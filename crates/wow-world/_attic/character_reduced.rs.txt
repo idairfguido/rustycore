@@ -1,0 +1,120 @@
+// RustyCore — WoW WotLK 3.4.3 server in Rust
+// Based on TrinityCore protocol research (https://github.com/TrinityCore/TrinityCore)
+// Licensed under GPL v3 — https://www.gnu.org/licenses/gpl-3.0.html
+
+//! Character handlers: enum, create, delete, and player login.
+
+use std::sync::Arc;
+
+use rand::Rng;
+use tracing::{debug, info, trace, warn};
+use wow_constants::ClientOpcodes;
+use wow_core::guid::HighGuid;
+use wow_core::{ObjectGuid, Position};
+use wow_crypto::rsa_sign::rsa_sign_connect_to;
+use wow_database::{CharStatements, LoginStatements, WorldDatabase, WorldStatements};
+use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
+use wow_packet::packets::auth::{
+    ConnectTo, ConnectToAddress, ConnectToFailed, ConnectToKey, ConnectToSerial, ResumeComms,
+};
+use wow_packet::packets::character::*;
+use wow_packet::packets::item::*;
+use wow_packet::packets::misc::*;
+use wow_packet::packets::update::*;
+// Import stub types for compatibility
+use wow_packet::packets::{ObjectType, CompressionType, UpdateFlags, UnitMoveFlags, CreateData};
+use wow_ai::CreatureAI;
+
+/// Compute the default display_id for a player based on race and gender.
+/// 
+/// These values come from ChrRaces.db2 (WotLK 3.4.3).
+/// Male = 0, Female = 1.
+/// 
+/// # Arguments
+/// * `race` - Race ID (1=Human, 2=Orc, etc.)
+/// * `gender` - Gender (0=Male, 1=Female)
+/// 
+/// # Returns
+/// Display ID for the race/gender combination, or 0 if unknown.
+pub fn default_display_id(race: u8, gender: u8) -> u32 {
+    // ChrRaces.db2 display IDs for WotLK 3.4.3
+    // Format: [race][gender] = display_id
+    match (race, gender) {
+        // Human
+        (1, 0) => 49,   // Male
+        (1, 1) => 50,   // Female
+        // Orc
+        (2, 0) => 51,   // Male
+        (2, 1) => 52,   // Female
+        // Dwarf
+        (3, 0) => 53,   // Male
+        (3, 1) => 54,   // Female
+        // Night Elf
+        (4, 0) => 55,   // Male
+        (4, 1) => 56,   // Female
+        // Undead
+        (5, 0) => 57,   // Male
+        (5, 1) => 58,   // Female
+        // Tauren
+        (6, 0) => 59,   // Male
+        (6, 1) => 60,   // Female
+        // Gnome
+        (7, 0) => 1563, // Male
+        (7, 1) => 1564, // Female
+        // Troll
+        (8, 0) => 1478, // Male
+        (8, 1) => 1479, // Female
+        // Goblin (expansion)
+        (9, 0) => 18312, // Male
+        (9, 1) => 18313, // Female
+        // Blood Elf
+        (10, 0) => 15476, // Male
+        (10, 1) => 15475, // Female
+        // Draenei
+        (11, 0) => 16125, // Male
+        (11, 1) => 16126, // Female
+        // Worgen (expansion)
+        (22, 0) => 25385, // Male
+        (22, 1) => 25386, // Female
+        // Unknown race/gender
+        _ => {
+            warn!("Unknown race/gender combination: race={}, gender={}", race, gender);
+            0
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_display_id_human() {
+        assert_eq!(default_display_id(1, 0), 49);   // Human Male
+        assert_eq!(default_display_id(1, 1), 50);   // Human Female
+    }
+
+    #[test]
+    fn test_default_display_id_orc() {
+        assert_eq!(default_display_id(2, 0), 51);   // Orc Male
+        assert_eq!(default_display_id(2, 1), 52);   // Orc Female
+    }
+
+    #[test]
+    fn test_default_display_id_dwarf() {
+        assert_eq!(default_display_id(3, 0), 53);   // Dwarf Male
+        assert_eq!(default_display_id(3, 1), 54);   // Dwarf Female
+    }
+
+    #[test]
+    fn test_default_display_id_blood_elf() {
+        assert_eq!(default_display_id(10, 0), 15476); // Blood Elf Male
+        assert_eq!(default_display_id(10, 1), 15475); // Blood Elf Female
+    }
+
+    #[test]
+    fn test_default_display_id_unknown() {
+        assert_eq!(default_display_id(99, 0), 0);   // Unknown race
+        assert_eq!(default_display_id(1, 2), 0);     // Unknown gender
+    }
+}

@@ -1,0 +1,237 @@
+// RustyCore — temporary stubs for migration compatibility
+// These stubs allow the code to compile while handlers are being migrated
+
+use wow_core::ObjectGuid;
+use wow_packet::packets::character::{CreateCharacter, PlayerLogin, CharDelete};
+use wow_packet::packets::auth::{ConnectToFailed, Ping, ResumeComms};
+use wow_packet::packets::misc::{TimeSyncResponse, DbQueryBulk, HotfixRequest, LogoutRequest};
+use wow_packet::packets::query::{QueryCreature, QueryGameObject, QueryPlayerNames, QueryRealmName};
+use wow_packet::packets::gossip::{Hello, GossipSelectOption};
+use wow_packet::packets::battlenet::BattlenetRequest;
+use wow_packet::WorldPacket;
+use crate::session::WorldSession;
+
+/// Stub: handle_continue_player_login
+pub async fn handle_continue_player_login_stub(session: &mut WorldSession) {
+    tracing::info!("STUB: handle_continue_player_login called");
+}
+
+/// Stub: handle_enum_characters
+pub async fn handle_enum_characters_stub(session: &mut WorldSession) {
+    tracing::info!("STUB: handle_enum_characters called");
+}
+
+/// Stub: handle_create_character
+pub async fn handle_create_character_stub(session: &mut WorldSession, _create: CreateCharacter) {
+    tracing::info!("STUB: handle_create_character called");
+}
+
+/// Stub: handle_char_delete
+pub async fn handle_char_delete_stub(session: &mut WorldSession, _del: CharDelete) {
+    tracing::info!("STUB: handle_char_delete called");
+}
+
+/// Stub: handle_player_login
+pub async fn handle_player_login_stub(session: &mut WorldSession, _login: PlayerLogin) {
+    tracing::info!("STUB: handle_player_login called");
+}
+
+/// Stub: handle_connect_to_failed
+pub async fn handle_connect_to_failed_stub(session: &mut WorldSession, _failed: ConnectToFailed) {
+    tracing::info!("STUB: handle_connect_to_failed called");
+}
+
+/// Stub: handle_get_undelete_cooldown_status
+pub async fn handle_get_undelete_cooldown_status_stub(session: &mut WorldSession) {
+    tracing::info!("STUB: handle_get_undelete_cooldown_status called");
+}
+
+/// Stub: handle_battlenet_request
+pub async fn handle_battlenet_request_stub(session: &mut WorldSession, _req: BattlenetRequest) {
+    tracing::info!("STUB: handle_battlenet_request called");
+}
+
+/// Stub: handle_server_time_offset_request
+pub async fn handle_server_time_offset_request_stub(session: &mut WorldSession) {
+    tracing::info!("STUB: handle_server_time_offset_request called");
+}
+
+/// Stub: handle_request_played_time
+pub async fn handle_request_played_time_stub(session: &mut WorldSession, _trigger: bool) {
+    tracing::info!("STUB: handle_request_played_time called");
+}
+
+/// Stub: handle_set_selection
+pub async fn handle_set_selection_stub(session: &mut WorldSession, _pkt: WorldPacket) {
+    tracing::info!("STUB: handle_set_selection called");
+}
+
+/// Stub: handle_area_trigger
+pub async fn handle_area_trigger_stub(session: &mut WorldSession, _pkt: WorldPacket) {
+    tracing::info!("STUB: handle_area_trigger called");
+}
+
+/// Stub: handle_request_cemetery_list
+pub async fn handle_request_cemetery_list_stub(session: &mut WorldSession, _pkt: WorldPacket) {
+    tracing::info!("STUB: handle_request_cemetery_list called");
+}
+
+/// Stub: handle_taxi_node_status_query
+pub async fn handle_taxi_node_status_query_stub(session: &mut WorldSession, _pkt: WorldPacket) {
+    tracing::info!("STUB: handle_taxi_node_status_query called");
+}
+
+/// Stub: handle_chat_join_channel
+pub async fn handle_chat_join_channel_stub(session: &mut WorldSession, _pkt: WorldPacket) {
+    tracing::info!("STUB: handle_chat_join_channel called");
+}
+
+/// Stub: handle_move_time_skipped
+pub async fn handle_move_time_skipped_stub(session: &mut WorldSession, _pkt: WorldPacket) {
+    tracing::info!("STUB: handle_move_time_skipped called");
+}
+
+/// Stub: handle_db_query_bulk
+pub async fn handle_db_query_bulk_stub(session: &mut WorldSession, _query: DbQueryBulk) {
+    tracing::info!("STUB: handle_db_query_bulk called");
+}
+
+/// Stub: handle_hotfix_request
+pub async fn handle_hotfix_request_stub(session: &mut WorldSession, _req: HotfixRequest) {
+    tracing::info!("STUB: handle_hotfix_request called");
+}
+
+/// Stub: handle_time_sync_response
+pub async fn handle_time_sync_response_stub(session: &mut WorldSession, _resp: TimeSyncResponse) {
+    tracing::info!("STUB: handle_time_sync_response called");
+}
+
+/// Stub: handle_logout_request
+pub async fn handle_logout_request_stub(session: &mut WorldSession, _req: LogoutRequest) {
+    tracing::info!("STUB: handle_logout_request called");
+}
+
+/// Stub: handle_logout_cancel
+pub async fn handle_logout_cancel_stub(session: &mut WorldSession) {
+    tracing::info!("STUB: handle_logout_cancel called");
+}
+
+/// Stub: handle_query_creature
+pub async fn handle_query_creature_stub(session: &mut WorldSession, _query: QueryCreature) {
+    tracing::info!("STUB: handle_query_creature called");
+}
+
+/// Stub: handle_query_game_object
+pub async fn handle_query_game_object_stub(session: &mut WorldSession, _query: QueryGameObject) {
+    tracing::info!("STUB: handle_query_game_object called");
+}
+
+/// Stub: handle_query_player_names
+pub async fn handle_query_player_names_stub(session: &mut WorldSession, _query: QueryPlayerNames) {
+    tracing::info!("STUB: handle_query_player_names called");
+}
+
+/// Stub: handle_query_realm_name
+pub fn handle_query_realm_name_stub(session: &mut WorldSession, _query: QueryRealmName) {
+    tracing::info!("STUB: handle_query_realm_name called");
+}
+
+/// Stub: handle_ping
+pub async fn handle_ping_stub(session: &mut WorldSession, _ping: Ping) {
+    tracing::info!("STUB: handle_ping called");
+}
+
+/// Stub: handle_gossip_hello
+pub async fn handle_gossip_hello_stub(session: &mut WorldSession, _hello: Hello) {
+    tracing::info!("STUB: handle_gossip_hello called");
+}
+
+/// Stub: handle_auction_hello_request
+pub async fn handle_auction_hello_request_stub(session: &mut WorldSession, _pkt: WorldPacket) {
+    tracing::info!("STUB: handle_auction_hello_request called");
+}
+
+/// Stub: handle_banker_activate
+pub async fn handle_banker_activate_stub(session: &mut WorldSession, _hello: Hello) {
+    tracing::info!("STUB: handle_banker_activate called");
+}
+
+/// Stub: handle_binder_activate
+pub async fn handle_binder_activate_stub(session: &mut WorldSession, _hello: Hello) {
+    tracing::info!("STUB: handle_binder_activate called");
+}
+
+/// Stub: handle_tabard_vendor_activate
+pub async fn handle_tabard_vendor_activate_stub(session: &mut WorldSession, _pkt: WorldPacket) {
+    tracing::info!("STUB: handle_tabard_vendor_activate called");
+}
+
+/// Stub: handle_spirit_healer_activate
+pub async fn handle_spirit_healer_activate_stub(session: &mut WorldSession, _pkt: WorldPacket) {
+    tracing::info!("STUB: handle_spirit_healer_activate called");
+}
+
+/// Stub: handle_repair_item
+pub async fn handle_repair_item_stub(session: &mut WorldSession, _pkt: WorldPacket) {
+    tracing::info!("STUB: handle_repair_item called");
+}
+
+/// Stub: handle_request_stabled_pets
+pub async fn handle_request_stabled_pets_stub(session: &mut WorldSession, _pkt: WorldPacket) {
+    tracing::info!("STUB: handle_request_stabled_pets called");
+}
+
+/// Stub: handle_gossip_select_option
+pub async fn handle_gossip_select_option_stub(session: &mut WorldSession, _select: GossipSelectOption) {
+    tracing::info!("STUB: handle_gossip_select_option called");
+}
+
+/// Stub: handle_query_npc_text
+pub async fn handle_query_npc_text_stub(session: &mut WorldSession, _pkt: WorldPacket) {
+    tracing::info!("STUB: handle_query_npc_text called");
+}
+
+/// Stub: handle_list_inventory
+pub async fn handle_list_inventory_stub(session: &mut WorldSession, _hello: Hello) {
+    tracing::info!("STUB: handle_list_inventory called");
+}
+
+/// Stub: handle_buy_item
+pub async fn handle_buy_item_stub(session: &mut WorldSession, _pkt: WorldPacket) {
+    tracing::info!("STUB: handle_buy_item called");
+}
+
+/// Stub: handle_sell_item
+pub async fn handle_sell_item_stub(session: &mut WorldSession, _pkt: WorldPacket) {
+    tracing::info!("STUB: handle_sell_item called");
+}
+
+/// Stub: handle_trainer_list
+pub async fn handle_trainer_list_stub(session: &mut WorldSession, _hello: Hello) {
+    tracing::info!("STUB: handle_trainer_list called");
+}
+
+/// Stub: handle_quest_giver_hello
+pub async fn handle_quest_giver_hello_stub(session: &mut WorldSession, _hello: Hello) {
+    tracing::info!("STUB: handle_quest_giver_hello called");
+}
+
+/// Stub: handle_quest_giver_status_query
+pub async fn handle_quest_giver_status_query_stub(session: &mut WorldSession, _hello: Hello) {
+    tracing::info!("STUB: handle_quest_giver_status_query called");
+}
+
+/// Stub: handle_quest_giver_status_multiple_query
+pub async fn handle_quest_giver_status_multiple_query_stub(session: &mut WorldSession) {
+    tracing::info!("STUB: handle_quest_giver_status_multiple_query called");
+}
+
+/// Stub: handle_swap_inv_item
+pub async fn handle_swap_inv_item_stub(session: &mut WorldSession, _pkt: WorldPacket) {
+    tracing::info!("STUB: handle_swap_inv_item called");
+}
+
+/// Stub: handle_auto_equip_item
+pub async fn handle_auto_equip_item_stub(session: &mut WorldSession, _pkt: WorldPacket) {
+    tracing::info!("STUB: handle_auto_equip_item called");
+}

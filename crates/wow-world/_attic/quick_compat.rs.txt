@@ -1,0 +1,59 @@
+//! Quick compatibility stubs for compilation
+//! 
+//! These are temporary implementations to allow compilation while
+//! the full migration is completed.
+
+use crate::WorldSession;
+use wow_core::ObjectGuid;
+use wow_packet::packets::update::UpdateObject;
+
+impl WorldSession {
+    /// Stub for update_realm_characters
+    pub async fn update_realm_characters(&mut self, _char_db: &std::sync::Arc<wow_database::CharacterDatabase>) {
+        // TODO: Implement full realm character update
+    }
+    
+    /// Stub for fallback_direct_login
+    pub fn fallback_direct_login(&mut self) {
+        // TODO: Implement direct login fallback
+    }
+    
+    /// Stub for send_nearby_creatures
+    pub fn send_nearby_creatures(&mut self) {
+        // TODO: Send nearby creatures from MapManager
+    }
+    
+    /// Stub for send_nearby_gameobjects
+    pub fn send_nearby_gameobjects(&mut self) {
+        // TODO: Send nearby game objects from MapManager
+    }
+    
+    /// Stub for spawn_initial_creatures
+    pub fn spawn_initial_creatures(&mut self) {
+        // TODO: Spawn initial creatures for player
+    }
+    
+    /// Stub for update_visibility
+    pub fn update_visibility(&mut self) {
+        // TODO: Update visibility for player
+    }
+    
+    /// Stub for request_time_sync
+    pub fn request_time_sync(&mut self) {
+        // TODO: Request time sync from client
+    }
+    
+    /// Stub for process_respawns_global
+    pub fn process_respawns_global(&mut self) {
+        // TODO: Process creature respawns
+    }
+}
+
+impl UpdateObject {
+    /// Stub for destroy_objects
+    pub fn destroy_objects(_guids: &[ObjectGuid]) -> Vec<u8> {
+        // Simple stub - returns empty vec
+        // TODO: Implement proper destroy objects packet
+        Vec::new()
+    }
+}

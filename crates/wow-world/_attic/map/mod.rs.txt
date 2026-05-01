@@ -1,0 +1,377 @@
+// RustyCore — WoW WotLK 3.4.3 server in Rust
+// Map System: Grid-based world partitioning (TrinityCore-compatible)
+//
+// This module implements a shared Map/Grid system where all WorldSessions
+// reference the same global MapManager, ensuring creatures and world state
+// are not duplicated per session.
+
+use std::collections::HashSet;
+use std::sync::{Arc, RwLock};
+use std::time::Instant;
+
+use dashmap::DashMap;
+use tracing::{debug, trace};
+
+use wow_core::{ObjectGuid, Position};
+
+pub mod coords;
+pub mod grid_loader;
+pub mod visibility;
+
+// Re-export coordinate helpers for convenience
+pub use coords::{distance_2d, get_grids_in_range, world_to_cell, world_to_grid};
+
+/// Tamaño de un grid en yards (igual que TrinityCore)
+pub const GRID_SIZE: f32 = 533.3333;
+/// Tamaño de una celda dentro del grid (8x8 celdas por grid)
+pub const CELL_SIZE: f32 = GRID_SIZE / 8.0; // ~66.66 yards
+/// Número de grids por lado (64x64 = 4096 grids)
+pub const MAX_GRIDS: usize = 64;
+/// Distancia de visibilidad por defecto
+pub const DEFAULT_VISIBILITY_DISTANCE: f32 = 100.0;
+/// Centro del mapa en coordenadas de grid
+pub const CENTER_GRID_ID: u8 = 32;
+
+/// Coordenadas de Grid (0-63, 0-63)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GridCoord {
+    pub x: u8,
+    pub y: u8,
+}
+
+/// Coordenadas de Cell dentro de un Grid (0-7, 0-7)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CellCoord {
+    pub x: u8, // 0-7
+    pub y: u8, // 0-7
+}
+
+/// Estado de carga de un grid
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridState {
+    Unloaded,
+    Loading,
+    Active,
+    Unloading,
+}
+
+/// Estado de una criatura
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreatureState {
+    Alive,
+    Dead,
+    Corpse,
+}
+
+/// Estado de AI de una criatura
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreatureAIState {
+    Idle,
+    Alert,
+    Aggro,
+    Evade,
+    Dead,
+}
+
+/// Datos de criatura almacenados en el grid
+#[derive(Debug, Clone)]
+pub struct CreatureData {
+    pub guid: ObjectGuid,
+    pub entry: u32,
+    pub position: Position,
+    pub health: u32,
+    pub max_health: u32,
+    pub state: CreatureState,
+    pub target: Option<ObjectGuid>,
+    pub ai_state: CreatureAIState,
+}
+
+/// Datos mínimos de GameObject para el grid
+#[derive(Debug, Clone)]
+pub struct GameObjectData {
+    pub guid: ObjectGuid,
+    pub entry: u32,
+    pub position: Position,
+}
+
+/// Información de jugador en el grid
+#[derive(Debug, Clone)]
+pub struct PlayerGridInfo {
+    pub guid: ObjectGuid,
+    pub name: String,
+    pub position: Position,
+    pub account_id: u32,
+    /// Entidades visibles actualmente para este jugador
+    pub visible_entities: RwLock<HashSet<ObjectGuid>>,
+}
+
+impl PlayerGridInfo {
+    pub fn new(guid: ObjectGuid, name: String, position: Position, account_id: u32) -> Self {
+        Self {
+            guid,
+            name,
+            position,
+            account_id,
+            visible_entities: RwLock::new(HashSet::new()),
+        }
+    }
+}
+
+/// Grid individual - contiene entidades
+pub struct Grid {
+    pub coord: GridCoord,
+    /// Criaturas en este grid (GUID → CreatureData)
+    pub creatures: DashMap<ObjectGuid, CreatureData>,
+    /// GameObjects en este grid
+    pub game_objects: DashMap<ObjectGuid, GameObjectData>,
+    /// Jugadores actualmente en este grid
+    pub players: DashMap<ObjectGuid, PlayerGridInfo>,
+    /// Estado del grid
+    pub state: RwLock<GridState>,
+    /// Tiempo desde que se cargó (para unload)
+    pub load_time: Instant,
+    /// Último acceso
+    pub last_access: RwLock<Instant>,
+}
+
+impl Grid {
+    pub fn new(coord: GridCoord) -> Self {
+        let now = Instant::now();
+        Self {
+            coord,
+            creatures: DashMap::new(),
+            game_objects: DashMap::new(),
+            players: DashMap::new(),
+            state: RwLock::new(GridState::Active),
+            load_time: now,
+            last_access: RwLock::new(now),
+        }
+    }
+
+    /// Marca el grid como accedido recientemente
+    pub fn touch(&self) {
+        if let Ok(mut last) = self.last_access.write() {
+            *last = Instant::now();
+        }
+    }
+
+    /// Comprueba si el grid debería descargarse (sin jugadores y timeout expirado)
+    pub fn should_unload(&self, timeout: std::time::Duration) -> bool {
+        self.players.is_empty()
+            && self
+                .last_access
+                .read()
+                .map(|t| t.elapsed() > timeout)
+                .unwrap_or(true)
+    }
+}
+
+/// Datos de spawn de criatura (cargados de DB)
+#[derive(Debug, Clone)]
+pub struct CreatureSpawn {
+    pub id: u64,
+    pub entry: u32,
+    pub position: Position,
+    pub map_id: u32,
+}
+
+/// Mapa completo (ej: Azeroth, MapID=0)
+pub struct MapInstance {
+    pub map_id: u32,
+    pub instance_id: u32,
+    /// Grids 64x64 - lazy loading
+    pub grids: DashMap<GridCoord, Arc<RwLock<Grid>>>,
+    /// Todos los jugadores en este mapa
+    pub players: DashMap<ObjectGuid, PlayerGridInfo>,
+    /// Configuración
+    pub visibility_distance: f32,
+    /// Timeout para descargar grids inactivos
+    pub grid_unload_timeout: std::time::Duration,
+}
+
+impl MapInstance {
+    pub fn new(map_id: u32, instance_id: u32) -> Self {
+        Self {
+            map_id,
+            instance_id,
+            grids: DashMap::new(),
+            players: DashMap::new(),
+            visibility_distance: DEFAULT_VISIBILITY_DISTANCE,
+            grid_unload_timeout: std::time::Duration::from_secs(300),
+        }
+    }
+
+    /// Asegura que un grid esté cargado, devolviendo un Arc<RwLock<Grid>>
+    pub fn ensure_grid_loaded(&self, coord: GridCoord) -> Arc<RwLock<Grid>> {
+        if let Some(grid) = self.grids.get(&coord) {
+            grid.touch();
+            return Arc::clone(grid.value());
+        }
+
+        // Crear nuevo grid
+        let grid = Arc::new(RwLock::new(Grid::new(coord)));
+        self.grids.insert(coord, Arc::clone(&grid));
+        debug!(
+            "Loaded grid ({}, {}) for map {} instance {}",
+            coord.x, coord.y, self.map_id, self.instance_id
+        );
+        grid
+    }
+
+    /// Obtiene un grid si existe (no lo carga)
+    pub fn get_grid(&self, coord: GridCoord) -> Option<Arc<RwLock<Grid>>> {
+        self.grids.get(&coord).map(|g| Arc::clone(g.value()))
+    }
+
+    /// Elimina grids inactivos
+    pub fn unload_inactive_grids(&self) {
+        let to_remove: Vec<GridCoord> = self
+            .grids
+            .iter()
+            .filter(|entry| entry.value().read().map(|g| g.should_unload(self.grid_unload_timeout)).unwrap_or(false))
+            .map(|entry| *entry.key())
+            .collect();
+
+        for coord in to_remove {
+            self.grids.remove(&coord);
+            debug!(
+                "Unloaded inactive grid ({}, {}) from map {} instance {}",
+                coord.x, coord.y, self.map_id, self.instance_id
+            );
+        }
+    }
+
+    /// Registra un jugador en el mapa
+    pub fn add_player(&self, info: PlayerGridInfo) {
+        let grid = self.ensure_grid_loaded(world_to_grid(info.position.x, info.position.y));
+        if let Ok(mut g) = grid.write() {
+            g.players.insert(info.guid, info.clone());
+        }
+        self.players.insert(info.guid, info);
+        trace!(
+            "Player {:?} added to map {} instance {}",
+            info.guid, self.map_id, self.instance_id
+        );
+    }
+
+    /// Elimina un jugador del mapa
+    pub fn remove_player(&self, guid: &ObjectGuid) {
+        if let Some((_, info)) = self.players.remove(guid) {
+            let grid_coord = world_to_grid(info.position.x, info.position.y);
+            if let Some(grid) = self.grids.get(&grid_coord) {
+                if let Ok(mut g) = grid.write() {
+                    g.players.remove(guid);
+                }
+            }
+        }
+    }
+}
+
+/// MapManager GLOBAL - compartido entre TODAS las sesiones
+pub struct MapManager {
+    /// MapID → MapInstance
+    pub maps: DashMap<u32, Arc<RwLock<MapInstance>>>,
+    /// Spawn data cargado de DB (coord → lista de spawns)
+    pub spawn_data: DashMap<(u32, GridCoord), Vec<CreatureSpawn>>,
+}
+
+impl MapManager {
+    pub fn new() -> Self {
+        Self {
+            maps: DashMap::new(),
+            spawn_data: DashMap::new(),
+        }
+    }
+
+    /// Singleton global thread-safe
+    pub fn instance() -> Arc<Self> {
+        use std::sync::OnceLock;
+        static INSTANCE: OnceLock<Arc<MapManager>> = OnceLock::new();
+        INSTANCE
+            .get_or_init(|| Arc::new(MapManager::new()))
+            .clone()
+    }
+
+    /// Obtiene o crea una instancia de mapa
+    pub fn get_or_create_map(&self, map_id: u32, instance_id: u32) -> Arc<RwLock<MapInstance>> {
+        if let Some(map) = self.maps.get(&map_id) {
+            return Arc::clone(map.value());
+        }
+
+        let map = Arc::new(RwLock::new(MapInstance::new(map_id, instance_id)));
+        self.maps.insert(map_id, Arc::clone(&map));
+        debug!("Created MapInstance map_id={} instance_id={}", map_id, instance_id);
+        map
+    }
+
+    /// Obtiene una instancia de mapa si existe
+    pub fn get_map(&self, map_id: u32) -> Option<Arc<RwLock<MapInstance>>> {
+        self.maps.get(&map_id).map(|m| Arc::clone(m.value()))
+    }
+
+    /// Descarga grids inactivos de todos los mapas
+    pub fn unload_inactive_grids(&self) {
+        for entry in self.maps.iter() {
+            if let Ok(map) = entry.value().read() {
+                map.unload_inactive_grids();
+            }
+        }
+    }
+}
+
+/// Entidad visible para un jugador
+#[derive(Debug, Clone)]
+pub enum VisibleEntity {
+    Creature(CreatureData),
+    Player(PlayerGridInfo),
+    GameObject(GameObjectData),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wow_core::Position;
+
+    #[test]
+    fn test_grid_coord_creation() {
+        let coord = GridCoord { x: 32, y: 32 };
+        assert_eq!(coord.x, 32);
+        assert_eq!(coord.y, 32);
+    }
+
+    #[test]
+    fn test_creature_data_creation() {
+        let guid = ObjectGuid::new(0, 1);
+        let pos = Position::new(0.0, 0.0, 0.0, 0.0);
+        let creature = CreatureData {
+            guid,
+            entry: 123,
+            position: pos,
+            health: 100,
+            max_health: 100,
+            state: CreatureState::Alive,
+            target: None,
+            ai_state: CreatureAIState::Idle,
+        };
+        assert_eq!(creature.entry, 123);
+        assert_eq!(creature.health, 100);
+    }
+
+    #[test]
+    fn test_map_instance_grid_loading() {
+        let map = MapInstance::new(0, 0);
+        let coord = GridCoord { x: 32, y: 32 };
+        let grid = map.ensure_grid_loaded(coord);
+        assert!(map.get_grid(coord).is_some());
+        assert!(map.grids.contains_key(&coord));
+        drop(grid);
+    }
+
+    #[test]
+    fn test_map_manager_singleton() {
+        let mm1 = MapManager::instance();
+        let mm2 = MapManager::instance();
+        // Mismo puntero (Arc comparte la misma instancia)
+        assert!(Arc::ptr_eq(&mm1, &mm2));
+    }
+}

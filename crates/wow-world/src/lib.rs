@@ -6,6 +6,8 @@
 //! World server core: session management, handlers, and world state.
 
 pub mod handlers;
+pub mod map_manager;
 pub mod session;
 
+pub use map_manager::{GridCoord, MapManager, SharedMapManager, WorldCreature};
 pub use session::WorldSession;

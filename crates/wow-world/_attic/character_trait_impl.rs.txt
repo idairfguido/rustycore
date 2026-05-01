@@ -1,0 +1,316 @@
+// RustyCore — WoW WotLK 3.4.3 server in Rust
+// Licensed under GPL v3
+
+//! Implementation of CharacterHandlers trait for WorldSession
+
+use async_trait::async_trait;
+use tracing::{debug, info, trace, warn};
+
+use wow_packet::packets::character::*;
+use wow_packet::packets::auth::ConnectToFailed;
+use wow_packet::packets::misc::{DbQueryBulk, HotfixRequest, TimeSyncResponse, LogoutRequest};
+use wow_packet::packets::query::{QueryCreature, QueryGameObject, QueryPlayerNames, QueryRealmName};
+use wow_packet::packets::gossip::{Hello, GossipSelectOption, QueryNpcText};
+use wow_packet::packets::item::{SwapInvItem, AutoEquipItem};
+use wow_packet::packets::misc::{BuyItem, SellItem};
+use wow_packet::ClientPacket;
+
+use crate::session::{WorldSession, SessionState};
+use crate::handlers::character_trait::CharacterHandlers;
+use crate::handlers::character::default_display_id;
+
+#[async_trait]
+impl CharacterHandlers for WorldSession {
+    async fn handle_continue_player_login(&mut self) {
+        crate::handlers::character_impl::handle_continue_player_login(self).await;
+    }
+
+    async fn handle_enum_characters(&mut self) {
+        crate::handlers::character_impl::handle_enum_characters(self).await;
+    }
+
+    async fn handle_create_character(&mut self, create: CreateCharacter) {
+        crate::handlers::character_impl::handle_create_character(self, create).await;
+    }
+
+    async fn handle_char_delete(&mut self, delete: CharDelete) {
+        crate::handlers::character_impl::handle_char_delete(self, delete).await;
+    }
+
+    async fn handle_player_login(&mut self, login: PlayerLogin) {
+        crate::handlers::character_impl::handle_player_login(self, login).await;
+    }
+
+    async fn handle_connect_to_failed(&mut self, failed: ConnectToFailed) {
+        crate::handlers::character_impl::handle_connect_to_failed(self, failed).await;
+    }
+
+    async fn handle_get_undelete_cooldown_status(&mut self) {
+        crate::handlers::character_impl::handle_get_undelete_cooldown_status(self).await;
+    }
+
+    async fn handle_server_time_offset_request(&mut self) {
+        crate::handlers::character_impl::handle_server_time_offset_request(self).await;
+    }
+
+    async fn handle_request_played_time(&mut self, trigger: bool) {
+        crate::handlers::character_impl::handle_request_played_time(self, trigger).await;
+    }
+
+    async fn handle_db_query_bulk(&mut self, query: DbQueryBulk) {
+        crate::handlers::character_impl::handle_db_query_bulk(self, query).await;
+    }
+
+    async fn handle_hotfix_request(&mut self, req: HotfixRequest) {
+        crate::handlers::character_impl::handle_hotfix_request(self, req).await;
+    }
+
+    async fn handle_time_sync_response(&mut self, resp: TimeSyncResponse) {
+        crate::handlers::character_impl::handle_time_sync_response(self, resp).await;
+    }
+
+    async fn handle_logout_request(&mut self, req: LogoutRequest) {
+        use std::time::{Duration, Instant};
+        
+        debug!("Logout requested for account {} (reason={})", self.account_id, req.reason);
+        
+        // Check if in combat
+        if self.in_combat {
+            use wow_packet::packets::misc::LogoutResponse;
+            self.send_packet(&LogoutResponse { result: 0x01, reason: 0 });
+            return;
+        }
+        
+        // Start logout timer
+        let logout_delay = if req.instant {
+            Duration::from_secs(0)
+        } else {
+            Duration::from_secs(20)
+        };
+        
+        self.logout_time = Some(Instant::now() + logout_delay);
+        
+        use wow_packet::packets::misc::LogoutResponse;
+        self.send_packet(&LogoutResponse { result: 0x00, reason: req.reason });
+    }
+
+    async fn handle_logout_cancel(&mut self) {
+        crate::handlers::character_impl::handle_logout_cancel(self).await;
+    }
+
+    async fn handle_query_creature(&mut self, query: QueryCreature) {
+        trace!("QueryCreature: entry={}", query.entry);
+        // Stub - would load from creature_template
+        use wow_packet::packets::query::QueryCreatureResponse;
+        self.send_packet(&QueryCreatureResponse {
+            entry: query.entry,
+            name: "Unknown".to_string(),
+            subname: "".to_string(),
+            icon_name: "".to_string(),
+            type_flags: 0,
+            type: 0,
+            family: 0,
+            rank: 0,
+            kill_credit1: 0,
+            kill_credit2: 0,
+            model_ids: [0; 4],
+            health_multiplier: 1.0,
+            power_multiplier: 1.0,
+            leader: false,
+            quest_items: Vec::new(),
+        });
+    }
+
+    async fn handle_query_game_object(&mut self, query: QueryGameObject) {
+        trace!("QueryGameObject: entry={}", query.entry);
+        // Stub
+        use wow_packet::packets::query::QueryGameObjectResponse;
+        self.send_packet(&QueryGameObjectResponse {
+            entry: query.entry,
+            type: 0,
+            display_id: 0,
+            name: "Unknown".to_string(),
+            icon_name: "".to_string(),
+            cast_bar_caption: "".to_string(),
+            unk_string: "".to_string(),
+            data: [0; 34],
+            size: 1.0,
+            quest_items: Vec::new(),
+        });
+    }
+
+    async fn handle_query_player_names(&mut self, query: QueryPlayerNames) {
+        trace!("QueryPlayerNames: {} guids", query.guids.len());
+        // Stub
+        use wow_packet::packets::query::QueryPlayerNamesResponse;
+        self.send_packet(&QueryPlayerNamesResponse { players: Vec::new() });
+    }
+
+    fn handle_query_realm_name(&mut self, query: QueryRealmName) {
+        trace!("QueryRealmName: realm={}", query.realm_id);
+        // Stub
+        use wow_packet::packets::query::QueryRealmNameResponse;
+        self.send_packet(&QueryRealmNameResponse {
+            realm_id: query.realm_id,
+            name: "RustyCore".to_string(),
+        });
+    }
+
+    async fn handle_ping(&mut self, ping: wow_packet::packets::auth::Ping) {
+        trace!("Ping: seq={}", ping.sequence);
+        use wow_packet::packets::auth::Pong;
+        self.send_packet(&Pong { sequence: ping.sequence });
+    }
+
+    async fn handle_gossip_hello(&mut self, hello: Hello) {
+        trace!("GossipHello: npc={:?}", hello.unit);
+        // Stub - would send gossip menu
+    }
+
+    async fn handle_auction_hello_request(&mut self, _pkt: wow_packet::WorldPacket) {
+        trace!("AuctionHelloRequest");
+        // Stub
+    }
+
+    async fn handle_banker_activate(&mut self, hello: Hello) {
+        trace!("BankerActivate: npc={:?}", hello.unit);
+        // Stub
+    }
+
+    async fn handle_binder_activate(&mut self, hello: Hello) {
+        trace!("BinderActivate: npc={:?}", hello.unit);
+        // Stub
+    }
+
+    async fn handle_tabard_vendor_activate(&mut self, _pkt: wow_packet::WorldPacket) {
+        trace!("TabardVendorActivate");
+        // Stub
+    }
+
+    async fn handle_spirit_healer_activate(&mut self, _pkt: wow_packet::WorldPacket) {
+        trace!("SpiritHealerActivate");
+        // Stub
+    }
+
+    async fn handle_repair_item(&mut self, _pkt: wow_packet::WorldPacket) {
+        trace!("RepairItem");
+        // Stub
+    }
+
+    async fn handle_request_stabled_pets(&mut self, _pkt: wow_packet::WorldPacket) {
+        trace!("RequestStabledPets");
+        // Stub
+    }
+
+    async fn handle_gossip_select_option(&mut self, select: GossipSelectOption) {
+        trace!("GossipSelectOption: gossip={}", select.gossip_option_id);
+        // Stub
+    }
+
+    async fn handle_query_npc_text(&mut self, query: QueryNpcText) {
+        trace!("QueryNpcText: text_id={}", query.text_id);
+        // Stub
+        use wow_packet::packets::gossip::QueryNpcTextResponse;
+        self.send_packet(&QueryNpcTextResponse { text_id: query.text_id });
+    }
+
+    async fn handle_list_inventory(&mut self, hello: Hello) {
+        trace!("ListInventory: vendor={:?}", hello.unit);
+        // Stub - would send vendor inventory
+    }
+
+    async fn handle_buy_item(&mut self, buy: BuyItem) {
+        trace!("BuyItem: item={}, count={}", buy.item_id, buy.count);
+        // Stub
+    }
+
+    async fn handle_sell_item(&mut self, sell: SellItem) {
+        trace!("SellItem: item_guid={:?}", sell.item_guid);
+        // Stub
+    }
+
+    async fn handle_quest_giver_hello(&mut self, hello: Hello) {
+        trace!("QuestGiverHello: npc={:?}", hello.unit);
+        // Stub
+    }
+
+    async fn handle_quest_giver_status_query(&mut self, hello: Hello) {
+        trace!("QuestGiverStatusQuery: npc={:?}", hello.unit);
+        // Stub
+    }
+
+    async fn handle_quest_giver_status_multiple_query(&mut self) {
+        trace!("QuestGiverStatusMultipleQuery");
+        // Stub
+    }
+
+    async fn handle_swap_inv_item(&mut self, swap: SwapInvItem) {
+        trace!("SwapInvItem: {} <-> {}", swap.slot1, swap.slot2);
+        // Stub
+    }
+
+    async fn handle_auto_equip_item(&mut self, equip: AutoEquipItem) {
+        trace!("AutoEquipItem: item={:?}", equip.item_guid);
+        // Stub
+    }
+
+    async fn handle_swap_item(&mut self, _pkt: wow_packet::WorldPacket) {
+        trace!("SwapItem");
+        // Stub
+    }
+
+    async fn handle_auto_store_bag_item(&mut self, _pkt: wow_packet::WorldPacket) {
+        trace!("AutoStoreBagItem");
+        // Stub
+    }
+
+    async fn handle_destroy_item(&mut self, _pkt: wow_packet::WorldPacket) {
+        trace!("DestroyItem");
+        // Stub
+    }
+
+    async fn handle_show_trade_skill(&mut self, _pkt: wow_packet::WorldPacket) {
+        trace!("ShowTradeSkill");
+        // Stub
+    }
+
+    async fn handle_battlenet_request(&mut self, _req: wow_packet::packets::battlenet::BattlenetRequest) {
+        trace!("BattlenetRequest");
+        // Stub
+    }
+
+    async fn handle_set_selection(&mut self, _pkt: wow_packet::WorldPacket) {
+        trace!("SetSelection");
+        // Stub
+    }
+
+    async fn handle_area_trigger(&mut self, _pkt: wow_packet::WorldPacket) {
+        trace!("AreaTrigger");
+        // Stub
+    }
+
+    async fn handle_request_cemetery_list(&mut self, _pkt: wow_packet::WorldPacket) {
+        trace!("RequestCemeteryList");
+        // Stub
+    }
+
+    async fn handle_taxi_node_status_query(&mut self, _pkt: wow_packet::WorldPacket) {
+        trace!("TaxiNodeStatusQuery");
+        // Stub
+    }
+
+    async fn handle_chat_join_channel(&mut self, _pkt: wow_packet::WorldPacket) {
+        trace!("ChatJoinChannel");
+        // Stub
+    }
+
+    async fn handle_move_time_skipped(&mut self, _pkt: wow_packet::WorldPacket) {
+        trace!("MoveTimeSkipped");
+        // Stub
+    }
+
+    async fn handle_trainer_list(&mut self, hello: Hello) {
+        trace!("TrainerList: npc={:?}", hello.unit);
+        // Stub - would send trainer list
+    }
+}

@@ -1,0 +1,26 @@
+//! Quick handler stubs for missing methods
+
+use crate::WorldSession;
+
+// Stub implementations for missing handlers
+impl WorldSession {
+    pub async fn handle_tabard_vendor_activate(&mut self) {
+        // TODO: Implement tabard vendor
+    }
+    
+    pub async fn handle_spirit_healer_activate(&mut self) {
+        // TODO: Implement spirit healer
+    }
+    
+    pub async fn handle_swap_inv_item(&mut self) {
+        // TODO: Implement swap inventory item
+    }
+    
+    pub async fn handle_swap_item(&mut self) {
+        // TODO: Implement swap item
+    }
+    
+    pub async fn handle_time_sync_response(&mut self) {
+        // TODO: Implement time sync response
+    }
+}

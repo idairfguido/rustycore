@@ -1,0 +1,216 @@
+// RustyCore — WoW WotLK 3.4.3 server in Rust
+// Based on TrinityCore protocol research (https://github.com/TrinityCore/TrinityCore)
+// Licensed under GPL v3 — https://www.gnu.org/licenses/gpl-3.0.html
+
+//! Migrated handlers that use the global MapManager instead of per-session creatures.
+//! 
+//! This module provides updated implementations of handlers that work with the
+//! new global creature system.
+
+use wow_core::{ObjectGuid, Position};
+use wow_packet::packets::update::CreatureCreateData;
+use crate::session::WorldSession;
+use crate::session_map_integration::SessionMapIntegration;
+
+/// Get creature entry for gossip/vendor/trainer queries
+/// 
+/// Replaces: `self.creatures.get(&guid).map(|c| c.entry).unwrap_or(0)`
+pub fn get_creature_entry_for_interaction(session: &WorldSession, guid: &ObjectGuid) -> u32 {
+    session.get_creature_entry(guid)
+}
+
+/// Get NPC flags for gossip checks
+///
+/// Replaces: `self.creatures.get(&guid).map(|c| c.npc_flags).unwrap_or(0)`
+pub fn get_creature_npc_flags_for_interaction(session: &WorldSession, guid: &ObjectGuid) -> u64 {
+    session.get_creature_npc_flags(guid)
+}
+
+/// Check if creature is a flight master
+///
+/// Replaces: `self.creatures.get(&unit_guid).map(|c| c.npc_flags & 0x2000 != 0).unwrap_or(false)`
+pub fn is_flight_master(session: &WorldSession, guid: &ObjectGuid) -> bool {
+    session.get_creature_npc_flags(guid) & 0x2000 != 0
+}
+
+/// Get trainer entry from creature
+///
+/// Replaces: `match self.creatures.get(&trainer_guid) { Some(c) => c.entry, None => return }`
+pub fn get_trainer_entry(session: &WorldSession, trainer_guid: &ObjectGuid) -> u32 {
+    session.get_creature_entry(trainer_guid)
+}
+
+/// Check if creature has vendor capabilities
+///
+/// Uses NPC flags to determine if creature can sell items
+pub fn is_vendor(session: &WorldSession, guid: &ObjectGuid) -> bool {
+    session.get_creature_npc_flags(guid) & 0x80 != 0 // UNIT_NPC_FLAG_VENDOR
+}
+
+/// Check if creature is a quest giver
+pub fn is_quest_giver(session: &WorldSession, guid: &ObjectGuid) -> bool {
+    session.get_creature_npc_flags(guid) & 0x02 != 0 // UNIT_NPC_FLAG_QUESTGIVER
+}
+
+/// Get creature position for distance calculations
+///
+/// Replaces: `self.creatures.get(&guid).map(|c| c.position)`
+pub fn get_creature_position(session: &WorldSession, guid: &ObjectGuid) -> Option<Position> {
+    session.get_creature_position(guid)
+}
+
+/// Calculate distance to creature
+///
+/// Replaces manual position distance calculations
+pub fn distance_to_creature(session: &WorldSession, guid: &ObjectGuid) -> f32 {
+    session.distance_to_creature(guid)
+}
+
+/// Check if creature is in range for interaction
+pub fn is_creature_in_range(session: &WorldSession, guid: &ObjectGuid, range: f32) -> bool {
+    distance_to_creature(session, guid) <= range
+}
+
+/// Get visible creature count
+///
+/// Replaces: `self.visible_creatures.len()`
+pub fn get_visible_creature_count(session: &WorldSession) -> usize {
+    session.get_visible_creatures().len()
+}
+
+/// Check if specific creature is visible
+///
+/// Replaces: `self.visible_creatures.contains(&guid)`
+pub fn is_creature_visible(session: &WorldSession, guid: &ObjectGuid) -> bool {
+    session.is_creature_visible(guid)
+}
+
+/// Count creatures matching predicate
+///
+/// Replaces: `self.creatures.values().filter(|c| ...).count()`
+pub fn count_visible_creatures<F>(session: &WorldSession, predicate: F) -> usize
+where
+    F: Fn(&crate::map_manager::WorldCreature) -> bool,
+{
+    session.get_visible_creatures()
+        .iter()
+        .filter(|c| predicate(c))
+        .count()
+}
+
+/// Get all visible creature GUIDs
+///
+/// Replaces: `self.visible_creatures.iter().cloned().collect()`
+pub fn get_visible_creature_guids(session: &WorldSession) -> Vec<ObjectGuid> {
+    session.get_visible_creatures()
+        .into_iter()
+        .map(|c| c.guid)
+        .collect()
+}
+
+/// Iterate visible creatures and perform action
+///
+/// Replaces: `for (guid, creature) in self.creatures.iter()` with visible check
+pub fn with_visible_creatures<F>(session: &WorldSession, mut f: F)
+where
+    F: FnMut(&ObjectGuid, &crate::map_manager::WorldCreature),
+{
+    for creature in session.get_visible_creatures() {
+        f(&creature.guid, &creature);
+    }
+}
+
+/// Check if any visible creature matches predicate
+///
+/// Replaces: `self.creatures.values().any(|c| ...)`
+pub fn any_visible_creature<F>(session: &WorldSession, predicate: F) -> bool
+where
+    F: Fn(&crate::map_manager::WorldCreature) -> bool,
+{
+    session.get_visible_creatures()
+        .iter()
+        .any(|c| predicate(c))
+}
+
+/// Get creature health for display or combat calculations
+///
+/// Returns (current_health, max_health)
+pub fn get_creature_health(session: &WorldSession, guid: &ObjectGuid) -> (i64, i64) {
+    session.get_creature_health(guid)
+}
+
+/// Check if creature is alive
+///
+/// Replaces checks against creature.is_alive
+pub fn is_creature_alive(session: &WorldSession, guid: &ObjectGuid) -> bool {
+    session.get_creature_health(guid).0 > 0
+}
+
+/// Get creature level for level-based calculations
+///
+/// Replaces: `self.creatures.get(&guid).map(|c| c.level).unwrap_or(0)`
+pub fn get_creature_level(session: &WorldSession, guid: &ObjectGuid) -> u8 {
+    session.get_creature_global(guid)
+        .map(|c| c.level)
+        .unwrap_or(0)
+}
+
+/// Convert WorldCreature to CreatureCreateData for packet generation
+///
+/// This bridges the internal creature representation with the packet format
+pub fn world_creature_to_create_data(creature: &crate::map_manager::WorldCreature) -> CreatureCreateData {
+    CreatureCreateData {
+        guid: creature.guid,
+        entry: creature.entry,
+        display_id: creature.display_id,
+        native_display_id: creature.native_display_id,
+        health: creature.current_hp,
+        max_health: creature.max_hp,
+        level: creature.level,
+        faction_template: creature.faction_template,
+        npc_flags: creature.npc_flags,
+        unit_flags: creature.unit_flags,
+        unit_flags2: creature.unit_flags2,
+        unit_flags3: creature.unit_flags3,
+        scale: creature.scale,
+        unit_class: creature.unit_class,
+        base_attack_time: creature.base_attack_time,
+        ranged_attack_time: creature.ranged_attack_time,
+        zone_id: creature.zone_id,
+        speed_walk_rate: creature.speed_walk_rate,
+        speed_run_rate: creature.speed_run_rate,
+    }
+}
+
+/// Build CreatureCreateData from template and instance data
+///
+/// Used when spawning new creatures
+pub fn build_creature_create_data(
+    guid: ObjectGuid,
+    entry: u32,
+    position: Position,
+    // Add template parameters as needed
+) -> CreatureCreateData {
+    // Default values - in production these would come from creature_template
+    CreatureCreateData {
+        guid,
+        entry,
+        display_id: 0, // Would come from template
+        native_display_id: 0,
+        health: 100,
+        max_health: 100,
+        level: 1,
+        faction_template: 0,
+        npc_flags: 0,
+        unit_flags: 0,
+        unit_flags2: 0,
+        unit_flags3: 0,
+        scale: 1.0,
+        unit_class: 1,
+        base_attack_time: 2000,
+        ranged_attack_time: 0,
+        zone_id: 0,
+        speed_walk_rate: 1.0,
+        speed_run_rate: 1.14286,
+    }
+}

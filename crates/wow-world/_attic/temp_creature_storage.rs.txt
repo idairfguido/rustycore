@@ -1,0 +1,90 @@
+// RustyCore — WoW WotLK 3.4.3 server in Rust
+// Based on TrinityCore protocol research (https://github.com/TrinityCore/TrinityCore)
+// Licensed under GPL v3 — https://www.gnu.org/licenses/gpl-3.0.html
+
+//! Temporary stubs for session.rs to maintain compatibility during migration.
+//! 
+//! This file provides implementations of methods that were removed from
+//! WorldSession struct. These are TEMPORARY and should be replaced with
+//! proper MapManager calls.
+
+use std::collections::{HashMap, HashSet};
+use wow_core::ObjectGuid;
+use wow_ai::CreatureAI;
+
+/// TEMPORARY: Creature storage for compatibility during migration.
+/// 
+/// This struct wraps the local creature storage to maintain compatibility
+/// with existing code while we migrate to the global MapManager.
+#[derive(Debug, Default)]
+pub struct TempCreatureStorage {
+    pub creatures: HashMap<ObjectGuid, CreatureAI>,
+    pub visible_creatures: HashSet<ObjectGuid>,
+}
+
+impl TempCreatureStorage {
+    pub fn new() -> Self {
+        Self {
+            creatures: HashMap::new(),
+            visible_creatures: HashSet::new(),
+        }
+    }
+    
+    pub fn insert(&mut self, guid: ObjectGuid, ai: CreatureAI) {
+        self.creatures.insert(guid, ai);
+    }
+    
+    pub fn remove(&mut self, guid: &ObjectGuid) -> Option<CreatureAI> {
+        self.visible_creatures.remove(guid);
+        self.creatures.remove(guid)
+    }
+    
+    pub fn get(&self, guid: &ObjectGuid) -> Option<&CreatureAI> {
+        self.creatures.get(guid)
+    }
+    
+    pub fn get_mut(&mut self, guid: &ObjectGuid) -> Option<&mut CreatureAI> {
+        self.creatures.get_mut(guid)
+    }
+    
+    pub fn contains_key(&self, guid: &ObjectGuid) -> bool {
+        self.creatures.contains_key(guid)
+    }
+    
+    pub fn keys(&self) -> impl Iterator<Item = &ObjectGuid> {
+        self.creatures.keys()
+    }
+    
+    pub fn values(&self) -> impl Iterator<Item = &CreatureAI> {
+        self.creatures.values()
+    }
+    
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut CreatureAI> {
+        self.creatures.values_mut()
+    }
+    
+    pub fn len(&self) -> usize {
+        self.creatures.len()
+    }
+    
+    pub fn is_empty(&self) -> bool {
+        self.creatures.is_empty()
+    }
+    
+    pub fn clear(&mut self) {
+        self.creatures.clear();
+        self.visible_creatures.clear();
+    }
+    
+    pub fn mark_visible(&mut self, guid: ObjectGuid) {
+        self.visible_creatures.insert(guid);
+    }
+    
+    pub fn mark_invisible(&mut self, guid: &ObjectGuid) {
+        self.visible_creatures.remove(guid);
+    }
+    
+    pub fn is_visible(&self, guid: &ObjectGuid) -> bool {
+        self.visible_creatures.contains(guid)
+    }
+}

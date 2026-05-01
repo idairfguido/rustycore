@@ -1056,6 +1056,7 @@ fn max_power_for_class(class: u8, _level: u8) -> i32 {
 // ── CreatureCreateData ──────────────────────────────────────────────
 
 /// Data needed to build a creature create packet for the client.
+#[derive(Debug, Clone)]
 pub struct CreatureCreateData {
     pub guid: ObjectGuid,
     pub entry: u32,
@@ -2762,7 +2763,7 @@ mod tests {
         let guid = ObjectGuid::create_player(1, 42);
         let pos = Position::new(-8949.95, -132.493, 83.5312, 0.0);
 
-        let pkt = UpdateObject::create_player(guid, 1, 1, 0, 1, 49, &pos, 0, 12, true, [(0, 0, 0); 19], [ObjectGuid::EMPTY; 141], PlayerCombatStats::default(), Vec::new());
+        let pkt = UpdateObject::create_player(guid, 1, 1, 0, 1, 49, &pos, 0, 12, true, [(0, 0, 0); 19], [ObjectGuid::EMPTY; 141], PlayerCombatStats::default(), Vec::new(), 0, Vec::new());
         let bytes = pkt.to_bytes();
         // Should be a substantial packet (many KB with ActivePlayerData)
         assert!(bytes.len() > 1000, "Packet too small: {} bytes", bytes.len());
@@ -2805,7 +2806,7 @@ mod tests {
         // Verify the top-level format: opcode + NumObjUpdates + MapID + Data
         let guid = ObjectGuid::create_player(1, 1);
         let pos = Position::new(0.0, 0.0, 0.0, 0.0);
-        let pkt = UpdateObject::create_player(guid, 1, 1, 0, 1, 49, &pos, 0, 12, true, [(0, 0, 0); 19], [ObjectGuid::EMPTY; 141], PlayerCombatStats::default(), Vec::new());
+        let pkt = UpdateObject::create_player(guid, 1, 1, 0, 1, 49, &pos, 0, 12, true, [(0, 0, 0); 19], [ObjectGuid::EMPTY; 141], PlayerCombatStats::default(), Vec::new(), 0, Vec::new());
         let bytes = pkt.to_bytes();
 
         // opcode (2 bytes)
@@ -2840,8 +2841,8 @@ mod tests {
         // Non-self player should be smaller (no ActivePlayerData)
         let guid = ObjectGuid::create_player(1, 42);
         let pos = Position::new(0.0, 0.0, 0.0, 0.0);
-        let self_pkt = UpdateObject::create_player(guid, 1, 1, 0, 1, 49, &pos, 0, 12, true, [(0, 0, 0); 19], [ObjectGuid::EMPTY; 141], PlayerCombatStats::default(), Vec::new());
-        let other_pkt = UpdateObject::create_player(guid, 1, 1, 0, 1, 49, &pos, 0, 12, false, [(0, 0, 0); 19], [ObjectGuid::EMPTY; 141], PlayerCombatStats::default(), Vec::new());
+        let self_pkt = UpdateObject::create_player(guid, 1, 1, 0, 1, 49, &pos, 0, 12, true, [(0, 0, 0); 19], [ObjectGuid::EMPTY; 141], PlayerCombatStats::default(), Vec::new(), 0, Vec::new());
+        let other_pkt = UpdateObject::create_player(guid, 1, 1, 0, 1, 49, &pos, 0, 12, false, [(0, 0, 0); 19], [ObjectGuid::EMPTY; 141], PlayerCombatStats::default(), Vec::new(), 0, Vec::new());
         let self_bytes = self_pkt.to_bytes();
         let other_bytes = other_pkt.to_bytes();
         // Self packet should be much larger due to ActivePlayerData
@@ -2907,7 +2908,7 @@ mod tests {
         let player_pkt = UpdateObject::create_player(
             player_guid, 1, 1, 0, 1, 49, &pos, 0, 12, false,
             [(0, 0, 0); 19], [ObjectGuid::EMPTY; 141],
-            PlayerCombatStats::default(), Vec::new(),
+            PlayerCombatStats::default(), Vec::new(), 0, Vec::new(),
         );
 
         let creature_data = CreatureCreateData {
@@ -3052,8 +3053,8 @@ mod tests {
         // Non-self packets don't have this block.
         let guid = ObjectGuid::create_player(1, 42);
         let pos = Position::new(0.0, 0.0, 0.0, 0.0);
-        let self_pkt = UpdateObject::create_player(guid, 1, 1, 0, 1, 49, &pos, 0, 12, true, [(0, 0, 0); 19], [ObjectGuid::EMPTY; 141], PlayerCombatStats::default(), Vec::new());
-        let other_pkt = UpdateObject::create_player(guid, 1, 1, 0, 1, 49, &pos, 0, 12, false, [(0, 0, 0); 19], [ObjectGuid::EMPTY; 141], PlayerCombatStats::default(), Vec::new());
+        let self_pkt = UpdateObject::create_player(guid, 1, 1, 0, 1, 49, &pos, 0, 12, true, [(0, 0, 0); 19], [ObjectGuid::EMPTY; 141], PlayerCombatStats::default(), Vec::new(), 0, Vec::new());
+        let other_pkt = UpdateObject::create_player(guid, 1, 1, 0, 1, 49, &pos, 0, 12, false, [(0, 0, 0); 19], [ObjectGuid::EMPTY; 141], PlayerCombatStats::default(), Vec::new(), 0, Vec::new());
         let self_bytes = self_pkt.to_bytes();
         let other_bytes = other_pkt.to_bytes();
 

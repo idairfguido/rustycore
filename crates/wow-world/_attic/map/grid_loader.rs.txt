@@ -1,0 +1,124 @@
+// RustyCore — Lazy Grid Loader
+// Carga criaturas y spawns desde la base de datos bajo demanda.
+
+use tracing::{debug, warn};
+use wow_core::{ObjectGuid, Position};
+
+use crate::map::{CreatureData, CreatureSpawn, CreatureState, GridCoord, MapInstance};
+
+/// Sistema de carga lazy de grids.
+pub struct GridLoader;
+
+impl GridLoader {
+    /// Carga criaturas de un grid desde spawn data precargada.
+    /// Si no hay spawn data, el grid queda vacío (se poblará por otros sistemas).
+    pub fn load_grid_from_spawn_data(map: &MapInstance, coord: GridCoord) -> usize {
+        let map_id = map.map_id;
+        let key = (map_id, coord);
+
+        let spawns = match map
+            .spawn_data
+            .get(&key)
+        {
+            Some(s) => s.clone(),
+            None => {
+                debug!(
+                    "No spawn data for grid ({}, {}) in map {} — leaving empty",
+                    coord.x, coord.y, map_id
+                );
+                return 0;
+            }
+        };
+
+        let grid = map.ensure_grid_loaded(coord);
+        let mut count = 0;
+
+        if let Ok(mut g) = grid.write() {
+            for spawn in spawns.iter() {
+                let creature = CreatureData {
+                    guid: ObjectGuid::new(0, spawn.id as i64),
+                    entry: spawn.entry,
+                    position: spawn.position,
+                    health: 100, // TODO: cargar desde creature_template
+                    max_health: 100,
+                    state: CreatureState::Alive,
+                    target: None,
+                    ai_state: crate::map::CreatureAIState::Idle,
+                };
+
+                g.creatures.insert(creature.guid, creature);
+                count += 1;
+            }
+        }
+
+        debug!(
+            "Loaded {} creatures into grid ({}, {}) map {} from spawn data",
+            count, coord.x, coord.y, map_id
+        );
+        count
+    }
+
+    /// Precarga spawn data para un mapa completo desde la base de datos.
+    /// Esto se hace típicamente al iniciar el servidor o al cargar un mapa por primera vez.
+    ///
+    /// TODO: Integrar con wow_database::WorldDatabase cuando el schema de grid esté listo.
+    pub async fn preload_spawn_data_for_map(_map: &MapInstance) -> Result<usize, String> {
+        // Fase 1: stub — la carga real requiere columnas grid_x/grid_y en la tabla creature.
+        // Cuando el schema SQL esté actualizado, implementar aquí la consulta:
+        //
+        // SELECT id, entry, x, y, z, orientation, grid_x, grid_y
+        // FROM creature WHERE map_id = ?
+        //
+        // Y agrupar por (map_id, GridCoord { grid_x, grid_y }) en spawn_data.
+        debug!("Preload spawn data: stub — implementar tras actualizar schema SQL");
+        Ok(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::map::{CreatureSpawn, MapManager};
+    use wow_core::Position;
+
+    #[test]
+    fn test_load_grid_empty_spawn_data() {
+        let map = MapInstance::new(0, 0);
+        let coord = GridCoord { x: 32, y: 32 };
+
+        let count = GridLoader::load_grid_from_spawn_data(&map, coord);
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_load_grid_with_spawn_data() {
+        let map = MapInstance::new(0, 0);
+        let coord = GridCoord { x: 32, y: 32 };
+
+        // Insertar spawn data manualmente
+        let spawns = vec![
+            CreatureSpawn {
+                id: 1,
+                entry: 123,
+                position: Position::new(0.0, 0.0, 0.0, 0.0),
+                map_id: 0,
+            },
+            CreatureSpawn {
+                id: 2,
+                entry: 456,
+                position: Position::new(10.0, 10.0, 0.0, 0.0),
+                map_id: 0,
+            },
+        ];
+        map.spawn_data.insert((0, coord), spawns);
+
+        let count = GridLoader::load_grid_from_spawn_data(&map, coord);
+        assert_eq!(count, 2);
+
+        // Verificar que las criaturas están en el grid
+        let grid = map.get_grid(coord).unwrap();
+        if let Ok(g) = grid.read() {
+            assert_eq!(g.creatures.len(), 2);
+        }
+    }
+}

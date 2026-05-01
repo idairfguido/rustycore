@@ -1,0 +1,295 @@
+// RustyCore — Visibility System
+// Based on TrinityCore::Player::UpdateVisibilityOf
+
+use std::collections::HashSet;
+
+use tracing::trace;
+use wow_core::{ObjectGuid, Position};
+
+use crate::map::{
+    distance_2d, get_grids_in_range, world_to_grid, CreatureData, GridCoord, MapInstance,
+    PlayerGridInfo, VisibleEntity,
+};
+
+/// Sistema de visibilidad - gestiona qué entidades son visibles para cada jugador.
+pub struct VisibilitySystem {
+    visibility_distance: f32,
+}
+
+impl VisibilitySystem {
+    pub fn new(distance: f32) -> Self {
+        Self {
+            visibility_distance: distance,
+        }
+    }
+
+    /// Actualiza visibilidad para un jugador.
+    /// Retorna: (nuevas_entidades, entidades_a_eliminar)
+    pub fn update_player_visibility(
+        &self,
+        player: &PlayerGridInfo,
+        map: &MapInstance,
+    ) -> (Vec<VisibleEntity>, Vec<ObjectGuid>) {
+        let player_pos = &player.position;
+        let current_grid = world_to_grid(player_pos.x, player_pos.y);
+
+        // Obtener grids en rango de visibilidad
+        let grids_in_range = get_grids_in_range(current_grid, self.visibility_distance);
+
+        let mut newly_visible = Vec::new();
+        let currently_visible = player
+            .visible_entities
+            .read()
+            .map(|v| v.clone())
+            .unwrap_or_default();
+        let mut new_visible_set = HashSet::new();
+
+        // Revisar cada grid en rango
+        for grid_coord in grids_in_range {
+            if let Some(grid_ref) = map.grids.get(&grid_coord) {
+                if let Ok(grid) = grid_ref.read() {
+                    // Revisar criaturas en el grid
+                    for entry in grid.creatures.iter() {
+                        let creature = entry.value();
+                        let dist = distance_2d(player_pos, &creature.position);
+
+                        if dist <= self.visibility_distance {
+                            new_visible_set.insert(creature.guid);
+
+                            // Si no estaba visible antes, es nueva
+                            if !currently_visible.contains(&creature.guid) {
+                                newly_visible.push(VisibleEntity::Creature(creature.clone()));
+                            }
+                        }
+                    }
+
+                    // Revisar jugadores en el grid (excepto uno mismo)
+                    for entry in grid.players.iter() {
+                        let other_player = entry.value();
+                        if other_player.guid == player.guid {
+                            continue;
+                        }
+
+                        let dist = distance_2d(player_pos, &other_player.position);
+                        if dist <= self.visibility_distance {
+                            new_visible_set.insert(other_player.guid);
+
+                            if !currently_visible.contains(&other_player.guid) {
+                                newly_visible.push(VisibleEntity::Player(other_player.clone()));
+                            }
+                        }
+                    }
+
+                    // Revisar GameObjects en el grid
+                    for entry in grid.game_objects.iter() {
+                        let go = entry.value();
+                        let dist = distance_2d(player_pos, &go.position);
+
+                        if dist <= self.visibility_distance {
+                            new_visible_set.insert(go.guid);
+
+                            if !currently_visible.contains(&go.guid) {
+                                newly_visible.push(VisibleEntity::GameObject(go.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Calcular qué entidades dejaron de ser visibles
+        let to_remove: Vec<ObjectGuid> = currently_visible
+            .difference(&new_visible_set)
+            .cloned()
+            .collect();
+
+        // Actualizar set de visibles
+        if let Ok(mut vis) = player.visible_entities.write() {
+            *vis = new_visible_set;
+        }
+
+        trace!(
+            "Visibility update for {:?}: {} new, {} removed",
+            player.guid,
+            newly_visible.len(),
+            to_remove.len()
+        );
+
+        (newly_visible, to_remove)
+    }
+
+    /// Mueve un jugador entre grids si es necesario.
+    /// Retorna Some(new_grid) si el jugador cambió de grid.
+    pub fn handle_player_movement(
+        &self,
+        player_guid: ObjectGuid,
+        new_position: Position,
+        map: &MapInstance,
+    ) -> Option<GridCoord> {
+        let new_grid = world_to_grid(new_position.x, new_position.y);
+
+        // Actualizar posición en el mapa global
+        if let Some(mut player_info) = map.players.get_mut(&player_guid) {
+            let old_grid = world_to_grid(player_info.position.x, player_info.position.y);
+
+            if old_grid != new_grid {
+                // Mover entre grids
+                player_info.position = new_position;
+                drop(player_info); // Release lock de DashMap
+
+                // Remover del grid antiguo
+                if let Some(old_grid_ref) = map.grids.get(&old_grid) {
+                    if let Ok(old) = old_grid_ref.write() {
+                        old.players.remove(&player_guid);
+                    }
+                }
+
+                // Agregar al nuevo grid
+                let new_grid_arc = map.ensure_grid_loaded(new_grid);
+                if let Ok(mut new_g) = new_grid_arc.write() {
+                    if let Some(player_info) = map.players.get(&player_guid) {
+                        new_g.players.insert(player_guid, player_info.clone());
+                    }
+                }
+
+                return Some(new_grid);
+            }
+
+            // Misma grid, solo actualizar posición
+            player_info.position = new_position;
+        }
+
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::map::{
+        CreatureAIState, CreatureData, CreatureState, Grid, MapManager, PlayerGridInfo,
+    };
+    use wow_core::{ObjectGuid, Position};
+
+    #[test]
+    fn test_visibility_empty_map() {
+        let map = MapInstance::new(0, 0);
+        let player = PlayerGridInfo::new(
+            ObjectGuid::new(0, 1),
+            "Test".to_string(),
+            Position::new(0.0, 0.0, 0.0, 0.0),
+            1,
+        );
+
+        let vis = VisibilitySystem::new(100.0);
+        let (new_entities, removed) = vis.update_player_visibility(&player, &map);
+
+        assert!(new_entities.is_empty());
+        assert!(removed.is_empty());
+    }
+
+    #[test]
+    fn test_visibility_sees_creature() {
+        let map = MapInstance::new(0, 0);
+        let player = PlayerGridInfo::new(
+            ObjectGuid::new(0, 1),
+            "Test".to_string(),
+            Position::new(0.0, 0.0, 0.0, 0.0),
+            1,
+        );
+        map.add_player(player.clone());
+
+        // Añadir criatura cerca del jugador
+        let creature_guid = ObjectGuid::new(0, 2);
+        let creature = CreatureData {
+            guid: creature_guid,
+            entry: 123,
+            position: Position::new(10.0, 0.0, 0.0, 0.0),
+            health: 100,
+            max_health: 100,
+            state: CreatureState::Alive,
+            target: None,
+            ai_state: CreatureAIState::Idle,
+        };
+
+        let grid = map.ensure_grid_loaded(world_to_grid(10.0, 0.0));
+        if let Ok(mut g) = grid.write() {
+            g.creatures.insert(creature_guid, creature);
+        }
+
+        let vis = VisibilitySystem::new(100.0);
+        let (new_entities, removed) = vis.update_player_visibility(&player, &map);
+
+        assert_eq!(new_entities.len(), 1);
+        assert!(removed.is_empty());
+        match &new_entities[0] {
+            VisibleEntity::Creature(c) => assert_eq!(c.guid, creature_guid),
+            _ => panic!("Expected creature"),
+        }
+    }
+
+    #[test]
+    fn test_visibility_creature_out_of_range() {
+        let map = MapInstance::new(0, 0);
+        let player = PlayerGridInfo::new(
+            ObjectGuid::new(0, 1),
+            "Test".to_string(),
+            Position::new(0.0, 0.0, 0.0, 0.0),
+            1,
+        );
+        map.add_player(player.clone());
+
+        // Añadir criatura lejos del jugador (>100 yards)
+        let creature_guid = ObjectGuid::new(0, 2);
+        let creature = CreatureData {
+            guid: creature_guid,
+            entry: 123,
+            position: Position::new(500.0, 0.0, 0.0, 0.0),
+            health: 100,
+            max_health: 100,
+            state: CreatureState::Alive,
+            target: None,
+            ai_state: CreatureAIState::Idle,
+        };
+
+        let grid = map.ensure_grid_loaded(world_to_grid(500.0, 0.0));
+        if let Ok(mut g) = grid.write() {
+            g.creatures.insert(creature_guid, creature);
+        }
+
+        let vis = VisibilitySystem::new(100.0);
+        let (new_entities, removed) = vis.update_player_visibility(&player, &map);
+
+        assert!(new_entities.is_empty());
+        assert!(removed.is_empty());
+    }
+
+    #[test]
+    fn test_handle_player_movement_grid_change() {
+        let map = MapInstance::new(0, 0);
+        let player_guid = ObjectGuid::new(0, 1);
+        let player = PlayerGridInfo::new(
+            player_guid,
+            "Test".to_string(),
+            Position::new(0.0, 0.0, 0.0, 0.0),
+            1,
+        );
+        map.add_player(player);
+
+        let vis = VisibilitySystem::new(100.0);
+
+        // Mover lo suficiente para cambiar de grid (>533 yards)
+        let new_pos = Position::new(600.0, 0.0, 0.0, 0.0);
+        let result = vis.handle_player_movement(player_guid, new_pos, &map);
+
+        assert!(result.is_some());
+
+        // Verificar que el jugador está en el nuevo grid
+        let new_grid = world_to_grid(600.0, 0.0);
+        if let Some(grid_ref) = map.grids.get(&new_grid) {
+            if let Ok(grid) = grid_ref.read() {
+                assert!(grid.players.contains_key(&player_guid));
+            }
+        }
+    }
+}

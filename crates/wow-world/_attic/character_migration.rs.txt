@@ -1,0 +1,391 @@
+// RustyCore — Migration Patch for Global Creature System
+// Añade estos métodos a WorldSession en character.rs o donde correspondan
+// Reemplazan las versiones antiguas que usaban self.creatures (HashMap local)
+
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use tracing::{debug, info, trace, warn};
+use wow_core::ObjectGuid;
+use wow_packet::packets::update::CreatureCreateData;
+use wow_ai::CreatureAI;
+
+use crate::session::{WorldSession, PendingRespawn};
+use crate::map_manager::{world_to_grid_x, world_to_grid_y, WorldCreature, GridCoord};
+
+impl WorldSession {
+    /// Versión actualizada de tick_creatures_sync usando MapManager global.
+    /// Procesa AI de criaturas en el mapa global.
+    pub(crate) fn tick_creatures_sync(&mut self) {
+        let player_guid = match self.player_guid {
+            Some(g) => g,
+            None => return,
+        };
+        
+        let player_pos = match self.player_position {
+            Some(p) => p,
+            None => return,
+        };
+
+        // Obtener criaturas visibles del mapa global
+        let visible_creatures = self.get_visible_creatures();
+        
+        // Procesar cada criatura
+        for mut creature in visible_creatures {
+            // Solo procesar criaturas hostiles (npc_flags == 0) y no muertas
+            if creature.npc_flags != 0 || !creature.is_alive {
+                continue;
+            }
+
+            let distance = wow_core::Position::distance(&player_pos, &creature.position);
+
+            // Verificar agro si estamos en rango
+            if distance < creature.aggro_radius && creature.state == wow_ai::CreatureState::Idle {
+                // Entrar en combate con el jugador
+                creature.enter_combat(player_guid);
+                creature.state = wow_ai::CreatureState::InCombat;
+                
+                // Actualizar en el mapa global
+                self.with_creature_mut(&creature.guid, |c| {
+                    c.enter_combat(player_guid);
+                });
+            }
+
+            // Procesar movimiento según el estado
+            match creature.state {
+                wow_ai::CreatureState::WalkingRandom => {
+                    if let Some(target) = creature.move_target {
+                        let dist = wow_core::Position::distance(&creature.position, &target);
+                        if dist < 0.5 {
+                            // Llegó al destino, volver a idle
+                            self.with_creature_mut(&creature.guid, |c| {
+                                c.state = wow_ai::CreatureState::Idle;
+                                c.move_target = None;
+                            });
+                        }
+                    }
+                }
+                wow_ai::CreatureState::InCombat => {
+                    // Moverse hacia el jugador si está lejos
+                    if distance > 2.0 {
+                        // TODO: Pathfinding simplificado - mover directamente hacia el jugador
+                        let direction = wow_core::Position::direction(&creature.position, &player_pos);
+                        let speed = 3.0; // yards/segundo
+                        let delta = 0.2; // segundos por tick (asumiendo 5 ticks/segundo)
+                        
+                        let new_x = creature.position.x + direction.x * speed * delta;
+                        let new_y = creature.position.y + direction.y * speed * delta;
+                        let new_z = creature.position.z; // Mantener altura (simplificado)
+                        
+                        self.with_creature_mut(&creature.guid, |c| {
+                            c.position = wow_core::Position::new(new_x, new_y, new_z, direction.o);
+                        });
+                        
+                        // Enviar movimiento a jugadores cercanos
+                        // TODO: Broadcast MonsterMove
+                    }
+                }
+                _ => {}
+            }
+
+            // Verificar si necesita despawn (corpse decay)
+            if !creature.is_alive {
+                if let Some(despawn_time) = creature.corpse_despawn_at {
+                    if Instant::now() >= despawn_time {
+                        info!(
+                            "Creature {:?} (entry {}) corpse despawning",
+                            creature.guid, creature.entry
+                        );
+                        
+                        // Despawn del mapa global
+                        self.despawn_creature_global(creature.guid);
+                        
+                        // Añadir a cola de respawn
+                        let respawn_data = PendingRespawn {
+                            respawn_at: Instant::now() + Duration::from_secs(300), // 5 minutos
+                            home_pos: creature.home_pos,
+                            create_data: creature.create_data.clone(),
+                            max_hp: creature.max_hp,
+                            level: creature.level,
+                            min_dmg: creature.min_dmg,
+                            max_dmg: creature.max_dmg,
+                            aggro_radius: creature.aggro_radius,
+                            npc_flags: creature.npc_flags,
+                            unit_flags: creature.unit_flags,
+                            map_id: self.current_map_id,
+                        };
+                        self.respawn_queue.push(respawn_data);
+                        
+                        // Enviar DestroyObject a jugadores
+                        self.broadcast_destroy_creature(creature.guid);
+                    }
+                }
+            }
+        }
+
+        // Procesar cola de respawn
+        self.process_respawn_queue();
+    }
+
+    /// Procesa criaturas esperando respawn.
+    fn process_respawn_queue(&mut self) {
+        let now = Instant::now();
+        let ready_to_respawn: Vec<PendingRespawn> = self
+            .respawn_queue
+            .drain(..)
+            .filter(|r| r.respawn_at <= now)
+            .collect();
+
+        for respawn in ready_to_respawn {
+            info!(
+                "Respawning creature entry {} at {:?}",
+                respawn.create_data.entry_id, respawn.home_pos
+            );
+
+            // Crear nueva criatura
+            let guid = wow_core::ObjectGuid::create_creature(
+                self.realm_id,
+                rand::random::<i64>().abs(),
+            );
+
+            let new_creature = WorldCreature {
+                guid,
+                entry: respawn.create_data.entry_id as u32,
+                level: respawn.level,
+                is_alive: true,
+                current_hp: respawn.max_hp,
+                max_hp: respawn.max_hp,
+                position: respawn.home_pos,
+                home_pos: respawn.home_pos,
+                state: wow_ai::CreatureState::Idle,
+                move_target: None,
+                corpse_despawn_at: None,
+                npc_flags: respawn.npc_flags,
+                unit_flags: respawn.unit_flags,
+                aggro_radius: respawn.aggro_radius,
+                min_dmg: respawn.min_dmg,
+                max_dmg: respawn.max_dmg,
+                create_data: respawn.create_data.clone(),
+            };
+
+            // Añadir al mapa global
+            if self.spawn_creature_global(new_creature.clone()) {
+                // Enviar CreateObject a jugadores cercanos
+                self.broadcast_create_creature(new_creature);
+            }
+        }
+
+        // Las que no están listas vuelven a la cola
+        let not_ready: Vec<PendingRespawn> = self
+            .respawn_queue
+            .drain(..)
+            .filter(|r| r.respawn_at > now)
+            .collect();
+        self.respawn_queue.extend(not_ready);
+    }
+
+    /// Broadcast CreateObject para una criatura a todos los jugadores cercanos.
+    fn broadcast_create_creature(&self, creature: WorldCreature) {
+        // TODO: Implementar broadcast usando player_registry
+        // Enviar UpdateObject (CreateObject2) a jugadores en el mismo mapa/grid
+    }
+
+    /// Broadcast DestroyObject para una criatura.
+    fn broadcast_destroy_creature(&self, guid: ObjectGuid) {
+        use wow_packet::packets::update::DestroyObject;
+        use wow_packet::ServerPacket;
+
+        let destroy = DestroyObject {
+            guid,
+            target_swap: 0,
+            slot_swap: 0,
+            padding: 0,
+        };
+        self.send_packet(&destroy);
+        
+        // TODO: Broadcast a otros jugadores cercanos
+    }
+
+    /// Versión actualizada de send_nearby_creatures usando MapManager global.
+    /// Carga criaturas de la base de datos y las añade al mapa global.
+    pub async fn send_nearby_creatures(&mut self, map_id: u16, pos: &wow_core::Position, _zone_id: u32) {
+        debug!(
+            account = self.account_id,
+            x = pos.x,
+            y = pos.y,
+            z = pos.z,
+            "send_nearby_creatures (global map)"
+        );
+
+        let world_db = match self.world_db() {
+            Some(db) => Arc::clone(db),
+            None => {
+                warn!("No world database for creature spawn");
+                return;
+            }
+        };
+
+        // Calcular grid actual
+        let grid_x = world_to_grid_x(pos.x);
+        let grid_y = world_to_grid_y(pos.y);
+
+        // Verificar si el grid ya está cargado
+        let grid_loaded = self.with_map_manager(|mgr| {
+            mgr.is_grid_loaded(map_id, 0, grid_x, grid_y)
+        }).unwrap_or(false);
+
+        if grid_loaded {
+            // El grid ya está cargado, solo enviar criaturas existentes al cliente
+            let creatures = self.get_visible_creatures();
+            for creature in creatures {
+                // Enviar CreateObject
+                self.send_packet(&creature.create_data.to_update_object());
+            }
+            return;
+        }
+
+        // Grid no cargado - cargar desde DB
+        let range = 100.0; // Radio de spawn en yards
+
+        let mut stmt = world_db.prepare(wow_database::WorldStatements::SEL_CREATURE_BY_MAP_RANGE);
+        stmt.set_i32(0, map_id as i32);
+        stmt.set_f32(1, pos.x - range);
+        stmt.set_f32(2, pos.x + range);
+        stmt.set_f32(3, pos.y - range);
+        stmt.set_f32(4, pos.y + range);
+
+        let result = match world_db.query(&stmt).await {
+            Ok(r) => r,
+            Err(e) => {
+                warn!("Failed to query creatures: {e}");
+                return;
+            }
+        };
+
+        if !result.is_empty() {
+            let mut result = result;
+            loop {
+                let guid_low: u64 = result.read(0);
+                let entry: u32 = result.read(1);
+                let x: f32 = result.read(2);
+                let y: f32 = result.read(3);
+                let z: f32 = result.read(4);
+                let o: f32 = result.read(5);
+
+                let guid = wow_core::ObjectGuid::create_creature(self.realm_id, guid_low as i64);
+                let position = wow_core::Position::new(x, y, z, o);
+
+                // Cargar template
+                let template_stmt = world_db.prepare(wow_database::WorldStatements::SEL_CREATURE_TEMPLATE);
+                let template_result = world_db.query(&template_stmt).await.ok();
+
+                // Valores por defecto
+                let mut level: u8 = 1;
+                let mut min_dmg: u32 = 5;
+                let mut max_dmg: u32 = 10;
+                let mut max_hp: u32 = 50;
+                let mut npc_flags: u32 = 0;
+                let mut unit_flags: u32 = 0;
+                let mut display_id: u32 = 0;
+
+                // Buscar template
+                if let Some(mut t_result) = template_result {
+                    loop {
+                        let t_entry: u32 = t_result.read(0);
+                        if t_entry == entry {
+                            level = t_result.try_read(1).unwrap_or(1);
+                            max_hp = t_result.try_read(2).unwrap_or(50);
+                            min_dmg = t_result.try_read(3).unwrap_or(5);
+                            max_dmg = t_result.try_read(4).unwrap_or(10);
+                            npc_flags = t_result.try_read(5).unwrap_or(0);
+                            unit_flags = t_result.try_read(6).unwrap_or(0);
+                            display_id = t_result.try_read(7).unwrap_or(0);
+                            break;
+                        }
+                        if !t_result.next_row() {
+                            break;
+                        }
+                    }
+                }
+
+                // Crear CreatureCreateData
+                let create_data = CreatureCreateData {
+                    guid,
+                    entry_id: entry as i32,
+                    display_id,
+                    level,
+                    max_hp: max_hp as i32,
+                    current_hp: max_hp as i32,
+                    position,
+                    npc_flags,
+                    unit_flags,
+                    faction: 35, // Neutral (simplificado)
+                };
+
+                // Crear WorldCreature para el mapa global
+                let creature = WorldCreature {
+                    guid,
+                    entry,
+                    level,
+                    is_alive: true,
+                    current_hp: max_hp,
+                    max_hp,
+                    position,
+                    home_pos: position,
+                    state: wow_ai::CreatureState::Idle,
+                    move_target: None,
+                    corpse_despawn_at: None,
+                    npc_flags,
+                    unit_flags,
+                    aggro_radius: 20.0, // 20 yards default
+                    min_dmg,
+                    max_dmg,
+                    create_data: create_data.clone(),
+                };
+
+                // Añadir al mapa global
+                if self.spawn_creature_global(creature.clone()) {
+                    // Enviar al cliente
+                    self.send_packet(&create_data.to_update_object());
+                    debug!("Spawned creature {:?} (entry {}) at grid ({}, {})", guid, entry, grid_x, grid_y);
+                }
+
+                if !result.next_row() {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Helper: Obtener información de criatura para handlers de gossip/vendor.
+    /// Reemplaza `self.creatures.get(&guid).map(|c| c.npc_flags)` etc.
+    pub(crate) fn get_creature_info(&self, guid: &ObjectGuid) -> Option<(u32, u32, u8, u32)> {
+        // (npc_flags, entry, level, unit_flags)
+        let creature = self.get_creature(guid)?;
+        Some((creature.npc_flags, creature.entry, creature.level, creature.unit_flags))
+    }
+}
+
+// Trait helper para convertir CreatureCreateData a UpdateObject
+trait ToUpdateObject {
+    fn to_update_object(&self) -> wow_packet::packets::update::UpdateObject;
+}
+
+impl ToUpdateObject for CreatureCreateData {
+    fn to_update_object(&self) -> wow_packet::packets::update::UpdateObject {
+        use wow_packet::packets::update::UpdateObject;
+        
+        UpdateObject::create_creature(
+            self.guid,
+            self.entry_id as u32,
+            self.display_id,
+            self.level,
+            self.max_hp as u32,
+            self.current_hp as u32,
+            &self.position,
+            self.npc_flags,
+            self.unit_flags,
+            self.faction,
+        )
+    }
+}

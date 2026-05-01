@@ -1,0 +1,347 @@
+// RustyCore — WoW WotLK 3.4.3 server in Rust
+// Migration helpers: creature system integration with global MapManager
+
+use std::sync::Arc;
+use std::collections::HashMap;
+
+use tracing::{debug, trace, warn};
+
+use wow_core::{ObjectGuid, Position};
+use wow_database::WorldDatabase;
+use wow_packet::packets::update::{UpdateType, UpdateObject};
+use wow_ai::CreatureState;
+
+use crate::session::WorldSession;
+use crate::map_manager::{WorldCreature, world_to_grid_x, world_to_grid_y};
+
+impl WorldSession {
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // CREATURE ACCESS METHODS (Global MapManager Integration)
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    /// Check if a creature exists and is visible to this session.
+    /// Uses the global MapManager for lookup.
+    pub(crate) fn is_creature_visible(&self, guid: &ObjectGuid) -> bool {
+        let Some(pos) = self.player_position else { return false; };
+        let Some(map_manager) = &self.map_manager else { return false; };
+        
+        let map_guard = map_manager.read().unwrap();
+        let creatures = map_guard.get_visible_creatures(
+            self.current_map_id, 
+            0, 
+            pos.x, pos.y, pos.z
+        );
+        
+        creatures.iter().any(|c| c.guid == *guid)
+    }
+
+    /// Get NPC flags for a creature from the global MapManager.
+    pub(crate) fn get_creature_npc_flags(&self, guid: &ObjectGuid) -> u32 {
+        let Some(pos) = self.player_position else { return 0; };
+        let Some(map_manager) = &self.map_manager else { return 0; };
+        
+        let map_guard = map_manager.read().unwrap();
+        let creatures = map_guard.get_visible_creatures(
+            self.current_map_id, 
+            0, 
+            pos.x, pos.y, pos.z
+        );
+        
+        creatures.iter()
+            .find(|c| c.guid == *guid)
+            .map(|c| c.npc_flags)
+            .unwrap_or(0)
+    }
+
+    /// Get creature entry from the global MapManager.
+    pub(crate) fn get_creature_entry(&self, guid: &ObjectGuid) -> u32 {
+        let Some(pos) = self.player_position else { return 0; };
+        let Some(map_manager) = &self.map_manager else { return 0; };
+        
+        let map_guard = map_manager.read().unwrap();
+        let creatures = map_guard.get_visible_creatures(
+            self.current_map_id, 
+            0, 
+            pos.x, pos.y, pos.z
+        );
+        
+        creatures.iter()
+            .find(|c| c.guid == *guid)
+            .map(|c| c.entry)
+            .unwrap_or(0)
+    }
+
+    /// Get creature level from the global MapManager.
+    pub(crate) fn get_creature_level(&self, guid: &ObjectGuid) -> u8 {
+        let Some(pos) = self.player_position else { return 1; };
+        let Some(map_manager) = &self.map_manager else { return 1; };
+        
+        let map_guard = map_manager.read().unwrap();
+        let creatures = map_guard.get_visible_creatures(
+            self.current_map_id, 
+            0, 
+            pos.x, pos.y, pos.z
+        );
+        
+        creatures.iter()
+            .find(|c| c.guid == *guid)
+            .map(|c| c.level)
+            .unwrap_or(1)
+    }
+
+    /// Get creature position from the global MapManager.
+    pub(crate) fn get_creature_position(&self, guid: &ObjectGuid) -> Option<Position> {
+        let Some(pos) = self.player_position else { return None; };
+        let Some(map_manager) = &self.map_manager else { return None; };
+        
+        let map_guard = map_manager.read().unwrap();
+        let creatures = map_guard.get_visible_creatures(
+            self.current_map_id, 
+            0, 
+            pos.x, pos.y, pos.z
+        );
+        
+        creatures.iter()
+            .find(|c| c.guid == *guid)
+            .map(|c| c.position)
+    }
+
+    /// Check if a creature is alive in the global MapManager.
+    pub(crate) fn is_creature_alive(&self, guid: &ObjectGuid) -> bool {
+        let Some(pos) = self.player_position else { return false; };
+        let Some(map_manager) = &self.map_manager else { return false; };
+        
+        let map_guard = map_manager.read().unwrap();
+        let creatures = map_guard.get_visible_creatures(
+            self.current_map_id, 
+            0, 
+            pos.x, pos.y, pos.z
+        );
+        
+        creatures.iter()
+            .find(|c| c.guid == *guid)
+            .map(|c| c.is_alive)
+            .unwrap_or(false)
+    }
+
+    /// Get all visible creatures for this session from the MapManager.
+    pub(crate) fn get_visible_creatures_from_map(&self) -> Vec<WorldCreature> {
+        let Some(pos) = self.player_position else { return Vec::new(); };
+        let Some(map_manager) = &self.map_manager else { return Vec::new(); };
+        
+        let map_guard = map_manager.read().unwrap();
+        map_guard.get_visible_creatures(
+            self.current_map_id, 
+            0, 
+            pos.x, pos.y, pos.z
+        )
+    }
+
+    /// Spawn a creature into the global MapManager.
+    pub(crate) fn spawn_creature_global(&self, creature: WorldCreature) -> bool {
+        let Some(map_manager) = &self.map_manager else { return false; };
+        
+        let mut map_guard = map_manager.write().unwrap();
+        let grid_x = world_to_grid_x(creature.position.x);
+        let grid_y = world_to_grid_y(creature.position.y);
+        
+        let result = map_guard.add_creature(
+            self.current_map_id,
+            0,
+            grid_x,
+            grid_y,
+            creature.clone()
+        );
+        
+        if result {
+            debug!("Spawned creature {:?} into global map {} at grid ({}, {})",
+                creature.guid, self.current_map_id, grid_x, grid_y);
+        }
+        
+        result
+    }
+
+    /// Despawn a creature from the global MapManager.
+    pub(crate) fn despawn_creature_global(&self, guid: ObjectGuid) -> bool {
+        let Some(pos) = self.player_position else { return false; };
+        let Some(map_manager) = &self.map_manager else { return false; };
+        
+        let mut map_guard = map_manager.write().unwrap();
+        let grid_x = world_to_grid_x(pos.x);
+        let grid_y = world_to_grid_y(pos.y);
+        
+        let result = map_guard.remove_creature(
+            self.current_map_id,
+            0,
+            grid_x,
+            grid_y,
+            guid
+        );
+        
+        if result {
+            debug!("Despawned creature {:?} from global map {}", guid, self.current_map_id);
+        }
+        
+        result
+    }
+
+    /// Update creature health in the global MapManager.
+    pub(crate) fn update_creature_health_global(&self, guid: &ObjectGuid, new_hp: u32) -> bool {
+        let Some(pos) = self.player_position else { return false; };
+        let Some(map_manager) = &self.map_manager else { return false; };
+        
+        let mut map_guard = map_manager.write().unwrap();
+        let grid_x = world_to_grid_x(pos.x);
+        let grid_y = world_to_grid_y(pos.y);
+        
+        map_guard.with_creature_mut(
+            self.current_map_id,
+            0,
+            grid_x,
+            grid_y,
+            *guid,
+            |creature| {
+                creature.current_hp = new_hp;
+            }
+        ).is_some()
+    }
+
+    /// Set creature state in the global MapManager.
+    pub(crate) fn set_creature_state_global(&self, guid: &ObjectGuid, state: CreatureState) -> bool {
+        let Some(pos) = self.player_position else { return false; };
+        let Some(map_manager) = &self.map_manager else { return false; };
+        
+        let mut map_guard = map_manager.write().unwrap();
+        let grid_x = world_to_grid_x(pos.x);
+        let grid_y = world_to_grid_y(pos.y);
+        
+        map_guard.with_creature_mut(
+            self.current_map_id,
+            0,
+            grid_x,
+            grid_y,
+            *guid,
+            |creature| {
+                creature.state = state;
+            }
+        ).is_some()
+    }
+
+    /// Damage a creature in the global MapManager.
+    /// Returns the new HP after damage.
+    pub(crate) fn damage_creature_global(&self, guid: &ObjectGuid, damage: u32) -> Option<u32> {
+        let Some(pos) = self.player_position else { return None; };
+        let Some(map_manager) = &self.map_manager else { return None; };
+        
+        let mut map_guard = map_manager.write().unwrap();
+        let grid_x = world_to_grid_x(pos.x);
+        let grid_y = world_to_grid_y(pos.y);
+        
+        let old_hp = map_guard.get_creature(
+            self.current_map_id,
+            0,
+            grid_x,
+            grid_y,
+            *guid
+        ).map(|c| c.current_hp)?;
+        
+        let new_hp = old_hp.saturating_sub(damage);
+        
+        let died = map_guard.with_creature_mut(
+            self.current_map_id,
+            0,
+            grid_x,
+            grid_y,
+            *guid,
+            |creature| {
+                creature.current_hp = new_hp;
+                if new_hp == 0 {
+                    creature.is_alive = false;
+                    creature.state = CreatureState::Dead;
+                    creature.corpse_despawn_at = Some(std::time::Instant::now() + std::time::Duration::from_secs(30));
+                    true // died
+                } else {
+                    false
+                }
+            }
+        );
+        
+        if died == Some(true) {
+            debug!("Creature {:?} died from damage", guid);
+        }
+        
+        Some(new_hp)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // LEGACY COMPATIBILITY (transitional methods during migration)
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    /// Legacy method: Get mutable reference to creature via closure.
+    /// TEMPORARY: This creates a local copy, modifies it, and writes back.
+    /// Will be replaced with proper reference-based API after full migration.
+    pub(crate) fn with_creature_mut<F, R>(&self, guid: &ObjectGuid, f: F) -> Option<R>
+    where
+        F: FnOnce(&mut WorldCreature) -> R,
+    {
+        let Some(pos) = self.player_position else { return None; };
+        let Some(map_manager) = &self.map_manager else { return None; };
+        
+        let grid_x = world_to_grid_x(pos.x);
+        let grid_y = world_to_grid_y(pos.y);
+        
+        // Read creature
+        let creature = {
+            let map_guard = map_manager.read().unwrap();
+            map_guard.get_creature(
+                self.current_map_id,
+                0,
+                grid_x,
+                grid_y,
+                *guid
+            ).cloned()
+        }?;
+        
+        // Modify
+        let mut mutable = creature;
+        let result = f(&mut mutable);
+        
+        // Write back
+        let mut map_guard = map_manager.write().unwrap();
+        map_guard.add_creature(
+            self.current_map_id,
+            0,
+            grid_x,
+            grid_y,
+            mutable
+        );
+        
+        Some(result)
+    }
+
+    /// Legacy method: Get creature reference via closure.
+    pub(crate) fn with_creature<F, R>(&self, guid: &ObjectGuid, f: F) -> Option<R>
+    where
+        F: FnOnce(&WorldCreature) -> R,
+    {
+        let Some(pos) = self.player_position else { return None; };
+        let Some(map_manager) = &self.map_manager else { return None; };
+        
+        let map_guard = map_manager.read().unwrap();
+        let grid_x = world_to_grid_x(pos.x);
+        let grid_y = world_to_grid_y(pos.y);
+        
+        map_guard.get_creature(
+            self.current_map_id,
+            0,
+            grid_x,
+            grid_y,
+            *guid
+        ).map(f)
+    }
+    
+    /// Legacy method: Get creature directly (returns a clone).
+    pub(crate) fn get_creature(&self, guid: &ObjectGuid) -> Option<WorldCreature> {
+        self.with_creature(guid, |c| c.clone())
+    }
+}

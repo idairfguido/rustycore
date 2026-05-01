@@ -1,0 +1,313 @@
+// RustyCore — WoW WotLK 3.4.3 server in Rust
+// Based on TrinityCore protocol research
+// Licensed under GPL v3
+
+//! Character handlers - implementation stubs for compilation
+
+use std::sync::Arc;
+use tracing::{debug, info, trace, warn};
+use wow_constants::ClientOpcodes;
+use wow_core::{ObjectGuid, Position};
+use wow_database::{CharStatements, CharacterDatabase, WorldDatabase};
+use wow_packet::packets::character::*;
+use wow_packet::packets::auth::{ConnectToFailed, ResumeComms, ResumeCommsResponse};
+
+use crate::session::{SessionState, WorldSession};
+use crate::handlers::character::default_display_id;
+
+/// Resume the player login process after ConnectTo completes.
+/// Called when the instance link is received.
+pub async fn handle_continue_player_login(session: &mut WorldSession) {
+    debug!("Continuing player login for account {}", session.account_id);
+    // Continue login sequence on instance socket
+    session.send_packet(&ResumeCommsResponse {});
+}
+
+/// Handle enum characters request.
+pub async fn handle_enum_characters(session: &mut WorldSession) {
+    use wow_packet::packets::character::EnumCharactersResult;
+    
+    debug!("Handling EnumCharacters for account {}", session.account_id);
+    
+    // Get characters from database
+    let chars = match session.char_db() {
+        Some(db) => {
+            match db.query_characters(session.account_id).await {
+                Ok(rows) => rows,
+                Err(e) => {
+                    warn!("Failed to query characters: {}", e);
+                    Vec::new()
+                }
+            }
+        }
+        None => {
+            warn!("No character database available");
+            Vec::new()
+        }
+    };
+    
+    session.send_packet(&EnumCharactersResult { characters: chars });
+}
+
+/// Handle create character request.
+pub async fn handle_create_character(session: &mut WorldSession, create: CreateCharacter) {
+    use wow_packet::packets::character::{CreateCharacterResponse, CharacterInfo};
+    
+    debug!("Handling CreateCharacter for account {}: {}", session.account_id, create.name);
+    
+    // Validate inputs
+    if create.name.is_empty() || create.name.len() > 12 {
+        session.send_packet(&CreateCharacterResponse { result: 0x34, guid: ObjectGuid::EMPTY }); // CHAR_NAME_INVALID
+        return;
+    }
+    
+    // Create character in database
+    let result = match session.char_db() {
+        Some(db) => {
+            match db.create_character(session.account_id, &create).await {
+                Ok(guid) => {
+                    info!("Created character {} with GUID {:?}", create.name, guid);
+                    session.send_packet(&CreateCharacterResponse { result: 0x00, guid });
+                    return;
+                }
+                Err(e) => {
+                    warn!("Failed to create character: {}", e);
+                    0x31 // CHAR_CREATE_ERROR
+                }
+            }
+        }
+        None => {
+            warn!("No character database available");
+            0x31
+        }
+    };
+    
+    session.send_packet(&CreateCharacterResponse { result: result, guid: ObjectGuid::EMPTY });
+}
+
+/// Handle character delete request.
+pub async fn handle_char_delete(session: &mut WorldSession, delete: CharDelete) {
+    use wow_packet::packets::character::DeleteCharResponse;
+    
+    debug!("Handling CharDelete for account {}: {:?}", session.account_id, delete.guid);
+    
+    // Verify ownership and delete
+    let result = match session.char_db() {
+        Some(db) => {
+            match db.delete_character(session.account_id, delete.guid).await {
+                Ok(_) => {
+                    info!("Deleted character {:?}", delete.guid);
+                    0x00 // CHAR_DELETE_SUCCESS
+                }
+                Err(e) => {
+                    warn!("Failed to delete character: {}", e);
+                    0x3C // CHAR_DELETE_FAILED
+                }
+            }
+        }
+        None => 0x3C,
+    };
+    
+    session.send_packet(&DeleteCharResponse { result });
+}
+
+/// Handle player login request.
+pub async fn handle_player_login(session: &mut WorldSession, login: PlayerLogin) {
+    use wow_packet::packets::misc::NewWorld;
+    
+    debug!("Handling PlayerLogin for account {}: {:?}", session.account_id, login.guid);
+    
+    // Validate character ownership
+    if !session.is_legit_character(&login.guid) {
+        warn!("Player login rejected: {:?} not in legit characters", login.guid);
+        session.state = SessionState::Disconnecting;
+        return;
+    }
+    
+    // Load character data
+    let char_data = match session.char_db() {
+        Some(db) => {
+            match db.load_character_data(login.guid).await {
+                Ok(data) => data,
+                Err(e) => {
+                    warn!("Failed to load character data: {}", e);
+                    session.state = SessionState::Disconnecting;
+                    return;
+                }
+            }
+        }
+        None => {
+            warn!("No character database available");
+            return;
+        }
+    };
+    
+    // Store player info
+    session.player_guid = Some(login.guid);
+    session.player_name = Some(char_data.name.clone());
+    session.player_race = char_data.race;
+    session.player_class = char_data.class;
+    session.player_level = char_data.level;
+    session.player_gender = char_data.gender;
+    session.current_map_id = char_data.map_id;
+    session.player_position = Some(Position {
+        x: char_data.x,
+        y: char_data.y,
+        z: char_data.z,
+        orientation: char_data.o,
+    });
+    session.player_gold = char_data.money;
+    
+    // Send NewWorld to client (map transfer)
+    session.send_packet(&NewWorld {
+        map_id: char_data.map_id as u32,
+        x: char_data.x,
+        y: char_data.y,
+        z: char_data.z,
+        orientation: char_data.o,
+        reason: 0,
+    });
+    
+    // Set state to transfer (waiting for client to acknowledge)
+    session.state = SessionState::Transfer;
+    
+    debug!("Player login initiated for {} ({})", char_data.name, login.guid);
+}
+
+/// Handle ConnectTo failed.
+pub async fn handle_connect_to_failed(session: &mut WorldSession, failed: ConnectToFailed) {
+    warn!("ConnectTo failed for account {}: serial={:?}, con={}", 
+        session.account_id, failed.serial, failed.con);
+    
+    // Reset connection state
+    session.set_player_loading(None);
+    session.set_connect_to_key(None);
+}
+
+/// Handle undelete character cooldown status request.
+pub async fn handle_get_undelete_cooldown_status(session: &mut WorldSession) {
+    use wow_packet::packets::character::UndeleteCooldownStatusResponse;
+    
+    // Always return 0 (no cooldown) for simplicity
+    session.send_packet(&UndeleteCooldownStatusResponse {
+        cooldown_remaining_sec: 0,
+        max_cooldown_sec: 0,
+    });
+}
+
+/// Handle server time offset request.
+pub async fn handle_server_time_offset_request(session: &mut WorldSession) {
+    use wow_packet::packets::misc::ServerTimeOffsetResponse;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as u32;
+    
+    session.send_packet(&ServerTimeOffsetResponse {
+        time: now,
+        offset: 0, // Server time offset (0 for same timezone)
+    });
+}
+
+/// Handle played time request.
+pub async fn handle_request_played_time(session: &mut WorldSession, trigger: bool) {
+    use wow_packet::packets::misc::PlayedTimeResponse;
+    use std::time::Instant;
+    
+    // Calculate current session time
+    let session_time = if let Some(login_time) = session.login_time {
+        Instant::now().duration_since(login_time).as_secs() as u32
+    } else {
+        0
+    };
+    
+    let total = session.total_played_time + session_time;
+    let level = session.level_played_time + session_time;
+    
+    session.send_packet(&PlayedTimeResponse {
+        total_played_time: total,
+        level_played_time: level,
+        trigger_script_event: trigger,
+    });
+}
+
+/// Handle DB query bulk.
+pub async fn handle_db_query_bulk(session: &mut WorldSession, query: wow_packet::packets::misc::DbQueryBulk) {
+    trace!("DB Query Bulk: table={:016X}, queries={}", query.table_hash, query.queries.len());
+    // TODO: Implement DB2 query responses
+}
+
+/// Handle hotfix request.
+pub async fn handle_hotfix_request(session: &mut WorldSession, req: wow_packet::packets::misc::HotfixRequest) {
+    use wow_packet::packets::misc::HotfixResponse;
+    
+    trace!("Hotfix request: {} items", req.items.len());
+    
+    // Return empty response for now
+    session.send_packet(&HotfixResponse { items: Vec::new() });
+}
+
+/// Handle time sync response.
+pub async fn handle_time_sync_response(session: &mut WorldSession, resp: wow_packet::packets::misc::TimeSyncResponse) {
+    trace!("Time sync response: index={}, time={}", resp.sequence_index, resp.client_time);
+    // Used for latency calculation - store if needed
+}
+
+/// Handle logout request.
+pub async fn handle_logout_request(session: &mut WorldSession, req: wow_packet::packets::misc::LogoutRequest) {
+    use wow_packet::packets::misc::LogoutResponse;
+    use std::time::{Duration, Instant};
+    
+    debug!("Logout requested for account {} (reason={})", session.account_id, req.reason);
+    
+    // Check if in combat
+    if session.in_combat {
+        session.send_packet(&LogoutResponse { result: 0x01, reason: 0 }); // LOGOUT_DENIED_COMBAT
+        return;
+    }
+    
+    // Start logout timer (20 seconds, or instant if requested)
+    let logout_delay = if req.instant {
+        Duration::from_secs(0)
+    } else {
+        Duration::from_secs(20)
+    };
+    
+    session.logout_time = Some(Instant::now() + logout_delay);
+    
+    session.send_packet(&LogoutResponse { result: 0x00, reason: req.reason });
+    
+    debug!("Logout scheduled for account {} in {:?}", session.account_id, logout_delay);
+}
+
+/// Handle logout cancel.
+pub async fn handle_logout_cancel(session: &mut WorldSession) {
+    use wow_packet::packets::misc::LogoutCancelAck;
+    
+    session.logout_time = None;
+    session.send_packet(&LogoutCancelAck {});
+    
+    debug!("Logout cancelled for account {}", session.account_id);
+}
+
+/// Complete the logout process.
+fn complete_logout(session: &mut WorldSession) {
+    info!("Completing logout for account {}", session.account_id);
+    
+    // Save character data
+    // TODO: Persist current position, health, mana, etc.
+    
+    // Unregister from broadcast
+    session.unregister_from_player_registry();
+    
+    // Send logout complete
+    use wow_packet::packets::misc::LogoutCompleteResponse;
+    session.send_packet(&LogoutCompleteResponse { reason: 0 });
+    
+    // Return to auth state (character selection)
+    session.state = SessionState::Authed;
+    session.player_guid = None;
+    session.login_time = None;
+}

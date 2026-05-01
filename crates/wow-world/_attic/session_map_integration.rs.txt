@@ -1,0 +1,428 @@
+// RustyCore — migrated session methods for MapManager integration
+// These methods bridge WorldSession with the global MapManager
+
+use std::collections::{HashMap, HashSet};
+use std::time::Instant;
+
+use tracing::{debug, info, trace, warn};
+use wow_core::{ObjectGuid, Position};
+use wow_packet::{ServerPacket, packets::update::{UpdateObject, CreatureCreateData}};
+use wow_database::WorldDatabase;
+
+use crate::session::WorldSession;
+use crate::map_manager::{SharedMapManager, WorldCreature, GridCoord, world_to_grid_x, world_to_grid_y, world_to_grid_coords};
+
+/// Extension trait for WorldSession methods migrated to use MapManager.
+pub trait SessionMapIntegration {
+    /// Spawn a creature into the global MapManager.
+    fn spawn_creature_global(&mut self, creature: WorldCreature);
+    
+    /// Despawn a creature from the global MapManager.
+    fn despawn_creature_global(&mut self, guid: ObjectGuid);
+    
+    /// Get a creature from the global MapManager.
+    fn get_creature_global(&self, guid: ObjectGuid) -> Option<WorldCreature>;
+    
+    /// Get all visible creatures around the player from MapManager.
+    fn get_visible_creatures_from_map(&self) -> Vec<WorldCreature>;
+    
+    /// Check if a creature is visible to this player.
+    fn is_creature_visible(&self, guid: &ObjectGuid) -> bool;
+    
+    /// Update player position in the MapManager (grid tracking).
+    fn update_position_in_map(&mut self, position: Position);
+    
+    /// Send initial creature spawns to the player (from MapManager).
+    async fn send_initial_creature_spawns(&mut self);
+    
+    /// Tick creature AI for all visible creatures (called every 200ms).
+    fn tick_creature_ai_global(&mut self);
+    
+    /// Process creature respawns from the queue.
+    fn process_respawns_global(&mut self);
+    
+    /// Load and spawn creatures from database into MapManager.
+    async fn load_creatures_from_db(&mut self, map_id: u16, zone_id: u32, center: &Position, radius: f32);
+    
+    /// Send UpdateObject packets for all visible creatures.
+    async fn broadcast_visible_creatures(&mut self);
+    
+    /// Get creature NPC flags from MapManager.
+    fn get_creature_npc_flags(&self, guid: &ObjectGuid) -> u32;
+    
+    /// Get creature entry from MapManager.
+    fn get_creature_entry(&self, guid: &ObjectGuid) -> u32;
+    
+    /// Execute callback with mutable creature reference.
+    fn with_creature_mut<F, R>(&mut self, guid: &ObjectGuid, f: F) -> Option<R>
+    where
+        F: FnOnce(&mut WorldCreature) -> R;
+    
+    /// Get combat target from creature.
+    fn get_creature_combat_target(&self, guid: &ObjectGuid) -> Option<ObjectGuid>;
+    
+    /// Set creature as in combat.
+    fn set_creature_in_combat(&mut self, guid: ObjectGuid, target: ObjectGuid);
+    
+    /// Deal damage to a creature. Returns true if creature died.
+    fn damage_creature(&mut self, guid: ObjectGuid, damage: u32) -> bool;
+    
+    /// Get creature position from MapManager.
+    fn get_creature_position(&self, guid: &ObjectGuid) -> Option<Position>;
+    
+    /// Tick combat for all creatures in combat.
+    fn tick_combat_global(&mut self);
+    
+    /// Move creature to a new position.
+    fn move_creature_to(&mut self, guid: ObjectGuid, new_pos: Position);
+}
+
+impl SessionMapIntegration for WorldSession {
+    fn spawn_creature_global(&mut self, creature: WorldCreature) {
+        let Some(map_manager) = self.map_manager.clone() else {
+            warn!("Cannot spawn creature: no MapManager");
+            return;
+        };
+        
+        let grid_x = world_to_grid_x(creature.position.x);
+        let grid_y = world_to_grid_y(creature.position.y);
+        let map_id = self.current_map_id;
+        let instance_id = 0u32; // TODO: instance support
+        
+        let mut mgr = map_manager.write().unwrap();
+        mgr.add_creature(map_id, instance_id, grid_x, grid_y, creature);
+        debug!("Spawned creature at grid ({}, {}) in map {}", grid_x, grid_y, map_id);
+    }
+    
+    fn despawn_creature_global(&mut self, guid: ObjectGuid) {
+        let Some(map_manager) = self.map_manager.clone() else {
+            return;
+        };
+        
+        let grid_x = self.current_grid.as_ref().map(|g| g.x).unwrap_or(0);
+        let grid_y = self.current_grid.as_ref().map(|g| g.y).unwrap_or(0);
+        let map_id = self.current_map_id;
+        let instance_id = 0u32;
+        
+        let mut mgr = map_manager.write().unwrap();
+        mgr.remove_creature(map_id, instance_id, grid_x, grid_y, guid);
+    }
+    
+    fn get_creature_global(&self, guid: ObjectGuid) -> Option<WorldCreature> {
+        let map_manager = self.map_manager.clone()?;
+        let grid_x = self.current_grid.as_ref().map(|g| g.x).unwrap_or(0);
+        let grid_y = self.current_grid.as_ref().map(|g| g.y).unwrap_or(0);
+        let map_id = self.current_map_id;
+        let instance_id = 0u32;
+        
+        let mgr = map_manager.read().unwrap();
+        mgr.get_creature(map_id, instance_id, grid_x, grid_y, guid).cloned()
+    }
+    
+    fn get_visible_creatures_from_map(&self) -> Vec<WorldCreature> {
+        let Some(map_manager) = self.map_manager.clone() else {
+            return Vec::new();
+        };
+        let Some(pos) = self.player_position else {
+            return Vec::new();
+        };
+        
+        let mgr = map_manager.read().unwrap();
+        mgr.get_visible_creatures(self.current_map_id, 0, pos.x, pos.y, pos.z)
+    }
+    
+    fn is_creature_visible(&self, guid: &ObjectGuid) -> bool {
+        self.get_visible_creatures_from_map()
+            .iter()
+            .any(|c| &c.guid == guid)
+    }
+    
+    fn update_position_in_map(&mut self, position: Position) {
+        let Some(map_manager) = self.map_manager.clone() else {
+            return;
+        };
+        let Some(old_pos) = self.player_position else {
+            self.player_position = Some(position);
+            return;
+        };
+        
+        let old_grid = world_to_grid_coords(old_pos.x, old_pos.y);
+        let new_grid = world_to_grid_coords(position.x, position.y);
+        
+        // Only update MapManager if grid changed
+        if old_grid != new_grid {
+            let player_guid = self.player_guid.unwrap_or(ObjectGuid::EMPTY);
+            let map_id = self.current_map_id;
+            let instance_id = 0u32;
+            
+            let mut mgr = map_manager.write().unwrap();
+            mgr.player_move(map_id, instance_id, old_grid, new_grid, player_guid, position);
+            
+            self.current_grid = Some(GridCoord::new(new_grid.0, new_grid.1));
+            debug!("Player moved from grid {:?} to {:?}", old_grid, new_grid);
+        }
+        
+        self.player_position = Some(position);
+        self.update_registry_position();
+    }
+    
+    async fn send_initial_creature_spawns(&mut self) {
+        let creatures = self.get_visible_creatures_from_map();
+        
+        for creature in &creatures {
+            let packet = creature.create_data.clone();
+            self.send_packet(&packet);
+        }
+        
+        debug!("Sent {} creature spawns to player", creatures.len());
+    }
+    
+    fn tick_creature_ai_global(&mut self) {
+        // Get visible creatures and update their AI
+        let creatures = self.get_visible_creatures_from_map();
+        let player_pos = self.player_position;
+        let player_guid = self.player_guid;
+        
+        for creature in creatures {
+            // Skip if creature is in combat (handled by tick_combat)
+            if matches!(creature.state, wow_ai::CreatureState::InCombat) {
+                continue;
+            }
+            
+            // Simple idle behavior - could be expanded
+            if matches!(creature.state, wow_ai::CreatureState::Idle) {
+                // Chance to start random movement
+                // TODO: Implement proper AI behavior
+            }
+        }
+    }
+    
+    fn process_respawns_global(&mut self) {
+        let now = Instant::now();
+        let ready: Vec<_> = self.respawn_queue
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.respawn_at <= now)
+            .map(|(i, _)| i)
+            .collect();
+        
+        for i in ready.into_iter().rev() {
+            let respawn = self.respawn_queue.remove(i);
+            
+            let creature = WorldCreature {
+                guid: respawn.create_data.guid,
+                entry: respawn.create_data.entry_id,
+                level: respawn.level,
+                is_alive: true,
+                current_hp: respawn.max_hp,
+                max_hp: respawn.max_hp,
+                position: respawn.home_pos,
+                home_pos: respawn.home_pos,
+                state: wow_ai::CreatureState::Idle,
+                move_target: None,
+                corpse_despawn_at: None,
+                npc_flags: respawn.npc_flags,
+                unit_flags: respawn.unit_flags,
+                aggro_radius: respawn.aggro_radius,
+                min_dmg: respawn.min_dmg,
+                max_dmg: respawn.max_dmg,
+                create_data: respawn.create_data.clone(),
+            };
+            
+            self.spawn_creature_global(creature.clone());
+            self.send_packet(&respawn.create_data);
+            
+            info!("Creature {:?} respawned at {:?}", respawn.create_data.guid, respawn.home_pos);
+        }
+    }
+    
+    async fn load_creatures_from_db(&mut self, map_id: u16, zone_id: u32, center: &Position, radius: f32) {
+        let Some(world_db) = self.world_db().cloned() else {
+            warn!("Cannot load creatures: no world database");
+            return;
+        };
+        
+        // Query creatures from database using the extension method
+        use crate::map_manager::WorldExt;
+        let spawns = match world_db.get_creatures_in_radius(map_id, center, radius).await {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("Failed to load creatures from DB: {}", e);
+                return;
+            }
+        };
+        
+        for spawn in spawns {
+            let create_data = wow_packet::packets::update::CreatureCreateData {
+                guid: spawn.guid,
+                entry_id: spawn.entry,
+                display_id: spawn.display_id.unwrap_or(0),
+                level: spawn.level,
+                max_hp: spawn.max_hp,
+                current_hp: spawn.max_hp,
+                position: spawn.position.clone(),
+                npc_flags: spawn.npc_flags,
+                unit_flags: spawn.unit_flags,
+                faction: spawn.faction,
+            };
+            
+            let creature = WorldCreature {
+                guid: spawn.guid,
+                entry: spawn.entry,
+                level: spawn.level,
+                is_alive: true,
+                current_hp: spawn.max_hp,
+                max_hp: spawn.max_hp,
+                position: spawn.position,
+                home_pos: spawn.position,
+                state: wow_ai::CreatureState::Idle,
+                move_target: None,
+                corpse_despawn_at: None,
+                npc_flags: spawn.npc_flags,
+                unit_flags: spawn.unit_flags,
+                aggro_radius: spawn.aggro_radius,
+                min_dmg: spawn.min_dmg,
+                max_dmg: spawn.max_dmg,
+                create_data,
+            };
+            
+            self.spawn_creature_global(creature);
+        }
+        
+        info!("Loaded {} creatures into MapManager for map {}", 
+            self.get_visible_creatures_from_map().len(), map_id);
+    }
+    
+    async fn broadcast_visible_creatures(&mut self) {
+        // This would broadcast creature updates to all nearby players
+        // For now, just ensure our local player sees them
+        self.send_initial_creature_spawns().await;
+    }
+    
+    fn get_creature_npc_flags(&self, guid: &ObjectGuid) -> u32 {
+        self.get_creature_global(*guid)
+            .map(|c| c.npc_flags)
+            .unwrap_or(0)
+    }
+    
+    fn get_creature_entry(&self, guid: &ObjectGuid) -> u32 {
+        self.get_creature_global(*guid)
+            .map(|c| c.entry)
+            .unwrap_or(0)
+    }
+    
+    fn with_creature_mut<F, R>(&mut self, guid: &ObjectGuid, f: F) -> Option<R>
+    where
+        F: FnOnce(&mut WorldCreature) -> R,
+    {
+        let map_manager = self.map_manager.clone()?;
+        let grid_x = self.current_grid.as_ref().map(|g| g.x).unwrap_or(0);
+        let grid_y = self.current_grid.as_ref().map(|g| g.y).unwrap_or(0);
+        let map_id = self.current_map_id;
+        let instance_id = 0u32;
+        
+        let mut mgr = map_manager.write().unwrap();
+        mgr.with_creature_mut(map_id, instance_id, grid_x, grid_y, *guid, f)
+    }
+    
+    fn get_creature_combat_target(&self, guid: &ObjectGuid) -> Option<ObjectGuid> {
+        // For now, creatures don't track individual targets in this simplified model
+        // This would need proper aggro table implementation
+        None
+    }
+    
+    fn set_creature_in_combat(&mut self, guid: ObjectGuid, target: ObjectGuid) {
+        self.with_creature_mut(&guid, |c| {
+            c.enter_combat(target);
+        });
+    }
+    
+    fn damage_creature(&mut self, guid: ObjectGuid, damage: u32) -> bool {
+        let died = self.with_creature_mut(&guid, |c| {
+            c.take_damage(damage)
+        }).unwrap_or(false);
+        
+        if died {
+            // Creature died - handle corpse, loot, respawn timer
+            self.with_creature_mut(&guid, |c| {
+                c.is_alive = false;
+                c.corpse_despawn_at = Some(Instant::now() + std::time::Duration::from_secs(30));
+            });
+        }
+        
+        died
+    }
+    
+    fn get_creature_position(&self, guid: &ObjectGuid) -> Option<Position> {
+        self.get_creature_global(*guid).map(|c| c.position)
+    }
+    
+    fn tick_combat_global(&mut self) {
+        // Get creatures in combat
+        let combat_creatures: Vec<_> = self.get_visible_creatures_from_map()
+            .into_iter()
+            .filter(|c| matches!(c.state, wow_ai::CreatureState::InCombat))
+            .collect();
+        
+        let player_pos = self.player_position;
+        let player_guid = self.player_guid.unwrap_or(ObjectGuid::EMPTY);
+        
+        for creature in combat_creatures {
+            // Simple combat AI - attack player if in range
+            if let Some(pos) = player_pos {
+                let dist = Position::distance(&pos, &creature.position);
+                if dist <= 5.0 { // Melee range
+                    // Deal damage to player
+                    let damage = creature.min_dmg + ((creature.max_dmg - creature.min_dmg) / 2);
+                    // TODO: Apply damage to player
+                }
+            }
+        }
+    }
+    
+    fn move_creature_to(&mut self, guid: ObjectGuid, new_pos: Position) {
+        let old_pos = self.get_creature_position(&guid);
+        
+        self.with_creature_mut(&guid, |c| {
+            c.position = new_pos;
+            c.move_target = None;
+        });
+        
+        // If moved to different grid, update MapManager
+        if let Some(old) = old_pos {
+            let old_grid = world_to_grid_coords(old.x, old.y);
+            let new_grid = world_to_grid_coords(new_pos.x, new_pos.y);
+            
+            if old_grid != new_grid {
+                // Remove from old grid, add to new
+                if let Some(creature) = self.get_creature_global(guid) {
+                    self.despawn_creature_global(guid);
+                    self.spawn_creature_global(creature);
+                }
+            }
+        }
+    }
+}
+
+/// Helper function to convert CreatureAI to WorldCreature.
+pub fn creature_ai_to_world_creature(ai: &wow_ai::CreatureAI, create_data: wow_packet::packets::update::CreatureCreateData) -> WorldCreature {
+    WorldCreature {
+        guid: ai.guid,
+        entry: ai.entry,
+        level: ai.level,
+        is_alive: ai.is_alive,
+        current_hp: ai.current_hp,
+        max_hp: ai.max_hp,
+        position: ai.position,
+        home_pos: ai.home_pos,
+        state: ai.state.clone(),
+        move_target: ai.move_target,
+        corpse_despawn_at: ai.corpse_despawn_at,
+        npc_flags: ai.npc_flags,
+        unit_flags: ai.unit_flags,
+        aggro_radius: ai.aggro_radius,
+        min_dmg: ai.min_dmg,
+        max_dmg: ai.max_dmg,
+        create_data,
+    }
+}

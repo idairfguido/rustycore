@@ -20,7 +20,7 @@ use crate::{ClientPacket, ServerPacket};
 /// Full movement info parsed from any CMSG_MOVE_* packet.
 ///
 /// Binary layout (from C# PacketHandlerExtensions.Read):
-/// ```
+/// ```text
 /// PackedGuid  guid
 /// u32         movement_flags
 /// u32         movement_flags2
@@ -332,7 +332,7 @@ impl ServerPacket for MoveUpdate {
 /// Simplified version: single straight-line move with one destination point.
 ///
 /// Wire format (simplified, no cyclic/uncompressed):
-/// ```
+/// ```text
 /// PackedGuid  mover_guid
 /// Vector3     current_pos (f32 x3)
 /// u32         spline_id

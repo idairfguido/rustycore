@@ -1,0 +1,248 @@
+// RustyCore — WoW WotLK 3.4.3 server in Rust
+// Based on TrinityCore protocol research (https://github.com/TrinityCore/TrinityCore)
+// Licensed under GPL v3 — https://www.gnu.org/licenses/gpl-3.0.html
+
+//! Migrated session methods using global MapManager.
+//! 
+//! Este archivo contiene las versiones migradas de los métodos de session.rs
+//! que ahora usan el MapManager global en lugar de self.creatures.
+
+use wow_core::{ObjectGuid, Position};
+use wow_packet::packets::update::{UpdateObject, CreatureCreateData};
+use wow_packet::packets::combat::AttackerStateUpdate;
+use wow_packet::packets::loot::LootResponse;
+use wow_packet::ServerPacket;
+use wow_ai::CreatureState;
+use crate::session::WorldSession;
+use crate::session_map_integration::SessionMapIntegration;
+use crate::map_manager::WorldCreature;
+
+/// Constantes para combat
+const VICTIM_STATE_HIT: u8 = 0;
+
+/// Método migrado: tick_creatures_sync
+/// 
+/// Versión actualizada que usa MapManager global en lugar de self.creatures.
+pub fn tick_creatures_sync_migrated(session: &mut WorldSession) {
+    use tracing::{info, warn};
+    
+    // Obtener criaturas visibles desde el MapManager global
+    let visible_creatures = session.get_visible_creatures();
+    
+    // ── Corpse despawn ─────────────────────────────────────────────────
+    // Criaturas muertas cuyo tiempo de despawn ha expirado
+    let now = std::time::Instant::now();
+    
+    for creature in &visible_creatures {
+        if !creature.is_alive {
+            if let Some(despawn_time) = creature.corpse_despawn_at {
+                if now >= despawn_time {
+                    // Despawn del MapManager global
+                    session.despawn_creature_global(creature.guid);
+                    
+                    // Enviar DestroyObject al cliente
+                    let destroy = UpdateObject::destroy_object(creature.guid, false);
+                    let _ = session.send_tx.send(destroy.to_bytes());
+                    
+                    // Añadir a cola de respawn si aplica
+                    // (esto se maneja en process_respawns_global)
+                }
+            }
+        }
+    }
+    
+    // ── AI Tick para criaturas vivas ────────────────────────────────────
+    for creature in &visible_creatures {
+        if !creature.is_alive {
+            continue;
+        }
+        
+        // Clonar datos necesarios para no mantener borrow
+        let guid = creature.guid;
+        let state = creature.state.clone();
+        let position = creature.position;
+        let home_pos = creature.home_pos;
+        
+        match state {
+            CreatureState::Idle => {
+                // En Idle, podría iniciar movimiento random
+                // TODO: Implementar random movement
+            }
+            CreatureState::WalkingRandom => {
+                // Verificar si llegó al destino
+                // Note: WalkingRandom no tiene end_pos en la definición actual
+                // TODO: Implementar verificación de movimiento
+            }
+            CreatureState::WalkingWaypoint => {
+                // Verificar si llegó al waypoint
+                // TODO: Implementar waypoint system
+            }
+            CreatureState::InCombat => {
+                // El combat se maneja en tick_combat_sync
+            }
+            CreatureState::Returning => {
+                // Volviendo a home position
+                let dist = position.distance(&home_pos);
+                if dist < 1.0 {
+                    session.set_creature_state_global(&guid, CreatureState::Idle);
+                }
+            }
+            CreatureState::Dead => {
+                // No debería estar aquí, ya se filtró arriba
+            }
+        }
+    }
+    
+    // ── Process respawns ──────────────────────────────────────────────
+    session.process_respawns_global();
+}
+
+/// Método migrado: tick_combat_sync
+/// 
+/// Versión actualizada para usar MapManager global.
+pub fn tick_combat_sync_migrated(session: &mut WorldSession) {
+    use tracing::trace;
+    
+    let (Some(combat_target), Some(player_guid)) = (session.combat_target, session.player_guid) else {
+        return;
+    };
+    
+    // Check if target exists using global MapManager
+    let creature_opt = session.get_creature(&combat_target);
+    if creature_opt.is_none() {
+        session.combat_target = None;
+        session.in_combat = false;
+        return;
+    }
+    
+    let creature = creature_opt.unwrap();
+    
+    if !creature.is_alive {
+        session.combat_target = None;
+        session.in_combat = false;
+        return;
+    }
+    
+    // Verificar distancia de combate
+    let player_pos = session.player_position.unwrap_or_default();
+    let distance = player_pos.distance(&creature.position);
+    
+    // Si está muy lejos, salir de combate
+    if distance > 40.0 {
+        session.set_creature_state_global(&combat_target, CreatureState::Returning);
+        session.combat_target = None;
+        session.in_combat = false;
+        return;
+    }
+    
+    // El resto del combat logic se mantiene similar
+    // TODO: Implementar swing timer y daño completo
+    
+    // Ejemplo de cómo aplicar daño:
+    // session.with_creature_mut(&combat_target, |c| {
+    //     c.current_hp -= dmg;
+    //     if c.current_hp <= 0 {
+    //         c.is_alive = false;
+    //         c.state = CreatureState::Dead;
+    //         c.corpse_despawn_at = Some(std::time::Instant::now() + std::time::Duration::from_secs(30));
+    //     }
+    // });
+}
+
+/// Método migrado: handle_loot_unit
+/// 
+/// Versión actualizada para usar MapManager global.
+pub fn handle_loot_unit_migrated(session: &mut WorldSession, target_guid: ObjectGuid) {
+    use tracing::warn;
+    
+    // Buscar criatura en el MapManager global
+    let creature_opt = session.get_creature(&target_guid);
+    
+    if creature_opt.is_none() {
+        warn!("Loot attempt on non-existent creature {:?}", target_guid);
+        return;
+    }
+    
+    let creature = creature_opt.unwrap();
+    
+    // Verificar que está muerta
+    if creature.is_alive {
+        return;
+    }
+    
+    // Verificar distancia
+    let player_pos = session.player_position.unwrap_or_default();
+    if player_pos.distance(&creature.position) > 5.0 {
+        return;
+    }
+    
+    // Generar loot (solo monedas por ahora)
+    let level = creature.level;
+    let coinage = (level as u32 * 5 + 1) as u64; // ~5 copper por nivel
+    
+    let loot = LootResponse {
+        creature_guid: target_guid,
+        loot_type: 1, // CORPSE
+        gold: coinage,
+        items: vec![], // TODO: items reales
+    };
+    
+    session.send_packet(&loot);
+}
+
+/// Método migrado: handle_loot_release
+/// 
+/// Liberar loot y potencialmente despawnear cuerpo.
+pub fn handle_loot_release_migrated(session: &mut WorldSession, target_guid: ObjectGuid) {
+    use tracing::trace;
+    
+    trace!("Loot released for {:?}", target_guid);
+    
+    // Remover de loot table
+    session.loot_table.remove(&target_guid);
+    
+    // Verificar si hay más looters
+    // TODO: Contar looters activos
+    
+    // Si no hay más looters, iniciar despawn rápido del cuerpo
+    let creature_opt = session.get_creature(&target_guid);
+    if let Some(creature) = creature_opt {
+        if !creature.is_alive {
+            // Marcar para despawn inmediato (2 segundos)
+            session.with_creature_mut(&target_guid, |c| {
+                c.corpse_despawn_at = Some(std::time::Instant::now() + std::time::Duration::from_secs(2));
+            });
+        }
+    }
+}
+
+/// Helper: Spawn creature from AI data
+/// 
+/// Crea un WorldCreature desde CreatureAI y lo spawnea globalmente.
+pub fn spawn_creature_from_ai(
+    session: &mut WorldSession,
+    ai: &wow_ai::CreatureAI,
+    create_data: CreatureCreateData,
+    position: Position,
+) {
+    let creature = WorldCreature {
+        guid: ai.guid,
+        entry: ai.entry,
+        level: ai.level,
+        is_alive: true,
+        current_hp: ai.max_hp as i64,
+        max_hp: ai.max_hp as i64,
+        position,
+        home_pos: ai.home_pos,
+        state: CreatureState::Idle,
+        move_target: None,
+        corpse_despawn_at: None,
+        npc_flags: ai.npc_flags as u64,
+        unit_flags: ai.unit_flags,
+        aggro_radius: ai.aggro_radius,
+        min_dmg: ai.min_dmg,
+        max_dmg: ai.max_dmg,
+    };
+    
+    session.spawn_creature_global(creature);
+}

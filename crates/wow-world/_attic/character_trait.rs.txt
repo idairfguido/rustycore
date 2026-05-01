@@ -1,0 +1,71 @@
+// RustyCore — WoW WotLK 3.4.3 server in Rust
+// Licensed under GPL v3
+
+//! Character handler methods for WorldSession
+
+use async_trait::async_trait;
+
+use wow_packet::packets::character::*;
+use wow_packet::packets::auth::ConnectToFailed;
+use wow_packet::packets::misc::{DbQueryBulk, HotfixRequest, TimeSyncResponse, LogoutRequest};
+use wow_packet::packets::query::{QueryCreature, QueryGameObject, QueryPlayerNames, QueryRealmName};
+use wow_packet::packets::gossip::{Hello, GossipSelectOption, QueryNpcText};
+use wow_packet::packets::item::{SwapInvItem, AutoEquipItem};
+use wow_packet::packets::misc::{BuyItem, SellItem};
+use wow_packet::ClientPacket;
+
+use crate::session::WorldSession;
+
+/// Trait for character-related handlers
+#[async_trait]
+pub trait CharacterHandlers {
+    async fn handle_continue_player_login(&mut self);
+    async fn handle_enum_characters(&mut self);
+    async fn handle_create_character(&mut self, create: CreateCharacter);
+    async fn handle_char_delete(&mut self, delete: CharDelete);
+    async fn handle_player_login(&mut self, login: PlayerLogin);
+    async fn handle_connect_to_failed(&mut self, failed: ConnectToFailed);
+    async fn handle_get_undelete_cooldown_status(&mut self);
+    async fn handle_server_time_offset_request(&mut self);
+    async fn handle_request_played_time(&mut self, trigger: bool);
+    async fn handle_db_query_bulk(&mut self, query: DbQueryBulk);
+    async fn handle_hotfix_request(&mut self, req: HotfixRequest);
+    async fn handle_time_sync_response(&mut self, resp: TimeSyncResponse);
+    async fn handle_logout_request(&mut self, req: LogoutRequest);
+    async fn handle_logout_cancel(&mut self);
+    async fn handle_query_creature(&mut self, query: QueryCreature);
+    async fn handle_query_game_object(&mut self, query: QueryGameObject);
+    async fn handle_query_player_names(&mut self, query: QueryPlayerNames);
+    fn handle_query_realm_name(&mut self, query: QueryRealmName);
+    async fn handle_ping(&mut self, ping: wow_packet::packets::auth::Ping);
+    async fn handle_gossip_hello(&mut self, hello: Hello);
+    async fn handle_auction_hello_request(&mut self, pkt: wow_packet::WorldPacket);
+    async fn handle_banker_activate(&mut self, hello: Hello);
+    async fn handle_binder_activate(&mut self, hello: Hello);
+    async fn handle_tabard_vendor_activate(&mut self, pkt: wow_packet::WorldPacket);
+    async fn handle_spirit_healer_activate(&mut self, pkt: wow_packet::WorldPacket);
+    async fn handle_repair_item(&mut self, pkt: wow_packet::WorldPacket);
+    async fn handle_request_stabled_pets(&mut self, pkt: wow_packet::WorldPacket);
+    async fn handle_gossip_select_option(&mut self, select: GossipSelectOption);
+    async fn handle_query_npc_text(&mut self, query: QueryNpcText);
+    async fn handle_list_inventory(&mut self, hello: Hello);
+    async fn handle_buy_item(&mut self, buy: BuyItem);
+    async fn handle_sell_item(&mut self, sell: SellItem);
+    async fn handle_quest_giver_hello(&mut self, hello: Hello);
+    async fn handle_quest_giver_status_query(&mut self, hello: Hello);
+    async fn handle_quest_giver_status_multiple_query(&mut self);
+    async fn handle_swap_inv_item(&mut self, swap: SwapInvItem);
+    async fn handle_auto_equip_item(&mut self, equip: AutoEquipItem);
+    async fn handle_swap_item(&mut self, pkt: wow_packet::WorldPacket);
+    async fn handle_auto_store_bag_item(&mut self, pkt: wow_packet::WorldPacket);
+    async fn handle_destroy_item(&mut self, pkt: wow_packet::WorldPacket);
+    async fn handle_show_trade_skill(&mut self, pkt: wow_packet::WorldPacket);
+    async fn handle_battlenet_request(&mut self, req: wow_packet::packets::battlenet::BattlenetRequest);
+    async fn handle_set_selection(&mut self, pkt: wow_packet::WorldPacket);
+    async fn handle_area_trigger(&mut self, pkt: wow_packet::WorldPacket);
+    async fn handle_request_cemetery_list(&mut self, pkt: wow_packet::WorldPacket);
+    async fn handle_taxi_node_status_query(&mut self, pkt: wow_packet::WorldPacket);
+    async fn handle_chat_join_channel(&mut self, pkt: wow_packet::WorldPacket);
+    async fn handle_move_time_skipped(&mut self, pkt: wow_packet::WorldPacket);
+    async fn handle_trainer_list(&mut self, hello: Hello);
+}

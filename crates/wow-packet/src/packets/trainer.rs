@@ -69,7 +69,7 @@ pub struct TrainerListSpell {
 /// SMSG_TRAINER_LIST — full trainer spell list response.
 ///
 /// C# write order:
-/// ```
+/// ```text
 /// WritePackedGuid(TrainerGUID)
 /// WriteInt32(TrainerType)
 /// WriteInt32(TrainerID)
@@ -146,7 +146,7 @@ pub struct LearnedSpellEntry {
 /// SMSG_LEARNED_SPELLS — sent after a player learns one or more spells.
 ///
 /// C# write order (SpellPackets.cs LearnedSpells):
-/// ```
+/// ```text
 /// WriteInt32(ClientLearnedSpellData.Count)
 /// WriteUInt32(SpecializationID)
 /// WriteBit(SuppressMessaging)

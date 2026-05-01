@@ -1,0 +1,178 @@
+// RustyCore — Coordinate conversion helpers
+// Based on TrinityCore::ComputeGridCoord / ComputeCellCoord
+
+use wow_core::Position;
+
+use crate::map::{CellCoord, GridCoord, CELL_SIZE, GRID_SIZE, MAX_GRIDS};
+
+/// Convierte coordenadas del mundo (x, y) a GridCoord.
+/// Basado en TrinityCore::ComputeGridCoord.
+///
+/// El centro del mapa es (0,0) en el mundo, que corresponde al grid (32, 32).
+/// Cada grid mide GRID_SIZE yards (533.3333).
+pub fn world_to_grid(x: f32, y: f32) -> GridCoord {
+    // Centro del mapa es (0,0), grids van de 0-63
+    let center_offset = GRID_SIZE * (MAX_GRIDS as f32 / 2.0);
+
+    let x_offset = (x + center_offset) / GRID_SIZE;
+    let y_offset = (y + center_offset) / GRID_SIZE;
+
+    let grid_x = x_offset.clamp(0.0, (MAX_GRIDS - 1) as f32) as u8;
+    let grid_y = y_offset.clamp(0.0, (MAX_GRIDS - 1) as f32) as u8;
+
+    GridCoord { x: grid_x, y: grid_y }
+}
+
+/// Convierte coordenadas del mundo a CellCoord dentro del grid.
+/// Retorna (GridCoord, CellCoord).
+pub fn world_to_cell(x: f32, y: f32) -> (GridCoord, CellCoord) {
+    let grid = world_to_grid(x, y);
+
+    // Calcular offset dentro del grid
+    let center_offset = GRID_SIZE * (MAX_GRIDS as f32 / 2.0);
+    let grid_start_x = (grid.x as f32 * GRID_SIZE) - center_offset;
+    let grid_start_y = (grid.y as f32 * GRID_SIZE) - center_offset;
+
+    let local_x = x - grid_start_x;
+    let local_y = y - grid_start_y;
+
+    let cell_x = (local_x / CELL_SIZE).clamp(0.0, 7.0) as u8;
+    let cell_y = (local_y / CELL_SIZE).clamp(0.0, 7.0) as u8;
+
+    (grid, CellCoord { x: cell_x, y: cell_y })
+}
+
+/// Convierte un GridCoord a coordenadas del mundo (esquina inferior izquierda del grid).
+pub fn grid_to_world(coord: GridCoord) -> (f32, f32) {
+    let center_offset = GRID_SIZE * (MAX_GRIDS as f32 / 2.0);
+    let x = (coord.x as f32 * GRID_SIZE) - center_offset;
+    let y = (coord.y as f32 * GRID_SIZE) - center_offset;
+    (x, y)
+}
+
+/// Calcula grids adyacentes dentro de cierto rango en yards.
+pub fn get_grids_in_range(center: GridCoord, range_yards: f32) -> Vec<GridCoord> {
+    let grids_range = (range_yards / GRID_SIZE).ceil() as i32;
+    let mut result = Vec::new();
+
+    for dx in -grids_range..=grids_range {
+        for dy in -grids_range..=grids_range {
+            let new_x = center.x as i32 + dx;
+            let new_y = center.y as i32 + dy;
+
+            if new_x >= 0
+                && new_x < MAX_GRIDS as i32
+                && new_y >= 0
+                && new_y < MAX_GRIDS as i32
+            {
+                result.push(GridCoord {
+                    x: new_x as u8,
+                    y: new_y as u8,
+                });
+            }
+        }
+    }
+
+    result
+}
+
+/// Calcula distancia 2D entre dos posiciones.
+pub fn distance_2d(pos1: &Position, pos2: &Position) -> f32 {
+    let dx = pos1.x - pos2.x;
+    let dy = pos1.y - pos2.y;
+    (dx * dx + dy * dy).sqrt()
+}
+
+/// Calcula distancia 2D al cuadrado (más eficiente para comparaciones).
+pub fn distance_2d_sq(pos1: &Position, pos2: &Position) -> f32 {
+    let dx = pos1.x - pos2.x;
+    let dy = pos1.y - pos2.y;
+    dx * dx + dy * dy
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_world_to_grid_center() {
+        // Centro del mundo (0,0) → grid (32, 32)
+        let grid = world_to_grid(0.0, 0.0);
+        assert_eq!(grid.x, 32);
+        assert_eq!(grid.y, 32);
+    }
+
+    #[test]
+    fn test_world_to_grid_northwest_corner() {
+        // Esquina noroeste → aprox grid (0, 0)
+        let grid = world_to_grid(-17000.0, -17000.0);
+        assert_eq!(grid.x, 0);
+        assert_eq!(grid.y, 0);
+    }
+
+    #[test]
+    fn test_world_to_grid_southeast_corner() {
+        // Esquina sureste → grid (63, 63)
+        let grid = world_to_grid(17000.0, 17000.0);
+        assert_eq!(grid.x, 63);
+        assert_eq!(grid.y, 63);
+    }
+
+    #[test]
+    fn test_world_to_cell() {
+        // Centro del mundo está en el grid (32,32), cell (0,0) esquina
+        let (grid, cell) = world_to_cell(0.0, 0.0);
+        assert_eq!(grid.x, 32);
+        assert_eq!(grid.y, 32);
+        // En el centro exacto de un grid de 533.33, la celda es (0,0)
+        // porque 0.0 está en el borde entre celdas y clamp da 0
+        assert_eq!(cell.x, 0);
+        assert_eq!(cell.y, 0);
+    }
+
+    #[test]
+    fn test_grids_in_range_single_grid() {
+        let center = GridCoord { x: 32, y: 32 };
+        let grids = get_grids_in_range(center, 100.0); // menos de un grid
+
+        // Solo el grid central (rango < GRID_SIZE)
+        assert_eq!(grids.len(), 1);
+        assert!(grids.contains(&center));
+    }
+
+    #[test]
+    fn test_grids_in_range_one_grid_distance() {
+        let center = GridCoord { x: 32, y: 32 };
+        let grids = get_grids_in_range(center, 600.0); // ~1 grid de distancia
+
+        // Debe incluir grid central + 8 adyacentes = 9 grids
+        assert!(grids.len() >= 9);
+        assert!(grids.contains(&center));
+        assert!(grids.contains(&GridCoord { x: 31, y: 32 }));
+        assert!(grids.contains(&GridCoord { x: 33, y: 32 }));
+        assert!(grids.contains(&GridCoord { x: 32, y: 31 }));
+        assert!(grids.contains(&GridCoord { x: 32, y: 33 }));
+    }
+
+    #[test]
+    fn test_distance_2d() {
+        let p1 = Position::new(0.0, 0.0, 0.0, 0.0);
+        let p2 = Position::new(3.0, 4.0, 0.0, 0.0);
+        assert!((distance_2d(&p1, &p2) - 5.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_distance_2d_sq() {
+        let p1 = Position::new(0.0, 0.0, 0.0, 0.0);
+        let p2 = Position::new(3.0, 4.0, 0.0, 0.0);
+        assert!((distance_2d_sq(&p1, &p2) - 25.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_grid_clamping() {
+        // Coordenadas fuera del mapa deben clamp a 0-63
+        let grid = world_to_grid(-99999.0, 99999.0);
+        assert_eq!(grid.x, 0);
+        assert_eq!(grid.y, 63);
+    }
+}

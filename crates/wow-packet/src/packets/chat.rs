@@ -168,7 +168,7 @@ impl ClientPacket for ChatMessageEmote {
 /// Server sends this to broadcast a chat message to nearby players.
 ///
 /// C# ChatPkt.Write():
-/// ```
+/// ```text
 /// u8   slash_cmd (ChatMsg)
 /// u32  language
 /// PackedGuid sender_guid
