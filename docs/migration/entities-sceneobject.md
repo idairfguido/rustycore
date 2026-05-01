@@ -1,0 +1,180 @@
+# Migration: Entities / SceneObject
+
+> **C++ canonical path:** `/home/server/woltk-trinity-legacy/src/server/game/Entities/SceneObject/`
+> **Rust target crate(s):** `crates/wow-world/`, `crates/wow-data/`, `crates/wow-constants/`
+> **Layer:** L4 (sub-modules)
+> **Status:** ❌ not started — **n/a for WoLK 3.4** (post-WoLK feature, like Conversation)
+> **Audited vs C++:** ⚠️ partial (header-level audit only)
+> **Last updated:** 2026-05-01
+
+---
+
+## 1. Purpose
+
+`SceneObject` is the post-WoLK entity that anchors **scripted scene packages** (`SCENESCRIPT_PACKAGE_ID`, `SceneScript.db2`) — the engine's mechanism for in-world cinematics, scripted minigames, and the Pet Battle UI surface. The scene id resolves a client-side script package which drives camera, animation, and UI. Two subtypes exist: `SceneType::Normal` (cinematic / scripted scene) and `SceneType::PetBattle` (pet battle 6v6 surface; introduced in MoP). **Like `Conversation`, this entity is dead infrastructure on the WotLK 3.4.3 retail client** — TYPEID is reserved but the client cannot render scenes nor pet battles.
+
+---
+
+## 2. C++ canonical files
+
+| File | Lines | Purpose |
+|---|---|---|
+| `src/server/game/Entities/SceneObject/SceneObject.h` | 89 | `SceneObject` class (final, WorldObject + GridObject) |
+| `src/server/game/Entities/SceneObject/SceneObject.cpp` | 207 | Create, Update, Remove, ShouldBeRemoved, factory `CreateSceneObject` |
+
+---
+
+## 3. Classes / Structs / Enums
+
+| Symbol | Kind | Purpose |
+|---|---|---|
+| `SceneObject` | class (final) | Scene/cinematic anchor entity |
+| `SceneType` | enum class | `Normal=0`, `PetBattle=1` |
+| `SceneTemplate` | struct (forward decl, defined in `SceneMgr` / `ObjectMgr`) | Per-scene-id template (script package id, flags) |
+| `UF::SceneObjectData` | UF struct | Wire data: `ScriptPackageID`, `RndSeedVal`, `CreatedBy`, `SceneType` |
+
+---
+
+## 4. Critical public methods
+
+| Symbol | Purpose | Calls into |
+|---|---|---|
+| `CreateSceneObject(sceneId, creator, pos, privateOwner)` | Static factory; resolves template, builds entity, adds to map | `Create`, `Map::AddToMap` |
+| `Create(lowGuid, type, sceneId, scriptPackageId, map, creator, pos, privateOwner)` | Internal builder (sets UF fields) | UF mutators |
+| `Update(uint32 diff)` | Tick: check `ShouldBeRemoved`, then base `WorldObject::Update` | `Remove` |
+| `Remove()` | Despawn | `RemoveFromWorld` |
+| `ShouldBeRemoved()` (private) | Lifetime predicate (creator gone, scene dismissed, etc.) | — |
+| `SetCreatedBySpellCast(ObjectGuid castId)` | Tag the spell cast that birthed this scene | `_createdBySpellCast` |
+| `GetCreatorGUID()` / `GetOwnerGUID()` | Resolve via UF `CreatedBy` | — |
+
+---
+
+## 5. Module dependencies
+
+**Depends on:**
+- `WorldObject` / `GridObject` (entity base)
+- `SceneTemplate` (`scene_template` DB table — post-WoLK schema)
+- `SceneScript.db2` (post-WoLK DB2; not present in 3.4 client)
+- `Map` (AddToMap)
+- Pet battle subsystem (only for `SceneType::PetBattle`)
+
+**Depended on by:**
+- `Spell::EffectSceneObject` (post-WoLK spell effect)
+- `SceneMgr` on Player (manages active scenes per player)
+- Pet battle initiation flow
+
+---
+
+## 6. SQL / DB queries
+
+| Statement / Source | Purpose | DB |
+|---|---|---|
+| `scene_template` | Per-sceneId metadata (script package id, flags, type) | world (post-WoLK) |
+
+DBC stores (post-WoLK):
+
+| Store | What it loads | Read by |
+|---|---|---|
+| `SceneScriptStore` / `SceneScriptPackageStore` | `SceneScript.db2`, `SceneScriptPackage.db2` | template lookup |
+
+**None of these tables/DB2 files exist in the 3.4.3 client.**
+
+---
+
+## 7. Wire-protocol packets
+
+| Opcode | Direction | Sent/Received in |
+|---|---|---|
+| `SMSG_UPDATE_OBJECT` (with SceneObject block) | S → C | spawn (post-WoLK clients) |
+| `SMSG_SCENE_OBJECT_EVENT` | S → C | scene script event broadcast | (`crates/wow-constants/src/opcodes.rs`: `SceneObjectEvent = 0x25e2`) |
+| `SMSG_SCENE_OBJECT_PET_BATTLE_INITIAL_UPDATE` / `_FIRST_ROUND` / `_ROUND_RESULT` / `_REPLACEMENTS_MADE` / `_FINAL_ROUND` / `_FINISHED` | S → C | pet battle state machine | (`SceneObjectPetBattle*` constants present) |
+
+**Caveat:** these opcodes do not exist in the 3.4.3.54261 retail client. Constants are reserved for parity only.
+
+---
+
+## 8. Current state in RustyCore
+
+**Files in `/home/server/rustycore`:**
+- `crates/wow-constants/src/object.rs` — `TypeId::SceneObject = 12`, `HighGuid::SceneObject = 16`
+- `crates/wow-core/src/guid.rs` — `HighGuid::SceneObject`, `is_scene_object`, type mapping
+- `crates/wow-constants/src/opcodes.rs` — `SceneObjectEvent`, `SceneObjectPetBattleInitialUpdate/FirstRound/RoundResult/ReplacementsMade/FinalRound/Finished` enumerated (~7 opcodes)
+- `crates/wow-packet/src/packets/update.rs` — SceneObject block bit hardcoded `false`
+- **0 lines** of SceneObject entity logic.
+
+**What's implemented:** type-id, GUID type, opcode constants. Update bit reserved to `false`.
+
+**What's missing vs C++:** entire 207-line `SceneObject.cpp`. Not a priority — see status note.
+
+**Suspicious / likely divergent:** none — feature does not exist on the target client.
+
+**Tests existing:** 0.
+
+---
+
+## 9. Migration sub-tasks
+
+- [ ] **#SCENE.1** **Decision gate:** confirm whether 3.4 backport content needs SceneObject (almost certainly no). If no — close as `n/a`. (L)
+- [ ] **#SCENE.2** Port `SceneType` enum to `wow-constants` (L)
+- [ ] **#SCENE.3** Define `SceneObject` entity struct (`script_package_id`, `created_by`, `created_by_spell_cast`, `private_owner`) (L)
+- [ ] **#SCENE.4** Implement `create` factory (M)
+- [ ] **#SCENE.5** Implement `update_tick` + `should_be_removed` lifetime predicate (L)
+- [ ] **#SCENE.6** `SceneObjectData` UF block + flip create bit (M)
+- [ ] **#SCENE.7** `scene_template` DB schema + loader (M, post-WoLK schema)
+- [ ] **#SCENE.8** Pet battle subsystem (huge — `SceneType::PetBattle` requires the entire pet-battle state machine; treat as separate epic, defer)
+
+**Recommendation:** mark this module **`n/a`** in the master roadmap. Pet battle is post-WoLK; cinematic scenes are post-WoLK.
+
+---
+
+## 10. Regression tests to write
+
+(Only relevant if the decision gate in #SCENE.1 says yes.)
+
+- [ ] Test: `create_scene_object` populates ScriptPackageID matching `scene_template`
+- [ ] Test: `should_be_removed` true when creator GUID is gone
+- [ ] Test: `set_created_by_spell_cast` populates the cast id field
+- [ ] Test: private-owner GUID restricts visibility (only that player sees the entity)
+
+---
+
+## 11. Notes / gotchas
+
+- **WoLK 3.4.3 retail client cannot render scenes or pet battles.** All structural code is dead infrastructure. Spawning a SceneObject on a real 3.4 client will at best be ignored.
+- **Pet battles are explicitly out of scope** for a 3.4 server even with full SceneObject support — they require their own DB tables (`battle_pet_*`), DB2 files, and a 6v6 turn-based combat engine. Do not start that work without explicit user direction.
+- The C# legacy reference at `/home/server/woltk-server-core/Source/` likely **does not** have a SceneObject class.
+- Private-object-owner pattern is shared with `Conversation`. If both end up being implemented, factor a `PrivateObjectFilter` into MapManager visibility checks.
+- `_createdBySpellCast` is the **cast id** (a `Cast` instance GUID), not the spell id — do not conflate.
+- `RndSeedVal` (UF field) is a per-entity random seed used to deterministically vary scene playback across clients; if implemented, generate at create time and never mutate.
+
+---
+
+## 12. C++ → Rust mapping
+
+| C++ Symbol | Rust Equivalent | Notes |
+|---|---|---|
+| `class SceneObject : WorldObject` | `struct SceneObject` (composition) | if implemented |
+| `enum class SceneType` | `enum SceneType { Normal, PetBattle }` | direct |
+| `Position _stationaryPosition` | `Position` field | from `wow-core` |
+| `ObjectGuid _createdBySpellCast` | `ObjectGuid` | direct |
+| `m_sceneObjectData->CreatedBy` (UF ref) | `ObjectGuid` field | flatten UF into struct |
+| `static SceneObject* CreateSceneObject(...)` | `fn create_scene_object(...) -> Self` | factory |
+
+---
+
+## 13. §13 Audit (vs `/home/server/woltk-trinity-legacy/`)
+
+| C++ symbol | Found in Rust | File | Verdict |
+|---|---|---|---|
+| `class SceneObject` | no | — | ❌ missing (and likely n/a) |
+| `enum class SceneType` | no | — | ❌ missing |
+| `SceneObject::CreateSceneObject` | no | — | ❌ missing |
+| `SceneObject::Update` / `Remove` / `ShouldBeRemoved` | no | — | ❌ missing |
+| `SetCreatedBySpellCast` | no | — | ❌ missing |
+| `UF::SceneObjectData` UF block | no (bit hardcoded false) | `crates/wow-packet/src/packets/update.rs` | ❌ missing |
+| `TypeId::SceneObject = 12` | yes | `crates/wow-constants/src/object.rs` | ✅ present (constant only) |
+| `HighGuid::SceneObject = 16` | yes | `crates/wow-core/src/guid.rs` | ✅ present (constant only) |
+| `SMSG_SCENE_OBJECT_EVENT` opcode | yes (constant) | `crates/wow-constants/src/opcodes.rs` | ⚠️ enumerated, no sender (and client likely won't render) |
+| `SMSG_SCENE_OBJECT_PET_BATTLE_*` opcodes (×6) | yes (constants) | `crates/wow-constants/src/opcodes.rs` | ⚠️ enumerated, pet battle out of scope |
+
+**Verdict:** ❌ not started — **and recommended to stay that way for the 3.4 fork.** Surface coverage ≈ 0% (constants reserved). Mark `n/a` in master roadmap pending explicit user requirement (which will almost certainly not arrive for 3.4).
