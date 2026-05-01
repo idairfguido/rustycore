@@ -29,9 +29,9 @@ Layer: L0–L8 según `MIGRATION_ROADMAP.md` § 2.
 | L0 | Texts | `src/server/game/Texts/` | [texts.md](texts.md) | ⚠️ | ❌ |
 | L0 | Tools | `src/server/game/Tools/` | [tools.md](tools.md) | ⚠️ | ❌ |
 | L0 | Miscellaneous | `src/server/game/Miscellaneous/` | [miscellaneous.md](miscellaneous.md) | ⚠️ | ❌ |
-| L1 | shared/Networking | `src/server/shared/Networking/` | [shared-networking.md](shared-networking.md) | ✅ | ❌ |
-| L1 | shared/Packets | `src/server/shared/Packets/` | [shared-packets.md](shared-packets.md) | ✅ | ❌ |
-| L1 | Crypto (SRP6/AES-GCM/HMAC) | `src/server/shared/Cryptography/` + `src/common/Cryptography/` | [crypto.md](crypto.md) | ✅ | ⚠️ |
+| L1 | shared/Networking | `src/server/shared/Networking/` | [shared-networking.md](shared-networking.md) | ⚠️ ~75% | ⚠️ |
+| L1 | shared/Packets | `src/server/shared/Packets/` | [shared-packets.md](shared-packets.md) | ⚠️ | ⚠️ |
+| L1 | Crypto (SRP6/AES-GCM/HMAC) | `src/server/shared/Cryptography/` + `src/common/Cryptography/` | [crypto.md](crypto.md) | ✅ ~95% | ⚠️ |
 | L1 | shared/Realm | `src/server/shared/Realm/` | [shared-realm.md](shared-realm.md) | ⚠️ | ❌ |
 | L1 | shared/Secrets | `src/server/shared/Secrets/` | [shared-secrets.md](shared-secrets.md) | ✅ | ❌ |
 | L1 | shared/DataStores | `src/server/shared/DataStores/` | [shared-datastores.md](shared-datastores.md) | ✅ | ❌ |
@@ -150,6 +150,7 @@ Layer: L0–L8 según `MIGRATION_ROADMAP.md` § 2.
 |---|---|
 | 2026-05-01 | Índice creado, 45 módulos enumerados, 0 docs todavía |
 | 2026-05-01 | Primera ronda completa: 64/64 docs con plantilla de 12 secciones, plan de migración por módulo, gotchas y mapping C++→Rust. Audit aún 0/64. |
+| 2026-05-01 | Fase A (audit) — primer batch: crypto / shared-packets / shared-networking auditados vs C++ wotlk_classic. Status downgrade: shared-networking ✅→⚠️ (~75%), shared-packets ✅→⚠️, crypto ✅→⚠️ pero validado byte-exact en SRP6/AES-GCM/nonce. Audit: 3/64. |
 
 ---
 

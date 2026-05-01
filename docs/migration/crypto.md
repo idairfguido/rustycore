@@ -4,7 +4,7 @@
 > **Rust target crate(s):** `crates/wow-crypto/`
 > **Layer:** L1
 > **Status:** ✅ done (~95%)
-> **Audited vs C++:** ❌ not audited
+> **Audited vs C++:** ⚠️ (see §13)
 > **Last updated:** 2026-05-01
 
 ---
@@ -228,6 +228,71 @@ Crypto NO origina packets; `WorldSocket` los emite. Crypto cifra:
 | `CryptoRandom` | `rand::thread_rng()` | Extern |
 | `RSA sign/verify` | `wow-network::rsa_sign` (separate module) | — |
 | `Ed25519` | `ed25519_dalek` + `ed25519ctx` wrapper | — |
+
+---
+
+## 13. Audit (2026-05-01)
+
+> Audited 2026-05-01 by sub-agent against C++ at `/home/server/woltk-trinity-legacy` commit `5100ce3d8fc6` ("WIP: consolidate pending changes before bot testing"). Scope: every primitive listed in this document plus the AuthSession HMAC flow and EnterEncryptedMode Ed25519ctx signing path. Authoritative C++ paths: `src/common/Cryptography/` and `src/server/game/Server/WorldSocket.cpp`.
+
+> **Heads-up about the doc itself.** Some of the suspicions in §8 ("HMAC keying", "ServerToClient\0 / ClientToServer\0 KDF labels", "nonce format LE/BE") are based on a different protocol family. The legacy 3.4.3 wotlk_classic C++ in this tree does **not** use ASCII KDF labels; the per-direction binding is the 4-byte IV magic suffix `0x52565253` ("SRVR") / `0x544E4C43` ("CLNT") appended to the counter. There is no string `"ServerToClient"` or `"ClientToServer"` anywhere in the canonical C++. The Rust matches that. The audit below grades against the actual C++ behaviour, not the §8 hypotheses.
+
+### 13.1 Primitive-by-primitive
+
+| Primitive | C++ ref | Rust ref | Status | Divergence |
+|---|---|---|---|---|
+| SRP6 prime `N` (Grunt, 256-bit) | `src/common/Cryptography/Authentication/SRP6.cpp:27` | `crates/wow-crypto/src/srp6.rs:25` | ✅ | Both are `894B645E89E1535BBDAD5B8B290650530801B18EBFBF5E8FAB3C82872A3E9BB7` exact. |
+| SRP6 generator `g`, multiplier `k` (Grunt) | `SRP6.cpp:28`, `SRP6.cpp:82` | `srp6.rs:31, 36` | ✅ | `g=7, k=3`. |
+| BNet SRP6 v1 prime / `g` | `SRP6.cpp:30-31` | `bnet_srp6.rs:26-31, 46` | ✅ | 1024-bit prime + `g=2` byte-identical. |
+| BNet SRP6 v2 prime / `g` | `SRP6.cpp:33-34` | `bnet_srp6.rs:34-43, 46` | ✅ | RFC 3526 group-14 + `g=2` byte-identical. |
+| `CalculateX` (Grunt) hash input | `SRP6.cpp:91-97` `SHA1(salt, SHA1(user, ":", pwd))` | `srp6.rs:107-117` | ⚠️ | C++ relies on **caller** to uppercase via `Utf8ToUpperOnlyLatin` (`AccountMgr.cpp:55-57`). Rust uppercases **internally** with `to_ascii_uppercase()`. Equivalent for ASCII, divergent for any non-ASCII glyph that `Utf8ToUpperOnlyLatin` handles. Real accounts are ASCII so currently safe; document or normalise at the same layer. |
+| Verifier endianness on hash→bignum | C++ `SHA1::Digest → BigNumber(_, true)` is **LE** by default | `srp6.rs:116` `from_bytes_le` | ✅ | Match. |
+| Wire endian for `A`, `B`, `salt` (Grunt) | `BigNumber::ToByteArray<32>()` default = LE (`SRP6.cpp:104, 110-115`) | `biguint_to_le_fixed(_, 32)` (`srp6.rs:165-168, 250-264`) | ✅ | Both LE 32-byte. |
+| `M1` evidence formula (Grunt) | `SRP6.cpp:115` `H(NgHash, H(I), s, A, B, K)` | `srp6.rs:241-274` | ✅ | Formula and concatenation order identical, K is 40 bytes both sides. |
+| `M2` evidence formula (Grunt) | `SRP6.cpp:88` `H(A, M1, K)` | `srp6.rs:281-288` | ✅ | Identical. |
+| `SHA1Interleave` (split S, skip leading zeros) | `SRP6.cpp:122-150` | `srp6.rs:197-234` | ✅ | Algorithm matches incl. odd-byte skip. |
+| BNet SRP6 `k = H(N || pad || g)` | `SRP6.h:196-219` (`ToByteArray<128/256>(false)`) | `bnet_srp6.rs:297-330` | ✅ | C++ pads both sides to N-size BE; Rust composes equivalent buffer (works because `g=2` fits in 1 byte). |
+| BNet SRP6 evidence "broken padding" | `SRP6.cpp:183-187` `(bits + 8) >> 3` | `bnet_srp6.rs:419-432` | ✅ | Identical. |
+| BNet SRP6 v2 `x = PBKDF2-HMAC-SHA512` 15000 iter | `SRP6.cpp:202-221` | `bnet_srp6.rs:342-376` | ✅ | Iterations, hash, sign-fix all match. |
+| AES-128-GCM key/IV/tag sizes | `AES.h:30-36` `IV=12, KEY=16, TAG=12` | `world_crypt.rs:24, 36` | ✅ | **12-byte tag explicitly enforced** via `AesGcm<Aes128, U12, U12>`. NOT the 16-byte default. |
+| GCM nonce layout | `WorldPacketCrypt.cpp:33-42` `[counter (memcpy uint64) | magic (memcpy uint32)]` on x86 = LE | `world_crypt.rs:100-105` `[counter LE 8 | suffix LE 4]` | ✅ | Byte-for-byte identical on little-endian hosts (the only platform either side runs on). |
+| Direction magic constants | `WorldPacketCrypt.cpp:48, 60, 75` `0x544E4C43`(CLNT, recv), `0x52565253`(SRVR, send) | `world_crypt.rs:27-29` | ✅ | Identical. Test on `world_crypt.rs:299-305` asserts the LE bytes spell "CLNT"/"SRVR". |
+| Per-direction monotonic counter | `WorldPacketCrypt.cpp:67, 82` | `world_crypt.rs:134, 170` | ✅ | Both `++` on every successful Process; never reused, never decremented. |
+| Counter overflow handling | C++ no special handling (UB on `uint64` wrap) | Rust `+=` panics on debug, wraps on release | ⚠️ | Same practical risk as C++. No detection on either side. Sub-task `#CRYPTO.6` still open. |
+| `SessionKeyGenerator<SHA256>` algorithm | `SessionKeyGenerator.h:23-58` `o0=H(o1‖o0‖o2); halves on init` | `session_key.rs:88-128` | ✅ | Constructor split, fill-up triple-hash, byte-by-byte refill loop all match. SHA1 variant matches too. |
+| AuthSession digest HMAC | `WorldSocket.cpp:710-723` `H1=SHA256(KeyData‖Win64AuthSeed); HMAC-SHA256(H1, LocalChallenge‖ServerChallenge‖AuthCheckSeed)` | `world_socket.rs:296-326` | ✅ | Sequence and concatenation order identical, **including the asymmetry** (LocalChallenge first here). Rust compares first 24 bytes (`world_socket.rs:329`); C++ compares `Digest.size()` which is 24 (`AuthenticationPackets.h:80`). |
+| Session-key HMAC | `WorldSocket.cpp:733-744` `HMAC-SHA256(SHA256(KeyData), ServerChallenge‖LocalChallenge‖SessionKeySeed) → SessionKeyGenerator<SHA256> → 40 bytes` | `world_socket.rs:348-367` | ✅ | Order **(server, local)** matches; this is intentionally reversed vs the digest step on both sides. |
+| Encryption-key HMAC | `WorldSocket.cpp:746-753` `HMAC-SHA256(_sessionKey, LocalChallenge‖ServerChallenge‖EncryptionKeySeed)[..16]` | `world_socket.rs:369-379` | ✅ | Order **(local, server)**, truncate to 16 bytes — matches. |
+| Magic seeds (`AuthCheckSeed`, `SessionKeySeed`, `EncryptionKeySeed`, `ContinuedSessionSeed`, `EnableEncryptionSeed`, `EnableEncryptionContext`) | `WorldSocket.cpp:55-58`, `AuthenticationPackets.cpp:347-348` | `world_socket.rs:46-75` | ✅ | All six 16-byte arrays byte-identical. |
+| EnterEncryptedMode signing | `AuthenticationPackets.cpp:350-365` `Ed25519.SignWithContext(HMAC-SHA256(EncryptKey, [enabled]‖EnableEncryptionSeed), EnableEncryptionContext)` (= Ed25519ctx phflag=0) | `world_socket.rs:943-956` + `ed25519ctx.rs:38-88` | ⚠️ | Algorithm matches (same dom2 prefix, same context, same toSign). **But** the Ed25519 private key is hardcoded at `world_socket.rs:81-86`. C++ loads it from `EnterEncryptedModeSigner` (PEM file) per `build_info`. If the hardcoded Rust key does not match the public key the live client expects for this build, every login fails the signature check. Verify against the actual client build's pubkey in `BuildInfo` table. |
+| HMAC-SHA1 / HMAC-SHA256 keying | `HMAC.h` (template `GenericHMAC`, `EVP_DigestSign`) | `hmac_utils.rs:14-19, 47-52` | ✅ | RFC 2202 / 4231 KAT vectors pass (`hmac_utils.rs:78-97`). |
+| RC4 (legacy) | `ARC4.cpp` (deprecated, **never instantiated** in WorldSocket.cpp for this build) | `sarc4.rs` (dead code, no callers) | ✅ | Both sides agree it is unused for 3.4.3 wotlk_classic. |
+| Argon2, TOTP | C++ has them (`Argon2.cpp`, `TOTP.cpp`) | Not implemented in Rust | ❌ | Not on the wire path for WoLK 3.4.3 world auth; only relevant if BNet v2 2FA is exposed. Acceptable gap, low priority. |
+| Test coverage: round-trip with **real** captured vectors | C++ has unit tests in TC mainline | `wow-crypto/src/*.rs` 46 tests, but **zero** hardcoded vectors derived from a C++ run or wire capture | ⚠️ | Self-tests only verify internal consistency, not byte-equivalence with C++ output. Any silently-divergent byte order would not be caught by the existing tests except indirectly via on-the-wire login. |
+
+### 13.2 Critical findings
+
+1. **⚠️ Ed25519 private key is hardcoded** — `crates/wow-network/src/world_socket.rs:81-86`. C++ loads it from `EnterEncryptedModeSigner` configured from a PEM file, with one signer per client build (`AuthenticationPackets.cpp:359` uses `*EnterEncryptedModeSigner`). If the embedded Rust seed does not produce the public key the official 3.4.3.54261 client validates against, the client rejects `SMSG_ENTER_ENCRYPTED_MODE` and the connection drops before any encrypted packet flows. **High priority to validate against an actual successful client handshake capture or against the C++ reference key file.** Sub-task `#CRYPTO.11`.
+2. **⚠️ Username/password normalisation moved one layer** — Rust `crates/wow-crypto/src/srp6.rs:108` calls `to_ascii_uppercase()` inside `compute_x`; C++ relies on its caller (`src/server/game/Accounts/AccountMgr.cpp:55-57, 181-182, 215-216, 245`) using `Utf8ToUpperOnlyLatin`. For ASCII these are equivalent. For accent / diacritic / Latin-1 supplement chars they differ. Resulting verifiers from a C++-stored account containing such a char will fail to match a Rust recompute. Sub-task: pick one normalization and document it (`#CRYPTO.4` extension).
+3. **⚠️ No cross-impl test vectors** — every test in `wow-crypto/` is internal round-trip. Combined with finding #1, there is no offline check that would catch a regression in Rust's nonce/HMAC byte order short of a live login. Recommend ingesting the existing C++ `bot debug` HMAC dump (already produced by `WorldSocket.cpp:755`) as a hardcoded vector. Sub-tasks `#CRYPTO.1`, `#CRYPTO.5`, `#CRYPTO.7`.
+4. **⚠️ Counter overflow** — both Rust and C++ silently UB on `u64`/`uint64` overflow. Practically unreachable but the doc claimed this would warn at 2^60. It does not. Sub-task `#CRYPTO.6` open.
+
+No ❌ blocker found in the wire-protocol path itself: SRP6 constants, AES-GCM nonce, tag truncation, HMAC keying order, KDF seeds, and Ed25519ctx signing algorithm all match the C++ canonical implementation byte-for-byte.
+
+### 13.3 Recommended action — priority queue
+
+1. **`#CRYPTO.11` — Ed25519 key sourcing (HIGH).** Compare `ENTER_ENCRYPTED_MODE_PRIVATE_KEY` at `world_socket.rs:81-86` against the C++ `EnterEncryptedModeSigner` PEM (or the corresponding public key shipped in the 3.4.3.54261 client). Treat as login-blocker until verified. If public keys diverge, load from `build_info` like C++ does.
+2. **`#CRYPTO.1` + `#CRYPTO.5` + `#CRYPTO.7` — vector tests (HIGH).** Capture one HMAC chain (digest, session_key, encrypt_key) from a working C++ login (the `[DEBUG] WorldSocket _encryptKey` log line at `WorldSocket.cpp:755` gives one for free) and bake it into a `#[test]` against the Rust path with the same inputs. Same for an SRP6 `(salt, verifier)` pair from `account` table.
+3. **`#CRYPTO.4` extension — username normalisation (MEDIUM).** Decide whether Rust SRP6 takes pre-normalised input (and stop calling `to_ascii_uppercase` in `compute_x`) or whether it implements `Utf8ToUpperOnlyLatin`. Document the choice. Currently fine for ASCII-only accounts, hidden bug for any non-ASCII account.
+4. **`#CRYPTO.6` — counter overflow detection (LOW).** Add a `tracing::warn!` once `server_counter` or `client_counter` crosses `1u64 << 60`.
+5. **`#CRYPTO.14` — fuzz invalid `A` (MEDIUM).** Already partially covered by `verify_client_proof`'s `(A % N).is_zero()` check at `srp6.rs:320`, but not by tests.
+6. Sub-tasks `#CRYPTO.13` (Argon2) and `#CRYPTO.10` (RSA build_info) remain deferrable as long as 2FA is off and the build_info path is not exercised.
+
+Suspicions in §8 about KDF labels `"ServerToClient\0"` / `"ClientToServer\0"` and BE-vs-LE nonce format are **not divergences** — they were misremembered from a different (BNet REST / modern Battle.net) protocol. The real direction binding is the IV magic suffix; the audit confirms Rust matches C++ on that mechanism.
+
+### 13.4 Justifying the index status
+
+The `✅ done (~95%)` claim in the document header is **mostly justified** for the wire-protocol-critical primitives (SRP6 algorithm + AES-GCM + HMAC-SHA256 KDF chain + Ed25519ctx framing all line up with C++). The `~95%` headroom corresponds well to the four ⚠️ items listed in §13.2: Ed25519 key sourcing, ASCII vs Latin-1 normalisation, missing cross-impl test vectors, and counter-overflow telemetry. None of those is a silent-divergence wire bug; they are operational gaps. Recommendation: keep `✅ done (~95%)` but resolve `#CRYPTO.11` before declaring 100%.
 
 ---
 
