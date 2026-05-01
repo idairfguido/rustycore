@@ -1,0 +1,215 @@
+# Migration: Support (SupportMgr — bugs, complaints, suggestions)
+
+> **C++ canonical path:** `/home/server/woltk-trinity-legacy/src/server/game/Support/`
+> **Rust target crate(s):** would live in a new `crates/wow-support/` (or fold into `wow-social`); GM-command surface eventually in `wow-handler`
+> **Layer:** L8 (service — opt-in feature on top of database/world/chat)
+> **Status:** ❌ not started (GM-ticket opcodes are decoded but routed to no-op stubs)
+> **Audited vs C++:** ⚠️ partial (header fully read, `.cpp` ~830 lines partially read)
+> **Last updated:** 2026-05-01
+
+---
+
+## 1. Purpose
+
+The in-game player feedback system. Three ticket kinds:
+
+- **Bug** — "this quest is broken" reports.
+- **Complaint** — player-against-player report (chat spam, cheating, inappropriate name, etc.). Carries a structured `ReportType`/`ReportMajorCategory`/`ReportMinorCategory` + optional chat-log evidence.
+- **Suggestion** — feature-request notes.
+
+`SupportMgr` is a singleton that loads all open and closed tickets at startup, generates fresh ids, holds them in three `map<uint32, Ticket*>`s, persists changes to `character.gm_bug` / `gm_complaint` / `gm_suggestion`, and exposes them to GM commands and the client opcodes (`SUPPORT_TICKET_SUBMIT_*`, `GM_TICKET_GET_SYSTEM_STATUS`, `GM_TICKET_GET_CASE_STATUS`). The "GM ticket" classic system (`GMTICKET_*` opcodes) is the legacy interface; the modern Cataclysm-onwards "Submit Bug/Complaint/Suggestion" UI uses the same backing store.
+
+---
+
+## 2. C++ canonical files
+
+| File | Lines | Purpose |
+|---|---|---|
+| `src/server/game/Support/SupportMgr.h` | 313 | All enums + `Ticket` base + `BugTicket` / `ComplaintTicket` / `SuggestionTicket` + `SupportMgr` singleton |
+| `src/server/game/Support/SupportMgr.cpp` | 832 | All implementations — load/save/delete per ticket type, `Initialize`, `AddTicket`/`CloseTicket`/`RemoveTicket`/`ResetTickets` (templated on T), display formatters |
+
+The opcode dispatch (`HandleSupportTicketSubmitBug`, `HandleSupportTicketSubmitComplaint`, `HandleSupportTicketSubmitSuggestion`, `HandleGMTicket*`) lives in `Server/WorldSession.cpp` and `Handlers/MiscHandler.cpp` — outside this folder but tightly coupled.
+
+---
+
+## 3. Classes / Structs / Enums
+
+| Symbol | Kind | Purpose |
+|---|---|---|
+| `SupportMgr` | class (singleton) | Registry + persistence + system-status flags |
+| `Ticket` | abstract class | Base: `_id`, `_playerGuid`, `_mapId`, `_pos`, `_createTime`, `_closedBy`, `_assignedTo`, `_comment`; pure virtual `LoadFromDB` / `SaveToDB` / `DeleteFromDB` / `FormatViewMessageString` |
+| `BugTicket` | concrete | Adds `_note: string` |
+| `ComplaintTicket` | concrete | Adds `_targetCharacterGuid`, `_reportType: ReportType`, `_majorCategory`, `_minorCategoryFlags`, `_chatLog: ChatLog`, `_note` |
+| `SuggestionTicket` | concrete | Adds `_note` |
+| `ReportType` | enum class : i32 | `Chat=0`, `InWorld=1`, `ClubFinderPosting=2`, `ClubFinderApplicant=3`, `GroupFinderPosting=4`, `GroupFinderApplicant=5`, `ClubMember=6`, `GroupMember=7`, `Friend=8`, `Pet=9`, `BattlePet=10`, `Calendar=11`, `Mail=12`, `PvP=13` |
+| `ReportMajorCategory` | enum class : i32 | `InappropriateCommunication=0`, `GameplaySabotage=1`, `Cheating=2`, `InappropriateName=3` |
+| `ReportMinorCategory` | enum class : i32 (bitmask) | `TextChat=0x1` … `Name=0x4000` (15 flags) |
+| `GMTicketSystemStatus` | enum | `DISABLED=0`, `ENABLED=1` (wire value) |
+| `SupportSpamType` | enum | `MAIL=0`, `CHAT=1`, `CALENDAR=2` |
+| `ChatLog` typedef | = `WorldPackets::Ticket::SupportTicketChatLog` | Rich struct: lines + reported player IDs |
+| `BugTicketList` / `ComplaintTicketList` / `SuggestionTicketList` | typedefs | `map<uint32, T*>` |
+
+Note: WoLK 3.4.3 has only the *classic* GM-ticket system. The modern bug/complaint/suggestion UI in this header was back-ported from later expansions (the report categories reference Club Finder / BattlePet / Friend reporting which don't exist in 3.4.3 client). For a pure 3.4.3 server, only `Chat`, `InWorld`, `Mail`, `PvP`, and the four major categories matter — but the schema is the upstream Trinity one and the back-port is harmless.
+
+---
+
+## 4. Critical public methods / functions
+
+| Symbol | Purpose | Calls into |
+|---|---|---|
+| `SupportMgr::Initialize()` | Read `CONFIG_SUPPORT_*` config flags into the four system-status booleans | `World::getBoolConfig` |
+| `SupportMgr::LoadBugTickets()` | `CHAR_SEL_GM_BUGS`; per row `BugTicket::LoadFromDB`; track `_lastBugId` and `_openBugTicketCount` | DB |
+| `SupportMgr::LoadComplaintTickets()` | `CHAR_SEL_GM_COMPLAINTS`; per row `ComplaintTicket::LoadFromDB`; for each ticket, `CHAR_SEL_GM_COMPLAINT_CHATLINES` and `LoadChatLineFromDB` per line | DB |
+| `SupportMgr::LoadSuggestionTickets()` | `CHAR_SEL_GM_SUGGESTIONS`; analogous | DB |
+| `SupportMgr::AddTicket(BugTicket*)` / `AddTicket(ComplaintTicket*)` / `AddTicket(SuggestionTicket*)` | Insert into the right map; bump open-count; call `SaveToDB`; `UpdateLastChange` | per-ticket `SaveToDB` |
+| `SupportMgr::RemoveTicket<T>(id)` | Delete from map + DB; decrement open-count if was open | `T::DeleteFromDB` |
+| `SupportMgr::CloseTicket<T>(id, closedBy)` | Set `_closedBy`; persist; decrement open-count | `T::SaveToDB` |
+| `SupportMgr::ResetTickets<T>()` | Wipe in-memory + DB for that type | — |
+| `SupportMgr::GetTicket<T>(id)` | Typed lookup | — |
+| `SupportMgr::GetComplaintsByPlayerGuid(guid)` | Linear scan filtering by author | — |
+| `SupportMgr::ShowList<T>(handler, onlineOnly?)` / `ShowClosedList<T>` | GM-command formatting helper | per-ticket `FormatViewMessageString` |
+| `SupportMgr::Generate*Id()` | `++_lastBugId` / `_lastComplaintId` / `_lastSuggestionId` | — |
+| `SupportMgr::GetSupportSystemStatus()` / `GetTicketSystemStatus()` / `GetBugSystemStatus()` / `GetComplaintSystemStatus()` / `GetSuggestionSystemStatus()` | Master + per-feature flags AND'd | — |
+| `Ticket::TeleportTo(player)` | GM command convenience: tp the GM to where the ticket was filed | — |
+| `Ticket::FormatViewMessageString(handler, detailed)` | Produce the `.ticket` chat output | — |
+| `Ticket::SaveToDB() / LoadFromDB(fields) / DeleteFromDB()` (per subclass) | `INSERT … ON DUPLICATE KEY UPDATE` for save; field unpacking for load; `DELETE` for delete | DB |
+| `ComplaintTicket::LoadChatLineFromDB(fields)` | Append one line to `_chatLog` | — |
+
+---
+
+## 5. Module dependencies
+
+**Depends on:**
+- `Database` — extensive: prepared statements for all three ticket types (CRUD + chat-log child rows).
+- `Entities/Object/ObjectGuid` — `_playerGuid`, `_assignedTo`, `_closedBy`, `_targetCharacterGuid`.
+- `Entities/Player::TeleportTo` — for `Ticket::TeleportTo`.
+- `Server/Packets/TicketPackets` — `SupportTicketChatLog` (wire-format struct reused as in-memory).
+- `Chat/ChatHandler` — `FormatViewMessageString` consumers.
+- `Server/World` — config flags via `CONFIG_SUPPORT_*`, `CONFIG_ALLOW_TICKETS`.
+- `wow-core/Position` — `_mapId`, `_pos` for ticket location.
+
+**Depended on by:**
+- `Server/WorldSession.cpp` opcode handlers: `SupportTicketSubmitBug/Complaint/Suggestion`, `GMTicketGetSystemStatus`, `GMTicketGetCaseStatus`, `GMTicketAcknowledgeSurvey`, `Complaint`.
+- `Chat/Commands/cs_ticket.cpp` (et al.) — GM commands `.ticket`, `.bug`, `.complaint`, `.suggestion` family.
+
+---
+
+## 6. SQL / DB queries (if any)
+
+Prepared statements registered in `CharacterDatabasePreparedStatements`:
+
+| Statement / Source | Purpose | DB |
+|---|---|---|
+| `CHAR_SEL_GM_BUGS` | Load all bug tickets at startup | character |
+| `CHAR_SEL_GM_COMPLAINTS` | Load all complaint headers | character |
+| `CHAR_SEL_GM_COMPLAINT_CHATLINES` | Load chat-log child rows for a complaint | character |
+| `CHAR_SEL_GM_SUGGESTIONS` | Load all suggestion tickets | character |
+| `CHAR_REP_GM_BUG` | Insert/replace bug | character |
+| `CHAR_DEL_GM_BUG` | Delete bug | character |
+| `CHAR_REP_GM_COMPLAINT` | Insert/replace complaint header | character |
+| `CHAR_INS_GM_COMPLAINT_CHATLINE` | Insert chat-log line | character |
+| `CHAR_DEL_GM_COMPLAINT` | Delete complaint header (chat lines cascade) | character |
+| `CHAR_DEL_GM_COMPLAINT_CHATLOG` | Delete chat-log lines (alternative path) | character |
+| `CHAR_REP_GM_SUGGESTION` | Insert/replace suggestion | character |
+| `CHAR_DEL_GM_SUGGESTION` | Delete suggestion | character |
+
+Tables: `gm_bug`, `gm_complaint`, `gm_complaint_chatlog`, `gm_suggestion` (all in `character`).
+
+No DBC/DB2 stores used.
+
+---
+
+## 7. Wire-protocol packets (if any)
+
+| Opcode | Direction | Sent/Received in |
+|---|---|---|
+| `CMSG_SUPPORT_TICKET_SUBMIT_COMPLAINT` | client → server | Creates `ComplaintTicket`; `AddTicket` |
+| `CMSG_SUPPORT_TICKET_SUBMIT_BUG` (named `Bug`/`SubmitBug` in different builds) | client → server | Creates `BugTicket` |
+| `CMSG_SUPPORT_TICKET_SUBMIT_SUGGESTION` | client → server | Creates `SuggestionTicket` |
+| `CMSG_GM_TICKET_GET_SYSTEM_STATUS` | client → server | Replies with `SMSG_GM_TICKET_SYSTEM_STATUS` (ENABLED/DISABLED) |
+| `CMSG_GM_TICKET_GET_CASE_STATUS` | client → server | Replies with `SMSG_GM_TICKET_CASE_STATUS` (open ticket count for player) |
+| `CMSG_GM_TICKET_ACKNOWLEDGE_SURVEY` | client → server | Marks survey as acknowledged |
+| `CMSG_COMPLAINT` | client → server | Spam-report shortcut (`SupportSpamType`); fast-path that does not create a `ComplaintTicket` |
+| `SMSG_GM_TICKET_SYSTEM_STATUS` | server → client | One u32 = enabled-status |
+| `SMSG_GM_TICKET_CASE_STATUS` | server → client | Open-tickets array |
+| `SMSG_COMPLAINT_RESULT` | server → client | Echoes `Complaint` result |
+
+The Rust opcode constants for these already exist in `crates/wow-constants/src/opcodes.rs` (e.g. `Complaint = 0x366e`, `SupportTicketSubmitComplaint = 0x3647`, `GmTicketGetCaseStatus = 0x368f`, `GmTicketGetSystemStatus = 0x368e`, `GmTicketAcknowledgeSurvey = 0x3690`, `ComplaintResult = 0x26ab`, `GmTicketCaseStatus = 0x26a3`, `GmTicketSystemStatus = 0x26a2`).
+
+---
+
+## 8. Current state in RustyCore
+
+**Files in `/home/server/rustycore`:**
+- `crates/wow-constants/src/opcodes.rs` — all relevant opcode constants (see above).
+- `crates/wow-world/src/handlers/misc.rs:245`/`604` — `handle_gm_ticket_get_case_status` registered and dispatched, but the body is `pub async fn handle_gm_ticket_get_case_status(&mut self, _pkt: WorldPacket) {}` — empty no-op.
+- `crates/wow-packet/src/packets/misc.rs:281` — outbound `SMSG_FEATURE_SYSTEM_STATUS` advertises `ComplaintsEnabled = false` (intentional placeholder per comment "default false").
+- `crates/wow-world/src/session.rs:1811` — dispatcher routes `GmTicketGetCaseStatus` to the no-op above.
+- `crates/wow-database/src/statements/` — **no** support-related prepared statements registered.
+
+**What's implemented:** opcode constants and one stub handler. Nothing else.
+
+**What's missing vs C++:** literally everything past the wire layer — `Ticket` struct hierarchy, `SupportMgr`, prepared statements, schema migration for `gm_bug` / `gm_complaint*` / `gm_suggestion`, GM-command surface, the `SMSG_*` reply packets.
+
+**Suspicious / likely divergent:** none — the current Rust stub is honest about being a stub.
+
+**Tests existing:** none.
+
+---
+
+## 9. Migration sub-tasks
+
+- [ ] **#SUP.1** Add a `wow-support` crate (or module under `wow-social`). Define `enum TicketKind { Bug, Complaint, Suggestion }`, `ReportType`, `ReportMajorCategory`, `ReportMinorCategory` (bitflags), `Ticket` base struct with the shared fields (`id, player_guid, map_id, position, create_time, closed_by, assigned_to, comment`), and `BugTicket` / `ComplaintTicket` / `SuggestionTicket` value types holding their per-kind extras. (complexity: **M**)
+- [ ] **#SUP.2** Add prepared statements to `crates/wow-database/src/statements/character.rs`: `SEL_GM_BUGS`, `SEL_GM_COMPLAINTS`, `SEL_GM_COMPLAINT_CHATLINES`, `SEL_GM_SUGGESTIONS`, plus the REP/DEL counterparts for each. Schema is already in TrinityCore's `character_database.sql` — port as-is. (complexity: **M**)
+- [ ] **#SUP.3** Implement `SupportMgr` as `Arc<RwLock<Inner>>` holding three `BTreeMap<u32, Ticket>` and `last_*_id: u32` + `open_*_count: u32`. Add `load_all(pool)`, `add_ticket`, `close_ticket(kind, id, closed_by)`, `remove_ticket(kind, id)`, `reset_tickets(kind)`, `get<T>(id)`, `get_complaints_by_player(guid)`, plus the four system-status booleans loaded from config. (complexity: **H**)
+- [ ] **#SUP.4** Implement the per-kind `SaveToDb` / `DeleteFromDb` codecs against the prepared statements; `ComplaintTicket` saves chat-log child rows in the same transaction. (complexity: **M**)
+- [ ] **#SUP.5** Wire the four currently-stub opcode handlers in `wow-world/src/handlers/misc.rs`: `GmTicketGetSystemStatus`, `GmTicketGetCaseStatus`, `GmTicketAcknowledgeSurvey`, `Complaint`. Add parsers + senders for `SubmitBug`/`SubmitComplaint`/`SubmitSuggestion` and their `*Result` reply opcodes. (complexity: **M**)
+- [ ] **#SUP.6** Flip the `ComplaintsEnabled` bit in `wow-packet/src/packets/misc.rs:281` (`SMSG_FEATURE_SYSTEM_STATUS`) when the corresponding `CONFIG_SUPPORT_COMPLAINTS_ENABLED` is true. Same for the other three flags (Tickets/Bugs/Suggestions). (complexity: **L**)
+- [ ] **#SUP.7** GM-command surface (deferred — depends on `wow-handler`'s command framework existing): `.ticket list`, `.ticket close`, `.ticket assign`, `.ticket comment`, `.ticket teleport`. (complexity: **M**)
+
+---
+
+## 10. Regression tests to write
+
+- [ ] `SupportMgr::load_all` round-trips: insert fixtures via SQL; load; assert all three maps' sizes match; assert `last_*_id` is the max id loaded.
+- [ ] `add_ticket` increments `open_*_count`; `close_ticket` decrements it; `remove_ticket` of a closed ticket does NOT double-decrement.
+- [ ] `ComplaintTicket` with a 5-line chat log persists and reloads with all 5 lines in original order.
+- [ ] `generate_*_id` is monotonic across a save-load-save cycle (no collisions after restart).
+- [ ] `SMSG_FEATURE_SYSTEM_STATUS` flips `ComplaintsEnabled` correctly when the corresponding config is toggled at runtime.
+- [ ] `SMSG_GM_TICKET_SYSTEM_STATUS` returns `DISABLED` when `support_system_status` is false even if the per-feature toggles are true (master flag wins).
+- [ ] Submitting a complaint when complaints are disabled is rejected (no DB write, no echoed `*Result`).
+
+---
+
+## 11. Notes / gotchas
+
+- **Master vs per-feature flags**: `GetTicketSystemStatus()` returns `_supportSystemStatus && _ticketSystemStatus`. The master flag has veto. Mirror this; don't naively expose only the per-feature ones.
+- **`ChatLog` is a wire packet struct reused as in-memory storage**: `using ChatLog = WorldPackets::Ticket::SupportTicketChatLog;`. Convenient in C++; in Rust, define one struct in `wow-packet` (Serialize) and reuse via `Clone`.
+- **`Generate*Id` is NOT atomic** in C++ (plain `++_lastBugId`). Trinity assumes `SupportMgr` is only ever called from the world thread. RustyCore is multi-threaded — wrap the counters in `AtomicU32` or take the `RwLock` for the whole "generate id + insert" sequence.
+- **`RemoveTicket` deletes the in-memory `Ticket*` via `delete`** — owning raw pointers. Rust port owns by value; no equivalent leak risk.
+- **Modern report categories (`ClubFinder*`, `BattlePet`, `Friend`) are 3.4.3-client-incompatible** but kept in the schema. Don't strip them — leaving the columns and treating unknown values as opaque is forward-compatible and matches Trinity's choice.
+- **Position is stored** (`SetPosition(mapId, pos)`) so a GM can `.ticket teleport` to where the player filed it. Ensure the `Position` field is populated at submit time even on bug tickets (Trinity does).
+- **`UpdateLastChange()` updates a `_lastChange` timestamp** that the client polls via `SMSG_GM_TICKET_SYSTEM_STATUS` to know whether to refresh its UI. Don't forget to bump it on every mutation.
+- **`CMSG_COMPLAINT`** (the spam-report shortcut, opcode `0x366e`) does NOT create a persistent `ComplaintTicket` — it's a quick "I'm muting/reporting this guy for chat spam" path that goes to `SupportSpamType` logging only. Don't confuse with the full `SupportTicketSubmitComplaint` flow.
+- **`gm_complaint_chatlog`** child rows must be deleted with the parent; either rely on `ON DELETE CASCADE` in the schema or issue both deletes in the same transaction. Trinity uses both `CHAR_DEL_GM_COMPLAINT` and `CHAR_DEL_GM_COMPLAINT_CHATLOG` defensively.
+
+---
+
+## 12. C++ → Rust mapping (high-level)
+
+| C++ Symbol | Rust Equivalent | Notes |
+|---|---|---|
+| `class SupportMgr` (singleton) | `pub struct SupportMgr` injected as `Arc<SupportMgr>` | No global; route through `WorldSession` context |
+| `class Ticket` (abstract) | `trait Ticket { fn save(...); fn load(...); fn delete(...); fn format(...); }` + value-type structs | No virtual dtor needed |
+| `BugTicket : Ticket` | `pub struct BugTicket { base: TicketBase, note: String }` | Composition over inheritance |
+| `ComplaintTicket` | `pub struct ComplaintTicket { base: TicketBase, target: ObjectGuid, report_type: ReportType, major: ReportMajorCategory, minor: ReportMinorCategory, chat_log: ChatLog, note: String }` | — |
+| `enum class ReportType : i32` | `#[repr(i32)] enum ReportType { … }` | — |
+| `enum class ReportMinorCategory : i32` (bitmask) | `bitflags! struct ReportMinorCategory: i32 { … }` | — |
+| `map<u32, T*>` | `BTreeMap<u32, T>` | Ordered for `.ticket list` consistency |
+| `template<typename T> T* GetTicket(u32)` | three explicit getters: `get_bug`, `get_complaint`, `get_suggestion` (or one generic over `enum TicketKind`) | Avoids monomorphic explosion |
+| `SaveToDB() / LoadFromDB(Field*)` | `async fn save(&self, tx: &mut Transaction) -> Result<()>` / `fn from_row(row: Row) -> Self` | Async DB |
+| `_lastChange: u64` (ms) | `last_change: AtomicU64` | Lock-free read |
+
+---
+
+*Template version: 1.0 (2026-05-01).*

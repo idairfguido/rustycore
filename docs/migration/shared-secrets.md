@@ -1,0 +1,180 @@
+# Migration: shared/Secrets
+
+> **C++ canonical path:** `/home/server/woltk-trinity-legacy/src/server/shared/Secrets/`
+> **Rust target crate(s):** `crates/wow-crypto/` (TODO) + `crates/bnet-server/` (TODO)
+> **Layer:** L1
+> **Status:** ❌ not started (~0%)
+> **Audited vs C++:** ❌ not audited
+> **Last updated:** 2026-05-01
+
+---
+
+## 1. Purpose
+
+Manager de secretos persistentes del servidor (singleton `SecretMgr`) que carga claves desde el `.conf`, las verifica contra un digest Argon2 guardado en `secret_digest` (DB `auth`), y orquesta transiciones cuando el operador rota la clave (re-cifra todos los TOTP secrets de cuentas usando la clave nueva). El único secreto vivo en WoLK 3.4.3 es `SECRET_TOTP_MASTER_KEY`: la master key con la que se AES-cifran los secretos TOTP por cuenta.
+
+---
+
+## 2. C++ canonical files
+
+| File | Lines | Purpose |
+|---|---|---|
+| `src/server/shared/Secrets/SecretMgr.h` | 85 | Class declaration + `Secret` POD + `SecretOwner`/`Secrets` enums |
+| `src/server/shared/Secrets/SecretMgr.cpp` | 237 | `Initialize`, `GetSecret`, `AttemptLoad`, `AttemptTransition` (re-cifra cuentas) |
+| **TOTAL** | **~322** | — |
+
+---
+
+## 3. Classes / Structs / Enums
+
+| Symbol | Kind | Purpose |
+|---|---|---|
+| `SecretMgr` | singleton class | Holder + lifecycle de secretos del proceso |
+| `SecretMgr::Secret` | inner struct | Estado lazy: `NOT_LOADED_YET / LOAD_FAILED / NOT_PRESENT / PRESENT`, mutex propio, `BigNumber value` |
+| `Secrets` | enum | Índices: `SECRET_TOTP_MASTER_KEY = 0`, `NUM_SECRETS = 1` |
+| `SecretOwner` | enum | `SECRET_OWNER_BNETSERVER` / `SECRET_OWNER_WORLDSERVER` (qué proceso es el dueño autoritativo) |
+| `SecretInfo` (anon) | struct | Tabla estática: `configKey`, `oldKey`, `bits`, `owner`, `flags()` |
+| `SecretFlags` | enum | `SECRET_FLAG_DEFER_LOAD = 0x1` (per-owner via macro `SECRET_FLAG_FOR`) |
+
+Tabla `secret_info[]` contiene un solo entry: `{ "TOTPMasterSecret", "TOTPOldMasterSecret", 128, BNETSERVER, WORLDSERVER_DEFER_LOAD }` → en bnetserver carga eager, en worldserver carga lazy on first `GetSecret`.
+
+---
+
+## 4. Critical public methods / functions
+
+| Symbol | Purpose | Calls into |
+|---|---|---|
+| `SecretMgr::instance()` | Singleton accessor | — |
+| `SecretMgr::Initialize(owner)` | Set `OWNER` global, cargar todos los `!DEFER_LOAD` secrets, abortar si fallan | `AttemptLoad` |
+| `SecretMgr::GetSecret(i)` | Lazy-load on first call si `NOT_LOADED_YET`, retornar `Secret const&` | `AttemptLoad` |
+| `SecretMgr::AttemptLoad(i, errorLevel, lock)` | Lee `LOGIN_SEL_SECRET_DIGEST`, lee config, verifica con Argon2, dispara transición si difieren | `Argon2::Verify`, `GetHexFromConfig`, `AttemptTransition` |
+| `SecretMgr::AttemptTransition(i, newSecret, oldSecret, hadOldSecret)` | Decrypt todos los `account.totp_secret` con old key, re-encrypt con new key, regenerar digest Argon2, todo en una transacción | `LOGIN_UPD_ACCOUNT_TOTP_SECRET`, `LOGIN_DEL_SECRET_DIGEST`, `LOGIN_INS_SECRET_DIGEST`, `Argon2::Hash` |
+| `Secret::operator bool()` | `state == PRESENT` | — |
+| `Secret::operator*()` / `operator->()` | Acceso a `BigNumber value` | — |
+| `Secret::IsAvailable()` | `state ∉ {NOT_LOADED_YET, LOAD_FAILED}` | — |
+| `GetHexFromConfig(key, bits)` (free fn) | Lee config como hex, valida rango `[0, 2^bits)`, trunca con WARN si excede | `sConfigMgr->GetStringDefault`, `BigNumber::SetHexStr` |
+
+---
+
+## 5. Module dependencies
+
+**Depends on:**
+- `shared/Crypto/AES` — `AEEncryptWithRandomIV<AES>`, `AEDecrypt<AES>` (16-byte key)
+- `shared/Crypto/Argon2` — `Argon2::Hash(secret, salt)`, `Argon2::Verify(secret, hash)`
+- `shared/Crypto/CryptoGenerics` — wrappers genéricos
+- `shared/Crypto/BigNumber` — almacena el secreto como `BigNumber` (≤128 bits)
+- `shared/Database` — prep statements `LOGIN_SEL_SECRET_DIGEST`, `LOGIN_INS_SECRET_DIGEST`, `LOGIN_DEL_SECRET_DIGEST`, `LOGIN_UPD_ACCOUNT_TOTP_SECRET`, transactions
+- `shared/Configuration` — `sConfigMgr->GetStringDefault`
+- `shared/Logging` — TC_LOG (FATAL, ERROR, INFO)
+
+**Depended on by:**
+- `worldserver/Authentication/AuthenticationPackets` — al loggear, decifra `account.totp_secret` con `sSecretMgr->GetSecret(SECRET_TOTP_MASTER_KEY)` para validar TOTP code
+- `bnetserver/RealmList` (indirecto via auth) — owner del secreto, lo carga eager
+
+---
+
+## 6. SQL / DB queries
+
+| Statement | Purpose | DB |
+|---|---|---|
+| `LOGIN_SEL_SECRET_DIGEST` | `SELECT digest FROM secret_digest WHERE id = ?` | auth |
+| `LOGIN_INS_SECRET_DIGEST` | `INSERT INTO secret_digest (id, digest) VALUES (?,?)` | auth |
+| `LOGIN_DEL_SECRET_DIGEST` | `DELETE FROM secret_digest WHERE id = ?` | auth |
+| inline `SELECT id, totp_secret FROM account` | Iterar todas las cuentas para re-cifrar TOTP en transición | auth |
+| `LOGIN_UPD_ACCOUNT_TOTP_SECRET` | `UPDATE account SET totp_secret = ? WHERE id = ?` | auth |
+
+---
+
+## 7. Wire-protocol packets
+
+N/A — módulo enteramente offline/setup.
+
+---
+
+## 8. Current state in RustyCore
+
+**Files in `/home/server/rustycore`:**
+- **(ninguno)** — sin equivalente Rust de `SecretMgr`.
+- `crates/wow-database/src/statements/login.rs` ya **declara** los prep statements: `SEL_SECRET_DIGEST`, `INS_SECRET_DIGEST`, `DEL_SECRET_DIGEST`, `SEL_ACCOUNT_TOTP_SECRET`, `UPD_ACCOUNT_TOTP_SECRET` — pero ninguno se invoca todavía.
+
+**What's implemented:**
+- Solo los SQL statements registrados (no usados).
+
+**What's missing vs C++:**
+- **Toda la lógica.** No hay struct `SecretMgr`, no hay `Secret`, no hay carga, no hay verificación Argon2, no hay transición.
+- Sin `Argon2` wrapper en `wow-crypto` (verificar dependencia `argon2` crate; no aparece en grep).
+- Sin AES key-wrap genérico para los TOTP secrets (`wow-crypto` tiene AES-GCM para network, no este modo).
+- TOTP no implementado en `bnet-server` ni `world-server` — el handler de auth/login no consulta la master key.
+- No existe `BigNumber` Rust (el SRP6 en `wow-crypto` usa `num-bigint` internamente, OK).
+
+**Suspicious / likely divergent (hipótesis pre-auditoría):**
+- Como TOTP no está activo, **no se ha confirmado** que la decryption de `account.totp_secret` produce los mismos bytes que TrinityCore. Si se activa esto es el primer test de regresión obligatorio.
+- 128 bits = AES-128 key → ojo con AES-256 si alguien “mejora” la spec (rompería compatibilidad).
+
+**Tests existing:**
+- 0.
+
+---
+
+## 9. Migration sub-tasks
+
+- [ ] **#SEC.1** Añadir crate dep `argon2` (RustCrypto) en `wow-crypto/Cargo.toml`. (L)
+- [ ] **#SEC.2** Implementar `wow_crypto::argon2::{hash, verify}` con parámetros TC-compatibles (Argon2id, mismas iters/memory que el C++ default — verificar `Argon2.cpp` upstream). (M)
+- [ ] **#SEC.3** Implementar `wow_crypto::aes_keywrap::{encrypt_with_random_iv, decrypt}` para `Vec<u8>` payload con clave de 16 bytes (formato C++: `[IV(12)][cipher][tag(16)]` — confirmar). (M)
+- [ ] **#SEC.4** Crear `crates/wow-crypto/src/secret_mgr.rs` con `SecretMgr`, `Secret`, enum `Secrets`, enum `SecretOwner`. (M)
+- [ ] **#SEC.5** Implementar `SecretMgr::initialize(owner, config, login_db)` con eager-load para non-defer + abort on failure. (M)
+- [ ] **#SEC.6** Implementar `get_secret(i) -> Result<&Secret>` con lazy-load + `parking_lot::Mutex` per-secret. (L)
+- [ ] **#SEC.7** Implementar `attempt_load` con verificación Argon2 + dispatch a `attempt_transition`. (M)
+- [ ] **#SEC.8** Implementar `attempt_transition` para `SECRET_TOTP_MASTER_KEY`: SELECT all accounts.totp_secret, decrypt-with-old, encrypt-with-new, UPDATE en una transacción. (H)
+- [ ] **#SEC.9** Wire `SecretMgr::initialize` en `bnet-server/src/main.rs` (owner = BNETSERVER, eager). (L)
+- [ ] **#SEC.10** Wire `SecretMgr::initialize` en `world-server/src/main.rs` (owner = WORLDSERVER, defer). (L)
+- [ ] **#SEC.11** Implementar TOTP validation usando `get_secret(SECRET_TOTP_MASTER_KEY)` + `account.totp_secret` decrypt → RFC6238 (necesita crate `totp-rs` o equivalente). (M)
+- [ ] **#SEC.12** Tests: round-trip encrypt/decrypt con master key, Argon2 verify positive/negative, transition de mock-DB. (M)
+
+---
+
+## 10. Regression tests to write
+
+- [ ] `Argon2::verify(secret, hash)` true para `(secret, Argon2::hash(secret, salt))` — round-trip
+- [ ] `AEEncryptWithRandomIV` + `AEDecrypt` round-trip preserva bytes
+- [ ] Decrypt de un `account.totp_secret` cifrado por el C++ TrinityCore con la misma master key produce los mismos bytes en Rust (test fixture binario)
+- [ ] `attempt_load` aborta con FATAL si owner=BNETSERVER y digest no matchea
+- [ ] `attempt_load` retorna `LOAD_FAILED` (sin abort) si owner=WORLDSERVER y digest no matchea
+- [ ] `attempt_transition` re-cifra N cuentas y deja el digest nuevo; rollback en error
+- [ ] Lazy load: primer `GetSecret` carga, segundos hits no re-cargan
+- [ ] Concurrencia: dos hilos llamando `GetSecret` simultáneo solo cargan una vez (mutex per-secret)
+
+---
+
+## 11. Notes / gotchas
+
+1. **`SECRET_FLAG_DEFER_LOAD` es per-owner:** El macro `SECRET_FLAG(DEFER_LOAD, 0x1)` genera `BNETSERVER_DEFER_LOAD = 0x1 << 0` y `WORLDSERVER_DEFER_LOAD = 0x1 << 16`. La columna `_flags` empaqueta dos flags de 16 bits según owner. En la entry actual: `WORLDSERVER_DEFER_LOAD` significa “worldserver carga lazy”, `bnetserver` carga eager.
+2. **AES key-wrap format:** `AEEncryptWithRandomIV<AES>` produce `[random IV][ciphertext][HMAC tag]`. NO es AES-GCM standard — TrinityCore usa AES-CBC + HMAC-SHA256 separado. **Crítico para compat de DB**: si Rust usa AES-GCM aquí los TOTP secrets existentes son ilegibles.
+3. **`BigNumber` en C++ se serializa por `AsHexStr()`** para Argon2 input. En Rust replicar exactamente — strings hex sin prefijo, sin padding, lowercase (verificar).
+4. **`ABORT()` semántica:** owner=true + load_failed = process abort. Es deliberado para que el operador no levante un servidor con TOTP roto silently.
+5. **Missing `oldKey`** semántica: si `secret_info[i].oldKey == nullptr`, no hay path de transición — error duro.
+6. **Salt 128 bits**: `salt.SetRand(128)`. Argon2 acepta salt arbitrario; usar `[u8; 16]`.
+7. **TOTP no está en RustyCore todavía** — este módulo solo importa cuando se quiera habilitar 2FA. Bajar prioridad si TOTP no está en roadmap inmediato.
+
+---
+
+## 12. C++ → Rust mapping
+
+| C++ | Rust | Notas |
+|---|---|---|
+| `class SecretMgr` (singleton) | `struct SecretMgr` + `OnceLock<SecretMgr>` o `Arc<SecretMgr>` en `AppState` | Singleton vía `OnceLock` |
+| `SecretMgr::Secret` | `struct Secret { state: SecretState, value: Option<Vec<u8>> }` | `BigNumber` → `Vec<u8>` o `[u8; 16]` |
+| `enum Secrets` | `enum Secret` (Rust enum sin payload) | discriminant |
+| `enum SecretOwner` | `enum SecretOwner { Bnetserver, Worldserver }` | — |
+| `std::mutex lock` per-Secret | `parking_lot::Mutex<SecretState>` | — |
+| `BigNumber` | `[u8; 16]` (128 bits) o `num_bigint::BigUint` | Para AES key, prefer `[u8; 16]` |
+| `Argon2::Hash` / `Verify` | crate `argon2` (RustCrypto) | Mismos params (Argon2id, m, t, p) que C++ |
+| `AEEncryptWithRandomIV<AES>` | nuevo `wow_crypto::aes_cbc_hmac::seal` | **NO usar AES-GCM** — formato no compatible |
+| `LoginDatabaseTransaction` | `sqlx::Transaction<'_, MySql>` | — |
+| `sConfigMgr->GetStringDefault` | `wow_config::Config::get_string_default` | — |
+| `ABORT()` | `panic!()` o `std::process::exit(1)` | Mismo efecto |
+| Lazy load on `GetSecret` | `OnceCell` o check-and-set bajo Mutex | — |
+
+---
+
+*Template version: 1.0 (2026-05-01).*

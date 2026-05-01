@@ -1,0 +1,161 @@
+# Migration: Weather
+
+> **C++ canonical path:** `/home/server/woltk-trinity-legacy/src/server/game/Weather/`
+> **Rust target crate(s):** `crates/wow-world/` (no dedicated crate; would live next to `MapManager` / zone systems)
+> **Layer:** L8 (service — per-zone tick loop on top of map/zone)
+> **Status:** ❌ not started
+> **Audited vs C++:** ✅ complete (module is small: 4 files, ~480 lines total)
+> **Last updated:** 2026-05-01
+
+---
+
+## 1. Purpose
+
+Per-zone weather state machine. For every zone with a `game_weather` row, runs a Markov-chain regenerator that picks a `WeatherType` (fine/rain/snow/storm/blackrain/thunders) and an `intensity` float in [0, 1). The combination is mapped to a `WeatherState` opcode value (e.g. `WEATHER_STATE_LIGHT_RAIN = 3`) and broadcast via `SMSG_WEATHER` to every player in the zone every `CONFIG_INTERVAL_CHANGEWEATHER` ms (default 10 minutes). Also exposes `SetWeather` for scripted overrides (instance encounters, holiday events).
+
+---
+
+## 2. C++ canonical files
+
+| File | Lines | Purpose |
+|---|---|---|
+| `src/server/game/Weather/Weather.h` | 92 | `Weather` class, `WeatherState` enum, `WeatherData` / `WeatherSeasonChances` structs |
+| `src/server/game/Weather/Weather.cpp` | 322 | Per-zone state machine: `Update`, `ReGenerate`, `UpdateWeather`, `GetWeatherState` |
+| `src/server/game/Weather/WeatherMgr.h` | 37 | `WeatherMgr` namespace (loader + lookup only) |
+| `src/server/game/Weather/WeatherMgr.cpp` | 105 | `LoadWeatherData` from `world.game_weather`, `GetWeatherData(zone_id)` |
+
+Note: the lifecycle owner (`std::map<uint32, std::unique_ptr<Weather>>`) lives in `Map.cpp` (see `Map::AddZoneDynamicInfo`/`UpdateZoneWeather`) — Weather objects are created lazily on first player entering a zone.
+
+---
+
+## 3. Classes / Structs / Enums
+
+| Symbol | Kind | Purpose |
+|---|---|---|
+| `Weather` | class | Per-zone weather instance (state + 10-min timer) |
+| `WeatherMgr` | namespace | Static loader for `WeatherData` keyed by `zone_id` |
+| `WeatherData` | struct | 4 `WeatherSeasonChances` + `ScriptId` |
+| `WeatherSeasonChances` | struct | `rainChance`, `snowChance`, `stormChance` (each 0-100) |
+| `WeatherState` | enum (uint32) | Wire value sent to client (FINE=0, FOG=1, LIGHT_RAIN=3, …, BLACKSNOW=106) |
+| `WeatherType` | enum (declared in `SharedDefines.h`) | Internal type: FINE, RAIN, SNOW, STORM, BLACKRAIN, THUNDERS |
+| `WEATHER_SEASONS` | constexpr | 4 (spring/summer/fall/winter) |
+
+---
+
+## 4. Critical public methods / functions
+
+| Symbol | Purpose | Calls into |
+|---|---|---|
+| `Weather::Weather(zoneId, WeatherData const*)` | Construct; pulls interval from `CONFIG_INTERVAL_CHANGEWEATHER` | — |
+| `Weather::Update(uint32 diff)` | Tick; returns `false` when zone empty (caller drops it) | `ReGenerate`, `UpdateWeather`, `sScriptMgr->OnWeatherUpdate` |
+| `Weather::ReGenerate()` | Markov chain: 30% no-change / 30% better / 30% worse / 10% radical; uses `urand`/`rand_norm` | `GameTime::GetGameTime` (for season via `localtime_r` & `tm_yday`) |
+| `Weather::UpdateWeather()` | Build `SMSG_WEATHER` packet, send to zone via `World::SendZoneMessage`; logs change | `sScriptMgr->OnWeatherChange` |
+| `Weather::SendWeatherUpdateToPlayer(Player*)` | Push current state to a single player (e.g. on zone enter) | — |
+| `Weather::SendFineWeatherUpdateToPlayer(Player*)` | Force-send FINE (used on zone leave) | — |
+| `Weather::SetWeather(WeatherType, float intensity)` | Scripted override; calls `UpdateWeather` immediately | — |
+| `Weather::GetWeatherState() const` | Map (type, intensity) → `WeatherState` wire value | — |
+| `WeatherMgr::LoadWeatherData()` | Read all rows of `world.game_weather`; clamp invalid % | `sObjectMgr->GetScriptId` |
+| `WeatherMgr::GetWeatherData(zone_id)` | `MapGetValuePtr` lookup, returns `nullptr` if no data | — |
+
+---
+
+## 5. Module dependencies
+
+**Depends on:**
+- `Time` — `GameTime::GetGameTime()` for season computation in `ReGenerate`.
+- `Server/World` — `sWorld->getIntConfig(CONFIG_INTERVAL_CHANGEWEATHER)`, `SendZoneMessage`.
+- `Globals/ObjectMgr` — `GetScriptId(name)` for the `ScriptName` column.
+- `Scripting/ScriptMgr` — `OnWeatherUpdate`, `OnWeatherChange` hooks.
+- `Server/Packets/MiscPackets.h` — `WorldPackets::Misc::Weather` (`SMSG_WEATHER`).
+- `Util/Random` — `urand`, `rand_norm`.
+
+**Depended on by:**
+- `Maps/Map.cpp` — owns the `Weather*` per zone, ticks them in `Map::Update`.
+- A few scripts (boss encounters that force fog / blackrain).
+
+---
+
+## 6. SQL / DB queries (if any)
+
+| Statement / Source | Purpose | DB |
+|---|---|---|
+| Inline in `WeatherMgr::LoadWeatherData` | `SELECT zone, spring/summer/fall/winter * (rain/snow/storm)_chance, ScriptName FROM game_weather` | world |
+
+No prepared statements; single startup query. No DBC/DB2 stores used.
+
+---
+
+## 7. Wire-protocol packets (if any)
+
+| Opcode | Direction | Sent/Received in |
+|---|---|---|
+| `SMSG_WEATHER` | server → client | `Weather::UpdateWeather`, `Weather::SendWeatherUpdateToPlayer`, `Weather::SendFineWeatherUpdateToPlayer` |
+
+Payload: `WeatherState (uint32)`, `intensity (float, 0..1)`, `bool unk` (transition flag). No client-originated weather opcodes.
+
+---
+
+## 8. Current state in RustyCore
+
+**Files in `/home/server/rustycore`:**
+- None. No `weather.rs`, no `crates/wow-weather`, no opcode binding for `SMSG_Weather`'s payload (the opcode constant `Weather = 0x26a6` exists in `wow-constants/src/opcodes.rs:1625` but no packet body type and no handler).
+
+**What's implemented:** nothing.
+
+**What's missing vs C++:** everything — loader for `game_weather`, per-zone state machine, season computation, `SendZoneMessage` hook, scripted `SetWeather`.
+
+**Suspicious / likely divergent:** N/A (clean slate).
+
+**Tests existing:** none.
+
+---
+
+## 9. Migration sub-tasks
+
+- [ ] **#WTH.1** Add `WeatherData` / `WeatherSeasonChances` structs and a `WeatherMgr` (or function on `WorldExt`) that loads `world.game_weather` at startup, with the same 100-cap clamp + warn behaviour. (complexity: **L**)
+- [ ] **#WTH.2** Implement `Weather` struct (`zone_id`, `kind`, `intensity`, timer, chances ref) with `update(diff_ms)` + `regenerate()` matching the 30/30/30/10 distribution exactly (use `rand` crate; document seed source). (complexity: **M**)
+- [ ] **#WTH.3** Add `weather_state()` mapping (RAIN/SNOW/STORM × intensity bands → `WEATHER_STATE_*` u32), and the BLACKRAIN/THUNDERS pass-through. (complexity: **L**)
+- [ ] **#WTH.4** Define `SmsgWeather` packet in `wow-packet` (`WeatherState u32`, `intensity f32`, `transition bool`) and wire `Weather::send_to_zone` through `MapManager`/`PlayerRegistry` zone iteration. (complexity: **M**)
+- [ ] **#WTH.5** Hook ownership into `MapManager`: `HashMap<u32 zone_id, Weather>` per `Map`, ticked from the existing map update loop; drop entry when `update()` returns `false` (no players). (complexity: **M**)
+- [ ] **#WTH.6** Public APIs: `send_weather_update_to_player(player)` on zone enter, `send_fine_weather_update_to_player` on leave, `set_weather(kind, intensity)` for scripts. (complexity: **L**)
+- [ ] **#WTH.7** Wire script hooks (`on_weather_update`, `on_weather_change`) once the scripting layer exists; no-op stubs for now. (complexity: **L**)
+
+---
+
+## 10. Regression tests to write
+
+- [ ] `regenerate` distribution: with a fixed seed, 1M iterations starting from a known state must match the C++ histogram for {fine, light, medium, heavy} within ±0.5%.
+- [ ] Season computation: `(tm_yday - 78 + 365) / 91 % 4` matches the `localtime_r`-derived season for a battery of timestamps spanning a year.
+- [ ] `intensity` clamping: any value ≥1 clamps to `0.9999`; <0 clamps to `0.0001` (verbatim from `UpdateWeather`).
+- [ ] `WeatherState` mapping: table-test all (type, intensity) combinations against the C++ `GetWeatherState` switch.
+- [ ] Empty zone: `Weather::update` on a zone with zero players returns `false` and is dropped from the map.
+- [ ] Loader clamp: a row with `rain_chance=200` is replaced with `25` and an error is logged.
+
+---
+
+## 11. Notes / gotchas
+
+- **Season trick**: 78 days offset puts spring start at March 20, then 91-day blocks. Don't simplify — the magic constants come from US Naval Observatory data and fans noticed mismatches in earlier rewrites.
+- **`Weather::Update` returning `false`** is the only way Weather objects get freed. The map tick must drop the `Weather` from its map when this happens, otherwise dead zones leak.
+- The 30/30/30/10 in `ReGenerate` is misleading — read it carefully: the first `if (u<30) return false` short-circuits, then the next checks reuse the same `u` so the distributions overlap. The Rust port should preserve the exact branch order, not re-derive a "cleaner" distribution.
+- WoLK 3.4.3-specific: `WEATHER_STATE_BLACKSNOW = 106` exists in the enum but no current `WeatherType` produces it; reserve for scripts only.
+- `CONFIG_INTERVAL_CHANGEWEATHER` is in milliseconds in the conf even though the log line says "minutes".
+- `sScriptMgr->OnWeatherUpdate` is called every tick (even when nothing changed), `OnWeatherChange` only when the broadcast actually fires. Don't conflate them.
+
+---
+
+## 12. C++ → Rust mapping (high-level)
+
+| C++ Symbol | Rust Equivalent | Notes |
+|---|---|---|
+| `class Weather` | `pub struct Weather` in `crates/wow-world/src/weather.rs` | Plain struct; no inheritance involved |
+| `WeatherMgr` namespace | `pub struct WeatherStore` (or free fns + `OnceLock<HashMap<u32, WeatherData>>`) | Loaded once at startup |
+| `enum WeatherState : uint32` | `#[repr(u32)] enum WeatherState` | Preserve the exact integer values; client-visible |
+| `enum WeatherType` | `#[repr(u8)] enum WeatherKind { Fine, Rain, Snow, Storm, BlackRain, Thunders }` | Internal only |
+| `IntervalTimer m_timer` | `u32` ms accumulator + `interval_ms: u32` field | Use the same pattern as other tick code in `wow-world` |
+| `World::SendZoneMessage` | iterate `PlayerRegistry` filtering by zone, push `SmsgWeather` bytes | Lives in `wow-network` registries |
+| `sScriptMgr->OnWeatherUpdate` | trait hook on a future `ScriptMgr`; no-op stub initially | Defer until `wow-script` lands |
+
+---
+
+*Template version: 1.0 (2026-05-01).*

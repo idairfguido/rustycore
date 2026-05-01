@@ -1,0 +1,194 @@
+# Migration: shared/Dynamic
+
+> **C++ canonical path:** `/home/server/woltk-trinity-legacy/src/server/shared/Dynamic/`
+> **Rust target crate(s):** n/a (idiom replacement: `Arc`/`Weak` + `enum`s + `inventory`)
+> **Layer:** L1
+> **Status:** ✅ done (sustituido por idiom Rust; no port directo)
+> **Audited vs C++:** ❌ not audited
+> **Last updated:** 2026-05-01
+
+---
+
+## 1. Purpose
+
+Conjunto de templates C++ que dan TrinityCore su zoo de "smart pointers caseros" y registries genéricos: `LinkedList` intrusiva, `Reference<TO,FROM>` (auto-unlink en destructor), `RefManager`, `ObjectRegistry<T,Key>` (singleton-map de unique_ptr), `FactoryHolder<T,O,Key>` (factoría auto-registrante), y `TypeList` (lista de tipos a la Loki). Es C++ idiom puro: **no se porta directo a Rust**, sus equivalentes son `Arc`/`Weak`, `enum dispatch`, `HashMap<K, Box<dyn Trait>>`, y el crate `inventory` para auto-registration.
+
+---
+
+## 2. C++ canonical files
+
+| File | Lines | Purpose |
+|---|---|---|
+| `src/server/shared/Dynamic/LinkedList.h` | 231 | `LinkedListElement` + `LinkedListHead` (doubly-linked intrusivo, bidirectional iterator) |
+| `src/server/shared/Dynamic/LinkedReference/Reference.h` | 104 | `Reference<TO,FROM>` extiende `LinkedListElement`, hooks `targetObjectBuildLink`/`targetObjectDestroyLink`/`sourceObjectDestroyLink` |
+| `src/server/shared/Dynamic/LinkedReference/RefManager.h` | 54 | `RefManager<TO,FROM>` extiende `LinkedListHead`, `clearReferences` invalida todos |
+| `src/server/shared/Dynamic/ObjectRegistry.h` | 85 | `ObjectRegistry<T, Key=string>` singleton + `RegistryMapType = map<Key, unique_ptr<T>>` |
+| `src/server/shared/Dynamic/FactoryHolder.h` | 54 | `FactoryHolder<T,O,Key>` con `RegisterSelf` + `Permissible<T>::Permit` |
+| `src/server/shared/Dynamic/TypeList.h` | 45 | `TypeList<HEAD,TAIL>` + `TYPELIST_1..8` macros |
+| **TOTAL** | **~573** | — |
+
+---
+
+## 3. Classes / Structs / Enums
+
+| Symbol | Kind | Purpose |
+|---|---|---|
+| `LinkedListElement` | class | Nodo de doubly-linked list intrusiva, auto-delink en destructor |
+| `LinkedListHead` | class | Sentinel nodes `iFirst`/`iLast` + `iSize` lazy-counted |
+| `LinkedListHead::Iterator<T>` | template inner | `bidirectional_iterator_tag`, op++/--, op==/!= |
+| `Reference<TO,FROM>` | template class | Hereda `LinkedListElement`; vinculo bidi entre `TO` y `FROM` con hooks virtuales |
+| `RefManager<TO,FROM>` | template class | Hereda `LinkedListHead`; collection de Reference que se auto-invalidan en destrucción |
+| `ObjectRegistry<T,Key>` | template singleton | Map global `Key → unique_ptr<T>` con `InsertItem(force=false)` |
+| `FactoryHolder<T,O,Key>` | template class | Factory base con `Create(O*)=0` virtual + `RegisterSelf` |
+| `Permissible<T>` | template class | `Permit(T const*) const = 0` — patrón de selector "este factory acepta este input" |
+| `TypeList<HEAD,TAIL>` | template struct | Lista de tipos compile-time; `TYPELIST_N` macros |
+| `TypeNull` | sentinel class | Terminator de lista de tipos |
+
+---
+
+## 4. Critical public methods / functions
+
+| Symbol | Purpose | Calls into |
+|---|---|---|
+| `LinkedListElement::delink()` | Quitar nodo de su lista, nullear vecinos | — |
+| `LinkedListElement::insertBefore/After` | Splice de nodo en posición | — |
+| `LinkedListElement::~LinkedListElement` | Auto-delink (RAII) | `delink` |
+| `LinkedListHead::insertFirst/Last` | Splice al sentinel | `insertAfter`/`Before` |
+| `LinkedListHead::isEmpty()` | `!iFirst.iNext->isInList()` | — |
+| `LinkedListHead::getSize()` | Si `iSize=0` cuenta linealmente, sino retorna cached | — |
+| `Reference<TO,FROM>::link(toObj, fromObj)` | Establece link, dispara `targetObjectBuildLink` | — |
+| `Reference::unlink()` | Llama `targetObjectDestroyLink` + delink | — |
+| `Reference::invalidate()` | Llama `sourceObjectDestroyLink` + delink (target murió) | — |
+| `RefManager::clearReferences()` | Invalida todos los refs hijos | — |
+| `ObjectRegistry::instance()` | Singleton accessor | — |
+| `ObjectRegistry::InsertItem(obj, key, force)` | Add con opción de overwrite | — |
+| `ObjectRegistry::GetRegistryItem(key)` | Lookup, puede devolver null | — |
+| `FactoryHolder::RegisterSelf()` | `FactoryHolderRegistry::instance()->InsertItem(this, _key)` | — |
+| `FactoryHolder::Create(O*)` | Virtual factory method | — |
+
+---
+
+## 5. Module dependencies
+
+**Depends on:**
+- `Define.h` — `uint32` typedefs
+- `Errors.h` — `ASSERT`
+- nada más; es header-only puro
+
+**Depended on by:**
+- `game/Movement` — `MovementGenerator`s usan `FactoryHolder` (`MovementGeneratorFactory`)
+- `game/AI` — `CreatureAI` factories usan `FactoryHolder<CreatureAI, Creature>`
+- `game/Combat/HostileRefManager` — `HostileReference` extiende `Reference<Unit, ThreatManager>`
+- `game/Server/HostileRefManager`, `ThreatManager`, `RedirectThreatInfo` — `RefManager` para tracking de threat list
+- `game/Spells/Auras` — `Aura::AuraApplications` usa lista intrusiva (parecida)
+- `shared/Database/MySQL/...` — algunos prepared statements registries usan `ObjectRegistry`
+- `Battlefield` / `OutdoorPvP` script registries
+
+---
+
+## 6. SQL / DB queries
+
+N/A — utility puro.
+
+---
+
+## 7. Wire-protocol packets
+
+N/A.
+
+---
+
+## 8. Current state in RustyCore
+
+**Files in `/home/server/rustycore`:**
+- **(ninguno literal).** No existe `LinkedList.rs`, ni `RefManager.rs`, ni `ObjectRegistry.rs`. Es C++ idiom; **Rust resuelve los mismos problemas con primitives diferentes**. Status “done” en sentido idiomático: cada uso del C++ ya tiene su contraparte natural Rust.
+
+**Mapping idiomático (cómo se resuelve cada caso de uso):**
+
+| Caso de uso C++ | Equivalente Rust en RustyCore |
+|---|---|
+| `LinkedList` para iterar lista pequeña con removes baratos | `Vec<T>` + `Vec::retain` o `LinkedList<T>` (std), nadie lo usa en RustyCore |
+| `Reference<TO,FROM>` para link cross-objeto que sobrevive al destructor del owner | `Arc<RwLock<T>>` + `Weak<RwLock<T>>` (target tiene `Vec<Weak<...>>`) |
+| `RefManager::clearReferences` | drop del `Arc<...>` ⇒ `Weak::upgrade()` retorna `None` ⇒ readers limpian al iterar |
+| `ObjectRegistry<T, string>` para script/factory lookup | `inventory::collect!(T)` + `inventory::iter::<T>` (estática), ó `HashMap<&'static str, fn(...) -> Box<dyn Trait>>` |
+| `FactoryHolder<T,O>` con `RegisterSelf` | `inventory::submit!` + `inventory::collect!` (`crates/wow-handler/src/lib.rs` lo usa para packet handlers — patrón canónico en RustyCore) |
+| `TypeList<HEAD,TAIL>` + `TypeContainerVisitor` (game/Grids) | Tuple types + traits + `enum dispatch`. Para RustyCore actual: enums (`AnyMapObject`) o `HashMap<TypeId, ...>` |
+| `Permissible<T>::Permit` selector | `fn permit(&self, input: &T) -> i32` en un trait + iterar registry |
+
+**Específicamente en RustyCore:**
+- **Packet handler registry** = `inventory::submit!(PacketHandlerEntry{...})` en `wow-handler` (~ es `FactoryHolder` Rust-idiomatic)
+- **MapManager / grid storage** = HashMap<MapId, MapInstance> con `Arc<RwLock<...>>`; sin `TypeContainerVisitor`, los visitors se reemplazan por iter-and-match (pequeñas funciones que hacen `for creature in grid.creatures.values()`)
+- **Threat list / hostile refs** = TODO; combat module aún no implementa `Weak`-based threat tracking (mantiene `HashMap<ObjectGuid, ThreatEntry>` plano)
+
+**What's implemented (idiom):**
+- `inventory` crate usado para `PacketHandlerEntry` registration → cubre 80% del uso de `FactoryHolder`/`ObjectRegistry`
+- `Arc<RwLock<T>>` + `Weak` patrón disponible (workspace deps `parking_lot`, `dashmap`)
+- `std::collections::LinkedList` disponible si se necesitara (no se usa)
+
+**What's missing vs C++:**
+- N/A — no hay un “port” pendiente. Lo que importa es que cuando se traiga código que dependía de `RefManager` (combat threat, aura applications) se use `Weak<...>` en lugar de un port literal.
+- Si futuros módulos requieren un `ObjectRegistry`-style, el patrón canónico ya es `inventory::collect!`.
+
+**Suspicious / likely divergent (hipótesis pre-auditoría):**
+- **Threat list:** el C++ usa `HostileRefManager` con `Reference<Unit, ThreatManager>` para que cuando una `Unit` muera, todas sus inverse-refs se auto-invaliden. El Rust de `wow-combat` actual mantiene `HashMap<ObjectGuid, ThreatEntry>` plano y limpia explícitamente on death. Funcionalmente equivalente pero hay riesgo de leaks si alguien olvida limpiar.
+- **Aura targets:** mismo patrón — Rust ata aura a target via `ObjectGuid`, no via `Weak`, por lo que un GUID stale puede apuntar a un objeto distinto si el slot se reusa. **Verificar invariante de unicidad de GUID por sesión**.
+
+**Tests existing:**
+- 0 tests específicos (no hay módulo).
+
+---
+
+## 9. Migration sub-tasks
+
+> **Objetivo:** no portar el código sino documentar y enforce el idiom Rust en cada call site.
+
+- [ ] **#DYN.1** Auditar combat: `wow-combat` threat list — ¿usa `ObjectGuid` plano o `Weak<Unit>`? Documentar en `combat.md`. (M)
+- [ ] **#DYN.2** Auditar auras (`wow-spell`): aura → target link debería resistir GUID reuse. (M)
+- [ ] **#DYN.3** Documentar el patrón `inventory::submit!` como **el** patrón canónico para registries en `CONTRIBUTING.md` o equivalente. (L)
+- [ ] **#DYN.4** Si surge necesidad de listas intrusivas eficientes (rare), evaluar `intrusive-collections` crate antes de fabricar. (L)
+- [ ] **#DYN.5** Cuando se traiga `MovementGenerator` factory (game/Movement), usar `inventory::submit!`, **no** un puerto literal de `FactoryHolder`. (M)
+- [ ] **#DYN.6** Cuando se traiga `TypeContainerVisitor` (game/Grids), no portar como tal — en `MapManager` ya hay grids tipados; los “visits” se hacen con methods explícitos (`visit_creatures_in_radius` etc.). (M)
+
+---
+
+## 10. Regression tests to write
+
+Tests a nivel sistémico (no unitarios de este módulo):
+
+- [ ] **Threat list invariante:** killer muere → todos sus `ThreatEntry` desaparecen sin leak (test en `wow-combat`)
+- [ ] **GUID reuse safety:** crear creature, soltar guid, crear nueva creature con mismo guid base → ningún aura/threat de la primera apunta a la segunda
+- [ ] **`inventory::collect!` determinism:** misma compilación, mismo orden de iteration en `wow-handler`
+- [ ] **Drop semantics:** `Arc<RwLock<Unit>>` se libera cuando última `Strong` cae; `Weak::upgrade` retorna `None`
+
+---
+
+## 11. Notes / gotchas
+
+1. **No portar literal:** intentar portar `Reference<TO,FROM>` con punteros raw + `Drop` impl es un footgun de unsafe Rust. Usar `Arc`/`Weak` aunque tenga overhead distinto.
+2. **`LinkedListElement::~LinkedListElement` auto-delink** — equivalente Rust: `Drop` impl en wrapper alrededor de `Vec<...>` + index manual; o simplemente no usar listas intrusivas.
+3. **`ObjectRegistry::InsertItem(force=false)`** — semántica de "no overwrite si existe" → `HashMap::entry().or_insert_with()`.
+4. **`TypeList` + visitors** — antiguo trick C++ pre-variadic-templates. En Rust usar `enum AnyEntity { Creature(Arc<...>), Player(Arc<...>), ... }` o variadic generics si llega.
+5. **`FactoryHolder::RegisterSelf`** invocado en static-init time del C++ — equivalente Rust es `inventory::submit!` (usa link-time collection vía constructor attributes).
+6. **`Permissible::Permit` retorna `int32`** — el "score" más alto gana. Patrón Rust: `fn score(&self, input: &T) -> i32` en trait + `iter().max_by_key(|f| f.score(...))`.
+7. **iSize lazy en `LinkedListHead`** — si `iSize == 0` recorre la lista. Detalle de optimización; nadie lo necesita en Rust.
+
+---
+
+## 12. C++ → Rust mapping
+
+| C++ | Rust | Notas |
+|---|---|---|
+| `LinkedListElement` (intrusive node) | `std::collections::LinkedList<T>` o `Vec<T>` | Linked list raramente la solución correcta en Rust |
+| `LinkedListHead<T>::Iterator` | `impl Iterator for ...` con `next()`/`prev()` | std handles bidir |
+| `Reference<TO,FROM>` | `Weak<RwLock<TO>>` poseído por `FROM` | Drop auto-invalida via `upgrade() == None` |
+| `RefManager<TO,FROM>::clearReferences()` | drop del `Arc` → todos los `Weak` invalidan en upgrade | RAII Rust |
+| `targetObjectBuildLink` virtual | callback closure pasado al constructor del wrapper | No herencia |
+| `ObjectRegistry<T, string>` | `inventory::collect!(T)` + `inventory::iter::<T>` | Compile-time registration |
+| `FactoryHolder<T,O,Key>::RegisterSelf` | `inventory::submit! { Factory { key, create_fn } }` | Patrón canónico ya en `wow-handler` |
+| `Permissible<T>::Permit` | `fn permit(&self, t: &T) -> i32` en trait | iter+max_by_key |
+| `TypeList<HEAD,TAIL>` | tuple `(HEAD, TAIL)` + traits, o `enum` | sin necesidad real |
+| `TypeContainerVisitor` (en game/Grids) | métodos explícitos por tipo en `MapManager` | divergencia idiomática total |
+
+---
+
+*Template version: 1.0 (2026-05-01).*

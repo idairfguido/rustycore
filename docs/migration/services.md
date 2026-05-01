@@ -1,0 +1,183 @@
+# Migration: Services (Worldserver-side BNet RPC dispatcher)
+
+> **C++ canonical path:** `src/server/game/Services/`
+> **Rust target crate(s):** `crates/wow-network/`, `crates/wow-world/`, `crates/wow-proto/` — *(out of scope for the WotLK 3.4.3 path; see notes)*
+> **Layer:** L1 — Cross-realm RPC infrastructure
+> **Status:** ❌ not started — and likely not needed
+> **Audited vs C++:** ❌ not audited
+> **Last updated:** 2026-05-01
+
+---
+
+## 1. Purpose
+
+Routes BNet protobuf RPC calls **received over the world-socket** (`SMSG_BATTLE_NET_REQUEST` / `CMSG_BATTLE_NET_REQUEST` family) into the right protobuf-service handler. It is the world-server-side mirror of the bnetserver `Services/` dispatcher: once a session is in-game, the client can keep talking to BNet services (friends, presence, club, realm-list refresh, …) over the existing encrypted world TCP channel rather than re-authenticating to the bnetserver. The module is essentially TC's gRPC-style template machinery glued onto a `WorldSession`.
+
+---
+
+## 2. C++ canonical files
+
+All paths relative to `/home/server/woltk-trinity-legacy/`.
+
+| File | Lines (approx) | Purpose |
+|---|---|---|
+| `src/server/game/Services/WorldserverService.h` | 45 | Generic `template<class T> WorldserverService : public T` adapter; rewires `SendRequest`/`SendResponse`/`GetCallerInfo` of any protobuf service to a `WorldSession`'s wire methods |
+| `src/server/game/Services/WorldserverServiceDispatcher.h` | 72 | `WorldserverServiceDispatcher` singleton (`sServiceDispatcher`); maps `serviceHash → handler` |
+| `src/server/game/Services/WorldserverServiceDispatcher.cpp` | 49 | Registers 12 services (`Account`, `Authentication`, `ClubMembership`, `Club`, `Connection`, `Friends`, `GameUtilities`, `Presence`, `Report v1`, `Report v2`, `Resources`, `UserManager`); dispatches buffered RPCs |
+| `src/server/game/Services/WorldserverGameUtilitiesService.h` | 50 | `GameUtilitiesService` — handles `RealmListRequest` / `RealmJoinRequest` over the world socket |
+| `src/server/game/Services/WorldserverGameUtilitiesService.cpp` | 143 | Compresses realm list into a protobuf attribute, optionally fetches realm-list sub-regions |
+
+Related files (lives elsewhere, but part of the same RPC machinery):
+- `src/common/Services/Service.h` / `ServiceBase.h` — base classes for generated protobuf services
+- `src/server/proto/Server/{account,authentication,club,connection,friends,game_utilities,presence,report,resource_service,user_manager}_service.proto` — generated `*Service` C++ classes (one per service)
+- `src/server/game/Server/WorldSession.cpp` — `SendBattlenetRequest / SendBattlenetResponse / HandleBattlenetRequest` invoke the dispatcher.
+
+---
+
+## 3. Classes / Structs / Enums
+
+| Symbol | Kind | Purpose |
+|---|---|---|
+| `Battlenet::WorldserverService<T>` | template class | Adapter: subclasses any generated `T : public ServiceBase`, wires its RPC sinks to a `WorldSession` |
+| `Battlenet::WorldserverServiceDispatcher` | class (singleton) | Map from `serviceHash` (FNV-1a-style 32-bit hash of the protobuf service's original name) to a function pointer that constructs the right service for a session and dispatches the call |
+| `Battlenet::Services::GameUtilitiesService` | class : WorldserverService<game_utilities::v1::GameUtilitiesService> | Concrete handler for `Command_RealmListRequest_v1` and `Command_RealmJoinRequest_v1` — the in-game "show me the realm list / let me hop realms" flow |
+| `ClientRequestHandler` | typedef (member fn ptr) | `uint32 (GameUtilitiesService::*)(const std::unordered_map<std::string, Variant const*>&, ClientResponse*)` |
+| `MessageBuffer` | (defined elsewhere) | Owning byte buffer the dispatcher hands to the chosen service |
+| `Attribute` / `Variant` | protobuf | Generated message types (`bgs::protocol::game_utilities::v1`) |
+
+---
+
+## 4. Critical public methods / functions
+
+| Symbol | Purpose | Calls into |
+|---|---|---|
+| `WorldserverServiceDispatcher::Instance()` | Magic-static singleton; constructs all 12 services lazily | `AddService<...>` for each |
+| `WorldserverServiceDispatcher::Dispatch(session, serviceHash, token, methodId, buffer)` | Lookup the service in `_dispatchers`, invoke the templated `Dispatch<Service>` static which builds an instance and calls `CallServerMethod` | `Service::CallServerMethod(token, methodId, buf)` |
+| `WorldserverService<T>::SendRequest(serviceHash, methodId, msg, callback)` | Push a server-initiated RPC onto the WorldSession's send queue | `WorldSession::SendBattlenetRequest` |
+| `WorldserverService<T>::SendResponse(serviceHash, methodId, token, status_or_msg)` | Reply with status code or protobuf message | `WorldSession::SendBattlenetResponse` |
+| `WorldserverService<T>::GetCallerInfo()` | Returns "Player <name> Account <id> [Map ... ]" for log lines | `WorldSession::GetPlayerInfo()` |
+| `GameUtilitiesService::HandleProcessClientRequest(request, response, continuation)` | Parses `request.attribute()` into a `name → Variant*` map; dispatches by command name (after stripping suffix) | One of `HandleRealmListRequest`, `HandleRealmJoinRequest` |
+| `GameUtilitiesService::HandleRealmListRequest(params, response)` | Calls `sRealmList->GetRealmList(build, subRegion)` to get a compressed protobuf blob, attaches it as `Param_RealmList` plus a zlib-compressed `JSONRealmCharacterCountList:...` JSON blob as `Param_CharacterCountList` | `RealmList`, `zlib::compress` |
+| `GameUtilitiesService::HandleRealmJoinRequest(params, response)` | Reads `Param_RealmAddress`, calls `sRealmList->JoinRealm(addr, build, ip, secret, locale, os, tz, accountName, response)` | `RealmList`, `WorldSession` getters |
+| `GameUtilitiesService::HandleGetAllValuesForAttribute(request, response, continuation)` | For attribute key prefix `Command_RealmListRequest_v1`: fills the response with sub-region keys via `sRealmList->WriteSubRegions` | `RealmList` |
+
+---
+
+## 5. Module dependencies
+
+**Depends on:**
+- `WorldSession` — for `SendBattlenetRequest`, `SendBattlenetResponse`, `GetPlayerInfo`, `GetRealmListSecret`, `GetRemoteAddress`, `GetSessionDbcLocale`, `GetOS`, `GetTimezoneOffset`, `GetAccountName`, `GetRealmCharacterCounts`
+- `RealmList` (`sRealmList`) — `GetRealmList`, `JoinRealm`, `WriteSubRegions`
+- `Common/Services/Service.h` — base `ServiceBase` template
+- All 12 generated protobuf service classes (`account_service.pb.h` etc.)
+- `BattlenetRpcErrorCodes.h` — `ERROR_OK`, `ERROR_RPC_NOT_IMPLEMENTED`, `ERROR_RPC_MALFORMED_REQUEST`, `ERROR_UTIL_SERVER_FAILED_TO_SERIALIZE_RESPONSE`, `ERROR_WOW_SERVICES_INVALID_JOIN_TICKET`
+- `ProtobufJSON.h` — for `JSON::Serialize(realmCharacterCounts)`
+- `zlib` — compression of the JSON character-count blob
+
+**Depended on by:**
+- `WorldSession::HandleBattlenetRequest` — the only call site of `sServiceDispatcher.Dispatch(...)`
+
+---
+
+## 6. SQL / DB queries (if any)
+
+None directly. `RealmList::JoinRealm` writes a `LOGIN_UPD_BNET_GAME_ACCOUNT_LAST_LOGIN`-shaped row (lives in `RealmList`, not here).
+
+DBC/DB2 stores: none.
+
+---
+
+## 7. Wire-protocol packets (if any)
+
+The dispatcher itself doesn't define opcodes — it muxes on a 32-bit `serviceHash` carried inside protobuf-shaped CMSG/SMSG envelopes. The relevant world-socket opcodes (handled in `WorldSession`):
+
+| Opcode | Direction | Sent/Received in |
+|---|---|---|
+| `SMSG_BATTLENET_NOTIFICATION` (0x4F1) | server → client | `WorldSession::SendBattlenetRequest` / `WorldserverService<T>::SendRequest` (server-initiated push) |
+| `SMSG_BATTLENET_RESPONSE` (varies, ~0x4F2) | server → client | `WorldSession::SendBattlenetResponse` / `WorldserverService<T>::SendResponse` |
+| `CMSG_BATTLENET_REQUEST` (~0x4F3) | client → server | `WorldSession::HandleBattlenetRequest` → `sServiceDispatcher.Dispatch(...)` |
+| `CMSG_BATTLENET_LISTENER_OPCODES` (varies) | client → server | Protocol negotiation; not handled by dispatcher itself |
+
+Inside each envelope: `(service_hash: u32, method_id: u32, token: u32, payload_len: u32, payload: ...)`.
+
+---
+
+## 8. Current state in RustyCore
+
+**Files in `/home/server/rustycore`:**
+- `crates/bnet-server/src/rpc/services/{account,authentication,connection,game_utilities}.rs` — these implement four BNet services on the **bnet-server side** (port 1119, before the world handshake). They are NOT the world-side dispatcher. The world-server has *no* equivalent.
+- `crates/wow-proto/proto/` — has the protobuf generated types, but only what the bnet-server uses. The full set (`club`, `friends`, `presence`, `report`, `resources`, `user_manager`) is not in `wow-proto`.
+- `crates/wow-world/src/` — no `BattlenetRequest` opcode handler, no `service_dispatcher`, no `WorldserverService` adapter. The session has no `send_battlenet_request` / `send_battlenet_response` methods.
+
+**What's implemented:**
+- BNet RPC dispatcher on the **auth port** (`bnet-server/src/rpc/`) — for the pre-game login handshake only.
+
+**What's missing vs C++:**
+- Everything specific to the worldserver side. The whole `WorldserverServiceDispatcher` + 12 service registrations + `GameUtilitiesService::HandleRealmListRequest / HandleRealmJoinRequest` (in-game realm-hop flow) are absent.
+- `WorldSession::send_battlenet_request / send_battlenet_response / handle_battlenet_request` — no plumbing.
+- All non-game-utilities services (account, auth, club, connection, friends, presence, report, resources, user_manager) on the world side.
+- Service hash registry / FNV-1a hashing of original protobuf service names. The `Service::OriginalHash::value` constant is auto-generated by TC's `protoc` plugin; no Rust counterpart.
+
+**Suspicious / likely divergent (hipótesis pre-auditoría):**
+- The Rust client appears to never trigger `CMSG_BATTLENET_REQUEST` against the world server (it never asks for realm hops in-game; players are forced to log out to switch realms). If true, this whole module can be parked indefinitely without breaking the WotLK 3.4.3 single-realm experience.
+- Friends/Club/Presence services are mostly relevant to retail (chat across realms, communities). For 3.4.3 Classic one realm + in-game social we already cover via `wow-social` / `wow-chat`.
+- Report v1/v2 (player reporting for harassment etc.) likely unused on a private server.
+
+---
+
+## 9. Migration sub-tasks
+
+> **Scoping note:** for the WotLK 3.4.3 Classic target, treat this entire module as **out-of-scope** unless and until the live client is observed sending `CMSG_BATTLENET_REQUEST` to the world-server. Sub-tasks below are listed for completeness; do not start work on them without an opcode capture demonstrating the need.
+
+- [ ] **#SVC.1** Pcap-trace a 3.4.3.54261 client doing in-game `/realms`, character logout-to-realm-list, and friend/social actions. If `CMSG_BATTLENET_REQUEST` (opcode 0x4F3) never fires, mark this module as out-of-scope and stop. (L)
+- [ ] **#SVC.2** If S.1 shows traffic: define `wow-network` envelope structs `BattlenetRequest { service_hash: u32, method_id: u32, token: u32, payload: Vec<u8> }` and matching `BattlenetResponse`. (M)
+- [ ] **#SVC.3** Add `WorldSession::send_battlenet_request / send_battlenet_response / handle_battlenet_request`. (M)
+- [ ] **#SVC.4** Compute the `serviceHash` for each generated protobuf service at build-time (TC uses an FNV-1a over the *original* fully-qualified service name; replicate exactly — `bgs.protocol.game_utilities.v1.GameUtilities` etc.). (M)
+- [ ] **#SVC.5** Build a `WorldserverServiceDispatcher` keyed on those hashes, with a `dyn Fn(&mut WorldSession, token, method_id, Bytes) -> Result<()>` table. (M)
+- [ ] **#SVC.6** Port `GameUtilitiesService::handle_process_client_request` — attribute-name routing on `Command_*_v1` keys. (M)
+- [ ] **#SVC.7** Port `handle_realm_list_request`: pull realms from the realm registry, protobuf-encode, attach the JSON character-count blob (zlib-compressed, `JSONRealmCharacterCountList:` prefix), match TC's exact byte layout. (H)
+- [ ] **#SVC.8** Port `handle_realm_join_request`: call into `realm_list::join_realm(addr, build, ip, secret, locale, os, tz, account_name, &mut response)`. (M)
+- [ ] **#SVC.9** Port `handle_get_all_values_for_attribute` (sub-region enumeration). (L)
+- [ ] **#SVC.10** Other 11 services: stub with `RPC_NOT_IMPLEMENTED` (`0x80000020`-ish error code) and log `"unimplemented worldserver service: 0x{:x}"` until/unless needed. (L)
+
+---
+
+## 10. Regression tests to write
+
+- [ ] Test: no `CMSG_BATTLENET_REQUEST` is observed during a normal login → play-for-5-min → logout cycle. (Establishes the out-of-scope baseline.)
+- [ ] Test: `service_hash("bgs.protocol.game_utilities.v1.GameUtilities")` matches the constant generated by TC's `protoc` plugin (capture from a built C++ binary).
+- [ ] Test: `handle_realm_list_request` for a fresh subregion produces a `Param_RealmList` blob that, when decompressed, byte-equals what TC produces for the same realmlist contents.
+- [ ] Test: an unknown `service_hash` logs at `debug` level (not error) and replies `ERROR_RPC_NOT_IMPLEMENTED`, matching TC's behaviour.
+
+---
+
+## 11. Notes / gotchas
+
+- **`Service::OriginalHash` is generated by TC's protoc plugin** in `dep/protobuf-tc-extensions/`. The hash function is FNV-1a 32-bit over the *original* fully-qualified service name with package prefix (`bgs.protocol.X.vN.YService`). Reimplementing this without checking against a captured binary is a guaranteed protocol-mismatch bug.
+- **The 12 services registered in `WorldserverServiceDispatcher.cpp` are a strict superset of what's actually invoked**. TC registers everything the client could in principle ask for; in 3.4.3 Classic, GameUtilities is the only one that actually gets traffic in normal gameplay. Account/Auth on the world socket exist as a defensive measure for re-auth flows.
+- **`HandleRealmListRequest` does TWO compressions**: (1) the realm list itself comes pre-compressed from `sRealmList->GetRealmList()`, (2) the character-count JSON is then zlib-`compress()`d inline with a 4-byte little-endian length prefix. Both are then attached as separate `Attribute`s on the response. Easy to confuse the two.
+- **Attribute-name suffix stripping**: `removeSuffix("Command_RealmListRequest_v1")` returns `"Command_RealmListRequest"` (chops the last `_v1`). The handler map is keyed on the stripped form. Any whitespace/encoding mismatch silently routes to "unknown command".
+- **`Variant`** is a protobuf union with `int_value`, `uint_value`, `float_value`, `string_value`, `blob_value`, `message_value`, `bool_value`. `GetParam(...) ? ->string_value()` will return `""` if the wrong field was set, not an error.
+- WoLK 3.4.3 *Classic* uses retail Cataclysm+ BNet protobuf schemas even though the gameplay opcode set is WotLK. Don't try to reuse 3.3.5a-era bnetlibs.
+- Whatever happens in S.1, the bnetserver-side `GameUtilitiesService` (`bnet-server/src/rpc/services/game_utilities.rs`) covers the **pre-login** realm list. The world-side one only matters if the client refreshes mid-session.
+
+---
+
+## 12. C++ → Rust mapping (high-level)
+
+| C++ Symbol | Rust Equivalent | Notes |
+|---|---|---|
+| `template<class T> class WorldserverService : public T` | Trait `WorldserverServiceAdapter` plus an `impl<S: ProtobufService> WorldserverServiceAdapter for WorldserverWrapper<S>` | Rust has no public inheritance; use composition + trait. Each generated service becomes a struct that holds a `&mut WorldSession`. |
+| `class WorldserverServiceDispatcher` | `struct WorldserverServiceDispatcher { dispatchers: HashMap<u32, fn(&mut WorldSession, u32, u32, Bytes) -> Result<()>> }` + a `OnceLock` | Singleton via `OnceLock`. |
+| `class GameUtilitiesService : public WorldserverService<game_utilities::v1::GameUtilitiesService>` | `struct GameUtilitiesService<'s> { session: &'s mut WorldSession }` with `impl GameUtilitiesService<'_> { fn handle_process_client_request(...) }` | — |
+| `MessageBuffer` (TC's owning byte buffer) | `bytes::Bytes` or `Vec<u8>` | — |
+| `std::function<void(MessageBuffer)>` callbacks | `Box<dyn FnOnce(Bytes) + Send>` (or `tokio::sync::oneshot` if request/response) | — |
+| `std::unordered_map<std::string, Variant const*>` | `HashMap<String, &Variant>` | `Variant` is a `prost`-generated message; use `&` not `Arc`. |
+| `Service::OriginalHash::value` (FNV-1a 32-bit over original name) | `pub const ORIGINAL_HASH: u32 = fnv1a32(b"bgs.protocol.game_utilities.v1.GameUtilities");` (`const fn fnv1a32`) | Define once per service in `crates/wow-proto/src/service_hashes.rs`; verify against capture. |
+| `zlib::compress` (raw `compress2(...)` from `<zlib.h>`) | `flate2::write::ZlibEncoder` | Wire format must match TC's `compress()` — that's "zlib" (RFC1950), not "deflate" (RFC1951) and not gzip. |
+| `JSON::Serialize(realmCharacterCountList)` | `serde_json::to_string(&realm_character_count_list)?` with the same field naming | TC uses protobuf-JSON; the wire prefix `JSONRealmCharacterCountList:` is literal. |
+| `sServiceDispatcher.Dispatch(session, hash, token, methodId, buf)` | `worldserver_service_dispatcher().dispatch(session, hash, token, method_id, buf)` | — |
+
+---
+
+*Template version: 1.0 (2026-05-01).* Cuando se rellene, actualizar header de status y `Last updated`.
