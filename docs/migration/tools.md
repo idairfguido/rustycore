@@ -177,3 +177,20 @@ PlayerDumpWriter:
 ---
 
 *Template version: 1.0 (2026-05-01).*
+
+---
+
+## 13. Audit (2026-05-01)
+
+`find /home/server/rustycore -name "*.rs" -path "*/src/*" | xargs grep -l "PlayerDump\|player_dump\|CharacterDatabaseCleaner\|database_cleaner\|CleaningFlags\|clean_character"` returns **zero matches**. Confirmed: neither `CharacterDatabaseCleaner` nor `PlayerDump` (Writer or Reader) has any analogue — no module, no function, no GM command stub.
+
+Also confirmed:
+- `wow-database/src/statements/world.rs` carries no cleaner-shaped DELETE statements (no `DEL_ORPHAN_*`, no `CLEAN_*`).
+- `wow-database/src/statements/character.rs` is character-row CRUD only (player save/load), no bulk cleanup or dump-walk queries.
+- World startup sequence in `wow-world` does **not** invoke any cleanup pass before accepting sessions; section 9 #TLS.3 ("Hook `cleaner::run` into the world startup sequence") still wholly applicable.
+- No `world-server` CLI subcommand for dump/restore (the binary's argv parsing in `bins/world-server/src/main.rs` only takes config-file paths).
+- No GM-command framework exists yet to host `.character dump load/write` (consumer side double-blocked, as section 8 notes).
+
+**Wrath-only schema caveat from section 11 confirmed**: nothing in `wow-database/src/statements/character.rs` mentions `character_artifact*`, `character_azerite*`, `character_transmog*` tables — so when #TLS.5 ports `PlayerDumpWriter`, dropping those `DumpTableType` variants is safe and matches the existing schema scope.
+
+**Verdict:** ❌ not started, confirmed exactly. No course correction to the doc needed; section 8 ("nothing… everything is missing") is accurate verbatim.

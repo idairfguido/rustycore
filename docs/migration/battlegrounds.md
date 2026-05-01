@@ -4,7 +4,7 @@
 > **Rust target crate(s):** `crates/wow-pvp/` (currently empty scaffold — `Cargo.toml` only, no `lib.rs` content)
 > **Layer:** L7
 > **Status:** ❌ not started
-> **Audited vs C++:** ❌ not audited
+> **Audited vs C++:** ✅ audited 2026-05-01 (❌ confirmed)
 > **Last updated:** 2026-05-01
 
 ---
@@ -409,3 +409,23 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 ---
 
 *Template version: 1.0 (2026-05-01).* Cuando se rellene, actualizar header de status y `Last updated`.
+
+---
+
+## 13. Audit (2026-05-01)
+
+❌ confirmado. Auditado contra `/home/server/rustycore/crates/`.
+
+**Hallazgos clave:**
+- `crates/wow-pvp/src/lib.rs` está literalmente vacío (`wc -l` = 0 líneas). `Cargo.toml` declara solo `wow-core` y `wow-constants` — sin `wow-database`, sin `wow-network`, sin nada que pudiera persistir o transmitir BG state.
+- Constants existen en `wow-constants/src/opcodes.rs`: `BattlemasterHello=0x32b1`, `BattlemasterJoin=0x3520`, `BattlemasterJoinArena=0x3521`, `BattlemasterJoinSkirmish=0x3522`, `BattlefieldList=0x3181`, `BattlefieldPort=0x3525`, `BattlefieldLeave=0x3175`, `RequestBattlefieldStatus=0x35dd`, `AreaSpiritHealerQuery=0x34b0`, `AreaSpiritHealerQueue=0x34b1`. Server-bound: `BattlefieldList`, `BattlefieldStatusActive/Failed/NeedConfirmation/None/Queued/WaitForGroups`, `BattlefieldPortDenied`. Las constantes están — los handlers no.
+- Búsqueda de registros (`opcode: ClientOpcodes::Battlemaster*` o `Battlefield{List,Port,Leave}` o `AreaSpiritHealer*` o `ReportPvpAfk`) en `wow-world/src/handlers/` y `wow-handler/src/`: **0 resultados**. **Único registrado: `RequestBattlefieldStatus`** en `handlers/misc.rs:191` → handler vacío `handle_request_battlefield_status` en L598 (`{}`).
+- Conteo de handlers BG registrados confirmado por la doc: **1 stub vacío de 11 esperados.** Los otros 10 opcodes (HELLO, JOIN, JOIN_ARENA, JOIN_SKIRMISH, LIST, PORT, LEAVE, AREA_SPIRIT_HEALER_QUERY, AREA_SPIRIT_HEALER_QUEUE, REPORT_PVP_PLAYER_AFK) **no están registrados en absoluto** — caen en el path `handle_unknown_packet`.
+- `handlers/character.rs:2972` confirma además: gossip `option_npc=9 (Battlemaster)` solo emite `info!("Battlemaster interaction (stub)")` y retorna sin enviar packet alguno (no `BattlefieldList`, no `BattlemasterListEntry` lookup). El cliente click-derecho sobre un BattleMaster NPC abre menú gossip y luego se queda en blanco.
+
+**Riesgo de UI hang silencioso (real, ya activo):**
+- ⚠️ **CMSG_BATTLEMASTER_HELLO**: el `option_npc=9` en gossip select va al stub log-only — *no responde*. Cliente espera lista de BGs joinable; al no llegar, el menú se queda con la opción "I would like to go to the battleground" inerte. **Workaround actual: ninguno**. Test path: hablar con un Battlemaster NPC.
+- ⚠️ **CMSG_BATTLEMASTER_JOIN / JOIN_ARENA / JOIN_SKIRMISH**: opcodes registrados como constantes, NO dispatched. Si el cliente los envía (forzar via macro / addon), caen en error log "unknown opcode". Inofensivo en el flujo normal porque `HELLO` ya bloquea.
+- ⚠️ **CMSG_REQUEST_BATTLEFIELD_STATUS** está stubbed (silent ack). El cliente lo envía periódicamente para refrescar la mini-ventana de queue status. Sin respuesta → la mini-ventana muestra "—" forever pero NO bloquea login ni char screen. Bajo riesgo, sin embargo descarta la posibilidad de mostrar "Queue: position 1 of N" cuando se implemente.
+
+**Acción:** dejar `❌ not started` en el badge. Recomendación táctica si se necesita unstuck el menú de Battlemaster antes de la migración completa: stub `handle_battlemaster_hello` que envíe `SMSG_BATTLEFIELD_LIST` con `count=0` (lista vacía) y cierre el gossip con un mensaje "Battlegrounds offline".

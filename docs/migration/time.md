@@ -199,3 +199,23 @@ The `ByteBuffer << WowTime` overload is the canonical encoder for all of these.
 ---
 
 *Template version: 1.0 (2026-05-01).*
+
+---
+
+## 13. Audit (2026-05-01)
+
+Verified the section 8 "Suspicious" bullets against live source.
+
+**`to_packed` impl** (`crates/wow-core/src/time.rs:59`): broken as documented.
+- Month is computed `(remaining_days / 30).clamp(0, 11)` (line 70). 30-day uniform months drift by 5–6 days per year — by mid-year a `month` value is off by ~1.
+- Day is `(remaining_days % 30).clamp(0, 30)` (line 71). Same root cause; never reaches 31.
+- Year encoding: `((year.wrapping_sub(100)) & 0x1F) << 24` (line 79). `year` is `(days/365.25)` since Unix epoch (line 68), so `year` is "years since 1970". Subtracting 100 anchors on year **2070**, not year-2000 as the WoW client expects. **Bit-exact wrong** — packets carrying this value place the date ~70 years in the future. Doc line 139 says "1900-anchored offset"; the actual anchor is 1970 + (-100) = **1870**, but because `wrapping_sub` produces `u32::MAX-99 ≈ 4_294_967_196` for current dates and is then masked to 5 bits, the effective year value cycles arbitrarily. Either way, broken.
+- Bit layout in the comment (line 58) is correct vs `WowTime.cpp` — fields are right; arithmetic to fill them is wrong.
+- Tests at `crates/wow-core/src/time.rs:140+` exercise `now()`, `from_unix`, `has_passed`, `time_until` only; **zero tests assert any packed-time field value**. Doc claim "none of them validate the packed-time encoding" is correct.
+- One real consumer: `crates/wow-packet/src/packets/misc.rs:415` calls `wow_core::GameTime::now().to_packed()` for `SMSG_LOGIN_SET_TIME_SPEED`. Login-time clock display is therefore wrong on the client.
+
+**Snapshot-per-tick model**: not implemented. `GameTime::now()` (line 37+) calls `SystemTime::now()` directly each invocation; no `WorldClock`/`update_now()` accumulator.
+
+**`WowTime` struct, `UpdateTime`, timezone, `+= Seconds`, `is_in_range`, ByteBuffer ser**: all absent (no occurrences in the crate).
+
+**Verdict:** ⚠️ partial confirmed; closer to ❌. Replace ⚠️ with ❌ once #TIM.3 lands a real `WowTime`. The `to_packed` is not just "approximate" — it is functionally broken in two independent ways (month math + year anchor). #TIM.3 should be **P0**, not just M-complexity in arbitrary ordering.

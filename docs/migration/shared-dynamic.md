@@ -4,7 +4,7 @@
 > **Rust target crate(s):** n/a (idiom replacement: `Arc`/`Weak` + `enum`s + `inventory`)
 > **Layer:** L1
 > **Status:** ✅ done (sustituido por idiom Rust; no port directo)
-> **Audited vs C++:** ❌ not audited
+> **Audited vs C++:** ✅ n/a confirmed (2026-05-01) — C++ idiom replaced by `Arc`/`Weak` + `inventory`; no port needed
 > **Last updated:** 2026-05-01
 
 ---
@@ -188,6 +188,16 @@ Tests a nivel sistémico (no unitarios de este módulo):
 | `Permissible<T>::Permit` | `fn permit(&self, t: &T) -> i32` en trait | iter+max_by_key |
 | `TypeList<HEAD,TAIL>` | tuple `(HEAD, TAIL)` + traits, o `enum` | sin necesidad real |
 | `TypeContainerVisitor` (en game/Grids) | métodos explícitos por tipo en `MapManager` | divergencia idiomática total |
+
+---
+
+## 13. Audit (2026-05-01)
+
+**Status confirmed: ✅ n/a — no direct port needed.**
+
+The C++ `shared/Dynamic/` headers (`LinkedList.h`, `LinkedReference/Reference.h`, `RefManager.h`, `ObjectRegistry.h`, `FactoryHolder.h`, `TypeList.h`, ~573 lines total) are pure C++ idiom — RAII-driven intrusive lists, template singletons, and `TypeList`/`TypeContainerVisitor` machinery — that have no idiomatic Rust translation. Verified by grep: zero files named `linked_list.rs`, `ref_manager.rs`, `object_registry.rs`, `factory_holder.rs`, or `type_list.rs` exist in the workspace, and none are needed. Rust replaces these wholesale: `Arc<RwLock<T>>` + `Weak` for cross-object back-references with auto-invalidation; the `inventory` crate (used canonically in `crates/wow-handler/src/lib.rs` for `PacketHandlerEntry` registration) for static factory registration; `MapManager`'s explicit per-type accessors (`crates/wow-world/src/map_manager.rs`) instead of `TypeContainerVisitor`. The migration sub-tasks #DYN.1–#DYN.6 are documentation/audit-only and do not constitute a port.
+
+**Residual cleanup:** none for this module itself. Open follow-ups #DYN.1 (combat threat list `Weak`-vs-GUID audit) and #DYN.2 (aura target GUID-reuse safety) are tracked under `combat.md` and `pets.md`/spell domain respectively, not here.
 
 ---
 

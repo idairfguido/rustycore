@@ -4,7 +4,7 @@
 > **Rust target crate(s):** *N/A para WoLK 3.4.x* — placeholder en `crates/wow-world/src/scenarios/` (skeleton only)
 > **Layer:** L7
 > **Status:** ❌ not started — **N/A para 3.4.x classic**
-> **Audited vs C++:** ❌ not audited
+> **Audited vs C++:** ✅ n/a confirmed (2026-05-01) — post-WoLK MoP feature; zero impact on 3.4.3
 > **Last updated:** 2026-05-01
 
 ---
@@ -201,6 +201,16 @@ Complejidad: **L** (<1h), **M** (1-4h), **H** (4-12h).
 | `unordered_map<pair<uint32, uint8>, ScenarioDBData>` | `HashMap<(u32, u8), ScenarioDBData>` | — |
 | `void OnPlayerEnter(Player*)` | `async fn on_player_enter(&self, player: &Player)` | — |
 | `bool IsComplete() const` | `pub fn is_complete(&self) -> bool` | — |
+
+---
+
+## 13. Audit (2026-05-01)
+
+**Status confirmed: ✅ n/a for WoLK 3.4.3 — zero impact.**
+
+Scenarios are a **Mists of Pandaria (5.0, Sep 2012)** feature: 3-player adventure instances with their own criteria-tree state machine and POI metadata, entirely post-WoLK. The WotLK 3.4.3.54261 client ships **no `Scenario.db2` / `ScenarioStep.db2`** data files, has no UI for scenario state or POI rendering, never sends `CMSG_QUERY_SCENARIO_POI`, and never decodes `SMSG_SCENARIO_STATE` / `SMSG_SCENARIO_PROGRESS_UPDATE` / `SMSG_SCENARIO_COMPLETED` / `SMSG_SCENARIO_BOOT_PLAYER` / `SMSG_SCENARIO_POIS`. The 3.4.x SQL schema has no `scenarios` / `scenario_poi` / `scenario_poi_points` tables populated, and no `lfg_dungeon_template` row has `type==SCENARIO`. Verified zero presence in RustyCore: no `crates/wow-world/src/scenarios/`, no `Scenario` / `InstanceScenario` / `ScenarioMgr` symbols, no `LFG_QUEUE_SCENARIO` matchmaking path. The C++ module survives in `woltk-trinity-legacy` only as upstream-merged dead code (loaders return count=0 against an empty 3.4.x dataset).
+
+**Residual cleanup:** none required for 3.4.3. Sub-tasks #SCN.1–#SCN.3 (placeholder `SCENARIOS_NOT_SUPPORTED_IN_3_4_3` const, LFG queue-type comment, defensive empty response if `CMSG_QUERY_SCENARIO_POI` ever arrives) are nice-to-have hardening but not blocking; #SCN.4–#SCN.10 are gated on a hypothetical future MoP+ client port and should remain out-of-scope. This doc stays as a historical reference and skeleton — do not open implementation work.
 
 ---
 

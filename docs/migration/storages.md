@@ -3,8 +3,8 @@
 > **C++ canonical path:** `/home/server/woltk-trinity-legacy/src/server/game/Storages/`
 > **Rust target crate(s):** `crates/wow-social/` or `crates/wow-world/` (no dedicated crate needed)
 > **Layer:** L1 (infrastructure — periodically-rebuilt cache of online-player state)
-> **Status:** ❌ not started
-> **Audited vs C++:** ✅ complete (2 files, 154 lines total)
+> **Status:** ❌ not started — confirmed via audit 2026-05-01 (zero hits across `crates/`)
+> **Audited vs C++:** ✅ complete (2 files, 154 lines total) — Rust-side absence reverified 2026-05-01
 > **Last updated:** 2026-05-01
 
 ---
@@ -168,3 +168,20 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 ---
 
 *Template version: 1.0 (2026-05-01).* Cuando se rellene, actualizar header de status y `Last updated`.
+
+---
+
+## 13. Audit (2026-05-01)
+
+**Method:** `grep -rEi "(WhoList|who_list|wholist)" crates/` and inspection of `wow-network` / `wow-social` / `wow-world` for any equivalent snapshot pattern.
+
+**Findings:**
+
+- **Zero matches** for `WhoList` / `who_list` / `wholist` anywhere under `crates/`. The module is genuinely entirely absent — confirms §8.
+- `PlayerRegistry` in `wow-network` (workspace-wide registry of online sessions, mentioned in `CLAUDE.md`) is the closest existing primitive but is fundamentally a different shape: it tracks live session state, not the denormalized `WhoListPlayerInfo` snapshot (level/class/zone/guild-name/lower-cased wide-name) that `/who` needs. There is no `ArcSwap`-style snapshot wrapper either.
+- The `CMSG_WHO` / `SMSG_WHO` opcodes have no handler registered in `wow-world/src/handlers/` — confirmed by absence of any `WhoOpcode` / `who_opcode` / `handle_who` symbols. This means the gap is currently invisible to clients (the `/who` UI shows an empty list rather than wrong data), exactly as §8 predicted.
+- `wow-social` has a `social.rs` module but it deals with friend/ignore lists, not the live-player snapshot.
+
+**Suspicious / divergent:** none. The C++ module is 154 lines of self-contained code with no observable Rust counterpart; nothing to validate against.
+
+**Status verdict:** ❌ not started (no change). The doc is accurate and the migration sub-tasks (#STR.1–#STR.6) remain the right plan. Suggested priority: **low** — `/who` is a quality-of-life feature; it does not block any other migration. Pick this up after `wow-handler` chat-command dispatch lands and after `PlayerRegistry` exposes a stable iterator. The `arc_swap`-based pattern in #STR.2 is the right shape; do not regress to a `Mutex<Vec<...>>`.

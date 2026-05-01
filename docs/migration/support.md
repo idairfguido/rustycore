@@ -3,8 +3,8 @@
 > **C++ canonical path:** `/home/server/woltk-trinity-legacy/src/server/game/Support/`
 > **Rust target crate(s):** would live in a new `crates/wow-support/` (or fold into `wow-social`); GM-command surface eventually in `wow-handler`
 > **Layer:** L8 (service — opt-in feature on top of database/world/chat)
-> **Status:** ❌ not started (GM-ticket opcodes are decoded but routed to no-op stubs)
-> **Audited vs C++:** ⚠️ partial (header fully read, `.cpp` ~830 lines partially read)
+> **Status:** ❌ not started — confirmed via audit 2026-05-01 (one decoded opcode routed to a no-op `{}`; `ComplaintsEnabled = false` hardcoded; zero DB statements; zero ticket schema)
+> **Audited vs C++:** ⚠️ partial (header fully read, `.cpp` ~830 lines partially read) — Rust-side absence reverified 2026-05-01
 > **Last updated:** 2026-05-01
 
 ---
@@ -213,3 +213,25 @@ The Rust opcode constants for these already exist in `crates/wow-constants/src/o
 ---
 
 *Template version: 1.0 (2026-05-01).*
+
+---
+
+## 13. Audit (2026-05-01)
+
+**Method:** `grep -rEi "(SupportMgr|support_mgr|support_ticket|gm_bug|gm_complaint|gm_suggestion)" crates/`. Inspected `crates/wow-world/src/handlers/misc.rs`, `crates/wow-world/src/session.rs`, and `crates/wow-packet/src/packets/misc.rs`.
+
+**Verdict on doc claim "❌ not started": CONFIRMED with one nuance.** Of the 4 listed support opcodes, only `GmTicketGetCaseStatus` is actually wired to a stub handler (`handle_gm_ticket_get_case_status` at `handlers/misc.rs:551` — body `pub async fn handle_gm_ticket_get_case_status(&mut self, _pkt: wow_packet::WorldPacket) {}`). The other three (`GmTicketGetSystemStatus`, `GmTicketAcknowledgeSurvey`, `Complaint`) plus the three `SupportTicketSubmit{Bug,Complaint,Suggestion}` opcodes have **no registered handlers at all** — they would fall through to the unknown-opcode log path. Update §8 to reflect that (it currently implies all four are stubbed).
+
+**Findings:**
+
+1. **`SupportMgr` — CONFIRMED ABSENT.** Zero hits across `crates/`. No `Ticket` / `BugTicket` / `ComplaintTicket` / `SuggestionTicket` structs. No `wow-support` crate.
+2. **DB layer — CONFIRMED ABSENT.** No `gm_bug` / `gm_complaint` / `gm_suggestion` strings anywhere. No `CHAR_SEL_GM_BUGS` / `CHAR_REP_GM_COMPLAINT` / etc. statement constants in `crates/wow-database/src/statements/character.rs`.
+3. **`SMSG_FEATURE_SYSTEM_STATUS` flag — CONFIRMED stubbed off.** `crates/wow-packet/src/packets/misc.rs:280` writes `pkt.write_bit(false)` for `ComplaintsEnabled` with the comment `(SupportComplaintsEnabled config, default false)`. This is intentional and correct given the absence of a backing implementation; flip when #SUP.6 lands.
+4. **Stub handler returns nothing** — `handle_gm_ticket_get_case_status` is empty `{}`; the client expects a `SMSG_GM_TICKET_CASE_STATUS` reply but gets silence. This is observable as a hung "tickets" panel in-game when the player opens it — not crashing, just empty. Acceptable for now.
+5. **Spam-report fast-path (`CMSG_COMPLAINT`, opcode 0x366e) is unhandled** — see §11 gotcha. Not in any `inventory::submit!` block.
+6. **GM commands (`.ticket *`, `.bug`, `.complaint`)** — the command-dispatcher framework does not yet exist; #SUP.7 correctly defers.
+7. **No tests** for any support code path (consistent with absence of code).
+
+**Modern-vs-classic categorization scope:** §11 notes that `ClubFinder*`, `BattlePet`, `Friend` report categories are 3.4.3-client-incompatible but kept defensively. No need to drop them; the schema is forward-compatible. The Rust port should mirror this leave-them-alone posture when #SUP.1 lands.
+
+**Status verdict:** ❌ not started (no change). Priority: **low** — `/who` (`storages.md`) and Mail/Friends correctness (`cache.md`) are higher-value than ticket submission for a 3.4.3 Classic private server. Sub-tasks #SUP.1–#SUP.7 are well-scoped and can land in any order after a `wow-support` crate skeleton is created. Recommend doing #SUP.6 (the `ComplaintsEnabled` bit-flip) opportunistically when adjacent code touches `SMSG_FEATURE_SYSTEM_STATUS` — it's a 3-line change once #SUP.3 exists.

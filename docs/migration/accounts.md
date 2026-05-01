@@ -3,8 +3,8 @@
 > **C++ canonical path:** `src/server/game/Accounts/`
 > **Rust target crate(s):** `crates/wow-database/`, `crates/wow-network/`, `crates/bnet-server/`, `crates/wow-world/` (consumer)
 > **Layer:** L1 — Account management & authorization
-> **Status:** ❌ not started (only DB statements registered; no AccountMgr / RBACData logic)
-> **Audited vs C++:** ❌ not audited
+> **Status:** ❌ not started — confirmed via audit 2026-05-01 (only DB statement strings; no AccountMgr / RBACData logic; no `Utf8ToUpperOnlyLatin`; ~440 RBAC perms unrepresented)
+> **Audited vs C++:** ✅ audited 2026-05-01 — every flagged absence reconfirmed; `RBAC_PERM_*` enum is genuinely unrepresented; `Utf8ToUpperOnlyLatin` has zero callers
 > **Last updated:** 2026-05-01
 
 ---
@@ -269,3 +269,25 @@ Numera los items para poder referenciarlos desde `MIGRATION_ROADMAP.md` sección
 ---
 
 *Template version: 1.0 (2026-05-01).* Cuando se rellene, actualizar header de status y `Last updated`.
+
+---
+
+## 13. Audit (2026-05-01)
+
+**Method:** `grep -rE "(RBAC|rbac|HasPermission|has_permission|AccountMgr|account_mgr|Utf8ToUpperOnlyLatin|utf8_to_upper_only_latin)" crates/`. Inspected `crates/wow-database/src/statements/login.rs`, `crates/wow-network/src/world_socket.rs`, `crates/bnet-server/src/rest/handlers.rs`, and verified `crates/wow-account/` does not exist.
+
+**Verdicts on flagged absences:**
+
+1. **`AccountMgr` / `Battlenet::AccountMgr` — CONFIRMED ABSENT.** No `account_mgr` module, no `wow-account` crate, no `CreateAccount` / `DeleteAccount` / `ChangePassword` / `CheckPassword(by_name|by_id)` / `HasPermission` / `LoadRBAC` symbols anywhere in the workspace. The only matches are SQL-statement-string declarations in `wow-database/src/statements/login.rs` (`SEL_RBAC_ACCOUNT_PERMISSIONS`, `INS_RBAC_ACCOUNT_PERMISSION`, `DEL_RBAC_ACCOUNT_PERMISSION`) — declared, never called.
+2. **`RBAC_PERM_*` enum (~440 values) — CONFIRMED ABSENT.** No `rbac` module in `wow-constants`. No `RBACPermissions` enum, no `RBACData` struct, no `RBACPermission` catalogue, no `expand_permissions` / `calculate_new_permissions` logic. Every gameplay check that should call `HasPermission(RBAC_PERM_*)` either short-circuits to `true` or hard-codes a `gmlevel` numeric — needs an audit pass during #ACC.13.
+3. **`Utf8ToUpperOnlyLatin` — CONFIRMED ABSENT and load-bearing.** Zero hits for `utf8_to_upper_only_latin` / `Utf8ToUpperOnlyLatin` / `upper_only_latin` across `crates/`. **This is critical for SRP6 verifier compatibility:** TC's `MakeRegistrationData<GruntSRP6>(name, pass)` computes `H(salt | H(uppercased_name : uppercased_pass))` — any Rust-side normalization that uses `str::to_uppercase()` instead of TC's Latin-only upcase will produce a different verifier and silently lock out every account that was created on the C++ stack (and vice-versa). Recommend implementing #ACC.2 *before* #ACC.4-5, with a snapshot test against a known C++ output for at least one Cyrillic + one accented-Latin string.
+
+**Other findings during the audit:**
+
+- **BNet REST login (read-only path) works** — `crates/bnet-server/src/rest/handlers.rs` (~573 LOC) implements SRPv2 verification inline against `battlenet_accounts`, but does **not** route through any `BattlenetAccountMgr` API layer. Account *creation* via REST is therefore not wired.
+- **World-side session-key fetch works** — `crates/wow-network/src/world_socket.rs` uses `SEL_ACCOUNT_INFO_BY_NAME` to bundle session_key + security + expansion from the realm-join ticket. This is a *fast-path* that bypasses RBAC entirely.
+- **No `OnPasswordChange` / `OnEmailChange` script hooks wired** despite `wow-script(s)` crates existing.
+- **`session_key_bnet` storage format risk** — §8 already flags the 64-byte varbinary vs 64-hex-char ambiguity inherited from C# legacy. Cross-reference next time a regression surfaces in BNet REST writes vs world-socket reads.
+- **GM-command surface (`.account *`, `.rbac *`)** entirely absent — depends on a command dispatcher that doesn't yet exist, so #ACC.18 is correctly deferred to a later wave.
+
+**Status verdict:** ❌ not started (no change). The flagged risks (#ACC.2 SRP normalization, #ACC.8-12 RBAC) are real and high-impact. Recommend the migration order: #ACC.2 → #ACC.5 (verify SRP byte-equivalence on a fixture) → #ACC.4 → #ACC.8 → #ACC.10–12 → #ACC.13. Don't try to land RBAC and AccountMgr in one PR — they're separable.

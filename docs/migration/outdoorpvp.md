@@ -4,7 +4,7 @@
 > **Rust target crate(s):** `crates/wow-pvp/` (nuevo módulo `outdoor/`), wiring en `crates/wow-world/`
 > **Layer:** L7
 > **Status:** ❌ not started
-> **Audited vs C++:** ❌ not audited
+> **Audited vs C++:** ✅ audited 2026-05-01 (❌ confirmed — 5 zones in this fork)
 > **Last updated:** 2026-05-01
 
 ---
@@ -245,3 +245,26 @@ Complejidad: **L** (<1h), **M** (1-4h), **H** (4-12h), **XL** (>12h).
 ---
 
 *Template version: 1.0 (2026-05-01).*
+
+---
+
+## 13. Audit (2026-05-01)
+
+❌ confirmado. Auditado contra `/home/server/rustycore/crates/`.
+
+**Hallazgos clave:**
+- No existe módulo `outdoor` en `crates/wow-pvp/` (recordatorio: `wow-pvp/src/lib.rs` está vacío). No existe `crates/wow-world/src/outdoor/`.
+- Búsqueda de `OutdoorPvp`, `OutdoorPvpMgr`, `OPvPCapturePoint`, `outdoorpvp_template`, `Halaa`, `Silithyst`, `Hellfire`, `Terokkar`, `Zangarmarsh` en todo el workspace: **0 resultados**.
+- Búsqueda de los buff IDs distintivos (`32071`, `32049`, `33795`, `30754`, `33779` — Strength of the Halaani, Cenarion Favor, Twin Spire Blessing, Hellfire Towers, Blessing of Auchindoun): **0 resultados**.
+- Tabla `outdoorpvp_template` no aparece en `crates/wow-database/src/`. Cero queries SQL relacionadas.
+- 0 handlers para `CMSG_AREATRIGGER` con routing OutdoorPvP (Silithus). 0 handlers `HandleOpenGo` con routing OutdoorPvP.
+
+**Verificación zone count (claim del doc: 5 zonas, NOT 7):**
+- ✅ confirmado revisando el doc original §2: HP, NA, TF, ZM, SI son las 5 zonas con scripts en este fork legacy WoLK 3.4.3. Eastern Plaguelands (EP) **no** tiene script en `OutdoorPvP/` en este fork. Wintergrasp vive en `Battlefield/` (separado, no cuenta como OutdoorPvP). El enum C++ es `OutdoorPvPTypes::MAX = 6` con índice 0 reservado → 5 entradas reales (HP=1, NA=2, TF=3, ZM=4, SI=5).
+- Map distribution confirmada: HP/NA/TF/ZM en map 530 (Outland), SI en map 1 (Kalimdor). Total 4 handlers en map 530, 1 handler en map 1.
+
+**Riesgo de UI hang silencioso:**
+- 🟢 **Bajo riesgo**. Los OutdoorPvP no tienen opcodes propios — piggybacks sobre `CMSG_AREATRIGGER` (ya hay handler genérico en `wow-world`), `CMSG_GAMEOBJ_USE` (idem), `CMSG_CAST_SPELL` (idem). En zonas OutdoorPvP el client no se queda esperando packets server-only — la única UI afectada son los `SMSG_DEFENSE_MESSAGE` (zone chat) y los `SMSG_UPDATE_WORLD_STATE` (HUD widgets de torres/buffs). Sin esos, el HUD muestra valores stale/iniciales pero no se cuelga.
+- ⚠️ Riesgo MUY menor: en HP/NA/ZM, los control-zone GameObjects son interactuables — al "click" sobre una capture flag, el cliente envía `CMSG_GAMEOBJ_USE`. Sin routing OutdoorPvP, el GO solo dispara su default `use` (animación) sin progresar la captura. No hay hang, pero el feedback visual del progress bar nunca avanza. Inofensivo en single-player; visible solo si hay raid PvP organizada en Outland — improbable a este nivel del proyecto.
+
+**Acción:** dejar `❌ not started`. Migrar después de WorldStateMgr (per-map scope). El orden recomendado: implementar SI primero (más simple — flag carrier + areatrigger, 1 zona, sin towers), luego HP (3 torres simétricas), luego ZM/TF/NA. Auditar particularmente §11 nota sobre "world-states scope `Map*`, NO global" — bug latente si se cablea un singleton sin map binding.

@@ -4,7 +4,7 @@
 > **Rust target crate(s):** `wow-data` (templates), `wow-database` (loaders), `wow-world` (live registries / `MapManager`), `wow-network` (`PlayerRegistry`)
 > **Layer:** L0 (foundation — touched by virtually every other module)
 > **Status:** ⚠️ partial — fragmented across 5+ crates; no central `ObjectMgr` analogue
-> **Audited vs C++:** ⚠️ partial
+> **Audited vs C++:** ✅ complete (audit 2026-05-01)
 > **Last updated:** 2026-05-01
 
 ---
@@ -462,3 +462,20 @@ Each `LoadXxx` is a sub-task. Ordered by typical TC startup order (which is itse
 ---
 
 *Template version: 1.0 (2026-05-01).* Cuando se rellene, actualizar header de status y `Last updated`.
+
+---
+
+## 13. Audit (2026-05-01)
+
+Verified the section 8 hipótesis against live source.
+
+**ObjectMgr `Load*` count vs Rust loaders.**
+- C++ has ~107 `Load*` methods (count from `ObjectMgr.cpp` declarations) plus ~10 more in `AreaTriggerDataStore`/`CharacterTemplateDataStore`/`ConversationDataStore` — section 2's "~120" is correct.
+- Rust loaders (greppable with `fn load`): `wow-data/src/spell.rs:99 load`, `quest_xp.rs:33 load`, `item_stats.rs:242 load`, `player_stats.rs:194 load`, `area_trigger.rs:254 load_area_triggers`, `hotfix_cache.rs:40 load_db2`, `skill.rs:81 load`, `quest.rs:198 load_quests`, `item.rs:43 load`. That is **9** distinct top-level loaders covering quest/item/spell/skill/area-trigger/player-stats/hotfix domains. Plus `wow-world/src/handlers/quest.rs:776 load_player_quests` (per-session, not template-load). So **~107–9 ≈ ~98 loaders unported** plus most Locale/Addon variants — section 8's "~115 unported" estimate is in the right ballpark; tighten the doc figure to **~98 of ~107 ObjectMgr `Load*` absent** (still ⚠️ partial; closer to ❌).
+- `wow-database/src/statements/world.rs` is a **prepared-statement registry** (86 enum variants — `grep -cE '^\s*[A-Z][A-Z0-9_]*,' = 86`) **not a loader**. Doc already says this; just confirming the registry has slots like `SEL_CREATURE_TEMPLATE`, `SEL_QUEST_TEMPLATE`, `SEL_VENDOR_ITEMS` reserved but no consumer in `wow-data` or `wow-world` outside of the few loaders above.
+
+**Critical: `ObjectAccessor::GetCreature(WorldObject const&, ObjectGuid)` signature.**
+- `crates/wow-world/src/map_manager.rs:339` exposes a flat `MapManager::get_creature(guid) -> Option<&WorldCreature>` (search-all) **and** `MapManager::get_creature(map_id, instance_id, x, y, guid)` at `:510`. The flat one effectively is the GUID-only lookup the doc claimed was missing — it walks all maps/grids internally (see also `:343 get_creature_mut`, `:422` per-grid variant).
+- **Verdict on the doc claim**: the section 8 "the Rust API forces the caller to know the cell" line is **stale / wrong** — the GUID-only variant exists at `map_manager.rs:339`. The TC equivalent of `GetCreature(WorldObject const&, ObjectGuid)` (same-map scoped) is what's actually missing: there's no method that takes a reference object's `(map_id, instance_id)` and looks up only within that map. Update the doc to: GUID-only walk-all-maps exists; same-map scoped lookup does not.
+
+**Verdict:** ⚠️ partial confirmed. ObjectMgr ≈ 8% ported (9/107 loaders); ObjectAccessor lookup partially exists but lacks same-map scoping, name lookup, low-GUID lookup, save-all. Section 8 "Suspicious" bullet about `get_creature` should be revised — the GUID-only variant is present.

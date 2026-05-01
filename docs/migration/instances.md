@@ -4,7 +4,7 @@
 > **Rust target crate(s):** `crates/wow-instances/` (NOT YET CREATED — must be added to workspace)
 > **Layer:** L7
 > **Status:** ❌ not started
-> **Audited vs C++:** ❌ not audited
+> **Audited vs C++:** ✅ audited 2026-05-01 (❌ confirmed)
 > **Last updated:** 2026-05-01
 
 ---
@@ -327,3 +327,21 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 ---
 
 *Template version: 1.0 (2026-05-01).* Cuando se rellene, actualizar header de status y `Last updated`.
+
+---
+
+## 13. Audit (2026-05-01)
+
+❌ confirmado. Auditado contra `/home/server/rustycore/crates/`.
+
+**Hallazgos clave:**
+- No existe `crates/wow-instances/`. Búsqueda de `INSTANCE_ID_HIGH_MASK | _LFG_MASK | _NORMAL_MASK | 0x1F44 | 0x1f44` en todo el workspace: **0 resultados**. La hipótesis de la sección 8 queda confirmada — *no hay generador de instance IDs todavía*, ni con el bitfield correcto ni con uno secuencial: simplemente el `instance_id: u32` se pasa como parámetro por callers en `crates/wow-world/src/map_manager.rs:466` (`get_or_create_map(map_id, instance_id)`).
+- Los 2 únicos call-sites de `add_creature(0,0,0,0,…)` están en tests del propio `map_manager.rs` (líneas 761, 774). Sin caller real, la pregunta "qué bits usan los IDs" todavía no se ha decidido.
+- `InstanceLockMgr` análogo: 0 código. Tablas `instance`, `character_instance_lock`, `account_instance_times` no aparecen en `crates/wow-database/src/`. Cero prepared statements.
+- 0 handlers para `CMSG_RESET_INSTANCES`, `CMSG_INSTANCE_LOCK_RESPONSE`, `CMSG_REQUEST_RAID_INFO`. 0 builders para `SMSG_RAID_INSTANCE_INFO`, `SMSG_PENDING_RAID_LOCK`, `SMSG_INSTANCE_ENCOUNTER_*`, `SMSG_INSTANCE_RESET*`.
+
+**Riesgo de UI hang silencioso:**
+- ⚠️ **`CMSG_REQUEST_RAID_INFO` no está registrado** en `wow-handler` ni stubbed en `misc.rs`. El cliente al hacer `Shift-O → Raid` espera `SMSG_RAID_INSTANCE_INFO`; sin handler ni stub, el packet se descarta en el dispatcher (registro inventario) y la pestaña queda *forever-loading*. Si y cuando se cree wow-instances, este es el primer opcode a registrar (incluso si solo devuelve 0 locks).
+- Bajo riesgo de UI hang en el resto del flujo: el cliente nunca llega a "set difficulty" o "reset instance" porque el botón "Enter Dungeon" requiere primero un raid info populado.
+
+**Acción:** dejar `❌ not started` en el badge. El módulo puede dormir hasta después de Maps + WorldStateMgr + DataStores estén verdes. Cuando arranque, **prioridad #INST.41** (auditar `GenerateInstanceId` antes de persistir IDs) sigue válida porque ahora *no existe* y hay que crearla con los bits correctos desde el inicio — no parchearla después.

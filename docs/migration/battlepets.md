@@ -4,7 +4,7 @@
 > **Rust target crate(s):** No target crate intended for 3.4.3 client. Today only one packet stub exists: `crates/wow-packet/src/packets/misc.rs:1005` defines `BattlePetJournalLockAcquired` (zero-byte ServerPacket), used by `crates/wow-world/src/handlers/character.rs:4255` during the post-login packet pipeline (defensive ack so a 3.4.3 client that hasn't been told the journal is unavailable doesn't sit waiting). The single CMSG handler stub is `handle_battle_pet_request_journal` at `crates/wow-world/src/handlers/misc.rs:606` (empty body, registered at `:266`).
 > **Layer:** L7 (game system, but **not applicable to WotLK 3.4.3 client** — see §1)
 > **Status:** ⚠️ **N/A for WoLK 3.4.3.** The opcodes exist in the WoLK Trinity-Legacy codebase because that fork tracks a forward-ported feature surface, but a 3.4.3.54261 client has no Pet Battle UI, no companion summoning that resolves to a `BattlePet` species entry, and no journal screen. The only thing the Rust port needs to do is **not break the login flow** by sending a token `BattlePetJournalLockAcquired` (already done) and silently accept any of the 9 CMSG_BATTLEPET_* opcodes if a modded client ever sends them. **Do not implement the system.**
-> **Audited vs C++:** ⚠️ partial — design read confirms scope and DB2 dependencies; no live behavioral comparison needed because feature is intentionally absent
+> **Audited vs C++:** ✅ n/a confirmed (2026-05-01) — post-MoP feature; 3.4.3 client never sends BattlePet opcodes; existing `BattlePetJournalLockAcquired` proactive send flagged for removal/Denied switch
 > **Last updated:** 2026-05-01
 
 ---
@@ -285,6 +285,16 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 | `BattlePetMgr::SaveToDB(LoginDatabaseTransaction)` | `async fn save_to_db(&mut self, tx: &mut Transaction) -> Result<()>` | login DB |
 | `unordered_map<u64, BattlePet> _pets` | `HashMap<u64, BattlePet>` (key = battle-pet GUID low part) | — |
 | `vector<WorldPackets::BattlePet::BattlePetSlot> _slots` | `[BattlePetSlot; 3]` | Fixed size 3 |
+
+---
+
+## 13. Audit (2026-05-01)
+
+**Status confirmed: ✅ n/a for WoLK 3.4.3.**
+
+BattlePets is a **Mists of Pandaria (5.0.4, Oct 2012)** feature — the Pokémon-style companion mini-game. The 3.4.3.54261 (WotLK Classic) client has no Pet Battle UI, no journal screen, no `BattlePetSpecies.db2` / `BattlePetBreedQuality.db2` / `BattlePetSpeciesState.db2` data files, no `HighGuid::BattlePet` namespace, and no spell `SPELL_SUMMON_BATTLE_PET` (118301) or `SPELL_BATTLE_PET_TRAINING` (125610) cast paths. Companion pets in 3.4.3 are pure cosmetic critters resolved via `summon_companion` spell effect → `Player::SetCritterGUID`, with no levelling, abilities, or battles — entirely separate code. Verified that no `BattlePetMgr` / `BattlePet` struct / DB2 stores / login-DB schema exists in `crates/wow-*` and that 8 of 9 `CMSG_BATTLE_PET_*` opcodes silently default in the dispatcher (correct).
+
+**Residual cleanup (low priority):** the existing `BattlePetJournalLockAcquired` zero-byte stub at `crates/wow-packet/src/packets/misc.rs:1009` is sent **proactively and unconditionally** during `send_initial_packets_after_load` (`crates/wow-world/src/handlers/character.rs:4255`), which is semantically wrong vs the C++ flow (only sent in response to `CMSG_BATTLE_PET_REQUEST_JOURNAL_LOCK`, and only if `IsJournalLockAcquired()`). For 3.4.3 the cleanest fix is to **remove the proactive send entirely** (preferred — the client never asks); alternatively switch to `BattlePetJournalLockDenied` (0x25ee) which would require defining a new packet type. Tracked as #BPETS.4 / #BPETS.6. Empty handler at `handlers/misc.rs:606` is fine as-is.
 
 ---
 

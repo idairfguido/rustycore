@@ -3,8 +3,8 @@
 > **C++ canonical path:** `/home/server/woltk-trinity-legacy/src/server/game/Cache/`
 > **Rust target crate(s):** `crates/wow-database/` (or a thin `crates/wow-cache/`); consumers in `wow-world` and `wow-social`
 > **Layer:** L1 (infrastructure — read-mostly in-memory index over `characters` table)
-> **Status:** ❌ not started
-> **Audited vs C++:** ✅ complete (module is 2 files, ~315 lines)
+> **Status:** ❌ not started — confirmed via audit 2026-05-01 (zero hits across `crates/`)
+> **Audited vs C++:** ✅ complete (module is 2 files, ~315 lines) — Rust-side absence reverified 2026-05-01
 > **Last updated:** 2026-05-01
 
 ---
@@ -166,3 +166,22 @@ Used to tell clients to drop their client-side name caches and re-query for that
 ---
 
 *Template version: 1.0 (2026-05-01).*
+
+---
+
+## 13. Audit (2026-05-01)
+
+**Method:** `grep -rEi "(CharacterCache|character_cache)" crates/` returns **zero matches**. Inspected `wow-database` and `wow-network` for any partial substitute (e.g. a `by_name`/`by_guid` map keyed off `characters` rows).
+
+**Findings:**
+
+- **Module is entirely absent.** No `CharacterCache` struct, no `CharacterCacheEntry`, no by-guid or by-name maps loaded from `characters.characters` at startup. `crates/wow-database/src/statements/character.rs` does not declare a `SEL_ALL_CHARACTERS` startup query.
+- **Raw-pointer trick correctly avoided** — there is nothing to avoid yet, but when the migration lands, the §11 gotcha (don't replicate the `unordered_map<string, Entry*>` aliasing) is still load-bearing advice.
+- `PlayerRegistry` (online-only) is the only adjacent primitive. As §8 predicts, every offline-name flow (mail recipient lookup, guild roster level/class display, friends list rendering, `/who` filters that hit logged-out characters) is currently either broken or hits the DB ad-hoc per query.
+- **`SMSG_INVALIDATE_PLAYER` packet** — search returns no hits in `crates/wow-packet/`; not yet defined. Sub-task #CCH.6 will need to define it from scratch.
+- **No tests** as predicted.
+- The two-store invariant (by-guid owning + by-name pointer-into-guid) is a C++-only artifact; the §12 mapping (`DashMap<String, ObjectGuid>` + chain to `DashMap<ObjectGuid, CharacterCacheEntry>`) remains the correct Rust shape.
+
+**Suspicious / divergent:** none. The doc accurately describes "everything missing".
+
+**Status verdict:** ❌ not started (no change). Priority: **medium** — blocks correctness of mail/guild/friends/who once those surfaces light up. The migration sub-tasks (#CCH.1–#CCH.7) are well-scoped; #CCH.2 (the storage shape) is the only design call still open — recommend `DashMap` over `RwLock<HashMap>` for the read-heavy access pattern. Coordinate with the `accounts.md` audit (RBAC needs `account_id` lookups against the same row), but this cache should not depend on `wow-account`.

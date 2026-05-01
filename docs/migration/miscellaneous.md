@@ -4,7 +4,7 @@
 > **Rust target crate(s):** `wow-constants`, `wow-core`, `wow-combat`, `wow-data`, `wow-script` (scattered)
 > **Layer:** L0 (foundation — pulled in by every layer above)
 > **Status:** ⚠️ partial — only `SharedDefines` constants and a few `Formulas::XP::*` curves are partially ported
-> **Audited vs C++:** ❌ not audited
+> **Audited vs C++:** ✅ complete (audit 2026-05-01)
 > **Last updated:** 2026-05-01
 
 ---
@@ -253,3 +253,40 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 ---
 
 *Template version: 1.0 (2026-05-01).* Cuando se rellene, actualizar header de status y `Last updated`.
+
+---
+
+## 13. Audit (2026-05-01)
+
+**Constant volume in `wow-constants`** (CamelCase enum variant count via `grep -cE "^\s*[A-Z][A-Za-z0-9_]+\s*[,=]"`):
+
+| File | Variants | Lines | Purpose |
+|---|---|---|---|
+| `opcodes.rs` | 1618 | 1642 | `Opcode` enum |
+| `item.rs` | 806 | 1239 | item flags / classes / subclasses / qualities |
+| `spell.rs` | 440 | 569 | spell families / mechanics / aura types |
+| `unit.rs` | 231 | 599 | races / classes / powers / unit flags |
+| `shared.rs` | 208 | 464 | language / chat / `MAX_*` |
+| `creature.rs` | 144 | 623 | creature flags / family / type |
+| `object.rs` | 90 | 173 | object types / dynamic flags |
+| `update.rs` | 4 | 31 | UpdateField enum |
+| `movement.rs` | 0 | 107 | movement flag bitfields (consts, not enum) |
+| **Total** | **~3 541 variants** | 5 477 | (multi-domain) |
+
+C++ `SharedDefines.h` has 8 184 lines and `enuminfo_SharedDefines.cpp` (the auto-generated reflection mirror) is 5 199 lines — broadly comparable in source volume to the 5 477-line Rust port. Coverage is roughly **40–50%** by surface (the doc's section 8 "70%+ missing" is too pessimistic; many spell families and item flags *are* present in `spell.rs`/`item.rs`, but pre-Wrath flag groups like `ItemFlags3+`, `SPELL_AURA_MOD_OVERRIDE_*` Cata additions, vehicle subtypes, achievement criteria types, and almost all `MAX_*` numeric bounds beyond the basics are absent). Update section 8 estimate to **~50% missing**, not 70%+.
+
+**`Language.h` enum** (~1 200 entries): grep `LANG_` in `wow-constants/src/` finds only `AllLanguages = -1` in `shared.rs:32` (a different enum — chat language, not server-string id). **Confirmed absent.** Section 8 correct.
+
+**`RaceMask<T>`**: `grep "RaceMask\|race_mask"` across `wow-core` and `wow-constants` returns **zero hits**. Confirmed absent. #MISC.11 still required.
+
+**`CommonPredicates`**: no `is_victim_of`, `health_pct_order`, `power_pct_order`, `inverter` anywhere. Absent.
+
+**`Formulas::Honor::*`**: zero hits for `honor_at_level`, `hk_honor`. Absent.
+
+**`Formulas::XP`** partial port location confirmed: `crates/wow-world/src/session.rs:723` carries `gray_level(pl)` and `:734 zero_difference(pl)`, plus an inline XP-gain pipeline at `:700–720` that mirrors `Trinity::XP::Gain` (n_base_exp by content level, gray check, ZD-band scaling). It is **inlined into `WorldSession`**, not extracted to `wow-combat::xp` as section 8/9 anticipates — the formulas exist but in the wrong crate. Update #MISC.3/#MISC.4: refactor existing session-level code into `wow-combat`, don't write from scratch.
+
+**`xp_to_level`**: `wow-data/src/quest_xp.rs:33` exists (loader); no closed-form fallback if the table is missing. Doc claim "partial" correct.
+
+**`GetExpansionForLevel`**: not found. Absent.
+
+**Verdict:** ⚠️ partial confirmed. Net adjustments to upstream sections: (a) constant coverage is ~50%, not 30%; (b) XP formulas are present but mis-located; (c) Language/RaceMask/CommonPredicates/Honor remain wholly absent — these four are the real gap.

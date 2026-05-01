@@ -4,7 +4,7 @@
 > **Rust target crate(s):** `crates/wow-battlefield/` (NOT YET CREATED — must be added to workspace)
 > **Layer:** L7
 > **Status:** ❌ not started
-> **Audited vs C++:** ❌ not audited
+> **Audited vs C++:** ✅ audited 2026-05-01 (❌ confirmed — last PvP to migrate)
 > **Last updated:** 2026-05-01
 
 ---
@@ -369,3 +369,29 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 ---
 
 *Template version: 1.0 (2026-05-01).* Cuando se rellene, actualizar header de status y `Last updated`.
+
+---
+
+## 13. Audit (2026-05-01)
+
+❌ confirmado. Auditado contra `/home/server/rustycore/crates/`.
+
+**Hallazgos clave:**
+- No existe `crates/wow-battlefield/`. No existe `crates/wow-vehicles/` ni `crates/wow-worldstate/` ni `crates/wow-areatrigger/` con `ControlZoneHandler`. Todas las dependencies que el doc lista como precondición (WorldStateMgr, ControlZoneHandler, Vehicle aura, Phasing, AchievementMgr) están ausentes.
+- `crates/wow-achievement/` existe como crate pero solo con scaffolding mínimo (no `AchievementMgr` real con `CompletedCriteria`).
+- Búsqueda de identifiers `Wintergrasp`, `BattlefieldMgr`, `Bf*Mgr*`, `BfWGGameObjectBuilding`, `WintergraspWorkshop`, `m_DefenderTeam`, `OnBattleStart`, `OnBattleEnd` en todo el workspace: **0 resultados**.
+- Búsqueda de los opcodes `BfMgr*` o `BattlefieldMgr*` (entry-invite, queue-invite, queue-request, exit-request, ejected, eject-pending, state-changed) en `wow-constants/src/opcodes.rs`: **0 nombres con esos prefijos**. Las constantes ni siquiera están aún en el catálogo de opcodes — habrá que añadirlas en el batch correspondiente. Solo aparecen los del subspace `Battlefield*` de BGs (que es otra familia, ver §11 del propio doc).
+- `crates/wow-world/src/handlers/` no contiene ningún archivo `battlefield.rs` ni stub para los 4 CMSG (`ENTRY_INVITE_RESPONSE`, `QUEUE_INVITE_RESPONSE`, `QUEUE_REQUEST`, `EXIT_REQUEST`).
+
+**Verificación de dependencias (el doc dice "should be last PvP migrated" — confirmado):**
+- WorldStateMgr: ❌ ausente. Battlefield necesita ~30 worldstate IDs propios + persistencia del defender team.
+- ControlZoneHandler: ❌ ausente. Wintergrasp usa el primitivo de captura genérico para los 6 workshops.
+- Vehicle (auras 56933 driving, etc.): ❌ ausente. Sin esto, demolishers/siege engines/catapults son spawns inertes.
+- Phasing (auras 56617, 56618, 55773, 55774 + máscaras 16/32/64/128): ❌ ausente. Sin esto, factory phase shift no funciona y los vehicles spawneados serían visibles para todos sin distinción de team.
+- AchievementMgr: ⚠️ scaffold-only. Wintergrasp completa 16 logros distintos.
+
+**Riesgo de UI hang silencioso:**
+- 🟢 **No hay riesgo activo** porque no existe la zona Wintergrasp jugable. Los players nunca llegarán al área 4197 con contenido funcional, así que el cliente nunca enviará `CMSG_BATTLEFIELD_MGR_*` opcodes. Dropear estos en el dispatcher sin handler es no-op visible.
+- ⚠️ Si se entra al área 4197 (zone teleport via GM) con el sistema dormido, el cliente queda en zone con HUD genérico — no hay UI element esperando confirmación, así que no hay hang. Riesgo cosmético only.
+
+**Acción:** dejar `❌ not started` y mantenerlo al final del orden de migración PvP (después de #BG, #OPVP, y de WorldStateMgr+Vehicle+Phasing). Documentar en MIGRATION_ROADMAP que Battlefield es **gated by**: maps.md, instances.md, vehicles, phasing, worldstatemgr, achievements. Hasta entonces nadie debe abrir un PR `wow-battlefield`.

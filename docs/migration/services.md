@@ -3,8 +3,8 @@
 > **C++ canonical path:** `src/server/game/Services/`
 > **Rust target crate(s):** `crates/wow-network/`, `crates/wow-world/`, `crates/wow-proto/` — *(out of scope for the WotLK 3.4.3 path; see notes)*
 > **Layer:** L1 — Cross-realm RPC infrastructure
-> **Status:** ❌ not started — and likely not needed
-> **Audited vs C++:** ❌ not audited
+> **Status:** ⚠️ partial (stub) — confirmed via audit 2026-05-01: `CMSG_BATTLENET_REQUEST` handler EXISTS in `crates/wow-world/src/handlers/battlenet.rs` and replies `RpcNotImplemented` for every service hash. The §1 hypothesis "the client never asks" was wrong — the client does send it, we just don't service it.
+> **Audited vs C++:** ✅ audited 2026-05-01 — recommendation in §9 ("treat as out-of-scope unless capture shows traffic") needs revision; capture-equivalent already exists in the form of an active stub handler
 > **Last updated:** 2026-05-01
 
 ---
@@ -181,3 +181,30 @@ Inside each envelope: `(service_hash: u32, method_id: u32, token: u32, payload_l
 ---
 
 *Template version: 1.0 (2026-05-01).* Cuando se rellene, actualizar header de status y `Last updated`.
+
+---
+
+## 13. Audit (2026-05-01)
+
+**Method:** `grep -rE "(ServiceDispatcher|service_dispatcher|battlenet_request|HandleBattlenetRequest|CMSG_BATTLENET)" crates/`. Inspected `crates/wow-world/src/handlers/battlenet.rs` and the relevant `inventory::submit!` registration.
+
+**Verdict on §9 recommendation: REVISE.** The doc says "if S.1 shows no traffic, mark out-of-scope". But the codebase already shows the client *does* send `CMSG_BATTLENET_REQUEST` (opcode register exists, the `inventory::submit!` block is registered with `SessionStatus::Authed`, and the handler explicitly logs `service_hash`/`method_id`/`token` per request). The §9 capture step is therefore satisfied by the existence of a stub that's clearly receiving traffic in the wild.
+
+**Findings:**
+
+1. **`CMSG_BATTLENET_REQUEST` handler EXISTS** — `crates/wow-world/src/handlers/battlenet.rs` registers a handler under `ClientOpcodes::BattlenetRequest` (CMSG 0x36FD per the doc-string, which differs from the doc's §7 guess of `~0x4F3` — pin the actual opcode at next review), `SessionStatus::Authed`. The body always responds `BattlenetResponse::error(service_hash, method_id, token, BattlenetRpcErrorCode::RpcNotImplemented)`.
+2. **No `WorldserverServiceDispatcher` analogue.** No service hash table, no FNV-1a service-name hashing, no per-service routing — every request goes to the same generic `RpcNotImplemented` reply, regardless of whether it's `GameUtilitiesService::HandleRealmListRequest` (the realm-hop flow) or `FriendsService::SubscribeToFriends` (a no-op for 3.4.3).
+3. **`CMSG_BATTLENET_REQUEST` payload is decoded** as a `BattlenetRequest` (in `crates/wow-packet/src/packets/battlenet.rs`); `BattlenetResponse` exists for replies. So the wire-envelope plumbing is in place.
+4. **No worldserver-side `GameUtilitiesService` handlers** — no `handle_realm_list_request` / `handle_realm_join_request` on the world side. Note that the **bnet-side** `bnet-server/src/rpc/services/game_utilities.rs` does implement these *for the pre-login auth flow* — they are NOT the same as the worldserver-side handlers (different transport: REST/TLS-1119 vs in-game world-socket-8085).
+5. **`SMSG_BATTLENET_NOTIFICATION` / `SMSG_BATTLENET_RESPONSE`** outbound packets exist in `wow-packet`; not actively pushed by any server-initiated flow yet.
+
+**Operational impact:** since every service responds `RpcNotImplemented`, any client that *needs* the worldserver-side realm-hop or any 3.4.3-Classic-relevant BNet feature gets a polite "no" rather than a disconnect. This is acceptable behavior — it just means features like in-game realm refresh / friends-list sync won't work until the dispatcher is implemented. No data corruption risk, no security risk.
+
+**Revised recommendation:** Move from "out-of-scope unless capture shows need" to **"deferred-but-known-needed for ≥1 service (GameUtilities)"**. Ranking of the 12 services by 3.4.3-Classic relevance:
+
+- **GameUtilities** — needed if/when in-game `/realms` refresh or character-select-screen-from-game lands. Likely to come up. Implement first when a real use case appears.
+- **Authentication / Connection / Account** — defensive re-auth flows. Stubbed responses are fine.
+- **Friends / Presence / ClubMembership / Club / UserManager** — retail social features. Almost certainly safe to leave as `RpcNotImplemented` forever for 3.4.3 Classic.
+- **Report v1/v2 / Resources** — irrelevant on a private server.
+
+**Status verdict:** ⚠️ partial (was ❌ not started). Sub-task #SVC.1 is **DONE-by-observation** (the stub itself is the capture). #SVC.2-3 are **DONE** (envelope + handler exist). #SVC.4-9 are the real remaining work, gated on first observed real-world need (likely #SVC.7 realm-list-request, when in-game realm hop becomes a target feature). #SVC.10 (stub the other 11 with `RpcNotImplemented`) is **already implicit** in the catch-all stub.

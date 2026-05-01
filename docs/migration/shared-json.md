@@ -4,7 +4,7 @@
 > **Rust target crate(s):** n/a (idiom replacement: `serde` + `serde_json`)
 > **Layer:** L1
 > **Status:** ✅ done (sustituido por `serde_json` + structs `#[derive(Serialize)]`; no port directo)
-> **Audited vs C++:** ❌ not audited
+> **Audited vs C++:** ✅ n/a confirmed (2026-05-01) — by-design divergence (RapidJSON+protobuf → serde_json+ad-hoc structs); golden-test gaps tracked
 > **Last updated:** 2026-05-01
 
 ---
@@ -158,6 +158,16 @@ N/A directo. Indirectamente: el output JSON va dentro de payloads bnet auth, no 
 | Proto `TYPE_BYTES` → base64 | `#[serde(with = "base64")]` | Si se necesita |
 | Proto enum → name string | `#[derive(Serialize)] enum X { ... }` o `serde_repr` para int | Configurable per-enum |
 | `bool Deserialize` retorna false on error | `Result<T, serde_json::Error>` | Más expresivo |
+
+---
+
+## 13. Audit (2026-05-01)
+
+**Status confirmed: ✅ n/a — by-design divergence.**
+
+C++ `shared/JSON/ProtobufJSON.{h,cpp}` (~495 lines) is a RapidJSON visitor over `google::protobuf::Reflection` — generic over any proto `Message`. RustyCore deliberately does **not** port this: the only consumer is the bnet realm-list payload, and `crates/bnet-server/src/realm/mod.rs` already provides idiomatic Rust structs with `#[derive(Serialize)]` + `#[serde(rename_all = "camelCase")]` driving `serde_json::to_string`, plus envelope strings (`JSONRealmListUpdates:`, `JamJSONRealmEntry:`, etc.), trailing `\0`, and zlib via `flate2`. Reusing `prost-reflect` for a generic visitor would be overkill for ~7 message types and would add a runtime-reflection dependency not otherwise needed. The divergence is intentional: structs ad-hoc over proto-derived JSON.
+
+**Residual cleanup:** the divergence has known **observable risks** that should not block the n/a status but must be tracked: (a) proto3 default-value omission (RapidJSON omits, `serde_json` emits — possibly visible to strict clients), (b) field key ordering, (c) `bytes` → base64 encoding if any `Vec<u8>` field is added. These are captured as open sub-tasks #JSON.1 (golden test against captured TC payload), #JSON.2 (default omission audit), #JSON.3 (key-order test), and #JSON.4 (base64 on demand). Until #JSON.1 has been executed at least once, treat the wire equivalence as **assumed, not proven**.
 
 ---
 

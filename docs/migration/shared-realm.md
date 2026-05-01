@@ -3,8 +3,8 @@
 > **C++ canonical path:** `/home/server/woltk-trinity-legacy/src/server/shared/Realm/`
 > **Rust target crate(s):** `crates/bnet-server/` (`src/realm/mod.rs`)
 > **Layer:** L1
-> **Status:** ⚠️ partial (~60%)
-> **Audited vs C++:** ❌ not audited
+> **Status:** ⚠️ partial (~60%) — confirmed via audit 2026-05-01 (RealmHandle packing absent; cfg_timezones/categories swapped vs C++; JoinRealm exists at bnet RPC layer, not at the missing-RealmList layer)
+> **Audited vs C++:** ✅ audited 2026-05-01 — both flagged divergences confirmed; one was C++-side mis-cited (line 332 actually points to the correct C++ assignment, *not* the bug; the bug is purely in Rust)
 > **Last updated:** 2026-05-01
 
 ---
@@ -202,3 +202,23 @@ Y para realm list updates:
 ---
 
 *Template version: 1.0 (2026-05-01).*
+
+---
+
+## 13. Audit (2026-05-01)
+
+**Method:** Read `crates/bnet-server/src/realm/mod.rs` (392 lines), cross-checked against C++ `shared/Realm/{Realm.h, Realm.cpp, RealmList.cpp}`. Verified the two specific divergences flagged in §8.
+
+**Verdicts on flagged hypotheses:**
+
+1. **`RealmHandle` packing — CONFIRMED DIVERGENT.** `mod.rs:104` writes `wow_realm_address: r.id as i32` while C++ `RealmList.cpp:269` writes `realmEntry.set_wowrealmaddress(realm->Id.GetAddress())` where `RealmHandle::GetAddress()` (`Realm.h:56`) returns `(Region << 24) | (Site << 16) | uint16(Realm)`. The Rust code drops Region/Site entirely. Single-region servers (current case) coincidentally work because `region=0, site=0` makes `GetAddress() == realm_id`, but any multi-region deployment would emit the wrong wire address. The reverse parse on `mod.rs:131` (`wow_realm_address: realm_id as i32`) has the same bug.
+2. **`cfg_timezones_id` ↔ `cfg_categories_id` swap — CONFIRMED DIVERGENT.** C++ `RealmList.cpp:270` and `:330` set `cfgtimezonesid = 1` (constant); `:272` and `:332` set `cfgcategoriesid = realm.Timezone`. Rust `mod.rs:105-107` does the inverse: `cfg_timezones_id = r.timezone`, `cfg_categories_id = 1`. **Real bug** — visible client-side as wrong realm grouping/timezone in the server-list UI for any realm whose timezone field is non-1.
+
+**Other findings during the audit:**
+
+- **`JoinRealm` flow EXISTS** but in `crates/bnet-server/src/rpc/services/game_utilities.rs:233-303`, not under the realm module. Generates 32-byte server secret with `rand::thread_rng().fill`, persists `client_secret + server_secret` via `LoginStatements::UPD_BNET_GAME_ACCOUNT_LOGIN_INFO`, returns the three response blobs (`Param_RealmJoinTicket`, `Param_ServerAddresses`, `Param_JoinSecret`). The §8 claim "JoinRealm flow no existe" was **WRONG** — update §8 to reflect that the flow lives at the RPC-handler layer rather than as a `RealmList::JoinRealm` method. Sub-task #REALM.4 is therefore partially-done: the wire-level behavior works; what's missing is the C++-style architectural placement (RealmList owning the join logic) and the Resolver hostname resolution.
+- **`RealmHandle` decomposition** is also missing on the inbound path: `mod.rs:248-250` extracts `Param_RealmAddress` as a flat `uint_value` and looks up `realm_mgr.realms.get(&realm_address)`, never decomposing. C++ does `RealmList::JoinRealm(Battlenet::RealmHandle(realmAddress), ...)` which constructs the handle from the packed u32 (`Realm.h:46`). For single-region this is functionally identical; cross-check on next multi-region work.
+- **Hostname resolution still missing** as flagged.
+- **Timezone field type:** Rust reads `r.timezone: u8` (line 273); C++ uses `uint8` for the realmlist column too — equivalent.
+
+**Status verdict:** ⚠️ partial (no change). The two flagged bugs are real and should be fixed (#REALM.1 + #REALM.3 in §9). The §8 wording about JoinRealm needs softening — the flow exists, it's just architecturally elsewhere.

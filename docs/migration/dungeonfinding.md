@@ -4,7 +4,7 @@
 > **Rust target crate(s):** `crates/wow-world/src/lfg/` (a crear) + handlers en `crates/wow-world/src/handlers/`
 > **Layer:** L7
 > **Status:** ❌ not started (stubs vacíos en `handlers/misc.rs`)
-> **Audited vs C++:** ❌ not audited
+> **Audited vs C++:** ✅ audited 2026-05-01 (❌ confirmed — silent UI hang risk)
 > **Last updated:** 2026-05-01
 
 ---
@@ -356,3 +356,23 @@ Complejidad: **L** (<1h), **M** (1-4h), **H** (4-12h), **XL** (>12h).
 ---
 
 *Template version: 1.0 (2026-05-01).*
+
+---
+
+## 13. Audit (2026-05-01)
+
+❌ confirmado. Auditado contra `/home/server/rustycore/crates/`.
+
+**Hallazgos clave:**
+- No existe `crates/wow-world/src/lfg/`. No existe ningún archivo dedicado a LFG en `crates/wow-world/src/handlers/` (no hay `lfg.rs`, no hay `dungeonfinder.rs`).
+- Búsqueda de `LFGMgr`, `LFGQueue`, `LfgPlayerData`, `LfgGroupData`, `LfgProposal`, `LfgRoleCheck`, `LfgReward`, `Luck of the Draw`, `72221`, `71041`, `71328`, `LFGDungeons`, `lfg_dungeon_rewards`, `lfg_entrances`, `character_lfg_data` en todo el workspace: **0 resultados**.
+- Cero ELO matchmaking, cero algoritmo `check_group_roles` (1T+1H+3D backtracking), cero state machine (NONE/ROLECHECK/QUEUED/PROPOSAL/DUNGEON/FINISHED).
+- `crates/wow-constants/src/opcodes.rs` confirma 8 opcodes CMSG_DF_* (`DfJoin=0x360b`, `DfLeave=0x3614`, `DfProposalResponse=0x3609`, `DfSetRoles=0x3617`, `DfTeleport=0x3619`, `DfBootPlayerVote=0x3618`, `DfGetSystemInfo=0x3615`, `DfGetJoinStatus=0x3616`) y 11+ opcodes LfgList* (Premade Group Finder). De los 8 CMSG_DF_*, **solo 2 están registrados** (`DfGetSystemInfo`, `DfGetJoinStatus`) y ambos son stubs no-op (`handlers/misc.rs:601-602`). De los 11 LfgList*, **solo 2 stubs** (`RequestLfgListBlacklist` L610, `LfgListGetStatus` L611). Los otros 6 CMSG_DF_* y 9 LfgList* opcodes **no están registrados** (caen en unknown-opcode log).
+
+**Riesgo de UI hang silencioso (CRÍTICO — el doc lo flag bien):**
+- 🔴 **`CMSG_DF_JOIN`**: opcode parseado por el cliente al pulsar "Find Group" en el Dungeon Finder. **No registrado** en RustyCore — cae en unknown-opcode. El cliente espera `SMSG_LFG_JOIN_RESULT` + `SMSG_LFG_UPDATE_STATUS` (con `LFG_UPDATETYPE_JOIN_QUEUE=6`). Sin esto, el botón "Find Group" se queda con la spinner girando *forever*. Confirmado por la doc §8.
+- 🔴 **`CMSG_DF_GET_SYSTEM_INFO`** está stubbed (silent ack). El cliente lo envía al abrir el panel LFG y espera `SMSG_LFG_PLAYER_INFO` con la lista de dungeons + locks + random rewards. Sin respuesta, el panel muestra una lista *vacía* — el botón "Find Group" técnicamente está enabled pero al pulsarlo cae en el caso anterior. Riesgo: usuario ve UI vacía sin error → confusión.
+- 🟡 **`CMSG_LFG_LIST_JOIN`** (Premade Group Finder, 0x32f0): no registrado. Si el cliente intenta crear un grupo via "Premade", silent drop. UI Premade muestra "Failed to create" eventualmente (timeout ~30s).
+- 🟡 **`CMSG_DF_PROPOSAL_RESPONSE`** (0x3609): no registrado, pero solo relevante si llegara una proposal — cosa que no ocurre porque DfJoin no funciona. Cadena rota arriba.
+
+**Acción:** mantener `❌ not started`. Recomendación táctica para evitar el hang visible (si LFG se posterga ≥1 sprint): añadir un stub explícito `handle_df_join` que envíe `SMSG_LFG_JOIN_RESULT` con `result=LFG_JOIN_INTERNAL_ERROR=0x1A` (o `LFG_JOIN_DESERTER_PLAYER=0x28`) — el cliente entonces muestra un toast de error claro en vez de spinner infinito. Mejor todavía: enviar `SMSG_LFG_DISABLED` cuando llegue `CMSG_DF_GET_SYSTEM_INFO` para que el panel salga directamente con el mensaje "Dungeon Finder is currently disabled". Ambos son ~10 líneas y desbloquean el síntoma percibido sin migrar nada del manager.

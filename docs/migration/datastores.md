@@ -3,8 +3,8 @@
 > **C++ canonical path:** `/home/server/woltk-trinity-legacy/src/server/game/DataStores/`
 > **Rust target crate(s):** `crates/wow-data/` (also touches `crates/wow-database/` for hotfix statements)
 > **Layer:** L1 (infrastructure — typed game-data tables consumed by every gameplay system)
-> **Status:** ⚠️ partial (raw DB2 reader works; ~8 of ~261 tables exposed via hand-rolled readers; no DB2Manager, no hotfix overlay, no game tables)
-> **Audited vs C++:** ✅ complete (16 files, ~30 KLoC)
+> **Status:** ⚠️ partial — confirmed via audit 2026-05-01 (raw WDC4 reader OK; **7 hand-rolled tables of ~261**, not 8; no DB2Manager, no hotfix overlay, no GameTables, no M2 cameras)
+> **Audited vs C++:** ✅ complete (16 files, ~30 KLoC) — game-side gap reverified 2026-05-01 against `shared-datastores.md` audit (which counted 5 .db2 files at the shared-loader layer; this game-side layer wraps slightly more — they are not the same metric)
 > **Last updated:** 2026-05-01
 
 ---
@@ -357,3 +357,24 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 ---
 
 *Template version: 1.0 (2026-05-01).* Cuando se rellene, actualizar header de status y `Last updated`.
+
+---
+
+## 13. Audit (2026-05-01)
+
+**Method:** Listed `crates/wow-data/src/` and `crates/wow-data/src/lib.rs`; cross-referenced against the C++ `DataStores/` inventory and the `shared-datastores.md` audit (which already established a 5/325 baseline at the shared-loader layer).
+
+**Findings:**
+
+- `crates/wow-data/src/lib.rs` exports exactly 8 modules: `wdc4` (the parser, shared-layer), `item`, `item_stats`, `hotfix_cache`, `player_stats`, `skill`, `area_trigger`, `spell`. No `quest.rs` / `quest_xp.rs` (the §8 claim of 10 modules was inaccurate at audit time — they were either renamed/removed since the doc draft).
+- **Game-side typed tables actually wrapped: 7** (Item, ItemSparse, AreaTrigger+AreaTriggerTeleport, SkillLineAbility, SpellName-partial, plus the GameTable-shaped `player_stats` per-class baseline). The `shared-datastores.md` count of "5 .db2 files parsed" is a stricter metric (one count per .db2 file); this doc's "~8" should be normalized to **7 hand-rolled typed wrappers / ~261 game-side stores ≈ 2.7%**.
+- **No `DB2Manager` analogue.** No `OnceLock<Arc<DB2Manager>>`, no `_stores: DashMap<u32, ...>`, no centralized hotfix push container.
+- **No hotfix-DB overlay.** `hotfix_cache.rs` (111 LOC) is a *file-bytes* cache for `Item.db2` / `ItemSparse.db2` only — exactly as §8 describes. The misleading-name issue is real: this is **not** the C++ `DB2Manager::LoadHotfixBlob` equivalent.
+- **No GameTables.** None of the 16 `gtX.txt` TSV files (`gtCombatRatings`, `gtSpellScaling`, `gtBaseMP`, `gtHpPerSta`, `gtRegen*`, etc.) are loaded. `player_stats.rs` covers only the per-class baseline subset.
+- **No M2 cinematic camera parser.** `LoadM2Cameras` / `GetFlyByCameras` absent — cinematic opcodes won't have keyframe data.
+- **No DBCEnums centralization.** `Difficulty`, `Powers`, `MapType`, `BattlegroundBracketId`, `LevelLimit` not centralized in `wow-constants`.
+- **DB statement enum:** `crates/wow-database/src/statements/hotfix.rs` is a 25-line `_PLACEHOLDER` stub — the ~783 per-table prepared statements are not registered, and the three control tables (`hotfix_data`, `hotfix_blob`, `hotfix_optional_data`) are never queried.
+
+**Cross-reference vs `shared-datastores.md`:** the shared-layer audit found 5 `.db2` files parsed (Item, ItemSparse, SkillLineAbility, AreaTrigger, SpellName — its file count). This game-side layer wraps those into 7 typed accessors plus 1 GameTable shim (`player_stats`), but it does not add the architectural pieces the C++ game layer adds: stores registry, hotfix overlay, accessor helpers, secondary indexes. **The game-side gap is therefore strictly larger than the shared-side gap** — even if every shared-layer .db2 reader worked, the ~80 `DB2Manager::Get*` helpers would still all be missing.
+
+**Status verdict:** ⚠️ partial (no change). Tighten §1 wording: 7 typed wrappers (not 8), ~2.7% of game-side surface, zero of the 80 `DB2Manager::Get*` helpers, zero of the 16 GameTables, zero of the 3 hotfix-DB control tables. Sub-tasks #GDS.1, #GDS.7-9, #GDS.16 are the highest-leverage next steps.

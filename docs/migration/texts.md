@@ -198,3 +198,19 @@ This module *only* sends; nothing client-originated routes here.
 ---
 
 *Template version: 1.0 (2026-05-01).*
+
+---
+
+## 13. Audit (2026-05-01)
+
+**Loader / mgr presence.** `find … grep "CreatureText\|SendChat\|ChatTextBuilder\|text_repeat"` across all `crates/*/src/` returns **only** two hits, both in `crates/wow-database/src/statements/`:
+- `world.rs:14` — enum variant `SEL_CREATURE_TEXT,`
+- `mod.rs` — re-export of the same.
+
+Confirmed: **no `creature_text.rs`, no `text_mgr.rs`, no `chat_text_builder.rs`, no `WorldCreature::text_repeat` field, no `Talk(group)` method**. The prepared-statement variant `SEL_CREATURE_TEXT` is reserved but has no consumer (no callsite of `db.execute(SEL_CREATURE_TEXT, …)` anywhere). Section 8's "the prepared statement string. That's it." is precisely correct.
+
+**`SendChat`-returns-`duration` impl gap.** Confirmed unimplemented because `SendChat` itself does not exist. The C++ `CreatureTextMgr::SendChat` (`CreatureTextMgr.cpp` ~line 200, signature returns `uint32`) is the source of the `duration` value `BossAI::Talk(group)` reads to schedule the next line — without a Rust analogue, no boss script can self-pace. Any current Rust scripted talks must use ad-hoc `SMSG_CHAT` constructions (none found in handlers grep either; scripts currently silent).
+
+**Range dispatcher / locale cache / repeat-avoidance / 4 builders / `SendSound` / `SendEmote`**: all absent.
+
+**Verdict:** ❌ not started, confirmed. Doc badge correct as-is. Recommend escalating priority because every L6+ boss/quest script is gated on this; section 9 #TXT.3 (returns `duration`) is the unblocker — the rest of the L6 AI work cannot ship a faithful boss-line cadence without it.
