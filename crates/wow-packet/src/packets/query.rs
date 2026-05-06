@@ -254,7 +254,7 @@ impl ClientPacket for QueryGameObject {
 const MAX_GAMEOBJECT_NAMES: usize = 4;
 
 /// Maximum gameobject data fields.
-const MAX_GAMEOBJECT_DATA: usize = 34;
+const MAX_GAMEOBJECT_DATA: usize = 35;
 
 /// Gameobject template stats for query response.
 pub struct GameObjectStats {
@@ -330,7 +330,7 @@ impl ServerPacket for QueryGameObjectResponse {
         buf.write_cstring(&stats.cast_bar_caption);
         buf.write_cstring(&stats.unk_string);
 
-        // Data[34]
+        // Data[35] (Data0..Data34), matching C++ MAX_GAMEOBJECT_DATA.
         for &d in &stats.data {
             buf.write_int32(d);
         }
@@ -404,6 +404,25 @@ mod tests {
         let bytes = resp.to_bytes();
         // Should contain opcode + id + guid + allow bit
         assert!(bytes.len() > 6);
+    }
+
+    #[test]
+    fn query_game_object_response_writes_data34_and_content_tuning() {
+        let mut stats = GameObjectStats::default();
+        stats.names[0] = "Test GameObject".to_string();
+        stats.data[34] = 0x1122_3344;
+        stats.content_tuning_id = 0x5566_7788;
+
+        let resp = QueryGameObjectResponse {
+            game_object_id: 100,
+            guid: ObjectGuid::EMPTY,
+            allow: true,
+            stats: Some(stats),
+        };
+
+        let bytes = resp.to_bytes();
+        assert!(bytes.windows(4).any(|w| w == 0x1122_3344i32.to_le_bytes()));
+        assert!(bytes.windows(4).any(|w| w == 0x5566_7788i32.to_le_bytes()));
     }
 
     #[test]

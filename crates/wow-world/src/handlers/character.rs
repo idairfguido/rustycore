@@ -2408,11 +2408,12 @@ impl WorldSession {
         let unk_string: String = result.read_string(6);
         let size: f32 = result.try_read(7).unwrap_or(1.0);
 
-        // Data0..Data33 at columns 8..41
-        let mut data = [0i32; 34];
-        for i in 0..34 {
+        // Data0..Data34 at columns 8..42, matching C++ MAX_GAMEOBJECT_DATA.
+        let mut data = [0i32; 35];
+        for i in 0..35 {
             data[i] = result.try_read(8 + i).unwrap_or(0);
         }
+        let content_tuning_id = result.try_read(43).unwrap_or(0);
 
         let mut names: [String; 4] = Default::default();
         names[0] = name;
@@ -2427,7 +2428,7 @@ impl WorldSession {
             data,
             size,
             quest_items: Vec::new(),
-            content_tuning_id: 0,
+            content_tuning_id,
         };
 
         self.send_packet(&QueryGameObjectResponse {

@@ -73,6 +73,20 @@ Layer rules:
 - **L3 integration** lives in `tests/it/` at workspace root. Spins up WorldSession against a sqlite-or-tempdir MariaDB schema and the real packet stack, but no docker.
 - **L4 end-to-end** lives in `tests/e2e/` with `docker-compose.yml` provisioning MariaDB 10.6 + the two binaries; a smoke client logs in and walks one map.
 
+### 3.1 Existing headless client harness
+
+The available Rust bot harness lives outside this workspace at `/home/cdmonio/projects/wow-test-bot/rust-bot/`. It was built and validated against the C++ server in `/home/server/woltk-trinity-legacy/`; the C++-side reference docs are `LFG_TEST_HARNESS.md`, `BOT_PATCHES.md`, and `sql/custom/lfg_bot_test_migrations.md`.
+
+Use it during the port, not after, but only as an E2E regression harness. It is not a correctness oracle. Every packet layout and server behavior it relies on must still be checked against C++ first.
+
+Known harness dependencies to port or adapt before relying on it against Rust:
+- BNet bot REST endpoints: `POST /login/srp/` and `POST /login/` with the bot-specific JSON shape and `session_key` response.
+- Single-socket login path for bot accounts gated by the C++ `Bot.AccountPrefix` behavior, or an equivalent bot update that opens the Rust instance socket.
+- LFG client opcodes and handlers used by the harness: `CMSG_DF_SET_ROLES`, `CMSG_DF_JOIN`, `CMSG_DF_PROPOSAL_RESPONSE`, `CMSG_DF_READY_CHECK_RESPONSE`.
+- Test data hygiene for the bot accounts/characters and stale `groups` / `group_member` rows.
+
+Minimum acceptance before using it as a migration gate: bot BNet auth -> world auth -> `CMSG_ENUM_CHARACTERS` -> `CMSG_PLAYER_LOGIN` passes against Rust, then LFG-specific gates can be enabled as that subsystem is ported.
+
 ---
 
 ## 4. Key practices
@@ -176,7 +190,7 @@ Complexity: **L** (<1h), **M** (1-4h), **H** (4-12h), **XL** (>12h, split).
 - [ ] **#TEST.8** Add `proptest` dev-dep to workspace; first prop test on `BigNumber` ↔ `num_bigint::BigUint` round-trip across endianness. (M)
 - [ ] **#TEST.9** Add `cargo-fuzz` workspace member with target `fuzz_world_dispatch`: feed random bytes to the `wow-handler` dispatch table; assert no panic, no UB. (H)
 - [ ] **#TEST.10** Add `tests/it/login_to_world.rs` — boots a `WorldSession` against an in-process MariaDB (or sqlite-as-mariadb-shim if feasible) and walks `CMSG_AUTH_SESSION → SMSG_AUTH_RESPONSE → CMSG_PLAYER_LOGIN → SMSG_LOGIN_VERIFY_WORLD`. (XL — split into sub-issues per opcode.)
-- [ ] **#TEST.11** Add `docker-compose.yml` under `tests/e2e/`: MariaDB 10.6 + `bnet-server` + `world-server`. CI step `docker compose up --wait && cargo test --features slow-tests -p e2e`. (H)
+- [ ] **#TEST.11** Add `docker-compose.yml` under `tests/e2e/`: MariaDB 10.6 + `bnet-server` + `world-server`, then wire the existing Rust bot harness at `/home/cdmonio/projects/wow-test-bot/rust-bot/` as the scripted client once its C++-validated auth/login prerequisites pass against Rust. CI step `docker compose up --wait && cargo test --features slow-tests -p e2e`. (H)
 - [ ] **#TEST.12** Add an `insta`-based snapshot test for chat-message formatting and for log output formatting (covered in `logging.md` too). (M)
 - [ ] **#TEST.13** Backfill regression tests for every commit matching `^fix:` in `git log`. Initial sweep produces a count; one named `regression_<short-sha>` test per. (H)
 - [ ] **#TEST.14** Document a "vector capture playbook" — how to produce a new golden vector from C++: which logger to enable, which file to read, how to convert. Lives at `docs/migration/vector-capture-playbook.md`. (M)

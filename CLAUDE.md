@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-RustyCore — WoW Wrath of the Lich King Classic (3.4.3.54261) private server emulator written in Rust. Migration from a C# TrinityCore-derived server (reference at `/home/server/woltk-server-core/Source/`). Rust 1.85, edition 2024. ~29-crate Cargo workspace.
+RustyCore — WoW Wrath of the Lich King Classic (3.4.3.54261) private server emulator written in Rust. Migration from the C++ TrinityCore-derived server at `/home/server/woltk-trinity-legacy`. Rust 1.85, edition 2024. ~29-crate Cargo workspace.
 
 The repo lives on GitHub at `https://github.com/alseif0x/rustycore.git` (remote `origin`). There is also an older archived clone at `/home/server/rustycore_ARCHIVED_20260312/` — a parallel iteration with different work, not authoritative.
 
@@ -93,9 +93,11 @@ Treat `_attic/` as a brief from a colleague who tried and wrote down what didn't
 
 `MIGRATION_STATUS.md` (root) is a feature-implementation snapshot from late February 2026 — useful for "is X already done" but stale: it doesn't mention the quest system, XP/levelup, aura expiry, spell cooldown, or area-trigger teleports that have landed since.
 
-### Reference C# implementation
+### Reference implementations
 
-The original C# server at `/home/server/woltk-server-core/Source/` is the canonical reference for protocol/mechanics ambiguity. File-name correspondence usually holds (`CombatHandler.cs` → `handlers/combat.rs`, `Player.Stats.cs` → player stats logic, etc.).
+The C++ server at `/home/server/woltk-trinity-legacy` is the canonical reference for this port. Do not trust existing Rust code, prior AI changes, or migration docs as correctness sources until they are contrasted against C++.
+
+The C# server at `/home/server/woltk-server-core/Source/` is historical/reference material only. It can help locate concepts, but C++ wins for protocol layouts, database field order, packet semantics, and mechanics.
 
 ## Repo conventions / gitignore quirks
 

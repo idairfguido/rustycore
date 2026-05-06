@@ -284,7 +284,7 @@ impl StatementDef for WorldStatements {
                 "Data8, Data9, Data10, Data11, Data12, Data13, Data14, Data15, ",
                 "Data16, Data17, Data18, Data19, Data20, Data21, Data22, Data23, ",
                 "Data24, Data25, Data26, Data27, Data28, Data29, Data30, Data31, ",
-                "Data32, Data33 ",
+                "Data32, Data33, Data34, ContentTuningId ",
                 "FROM gameobject_template WHERE entry = ?",
             ),
             Self::SEL_HOTFIX_BLOB => {
