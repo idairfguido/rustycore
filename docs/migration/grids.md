@@ -3,7 +3,7 @@
 > **C++ canonical path:** `src/server/game/Grids/`
 > **Rust target crate(s):** `crates/wow-world/` (shared with Maps)
 > **Layer:** L3 (World layer, substrate for Maps)
-> **Status:** 🔧 broken (missing core state machine)
+> **Status:** 🔧 broken (coordinate foundation ported; missing core state machine)
 > **Audited vs C++:** ❌ confirmed broken — 2026-05-01 audit; flat HashMap "grid" replaces NGrid/Cell hierarchy, no GridState machine, no GridInfo, no ObjectGridLoader, world→grid coords ignore Trinity's [-64..64] center-32 reorientation
 > **Last updated:** 2026-05-01
 
@@ -156,15 +156,14 @@ Grids module **does not originate** any packets directly. All object creation/de
 ## 8. Current state in RustyCore
 
 **Files in `/home/server/rustycore`:**
-- `crates/wow-world/src/map_manager.rs` — ~350 lines — contains bare `GridCoord` struct only
-- No dedicated `grid.rs` or grid state machine file
+- `crates/wow-map/src/coords.rs` — TrinityCore grid/cell constants and `ComputeGridCoord` / `ComputeCellCoord` equivalents.
+- `crates/wow-world/src/map_manager.rs` — legacy scaffold only; still not the canonical Map/NGrid/Cell implementation.
+- No dedicated `grid.rs` or grid state machine file yet.
 
 **What's implemented:**
-- `GridCoord` struct: `x: i16, y: i16`
-- `GridCoord::new(x, y)` constructor
-- `GridCoord::surrounding()` → returns 9 cells in 3x3 around self
-- `GridCoord::distance_squared(other)` → grid distance metric
-- Constants: `GRID_SIZE = 64.0` (64x64 yards per cell), `DEFAULT_GRID_UNLOAD_TIME = 300s`
+- `CoordPair<LIMIT>`, `GridCoord`, `CellCoord`.
+- Constants from `GridDefines.h`: `MAX_NUMBER_OF_GRIDS=64`, `MAX_NUMBER_OF_CELLS=8`, `SIZE_OF_GRIDS=533.3333`, `SIZE_OF_GRID_CELL=66.6666...`, `TOTAL_NUMBER_OF_CELLS_PER_MAP=512`.
+- `compute_grid_coord`, `compute_grid_coord_simple`, `compute_cell_coord`, `compute_cell_coord_with_offset`, `cell_to_grid_local`, map-coordinate validation/clamping.
 
 **What's missing vs C++:**
 1. **No NGrid<> template/struct** — no 8x8 cell array container
@@ -173,7 +172,7 @@ Grids module **does not originate** any packets directly. All object creation/de
 4. **No Grid<T> generic container** — no cell-level entity storage
 5. **No GridReference / GridRefManager** — no intrusive list tracking for entities
 6. **No ObjectGridLoader** — no DB spawn loading on grid activation
-7. **No coordinate conversions** — no world→grid, grid→cell index functions
+7. ~~No coordinate conversions~~ — first-pass world→grid/cell conversions now exist in `wow-map::coords`; not yet wired into Map/NGrid lifecycle.
 8. **No grid lifecycle** — no ACTIVE/IDLE/REMOVAL transitions, no lazy loading/unloading
 9. **No visibility tracking** — no NGrid::VisitAllGrids or cell iteration patterns
 10. **No PersonalPhaseGridLoader** — no phase-specific grid loading
@@ -184,7 +183,8 @@ Grids module **does not originate** any packets directly. All object creation/de
 - No lazy-load pattern: static spawning vs. dynamic on-demand loading not implemented.
 
 **Tests existing:**
-- 0 tests for grid coordinate math, state transitions, or entity loading
+- 6 tests for grid/cell coordinate math in `crates/wow-map/src/coords.rs`.
+- 0 tests for state transitions or entity loading.
 
 ---
 
@@ -194,9 +194,9 @@ Numerated for reference in MIGRATION_ROADMAP.md section 5.
 
 Complexity: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>12h, split).
 
-- [ ] **#GRIDS.1** Port GridDefines constants: MAX_NUMBER_OF_GRIDS=64, MAX_NUMBER_OF_CELLS=8, SIZE_OF_GRIDS=533.33, SIZE_OF_GRID_CELL=66.67 (L)
-- [ ] **#GRIDS.2** Implement world-to-grid coordinate conversion: world_x,y → grid_idx (Trinity::ComputeGridCoord equivalent) with unit tests (L)
-- [ ] **#GRIDS.3** Implement world-to-cell coordinate conversion within grid: world_x,y → cell_x,cell_y (0-7 range) (L)
+- [x] **#GRIDS.1** Port GridDefines constants: MAX_NUMBER_OF_GRIDS=64, MAX_NUMBER_OF_CELLS=8, SIZE_OF_GRIDS=533.33, SIZE_OF_GRID_CELL=66.67 (L)
+- [x] **#GRIDS.2** Implement world-to-grid coordinate conversion: world_x,y → grid_idx (Trinity::ComputeGridCoord equivalent) with unit tests (L)
+- [x] **#GRIDS.3** Implement world-to-cell coordinate conversion within grid: world_x,y → cell_x,cell_y (0-7 range) (L)
 - [ ] **#GRIDS.4** Enhance GridCoord: add `cell_from_world(x,y)`, boundary checking, GridCoord↔u32 serialization (M)
 - [ ] **#GRIDS.5** Implement GridInfo struct: timer (TimeTracker), unload_locks (u16), vis_timer (PeriodicTimer), methods inc/dec locks (M)
 - [ ] **#GRIDS.6** Implement GridState enum + Update trait: { Invalid, Active, Idle, Removal } each with update_state(&mut self, grid, info, diff) (M)
@@ -349,4 +349,3 @@ Audited C++ tree: `/home/server/woltk-trinity-legacy/src/server/game/Grids/{Grid
 ### 13.3 Verdict
 
 🔧 **broken — confirmed.** This module is structurally a single flat HashMap of "tiles" wearing the name `Grid`. The four canonical sub-systems of the C++ Grids module — coordinate math (`Compute*`), `NGrid<8>` template, `GridInfo`+`GridState` 4-state machine, `ObjectGridLoader` DB loader — are all missing. None of the existing code can be incrementally upgraded; coordinates and scale are wrong, so even creature persistence keys won't line up with the world DB. Recommend treating tasks #GRIDS.1-3 (constants + ComputeGridCoord/ComputeCellCoord) as **a hard prerequisite** and rewriting before #GRIDS.5+. Keep the existing `Grid`/`MapInstance` types only as a temporary integration shim while the real `NGrid` lands; do not extend them.
-

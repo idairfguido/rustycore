@@ -173,9 +173,9 @@ The module also **processes** CMSG_MOVE_* packets indirectly via WorldSession �
 ## 8. Current state in RustyCore
 
 **Files in `/home/server/rustycore`:**
-- `crates/wow-world/src/map_manager.rs` — ~350 lines — **scaffold only**; basic MapManager skeleton, no grid state machine
-- `crates/wow-world/src/map.rs` (if exists) — not found; Map impl missing
-- `crates/wow-map/src/lib.rs` — **empty scaffold** (0 impl)
+- `crates/wow-map/src/coords.rs` — coordinate foundation ported from `GridDefines.h`; no Map/NGrid lifecycle yet.
+- `crates/wow-world/src/map_manager.rs` — ~350 lines — **scaffold only**; basic MapManager skeleton, no grid state machine.
+- `crates/wow-world/src/map.rs` (if exists) — not found; Map impl missing.
 - `crates/wow-world/src/session.rs` (legacy) — 100+ lines — contains `WorldCreature` struct (creature AI state) **not a Map concern** but used in place of proper entity hierarchy
 
 **What's implemented:**
@@ -196,7 +196,7 @@ The module also **processes** CMSG_MOVE_* packets indirectly via WorldSession �
 8. **No visibility tracking** — no VisitNearbyCellsOf or cell-based entity interest
 9. **No InstanceMap/BattlegroundMap subclasses** — no difficulty/lock handling
 10. **No MapUpdater threading** — maps not updated in parallel threads
-11. **No coordinate transformations** — no conversion from world coords to grid/cell indices
+11. ~~No coordinate transformations~~ — `wow-map::coords` now has the TrinityCore formulas; still not wired into a real Map/NGrid/Cell model.
 12. **Separated creature AI** — WorldCreature is jammed into session.rs instead of properly living in the map grid system
 
 **Suspicious / likely divergent (pre-audit hypothesis from MIGRATION_ROADMAP.md):**
@@ -205,7 +205,8 @@ The module also **processes** CMSG_MOVE_* packets indirectly via WorldSession �
 - No lazy-load pattern; C++ grids load spawns on demand (GRID_STATE_INVALID → GRID_STATE_ACTIVE → load via ObjectGridLoader). Rust version has no equivalent.
 
 **Tests existing:**
-- 0 tests in `crates/wow-world/` or `crates/wow-map/`
+- 6 coordinate tests in `crates/wow-map`.
+- 0 Map lifecycle / NGrid / ObjectGridLoader tests.
 
 ---
 
@@ -387,4 +388,3 @@ Rust replication: **none of this exists**. `GridCoord { x: i16, y: i16 }` (map_m
 ### 13.5 Verdict
 
 🔧 **broken — keep status as-is, downgrade audit field to ❌ confirmed**. The `MapManager` module compiles, holds 12 unit tests, and provides a credible-looking façade, but it is missing the four load-bearing C++ structures: (a) `Map::Update()` loop, (b) `MapManager::Update()` dispatcher, (c) NGrid + GridState 4-state machine, (d) ObjectGridLoader DB integration. The world server never ticks the map. Recommended work order: #MAPS.5 → #MAPS.6 → #MAPS.10 → #MAPS.13 (state machine before container before per-map tick before per-manager tick), then #MAPS.7 (`ObjectGridLoader`) once `wow-database` exposes per-cell spawn queries. `_attic/` is irrelevant here — that integration was bridging fields that don't exist on `CreatureCreateData`; this audit's blocker is upstream of that work.
-
