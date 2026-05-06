@@ -174,6 +174,7 @@ The module also **processes** CMSG_MOVE_* packets indirectly via WorldSession �
 
 **Files in `/home/server/rustycore`:**
 - `crates/wow-map/src/coords.rs` — coordinate foundation ported from `GridDefines.h`; no Map/NGrid lifecycle yet.
+- `crates/wow-map/src/lib.rs` — `MapKey { map_id: u32, instance_id: u32 }`, matching C++ `MapManager::MapKey`.
 - `crates/wow-world/src/map_manager.rs` — ~350 lines — **scaffold only**; basic MapManager skeleton, no grid state machine.
 - `crates/wow-world/src/map.rs` (if exists) — not found; Map impl missing.
 - `crates/wow-world/src/session.rs` (legacy) — 100+ lines — contains `WorldCreature` struct (creature AI state) **not a Map concern** but used in place of proper entity hierarchy
@@ -205,7 +206,7 @@ The module also **processes** CMSG_MOVE_* packets indirectly via WorldSession �
 - No lazy-load pattern; C++ grids load spawns on demand (GRID_STATE_INVALID → GRID_STATE_ACTIVE → load via ObjectGridLoader). Rust version has no equivalent.
 
 **Tests existing:**
-- 6 coordinate tests in `crates/wow-map`.
+- 6 coordinate tests and 2 `MapKey` tests in `crates/wow-map`.
 - 0 Map lifecycle / NGrid / ObjectGridLoader tests.
 
 ---
