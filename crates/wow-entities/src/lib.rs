@@ -130,7 +130,7 @@ pub use player::{
     BUYBACK_SLOT_END, BUYBACK_SLOT_START, BagTemplateRef, CHILD_EQUIPMENT_SLOT_END,
     CHILD_EQUIPMENT_SLOT_START, CanBankItemArgs, CanEquipItemArgs, CanEquipItemOutcome,
     CanStoreItemArgs, CanStoreItemOutcome, CanTakeMoreSimilarItemsArgs,
-    CanTakeMoreSimilarItemsOutcome, FindEquipSlotArgs, INVENTORY_DEFAULT_SIZE,
+    CanTakeMoreSimilarItemsOutcome, CanUnequipItemArgs, FindEquipSlotArgs, INVENTORY_DEFAULT_SIZE,
     INVENTORY_SLOT_BAG_END, INVENTORY_SLOT_BAG_START, INVENTORY_SLOT_ITEM_END,
     INVENTORY_SLOT_ITEM_START, ITEM_LIMIT_CATEGORY_MODE_EQUIP, ITEM_LIMIT_CATEGORY_MODE_HAVE,
     ItemLimitCategoryTemplate, ItemPosCount, ItemSearchCallbackResult, ItemSearchLocation,

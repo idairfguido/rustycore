@@ -308,6 +308,18 @@ pub struct CanEquipItemOutcome {
     pub unique_ignore_slot: Option<u8>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct CanUnequipItemArgs<'a> {
+    pub pos: u16,
+    pub source_item: Option<&'a Item>,
+    pub proto: Option<&'a ItemStorageTemplate>,
+    pub swap: bool,
+    pub source_is_not_empty_bag: bool,
+    pub is_charmed: bool,
+    pub is_in_combat: bool,
+    pub is_in_progress_arena: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CanStoreItemOutcome {
     pub result: InventoryResult,
@@ -2054,6 +2066,44 @@ impl Player {
         }
     }
 
+    pub fn can_unequip_item(&self, args: CanUnequipItemArgs<'_>) -> InventoryResult {
+        if !is_equipment_packed_pos(args.pos) && !is_bag_pos(args.pos) {
+            return InventoryResult::Ok;
+        }
+
+        let Some(source) = args.source_item else {
+            return InventoryResult::Ok;
+        };
+
+        let Some(proto) = args.proto else {
+            return InventoryResult::ItemNotFound;
+        };
+
+        if source.loot_generated() {
+            return InventoryResult::LootGone;
+        }
+
+        if args.is_charmed {
+            return InventoryResult::ClientLockedOut;
+        }
+
+        if !proto.can_change_equip_state_in_combat() {
+            if args.is_in_combat {
+                return InventoryResult::NotInCombat;
+            }
+
+            if args.is_in_progress_arena {
+                return InventoryResult::NotDuringArenaMatch;
+            }
+        }
+
+        if !args.swap && args.source_is_not_empty_bag {
+            return InventoryResult::DestroyNonemptyBag;
+        }
+
+        InventoryResult::Ok
+    }
+
     pub fn can_bank_item(
         &self,
         dest: &mut Vec<ItemPosCount>,
@@ -3456,6 +3506,23 @@ mod tests {
         }
     }
 
+    fn can_unequip_args<'a>(
+        pos: u16,
+        proto: Option<&'a ItemStorageTemplate>,
+        source_item: Option<&'a Item>,
+    ) -> CanUnequipItemArgs<'a> {
+        CanUnequipItemArgs {
+            pos,
+            source_item,
+            proto,
+            swap: false,
+            source_is_not_empty_bag: false,
+            is_charmed: false,
+            is_in_combat: false,
+            is_in_progress_arena: false,
+        }
+    }
+
     #[test]
     fn player_constructor_matches_cpp_base_state() {
         let player = Player::new(Some(42), false);
@@ -4004,6 +4071,117 @@ mod tests {
             player.can_equip_item(twohand_args).result,
             InventoryResult::CantSwap
         );
+    }
+
+    #[test]
+    fn can_unequip_item_matches_cpp_position_template_and_runtime_guards() {
+        let player = Player::new(None, false);
+        let armor = ItemStorageTemplate {
+            inventory_type: InventoryType::Chest,
+            ..ItemStorageTemplate::regular_item(400, 1)
+        };
+        let weapon = ItemStorageTemplate {
+            class_id: ItemClass::Weapon,
+            inventory_type: InventoryType::Weapon,
+            ..ItemStorageTemplate::regular_item(401, 1)
+        };
+        let bag = ItemStorageTemplate {
+            inventory_type: InventoryType::Bag,
+            ..ItemStorageTemplate::regular_item(402, 1)
+        };
+        let mut source = Item::default();
+        source.set_count(1);
+
+        assert_eq!(
+            player.can_unequip_item(can_unequip_args(
+                make_item_pos(INVENTORY_SLOT_BAG_START, 0),
+                Some(&armor),
+                Some(&source),
+            )),
+            InventoryResult::Ok
+        );
+        assert_eq!(
+            player.can_unequip_item(can_unequip_args(
+                make_item_pos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_CHEST),
+                Some(&armor),
+                None,
+            )),
+            InventoryResult::Ok
+        );
+        assert_eq!(
+            player.can_unequip_item(can_unequip_args(
+                make_item_pos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_CHEST),
+                None,
+                Some(&source),
+            )),
+            InventoryResult::ItemNotFound
+        );
+
+        source.set_loot_generated(true);
+        assert_eq!(
+            player.can_unequip_item(can_unequip_args(
+                make_item_pos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_CHEST),
+                Some(&armor),
+                Some(&source),
+            )),
+            InventoryResult::LootGone
+        );
+        source.set_loot_generated(false);
+
+        let mut charmed = can_unequip_args(
+            make_item_pos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_CHEST),
+            Some(&armor),
+            Some(&source),
+        );
+        charmed.is_charmed = true;
+        assert_eq!(
+            player.can_unequip_item(charmed),
+            InventoryResult::ClientLockedOut
+        );
+
+        let mut combat = can_unequip_args(
+            make_item_pos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_CHEST),
+            Some(&armor),
+            Some(&source),
+        );
+        combat.is_in_combat = true;
+        assert_eq!(
+            player.can_unequip_item(combat),
+            InventoryResult::NotInCombat
+        );
+
+        let mut arena = can_unequip_args(
+            make_item_pos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_CHEST),
+            Some(&armor),
+            Some(&source),
+        );
+        arena.is_in_progress_arena = true;
+        assert_eq!(
+            player.can_unequip_item(arena),
+            InventoryResult::NotDuringArenaMatch
+        );
+
+        let mut weapon_combat = can_unequip_args(
+            make_item_pos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_MAINHAND),
+            Some(&weapon),
+            Some(&source),
+        );
+        weapon_combat.is_in_combat = true;
+        assert_eq!(player.can_unequip_item(weapon_combat), InventoryResult::Ok);
+
+        let mut non_empty_bag = can_unequip_args(
+            make_item_pos(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_BAG_START),
+            Some(&bag),
+            Some(&source),
+        );
+        non_empty_bag.source_is_not_empty_bag = true;
+        assert_eq!(
+            player.can_unequip_item(non_empty_bag),
+            InventoryResult::DestroyNonemptyBag
+        );
+
+        non_empty_bag.swap = true;
+        assert_eq!(player.can_unequip_item(non_empty_bag), InventoryResult::Ok);
     }
 
     #[test]
