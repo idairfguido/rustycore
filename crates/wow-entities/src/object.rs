@@ -274,6 +274,10 @@ impl EntityObject {
         }
     }
 
+    pub fn replace_all_dynamic_flags_suppressed(&mut self, flags: u32) {
+        self.dynamic_flags = flags;
+    }
+
     pub fn set_is_new_object(&mut self, enable: bool) {
         self.is_new_object = enable;
     }

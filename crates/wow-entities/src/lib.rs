@@ -17,6 +17,7 @@ mod pet;
 mod player;
 mod scene_object;
 mod totem;
+mod transport;
 mod unit;
 mod update_fields;
 mod vehicle;
@@ -104,6 +105,11 @@ pub use totem::{
     TotemCreatedPacket, TotemType, TotemUpdateOutcome, UNIT_MASK_CONTROLABLE_GUARDIAN,
     UNIT_MASK_GUARDIAN, UNIT_MASK_HUNTER_PET, UNIT_MASK_MINION, UNIT_MASK_PET, UNIT_MASK_SUMMON,
     UNIT_MASK_TOTEM,
+};
+pub use transport::{
+    GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT, GO_DYNFLAG_LO_STOPPED, Transport, TransportCreateInfo,
+    TransportMovementState, TransportPassengerSet, TransportPathEvent, TransportPathLeg,
+    TransportPathSegment, TransportTemplate,
 };
 pub use unit::{
     BASE_MAXDAMAGE, BASE_MINDAMAGE, BASE_MOVE_SPEED, DEFAULT_PLAYER_DISPLAY_SCALE, MAX_ATTACK,

@@ -2,7 +2,7 @@ use wow_constants::{TypeId, TypeMask};
 use wow_core::{ObjectGuid, Position};
 
 use crate::{
-    CreateObjectFlags, ObjectDataUpdate, UpdateMask, WorldObject,
+    CreateObjectFlags, ObjectChangedFields, ObjectDataUpdate, UpdateMask, WorldObject,
     update_fields::{GAME_OBJECT_DATA_BITS, TYPEID_GAME_OBJECT},
 };
 
@@ -347,6 +347,26 @@ impl GameObject {
         });
     }
 
+    pub fn set_path_progress_for_client(&mut self, progress: f32) {
+        let had_dynamic_flags_change = self
+            .world
+            .object()
+            .changed_fields()
+            .contains(ObjectChangedFields::DYNAMIC_FLAGS);
+        let path_progress = (progress.clamp(0.0, 1.0) * 65_535.0) as u32;
+        let dynamic_flags = (self.world.object().dynamic_flags() & 0xFFFF) | (path_progress << 16);
+
+        if had_dynamic_flags_change {
+            self.world
+                .object_mut()
+                .replace_all_dynamic_flags(dynamic_flags);
+        } else {
+            self.world
+                .object_mut()
+                .replace_all_dynamic_flags_suppressed(dynamic_flags);
+        }
+    }
+
     pub fn changed_object_type_mask(&self) -> u32 {
         self.world.object().changed_object_type_mask()
             | if self.game_object_data_changes.is_any_set() {
@@ -584,6 +604,31 @@ mod tests {
         assert!(go.spawned_by_default());
         assert_eq!(go.cooldown_time(), 77);
         assert!(go.respawn_compatibility_mode());
+    }
+
+    #[test]
+    fn path_progress_for_client_preserves_cpp_dynamic_flag_change_state() {
+        let mut go = GameObject::new();
+
+        go.set_path_progress_for_client(0.5);
+        assert_eq!(go.world().object().dynamic_flags() >> 16, 32_767);
+        assert!(
+            !go.world()
+                .object()
+                .changed_fields()
+                .contains(ObjectChangedFields::DYNAMIC_FLAGS)
+        );
+
+        go.world_mut().object_mut().set_dynamic_flag(0x4);
+        go.set_path_progress_for_client(1.0);
+        assert_eq!(go.world().object().dynamic_flags() & 0xFFFF, 0x4);
+        assert_eq!(go.world().object().dynamic_flags() >> 16, 65_535);
+        assert!(
+            go.world()
+                .object()
+                .changed_fields()
+                .contains(ObjectChangedFields::DYNAMIC_FLAGS)
+        );
     }
 
     #[test]

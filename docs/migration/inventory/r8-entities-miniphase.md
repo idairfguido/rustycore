@@ -85,6 +85,11 @@
   Rust targets: `crates/wow-entities/src/vehicle.rs`, `crates/wow-entities/src/lib.rs`.
   Acceptance: base `Vehicle` is represented as a kit attached to a unit GUID/type/position, not as an independent object; vehicle id, creature entry, status, usable seat count, seats, passenger info, seat addon, accessory and template structures match C++ shape; passenger add/remove/remove-all and pending join-event seat checks are represented; `TransportBase::CalculatePassengerPosition/Offset` formulas are ported and round-trip tested.
 
+- [x] **#NEXT.R8.ENTITIES.038** Port `Transport` base state and passenger-set helpers.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Transport/Transport.h`, `Transport.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/TransportMgr.h`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.h`, `GameObject.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/SharedDefines.h`.
+  Rust targets: `crates/wow-entities/src/transport.rs`, `crates/wow-entities/src/game_object.rs`, `crates/wow-entities/src/object.rs`, `crates/wow-entities/src/lib.rs`.
+  Acceptance: base `Transport` is represented as a `GameObject`/map-object transport with `SERVER_TIME|STATIONARY|ROTATION` create flags; movement state, current path leg, request-stop timestamp, path progress, position-change timer, delayed-add-model flag, event trigger bitset shape and dynamic/static passenger GUID sets match C++ base fields; `GetTransportPeriod`/`SetPeriod` use `GameObjectData::Level`; path-progress-for-client encodes into high dynamic-flag bits; passenger add/remove/cleanup/unload helpers and `TransportBase::CalculatePassengerPosition/Offset` formulas are represented and tested.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.R8.ENTITIES.003** Bind `wow-map` grid unload actions to real entity methods once Creature/GameObject/Corpse exist.
@@ -108,3 +113,4 @@
 - [ ] **#NEXT.R8.ENTITIES.033** Complete `TempSummon`/`Minion`/`Totem` runtime: SummonProperties, owner slots, usable totem slot selection, model lookup by spell/race, `SMSG_TOTEM_CREATED`, spell casting, CombatStop, aura removal from owner/group, cooldown event and map removal scheduling.
 - [ ] **#NEXT.R8.ENTITIES.035** Complete `Pet` create/load/save/update runtime: pet GUID/create from DB/tamed creature, stable persistence, action bar, XP/level sync, stats, auras/cooldowns/charges, specialization/talents/passives, PetAI/charm info, group updates and map/object-store insertion.
 - [ ] **#NEXT.R8.ENTITIES.037** Complete `Vehicle` runtime: DB2 vehicle/seat lookup, npc flags, install/uninstall/reset scripts, accessories, control auras, immunities, passenger relocation/exit, pending join events, despawn delay and integration with Unit movement/transport state.
+- [ ] **#NEXT.R8.ENTITIES.039** Complete `Transport` runtime: `TransportMgr` template loading/path generation, `Transport::Create`, path update/event triggering, map transition teleport/hide behavior, static creature/GameObject passenger spawning, summon passenger path, passenger movement-info transport offsets, script hooks, model/collision update and map/grid integration.
