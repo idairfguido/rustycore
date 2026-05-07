@@ -477,7 +477,8 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
 ### Refinamiento completo (Fase R)
 
 - [ ] **#REFINE.001** Congelar features nuevas hasta refinar la siguiente mini-fase completa.
-- [ ] **#REFINE.010** Inventario C++ por archivo y módulo.
+- [x] **#REFINE.010** Inventario árbol C++ `src/server` en `docs/migration/inventory/cpp-server-tree.md`.
+- [x] **#REFINE.011** Inventario C++ por archivo y módulo en `docs/migration/inventory/cpp-files-by-module.md`.
 - [ ] **#REFINE.012** Inventario handlers/opcodes.
 - [ ] **#REFINE.013** Inventario SQL/prepared statements.
 - [ ] **#REFINE.014** Inventario DB2/DBC/hotfix stores.
