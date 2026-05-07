@@ -177,6 +177,42 @@ impl ServerPacket for ItemPushResult {
     }
 }
 
+/// SMSG_ITEM_TIME_UPDATE.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemTimeUpdate {
+    pub item_guid: ObjectGuid,
+    pub duration_left: u32,
+}
+
+impl ServerPacket for ItemTimeUpdate {
+    const OPCODE: ServerOpcodes = ServerOpcodes::ItemTimeUpdate;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_packed_guid(&self.item_guid);
+        pkt.write_uint32(self.duration_left);
+    }
+}
+
+/// SMSG_ITEM_ENCHANT_TIME_UPDATE.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemEnchantTimeUpdate {
+    pub owner_guid: ObjectGuid,
+    pub item_guid: ObjectGuid,
+    pub duration_left: u32,
+    pub slot: u32,
+}
+
+impl ServerPacket for ItemEnchantTimeUpdate {
+    const OPCODE: ServerOpcodes = ServerOpcodes::ItemEnchantTimeUpdate;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_packed_guid(&self.item_guid);
+        pkt.write_uint32(self.duration_left);
+        pkt.write_uint32(self.slot);
+        pkt.write_packed_guid(&self.owner_guid);
+    }
+}
+
 // ── InvUpdate (bit-packed item position list) ──────────────────────
 
 /// Shared structure for client inventory packets.
@@ -674,6 +710,46 @@ mod tests {
                 0xB3, 0xFF, 0xFF, 0xFF,
                 0x00,
                 0x00,
+            ]
+        );
+    }
+
+    #[test]
+    fn item_time_update_writes_cpp_order() {
+        let packet = ItemTimeUpdate {
+            item_guid: ObjectGuid::new(0, 0x0102),
+            duration_left: 300,
+        };
+        let mut pkt = WorldPacket::new_empty();
+        packet.write(&mut pkt);
+
+        assert_eq!(
+            pkt.data(),
+            &[
+                0x03, 0x00, 0x02, 0x01,
+                0x2C, 0x01, 0x00, 0x00,
+            ]
+        );
+    }
+
+    #[test]
+    fn item_enchant_time_update_writes_cpp_order() {
+        let packet = ItemEnchantTimeUpdate {
+            owner_guid: ObjectGuid::new(0, 0x0102),
+            item_guid: ObjectGuid::new(0, 0x0506),
+            duration_left: 45,
+            slot: 2,
+        };
+        let mut pkt = WorldPacket::new_empty();
+        packet.write(&mut pkt);
+
+        assert_eq!(
+            pkt.data(),
+            &[
+                0x03, 0x00, 0x06, 0x05,
+                45, 0, 0, 0,
+                2, 0, 0, 0,
+                0x03, 0x00, 0x02, 0x01,
             ]
         );
     }

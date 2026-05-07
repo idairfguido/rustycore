@@ -16,12 +16,16 @@ use wow_constants::ClientOpcodes;
 use wow_core::{ObjectGuid, ObjectGuidGenerator};
 use wow_data::{HotfixBlobCache, ItemStore, ItemStatsStore, PlayerStatsStore, SkillStore, AreaTriggerStore, SpellStore};
 use wow_database::{CharacterDatabase, LoginDatabase, WorldDatabase};
-use wow_entities::{SendNewItemDelivery, SendNewItemDisplayText, SendNewItemPlan};
+use wow_entities::{
+    PlayerEnchantTimeUpdate, PlayerItemTimeUpdate, SendNewItemDelivery, SendNewItemDisplayText,
+    SendNewItemPlan,
+};
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus, build_dispatch_table};
 use wow_network::session_mgr::{InstanceLink, SessionManager};
 use wow_network::{GroupRegistry, PendingInvites, PlayerBroadcastInfo, PlayerRegistry};
 use wow_packet::packets::item::{
-    ItemInstance, ItemMod, ItemModList, ItemPushResult, ItemPushResultDisplayType,
+    ItemEnchantTimeUpdate, ItemInstance, ItemMod, ItemModList, ItemPushResult,
+    ItemPushResultDisplayType, ItemTimeUpdate,
 };
 use wow_packet::{ClientPacket, WorldPacket};
 
@@ -2177,6 +2181,42 @@ impl WorldSession {
         delivered
     }
 
+    pub fn send_item_time_update_plan(&self, update: &PlayerItemTimeUpdate) {
+        self.send_packet(&ItemTimeUpdate {
+            item_guid: update.item_guid,
+            duration_left: update.expiration,
+        });
+    }
+
+    pub fn send_item_time_update_plans(&self, updates: &[PlayerItemTimeUpdate]) {
+        for update in updates {
+            self.send_item_time_update_plan(update);
+        }
+    }
+
+    pub fn send_item_enchant_time_update_plan(
+        &self,
+        owner_guid: ObjectGuid,
+        update: &PlayerEnchantTimeUpdate,
+    ) {
+        self.send_packet(&ItemEnchantTimeUpdate {
+            owner_guid,
+            item_guid: update.item_guid,
+            duration_left: update.duration_secs,
+            slot: update.slot as u32,
+        });
+    }
+
+    pub fn send_item_enchant_time_update_plans(
+        &self,
+        owner_guid: ObjectGuid,
+        updates: &[PlayerEnchantTimeUpdate],
+    ) {
+        for update in updates {
+            self.send_item_enchant_time_update_plan(owner_guid, update);
+        }
+    }
+
     /// Send session initialization packets (first encrypted packets after
     /// EnterEncryptedModeAck). Matches C# `InitializeSessionCallback`.
     ///
@@ -3104,6 +3144,7 @@ fn default_available_classes() -> Vec<wow_packet::packets::auth::RaceClassAvaila
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wow_constants::EnchantmentSlot;
     use wow_core::Position;
     use wow_entities::{SendNewItemInstancePlan, SendNewItemModifier};
     use wow_network::{GroupInfo, PlayerBroadcastInfo};
@@ -3304,6 +3345,46 @@ mod tests {
         assert_eq!(self_rx.try_recv().unwrap(), expected);
         assert_eq!(other_rx.try_recv().unwrap(), expected);
         assert!(send_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn send_item_time_update_plan_sends_cpp_packet() {
+        let (session, _, send_rx) = make_session();
+        let update = PlayerItemTimeUpdate {
+            item_guid: ObjectGuid::new(0, 0x0102),
+            expiration: 300,
+        };
+        let expected = ItemTimeUpdate {
+            item_guid: update.item_guid,
+            duration_left: update.expiration,
+        }
+        .to_bytes();
+
+        session.send_item_time_update_plan(&update);
+
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
+    }
+
+    #[test]
+    fn send_item_enchant_time_update_plan_sends_cpp_packet() {
+        let (session, _, send_rx) = make_session();
+        let owner_guid = ObjectGuid::new(0, 0x0102);
+        let update = PlayerEnchantTimeUpdate {
+            item_guid: ObjectGuid::new(0, 0x0506),
+            slot: EnchantmentSlot::EnhancementSocket,
+            duration_secs: 45,
+        };
+        let expected = ItemEnchantTimeUpdate {
+            owner_guid,
+            item_guid: update.item_guid,
+            duration_left: update.duration_secs,
+            slot: update.slot as u32,
+        }
+        .to_bytes();
+
+        session.send_item_enchant_time_update_plan(owner_guid, &update);
+
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
     }
 
     #[test]
