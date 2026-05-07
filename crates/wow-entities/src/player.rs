@@ -1,7 +1,7 @@
 use bitflags::bitflags;
 use wow_constants::{
-    BagFamilyMask, Gender, InventoryResult, ItemFieldFlags, ItemUpdateState, PowerType, TypeId,
-    TypeMask,
+    BagFamilyMask, Gender, InventoryResult, ItemClass, ItemFieldFlags, ItemSubClassContainer,
+    ItemUpdateState, PowerType, TypeId, TypeMask,
 };
 use wow_core::ObjectGuid;
 
@@ -897,6 +897,101 @@ impl Player {
             need_space = need_space.min(*count);
             let new_position =
                 ItemPosCount::new(make_item_pos(INVENTORY_SLOT_BAG_0, slot), need_space);
+            if !new_position.is_contained_in(dest) {
+                dest.push(new_position);
+                *count -= need_space;
+
+                if *count == 0 {
+                    return InventoryResult::Ok;
+                }
+            }
+        }
+
+        InventoryResult::Ok
+    }
+
+    pub fn can_store_item_in_bag(
+        &self,
+        bag: u8,
+        dest: &mut Vec<ItemPosCount>,
+        proto: &ItemStorageTemplate,
+        count: &mut u32,
+        merge: bool,
+        non_specialized: bool,
+        source_item: Option<&Item>,
+        source_is_not_empty_bag: bool,
+        skip_bag: u8,
+        skip_slot: u8,
+        bag_proto: Option<&ItemStorageTemplate>,
+        slot_items: &[ItemSlotRef<'_>],
+    ) -> InventoryResult {
+        if bag == skip_bag {
+            return InventoryResult::WrongBagType;
+        }
+
+        let Some(bag_storage) = self
+            .inventory
+            .bags
+            .get(bag as usize)
+            .and_then(Option::as_ref)
+        else {
+            return InventoryResult::WrongBagType;
+        };
+
+        if source_item.is_some_and(|source| source.object().guid() == bag_storage.bag_guid) {
+            return InventoryResult::WrongBagType;
+        }
+
+        if let Some(source) = source_item {
+            if source_is_not_empty_bag {
+                return InventoryResult::DestroyNonemptyBag;
+            }
+
+            if source.has_item_flag(ItemFieldFlags::CHILD) {
+                return InventoryResult::WrongBagType3;
+            }
+        }
+
+        let Some(bag_proto) = bag_proto else {
+            return InventoryResult::WrongBagType;
+        };
+
+        let bag_is_regular_container = bag_proto.class_id == ItemClass::Container
+            && bag_proto.subclass_id == ItemSubClassContainer::Container as u32;
+        if non_specialized != bag_is_regular_container {
+            return InventoryResult::WrongBagType;
+        }
+
+        if !item_can_go_into_bag(proto, bag_proto) {
+            return InventoryResult::WrongBagType;
+        }
+
+        for slot in 0..bag_storage.bag_size {
+            if slot == skip_slot {
+                continue;
+            }
+
+            let existing_item = item_ref_by_pos(slot_items, bag, slot).filter(|existing| {
+                source_item.is_none_or(|source| existing.object().guid() != source.object().guid())
+            });
+
+            if existing_item.is_some() != merge {
+                continue;
+            }
+
+            let mut need_space = proto.max_stack_size;
+            if let Some(existing_item) = existing_item {
+                if existing_item.can_be_merged_partly_with(proto.entry, proto.max_stack_size)
+                    != InventoryResult::Ok
+                {
+                    continue;
+                }
+
+                need_space -= existing_item.count();
+            }
+
+            need_space = need_space.min(*count);
+            let new_position = ItemPosCount::new(make_item_pos(bag, slot), need_space);
             if !new_position.is_contained_in(dest) {
                 dest.push(new_position);
                 *count -= need_space;
@@ -2381,6 +2476,285 @@ mod tests {
             )]
         );
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn can_store_item_in_bag_applies_cpp_bag_and_source_guards() {
+        let mut player = Player::new(None, false);
+        let proto = ItemStorageTemplate::regular_item(6948, 20);
+        let regular_bag_proto = ItemStorageTemplate {
+            class_id: ItemClass::Container,
+            subclass_id: ItemSubClassContainer::Container as u32,
+            container_slots: 4,
+            ..ItemStorageTemplate::regular_item(100, 1)
+        };
+        let bag_guid = ObjectGuid::create_item(1, 300);
+
+        assert_eq!(
+            player.can_store_item_in_bag(
+                INVENTORY_SLOT_BAG_START,
+                &mut Vec::new(),
+                &proto,
+                &mut 1,
+                false,
+                true,
+                None,
+                false,
+                NULL_BAG,
+                NULL_SLOT,
+                Some(&regular_bag_proto),
+                &[],
+            ),
+            InventoryResult::WrongBagType
+        );
+
+        player
+            .register_bag_storage(INVENTORY_SLOT_BAG_START, bag_guid, 4)
+            .unwrap();
+        assert_eq!(
+            player.can_store_item_in_bag(
+                INVENTORY_SLOT_BAG_START,
+                &mut Vec::new(),
+                &proto,
+                &mut 1,
+                false,
+                true,
+                None,
+                false,
+                INVENTORY_SLOT_BAG_START,
+                NULL_SLOT,
+                Some(&regular_bag_proto),
+                &[],
+            ),
+            InventoryResult::WrongBagType
+        );
+
+        let mut source_bag = Item::default();
+        source_bag.object_mut().create(bag_guid);
+        assert_eq!(
+            player.can_store_item_in_bag(
+                INVENTORY_SLOT_BAG_START,
+                &mut Vec::new(),
+                &proto,
+                &mut 1,
+                false,
+                true,
+                Some(&source_bag),
+                false,
+                NULL_BAG,
+                NULL_SLOT,
+                Some(&regular_bag_proto),
+                &[],
+            ),
+            InventoryResult::WrongBagType
+        );
+
+        let mut source = Item::default();
+        source.object_mut().create(ObjectGuid::create_item(1, 301));
+        assert_eq!(
+            player.can_store_item_in_bag(
+                INVENTORY_SLOT_BAG_START,
+                &mut Vec::new(),
+                &proto,
+                &mut 1,
+                false,
+                true,
+                Some(&source),
+                true,
+                NULL_BAG,
+                NULL_SLOT,
+                Some(&regular_bag_proto),
+                &[],
+            ),
+            InventoryResult::DestroyNonemptyBag
+        );
+
+        source.set_item_flag(ItemFieldFlags::CHILD);
+        assert_eq!(
+            player.can_store_item_in_bag(
+                INVENTORY_SLOT_BAG_START,
+                &mut Vec::new(),
+                &proto,
+                &mut 1,
+                false,
+                true,
+                Some(&source),
+                false,
+                NULL_BAG,
+                NULL_SLOT,
+                Some(&regular_bag_proto),
+                &[],
+            ),
+            InventoryResult::WrongBagType3
+        );
+    }
+
+    #[test]
+    fn can_store_item_in_bag_applies_cpp_specialized_mode_and_family_rules() {
+        let mut player = Player::new(None, false);
+        player
+            .register_bag_storage(INVENTORY_SLOT_BAG_START, ObjectGuid::create_item(1, 310), 2)
+            .unwrap();
+        let misc = ItemStorageTemplate::regular_item(6948, 20);
+        let herb = ItemStorageTemplate {
+            bag_family: BagFamilyMask::HERBS,
+            ..ItemStorageTemplate::regular_item(2447, 20)
+        };
+        let regular_bag_proto = ItemStorageTemplate {
+            class_id: ItemClass::Container,
+            subclass_id: ItemSubClassContainer::Container as u32,
+            container_slots: 2,
+            ..ItemStorageTemplate::regular_item(100, 1)
+        };
+        let herb_bag_proto = ItemStorageTemplate {
+            class_id: ItemClass::Container,
+            subclass_id: ItemSubClassContainer::HerbContainer as u32,
+            container_slots: 2,
+            ..ItemStorageTemplate::regular_item(101, 1)
+        };
+
+        assert_eq!(
+            player.can_store_item_in_bag(
+                INVENTORY_SLOT_BAG_START,
+                &mut Vec::new(),
+                &misc,
+                &mut 1,
+                false,
+                false,
+                None,
+                false,
+                NULL_BAG,
+                NULL_SLOT,
+                Some(&regular_bag_proto),
+                &[],
+            ),
+            InventoryResult::WrongBagType
+        );
+        assert_eq!(
+            player.can_store_item_in_bag(
+                INVENTORY_SLOT_BAG_START,
+                &mut Vec::new(),
+                &misc,
+                &mut 1,
+                false,
+                false,
+                None,
+                false,
+                NULL_BAG,
+                NULL_SLOT,
+                Some(&herb_bag_proto),
+                &[],
+            ),
+            InventoryResult::WrongBagType
+        );
+
+        let mut dest = Vec::new();
+        let mut count = 1;
+        assert_eq!(
+            player.can_store_item_in_bag(
+                INVENTORY_SLOT_BAG_START,
+                &mut dest,
+                &herb,
+                &mut count,
+                false,
+                false,
+                None,
+                false,
+                NULL_BAG,
+                NULL_SLOT,
+                Some(&herb_bag_proto),
+                &[],
+            ),
+            InventoryResult::Ok
+        );
+        assert_eq!(
+            dest,
+            vec![ItemPosCount::new(
+                make_item_pos(INVENTORY_SLOT_BAG_START, 0),
+                1,
+            )]
+        );
+    }
+
+    #[test]
+    fn can_store_item_in_bag_scans_slots_like_cpp_merge_and_empty_modes() {
+        let mut player = Player::new(None, false);
+        player
+            .register_bag_storage(INVENTORY_SLOT_BAG_START, ObjectGuid::create_item(1, 320), 3)
+            .unwrap();
+        let proto = ItemStorageTemplate::regular_item(6948, 20);
+        let regular_bag_proto = ItemStorageTemplate {
+            class_id: ItemClass::Container,
+            subclass_id: ItemSubClassContainer::Container as u32,
+            container_slots: 3,
+            ..ItemStorageTemplate::regular_item(100, 1)
+        };
+        let mut matching = Item::default();
+        matching
+            .object_mut()
+            .create(ObjectGuid::create_item(1, 321));
+        matching.object_mut().set_entry(6948);
+        matching.set_count(16);
+        let mut wrong_entry = Item::default();
+        wrong_entry
+            .object_mut()
+            .create(ObjectGuid::create_item(1, 322));
+        wrong_entry.object_mut().set_entry(6949);
+        wrong_entry.set_count(1);
+        let slot_items = [
+            ItemSlotRef::new(INVENTORY_SLOT_BAG_START, 0, &matching),
+            ItemSlotRef::new(INVENTORY_SLOT_BAG_START, 1, &wrong_entry),
+        ];
+        let mut merge_dest = Vec::new();
+        let mut merge_count = 6;
+
+        assert_eq!(
+            player.can_store_item_in_bag(
+                INVENTORY_SLOT_BAG_START,
+                &mut merge_dest,
+                &proto,
+                &mut merge_count,
+                true,
+                true,
+                None,
+                false,
+                NULL_BAG,
+                NULL_SLOT,
+                Some(&regular_bag_proto),
+                &slot_items,
+            ),
+            InventoryResult::Ok
+        );
+        assert_eq!(
+            merge_dest,
+            vec![ItemPosCount::new(
+                make_item_pos(INVENTORY_SLOT_BAG_START, 0),
+                4,
+            )]
+        );
+        assert_eq!(merge_count, 2);
+
+        let mut empty_dest = Vec::new();
+        let mut empty_count = 7;
+        assert_eq!(
+            player.can_store_item_in_bag(
+                INVENTORY_SLOT_BAG_START,
+                &mut empty_dest,
+                &proto,
+                &mut empty_count,
+                false,
+                true,
+                None,
+                false,
+                NULL_BAG,
+                2,
+                Some(&regular_bag_proto),
+                &slot_items,
+            ),
+            InventoryResult::Ok
+        );
+        assert!(empty_dest.is_empty());
+        assert_eq!(empty_count, 7);
     }
 
     #[test]
