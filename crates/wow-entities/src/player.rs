@@ -724,6 +724,55 @@ pub struct SwapItemRealSwapExecutionPlan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwapItemErrorItemOrder {
+    SourceDestination,
+    SourceOnly,
+    DestinationSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwapItemMissingPhase {
+    EmptyDestination,
+    MergeFill,
+    RealSwapValidation,
+    BagExchange,
+    RealSwapExecution,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SwapItemOrchestrationResult {
+    NoSource,
+    ChildRedirect {
+        first_src: u16,
+        first_dst: u16,
+        second_src: u16,
+        second_dst: u16,
+    },
+    Error {
+        result: InventoryResult,
+        item_order: SwapItemErrorItemOrder,
+    },
+    EmptyDestination(SwapItemEmptyDestinationPlan),
+    MergeFill(SwapItemMergeFillPlan),
+    RealSwap {
+        bag_exchange: SwapItemBagExchangePlan,
+        execution: SwapItemRealSwapExecutionPlan,
+    },
+    InconsistentRealSwapTargets {
+        validation_source_target: SwapItemRealSwapTarget,
+        validation_destination_target: SwapItemRealSwapTarget,
+        execution_source_target: SwapItemRealSwapTarget,
+        execution_destination_target: SwapItemRealSwapTarget,
+    },
+    MissingPhase(SwapItemMissingPhase),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwapItemOrchestrationPlan {
+    pub result: SwapItemOrchestrationResult,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitanGripPenaltyAction {
     None,
     Cast(u32),
@@ -4153,6 +4202,154 @@ impl Player {
             apply_item_dependent_auras,
             release_loot,
             auto_unequip_offhand: true,
+        }
+    }
+
+    pub fn swap_item_orchestration_plan(
+        &self,
+        preflight: SwapItemPreflightPlan,
+        empty_destination: Option<SwapItemEmptyDestinationPlan>,
+        merge_fill: Option<SwapItemMergeFillPlan>,
+        real_swap_validation: Option<SwapItemRealSwapValidationPlan>,
+        bag_exchange: Option<SwapItemBagExchangePlan>,
+        real_swap_execution: Option<SwapItemRealSwapExecutionPlan>,
+    ) -> SwapItemOrchestrationPlan {
+        match preflight.result {
+            SwapItemPreflightResult::NoSource => {
+                return SwapItemOrchestrationPlan {
+                    result: SwapItemOrchestrationResult::NoSource,
+                };
+            }
+            SwapItemPreflightResult::ChildRedirect {
+                first_src,
+                first_dst,
+                second_src,
+                second_dst,
+            } => {
+                return SwapItemOrchestrationPlan {
+                    result: SwapItemOrchestrationResult::ChildRedirect {
+                        first_src,
+                        first_dst,
+                        second_src,
+                        second_dst,
+                    },
+                };
+            }
+            SwapItemPreflightResult::Error(result) => {
+                return SwapItemOrchestrationPlan {
+                    result: SwapItemOrchestrationResult::Error {
+                        result,
+                        item_order: SwapItemErrorItemOrder::SourceDestination,
+                    },
+                };
+            }
+            SwapItemPreflightResult::Continue => {}
+        }
+
+        let Some(empty_destination) = empty_destination else {
+            return SwapItemOrchestrationPlan {
+                result: SwapItemOrchestrationResult::MissingPhase(
+                    SwapItemMissingPhase::EmptyDestination,
+                ),
+            };
+        };
+        match empty_destination.result {
+            SwapItemEmptyDestinationResult::OccupiedDestination => {}
+            SwapItemEmptyDestinationResult::Error(result) => {
+                return SwapItemOrchestrationPlan {
+                    result: SwapItemOrchestrationResult::Error {
+                        result,
+                        item_order: SwapItemErrorItemOrder::SourceOnly,
+                    },
+                };
+            }
+            _ => {
+                return SwapItemOrchestrationPlan {
+                    result: SwapItemOrchestrationResult::EmptyDestination(empty_destination),
+                };
+            }
+        }
+
+        let Some(merge_fill) = merge_fill else {
+            return SwapItemOrchestrationPlan {
+                result: SwapItemOrchestrationResult::MissingPhase(SwapItemMissingPhase::MergeFill),
+            };
+        };
+        if merge_fill.result != SwapItemMergeFillResult::ContinueToRealSwap {
+            return SwapItemOrchestrationPlan {
+                result: SwapItemOrchestrationResult::MergeFill(merge_fill),
+            };
+        }
+
+        let Some(real_swap_validation) = real_swap_validation else {
+            return SwapItemOrchestrationPlan {
+                result: SwapItemOrchestrationResult::MissingPhase(
+                    SwapItemMissingPhase::RealSwapValidation,
+                ),
+            };
+        };
+        let (source_target, destination_target) = match real_swap_validation.result {
+            SwapItemRealSwapValidationResult::Error { result, subject } => {
+                let item_order = match subject {
+                    SwapItemRealSwapValidationSubject::Source => {
+                        SwapItemErrorItemOrder::SourceDestination
+                    }
+                    SwapItemRealSwapValidationSubject::Destination => {
+                        SwapItemErrorItemOrder::DestinationSource
+                    }
+                };
+
+                return SwapItemOrchestrationPlan {
+                    result: SwapItemOrchestrationResult::Error { result, item_order },
+                };
+            }
+            SwapItemRealSwapValidationResult::Continue {
+                source_target,
+                destination_target,
+            } => (source_target, destination_target),
+        };
+
+        let Some(bag_exchange) = bag_exchange else {
+            return SwapItemOrchestrationPlan {
+                result: SwapItemOrchestrationResult::MissingPhase(
+                    SwapItemMissingPhase::BagExchange,
+                ),
+            };
+        };
+        if let SwapItemBagExchangeResult::Error(result) = &bag_exchange.result {
+            return SwapItemOrchestrationPlan {
+                result: SwapItemOrchestrationResult::Error {
+                    result: *result,
+                    item_order: SwapItemErrorItemOrder::SourceDestination,
+                },
+            };
+        }
+
+        let Some(real_swap_execution) = real_swap_execution else {
+            return SwapItemOrchestrationPlan {
+                result: SwapItemOrchestrationResult::MissingPhase(
+                    SwapItemMissingPhase::RealSwapExecution,
+                ),
+            };
+        };
+        if real_swap_execution.source_target != source_target
+            || real_swap_execution.destination_target != destination_target
+        {
+            return SwapItemOrchestrationPlan {
+                result: SwapItemOrchestrationResult::InconsistentRealSwapTargets {
+                    validation_source_target: source_target,
+                    validation_destination_target: destination_target,
+                    execution_source_target: real_swap_execution.source_target,
+                    execution_destination_target: real_swap_execution.destination_target,
+                },
+            };
+        }
+
+        SwapItemOrchestrationPlan {
+            result: SwapItemOrchestrationResult::RealSwap {
+                bag_exchange,
+                execution: real_swap_execution,
+            },
         }
     }
 
@@ -10958,6 +11155,257 @@ mod tests {
                     true,
                 )
                 .release_loot
+        );
+    }
+
+    #[test]
+    fn swap_item_orchestration_plan_matches_cpp_branch_order() {
+        let player = Player::new(None, false);
+        let continue_preflight = SwapItemPreflightPlan {
+            result: SwapItemPreflightResult::Continue,
+            src_unequip_swap: None,
+            dst_unequip_swap: None,
+        };
+        let occupied_destination = SwapItemEmptyDestinationPlan {
+            result: SwapItemEmptyDestinationResult::OccupiedDestination,
+        };
+        let continue_merge = SwapItemMergeFillPlan {
+            result: SwapItemMergeFillResult::ContinueToRealSwap,
+            send_refund_info: false,
+        };
+        let inventory_bank_validation = SwapItemRealSwapValidationPlan {
+            result: SwapItemRealSwapValidationResult::Continue {
+                source_target: SwapItemRealSwapTarget::Inventory,
+                destination_target: SwapItemRealSwapTarget::Bank,
+            },
+        };
+        let no_bag_exchange = SwapItemBagExchangePlan {
+            result: SwapItemBagExchangeResult::Continue,
+        };
+        let execution = SwapItemRealSwapExecutionPlan {
+            remove_destination_update: false,
+            remove_source_update: false,
+            source_target: SwapItemRealSwapTarget::Inventory,
+            destination_target: SwapItemRealSwapTarget::Bank,
+            apply_item_dependent_auras: false,
+            release_loot: false,
+            auto_unequip_offhand: true,
+        };
+
+        assert_eq!(
+            player.swap_item_orchestration_plan(
+                SwapItemPreflightPlan {
+                    result: SwapItemPreflightResult::Error(InventoryResult::PlayerDead),
+                    src_unequip_swap: None,
+                    dst_unequip_swap: None,
+                },
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+            SwapItemOrchestrationPlan {
+                result: SwapItemOrchestrationResult::Error {
+                    result: InventoryResult::PlayerDead,
+                    item_order: SwapItemErrorItemOrder::SourceDestination,
+                },
+            }
+        );
+
+        assert_eq!(
+            player.swap_item_orchestration_plan(
+                continue_preflight,
+                Some(SwapItemEmptyDestinationPlan {
+                    result: SwapItemEmptyDestinationResult::Error(InventoryResult::InvFull),
+                }),
+                None,
+                None,
+                None,
+                None,
+            ),
+            SwapItemOrchestrationPlan {
+                result: SwapItemOrchestrationResult::Error {
+                    result: InventoryResult::InvFull,
+                    item_order: SwapItemErrorItemOrder::SourceOnly,
+                },
+            }
+        );
+
+        let move_to_bank = SwapItemEmptyDestinationPlan {
+            result: SwapItemEmptyDestinationResult::MoveToBank {
+                quest_removed: true,
+            },
+        };
+        assert_eq!(
+            player.swap_item_orchestration_plan(
+                continue_preflight,
+                Some(move_to_bank),
+                None,
+                None,
+                None,
+                None,
+            ),
+            SwapItemOrchestrationPlan {
+                result: SwapItemOrchestrationResult::EmptyDestination(move_to_bank),
+            }
+        );
+
+        let partial_fill = SwapItemMergeFillPlan {
+            result: SwapItemMergeFillResult::PartialFill {
+                source_remaining_count: 2,
+                destination_count: 20,
+                send_updates: true,
+            },
+            send_refund_info: true,
+        };
+        assert_eq!(
+            player.swap_item_orchestration_plan(
+                continue_preflight,
+                Some(occupied_destination),
+                Some(partial_fill),
+                None,
+                None,
+                None,
+            ),
+            SwapItemOrchestrationPlan {
+                result: SwapItemOrchestrationResult::MergeFill(partial_fill),
+            }
+        );
+
+        assert_eq!(
+            player.swap_item_orchestration_plan(
+                continue_preflight,
+                Some(occupied_destination),
+                Some(continue_merge),
+                Some(SwapItemRealSwapValidationPlan {
+                    result: SwapItemRealSwapValidationResult::Error {
+                        result: InventoryResult::CantEquipEver,
+                        subject: SwapItemRealSwapValidationSubject::Destination,
+                    },
+                }),
+                None,
+                None,
+            ),
+            SwapItemOrchestrationPlan {
+                result: SwapItemOrchestrationResult::Error {
+                    result: InventoryResult::CantEquipEver,
+                    item_order: SwapItemErrorItemOrder::DestinationSource,
+                },
+            }
+        );
+
+        assert_eq!(
+            player.swap_item_orchestration_plan(
+                continue_preflight,
+                Some(occupied_destination),
+                Some(continue_merge),
+                Some(inventory_bank_validation),
+                Some(SwapItemBagExchangePlan {
+                    result: SwapItemBagExchangeResult::Error(InventoryResult::BagInBag),
+                }),
+                None,
+            ),
+            SwapItemOrchestrationPlan {
+                result: SwapItemOrchestrationResult::Error {
+                    result: InventoryResult::BagInBag,
+                    item_order: SwapItemErrorItemOrder::SourceDestination,
+                },
+            }
+        );
+
+        assert_eq!(
+            player.swap_item_orchestration_plan(
+                continue_preflight,
+                Some(occupied_destination),
+                Some(continue_merge),
+                Some(inventory_bank_validation),
+                Some(no_bag_exchange.clone()),
+                Some(execution),
+            ),
+            SwapItemOrchestrationPlan {
+                result: SwapItemOrchestrationResult::RealSwap {
+                    bag_exchange: no_bag_exchange,
+                    execution,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn swap_item_orchestration_plan_keeps_phase_gaps_visible() {
+        let player = Player::new(None, false);
+        let continue_preflight = SwapItemPreflightPlan {
+            result: SwapItemPreflightResult::Continue,
+            src_unequip_swap: None,
+            dst_unequip_swap: None,
+        };
+
+        assert_eq!(
+            player.swap_item_orchestration_plan(continue_preflight, None, None, None, None, None),
+            SwapItemOrchestrationPlan {
+                result: SwapItemOrchestrationResult::MissingPhase(
+                    SwapItemMissingPhase::EmptyDestination,
+                ),
+            }
+        );
+
+        let occupied_destination = SwapItemEmptyDestinationPlan {
+            result: SwapItemEmptyDestinationResult::OccupiedDestination,
+        };
+        assert_eq!(
+            player.swap_item_orchestration_plan(
+                continue_preflight,
+                Some(occupied_destination),
+                None,
+                None,
+                None,
+                None,
+            ),
+            SwapItemOrchestrationPlan {
+                result: SwapItemOrchestrationResult::MissingPhase(SwapItemMissingPhase::MergeFill),
+            }
+        );
+
+        let continue_merge = SwapItemMergeFillPlan {
+            result: SwapItemMergeFillResult::ContinueToRealSwap,
+            send_refund_info: false,
+        };
+        let validation = SwapItemRealSwapValidationPlan {
+            result: SwapItemRealSwapValidationResult::Continue {
+                source_target: SwapItemRealSwapTarget::Inventory,
+                destination_target: SwapItemRealSwapTarget::Bank,
+            },
+        };
+        let mismatched_execution = SwapItemRealSwapExecutionPlan {
+            remove_destination_update: false,
+            remove_source_update: false,
+            source_target: SwapItemRealSwapTarget::Bank,
+            destination_target: SwapItemRealSwapTarget::Inventory,
+            apply_item_dependent_auras: false,
+            release_loot: false,
+            auto_unequip_offhand: true,
+        };
+
+        assert_eq!(
+            player.swap_item_orchestration_plan(
+                continue_preflight,
+                Some(occupied_destination),
+                Some(continue_merge),
+                Some(validation),
+                Some(SwapItemBagExchangePlan {
+                    result: SwapItemBagExchangeResult::Continue,
+                }),
+                Some(mismatched_execution),
+            ),
+            SwapItemOrchestrationPlan {
+                result: SwapItemOrchestrationResult::InconsistentRealSwapTargets {
+                    validation_source_target: SwapItemRealSwapTarget::Inventory,
+                    validation_destination_target: SwapItemRealSwapTarget::Bank,
+                    execution_source_target: SwapItemRealSwapTarget::Bank,
+                    execution_destination_target: SwapItemRealSwapTarget::Inventory,
+                },
+            }
         );
     }
 }
