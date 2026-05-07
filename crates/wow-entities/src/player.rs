@@ -940,6 +940,161 @@ pub enum RemoveArenaEnchantmentAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ApplyEnchantmentTemplateRef {
+    pub enchantment_id: i32,
+    pub condition_id: u32,
+    pub condition_fits: bool,
+    pub min_level: u8,
+    pub required_skill_id: u32,
+    pub required_skill_rank: u16,
+    pub required_skill_value: u16,
+}
+
+impl ApplyEnchantmentTemplateRef {
+    pub const fn new(enchantment_id: i32) -> Self {
+        Self {
+            enchantment_id,
+            condition_id: 0,
+            condition_fits: true,
+            min_level: 0,
+            required_skill_id: 0,
+            required_skill_rank: 0,
+            required_skill_value: 0,
+        }
+    }
+
+    pub const fn skill_fits(&self) -> bool {
+        self.required_skill_id == 0 || self.required_skill_value >= self.required_skill_rank
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ApplyEnchantmentGemRequirementRef {
+    pub required_skill_id: u32,
+    pub required_skill_rank: u16,
+    pub required_skill_value: u16,
+}
+
+impl ApplyEnchantmentGemRequirementRef {
+    pub const fn new(
+        required_skill_id: u32,
+        required_skill_rank: u16,
+        required_skill_value: u16,
+    ) -> Self {
+        Self {
+            required_skill_id,
+            required_skill_rank,
+            required_skill_value,
+        }
+    }
+
+    pub const fn skill_fits(&self) -> bool {
+        self.required_skill_id == 0 || self.required_skill_value >= self.required_skill_rank
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ApplyEnchantmentSocketContext {
+    pub socket_color: u32,
+    pub prismatic_enchantment: Option<ApplyEnchantmentTemplateRef>,
+    pub gem_requirement: Option<ApplyEnchantmentGemRequirementRef>,
+}
+
+impl ApplyEnchantmentSocketContext {
+    pub const fn prismatic(
+        prismatic_enchantment: Option<ApplyEnchantmentTemplateRef>,
+        gem_requirement: Option<ApplyEnchantmentGemRequirementRef>,
+    ) -> Self {
+        Self {
+            socket_color: 0,
+            prismatic_enchantment,
+            gem_requirement,
+        }
+    }
+
+    pub const fn colored(
+        socket_color: u32,
+        gem_requirement: Option<ApplyEnchantmentGemRequirementRef>,
+    ) -> Self {
+        Self {
+            socket_color,
+            prismatic_enchantment: None,
+            gem_requirement,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ApplyEnchantmentArgs {
+    pub apply: bool,
+    pub apply_dur: bool,
+    pub ignore_condition: bool,
+    pub socket_context: Option<ApplyEnchantmentSocketContext>,
+}
+
+impl ApplyEnchantmentArgs {
+    pub const fn apply() -> Self {
+        Self {
+            apply: true,
+            apply_dur: true,
+            ignore_condition: false,
+            socket_context: None,
+        }
+    }
+
+    pub const fn remove() -> Self {
+        Self {
+            apply: false,
+            apply_dur: true,
+            ignore_condition: false,
+            socket_context: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyEnchantmentSkipReason {
+    MissingItem,
+    NotEquipped,
+    NoEnchantment,
+    MissingEnchantmentTemplate,
+    ConditionFailed,
+    PlayerLevelTooLow,
+    RequiredSkillTooLow,
+    MissingPrismaticEnchantment,
+    PrismaticRequiredSkillTooLow,
+    GemRequiredSkillTooLow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyEnchantmentDurationAction {
+    Added(PlayerEnchantTimeUpdate),
+    Removed {
+        item_guid: ObjectGuid,
+        slot: EnchantmentSlot,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyEnchantmentResult {
+    Skipped(ApplyEnchantmentSkipReason),
+    Applied {
+        item_guid: ObjectGuid,
+        slot: EnchantmentSlot,
+        enchantment_id: i32,
+        apply: bool,
+        effects_allowed: bool,
+        update_permanent_visible_item: bool,
+        duration_action: Option<ApplyEnchantmentDurationAction>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ApplyEnchantmentPlan {
+    pub result: ApplyEnchantmentResult,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitanGripPenaltyAction {
     None,
     Cast(u32),
@@ -983,6 +1138,15 @@ fn push_arena_inventory_enchantment_action(
             enchantment_slot,
         }),
     }
+}
+
+const fn is_socket_enchantment_slot(slot: EnchantmentSlot) -> bool {
+    matches!(
+        slot,
+        EnchantmentSlot::EnhancementSocket
+            | EnchantmentSlot::EnhancementSocket2
+            | EnchantmentSlot::EnhancementSocket3
+    )
 }
 
 fn bag_template_by_pos<'a>(
@@ -5345,6 +5509,130 @@ impl Player {
         }
 
         actions
+    }
+
+    pub fn apply_enchantment_plan(
+        &mut self,
+        item: Option<&mut Item>,
+        slot: EnchantmentSlot,
+        enchantment: Option<ApplyEnchantmentTemplateRef>,
+        args: ApplyEnchantmentArgs,
+    ) -> ApplyEnchantmentPlan {
+        let Some(item) = item else {
+            return ApplyEnchantmentPlan {
+                result: ApplyEnchantmentResult::Skipped(ApplyEnchantmentSkipReason::MissingItem),
+            };
+        };
+        if !item.is_equipped() {
+            return ApplyEnchantmentPlan {
+                result: ApplyEnchantmentResult::Skipped(ApplyEnchantmentSkipReason::NotEquipped),
+            };
+        }
+
+        let enchantment_id = item.data().enchantments[slot as usize].id;
+        if enchantment_id == 0 {
+            return ApplyEnchantmentPlan {
+                result: ApplyEnchantmentResult::Skipped(ApplyEnchantmentSkipReason::NoEnchantment),
+            };
+        }
+
+        let Some(enchantment) =
+            enchantment.filter(|enchantment| enchantment.enchantment_id == enchantment_id)
+        else {
+            return ApplyEnchantmentPlan {
+                result: ApplyEnchantmentResult::Skipped(
+                    ApplyEnchantmentSkipReason::MissingEnchantmentTemplate,
+                ),
+            };
+        };
+
+        if !args.ignore_condition && enchantment.condition_id != 0 && !enchantment.condition_fits {
+            return ApplyEnchantmentPlan {
+                result: ApplyEnchantmentResult::Skipped(
+                    ApplyEnchantmentSkipReason::ConditionFailed,
+                ),
+            };
+        }
+        if i32::from(enchantment.min_level) > self.unit.data().level {
+            return ApplyEnchantmentPlan {
+                result: ApplyEnchantmentResult::Skipped(
+                    ApplyEnchantmentSkipReason::PlayerLevelTooLow,
+                ),
+            };
+        }
+        if !enchantment.skill_fits() {
+            return ApplyEnchantmentPlan {
+                result: ApplyEnchantmentResult::Skipped(
+                    ApplyEnchantmentSkipReason::RequiredSkillTooLow,
+                ),
+            };
+        }
+
+        if is_socket_enchantment_slot(slot) {
+            if let Some(socket_context) = args.socket_context {
+                if socket_context.socket_color == 0 {
+                    let Some(prismatic_enchantment) = socket_context.prismatic_enchantment else {
+                        return ApplyEnchantmentPlan {
+                            result: ApplyEnchantmentResult::Skipped(
+                                ApplyEnchantmentSkipReason::MissingPrismaticEnchantment,
+                            ),
+                        };
+                    };
+                    if !prismatic_enchantment.skill_fits() {
+                        return ApplyEnchantmentPlan {
+                            result: ApplyEnchantmentResult::Skipped(
+                                ApplyEnchantmentSkipReason::PrismaticRequiredSkillTooLow,
+                            ),
+                        };
+                    }
+                }
+
+                if let Some(gem_requirement) = socket_context.gem_requirement {
+                    if !gem_requirement.skill_fits() {
+                        return ApplyEnchantmentPlan {
+                            result: ApplyEnchantmentResult::Skipped(
+                                ApplyEnchantmentSkipReason::GemRequiredSkillTooLow,
+                            ),
+                        };
+                    }
+                }
+            }
+        }
+
+        let item_guid = item.object().guid();
+        let mut duration_action = None;
+        if args.apply_dur {
+            if args.apply {
+                let duration_ms = item.data().enchantments[slot as usize].duration;
+                if duration_ms > 0 {
+                    duration_action = self
+                        .add_enchantment_duration(item, slot, duration_ms)
+                        .map(ApplyEnchantmentDurationAction::Added);
+                }
+            } else {
+                let had_duration = self
+                    .enchant_durations
+                    .iter()
+                    .any(|duration| duration.item_guid == item_guid && duration.slot == slot);
+                self.add_enchantment_duration(item, slot, 0);
+                if had_duration {
+                    duration_action =
+                        Some(ApplyEnchantmentDurationAction::Removed { item_guid, slot });
+                }
+            }
+        }
+
+        ApplyEnchantmentPlan {
+            result: ApplyEnchantmentResult::Applied {
+                item_guid,
+                slot,
+                enchantment_id,
+                apply: args.apply,
+                effects_allowed: !item.is_broken(),
+                update_permanent_visible_item: slot == EnchantmentSlot::EnhancementPermanent,
+                duration_action,
+            },
+        }
     }
 
     pub const fn can_titan_grip(&self) -> bool {
@@ -11280,6 +11568,312 @@ mod tests {
                     duration_secs: 9,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn apply_enchantment_plan_matches_cpp_early_guards() {
+        let mut player = Player::new(None, false);
+        player.unit_mut().set_level(9);
+        let mut item = item_with_guid_entry(1246, 7460);
+        item.set_slot(EQUIPMENT_SLOT_CHEST);
+        item.set_enchantment(EnchantmentSlot::EnhancementTemporary, 900, 0, 0);
+
+        assert_eq!(
+            player.apply_enchantment_plan(
+                None,
+                EnchantmentSlot::EnhancementTemporary,
+                Some(ApplyEnchantmentTemplateRef::new(900)),
+                ApplyEnchantmentArgs::apply(),
+            ),
+            ApplyEnchantmentPlan {
+                result: ApplyEnchantmentResult::Skipped(ApplyEnchantmentSkipReason::MissingItem),
+            }
+        );
+
+        let mut inventory_item = item_with_guid_entry(1247, 7461);
+        inventory_item.set_slot(INVENTORY_SLOT_ITEM_START);
+        inventory_item.set_enchantment(EnchantmentSlot::EnhancementTemporary, 900, 0, 0);
+        assert_eq!(
+            player.apply_enchantment_plan(
+                Some(&mut inventory_item),
+                EnchantmentSlot::EnhancementTemporary,
+                Some(ApplyEnchantmentTemplateRef::new(900)),
+                ApplyEnchantmentArgs::apply(),
+            ),
+            ApplyEnchantmentPlan {
+                result: ApplyEnchantmentResult::Skipped(ApplyEnchantmentSkipReason::NotEquipped),
+            }
+        );
+
+        assert_eq!(
+            player.apply_enchantment_plan(
+                Some(&mut item),
+                EnchantmentSlot::EnhancementPermanent,
+                Some(ApplyEnchantmentTemplateRef::new(900)),
+                ApplyEnchantmentArgs::apply(),
+            ),
+            ApplyEnchantmentPlan {
+                result: ApplyEnchantmentResult::Skipped(ApplyEnchantmentSkipReason::NoEnchantment),
+            }
+        );
+        assert_eq!(
+            player.apply_enchantment_plan(
+                Some(&mut item),
+                EnchantmentSlot::EnhancementTemporary,
+                None,
+                ApplyEnchantmentArgs::apply(),
+            ),
+            ApplyEnchantmentPlan {
+                result: ApplyEnchantmentResult::Skipped(
+                    ApplyEnchantmentSkipReason::MissingEnchantmentTemplate,
+                ),
+            }
+        );
+
+        let mut condition_blocked = ApplyEnchantmentTemplateRef::new(900);
+        condition_blocked.condition_id = 1;
+        condition_blocked.condition_fits = false;
+        assert_eq!(
+            player.apply_enchantment_plan(
+                Some(&mut item),
+                EnchantmentSlot::EnhancementTemporary,
+                Some(condition_blocked),
+                ApplyEnchantmentArgs::apply(),
+            ),
+            ApplyEnchantmentPlan {
+                result: ApplyEnchantmentResult::Skipped(
+                    ApplyEnchantmentSkipReason::ConditionFailed,
+                ),
+            }
+        );
+
+        let mut condition_ignored_args = ApplyEnchantmentArgs::apply();
+        condition_ignored_args.ignore_condition = true;
+        assert_eq!(
+            player
+                .apply_enchantment_plan(
+                    Some(&mut item),
+                    EnchantmentSlot::EnhancementTemporary,
+                    Some(condition_blocked),
+                    condition_ignored_args,
+                )
+                .result,
+            ApplyEnchantmentResult::Applied {
+                item_guid: item.object().guid(),
+                slot: EnchantmentSlot::EnhancementTemporary,
+                enchantment_id: 900,
+                apply: true,
+                effects_allowed: true,
+                update_permanent_visible_item: false,
+                duration_action: None,
+            }
+        );
+
+        let mut level_blocked = ApplyEnchantmentTemplateRef::new(900);
+        level_blocked.min_level = 10;
+        assert_eq!(
+            player.apply_enchantment_plan(
+                Some(&mut item),
+                EnchantmentSlot::EnhancementTemporary,
+                Some(level_blocked),
+                ApplyEnchantmentArgs::apply(),
+            ),
+            ApplyEnchantmentPlan {
+                result: ApplyEnchantmentResult::Skipped(
+                    ApplyEnchantmentSkipReason::PlayerLevelTooLow,
+                ),
+            }
+        );
+
+        let mut skill_blocked = ApplyEnchantmentTemplateRef::new(900);
+        skill_blocked.required_skill_id = 164;
+        skill_blocked.required_skill_rank = 75;
+        skill_blocked.required_skill_value = 74;
+        assert_eq!(
+            player.apply_enchantment_plan(
+                Some(&mut item),
+                EnchantmentSlot::EnhancementTemporary,
+                Some(skill_blocked),
+                ApplyEnchantmentArgs::apply(),
+            ),
+            ApplyEnchantmentPlan {
+                result: ApplyEnchantmentResult::Skipped(
+                    ApplyEnchantmentSkipReason::RequiredSkillTooLow,
+                ),
+            }
+        );
+    }
+
+    #[test]
+    fn apply_enchantment_plan_matches_cpp_socket_requirement_order() {
+        let mut player = Player::new(None, false);
+        player.unit_mut().set_level(80);
+        let mut item = item_with_guid_entry(1248, 7462);
+        item.set_slot(EQUIPMENT_SLOT_CHEST);
+        item.set_enchantment(EnchantmentSlot::EnhancementSocket, 901, 0, 0);
+
+        let mut args = ApplyEnchantmentArgs::apply();
+        args.socket_context = Some(ApplyEnchantmentSocketContext::prismatic(None, None));
+        assert_eq!(
+            player.apply_enchantment_plan(
+                Some(&mut item),
+                EnchantmentSlot::EnhancementSocket,
+                Some(ApplyEnchantmentTemplateRef::new(901)),
+                args,
+            ),
+            ApplyEnchantmentPlan {
+                result: ApplyEnchantmentResult::Skipped(
+                    ApplyEnchantmentSkipReason::MissingPrismaticEnchantment,
+                ),
+            }
+        );
+
+        let mut prismatic = ApplyEnchantmentTemplateRef::new(902);
+        prismatic.required_skill_id = 755;
+        prismatic.required_skill_rank = 350;
+        prismatic.required_skill_value = 349;
+        args.socket_context = Some(ApplyEnchantmentSocketContext::prismatic(
+            Some(prismatic),
+            None,
+        ));
+        assert_eq!(
+            player.apply_enchantment_plan(
+                Some(&mut item),
+                EnchantmentSlot::EnhancementSocket,
+                Some(ApplyEnchantmentTemplateRef::new(901)),
+                args,
+            ),
+            ApplyEnchantmentPlan {
+                result: ApplyEnchantmentResult::Skipped(
+                    ApplyEnchantmentSkipReason::PrismaticRequiredSkillTooLow,
+                ),
+            }
+        );
+
+        prismatic.required_skill_value = 350;
+        args.socket_context = Some(ApplyEnchantmentSocketContext::prismatic(
+            Some(prismatic),
+            Some(ApplyEnchantmentGemRequirementRef::new(755, 400, 399)),
+        ));
+        assert_eq!(
+            player.apply_enchantment_plan(
+                Some(&mut item),
+                EnchantmentSlot::EnhancementSocket,
+                Some(ApplyEnchantmentTemplateRef::new(901)),
+                args,
+            ),
+            ApplyEnchantmentPlan {
+                result: ApplyEnchantmentResult::Skipped(
+                    ApplyEnchantmentSkipReason::GemRequiredSkillTooLow,
+                ),
+            }
+        );
+
+        args.socket_context = Some(ApplyEnchantmentSocketContext::colored(
+            1,
+            Some(ApplyEnchantmentGemRequirementRef::new(755, 400, 400)),
+        ));
+        assert_eq!(
+            player
+                .apply_enchantment_plan(
+                    Some(&mut item),
+                    EnchantmentSlot::EnhancementSocket,
+                    Some(ApplyEnchantmentTemplateRef::new(901)),
+                    args,
+                )
+                .result,
+            ApplyEnchantmentResult::Applied {
+                item_guid: item.object().guid(),
+                slot: EnchantmentSlot::EnhancementSocket,
+                enchantment_id: 901,
+                apply: true,
+                effects_allowed: true,
+                update_permanent_visible_item: false,
+                duration_action: None,
+            }
+        );
+    }
+
+    #[test]
+    fn apply_enchantment_plan_updates_duration_and_visible_shape_like_cpp() {
+        let mut player = Player::new(None, false);
+        player.unit_mut().set_level(80);
+        let mut item = item_with_guid_entry(1249, 7463);
+        item.set_slot(EQUIPMENT_SLOT_MAINHAND);
+        item.set_enchantment(EnchantmentSlot::EnhancementTemporary, 903, 6_000, 0);
+
+        assert_eq!(
+            player.apply_enchantment_plan(
+                Some(&mut item),
+                EnchantmentSlot::EnhancementTemporary,
+                Some(ApplyEnchantmentTemplateRef::new(903)),
+                ApplyEnchantmentArgs::apply(),
+            ),
+            ApplyEnchantmentPlan {
+                result: ApplyEnchantmentResult::Applied {
+                    item_guid: item.object().guid(),
+                    slot: EnchantmentSlot::EnhancementTemporary,
+                    enchantment_id: 903,
+                    apply: true,
+                    effects_allowed: true,
+                    update_permanent_visible_item: false,
+                    duration_action: Some(ApplyEnchantmentDurationAction::Added(
+                        PlayerEnchantTimeUpdate {
+                            item_guid: item.object().guid(),
+                            slot: EnchantmentSlot::EnhancementTemporary,
+                            duration_secs: 6,
+                        },
+                    )),
+                },
+            }
+        );
+
+        assert_eq!(
+            player.apply_enchantment_plan(
+                Some(&mut item),
+                EnchantmentSlot::EnhancementTemporary,
+                Some(ApplyEnchantmentTemplateRef::new(903)),
+                ApplyEnchantmentArgs::remove(),
+            ),
+            ApplyEnchantmentPlan {
+                result: ApplyEnchantmentResult::Applied {
+                    item_guid: item.object().guid(),
+                    slot: EnchantmentSlot::EnhancementTemporary,
+                    enchantment_id: 903,
+                    apply: false,
+                    effects_allowed: true,
+                    update_permanent_visible_item: false,
+                    duration_action: Some(ApplyEnchantmentDurationAction::Removed {
+                        item_guid: item.object().guid(),
+                        slot: EnchantmentSlot::EnhancementTemporary,
+                    }),
+                },
+            }
+        );
+        assert!(player.enchant_durations().is_empty());
+
+        item.set_enchantment(EnchantmentSlot::EnhancementPermanent, 904, 0, 0);
+        item.set_max_durability(100);
+        item.set_durability(0);
+        assert_eq!(
+            player
+                .apply_enchantment_plan(
+                    Some(&mut item),
+                    EnchantmentSlot::EnhancementPermanent,
+                    Some(ApplyEnchantmentTemplateRef::new(904)),
+                    ApplyEnchantmentArgs::apply(),
+                )
+                .result,
+            ApplyEnchantmentResult::Applied {
+                item_guid: item.object().guid(),
+                slot: EnchantmentSlot::EnhancementPermanent,
+                enchantment_id: 904,
+                apply: true,
+                effects_allowed: false,
+                update_permanent_visible_item: true,
+                duration_action: None,
+            }
         );
     }
 
