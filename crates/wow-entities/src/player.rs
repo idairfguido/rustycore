@@ -80,6 +80,7 @@ pub enum PlayerStorageError {
     InvalidBagSlot(u8),
     InvalidBagItemSlot(u8),
     UnknownBag(u8),
+    EmptyPlayerSlot(u8),
     OccupiedPlayerSlot(u8),
     OccupiedBagItemSlot {
         bag: u8,
@@ -87,6 +88,11 @@ pub enum PlayerStorageError {
     },
     MismatchedBagGuid {
         bag: u8,
+        expected: ObjectGuid,
+        actual: ObjectGuid,
+    },
+    MismatchedItemGuid {
+        slot: u8,
         expected: ObjectGuid,
         actual: ObjectGuid,
     },
@@ -638,6 +644,42 @@ impl Player {
         Ok(())
     }
 
+    pub fn merge_top_level_item_stack_object(
+        &mut self,
+        slot: u8,
+        existing: &mut Item,
+        incoming: &mut Item,
+        count: u32,
+    ) -> Result<(), PlayerStorageError> {
+        if slot as usize >= PLAYER_SLOT_END {
+            return Err(PlayerStorageError::InvalidPlayerSlot(slot));
+        }
+
+        let Some(expected_guid) = self.top_level_item_guid(slot) else {
+            return Err(PlayerStorageError::EmptyPlayerSlot(slot));
+        };
+
+        let actual_guid = existing.object().guid();
+        if expected_guid != actual_guid {
+            return Err(PlayerStorageError::MismatchedItemGuid {
+                slot,
+                expected: expected_guid,
+                actual: actual_guid,
+            });
+        }
+
+        existing.bind_if_stored(is_bag_storage_slot(slot));
+        existing.set_count(existing.count() + count);
+        existing.set_state(ItemUpdateState::Changed);
+
+        let owner_guid = self.guid();
+        incoming.set_owner_guid(owner_guid);
+        incoming.set_not_refundable();
+        incoming.clear_soulbound_tradeable();
+        incoming.set_state(ItemUpdateState::Removed);
+        Ok(())
+    }
+
     pub fn remove_top_level_item(
         &mut self,
         slot: u8,
@@ -1125,7 +1167,7 @@ fn is_buyback_slot(slot: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wow_constants::{ItemBondingType, ItemContext};
+    use wow_constants::{ItemBondingType, ItemContext, ItemFieldFlags};
 
     #[test]
     fn player_constructor_matches_cpp_base_state() {
@@ -1709,6 +1751,90 @@ mod tests {
         );
         assert_eq!(item.count(), 0);
         assert_eq!(bag.item_by_pos(2), None);
+    }
+
+    #[test]
+    fn merge_top_level_item_stack_object_matches_cpp_existing_stack_branch() {
+        let owner = ObjectGuid::create_player(1, 42);
+        let existing_guid = ObjectGuid::create_item(1, 820);
+        let incoming_guid = ObjectGuid::create_item(1, 821);
+        let mut player = Player::new(None, false);
+        let mut existing = Item::default();
+        let mut incoming = Item::default();
+
+        player.unit_mut().world_mut().object_mut().create(owner);
+        existing.object_mut().create(existing_guid);
+        existing.set_bonding(ItemBondingType::OnEquip);
+        existing.set_count(5);
+        existing.force_state(ItemUpdateState::Unchanged);
+        incoming.object_mut().create(incoming_guid);
+        incoming.set_item_flag(ItemFieldFlags::REFUNDABLE | ItemFieldFlags::BOP_TRADEABLE);
+        incoming.set_refund_recipient(ObjectGuid::create_player(1, 99));
+        incoming.set_paid_money(10);
+        incoming.set_paid_extended_cost(20);
+        incoming.force_state(ItemUpdateState::Unchanged);
+
+        player
+            .store_top_level_item(INVENTORY_SLOT_BAG_START, existing_guid)
+            .unwrap();
+        player
+            .merge_top_level_item_stack_object(
+                INVENTORY_SLOT_BAG_START,
+                &mut existing,
+                &mut incoming,
+                3,
+            )
+            .unwrap();
+
+        assert_eq!(existing.count(), 8);
+        assert!(existing.is_soul_bound());
+        assert_eq!(existing.update_state(), ItemUpdateState::Changed);
+        assert_eq!(incoming.owner_guid(), owner);
+        assert!(!incoming.is_refundable());
+        assert!(!incoming.is_bop_tradeable());
+        assert_eq!(incoming.refund_recipient(), ObjectGuid::EMPTY);
+        assert_eq!(incoming.paid_money(), 0);
+        assert_eq!(incoming.paid_extended_cost(), 0);
+        assert_eq!(incoming.update_state(), ItemUpdateState::Removed);
+    }
+
+    #[test]
+    fn merge_top_level_item_stack_object_rejects_empty_or_mismatched_slot() {
+        let expected = ObjectGuid::create_item(1, 830);
+        let actual = ObjectGuid::create_item(1, 831);
+        let mut player = Player::new(None, false);
+        let mut existing = Item::default();
+        let mut incoming = Item::default();
+        existing.object_mut().create(actual);
+
+        assert_eq!(
+            player.merge_top_level_item_stack_object(
+                INVENTORY_SLOT_ITEM_START,
+                &mut existing,
+                &mut incoming,
+                1,
+            ),
+            Err(PlayerStorageError::EmptyPlayerSlot(
+                INVENTORY_SLOT_ITEM_START
+            ))
+        );
+
+        player
+            .store_top_level_item(INVENTORY_SLOT_ITEM_START, expected)
+            .unwrap();
+        assert_eq!(
+            player.merge_top_level_item_stack_object(
+                INVENTORY_SLOT_ITEM_START,
+                &mut existing,
+                &mut incoming,
+                1,
+            ),
+            Err(PlayerStorageError::MismatchedItemGuid {
+                slot: INVENTORY_SLOT_ITEM_START,
+                expected,
+                actual,
+            })
+        );
     }
 
     #[test]

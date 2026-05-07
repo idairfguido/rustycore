@@ -461,6 +461,13 @@ impl Item {
         self.paid_extended_cost = extended_cost;
     }
 
+    pub fn set_not_refundable(&mut self) {
+        self.remove_item_flag(ItemFieldFlags::REFUNDABLE);
+        self.set_refund_recipient(ObjectGuid::EMPTY);
+        self.set_paid_money(0);
+        self.set_paid_extended_cost(0);
+    }
+
     pub const fn owner_guid(&self) -> ObjectGuid {
         self.data.owner
     }
@@ -559,6 +566,10 @@ impl Item {
 
     pub fn is_bop_tradeable(&self) -> bool {
         self.has_item_flag(ItemFieldFlags::BOP_TRADEABLE)
+    }
+
+    pub fn clear_soulbound_tradeable(&mut self) {
+        self.remove_item_flag(ItemFieldFlags::BOP_TRADEABLE);
     }
 
     pub fn is_wrapped(&self) -> bool {
@@ -1092,6 +1103,18 @@ mod tests {
         assert!(!item.is_locked());
         item.remove_item_flag(ItemFieldFlags::REFUNDABLE);
         assert!(!item.is_refundable());
+
+        item.set_item_flag(ItemFieldFlags::REFUNDABLE | ItemFieldFlags::BOP_TRADEABLE);
+        item.set_refund_recipient(ObjectGuid::create_player(1, 42));
+        item.set_paid_money(10);
+        item.set_paid_extended_cost(20);
+        item.set_not_refundable();
+        item.clear_soulbound_tradeable();
+        assert!(!item.is_refundable());
+        assert!(!item.is_bop_tradeable());
+        assert_eq!(item.refund_recipient(), ObjectGuid::EMPTY);
+        assert_eq!(item.paid_money(), 0);
+        assert_eq!(item.paid_extended_cost(), 0);
 
         item.set_item_flag2(ItemFieldFlags2::EQUIPPED);
         assert!(item.has_item_flag2(ItemFieldFlags2::EQUIPPED));
