@@ -5134,6 +5134,21 @@ impl Player {
         actions
     }
 
+    pub fn send_item_durations_plan(&self, items: &[ItemDurationRef]) -> Vec<PlayerItemTimeUpdate> {
+        self.item_durations
+            .iter()
+            .filter_map(|item_guid| {
+                items
+                    .iter()
+                    .find(|item| item.guid == *item_guid)
+                    .map(|item| PlayerItemTimeUpdate {
+                        item_guid: *item_guid,
+                        expiration: item.expiration,
+                    })
+            })
+            .collect()
+    }
+
     pub fn add_enchantment_durations(&mut self, item: &mut Item) -> Vec<PlayerEnchantTimeUpdate> {
         let mut updates = Vec::new();
         for slot in ENCHANTMENT_DURATION_SLOTS {
@@ -5244,6 +5259,17 @@ impl Player {
         }
         self.enchant_durations = kept;
         actions
+    }
+
+    pub fn send_enchantment_durations_plan(&self) -> Vec<PlayerEnchantTimeUpdate> {
+        self.enchant_durations
+            .iter()
+            .map(|duration| PlayerEnchantTimeUpdate {
+                item_guid: duration.item_guid,
+                slot: duration.slot,
+                duration_secs: duration.left_duration_ms / 1000,
+            })
+            .collect()
     }
 
     pub fn remove_arena_enchantments(
@@ -11209,6 +11235,52 @@ mod tests {
             ]
         );
         assert!(player.enchant_durations().is_empty());
+    }
+
+    #[test]
+    fn send_duration_plans_follow_cpp_duration_lists() {
+        let mut player = Player::new(None, false);
+        let mut item = item_with_guid_entry(1245, 7450);
+        item.set_expiration(1_200);
+        player.add_item_durations(&item);
+        player.add_item_durations(&item);
+
+        assert_eq!(
+            player.send_item_durations_plan(&[ItemDurationRef::new(
+                item.object().guid(),
+                1_200,
+                false,
+            )]),
+            vec![
+                PlayerItemTimeUpdate {
+                    item_guid: item.object().guid(),
+                    expiration: 1_200,
+                },
+                PlayerItemTimeUpdate {
+                    item_guid: item.object().guid(),
+                    expiration: 1_200,
+                },
+            ]
+        );
+
+        item.set_enchantment(EnchantmentSlot::EnhancementTemporary, 700, 4_500, 0);
+        player.add_enchantment_duration(&mut item, EnchantmentSlot::EnhancementTemporary, 4_500);
+        player.add_enchantment_duration(&mut item, EnchantmentSlot::EnhancementPermanent, 9_999);
+        assert_eq!(
+            player.send_enchantment_durations_plan(),
+            vec![
+                PlayerEnchantTimeUpdate {
+                    item_guid: item.object().guid(),
+                    slot: EnchantmentSlot::EnhancementTemporary,
+                    duration_secs: 4,
+                },
+                PlayerEnchantTimeUpdate {
+                    item_guid: item.object().guid(),
+                    slot: EnchantmentSlot::EnhancementPermanent,
+                    duration_secs: 9,
+                },
+            ]
+        );
     }
 
     #[test]
