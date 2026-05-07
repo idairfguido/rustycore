@@ -20,6 +20,8 @@ pub const PLAYER_DATA_FLAGS_EX_BIT: usize = 8;
 pub const PLAYER_DATA_NUM_BANK_SLOTS_BIT: usize = 12;
 pub const PLAYER_DATA_NATIVE_SEX_BIT: usize = 13;
 pub const PLAYER_DATA_CURRENT_SPEC_ID_BIT: usize = 24;
+pub const PLAYER_DATA_VISIBLE_ITEMS_PARENT_BIT: usize = 61;
+pub const PLAYER_DATA_VISIBLE_ITEMS_FIRST_BIT: usize = 62;
 
 pub const ACTIVE_PLAYER_DATA_PARENT_BIT: usize = 0;
 pub const ACTIVE_PLAYER_DATA_COINAGE_BIT: usize = 28;
@@ -146,6 +148,13 @@ impl Default for PlayerInventoryStorage {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct VisibleItemValues {
+    pub item_id: i32,
+    pub item_appearance_mod_id: u16,
+    pub item_visual: u16,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PlayerDataValues {
     pub loot_target_guid: ObjectGuid,
@@ -154,6 +163,7 @@ pub struct PlayerDataValues {
     pub num_bank_slots: u8,
     pub native_sex: u8,
     pub current_spec_id: u32,
+    pub visible_items: [VisibleItemValues; EQUIPMENT_SLOT_END as usize],
 }
 
 impl Default for PlayerDataValues {
@@ -165,6 +175,7 @@ impl Default for PlayerDataValues {
             num_bank_slots: 0,
             native_sex: Gender::Male as u8,
             current_spec_id: 0,
+            visible_items: [VisibleItemValues::default(); EQUIPMENT_SLOT_END as usize],
         }
     }
 }
@@ -430,6 +441,23 @@ impl Player {
         });
     }
 
+    pub fn set_visible_item_slot(&mut self, slot: u8, item: Option<VisibleItemValues>) {
+        if slot >= EQUIPMENT_SLOT_END {
+            return;
+        }
+
+        let value = item.unwrap_or_default();
+        let target = &mut self.data.visible_items[slot as usize];
+        if *target != value {
+            *target = value;
+            self.mark_player_data_array(
+                PLAYER_DATA_VISIBLE_ITEMS_PARENT_BIT,
+                PLAYER_DATA_VISIBLE_ITEMS_FIRST_BIT,
+                slot as usize,
+            );
+        }
+    }
+
     pub fn set_money(&mut self, value: u64) {
         self.set_active_u64(ACTIVE_PLAYER_DATA_COINAGE_BIT, value, |data| {
             &mut data.coinage
@@ -531,6 +559,19 @@ impl Player {
         Ok(())
     }
 
+    pub fn visualize_item(
+        &mut self,
+        slot: u8,
+        guid: ObjectGuid,
+        visible: VisibleItemValues,
+    ) -> Result<(), PlayerStorageError> {
+        self.store_top_level_item(slot, guid)?;
+        if slot < EQUIPMENT_SLOT_END {
+            self.set_visible_item_slot(slot, Some(visible));
+        }
+        Ok(())
+    }
+
     pub fn remove_top_level_item(
         &mut self,
         slot: u8,
@@ -541,6 +582,9 @@ impl Player {
 
         let removed = self.inventory.items[slot as usize].take();
         self.set_inv_slot(slot as usize, ObjectGuid::EMPTY);
+        if slot < EQUIPMENT_SLOT_END {
+            self.set_visible_item_slot(slot, None);
+        }
         if is_bag_storage_slot(slot) {
             self.inventory.bags[slot as usize] = None;
         }
@@ -904,6 +948,16 @@ impl Player {
         self.player_data_changes.set(bit);
     }
 
+    fn mark_player_data_array(
+        &mut self,
+        parent_bit: usize,
+        first_element_bit: usize,
+        index: usize,
+    ) {
+        self.player_data_changes.set(parent_bit);
+        self.player_data_changes.set(first_element_bit + index);
+    }
+
     fn mark_active_player_data(&mut self, bit: usize) {
         self.active_player_data_changes
             .set(ACTIVE_PLAYER_DATA_PARENT_BIT);
@@ -980,6 +1034,10 @@ mod tests {
         assert!(player.is_active());
         assert!(player.controlled_by_player());
         assert!(player.accept_whispers());
+        assert_eq!(
+            player.data().visible_items,
+            [VisibleItemValues::default(); EQUIPMENT_SLOT_END as usize]
+        );
         assert!(!player.player_data_changes_mask().is_any_set());
         assert!(!player.active_player_data_changes_mask().is_any_set());
     }
@@ -1220,6 +1278,77 @@ mod tests {
                 .active_player_data_changes_mask()
                 .is_set(ACTIVE_PLAYER_DATA_INV_SLOTS_FIRST_BIT)
         );
+    }
+
+    #[test]
+    fn visible_item_slot_marks_cpp_playerdata_array_bits() {
+        let mut player = Player::new(None, false);
+        player.clear_data_changes();
+
+        let visible = VisibleItemValues {
+            item_id: 19019,
+            item_appearance_mod_id: 7,
+            item_visual: 3,
+        };
+        player.set_visible_item_slot(15, Some(visible));
+
+        assert_eq!(player.data().visible_items[15], visible);
+        assert!(
+            player
+                .player_data_changes_mask()
+                .is_set(PLAYER_DATA_VISIBLE_ITEMS_PARENT_BIT)
+        );
+        assert!(
+            player
+                .player_data_changes_mask()
+                .is_set(PLAYER_DATA_VISIBLE_ITEMS_FIRST_BIT + 15)
+        );
+
+        player.clear_player_data_changes();
+        player.set_visible_item_slot(15, None);
+        assert_eq!(
+            player.data().visible_items[15],
+            VisibleItemValues::default()
+        );
+        assert!(
+            player
+                .player_data_changes_mask()
+                .is_set(PLAYER_DATA_VISIBLE_ITEMS_FIRST_BIT + 15)
+        );
+    }
+
+    #[test]
+    fn visualize_item_updates_equipment_storage_and_visible_item_like_cpp() {
+        let mut player = Player::new(None, false);
+        player.clear_data_changes();
+        player.clear_active_player_data_changes();
+
+        let guid = ObjectGuid::create_item(1, 500);
+        let visible = VisibleItemValues {
+            item_id: 500,
+            item_appearance_mod_id: 1,
+            item_visual: 2,
+        };
+
+        player.visualize_item(0, guid, visible).unwrap();
+
+        assert_eq!(player.get_item_by_pos(INVENTORY_SLOT_BAG_0, 0), Some(guid));
+        assert_eq!(player.active_data().inv_slots[0], guid);
+        assert_eq!(player.data().visible_items[0], visible);
+        assert!(
+            player
+                .active_player_data_changes_mask()
+                .is_set(ACTIVE_PLAYER_DATA_INV_SLOTS_FIRST_BIT)
+        );
+        assert!(
+            player
+                .player_data_changes_mask()
+                .is_set(PLAYER_DATA_VISIBLE_ITEMS_FIRST_BIT)
+        );
+
+        player.remove_top_level_item(0).unwrap();
+        assert_eq!(player.data().visible_items[0], VisibleItemValues::default());
+        assert_eq!(player.active_data().inv_slots[0], ObjectGuid::EMPTY);
     }
 
     #[test]
