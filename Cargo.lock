@@ -3265,6 +3265,7 @@ dependencies = [
  "wow-data",
  "wow-database",
  "wow-ecs",
+ "wow-entities",
  "wow-handler",
  "wow-logging",
  "wow-network",

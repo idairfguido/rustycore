@@ -16,9 +16,13 @@ use wow_constants::ClientOpcodes;
 use wow_core::{ObjectGuid, ObjectGuidGenerator};
 use wow_data::{HotfixBlobCache, ItemStore, ItemStatsStore, PlayerStatsStore, SkillStore, AreaTriggerStore, SpellStore};
 use wow_database::{CharacterDatabase, LoginDatabase, WorldDatabase};
+use wow_entities::{SendNewItemDelivery, SendNewItemDisplayText, SendNewItemPlan};
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus, build_dispatch_table};
 use wow_network::session_mgr::{InstanceLink, SessionManager};
 use wow_network::{GroupRegistry, PendingInvites, PlayerBroadcastInfo, PlayerRegistry};
+use wow_packet::packets::item::{
+    ItemInstance, ItemMod, ItemModList, ItemPushResult, ItemPushResultDisplayType,
+};
 use wow_packet::{ClientPacket, WorldPacket};
 
 /// Maximum number of packets processed per `update()` call.
@@ -2100,6 +2104,79 @@ impl WorldSession {
         }
     }
 
+    fn item_push_result_from_send_new_item_plan(plan: &SendNewItemPlan) -> ItemPushResult {
+        ItemPushResult {
+            player_guid: plan.player_guid,
+            slot: plan.slot,
+            slot_in_bag: i32::from(plan.slot_in_bag),
+            item: ItemInstance {
+                item_id: plan.item_instance.item_id as i32,
+                random_properties_seed: plan.item_instance.random_properties_seed,
+                random_properties_id: plan.item_instance.random_properties_id,
+                item_bonus: None,
+                modifications: ItemModList {
+                    values: plan
+                        .item_instance
+                        .modifications
+                        .iter()
+                        .map(|modifier| ItemMod::new(modifier.value, modifier.modifier_type))
+                        .collect(),
+                },
+            },
+            quest_log_item_id: plan.quest_log_item_id as i32,
+            quantity: plan.quantity as i32,
+            quantity_in_inventory: plan.quantity_in_inventory as i32,
+            dungeon_encounter_id: plan.dungeon_encounter_id as i32,
+            battle_pet_species_id: plan.battle_pet_species_id as i32,
+            battle_pet_breed_id: plan.battle_pet_breed_id as i32,
+            battle_pet_breed_quality: u32::from(plan.battle_pet_breed_quality),
+            battle_pet_level: plan.battle_pet_level as i32,
+            item_guid: plan.item_guid,
+            pushed: plan.pushed,
+            display_text: match plan.display_text {
+                SendNewItemDisplayText::Normal => ItemPushResultDisplayType::Normal,
+                SendNewItemDisplayText::EncounterLoot => ItemPushResultDisplayType::EncounterLoot,
+            },
+            created: plan.created,
+            is_bonus_roll: false,
+            is_encounter_loot: plan.is_encounter_loot,
+        }
+    }
+
+    pub fn send_new_item_plan(&self, plan: &SendNewItemPlan) {
+        let packet = Self::item_push_result_from_send_new_item_plan(plan);
+        if plan.delivery == SendNewItemDelivery::GroupBroadcast {
+            use wow_packet::ServerPacket;
+
+            if self.broadcast_item_push_result_to_group(packet.to_bytes()) {
+                return;
+            }
+        }
+
+        self.send_packet(&packet);
+    }
+
+    fn broadcast_item_push_result_to_group(&self, bytes: Vec<u8>) -> bool {
+        let (Some(group_guid), Some(group_registry), Some(player_registry)) =
+            (self.group_guid, &self.group_registry, &self.player_registry)
+        else {
+            return false;
+        };
+
+        let Some(group) = group_registry.get(&group_guid) else {
+            return false;
+        };
+
+        let mut delivered = false;
+        for member_guid in &group.members {
+            if let Some(member) = player_registry.get(member_guid) {
+                delivered |= member.send_tx.send(bytes.clone()).is_ok();
+            }
+        }
+
+        delivered
+    }
+
     /// Send session initialization packets (first encrypted packets after
     /// EnterEncryptedModeAck). Matches C# `InitializeSessionCallback`.
     ///
@@ -3027,6 +3104,10 @@ fn default_available_classes() -> Vec<wow_packet::packets::auth::RaceClassAvaila
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wow_core::Position;
+    use wow_entities::{SendNewItemInstancePlan, SendNewItemModifier};
+    use wow_network::{GroupInfo, PlayerBroadcastInfo};
+    use wow_packet::ServerPacket;
 
     fn make_session() -> (WorldSession, flume::Sender<WorldPacket>, flume::Receiver<Vec<u8>>) {
         let (pkt_tx, pkt_rx) = flume::bounded(100);
@@ -3046,6 +3127,60 @@ mod tests {
         );
 
         (session, pkt_tx, send_rx)
+    }
+
+    fn send_new_item_plan(delivery: SendNewItemDelivery) -> SendNewItemPlan {
+        SendNewItemPlan {
+            player_guid: ObjectGuid::create_player(1, 42),
+            item_guid: ObjectGuid::create_item(1, 500),
+            item_entry: 9001,
+            item_instance: SendNewItemInstancePlan {
+                item_id: 9001,
+                random_properties_seed: 456,
+                random_properties_id: -77,
+                modifications: vec![
+                    SendNewItemModifier {
+                        value: 123,
+                        modifier_type: 3,
+                    },
+                    SendNewItemModifier {
+                        value: 25,
+                        modifier_type: 5,
+                    },
+                ],
+            },
+            slot: 4,
+            slot_in_bag: 7,
+            quest_log_item_id: 777,
+            quantity: 3,
+            quantity_in_inventory: 9,
+            battle_pet_species_id: 123,
+            battle_pet_breed_id: 0xBC,
+            battle_pet_breed_quality: 0x1A,
+            battle_pet_level: 25,
+            pushed: true,
+            created: false,
+            display_text: SendNewItemDisplayText::EncounterLoot,
+            dungeon_encounter_id: 615,
+            is_encounter_loot: true,
+            delivery,
+        }
+    }
+
+    fn broadcast_info(guid: ObjectGuid, send_tx: flume::Sender<Vec<u8>>) -> PlayerBroadcastInfo {
+        PlayerBroadcastInfo {
+            map_id: 0,
+            position: Position::new(0.0, 0.0, 0.0, 0.0),
+            send_tx,
+            player_name: format!("Player{}", guid.counter()),
+            account_id: guid.counter() as u32,
+            race: 1,
+            class: 1,
+            sex: 0,
+            level: 1,
+            display_id: 49,
+            visible_items: [(0, 0, 0); 19],
+        }
     }
 
     #[test]
@@ -3101,6 +3236,74 @@ mod tests {
 
         let data = send_rx.try_recv().unwrap();
         assert_eq!(data.len(), 6); // opcode(2) + serial(4)
+    }
+
+    #[test]
+    fn send_new_item_plan_maps_entity_fields_to_item_push_result_like_cpp() {
+        let plan = send_new_item_plan(SendNewItemDelivery::Direct);
+        let packet = WorldSession::item_push_result_from_send_new_item_plan(&plan);
+
+        assert_eq!(packet.player_guid, plan.player_guid);
+        assert_eq!(packet.item_guid, plan.item_guid);
+        assert_eq!(packet.slot, 4);
+        assert_eq!(packet.slot_in_bag, 7);
+        assert_eq!(packet.quest_log_item_id, 777);
+        assert_eq!(packet.quantity, 3);
+        assert_eq!(packet.quantity_in_inventory, 9);
+        assert_eq!(packet.dungeon_encounter_id, 615);
+        assert_eq!(packet.display_text, ItemPushResultDisplayType::EncounterLoot);
+        assert!(packet.pushed);
+        assert!(!packet.created);
+        assert!(!packet.is_bonus_roll);
+        assert!(packet.is_encounter_loot);
+        assert_eq!(packet.item.item_id, 9001);
+        assert_eq!(packet.item.random_properties_seed, 456);
+        assert_eq!(packet.item.random_properties_id, -77);
+        assert!(packet.item.item_bonus.is_none());
+        assert_eq!(
+            packet.item.modifications.values,
+            vec![ItemMod::new(123, 3), ItemMod::new(25, 5)]
+        );
+    }
+
+    #[test]
+    fn send_new_item_plan_direct_sends_item_push_result_to_session() {
+        let (session, _, send_rx) = make_session();
+        let plan = send_new_item_plan(SendNewItemDelivery::Direct);
+        let expected = WorldSession::item_push_result_from_send_new_item_plan(&plan).to_bytes();
+
+        session.send_new_item_plan(&plan);
+
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
+    }
+
+    #[test]
+    fn send_new_item_plan_group_broadcasts_to_group_members_including_self() {
+        let (mut session, _, send_rx) = make_session();
+        let self_guid = ObjectGuid::create_player(1, 42);
+        let other_guid = ObjectGuid::create_player(1, 43);
+        let (self_tx, self_rx) = flume::bounded(10);
+        let (other_tx, other_rx) = flume::bounded(10);
+        let player_registry = Arc::new(PlayerRegistry::default());
+        player_registry.insert(self_guid, broadcast_info(self_guid, self_tx));
+        player_registry.insert(other_guid, broadcast_info(other_guid, other_tx));
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(self_guid);
+        group.add_member(other_guid);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.player_guid = Some(self_guid);
+        session.group_guid = Some(group_guid);
+        session.set_player_registry(player_registry);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+        let plan = send_new_item_plan(SendNewItemDelivery::GroupBroadcast);
+        let expected = WorldSession::item_push_result_from_send_new_item_plan(&plan).to_bytes();
+
+        session.send_new_item_plan(&plan);
+
+        assert_eq!(self_rx.try_recv().unwrap(), expected);
+        assert_eq!(other_rx.try_recv().unwrap(), expected);
+        assert!(send_rx.try_recv().is_err());
     }
 
     #[test]
