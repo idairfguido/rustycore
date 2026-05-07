@@ -3094,6 +3094,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "wow-entities"
+version = "0.1.0"
+dependencies = [
+ "bitflags",
+ "wow-constants",
+ "wow-core",
+]
+
+[[package]]
 name = "wow-handler"
 version = "0.1.0"
 dependencies = [

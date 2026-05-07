@@ -1,0 +1,15 @@
+[package]
+name = "wow-entities"
+description = "Canonical game entity model ported from TrinityCore Objects"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+bitflags = { workspace = true }
+wow-core = { workspace = true }
+wow-constants = { workspace = true }
+
+[lints]
+workspace = true

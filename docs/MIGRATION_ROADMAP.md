@@ -546,7 +546,7 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
 
 ### Inmediato siguiente (Fase 1 — Entidades canónicas)
 
-- [ ] **#023** `wow-entities`: crate/module boundary and base `Object` from `Entities/Object/Object.*`: guid, type id, map id, entry, update flags, in-world/grid state.
+- [x] **#023** `wow-entities`: crate/module boundary and base `Object` from `Entities/Object/Object.*`: guid, type id, map id, entry, update flags, in-world/grid state. Cerrado con crate `wow-entities` y `EntityObject` base contrastado contra `Object.h`, `Object.cpp`, `ObjectGuid.h`; `map_id`/`in_grid` quedan como bridge Rust explícito para ownership canónico de mapas.
 - [ ] **#023a** `wow-entities`/`wow-map`: bind `grid_unload` actions to real entity methods: `Creature::RemoveAllDynObjects`, `Creature::RemoveAllAreaTriggers`, `Creature::CombatStop`, creature/GO respawn relocation, `SetDestroyedObject`, `CleanupsBeforeDelete`, and object deletion.
 - [ ] **#024** `wow-entities`: `WorldObject` from `Entities/Object/WorldObject.*`: position/orientation, current cell, map pointer/key, phase shift, distance/facing helpers.
 - [ ] **#025** `wow-world`/`wow-entities`: `ObjectAccessor` equivalent from `Globals/ObjectAccessor.*`: global player lookup plus map-local object lookup APIs for Creature/GO/Corpse/DynamicObject/AreaTrigger/SceneObject/Conversation/Pet.
