@@ -6,6 +6,7 @@
 //! - `game/Entities/Object/ObjectGuid.h`
 
 mod creature;
+mod game_object;
 mod object;
 mod object_accessor;
 mod player;
@@ -17,6 +18,14 @@ pub use creature::{
     CREATURE_REGEN_INTERVAL_MS, Creature, CreatureModelDimensions, DEFAULT_BOUNDARY_CHECK_TIME_MS,
     DEFAULT_CORPSE_DELAY_SECS, DEFAULT_MONSTER_SIGHT_DISTANCE, DEFAULT_RESPAWN_DELAY_SECS,
     LOOT_MODE_DEFAULT, MAX_CREATURE_SPELLS, MovementGeneratorType, ReactState,
+};
+pub use game_object::{
+    DEFAULT_GAMEOBJECT_RESPAWN_DELAY_SECS, GAME_OBJECT_DATA_ART_KIT_BIT,
+    GAME_OBJECT_DATA_CUSTOM_PARAM_BIT, GAME_OBJECT_DATA_DISPLAY_ID_BIT,
+    GAME_OBJECT_DATA_FACTION_TEMPLATE_BIT, GAME_OBJECT_DATA_FLAGS_BIT, GAME_OBJECT_DATA_LEVEL_BIT,
+    GAME_OBJECT_DATA_PARENT_BIT, GAME_OBJECT_DATA_PERCENT_HEALTH_BIT, GAME_OBJECT_DATA_STATE_BIT,
+    GAME_OBJECT_DATA_TYPE_ID_BIT, GAMEOBJECT_LOOT_MODE_DEFAULT, GameObject, GameObjectDataUpdate,
+    GameObjectDataValues, GameObjectValuesUpdate, GoState, LootState,
 };
 pub use object::{CreateObjectFlags, EntityObject, EntityObjectState, ObjectChangedFields};
 pub use object_accessor::{
@@ -46,10 +55,10 @@ pub use unit::{
     UnitDataValues, UnitValuesUpdate,
 };
 pub use update_fields::{
-    ACTIVE_PLAYER_DATA_BITS, NUM_CLIENT_OBJECT_TYPES, OBJECT_DATA_BITS,
+    ACTIVE_PLAYER_DATA_BITS, GAME_OBJECT_DATA_BITS, NUM_CLIENT_OBJECT_TYPES, OBJECT_DATA_BITS,
     OBJECT_DATA_DYNAMIC_FLAGS_BIT, OBJECT_DATA_ENTRY_ID_BIT, OBJECT_DATA_PARENT_BIT,
     OBJECT_DATA_SCALE_BIT, ObjectDataUpdate, ObjectDataValues, PLAYER_DATA_BITS,
-    TYPEID_ACTIVE_PLAYER, TYPEID_OBJECT, TYPEID_PLAYER, TYPEID_UNIT, UNIT_DATA_BITS, UpdateMask,
-    ValuesUpdate,
+    TYPEID_ACTIVE_PLAYER, TYPEID_GAME_OBJECT, TYPEID_OBJECT, TYPEID_PLAYER, TYPEID_UNIT,
+    UNIT_DATA_BITS, UpdateMask, ValuesUpdate,
 };
 pub use world_object::{MAPID_INVALID, MapBindingError, PhaseShift, WorldLocation, WorldObject};

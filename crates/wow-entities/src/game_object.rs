@@ -1,0 +1,606 @@
+use wow_constants::{TypeId, TypeMask};
+use wow_core::{ObjectGuid, Position};
+
+use crate::{
+    CreateObjectFlags, ObjectDataUpdate, UpdateMask, WorldObject,
+    update_fields::{GAME_OBJECT_DATA_BITS, TYPEID_GAME_OBJECT},
+};
+
+pub const DEFAULT_GAMEOBJECT_RESPAWN_DELAY_SECS: u32 = 300;
+pub const GAMEOBJECT_LOOT_MODE_DEFAULT: u16 = 0x1;
+
+pub const GAME_OBJECT_DATA_PARENT_BIT: usize = 0;
+pub const GAME_OBJECT_DATA_DISPLAY_ID_BIT: usize = 4;
+pub const GAME_OBJECT_DATA_FLAGS_BIT: usize = 11;
+pub const GAME_OBJECT_DATA_FACTION_TEMPLATE_BIT: usize = 13;
+pub const GAME_OBJECT_DATA_LEVEL_BIT: usize = 14;
+pub const GAME_OBJECT_DATA_STATE_BIT: usize = 15;
+pub const GAME_OBJECT_DATA_TYPE_ID_BIT: usize = 16;
+pub const GAME_OBJECT_DATA_PERCENT_HEALTH_BIT: usize = 17;
+pub const GAME_OBJECT_DATA_ART_KIT_BIT: usize = 18;
+pub const GAME_OBJECT_DATA_CUSTOM_PARAM_BIT: usize = 19;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i8)]
+pub enum GoState {
+    Active = 0,
+    Ready = 1,
+    Destroyed = 2,
+    TransportActive = 24,
+    TransportStopped = 25,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum LootState {
+    NotReady = 0,
+    Ready = 1,
+    Activated = 2,
+    JustDeactivated = 3,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GameObjectDataValues {
+    pub display_id: i32,
+    pub flags: u32,
+    pub faction_template: i32,
+    pub level: i32,
+    pub state: i8,
+    pub type_id: i8,
+    pub percent_health: u8,
+    pub art_kit: u32,
+    pub custom_param: u32,
+}
+
+impl Default for GameObjectDataValues {
+    fn default() -> Self {
+        Self {
+            display_id: 0,
+            flags: 0,
+            faction_template: 0,
+            level: 0,
+            state: GoState::Active as i8,
+            type_id: 0,
+            percent_health: 0,
+            art_kit: 0,
+            custom_param: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameObjectDataUpdate {
+    pub mask: UpdateMask,
+    pub values: GameObjectDataValues,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameObjectValuesUpdate {
+    pub changed_object_type_mask: u32,
+    pub object_data: Option<ObjectDataUpdate>,
+    pub game_object_data: Option<GameObjectDataUpdate>,
+}
+
+impl GameObjectValuesUpdate {
+    pub const fn has_data(&self) -> bool {
+        self.changed_object_type_mask != 0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameObject {
+    world: WorldObject,
+    data: GameObjectDataValues,
+    game_object_data_changes: UpdateMask,
+    spell_id: u32,
+    respawn_time: i64,
+    respawn_delay_time: u32,
+    despawn_delay: u32,
+    despawn_respawn_time: u32,
+    restock_time: i64,
+    loot_state: LootState,
+    loot_state_unit_guid: ObjectGuid,
+    spawned_by_default: bool,
+    use_times: u32,
+    cooldown_time: i64,
+    prev_go_state: GoState,
+    packed_rotation: i64,
+    spawn_id: u64,
+    loot_mode: u16,
+    respawn_compatibility_mode: bool,
+    anim_kit_id: u16,
+    world_effect_id: u32,
+    stationary_position: Position,
+}
+
+impl GameObject {
+    pub fn new() -> Self {
+        let mut world = WorldObject::new(
+            false,
+            TypeId::GameObject,
+            TypeMask::OBJECT | TypeMask::GAME_OBJECT,
+        );
+        world
+            .object_mut()
+            .create_flags_mut()
+            .insert(CreateObjectFlags::STATIONARY | CreateObjectFlags::ROTATION);
+
+        Self {
+            world,
+            data: GameObjectDataValues::default(),
+            game_object_data_changes: UpdateMask::new(GAME_OBJECT_DATA_BITS),
+            spell_id: 0,
+            respawn_time: 0,
+            respawn_delay_time: DEFAULT_GAMEOBJECT_RESPAWN_DELAY_SECS,
+            despawn_delay: 0,
+            despawn_respawn_time: 0,
+            restock_time: 0,
+            loot_state: LootState::NotReady,
+            loot_state_unit_guid: ObjectGuid::EMPTY,
+            spawned_by_default: true,
+            use_times: 0,
+            cooldown_time: 0,
+            prev_go_state: GoState::Active,
+            packed_rotation: 0,
+            spawn_id: 0,
+            loot_mode: GAMEOBJECT_LOOT_MODE_DEFAULT,
+            respawn_compatibility_mode: false,
+            anim_kit_id: 0,
+            world_effect_id: 0,
+            stationary_position: Position::new(0.0, 0.0, 0.0, 0.0),
+        }
+    }
+
+    pub const fn world(&self) -> &WorldObject {
+        &self.world
+    }
+
+    pub fn world_mut(&mut self) -> &mut WorldObject {
+        &mut self.world
+    }
+
+    pub const fn data(&self) -> &GameObjectDataValues {
+        &self.data
+    }
+
+    pub fn game_object_data_changes_mask(&self) -> &UpdateMask {
+        &self.game_object_data_changes
+    }
+
+    pub fn clear_game_object_data_changes(&mut self) {
+        self.game_object_data_changes.reset_all();
+    }
+
+    pub const fn spell_id(&self) -> u32 {
+        self.spell_id
+    }
+
+    pub fn set_spell_id(&mut self, spell_id: u32) {
+        self.spell_id = spell_id;
+        if spell_id != 0 {
+            self.spawned_by_default = false;
+        }
+    }
+
+    pub const fn respawn_time(&self) -> i64 {
+        self.respawn_time
+    }
+
+    pub fn set_respawn_time(&mut self, respawn_time: i64) {
+        self.respawn_time = respawn_time;
+    }
+
+    pub const fn respawn_delay_time(&self) -> u32 {
+        self.respawn_delay_time
+    }
+
+    pub fn set_respawn_delay_time(&mut self, delay: u32) {
+        self.respawn_delay_time = delay;
+    }
+
+    pub const fn despawn_delay(&self) -> u32 {
+        self.despawn_delay
+    }
+
+    pub const fn despawn_respawn_time(&self) -> u32 {
+        self.despawn_respawn_time
+    }
+
+    pub const fn restock_time(&self) -> i64 {
+        self.restock_time
+    }
+
+    pub const fn loot_state(&self) -> LootState {
+        self.loot_state
+    }
+
+    pub const fn loot_state_unit_guid(&self) -> ObjectGuid {
+        self.loot_state_unit_guid
+    }
+
+    pub fn set_loot_state(&mut self, state: LootState, unit: Option<ObjectGuid>) {
+        self.loot_state = state;
+        self.loot_state_unit_guid = if state == LootState::Activated {
+            unit.unwrap_or(ObjectGuid::EMPTY)
+        } else {
+            ObjectGuid::EMPTY
+        };
+    }
+
+    pub const fn spawned_by_default(&self) -> bool {
+        self.spawned_by_default
+    }
+
+    pub fn set_spawned_by_default(&mut self, spawned: bool) {
+        self.spawned_by_default = spawned;
+    }
+
+    pub const fn use_times(&self) -> u32 {
+        self.use_times
+    }
+
+    pub const fn cooldown_time(&self) -> i64 {
+        self.cooldown_time
+    }
+
+    pub fn set_cooldown_time(&mut self, cooldown_time: i64) {
+        self.cooldown_time = cooldown_time;
+    }
+
+    pub const fn prev_go_state(&self) -> GoState {
+        self.prev_go_state
+    }
+
+    pub const fn packed_rotation(&self) -> i64 {
+        self.packed_rotation
+    }
+
+    pub const fn spawn_id(&self) -> u64 {
+        self.spawn_id
+    }
+
+    pub fn set_spawn_id(&mut self, spawn_id: u64) {
+        self.spawn_id = spawn_id;
+    }
+
+    pub const fn loot_mode(&self) -> u16 {
+        self.loot_mode
+    }
+
+    pub fn reset_loot_mode(&mut self) {
+        self.loot_mode = GAMEOBJECT_LOOT_MODE_DEFAULT;
+    }
+
+    pub const fn respawn_compatibility_mode(&self) -> bool {
+        self.respawn_compatibility_mode
+    }
+
+    pub fn set_respawn_compatibility_mode(&mut self, enabled: bool) {
+        self.respawn_compatibility_mode = enabled;
+    }
+
+    pub const fn anim_kit_id(&self) -> u16 {
+        self.anim_kit_id
+    }
+
+    pub const fn world_effect_id(&self) -> u32 {
+        self.world_effect_id
+    }
+
+    pub const fn stationary_position(&self) -> Position {
+        self.stationary_position
+    }
+
+    pub fn set_display_id(&mut self, display_id: u32) {
+        self.set_i32_field(GAME_OBJECT_DATA_DISPLAY_ID_BIT, display_id as i32, |data| {
+            &mut data.display_id
+        });
+    }
+
+    pub fn set_faction(&mut self, faction: u32) {
+        self.set_i32_field(
+            GAME_OBJECT_DATA_FACTION_TEMPLATE_BIT,
+            faction as i32,
+            |data| &mut data.faction_template,
+        );
+    }
+
+    pub fn set_go_state(&mut self, state: GoState) {
+        self.set_i8_field(GAME_OBJECT_DATA_STATE_BIT, state as i8, |data| {
+            &mut data.state
+        });
+    }
+
+    pub fn set_go_type(&mut self, type_id: u8) {
+        self.set_i8_field(GAME_OBJECT_DATA_TYPE_ID_BIT, type_id as i8, |data| {
+            &mut data.type_id
+        });
+    }
+
+    pub fn set_flags(&mut self, flags: u32) {
+        self.set_u32_field(GAME_OBJECT_DATA_FLAGS_BIT, flags, |data| &mut data.flags);
+    }
+
+    pub fn set_level(&mut self, level: u32) {
+        self.set_i32_field(GAME_OBJECT_DATA_LEVEL_BIT, level as i32, |data| {
+            &mut data.level
+        });
+    }
+
+    pub fn set_percent_health(&mut self, percent_health: u8) {
+        self.set_u8_field(
+            GAME_OBJECT_DATA_PERCENT_HEALTH_BIT,
+            percent_health,
+            |data| &mut data.percent_health,
+        );
+    }
+
+    pub fn set_art_kit(&mut self, art_kit: u32) {
+        self.set_u32_field(GAME_OBJECT_DATA_ART_KIT_BIT, art_kit, |data| {
+            &mut data.art_kit
+        });
+    }
+
+    pub fn set_custom_param(&mut self, custom_param: u32) {
+        self.set_u32_field(GAME_OBJECT_DATA_CUSTOM_PARAM_BIT, custom_param, |data| {
+            &mut data.custom_param
+        });
+    }
+
+    pub fn changed_object_type_mask(&self) -> u32 {
+        self.world.object().changed_object_type_mask()
+            | if self.game_object_data_changes.is_any_set() {
+                1 << TYPEID_GAME_OBJECT
+            } else {
+                0
+            }
+    }
+
+    pub fn values_update(&self) -> GameObjectValuesUpdate {
+        let object_update = self.world.object().values_update();
+        GameObjectValuesUpdate {
+            changed_object_type_mask: self.changed_object_type_mask(),
+            object_data: object_update.object_data,
+            game_object_data: self.game_object_data_changes.is_any_set().then(|| {
+                GameObjectDataUpdate {
+                    mask: self.game_object_data_changes.clone(),
+                    values: self.data,
+                }
+            }),
+        }
+    }
+
+    fn set_u32_field(
+        &mut self,
+        bit: usize,
+        value: u32,
+        field: impl FnOnce(&mut GameObjectDataValues) -> &mut u32,
+    ) {
+        let target = field(&mut self.data);
+        if *target != value {
+            *target = value;
+            self.mark_game_object_data(bit);
+        }
+    }
+
+    fn set_i32_field(
+        &mut self,
+        bit: usize,
+        value: i32,
+        field: impl FnOnce(&mut GameObjectDataValues) -> &mut i32,
+    ) {
+        let target = field(&mut self.data);
+        if *target != value {
+            *target = value;
+            self.mark_game_object_data(bit);
+        }
+    }
+
+    fn set_i8_field(
+        &mut self,
+        bit: usize,
+        value: i8,
+        field: impl FnOnce(&mut GameObjectDataValues) -> &mut i8,
+    ) {
+        let target = field(&mut self.data);
+        if *target != value {
+            *target = value;
+            self.mark_game_object_data(bit);
+        }
+    }
+
+    fn set_u8_field(
+        &mut self,
+        bit: usize,
+        value: u8,
+        field: impl FnOnce(&mut GameObjectDataValues) -> &mut u8,
+    ) {
+        let target = field(&mut self.data);
+        if *target != value {
+            *target = value;
+            self.mark_game_object_data(bit);
+        }
+    }
+
+    fn mark_game_object_data(&mut self, bit: usize) {
+        self.game_object_data_changes
+            .set(GAME_OBJECT_DATA_PARENT_BIT);
+        self.game_object_data_changes.set(bit);
+    }
+}
+
+impl Default for GameObject {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gameobject_constructor_matches_cpp_base_state() {
+        let go = GameObject::new();
+
+        assert_eq!(go.world().object().type_id(), TypeId::GameObject);
+        assert_eq!(
+            go.world().object().type_mask(),
+            TypeMask::OBJECT | TypeMask::GAME_OBJECT
+        );
+        assert!(!go.world().is_world_object());
+        assert!(
+            go.world()
+                .object()
+                .create_flags()
+                .contains(CreateObjectFlags::STATIONARY)
+        );
+        assert!(
+            go.world()
+                .object()
+                .create_flags()
+                .contains(CreateObjectFlags::ROTATION)
+        );
+        assert_eq!(go.respawn_time(), 0);
+        assert_eq!(
+            go.respawn_delay_time(),
+            DEFAULT_GAMEOBJECT_RESPAWN_DELAY_SECS
+        );
+        assert_eq!(go.despawn_delay(), 0);
+        assert_eq!(go.despawn_respawn_time(), 0);
+        assert_eq!(go.restock_time(), 0);
+        assert_eq!(go.loot_state(), LootState::NotReady);
+        assert_eq!(go.loot_state_unit_guid(), ObjectGuid::EMPTY);
+        assert!(go.spawned_by_default());
+        assert_eq!(go.use_times(), 0);
+        assert_eq!(go.spell_id(), 0);
+        assert_eq!(go.cooldown_time(), 0);
+        assert_eq!(go.prev_go_state(), GoState::Active);
+        assert_eq!(go.packed_rotation(), 0);
+        assert_eq!(go.spawn_id(), 0);
+        assert_eq!(go.loot_mode(), GAMEOBJECT_LOOT_MODE_DEFAULT);
+        assert!(!go.respawn_compatibility_mode());
+        assert_eq!(go.anim_kit_id(), 0);
+        assert_eq!(go.world_effect_id(), 0);
+        assert_eq!(go.stationary_position(), Position::new(0.0, 0.0, 0.0, 0.0));
+        assert!(!go.game_object_data_changes_mask().is_any_set());
+    }
+
+    #[test]
+    fn gameobject_data_setters_mark_cpp_bits() {
+        let mut go = GameObject::new();
+
+        go.set_display_id(1234);
+        go.set_faction(35);
+        go.set_go_state(GoState::Ready);
+        go.set_go_type(3);
+        go.set_flags(0x20);
+        go.set_level(70);
+        go.set_percent_health(80);
+        go.set_art_kit(4);
+        go.set_custom_param(99);
+
+        assert_eq!(go.data().display_id, 1234);
+        assert_eq!(go.data().faction_template, 35);
+        assert_eq!(go.data().state, GoState::Ready as i8);
+        assert_eq!(go.data().type_id, 3);
+        assert_eq!(go.data().flags, 0x20);
+        assert_eq!(go.data().level, 70);
+        assert_eq!(go.data().percent_health, 80);
+        assert_eq!(go.data().art_kit, 4);
+        assert_eq!(go.data().custom_param, 99);
+        assert!(
+            go.game_object_data_changes_mask()
+                .is_set(GAME_OBJECT_DATA_PARENT_BIT)
+        );
+        assert!(
+            go.game_object_data_changes_mask()
+                .is_set(GAME_OBJECT_DATA_DISPLAY_ID_BIT)
+        );
+        assert!(
+            go.game_object_data_changes_mask()
+                .is_set(GAME_OBJECT_DATA_FACTION_TEMPLATE_BIT)
+        );
+        assert!(
+            go.game_object_data_changes_mask()
+                .is_set(GAME_OBJECT_DATA_STATE_BIT)
+        );
+        assert!(
+            go.game_object_data_changes_mask()
+                .is_set(GAME_OBJECT_DATA_TYPE_ID_BIT)
+        );
+        assert!(
+            go.game_object_data_changes_mask()
+                .is_set(GAME_OBJECT_DATA_FLAGS_BIT)
+        );
+        assert!(
+            go.game_object_data_changes_mask()
+                .is_set(GAME_OBJECT_DATA_LEVEL_BIT)
+        );
+        assert!(
+            go.game_object_data_changes_mask()
+                .is_set(GAME_OBJECT_DATA_PERCENT_HEALTH_BIT)
+        );
+        assert!(
+            go.game_object_data_changes_mask()
+                .is_set(GAME_OBJECT_DATA_ART_KIT_BIT)
+        );
+        assert!(
+            go.game_object_data_changes_mask()
+                .is_set(GAME_OBJECT_DATA_CUSTOM_PARAM_BIT)
+        );
+    }
+
+    #[test]
+    fn loot_state_tracks_activating_unit_only_for_activated_state() {
+        let mut go = GameObject::new();
+        let unit = ObjectGuid::new(7, 11);
+
+        go.set_loot_state(LootState::Activated, Some(unit));
+        assert_eq!(go.loot_state(), LootState::Activated);
+        assert_eq!(go.loot_state_unit_guid(), unit);
+
+        go.set_loot_state(LootState::Ready, Some(unit));
+        assert_eq!(go.loot_state(), LootState::Ready);
+        assert_eq!(go.loot_state_unit_guid(), ObjectGuid::EMPTY);
+    }
+
+    #[test]
+    fn spell_id_and_spawn_fields_match_cpp_base_behaviour() {
+        let mut go = GameObject::new();
+
+        go.set_spell_id(123);
+        go.set_spawn_id(99);
+        go.set_respawn_delay_time(45);
+        go.set_respawn_time(1000);
+        go.set_spawned_by_default(true);
+        go.set_cooldown_time(77);
+        go.set_respawn_compatibility_mode(true);
+
+        assert_eq!(go.spell_id(), 123);
+        assert_eq!(go.spawn_id(), 99);
+        assert_eq!(go.respawn_delay_time(), 45);
+        assert_eq!(go.respawn_time(), 1000);
+        assert!(go.spawned_by_default());
+        assert_eq!(go.cooldown_time(), 77);
+        assert!(go.respawn_compatibility_mode());
+    }
+
+    #[test]
+    fn values_update_sets_gameobject_object_type_bit() {
+        let mut go = GameObject::new();
+
+        go.set_display_id(1234);
+        let update = go.values_update();
+
+        assert!(update.has_data());
+        assert_eq!(update.changed_object_type_mask, 1 << TYPEID_GAME_OBJECT);
+        let game_object_data = update.game_object_data.unwrap();
+        assert_eq!(game_object_data.values.display_id, 1234);
+        assert!(
+            game_object_data
+                .mask
+                .is_set(GAME_OBJECT_DATA_DISPLAY_ID_BIT)
+        );
+    }
+}

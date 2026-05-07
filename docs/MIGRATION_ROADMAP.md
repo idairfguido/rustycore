@@ -215,7 +215,7 @@ Leyenda:
 | `Entities/Unit/Unit` | (no existe formal) | ❌ | health/power/stats/auras/threat — disperso en session |
 | `Entities/Player/Player` | wow-entities + wow-world/session.rs | ⚠️ | base entidad iniciado; login/inventario/quests siguen mezclados en sesión |
 | `Entities/Creature/Creature` | wow-entities + wow-ai/map_manager legacy | ⚠️ | base entidad iniciado; AI/spawn/loot siguen duplicados fuera |
-| `Entities/GameObject/GameObject` | wow-world (parcial) | ⚠️ | falta lifecycle, scripts |
+| `Entities/GameObject/GameObject` | wow-entities + wow-world parcial | ⚠️ | base entidad iniciado; lifecycle/scripts siguen fuera |
 | `Entities/Pet/Pet` | (no existe) | ❌ | hunter pets |
 | `Entities/DynamicObject` | (no existe) | ❌ | DynObjects de spells AoE |
 | `Entities/AreaTrigger/AreaTrigger` | wow-data/area_trigger | ⚠️ | datos sí, lógica no |
@@ -557,8 +557,9 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
 - [x] **#027a** `wow-entities`: base `Unit` state from `Unit.*` and `UF::UnitData`: constructor state, movement update flag, death/unit state, health/max-health clamps, power index bridge, display/level/faction/reach fields and UnitData masks.
 - [ ] **#028** `wow-entities`: `Player` from `Entities/Player/`: account/session link, inventory refs, quests, skills, taxi state. Refinado: base `Player` state/setters cerrado en `#028a`; siguen pendientes create/load/login, inventario real, quests, skills, taxi, social, mail, group/guild, battleground, visibility and persistence.
 - [x] **#028a** `wow-entities`: base `Player` state from `Player.*`, `StatSystem.cpp::Player::GetPowerIndex` and `UF::{PlayerData,ActivePlayerData}`: constructor type id/mask, session bridge, hit chance defaults, whisper accept permission branch, race/class/gender/native gender setters, selection target, flags, loot GUID, bank/backpack counts, XP, money clamp and PlayerData/ActivePlayerData masks.
-- [ ] **#029** `wow-entities`: `Creature` + `GameObject` from their C++ dirs: template refs, spawn data, respawn timer, AI ref, GO state. Refinado: base `Creature` state cerrado en `#029a`; siguen pendientes `Creature::Create/LoadFromDB`, template/difficulty refs, AI ownership, loot, corpse/respawn lifecycle and GO base.
+- [ ] **#029** `wow-entities`: `Creature` + `GameObject` from their C++ dirs: template refs, spawn data, respawn timer, AI ref, GO state. Refinado: base `Creature` state cerrado en `#029a` y base `GameObject` state cerrado en `#029b`; siguen pendientes `Creature::Create/LoadFromDB`, template/difficulty refs, AI ownership, loot, corpse/respawn lifecycle and GameObject create/template/model/use lifecycle.
 - [x] **#029a** `wow-entities`: base `Creature` state from `Creature.*`, `CreatureData.h`, `UnitDefines.h`, `MovementDefines.h`, `SharedDefines.h`, `World.cpp` config defaults and `StatSystem.cpp::Creature::GetPowerIndex`: constructor defaults, respawn/corpse timers, react state, movement type, spells, loot mode, monster sight default, display/model dimension bridge, faction setter and creature power-index semantics.
+- [x] **#029b** `wow-entities`: base `GameObject` state from `GameObject.*`, `SharedDefines.h` and `UF::GameObjectData`: constructor type id/mask, stationary/rotation create flags, respawn/despawn/restock/cooldown state, loot state/unit guid, spawned-by-default, spell/spawn ids, packed rotation, loot mode, stationary position, respawn compatibility flag and GameObjectData setters/masks.
 - [ ] **#030** `wow-entities`: remaining map-stored object types: `Corpse`, `DynamicObject`, `AreaTrigger`, `Pet`, `Transport`, `Vehicle`, `SceneObject`, `Conversation`, `Totem`; mark post-WoLK-only behavior explicitly when C++ has stubs.
 - [ ] **#031** Mover `wow-ai::CreatureAI` a AI refs owned by `Creature`/Map update; eliminar duplicación con `WorldCreature`.
 - [ ] **#032** Refactor `WorldSession` para tener player entity handle/controlador en vez de campos sueltos.
