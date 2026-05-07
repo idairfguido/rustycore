@@ -4,6 +4,7 @@
 > Si un módulo no aparece aquí o no tiene su `.md`, **es bug del índice** — añadirlo.
 
 **Cómo usar:**
+- Para refinar el plan antes de implementar: seguir [refinement-plan.md](refinement-plan.md); la Fase R es precondicion para evitar gaps.
 - Para entender cualquier sistema: abrir su doc → secciones 1-7 son C++; 8 es estado actual; 9-12 son plan de trabajo; 13 es la auditoría 2026-05-01.
 - Para auditar un módulo: ya lo está auditando este doc. Update sección 8 + columna "Audited" cuando termines.
 - Para empezar a implementar: leer el doc del módulo + dependencias listadas en sección 5 + sección 13 (audit).

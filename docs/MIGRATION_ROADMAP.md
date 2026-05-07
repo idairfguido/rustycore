@@ -18,7 +18,7 @@
 Contraste realizado contra el árbol C++ real en `/home/server/woltk-trinity-legacy/src/server/`:
 
 - Inventario top-level correcto: C++ contiene `bnetserver`, `worldserver`, `database`, `proto`, `shared`, `game` y `scripts`.
-- `game/` contiene 50 subdirectorios reales si se ignora `PrecompiledHeaders`; el plan cubre todos por módulo o como parte de `Entities`/`Scripts`.
+- `game/` contiene 49 subdirectorios funcionales si se ignora `PrecompiledHeaders`; el plan cubre todos por módulo o como parte de `Entities`/`Scripts`.
 - `shared/` contiene 7 módulos reales si se ignora `PrecompiledHeaders`: `DataStores`, `Dynamic`, `JSON`, `Networking`, `Packets`, `Realm`, `Secrets`.
 - `scripts/` no es un bloque genérico solamente: tiene `Commands`, `Spells`, `Battlefield`, `Events`, `OutdoorPvP`, `World` y scripts por continente/expansión. La fase de contenido debe mantener esa subdivisión cuando llegue.
 - La matriz histórica de este roadmap estaba más optimista que `_INDEX.md`. Desde esta revisión, `_INDEX.md` manda para status/audit; este roadmap manda para orden de ejecución.
@@ -40,7 +40,7 @@ TrinityCore expone dos binarios ejecutables principales, una librería de script
 **Capas (`src/server/`):**
 ```
 shared/      Networking, Packets, Realm, Secrets, DataStores, Dynamic, JSON
-game/        50 subdirectorios reales (ignorando PrecompiledHeaders)
+game/        49 subdirectorios funcionales (ignorando PrecompiledHeaders)
 proto/       definiciones protobuf BNet
 database/    capa SQL común a todos los servidores
 scripts/     contenido scripteado (commands, spells, continentes, world, events, PvP)
@@ -309,6 +309,17 @@ Leyenda:
 
 Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `cargo check` + `cargo test` verdes. **No se salta a la siguiente sin la anterior cerrada.**
 
+### Fase R — Refinamiento WBS completo (precondición)
+
+> Antes de seguir implementando, convertir el plan en una estructura de tareas/subtareas verificable contra C++. El procedimiento completo vive en `docs/migration/refinement-plan.md`.
+
+- **R.1** Inventariar el árbol C++ completo: archivos, handlers/opcodes, SQL, DB2/DBC, config, entidades y scripts.
+- **R.2** Actualizar cada módulo de `docs/migration/*.md` con WBS granular: task IDs, C++ refs, dependencias, aceptación y tests.
+- **R.3** Crear registros transversales para opcodes, SQL, update fields, runtime managers y scripts.
+- **R.4** Revisar dependencias y gates de implementación; reordenar roadmap si C++ demuestra que el orden actual es incorrecto.
+- **R.5** Hacer gap audit: ningún archivo/opcode/script relevante de C++ queda sin dueño o exclusión explícita.
+- **R.6** Elegir la siguiente mini-fase solo cuando tenga C++ refs y tests definidos.
+
 ### Fase A — Auditoría obligatoria de lo existente (precondición)
 
 > Esta fase **se ejecuta en paralelo** con Fase 0 y siguientes; cada módulo se audita **antes** de extenderlo. No bloquea Fase 0 (Maps ya está auditado y la conclusión es "rehacer"). Bloquea Fase 1+ porque Entities depende de saber qué hay realmente en `wow-core`/`wow-world`.
@@ -463,6 +474,20 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
 - [ ] **#A14** Auditar **Group** vs `src/server/game/Groups/`.
 - [ ] **#A15** Auditar **Trainer/Vendor/Gossip** (handlers) vs `src/server/game/Handlers/NPCHandler.cpp`.
 
+### Refinamiento completo (Fase R)
+
+- [ ] **#REFINE.001** Congelar features nuevas hasta refinar la siguiente mini-fase completa.
+- [ ] **#REFINE.010** Inventario C++ por archivo y módulo.
+- [ ] **#REFINE.012** Inventario handlers/opcodes.
+- [ ] **#REFINE.013** Inventario SQL/prepared statements.
+- [ ] **#REFINE.014** Inventario DB2/DBC/hotfix stores.
+- [ ] **#REFINE.017** Inventario `scripts/*`.
+- [ ] **#REFINE.020** WBS granular por cada doc de módulo.
+- [ ] **#REFINE.030** Registros transversales de opcodes, SQL, update fields, managers y scripts.
+- [ ] **#REFINE.040** DAG de dependencias y gates por fase.
+- [ ] **#REFINE.050** Gap audit de archivos/opcodes/SQL/scripts.
+- [ ] **#REFINE.060** Selección de la siguiente mini-fase lista para implementación.
+
 ### Inmediato (Fase 0 — Maps rewrite)
 
 - [x] **#001** `wow-map`: módulo `coords.rs` con constantes y `compute_grid_coord` / `compute_cell_coord`. Tests vs `GridDefines.h`. Cerrado en `crates/wow-map/src/coords.rs` contra `GridDefines.h`.
@@ -591,6 +616,7 @@ Las auditorías son commits `docs(audit): ...` separados; no se mezclan con cód
 | 2026-05-01 | Creación inicial del documento | (este commit) |
 | 2026-05-01 | Añadido Fase A (auditoría obligatoria), columna "Auditado vs C++" en matriz, ADR-007, riesgo "lo existente puede tener bugs" | (este commit) |
 | 2026-05-07 | Revisión manual del plan contra el árbol C++: `_INDEX.md` pasa a ser inventario de estado, Fase 0 se ajusta a `NGrid.h`/`GridStates.cpp`/`ObjectGridLoader.cpp`/`SpawnData.h`, Fase 1 adelanta `ObjectAccessor` y UpdateFields, Fase 8 separa `scripts/Commands` del contenido masivo. | pendiente |
+| 2026-05-07 | Añadida Fase R de refinamiento WBS completo antes de continuar implementación. | pendiente |
 
 ---
 
