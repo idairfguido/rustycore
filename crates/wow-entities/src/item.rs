@@ -1,6 +1,7 @@
 use wow_constants::{
-    EnchantmentSlot, InventoryResult, ItemBondingType, ItemContext, ItemFieldFlags,
-    ItemFieldFlags2, ItemModifier, ItemUpdateState, TypeId, TypeMask,
+    BagFamilyMask, EnchantmentSlot, InventoryResult, ItemBondingType, ItemClass, ItemContext,
+    ItemFieldFlags, ItemFieldFlags2, ItemModifier, ItemSubClassContainer, ItemSubClassQuiver,
+    ItemUpdateState, TypeId, TypeMask,
 };
 use wow_core::ObjectGuid;
 
@@ -173,6 +174,31 @@ pub struct ItemCreateInfo {
     pub spell_charges: [i32; MAX_ITEM_SPELLS],
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemStorageTemplate {
+    pub entry: u32,
+    pub class_id: ItemClass,
+    pub subclass_id: u32,
+    pub bag_family: BagFamilyMask,
+    pub max_stack_size: u32,
+    pub container_slots: u8,
+    pub is_crafting_reagent: bool,
+}
+
+impl ItemStorageTemplate {
+    pub const fn regular_item(entry: u32, max_stack_size: u32) -> Self {
+        Self {
+            entry,
+            class_id: ItemClass::Miscellaneous,
+            subclass_id: 0,
+            bag_family: BagFamilyMask::NONE,
+            max_stack_size,
+            container_slots: 0,
+            is_crafting_reagent: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemDataUpdate {
     pub mask: UpdateMask,
@@ -189,6 +215,58 @@ pub struct ItemValuesUpdate {
 impl ItemValuesUpdate {
     pub const fn has_data(&self) -> bool {
         self.changed_object_type_mask != 0
+    }
+}
+
+pub fn item_can_go_into_bag(proto: &ItemStorageTemplate, bag_proto: &ItemStorageTemplate) -> bool {
+    match bag_proto.class_id {
+        ItemClass::Container => match bag_proto.subclass_id {
+            subclass if subclass == ItemSubClassContainer::Container as u32 => true,
+            subclass if subclass == ItemSubClassContainer::SoulContainer as u32 => {
+                proto.bag_family.contains(BagFamilyMask::SOUL_SHARDS)
+            }
+            subclass if subclass == ItemSubClassContainer::HerbContainer as u32 => {
+                proto.bag_family.contains(BagFamilyMask::HERBS)
+            }
+            subclass if subclass == ItemSubClassContainer::EnchantingContainer as u32 => {
+                proto.bag_family.contains(BagFamilyMask::ENCHANTING_SUPP)
+            }
+            subclass if subclass == ItemSubClassContainer::MiningContainer as u32 => {
+                proto.bag_family.contains(BagFamilyMask::MINING_SUPP)
+            }
+            subclass if subclass == ItemSubClassContainer::EngineeringContainer as u32 => {
+                proto.bag_family.contains(BagFamilyMask::ENGINEERING_SUPP)
+            }
+            subclass if subclass == ItemSubClassContainer::GemContainer as u32 => {
+                proto.bag_family.contains(BagFamilyMask::GEMS)
+            }
+            subclass if subclass == ItemSubClassContainer::LeatherworkingContainer as u32 => proto
+                .bag_family
+                .contains(BagFamilyMask::LEATHERWORKING_SUPP),
+            subclass if subclass == ItemSubClassContainer::InscriptionContainer as u32 => {
+                proto.bag_family.contains(BagFamilyMask::INSCRIPTION_SUPP)
+            }
+            subclass if subclass == ItemSubClassContainer::TackleContainer as u32 => {
+                proto.bag_family.contains(BagFamilyMask::FISHING_SUPP)
+            }
+            subclass if subclass == ItemSubClassContainer::CookingContainer as u32 => {
+                proto.bag_family.contains(BagFamilyMask::COOKING_SUPP)
+            }
+            subclass if subclass == ItemSubClassContainer::ReagentContainer as u32 => {
+                proto.is_crafting_reagent
+            }
+            _ => false,
+        },
+        ItemClass::Quiver => match bag_proto.subclass_id {
+            subclass if subclass == ItemSubClassQuiver::Quiver as u32 => {
+                proto.bag_family.contains(BagFamilyMask::ARROWS)
+            }
+            subclass if subclass == ItemSubClassQuiver::AmmoPouch as u32 => {
+                proto.bag_family.contains(BagFamilyMask::BULLETS)
+            }
+            _ => false,
+        },
+        _ => false,
     }
 }
 
@@ -1280,6 +1358,62 @@ mod tests {
             item.can_be_merged_partly_with(6948, 20),
             InventoryResult::LootGone
         );
+    }
+
+    #[test]
+    fn item_can_go_into_bag_matches_cpp_container_family_rules() {
+        let regular_bag = ItemStorageTemplate {
+            class_id: ItemClass::Container,
+            subclass_id: ItemSubClassContainer::Container as u32,
+            container_slots: 16,
+            ..ItemStorageTemplate::regular_item(100, 1)
+        };
+        let herb_bag = ItemStorageTemplate {
+            subclass_id: ItemSubClassContainer::HerbContainer as u32,
+            ..regular_bag
+        };
+        let reagent_bag = ItemStorageTemplate {
+            subclass_id: ItemSubClassContainer::ReagentContainer as u32,
+            ..regular_bag
+        };
+        let quiver = ItemStorageTemplate {
+            class_id: ItemClass::Quiver,
+            subclass_id: ItemSubClassQuiver::Quiver as u32,
+            ..regular_bag
+        };
+        let ammo_pouch = ItemStorageTemplate {
+            class_id: ItemClass::Quiver,
+            subclass_id: ItemSubClassQuiver::AmmoPouch as u32,
+            ..regular_bag
+        };
+        let herb = ItemStorageTemplate {
+            bag_family: BagFamilyMask::HERBS,
+            ..ItemStorageTemplate::regular_item(2447, 20)
+        };
+        let arrow = ItemStorageTemplate {
+            bag_family: BagFamilyMask::ARROWS,
+            ..ItemStorageTemplate::regular_item(2512, 200)
+        };
+        let bullet = ItemStorageTemplate {
+            bag_family: BagFamilyMask::BULLETS,
+            ..ItemStorageTemplate::regular_item(2516, 200)
+        };
+        let reagent = ItemStorageTemplate {
+            is_crafting_reagent: true,
+            ..ItemStorageTemplate::regular_item(3371, 20)
+        };
+        let misc = ItemStorageTemplate::regular_item(6948, 1);
+
+        assert!(item_can_go_into_bag(&misc, &regular_bag));
+        assert!(item_can_go_into_bag(&herb, &herb_bag));
+        assert!(!item_can_go_into_bag(&misc, &herb_bag));
+        assert!(item_can_go_into_bag(&reagent, &reagent_bag));
+        assert!(!item_can_go_into_bag(&misc, &reagent_bag));
+        assert!(item_can_go_into_bag(&arrow, &quiver));
+        assert!(!item_can_go_into_bag(&bullet, &quiver));
+        assert!(item_can_go_into_bag(&bullet, &ammo_pouch));
+        assert!(!item_can_go_into_bag(&arrow, &ammo_pouch));
+        assert!(!item_can_go_into_bag(&misc, &misc));
     }
 
     #[test]

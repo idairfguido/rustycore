@@ -94,9 +94,10 @@ pub use item::{
     ITEM_DATA_RANDOM_PROPERTIES_ID_BIT, ITEM_DATA_SPELL_CHARGES_FIRST_BIT,
     ITEM_DATA_SPELL_CHARGES_PARENT_BIT, ITEM_DATA_STACK_COUNT_BIT, ITEM_MODIFIER_COUNT, Item,
     ItemBonusKey, ItemCreateInfo, ItemDataUpdate, ItemDataValues, ItemEnchantment,
-    ItemStateTransition, ItemValuesUpdate, MAX_ENCHANTMENT_SLOT, MAX_INSPECTED_ENCHANTMENT_SLOT,
-    MAX_ITEM_SPELLS, MAX_SPECIALIZATIONS, PROFESSION_SLOT_END, PROFESSION_SLOT_START,
-    SECONDARY_APPEARANCE_MODIFIER_SLOT_BY_SPEC, SocketedGem,
+    ItemStateTransition, ItemStorageTemplate, ItemValuesUpdate, MAX_ENCHANTMENT_SLOT,
+    MAX_INSPECTED_ENCHANTMENT_SLOT, MAX_ITEM_SPELLS, MAX_SPECIALIZATIONS, PROFESSION_SLOT_END,
+    PROFESSION_SLOT_START, SECONDARY_APPEARANCE_MODIFIER_SLOT_BY_SPEC, SocketedGem,
+    item_can_go_into_bag,
 };
 pub use object::{CreateObjectFlags, EntityObject, EntityObjectState, ObjectChangedFields};
 pub use object_accessor::{
