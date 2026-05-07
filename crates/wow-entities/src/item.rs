@@ -217,6 +217,7 @@ pub struct ItemStorageTemplate {
     pub max_count: i32,
     pub item_limit_category: u32,
     pub container_slots: u8,
+    pub sell_price: u32,
     pub is_crafting_reagent: bool,
     pub is_bound_account_wide: bool,
 }
@@ -234,6 +235,7 @@ impl ItemStorageTemplate {
             max_count: 0,
             item_limit_category: 0,
             container_slots: 0,
+            sell_price: 0,
             is_crafting_reagent: false,
             is_bound_account_wide: false,
         }

@@ -4781,6 +4781,54 @@ impl Player {
         slot
     }
 
+    pub fn add_item_to_buyback_slot_object(
+        &mut self,
+        item: &Item,
+        item_template: Option<&ItemStorageTemplate>,
+        game_time: i64,
+        login_time: i64,
+        overwritten_item: Option<&mut Item>,
+    ) -> Result<u8, PlayerStorageError> {
+        let mut slot = self.inventory.current_buyback_slot;
+        if self.inventory.items[slot as usize].is_some() {
+            let mut oldest_slot = BUYBACK_SLOT_START;
+            let mut oldest_time = self.active_data.buyback_timestamp[0];
+
+            for candidate in BUYBACK_SLOT_START + 1..BUYBACK_SLOT_END {
+                let candidate_index = (candidate - BUYBACK_SLOT_START) as usize;
+                if self.inventory.items[candidate as usize].is_none() {
+                    oldest_slot = candidate;
+                    break;
+                }
+                let candidate_time = self.active_data.buyback_timestamp[candidate_index];
+                if oldest_time > candidate_time {
+                    oldest_time = candidate_time;
+                    oldest_slot = candidate;
+                }
+            }
+            slot = oldest_slot;
+        }
+
+        self.remove_item_from_buyback_slot_object(slot, overwritten_item, true)?;
+
+        let buyback_index = (slot - BUYBACK_SLOT_START) as usize;
+        let price = item_template
+            .map(|proto| proto.sell_price.wrapping_mul(item.count()))
+            .unwrap_or(0);
+        let timestamp = (game_time - login_time + (30 * 3600)) as u32 as i64;
+
+        self.inventory.items[slot as usize] = Some(item.object().guid());
+        self.set_inv_slot(slot as usize, item.object().guid());
+        self.set_buyback_price(buyback_index, price);
+        self.set_buyback_timestamp(buyback_index, timestamp);
+
+        if self.inventory.current_buyback_slot < BUYBACK_SLOT_END - 1 {
+            self.inventory.current_buyback_slot += 1;
+        }
+
+        Ok(slot)
+    }
+
     pub const fn can_titan_grip(&self) -> bool {
         self.can_titan_grip
     }
@@ -10303,6 +10351,67 @@ mod tests {
         );
         assert_eq!(player.active_data().buyback_price[0], 0);
         assert_eq!(player.active_data().buyback_timestamp[0], 0);
+    }
+
+    #[test]
+    fn add_item_to_buyback_slot_object_matches_cpp_price_time_and_replacement() {
+        let mut player = Player::new(None, false);
+        let mut overwritten = item_with_guid_entry(1100, 7000);
+        overwritten.set_count(3);
+        overwritten.force_state(ItemUpdateState::Unchanged);
+        let old_proto = ItemStorageTemplate {
+            sell_price: 11,
+            ..ItemStorageTemplate::regular_item(7000, 20)
+        };
+
+        let old_slot = player
+            .add_item_to_buyback_slot_object(&overwritten, Some(&old_proto), 2000, 1000, None)
+            .unwrap();
+        assert_eq!(old_slot, BUYBACK_SLOT_START);
+        assert_eq!(
+            player.get_item_from_buyback_slot(old_slot),
+            Some(overwritten.object().guid())
+        );
+        assert_eq!(player.active_data().buyback_price[0], 33);
+        assert_eq!(player.active_data().buyback_timestamp[0], 109000);
+
+        player.set_buyback_timestamp(0, 50);
+        for slot in BUYBACK_SLOT_START + 1..BUYBACK_SLOT_END {
+            let guid = ObjectGuid::create_item(1, 2000 + slot as i64);
+            player.add_item_to_buyback_slot(guid, 1, 100 + slot as i64);
+        }
+
+        overwritten.object_mut().add_to_world();
+        let mut replacement = item_with_guid_entry(1101, 7001);
+        replacement.set_count(4);
+        let replacement_proto = ItemStorageTemplate {
+            sell_price: 9,
+            ..ItemStorageTemplate::regular_item(7001, 20)
+        };
+
+        let replaced_slot = player
+            .add_item_to_buyback_slot_object(
+                &replacement,
+                Some(&replacement_proto),
+                5000,
+                3000,
+                Some(&mut overwritten),
+            )
+            .unwrap();
+
+        assert_eq!(replaced_slot, old_slot);
+        assert!(!overwritten.object().is_in_world());
+        assert_eq!(overwritten.update_state(), ItemUpdateState::Removed);
+        assert_eq!(
+            player.get_item_from_buyback_slot(replaced_slot),
+            Some(replacement.object().guid())
+        );
+        assert_eq!(player.active_data().buyback_price[0], 36);
+        assert_eq!(player.active_data().buyback_timestamp[0], 110000);
+        assert_eq!(
+            player.inventory().current_buyback_slot,
+            BUYBACK_SLOT_START + 1
+        );
     }
 
     #[test]
