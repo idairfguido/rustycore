@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::f32::consts::TAU;
+use std::f32::consts::{PI, TAU};
 
 use wow_constants::{TypeId, TypeMask};
 use wow_core::{ObjectGuid, Position};
@@ -337,6 +337,115 @@ impl WorldObject {
             && self.in_same_phase(other)
             && self.is_within_dist(other, dist, is_3d, true, true)
     }
+
+    pub fn absolute_angle_to_position(&self, position: Position) -> f32 {
+        normalize_orientation(
+            (position.y - self.position().y).atan2(position.x - self.position().x),
+        )
+    }
+
+    pub fn absolute_angle_to(&self, other: &Self) -> f32 {
+        self.absolute_angle_to_position(other.position())
+    }
+
+    pub fn to_absolute_angle(&self, relative_angle: f32) -> f32 {
+        normalize_orientation(relative_angle + self.position().orientation)
+    }
+
+    pub fn to_relative_angle(&self, absolute_angle: f32) -> f32 {
+        normalize_orientation(absolute_angle - self.position().orientation)
+    }
+
+    pub fn relative_angle_to_position(&self, position: Position) -> f32 {
+        self.to_relative_angle(self.absolute_angle_to_position(position))
+    }
+
+    pub fn relative_angle_to(&self, other: &Self) -> f32 {
+        self.relative_angle_to_position(other.position())
+    }
+
+    pub fn has_in_arc(&self, arc: f32, target: &Self, border: f32) -> bool {
+        if std::ptr::eq(self, target) {
+            return true;
+        }
+
+        let arc = normalize_orientation(arc);
+        let mut angle = self.relative_angle_to(target);
+        if angle > PI {
+            angle -= TAU;
+        }
+
+        let left_border = -(arc / border);
+        let right_border = arc / border;
+        left_border <= angle && angle <= right_border
+    }
+
+    pub fn is_in_front(&self, target: &Self, arc: f32) -> bool {
+        self.has_in_arc(arc, target, 2.0)
+    }
+
+    pub fn is_in_back(&self, target: &Self, arc: f32) -> bool {
+        !self.has_in_arc(TAU - arc, target, 2.0)
+    }
+
+    pub fn has_position_in_line(&self, position: Position, obj_size: f32, width: f32) -> bool {
+        if !self.has_position_in_arc(PI, position, 2.0) {
+            return false;
+        }
+
+        let width = width + obj_size;
+        let angle = self.relative_angle_to_position(position);
+        angle.sin().abs() * self.position().distance_2d(&position) < width
+    }
+
+    pub fn has_in_line(&self, target: &Self, width: f32) -> bool {
+        self.has_position_in_line(target.position(), target.combat_reach(), width)
+    }
+
+    pub fn has_position_in_arc(&self, arc: f32, position: Position, border: f32) -> bool {
+        let arc = normalize_orientation(arc);
+        let mut angle = self.relative_angle_to_position(position);
+        if angle > PI {
+            angle -= TAU;
+        }
+
+        let left_border = -(arc / border);
+        let right_border = arc / border;
+        left_border <= angle && angle <= right_border
+    }
+
+    pub fn is_within_box(
+        &self,
+        center: Position,
+        x_radius: f32,
+        y_radius: f32,
+        z_radius: f32,
+    ) -> bool {
+        let rotation = TAU - center.orientation;
+        let sin = rotation.sin();
+        let cos = rotation.cos();
+        let position = self.position();
+
+        let box_dist_x = position.x - center.x;
+        let box_dist_y = position.y - center.y;
+        let rot_x = center.x + box_dist_x * cos - box_dist_y * sin;
+        let rot_y = center.y + box_dist_y * cos + box_dist_x * sin;
+
+        let dx = rot_x - center.x;
+        let dy = rot_y - center.y;
+        let dz = position.z - center.z;
+        dx.abs() <= x_radius && dy.abs() <= y_radius && dz.abs() <= z_radius
+    }
+
+    pub fn is_within_double_vertical_cylinder(
+        &self,
+        center: Position,
+        radius: f32,
+        height: f32,
+    ) -> bool {
+        self.position().distance_2d_sq(&center) < radius * radius
+            && (self.position().z - center.z).abs() <= height
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -481,5 +590,61 @@ mod tests {
 
         b.phase_shift_mut().insert(10);
         assert!(a.is_within_dist_in_map(&b, 2.0, true));
+    }
+
+    #[test]
+    fn angle_helpers_match_cpp_position_relative_angle_semantics() {
+        let mut object = WorldObject::new(false, TypeId::Unit, TypeMask::UNIT);
+        object.relocate(Position::new(0.0, 0.0, 0.0, PI / 2.0));
+
+        assert!(
+            (object.absolute_angle_to_position(Position::xyz(1.0, 0.0, 0.0)) - 0.0).abs() < 0.0001
+        );
+        assert!((object.to_absolute_angle(PI / 2.0) - PI).abs() < 0.0001);
+        assert!((object.to_relative_angle(0.0) - (TAU - PI / 2.0)).abs() < 0.0001);
+        assert!(
+            (object.relative_angle_to_position(Position::xyz(0.0, 1.0, 0.0)) - 0.0).abs() < 0.0001
+        );
+    }
+
+    #[test]
+    fn arc_front_back_and_line_helpers_match_cpp_boundaries() {
+        let mut source = WorldObject::new(false, TypeId::Unit, TypeMask::UNIT);
+        let mut front = WorldObject::new(false, TypeId::Unit, TypeMask::UNIT);
+        let mut side = WorldObject::new(false, TypeId::Unit, TypeMask::UNIT);
+        let mut back = WorldObject::new(false, TypeId::Unit, TypeMask::UNIT);
+        source.relocate(Position::new(0.0, 0.0, 0.0, 0.0));
+        front.relocate(Position::xyz(1.0, 0.0, 0.0));
+        side.relocate(Position::xyz(0.0, 1.0, 0.0));
+        back.relocate(Position::xyz(-1.0, 0.0, 0.0));
+
+        assert!(source.has_in_arc(PI, &source, 2.0));
+        assert!(source.is_in_front(&front, PI));
+        assert!(source.is_in_front(&side, PI));
+        assert!(!source.is_in_front(&back, PI));
+        assert!(source.is_in_back(&back, PI));
+        assert!(!source.is_in_back(&front, PI));
+
+        front.relocate(Position::xyz(10.0, 1.0, 0.0));
+        assert!(source.has_in_line(&front, 2.0));
+        front.relocate(Position::xyz(10.0, 3.0, 0.0));
+        assert!(!source.has_in_line(&front, 2.0));
+    }
+
+    #[test]
+    fn box_and_double_vertical_cylinder_match_cpp_geometry() {
+        let mut object = WorldObject::new(false, TypeId::Unit, TypeMask::UNIT);
+        let center = Position::new(0.0, 0.0, 5.0, PI / 2.0);
+
+        object.relocate(Position::xyz(0.5, 1.5, 5.5));
+        assert!(object.is_within_box(center, 2.0, 1.0, 1.0));
+
+        object.relocate(Position::xyz(1.5, 1.5, 5.5));
+        assert!(!object.is_within_box(center, 2.0, 1.0, 1.0));
+
+        object.relocate(Position::xyz(3.0, 4.0, 8.0));
+        assert!(!object.is_within_double_vertical_cylinder(center, 5.0, 3.0));
+        object.relocate(Position::xyz(3.0, 3.9, 8.0));
+        assert!(object.is_within_double_vertical_cylinder(center, 5.0, 3.0));
     }
 }

@@ -90,10 +90,15 @@
   Rust targets: `crates/wow-entities/src/transport.rs`, `crates/wow-entities/src/game_object.rs`, `crates/wow-entities/src/object.rs`, `crates/wow-entities/src/lib.rs`.
   Acceptance: base `Transport` is represented as a `GameObject`/map-object transport with `SERVER_TIME|STATIONARY|ROTATION` create flags; movement state, current path leg, request-stop timestamp, path progress, position-change timer, delayed-add-model flag, event trigger bitset shape and dynamic/static passenger GUID sets match C++ base fields; `GetTransportPeriod`/`SetPeriod` use `GameObjectData::Level`; path-progress-for-client encodes into high dynamic-flag bits; passenger add/remove/cleanup/unload helpers and `TransportBase::CalculatePassengerPosition/Offset` formulas are represented and tested.
 
+- [x] **#NEXT.R8.ENTITIES.040** Port pure `WorldObject`/`Position` geometry helpers.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Position.h`, `Position.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.cpp`.
+  Rust targets: `crates/wow-entities/src/world_object.rs`.
+  Acceptance: absolute/relative angle conversion, `HasInArc`, `isInFront`, `isInBack`, `HasInLine`, rotated `IsWithinBox` and double vertical cylinder checks match C++ pure math semantics and are tested; LOS, terrain height, transport relocation and visibility-range hooks remain pending because they require canonical `Map`/terrain/transport ownership.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.R8.ENTITIES.003** Bind `wow-map` grid unload actions to real entity methods once Creature/GameObject/Corpse exist.
-- [ ] **#NEXT.R8.ENTITIES.005** Port `WorldObject` LOS, terrain-height, transport, visibility-range and facing/arc helpers that require Map/Terrain/Transport integration.
+- [ ] **#NEXT.R8.ENTITIES.005** Port `WorldObject` LOS, terrain-height, transport relocation and visibility-range helpers that require Map/Terrain/Transport integration.
 - [ ] **#NEXT.R8.ENTITIES.006** Complete `ObjectAccessor` branches that require real `Player`: item lookup via inventory, real `SaveAllPlayers`, and wiring to canonical `wow_map::Map` containers instead of bridge storage.
 - [ ] **#NEXT.R8.ENTITIES.008** Complete generated update-field sections beyond `ObjectData`: `UnitData`, `PlayerData`, `ActivePlayerData`, `GameObjectData`, `ItemData`, `CorpseData`, `DynamicObjectData`, `AreaTriggerData`, `SceneObjectData`, `ConversationData`, including visibility flag filters and dynamic/optional fields.
 - [ ] **#NEXT.R8.ENTITIES.010** Complete `Unit` subsystems beyond base fields: aura hooks, threat/combat manager, SpellHistory, MotionMaster/move spline, charm/minion ownership, vehicle hooks, AI references and runtime power-index implementations for Player/Creature/Pet.
