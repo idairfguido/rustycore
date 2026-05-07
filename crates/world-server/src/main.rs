@@ -356,6 +356,16 @@ async fn main() -> Result<()> {
     );
     info!("Loaded {} items from Item.db2", item_store.len());
 
+    // Load ItemAppearance.db2 for item display-info resolution.
+    let item_appearance_store = Arc::new(
+        wow_data::ItemAppearanceStore::load(&data_dir, &locale)
+            .context("Failed to load ItemAppearance.db2 — check DataDir and DBC.Locale config")?,
+    );
+    info!(
+        "Loaded {} item appearances from ItemAppearance.db2",
+        item_appearance_store.len()
+    );
+
     // Load ItemModifiedAppearance.db2 for transmog/visible-item appearance resolution.
     let item_modified_appearance_store = Arc::new(
         wow_data::ItemModifiedAppearanceStore::load(&data_dir, &locale).context(
@@ -552,6 +562,7 @@ async fn main() -> Result<()> {
         world_db: Some(Arc::clone(&world_db)),
         guid_generator: Some(Arc::clone(&guid_generator)),
         item_store: Some(Arc::clone(&item_store)),
+        item_appearance_store: Some(Arc::clone(&item_appearance_store)),
         item_modified_appearance_store: Some(Arc::clone(&item_modified_appearance_store)),
         player_stats: Some(Arc::clone(&player_stats)),
         item_stats_store: Some(Arc::clone(&item_stats_store)),
@@ -876,6 +887,9 @@ async fn create_session(
     }
     if let Some(ref store) = resources.item_store {
         session.set_item_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.item_appearance_store {
+        session.set_item_appearance_store(Arc::clone(store));
     }
     if let Some(ref store) = resources.item_modified_appearance_store {
         session.set_item_modified_appearance_store(Arc::clone(store));

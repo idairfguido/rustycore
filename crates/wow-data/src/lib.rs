@@ -7,6 +7,7 @@
 
 pub mod wdc4;
 pub mod item;
+pub mod item_appearance;
 pub mod item_modified_appearance;
 pub mod item_random_suffix;
 pub mod item_stats;
@@ -20,6 +21,7 @@ pub mod quest;
 pub mod quest_xp;
 
 pub use item::{ItemRecord, ItemStore};
+pub use item_appearance::{ItemAppearanceEntry, ItemAppearanceStore};
 pub use item_modified_appearance::{ItemModifiedAppearanceEntry, ItemModifiedAppearanceStore};
 pub use item_random_suffix::{ItemRandomSuffixEntry, ItemRandomSuffixStore};
 pub use item_stats::{ItemStatEntry, ItemStatsStore};

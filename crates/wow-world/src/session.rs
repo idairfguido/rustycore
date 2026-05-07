@@ -15,8 +15,9 @@ use tracing::{debug, info, trace, warn};
 use wow_constants::{ClientOpcodes, InventoryResult, ItemEnchantmentType};
 use wow_core::{ObjectGuid, ObjectGuidGenerator};
 use wow_data::{
-    AreaTriggerStore, HotfixBlobCache, ItemModifiedAppearanceStore, ItemRandomSuffixStore,
-    ItemStatsStore, ItemStore, PlayerStatsStore, SkillStore, SpellItemEnchantmentStore, SpellStore,
+    AreaTriggerStore, HotfixBlobCache, ItemAppearanceStore, ItemModifiedAppearanceStore,
+    ItemRandomSuffixStore, ItemStatsStore, ItemStore, PlayerStatsStore, SkillStore,
+    SpellItemEnchantmentStore, SpellStore,
 };
 use wow_database::{CharacterDatabase, LoginDatabase, WorldDatabase};
 use wow_entities::{
@@ -109,6 +110,9 @@ pub struct WorldSession {
 
     // Item store (Item.db2 data — inventory types, class/subclass)
     item_store: Option<Arc<ItemStore>>,
+
+    // Item appearance store (ItemAppearance.db2 data)
+    item_appearance_store: Option<Arc<ItemAppearanceStore>>,
 
     // Item modified appearance store (ItemModifiedAppearance.db2 data)
     item_modified_appearance_store: Option<Arc<ItemModifiedAppearanceStore>>,
@@ -430,6 +434,7 @@ impl WorldSession {
             login_db: None,
             world_db: None,
             item_store: None,
+            item_appearance_store: None,
             item_modified_appearance_store: None,
             player_stats: None,
             item_stats_store: None,
@@ -570,6 +575,16 @@ impl WorldSession {
         self.item_store.as_ref()
     }
 
+    /// Set the item appearance store for this session.
+    pub fn set_item_appearance_store(&mut self, store: Arc<ItemAppearanceStore>) {
+        self.item_appearance_store = Some(store);
+    }
+
+    /// Get the item appearance store reference.
+    pub fn item_appearance_store(&self) -> Option<&Arc<ItemAppearanceStore>> {
+        self.item_appearance_store.as_ref()
+    }
+
     /// Set the item modified appearance store for this session.
     pub fn set_item_modified_appearance_store(
         &mut self,
@@ -607,6 +622,18 @@ impl WorldSession {
             .as_ref()
             .and_then(|store| store.get_for_item(item_id, appearance_mod_id))
             .map(|entry| entry.id)
+    }
+
+    /// C++ `DB2Manager::GetItemDisplayId`.
+    pub fn item_display_id(&self, item_id: u32, appearance_mod_id: u32) -> Option<u32> {
+        let modified = self
+            .item_modified_appearance_store
+            .as_ref()
+            .and_then(|store| store.get_for_item(item_id, appearance_mod_id))?;
+        let appearance_id = u32::try_from(modified.item_appearance_id).ok()?;
+        self.item_appearance_store
+            .as_ref()
+            .and_then(|store| store.item_display_info_id(appearance_id))
     }
 
     /// Set the player stats store for this session.
@@ -3326,8 +3353,9 @@ mod tests {
     use wow_constants::{EnchantmentSlot, SpellItemEnchantmentFlags};
     use wow_core::Position;
     use wow_data::{
-        ItemModifiedAppearanceEntry, ItemModifiedAppearanceStore, ItemRandomSuffixEntry,
-        ItemRandomSuffixStore, SpellItemEnchantmentEntry, SpellItemEnchantmentStore,
+        ItemAppearanceEntry, ItemAppearanceStore, ItemModifiedAppearanceEntry,
+        ItemModifiedAppearanceStore, ItemRandomSuffixEntry, ItemRandomSuffixStore,
+        SpellItemEnchantmentEntry, SpellItemEnchantmentStore,
     };
     use wow_entities::{SendNewItemInstancePlan, SendNewItemModifier};
     use wow_network::{GroupInfo, PlayerBroadcastInfo};
@@ -3524,6 +3552,22 @@ mod tests {
     #[test]
     fn item_modified_appearance_helpers_use_cpp_lookup_shapes() {
         let (mut session, _, _) = make_session();
+        session.set_item_appearance_store(Arc::new(ItemAppearanceStore::from_entries([
+            ItemAppearanceEntry {
+                id: 1000,
+                display_type: 0,
+                item_display_info_id: 555,
+                default_icon_file_data_id: 0,
+                ui_order: 0,
+            },
+            ItemAppearanceEntry {
+                id: 1001,
+                display_type: 0,
+                item_display_info_id: 777,
+                default_icon_file_data_id: 0,
+                ui_order: 0,
+            },
+        ])));
         session.set_item_modified_appearance_store(Arc::new(
             ItemModifiedAppearanceStore::from_entries([
                 ItemModifiedAppearanceEntry {
@@ -3549,6 +3593,9 @@ mod tests {
         assert_eq!(session.item_modified_appearance_for_item(100, 2), Some(11));
         assert_eq!(session.item_modified_appearance_for_item(100, 9), Some(10));
         assert_eq!(session.item_modified_appearance_for_item(101, 0), None);
+        assert_eq!(session.item_display_id(100, 2), Some(777));
+        assert_eq!(session.item_display_id(100, 9), Some(555));
+        assert_eq!(session.item_display_id(101, 0), None);
     }
 
     #[test]
