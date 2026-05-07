@@ -549,6 +549,16 @@ fn bag_template_by_pos<'a>(
         .map(|bag_template| bag_template.template)
 }
 
+fn item_storage_ref_by_guid<'a>(
+    items: &[ItemStorageRef<'a>],
+    guid: ObjectGuid,
+) -> Option<ItemStorageRef<'a>> {
+    items
+        .iter()
+        .find(|stored| stored.item.object().guid() == guid)
+        .copied()
+}
+
 fn cpp_keyring_family_gate_applies(slot: u8) -> bool {
     let keyring_limit =
         i16::from(KEYRING_SLOT_START) + i16::from(KEYRING_SLOT_START) - i16::from(KEYRING_SLOT_END);
@@ -1479,6 +1489,47 @@ impl Player {
             })
             .map(|stored| stored.item.count())
             .sum()
+    }
+
+    pub fn item_by_entry<'a>(
+        &self,
+        entry: u32,
+        location: ItemSearchLocation,
+        stored_items: &'a [ItemStorageRef<'a>],
+    ) -> Option<ItemStorageRef<'a>> {
+        let mut result = None;
+        self.for_each_item_storage_ref(location, stored_items, |stored| {
+            if stored.item.object().entry() == entry {
+                result = Some(stored);
+                ItemSearchCallbackResult::Stop
+            } else {
+                ItemSearchCallbackResult::Continue
+            }
+        });
+        result
+    }
+
+    pub fn item_list_by_entry<'a>(
+        &self,
+        entry: u32,
+        in_bank_also: bool,
+        stored_items: &'a [ItemStorageRef<'a>],
+    ) -> Vec<ItemStorageRef<'a>> {
+        let mut location = ItemSearchLocation::EQUIPMENT
+            | ItemSearchLocation::INVENTORY
+            | ItemSearchLocation::REAGENT_BANK;
+        if in_bank_also {
+            location |= ItemSearchLocation::BANK;
+        }
+
+        let mut item_list = Vec::new();
+        self.for_each_item_storage_ref(location, stored_items, |stored| {
+            if stored.item.object().entry() == entry {
+                item_list.push(stored);
+            }
+            ItemSearchCallbackResult::Continue
+        });
+        item_list
     }
 
     pub fn can_store_item(
@@ -3787,6 +3838,21 @@ impl Player {
         true
     }
 
+    pub fn for_each_item_storage_ref<'a>(
+        &self,
+        location: ItemSearchLocation,
+        stored_items: &'a [ItemStorageRef<'a>],
+        mut callback: impl FnMut(ItemStorageRef<'a>) -> ItemSearchCallbackResult,
+    ) -> bool {
+        self.for_each_item_guid(location, |guid| {
+            if let Some(stored) = item_storage_ref_by_guid(stored_items, guid) {
+                callback(stored)
+            } else {
+                ItemSearchCallbackResult::Continue
+            }
+        })
+    }
+
     pub fn set_buyback_price(&mut self, slot: usize, price: u32) {
         if slot >= BUYBACK_SLOT_COUNT || self.active_data.buyback_price[slot] == price {
             return;
@@ -4482,6 +4548,13 @@ mod tests {
             stored_items: &[],
             bag_templates: &[],
         }
+    }
+
+    fn item_with_guid_entry(low: i64, entry: u32) -> Item {
+        let mut item = Item::default();
+        item.object_mut().create(ObjectGuid::create_item(1, low));
+        item.object_mut().set_entry(entry);
+        item
     }
 
     fn can_bank_args<'a>(
@@ -6798,6 +6871,154 @@ mod tests {
         assert_eq!(
             player.item_count_with_limit_category(77, Some(&limited_item), &stored),
             3
+        );
+    }
+
+    #[test]
+    fn item_by_entry_matches_cpp_for_each_item_order_and_stop() {
+        let mut player = Player::new(None, false);
+        player.set_inventory_slot_count(INVENTORY_DEFAULT_SIZE);
+
+        let equipped = item_with_guid_entry(640, 900);
+        let inventory_bag = item_with_guid_entry(641, 900);
+        let inventory_item = item_with_guid_entry(642, 900);
+        let bag_item = item_with_guid_entry(643, 900);
+        let bank_item = item_with_guid_entry(644, 900);
+
+        player
+            .store_top_level_item(EQUIPMENT_SLOT_CHEST, equipped.object().guid())
+            .unwrap();
+        player
+            .store_top_level_item(INVENTORY_SLOT_BAG_START, inventory_bag.object().guid())
+            .unwrap();
+        player
+            .register_bag_storage(INVENTORY_SLOT_BAG_START, inventory_bag.object().guid(), 4)
+            .unwrap();
+        player
+            .store_top_level_item(INVENTORY_SLOT_ITEM_START, inventory_item.object().guid())
+            .unwrap();
+        player
+            .store_bag_item(INVENTORY_SLOT_BAG_START, 0, bag_item.object().guid())
+            .unwrap();
+        player
+            .store_top_level_item(BANK_SLOT_ITEM_START, bank_item.object().guid())
+            .unwrap();
+
+        let stored = [
+            ItemStorageRef::new(INVENTORY_SLOT_BAG_0, BANK_SLOT_ITEM_START, &bank_item, None),
+            ItemStorageRef::new(INVENTORY_SLOT_BAG_START, 0, &bag_item, None),
+            ItemStorageRef::new(
+                INVENTORY_SLOT_BAG_0,
+                INVENTORY_SLOT_ITEM_START,
+                &inventory_item,
+                None,
+            ),
+            ItemStorageRef::new(
+                INVENTORY_SLOT_BAG_0,
+                INVENTORY_SLOT_BAG_START,
+                &inventory_bag,
+                None,
+            ),
+            ItemStorageRef::new(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_CHEST, &equipped, None),
+        ];
+
+        let default_found = player
+            .item_by_entry(900, ItemSearchLocation::DEFAULT, &stored)
+            .unwrap();
+        assert_eq!(default_found.item.object().guid(), equipped.object().guid());
+
+        let inventory_found = player
+            .item_by_entry(900, ItemSearchLocation::INVENTORY, &stored)
+            .unwrap();
+        assert_eq!(
+            inventory_found.item.object().guid(),
+            inventory_bag.object().guid()
+        );
+
+        assert!(
+            player
+                .item_by_entry(901, ItemSearchLocation::EVERYWHERE, &stored)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn item_list_by_entry_matches_cpp_locations_bank_and_reagent_order() {
+        let mut player = Player::new(None, false);
+        player.set_inventory_slot_count(INVENTORY_DEFAULT_SIZE);
+
+        let equipped = item_with_guid_entry(650, 901);
+        let inventory_item = item_with_guid_entry(651, 901);
+        let bank_item = item_with_guid_entry(652, 901);
+        let reagent_bag = item_with_guid_entry(653, 1);
+        let reagent_item = item_with_guid_entry(654, 901);
+        let other_item = item_with_guid_entry(655, 902);
+
+        player
+            .store_top_level_item(EQUIPMENT_SLOT_HEAD, equipped.object().guid())
+            .unwrap();
+        player
+            .store_top_level_item(INVENTORY_SLOT_ITEM_START, inventory_item.object().guid())
+            .unwrap();
+        player
+            .store_top_level_item(BANK_SLOT_ITEM_START, bank_item.object().guid())
+            .unwrap();
+        player
+            .store_top_level_item(REAGENT_BAG_SLOT_START, reagent_bag.object().guid())
+            .unwrap();
+        player
+            .register_bag_storage(REAGENT_BAG_SLOT_START, reagent_bag.object().guid(), 3)
+            .unwrap();
+        player
+            .store_bag_item(REAGENT_BAG_SLOT_START, 1, reagent_item.object().guid())
+            .unwrap();
+        player
+            .store_top_level_item(INVENTORY_SLOT_ITEM_START + 1, other_item.object().guid())
+            .unwrap();
+
+        let stored = [
+            ItemStorageRef::new(REAGENT_BAG_SLOT_START, 1, &reagent_item, None),
+            ItemStorageRef::new(INVENTORY_SLOT_BAG_0, BANK_SLOT_ITEM_START, &bank_item, None),
+            ItemStorageRef::new(
+                INVENTORY_SLOT_BAG_0,
+                INVENTORY_SLOT_ITEM_START,
+                &inventory_item,
+                None,
+            ),
+            ItemStorageRef::new(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_HEAD, &equipped, None),
+            ItemStorageRef::new(
+                INVENTORY_SLOT_BAG_0,
+                INVENTORY_SLOT_ITEM_START + 1,
+                &other_item,
+                None,
+            ),
+        ];
+
+        let without_bank = player.item_list_by_entry(901, false, &stored);
+        assert_eq!(
+            without_bank
+                .iter()
+                .map(|stored| stored.item.object().guid())
+                .collect::<Vec<_>>(),
+            vec![
+                equipped.object().guid(),
+                inventory_item.object().guid(),
+                reagent_item.object().guid(),
+            ]
+        );
+
+        let with_bank = player.item_list_by_entry(901, true, &stored);
+        assert_eq!(
+            with_bank
+                .iter()
+                .map(|stored| stored.item.object().guid())
+                .collect::<Vec<_>>(),
+            vec![
+                equipped.object().guid(),
+                inventory_item.object().guid(),
+                bank_item.object().guid(),
+                reagent_item.object().guid(),
+            ]
         );
     }
 
