@@ -8,8 +8,10 @@
 use wow_constants::{ClientOpcodes, ServerOpcodes};
 use wow_core::ObjectGuid;
 
-use crate::{ClientPacket, ServerPacket, WorldPacket};
 use crate::world_packet::PacketError;
+use crate::{ClientPacket, ServerPacket, WorldPacket};
+
+pub use wow_constants::{BuyResult, SellResult};
 
 // ── AccountDataTimes (SMSG 0x270a) ──────────────────────────────────
 
@@ -1776,7 +1778,7 @@ impl ServerPacket for BuySucceeded {
 pub struct BuyFailed {
     pub vendor_guid: ObjectGuid,
     pub muid: i32,
-    pub reason: u8,
+    pub reason: BuyResult,
 }
 
 impl ServerPacket for BuyFailed {
@@ -1785,7 +1787,7 @@ impl ServerPacket for BuyFailed {
     fn write(&self, pkt: &mut crate::WorldPacket) {
         pkt.write_packed_guid(&self.vendor_guid);
         pkt.write_int32(self.muid);
-        pkt.write_uint8(self.reason);
+        pkt.write_uint8(self.reason as u8);
     }
 }
 
@@ -1813,8 +1815,8 @@ impl ClientPacket for SellItem {
 /// C#: SellResponse
 pub struct SellResponse {
     pub vendor_guid: ObjectGuid,
-    pub item_guid: ObjectGuid,
-    pub reason: u8, // 0 = ok
+    pub item_guids: Vec<ObjectGuid>,
+    pub reason: i32,
 }
 
 impl ServerPacket for SellResponse {
@@ -1822,8 +1824,29 @@ impl ServerPacket for SellResponse {
 
     fn write(&self, pkt: &mut crate::WorldPacket) {
         pkt.write_packed_guid(&self.vendor_guid);
-        pkt.write_packed_guid(&self.item_guid);
-        pkt.write_uint8(self.reason);
+        pkt.write_uint32(self.item_guids.len() as u32);
+        pkt.write_int32(self.reason);
+        for item_guid in &self.item_guids {
+            pkt.write_packed_guid(item_guid);
+        }
+    }
+}
+
+impl SellResponse {
+    pub fn error(vendor_guid: ObjectGuid, item_guid: ObjectGuid, reason: SellResult) -> Self {
+        Self {
+            vendor_guid,
+            item_guids: vec![item_guid],
+            reason: reason as i32,
+        }
+    }
+
+    pub fn success(vendor_guid: ObjectGuid, item_guid: ObjectGuid) -> Self {
+        Self {
+            vendor_guid,
+            item_guids: vec![item_guid],
+            reason: 0,
+        }
     }
 }
 
@@ -2551,6 +2574,42 @@ mod tests {
         assert_eq!(bytes.len(), 2); // opcode only
         let opcode = u16::from_le_bytes([bytes[0], bytes[1]]);
         assert_eq!(opcode, 0x2685);
+    }
+
+    #[test]
+    fn buy_failed_serializes_cpp_reason_byte() {
+        let pkt = BuyFailed {
+            vendor_guid: ObjectGuid::EMPTY,
+            muid: 123,
+            reason: BuyResult::DistanceTooFar,
+        };
+        let bytes = pkt.to_bytes();
+
+        assert_eq!(bytes[bytes.len() - 1], BuyResult::DistanceTooFar as u8);
+    }
+
+    #[test]
+    fn sell_response_serializes_cpp_count_and_reason_before_item_guids() {
+        let pkt = SellResponse {
+            vendor_guid: ObjectGuid::EMPTY,
+            item_guids: Vec::new(),
+            reason: SellResult::CantSellItem as i32,
+        };
+        let bytes = pkt.to_bytes();
+
+        assert_eq!(&bytes[bytes.len() - 8..bytes.len() - 4], &0u32.to_le_bytes());
+        assert_eq!(
+            &bytes[bytes.len() - 4..],
+            &(SellResult::CantSellItem as i32).to_le_bytes()
+        );
+
+        let error = SellResponse::error(
+            ObjectGuid::EMPTY,
+            ObjectGuid::EMPTY,
+            SellResult::YouDontOwnThatItem,
+        );
+        assert_eq!(error.item_guids.len(), 1);
+        assert_eq!(error.reason, SellResult::YouDontOwnThatItem as i32);
     }
 
     #[test]
