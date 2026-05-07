@@ -1,4 +1,4 @@
-use wow_constants::{DeathState, PowerType, TypeId, TypeMask, WeaponAttackType};
+use wow_constants::{DeathState, Gender, PowerType, TypeId, TypeMask, WeaponAttackType};
 use wow_core::ObjectGuid;
 
 use crate::{
@@ -29,6 +29,11 @@ pub const UNIT_DATA_COMBAT_REACH_BIT: usize = 47;
 pub const UNIT_DATA_DISPLAY_SCALE_BIT: usize = 48;
 pub const UNIT_DATA_NATIVE_DISPLAY_ID_BIT: usize = 49;
 pub const UNIT_DATA_NATIVE_DISPLAY_SCALE_BIT: usize = 50;
+pub const UNIT_DATA_TARGET_BIT: usize = 19;
+pub const UNIT_DATA_RACE_BIT: usize = 24;
+pub const UNIT_DATA_CLASS_ID_BIT: usize = 25;
+pub const UNIT_DATA_PLAYER_CLASS_ID_BIT: usize = 26;
+pub const UNIT_DATA_SEX_BIT: usize = 27;
 pub const UNIT_DATA_POWER_PARENT_BIT: usize = 116;
 pub const UNIT_DATA_POWER_FIRST_BIT: usize = 137;
 pub const UNIT_DATA_MAX_POWER_FIRST_BIT: usize = 147;
@@ -41,6 +46,11 @@ pub struct UnitDataValues {
     pub health: u64,
     pub max_health: u64,
     pub display_id: i32,
+    pub target: ObjectGuid,
+    pub race: u8,
+    pub class_id: u8,
+    pub player_class_id: u8,
+    pub sex: u8,
     pub display_power: u8,
     pub level: i32,
     pub faction_template: i32,
@@ -62,6 +72,11 @@ impl Default for UnitDataValues {
             health: 0,
             max_health: 0,
             display_id: 0,
+            target: ObjectGuid::EMPTY,
+            race: 0,
+            class_id: 0,
+            player_class_id: 0,
+            sex: Gender::Male as u8,
             display_power: PowerType::Mana as u8,
             level: 0,
             faction_template: 0,
@@ -148,6 +163,10 @@ impl Unit {
 
     pub fn world_mut(&mut self) -> &mut WorldObject {
         &mut self.world
+    }
+
+    pub(crate) fn set_type(&mut self, type_id: TypeId, type_mask: TypeMask) {
+        self.world.object_mut().set_type(type_id, type_mask);
     }
 
     pub const fn data(&self) -> &UnitDataValues {
@@ -264,6 +283,28 @@ impl Unit {
         }
     }
 
+    pub fn set_target(&mut self, target: ObjectGuid) {
+        self.set_guid_field(UNIT_DATA_TARGET_BIT, target, |data| &mut data.target);
+    }
+
+    pub fn set_race(&mut self, race: u8) {
+        self.set_u8_field(UNIT_DATA_RACE_BIT, race, |data| &mut data.race);
+    }
+
+    pub fn set_class(&mut self, class_id: u8) {
+        self.set_u8_field(UNIT_DATA_CLASS_ID_BIT, class_id, |data| &mut data.class_id);
+    }
+
+    pub fn set_player_class(&mut self, class_id: u8) {
+        self.set_u8_field(UNIT_DATA_PLAYER_CLASS_ID_BIT, class_id, |data| {
+            &mut data.player_class_id
+        });
+    }
+
+    pub fn set_gender(&mut self, gender: Gender) {
+        self.set_u8_field(UNIT_DATA_SEX_BIT, gender as u8, |data| &mut data.sex);
+    }
+
     pub fn set_health(&mut self, mut value: u64) {
         if matches!(self.death_state, DeathState::JustDied | DeathState::Corpse) {
             value = 0;
@@ -377,6 +418,32 @@ impl Unit {
         bit: usize,
         value: i32,
         field: impl FnOnce(&mut UnitDataValues) -> &mut i32,
+    ) {
+        let target = field(&mut self.data);
+        if *target != value {
+            *target = value;
+            self.mark_unit_data(bit);
+        }
+    }
+
+    fn set_u8_field(
+        &mut self,
+        bit: usize,
+        value: u8,
+        field: impl FnOnce(&mut UnitDataValues) -> &mut u8,
+    ) {
+        let target = field(&mut self.data);
+        if *target != value {
+            *target = value;
+            self.mark_unit_data(bit);
+        }
+    }
+
+    fn set_guid_field(
+        &mut self,
+        bit: usize,
+        value: ObjectGuid,
+        field: impl FnOnce(&mut UnitDataValues) -> &mut ObjectGuid,
     ) {
         let target = field(&mut self.data);
         if *target != value {
@@ -516,12 +583,22 @@ mod tests {
         let mut unit = Unit::new(true);
 
         unit.set_level(70);
+        unit.set_race(1);
+        unit.set_class(2);
+        unit.set_player_class(2);
+        unit.set_gender(Gender::Female);
+        unit.set_target(ObjectGuid::new(7, 11));
         unit.set_faction(35);
         unit.set_bounding_radius(0.5);
         unit.set_combat_reach(1.5);
         unit.set_display_id(1234, true);
 
         assert_eq!(unit.data().level, 70);
+        assert_eq!(unit.data().race, 1);
+        assert_eq!(unit.data().class_id, 2);
+        assert_eq!(unit.data().player_class_id, 2);
+        assert_eq!(unit.data().sex, Gender::Female as u8);
+        assert_eq!(unit.data().target, ObjectGuid::new(7, 11));
         assert_eq!(unit.data().faction_template, 35);
         assert_eq!(unit.data().bounding_radius, 0.5);
         assert_eq!(unit.data().combat_reach, 1.5);
@@ -534,6 +611,14 @@ mod tests {
         );
         assert!(unit.unit_data_changes_mask().is_set(UNIT_DATA_PARENT_BIT));
         assert!(unit.unit_data_changes_mask().is_set(UNIT_DATA_LEVEL_BIT));
+        assert!(unit.unit_data_changes_mask().is_set(UNIT_DATA_RACE_BIT));
+        assert!(unit.unit_data_changes_mask().is_set(UNIT_DATA_CLASS_ID_BIT));
+        assert!(
+            unit.unit_data_changes_mask()
+                .is_set(UNIT_DATA_PLAYER_CLASS_ID_BIT)
+        );
+        assert!(unit.unit_data_changes_mask().is_set(UNIT_DATA_SEX_BIT));
+        assert!(unit.unit_data_changes_mask().is_set(UNIT_DATA_TARGET_BIT));
         assert!(
             unit.unit_data_changes_mask()
                 .is_set(UNIT_DATA_FACTION_TEMPLATE_BIT)

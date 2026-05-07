@@ -119,6 +119,11 @@ impl EntityObject {
         self.type_mask
     }
 
+    pub fn set_type(&mut self, type_id: TypeId, type_mask: TypeMask) {
+        self.type_id = type_id;
+        self.type_mask = type_mask;
+    }
+
     pub fn is_type(&self, mask: TypeMask) -> bool {
         self.type_mask.intersects(mask)
     }
