@@ -74,7 +74,7 @@ Para cada modulo de `_INDEX.md`:
 - [x] **#REFINE.021** Asegurar seccion "Rust target" con crates/modulos exactos.
 - [x] **#REFINE.022** Añadir "Task WBS" con IDs, dependencias y criterios de aceptacion.
 - [x] **#REFINE.023** Añadir "Known divergences / bugs" con evidencia desde C++.
-- [ ] **#REFINE.024** Añadir "Tests required" con gates unit, golden, integration y E2E.
+- [x] **#REFINE.024** Añadir "Tests required" con gates unit, golden, integration y E2E.
 - [ ] **#REFINE.025** Marcar explicitamente sistemas post-WoLK o desactivados por producto, sin descartarlos en silencio.
 
 Aceptacion de R2: ningun doc de modulo queda solo con tareas de alto nivel; toda tarea es implementable en un commit pequeño o marcada como "needs split".

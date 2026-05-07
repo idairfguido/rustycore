@@ -489,7 +489,7 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
 - [x] **#REFINE.021** Rust target exacto por cada doc de modulo (`docs/migration/inventory/r2-rust-targets.md`).
 - [x] **#REFINE.022** WBS granular por cada doc de modulo (`docs/migration/inventory/r2-task-wbs.md`).
 - [x] **#REFINE.023** Divergencias/bugs conocidos con evidencia C++ (`docs/migration/inventory/r2-known-divergences.md`).
-- [ ] **#REFINE.024** Tests required por modulo.
+- [x] **#REFINE.024** Tests required por modulo (`docs/migration/inventory/r2-tests-required.md`).
 - [ ] **#REFINE.025** Sistemas post-WoLK/desactivados marcados sin omision silenciosa.
 - [ ] **#REFINE.030** Registros transversales de opcodes, SQL, update fields, managers y scripts.
 - [ ] **#REFINE.040** DAG de dependencias y gates por fase.
