@@ -1,10 +1,10 @@
 use bitflags::bitflags;
-use wow_constants::{Gender, PowerType, TypeId, TypeMask};
+use wow_constants::{Gender, ItemUpdateState, PowerType, TypeId, TypeMask};
 use wow_core::ObjectGuid;
 
 use crate::{
-    EQUIPMENT_SLOT_END, INVENTORY_SLOT_BAG_0, MAX_BAG_SIZE, ObjectDataUpdate, PROFESSION_SLOT_END,
-    PROFESSION_SLOT_START, Unit, UnitDataUpdate, UpdateMask,
+    EQUIPMENT_SLOT_END, INVENTORY_SLOT_BAG_0, Item, MAX_BAG_SIZE, ObjectDataUpdate,
+    PROFESSION_SLOT_END, PROFESSION_SLOT_START, Unit, UnitDataUpdate, UpdateMask,
     update_fields::{
         ACTIVE_PLAYER_DATA_BITS, PLAYER_DATA_BITS, TYPEID_ACTIVE_PLAYER, TYPEID_PLAYER,
     },
@@ -292,6 +292,10 @@ impl Player {
         &mut self.unit
     }
 
+    pub const fn guid(&self) -> ObjectGuid {
+        self.unit.world().object().guid()
+    }
+
     pub const fn session_id(&self) -> Option<u64> {
         self.session_id
     }
@@ -569,6 +573,30 @@ impl Player {
         if slot < EQUIPMENT_SLOT_END {
             self.set_visible_item_slot(slot, Some(visible));
         }
+        Ok(())
+    }
+
+    pub fn visualize_item_object(
+        &mut self,
+        slot: u8,
+        item: &mut Item,
+        visible: VisibleItemValues,
+    ) -> Result<(), PlayerStorageError> {
+        let item_guid = item.object().guid();
+        self.store_top_level_item(slot, item_guid)?;
+
+        let owner_guid = self.guid();
+        item.bind_if_visualized();
+        item.set_contained_in(owner_guid);
+        item.set_owner_guid(owner_guid);
+        item.set_slot(slot);
+        item.set_container_guid(ObjectGuid::EMPTY);
+
+        if slot < EQUIPMENT_SLOT_END {
+            self.set_visible_item_slot(slot, Some(visible));
+        }
+
+        item.set_state(ItemUpdateState::Changed);
         Ok(())
     }
 
@@ -1015,6 +1043,7 @@ fn is_buyback_slot(slot: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wow_constants::ItemBondingType;
 
     #[test]
     fn player_constructor_matches_cpp_base_state() {
@@ -1349,6 +1378,48 @@ mod tests {
         player.remove_top_level_item(0).unwrap();
         assert_eq!(player.data().visible_items[0], VisibleItemValues::default());
         assert_eq!(player.active_data().inv_slots[0], ObjectGuid::EMPTY);
+    }
+
+    #[test]
+    fn visualize_item_object_mutates_item_like_cpp() {
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let item_guid = ObjectGuid::create_item(1, 500);
+        let mut player = Player::new(None, false);
+        let mut item = Item::default();
+        let visible = VisibleItemValues {
+            item_id: 500,
+            item_appearance_mod_id: 1,
+            item_visual: 2,
+        };
+
+        player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(player_guid);
+        player.clear_data_changes();
+        player.clear_active_player_data_changes();
+        item.object_mut().create(item_guid);
+        item.set_container_guid_and_slot(ObjectGuid::create_item(1, 700), 4);
+        item.set_bonding(ItemBondingType::OnEquip);
+        item.force_state(ItemUpdateState::Unchanged);
+        item.clear_item_data_changes();
+
+        player.visualize_item_object(0, &mut item, visible).unwrap();
+
+        assert_eq!(
+            player.get_item_by_pos(INVENTORY_SLOT_BAG_0, 0),
+            Some(item_guid)
+        );
+        assert_eq!(player.active_data().inv_slots[0], item_guid);
+        assert_eq!(player.data().visible_items[0], visible);
+        assert_eq!(item.data().contained_in, player_guid);
+        assert_eq!(item.owner_guid(), player_guid);
+        assert_eq!(item.slot(), 0);
+        assert_eq!(item.container_guid(), ObjectGuid::EMPTY);
+        assert_eq!(item.bag_slot(), INVENTORY_SLOT_BAG_0);
+        assert!(item.is_soul_bound());
+        assert_eq!(item.update_state(), ItemUpdateState::Changed);
     }
 
     #[test]

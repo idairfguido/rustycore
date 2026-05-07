@@ -1,6 +1,6 @@
 use wow_constants::{
-    EnchantmentSlot, ItemContext, ItemFieldFlags, ItemFieldFlags2, ItemModifier, ItemUpdateState,
-    TypeId, TypeMask,
+    EnchantmentSlot, ItemBondingType, ItemContext, ItemFieldFlags, ItemFieldFlags2, ItemModifier,
+    ItemUpdateState, TypeId, TypeMask,
 };
 use wow_core::ObjectGuid;
 
@@ -206,6 +206,7 @@ pub struct Item {
     slot: u8,
     container: ObjectGuid,
     container_slot: u8,
+    bonding: ItemBondingType,
     update_state: ItemUpdateState,
     queue_pos: i16,
     loot_generated: bool,
@@ -232,6 +233,7 @@ impl Item {
             slot: 0,
             container: ObjectGuid::EMPTY,
             container_slot: INVENTORY_SLOT_BAG_0,
+            bonding: ItemBondingType::None,
             update_state: ItemUpdateState::New,
             queue_pos: -1,
             loot_generated: false,
@@ -322,6 +324,23 @@ impl Item {
             self.container_slot
         } else {
             INVENTORY_SLOT_BAG_0
+        }
+    }
+
+    pub const fn bonding(&self) -> ItemBondingType {
+        self.bonding
+    }
+
+    pub fn set_bonding(&mut self, bonding: ItemBondingType) {
+        self.bonding = bonding;
+    }
+
+    pub fn bind_if_visualized(&mut self) {
+        if matches!(
+            self.bonding,
+            ItemBondingType::OnEquip | ItemBondingType::OnAcquire | ItemBondingType::Quest
+        ) {
+            self.set_binding(true);
         }
     }
 
@@ -964,6 +983,27 @@ mod tests {
         assert_eq!(item.bag_slot(), 21);
         assert_eq!(item.position(), (21u16 << 8) | 3);
         assert!(!item.is_equipped());
+    }
+
+    #[test]
+    fn bind_if_visualized_matches_cpp_bonding_subset() {
+        for bonding in [
+            ItemBondingType::OnEquip,
+            ItemBondingType::OnAcquire,
+            ItemBondingType::Quest,
+        ] {
+            let mut item = Item::default();
+            item.set_bonding(bonding);
+            item.bind_if_visualized();
+            assert!(item.is_soul_bound());
+        }
+
+        for bonding in [ItemBondingType::None, ItemBondingType::OnUse] {
+            let mut item = Item::default();
+            item.set_bonding(bonding);
+            item.bind_if_visualized();
+            assert!(!item.is_soul_bound());
+        }
     }
 
     #[test]

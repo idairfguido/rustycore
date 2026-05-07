@@ -130,6 +130,11 @@
   Rust targets: `crates/wow-entities/src/item.rs`, `crates/wow-entities/src/lib.rs`.
   Acceptance: `AppearanceModifierSlotBySpec`, `IllusionModifierSlotBySpec`, `SecondaryAppearanceModifierSlotBySpec`, `GetModifier`/`SetModifier`, `GetVisibleEntry`, `GetVisibleAppearanceModId`, `GetVisibleEnchantmentId`, `GetVisibleItemVisual` and secondary appearance precedence are represented and tested. DB2 resolver stores for `ItemModifiedAppearance` and `SpellItemEnchantment` remain explicit caller-provided bridges until canonical `wow-data` stores are ported under DataStores/#NEXT.R8.ENTITIES.013.
 
+- [x] **#NEXT.R8.ENTITIES.048** Port `Player::VisualizeItem` item mutation side effects.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Item/Item.h`.
+  Rust targets: `crates/wow-entities/src/player.rs`, `crates/wow-entities/src/item.rs`.
+  Acceptance: `VisualizeItem` binding behavior for `BIND_ON_EQUIP`, `BIND_ON_ACQUIRE` and `BIND_QUEST`, top-level inventory slot storage, item `ContainedIn`/`OwnerGUID`/slot/container reset and `ITEM_CHANGED` transition are represented and tested. Collection appearance registration, equip stat/aura/spell application, canonical item object registry, DB persistence and packet serializers remain under #NEXT.R8.ENTITIES.013/#008.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.R8.ENTITIES.003** Bind `wow-map` grid unload actions to real entity methods once Creature/GameObject/Corpse exist.
@@ -138,7 +143,7 @@
 - [ ] **#NEXT.R8.ENTITIES.008** Complete generated update-field sections beyond `ObjectData`: `UnitData`, `PlayerData`, `ActivePlayerData`, `GameObjectData`, `ItemData`, `CorpseData`, `DynamicObjectData`, `AreaTriggerData`, `SceneObjectData`, `ConversationData`, including visibility flag filters and dynamic/optional fields.
 - [ ] **#NEXT.R8.ENTITIES.010** Complete `Unit` subsystems beyond base fields: aura hooks, threat/combat manager, SpellHistory, MotionMaster/move spline, charm/minion ownership, vehicle hooks, AI references and runtime power-index implementations for Player/Creature/Pet.
 - [ ] **#NEXT.R8.ENTITIES.012** Complete `Player` create/load/login lifecycle: `Player::Create`, `LoadFromDB`, login packet sequencing, world insertion, visibility bootstrap, stats initialization and DB2-backed `GetPowerIndexByClass`.
-- [ ] **#NEXT.R8.ENTITIES.013** Complete `Player` inventory/equipment bridge: build on base `Item`/#NEXT.R8.ENTITIES.041, `Bag`/#NEXT.R8.ENTITIES.042, Player storage lookup/#NEXT.R8.ENTITIES.043, `ObjectAccessor` item branch/#NEXT.R8.ENTITIES.044, visible item state/#NEXT.R8.ENTITIES.045 and item visible modifier helpers/#NEXT.R8.ENTITIES.047 to port real ownership, DB2 resolver stores, binding/equipment side effects and save/load persistence.
+- [ ] **#NEXT.R8.ENTITIES.013** Complete `Player` inventory/equipment bridge: build on base `Item`/#NEXT.R8.ENTITIES.041, `Bag`/#NEXT.R8.ENTITIES.042, Player storage lookup/#NEXT.R8.ENTITIES.043, `ObjectAccessor` item branch/#NEXT.R8.ENTITIES.044, visible item state/#NEXT.R8.ENTITIES.045, item visible modifier helpers/#NEXT.R8.ENTITIES.047 and `VisualizeItem` mutation side effects/#NEXT.R8.ENTITIES.048 to port canonical item object registry, DB2 resolver stores, collection appearance registration, equip stat/aura/spell side effects and save/load persistence.
 - [ ] **#NEXT.R8.ENTITIES.014** Complete `Player` gameplay state: quests, skills, spells/actions, taxi, social, mail, group/guild, battleground/arena queues, reputation, achievements, cooldowns and rest state.
 - [ ] **#NEXT.R8.ENTITIES.016** Complete `Creature` create/load/template lifecycle: `Creature::Create`, `CreateCreatureFromDB`, `LoadFromDB`, creature template/difficulty/model refs, spawn data, equipment, level/stat selection and map insertion.
 - [ ] **#NEXT.R8.ENTITIES.017** Complete `Creature` runtime lifecycle: update loop, death/corpse/respawn transitions, forced despawn, evade/combat cleanup, loot owner/tap list, reputation, pickpocket and grid unload bindings.
