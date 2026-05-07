@@ -220,7 +220,7 @@ Leyenda:
 | `Entities/DynamicObject` | (no existe) | ❌ | DynObjects de spells AoE |
 | `Entities/AreaTrigger/AreaTrigger` | wow-data/area_trigger | ⚠️ | datos sí, lógica no |
 | `Entities/Conversation` | (no existe) | ❌ | quest text dialogues |
-| `Entities/Corpse` | (no existe) | ❌ | corpses persistentes |
+| `Entities/Corpse` | wow-entities | ⚠️ | base entidad iniciado; create/load/persistence pendiente |
 | `Entities/Vehicle` | (no existe) | ❌ | sistema de vehículos |
 | `Entities/Transport` (MO) | (no existe) | ❌ | barcos, dirigibles |
 | `Entities/SceneObject` | (no existe) | ❌ | escenas cinematicas |
@@ -560,6 +560,7 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
 - [ ] **#029** `wow-entities`: `Creature` + `GameObject` from their C++ dirs: template refs, spawn data, respawn timer, AI ref, GO state. Refinado: base `Creature` state cerrado en `#029a` y base `GameObject` state cerrado en `#029b`; siguen pendientes `Creature::Create/LoadFromDB`, template/difficulty refs, AI ownership, loot, corpse/respawn lifecycle and GameObject create/template/model/use lifecycle.
 - [x] **#029a** `wow-entities`: base `Creature` state from `Creature.*`, `CreatureData.h`, `UnitDefines.h`, `MovementDefines.h`, `SharedDefines.h`, `World.cpp` config defaults and `StatSystem.cpp::Creature::GetPowerIndex`: constructor defaults, respawn/corpse timers, react state, movement type, spells, loot mode, monster sight default, display/model dimension bridge, faction setter and creature power-index semantics.
 - [x] **#029b** `wow-entities`: base `GameObject` state from `GameObject.*`, `SharedDefines.h` and `UF::GameObjectData`: constructor type id/mask, stationary/rotation create flags, respawn/despawn/restock/cooldown state, loot state/unit guid, spawned-by-default, spell/spawn ids, packed rotation, loot mode, stationary position, respawn compatibility flag and GameObjectData setters/masks.
+- [x] **#029c** `wow-entities`: base `Corpse` state from `Corpse.*`, `SharedDefines.h` and `UF::CorpseData`: constructor type id/mask, `WorldObject(type != CORPSE_BONES)`, stationary flag, ghost time/type/cell bridge, dynamic flags, owner/party/guild, display/race/class/sex/flags/faction/item setters, corpse expiry thresholds and CorpseData masks.
 - [ ] **#030** `wow-entities`: remaining map-stored object types: `Corpse`, `DynamicObject`, `AreaTrigger`, `Pet`, `Transport`, `Vehicle`, `SceneObject`, `Conversation`, `Totem`; mark post-WoLK-only behavior explicitly when C++ has stubs.
 - [ ] **#031** Mover `wow-ai::CreatureAI` a AI refs owned by `Creature`/Map update; eliminar duplicación con `WorldCreature`.
 - [ ] **#032** Refactor `WorldSession` para tener player entity handle/controlador en vez de campos sueltos.

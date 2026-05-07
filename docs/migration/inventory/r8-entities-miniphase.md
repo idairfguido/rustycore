@@ -45,6 +45,11 @@
   Rust targets: `crates/wow-entities/src/game_object.rs`, `crates/wow-entities/src/update_fields.rs`, `crates/wow-entities/src/lib.rs`.
   Acceptance: base `GameObject` constructor matches C++ type id/mask and stationary/rotation create flags; respawn/despawn/restock/cooldown, loot state/unit guid, spawned-by-default, spell/spawn ids, packed rotation, loot mode, respawn compatibility and stationary position defaults are represented; `UF::GameObjectData` bit masks cover display, flags, faction, level, state, type, percent health, art kit and custom param; values update sets `TYPEID_GAMEOBJECT`.
 
+- [x] **#NEXT.R8.ENTITIES.022** Port `Corpse` base state and core setters.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Corpse/Corpse.h`, `Corpse.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/SharedDefines.h`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Updates/UpdateFields.h`.
+  Rust targets: `crates/wow-entities/src/corpse.rs`, `crates/wow-entities/src/update_fields.rs`, `crates/wow-entities/src/lib.rs`.
+  Acceptance: base `Corpse` constructor matches C++ type id/mask, `WorldObject(type != CORPSE_BONES)`, stationary create flag and ghost time/type state; `CorpseData` dynamic flags, owner/party/guild, display/race/class/sex/flags/faction/items setters use C++ bit positions; expiry thresholds for bones and resurrectable corpses match C++; values update sets `TYPEID_CORPSE`.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.R8.ENTITIES.003** Bind `wow-map` grid unload actions to real entity methods once Creature/GameObject/Corpse exist.
@@ -60,3 +65,4 @@
 - [ ] **#NEXT.R8.ENTITIES.018** Move real AI ownership from `wow-ai`/`wow-world::WorldCreature` bridge into canonical `Creature`/Map refs without mixing entity state into session.
 - [ ] **#NEXT.R8.ENTITIES.020** Complete `GameObject` create/load/template lifecycle: `GameObject::Create`, `CreateGameObjectFromDB`, template/addon refs, rotations, model/collision creation, spawn data, map insertion and respawn compatibility.
 - [ ] **#NEXT.R8.ENTITIES.021** Complete `GameObject` runtime lifecycle: update loop, loot/use state machine, door/button/trap/chest/fishing/destructible behavior, cooldown/restock, despawn/respawn persistence and grid unload bindings.
+- [ ] **#NEXT.R8.ENTITIES.023** Complete `Corpse` create/load/persistence lifecycle: player-owned corpse creation, DB save/load/delete, character cache invalidation, phasing, loot object and map registration.

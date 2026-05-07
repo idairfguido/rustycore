@@ -187,11 +187,13 @@ pub const UNIT_DATA_BITS: usize = 227;
 pub const PLAYER_DATA_BITS: usize = 108;
 pub const ACTIVE_PLAYER_DATA_BITS: usize = 1525;
 pub const GAME_OBJECT_DATA_BITS: usize = 20;
+pub const CORPSE_DATA_BITS: usize = 32;
 pub const TYPEID_OBJECT: usize = 0;
 pub const TYPEID_UNIT: usize = 5;
 pub const TYPEID_PLAYER: usize = 6;
 pub const TYPEID_ACTIVE_PLAYER: usize = 7;
 pub const TYPEID_GAME_OBJECT: usize = 8;
+pub const TYPEID_CORPSE: usize = 10;
 pub const OBJECT_DATA_PARENT_BIT: usize = 0;
 pub const OBJECT_DATA_ENTRY_ID_BIT: usize = 1;
 pub const OBJECT_DATA_DYNAMIC_FLAGS_BIT: usize = 2;
@@ -234,6 +236,10 @@ mod tests {
         let game_object_data = UpdateMask::new(GAME_OBJECT_DATA_BITS);
         assert_eq!(game_object_data.block_count(), 1);
         assert_eq!(game_object_data.blocks_mask_count(), 1);
+
+        let corpse_data = UpdateMask::new(CORPSE_DATA_BITS);
+        assert_eq!(corpse_data.block_count(), 1);
+        assert_eq!(corpse_data.blocks_mask_count(), 1);
     }
 
     #[test]
