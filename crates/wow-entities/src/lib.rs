@@ -19,6 +19,7 @@ mod scene_object;
 mod totem;
 mod unit;
 mod update_fields;
+mod vehicle;
 mod world_object;
 
 pub use area_trigger::{
@@ -124,5 +125,10 @@ pub use update_fields::{
     SCENE_OBJECT_DATA_BITS, TYPEID_ACTIVE_PLAYER, TYPEID_AREA_TRIGGER, TYPEID_CONVERSATION,
     TYPEID_CORPSE, TYPEID_DYNAMIC_OBJECT, TYPEID_GAME_OBJECT, TYPEID_OBJECT, TYPEID_PLAYER,
     TYPEID_SCENE_OBJECT, TYPEID_UNIT, UNIT_DATA_BITS, UpdateMask, ValuesUpdate,
+};
+pub use vehicle::{
+    MAX_VEHICLE_SEATS, PassengerInfo, Vehicle, VehicleAccessory, VehicleExitParameter, VehicleFlag,
+    VehicleSeat, VehicleSeatAddon, VehicleSeatInfo, VehicleStatus, VehicleTemplate,
+    calculate_passenger_offset, calculate_passenger_position,
 };
 pub use world_object::{MAPID_INVALID, MapBindingError, PhaseShift, WorldLocation, WorldObject};

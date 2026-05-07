@@ -80,6 +80,11 @@
   Rust targets: `crates/wow-entities/src/pet.rs`, `crates/wow-entities/src/totem.rs`, `crates/wow-entities/src/lib.rs`.
   Acceptance: base `Pet` constructor matches C++ `Guardian(nullptr, owner, true)` shape with `UNIT_MASK_SUMMON|MINION|GUARDIAN|PET|CONTROLABLE_GUARDIAN` and hunter-pet mask branch; name, pet type, duration, loading, removed, focus regen timer, group update mask and specialization defaults match C++; pet spell map/autospells and autocast toggles follow `PetSpell` field shape; `PetSaveMode` active/stable ranges and `GetLoadPetInfo` priority order are represented; pet XP factor is recorded.
 
+- [x] **#NEXT.R8.ENTITIES.036** Port `Vehicle` base kit and seat helpers.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Vehicle/Vehicle.h`, `Vehicle.cpp`, `VehicleDefines.h`, `/home/server/woltk-trinity-legacy/src/server/game/DataStores/DB2Structure.h`.
+  Rust targets: `crates/wow-entities/src/vehicle.rs`, `crates/wow-entities/src/lib.rs`.
+  Acceptance: base `Vehicle` is represented as a kit attached to a unit GUID/type/position, not as an independent object; vehicle id, creature entry, status, usable seat count, seats, passenger info, seat addon, accessory and template structures match C++ shape; passenger add/remove/remove-all and pending join-event seat checks are represented; `TransportBase::CalculatePassengerPosition/Offset` formulas are ported and round-trip tested.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.R8.ENTITIES.003** Bind `wow-map` grid unload actions to real entity methods once Creature/GameObject/Corpse exist.
@@ -102,3 +107,4 @@
 - [ ] **#NEXT.R8.ENTITIES.031** Complete `Conversation` create/start/update runtime: ConversationDataStore templates, conditions, actor fill visitor, line locale timings, private owner locale, script hooks, map insertion, actor unit/creature lookup and removal scheduling.
 - [ ] **#NEXT.R8.ENTITIES.033** Complete `TempSummon`/`Minion`/`Totem` runtime: SummonProperties, owner slots, usable totem slot selection, model lookup by spell/race, `SMSG_TOTEM_CREATED`, spell casting, CombatStop, aura removal from owner/group, cooldown event and map removal scheduling.
 - [ ] **#NEXT.R8.ENTITIES.035** Complete `Pet` create/load/save/update runtime: pet GUID/create from DB/tamed creature, stable persistence, action bar, XP/level sync, stats, auras/cooldowns/charges, specialization/talents/passives, PetAI/charm info, group updates and map/object-store insertion.
+- [ ] **#NEXT.R8.ENTITIES.037** Complete `Vehicle` runtime: DB2 vehicle/seat lookup, npc flags, install/uninstall/reset scripts, accessories, control auras, immunities, passenger relocation/exit, pending join events, despawn delay and integration with Unit movement/transport state.
