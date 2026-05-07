@@ -182,6 +182,8 @@ pub struct ItemStorageTemplate {
     pub bonding: ItemBondingType,
     pub bag_family: BagFamilyMask,
     pub max_stack_size: u32,
+    pub max_count: i32,
+    pub item_limit_category: u32,
     pub container_slots: u8,
     pub is_crafting_reagent: bool,
 }
@@ -195,6 +197,8 @@ impl ItemStorageTemplate {
             bonding: ItemBondingType::None,
             bag_family: BagFamilyMask::NONE,
             max_stack_size,
+            max_count: 0,
+            item_limit_category: 0,
             container_slots: 0,
             is_crafting_reagent: false,
         }

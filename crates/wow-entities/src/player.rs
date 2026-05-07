@@ -58,6 +58,8 @@ pub const KEYRING_SLOT_START: u8 = 106;
 pub const KEYRING_SLOT_END: u8 = 138;
 pub const CHILD_EQUIPMENT_SLOT_START: u8 = 138;
 pub const CHILD_EQUIPMENT_SLOT_END: u8 = 141;
+pub const ITEM_LIMIT_CATEGORY_MODE_HAVE: u8 = 0;
+pub const ITEM_LIMIT_CATEGORY_MODE_EQUIP: u8 = 1;
 
 pub const fn make_item_pos(bag: u8, slot: u8) -> u16 {
     u16::from_be_bytes([bag, slot])
@@ -198,8 +200,9 @@ pub struct CanStoreItemArgs<'a> {
     pub source_is_not_empty_bag: bool,
     pub source_is_binded_not_with_player: bool,
     pub swap: bool,
-    pub similar_result: InventoryResult,
-    pub no_similar_count: u32,
+    pub current_item_count: u32,
+    pub limit_category: Option<&'a ItemLimitCategoryTemplate>,
+    pub current_limit_category_count: u32,
     pub slot_items: &'a [ItemSlotRef<'a>],
     pub bag_templates: &'a [BagTemplateRef<'a>],
 }
@@ -208,6 +211,30 @@ pub struct CanStoreItemArgs<'a> {
 pub struct CanStoreItemOutcome {
     pub result: InventoryResult,
     pub no_space_count: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemLimitCategoryTemplate {
+    pub id: u32,
+    pub quantity: u8,
+    pub flags: u8,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CanTakeMoreSimilarItemsArgs<'a> {
+    pub proto: Option<&'a ItemStorageTemplate>,
+    pub count: u32,
+    pub source_item: Option<&'a Item>,
+    pub current_item_count: u32,
+    pub limit_category: Option<&'a ItemLimitCategoryTemplate>,
+    pub current_limit_category_count: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CanTakeMoreSimilarItemsOutcome {
+    pub result: InventoryResult,
+    pub no_space_count: Option<u32>,
+    pub offending_item_id: Option<u32>,
 }
 
 fn item_ref_by_pos<'a>(items: &'a [ItemSlotRef<'a>], bag: u8, slot: u8) -> Option<&'a Item> {
@@ -1050,6 +1077,73 @@ impl Player {
         InventoryResult::Ok
     }
 
+    pub fn can_take_more_similar_items(
+        &self,
+        args: CanTakeMoreSimilarItemsArgs<'_>,
+    ) -> CanTakeMoreSimilarItemsOutcome {
+        let Some(proto) = args.proto else {
+            return CanTakeMoreSimilarItemsOutcome {
+                result: InventoryResult::ItemMaxCount,
+                no_space_count: Some(args.count),
+                offending_item_id: None,
+            };
+        };
+
+        if args.source_item.is_some_and(Item::loot_generated) {
+            return CanTakeMoreSimilarItemsOutcome {
+                result: InventoryResult::LootGone,
+                no_space_count: None,
+                offending_item_id: None,
+            };
+        }
+
+        if (proto.max_count <= 0 && proto.item_limit_category == 0) || proto.max_count == i32::MAX {
+            return can_take_more_similar_ok();
+        }
+
+        if proto.max_count > 0 {
+            let max_count = proto.max_count as u32;
+            if args.current_item_count.saturating_add(args.count) > max_count {
+                return CanTakeMoreSimilarItemsOutcome {
+                    result: InventoryResult::ItemMaxCount,
+                    no_space_count: Some(
+                        args.current_item_count
+                            .saturating_add(args.count)
+                            .saturating_sub(max_count),
+                    ),
+                    offending_item_id: None,
+                };
+            }
+        }
+
+        if proto.item_limit_category != 0 {
+            let Some(limit_category) = args.limit_category else {
+                return CanTakeMoreSimilarItemsOutcome {
+                    result: InventoryResult::NotEquippable,
+                    no_space_count: Some(args.count),
+                    offending_item_id: None,
+                };
+            };
+
+            if limit_category.flags == ITEM_LIMIT_CATEGORY_MODE_HAVE {
+                let limit_quantity = u32::from(limit_category.quantity);
+                if args.current_limit_category_count.saturating_add(args.count) > limit_quantity {
+                    return CanTakeMoreSimilarItemsOutcome {
+                        result: InventoryResult::ItemMaxLimitCategoryCountExceededIs,
+                        no_space_count: Some(
+                            args.current_limit_category_count
+                                .saturating_add(args.count)
+                                .saturating_sub(limit_quantity),
+                        ),
+                        offending_item_id: Some(proto.entry),
+                    };
+                }
+            }
+        }
+
+        can_take_more_similar_ok()
+    }
+
     pub fn can_store_item(
         &self,
         dest: &mut Vec<ItemPosCount>,
@@ -1078,14 +1172,23 @@ impl Player {
         }
 
         let mut count = args.count;
-        let no_similar_count = if args.similar_result == InventoryResult::Ok {
+        let similar_result = self.can_take_more_similar_items(CanTakeMoreSimilarItemsArgs {
+            proto: args.proto,
+            count,
+            source_item: args.source_item,
+            current_item_count: args.current_item_count,
+            limit_category: args.limit_category,
+            current_limit_category_count: args.current_limit_category_count,
+        });
+        let no_similar_count = if similar_result.result == InventoryResult::Ok {
             0
         } else {
-            if count == args.no_similar_count {
-                return can_store_item_error(args.similar_result, args.no_similar_count, 0);
+            let no_similar_count = similar_result.no_space_count.unwrap_or(0);
+            if count == no_similar_count {
+                return can_store_item_error(similar_result.result, no_similar_count, 0);
             }
-            count -= args.no_similar_count;
-            args.no_similar_count
+            count -= no_similar_count;
+            no_similar_count
         };
 
         if args.bag != NULL_BAG && args.slot != NULL_SLOT {
@@ -2328,6 +2431,14 @@ fn can_store_item_count_zero(count: u32, no_similar_count: u32) -> Option<CanSto
     })
 }
 
+fn can_take_more_similar_ok() -> CanTakeMoreSimilarItemsOutcome {
+    CanTakeMoreSimilarItemsOutcome {
+        result: InventoryResult::Ok,
+        no_space_count: None,
+        offending_item_id: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2352,8 +2463,9 @@ mod tests {
             source_is_not_empty_bag: false,
             source_is_binded_not_with_player: false,
             swap: false,
-            similar_result: InventoryResult::Ok,
-            no_similar_count: 0,
+            current_item_count: 0,
+            limit_category: None,
+            current_limit_category_count: 0,
             slot_items: &[],
             bag_templates: &[],
         }
@@ -3330,6 +3442,156 @@ mod tests {
     }
 
     #[test]
+    fn can_take_more_similar_items_matches_cpp_max_count_guards() {
+        let player = Player::new(None, false);
+        let unlimited = ItemStorageTemplate::regular_item(6948, 20);
+
+        assert_eq!(
+            player.can_take_more_similar_items(CanTakeMoreSimilarItemsArgs {
+                proto: None,
+                count: 3,
+                source_item: None,
+                current_item_count: 0,
+                limit_category: None,
+                current_limit_category_count: 0,
+            }),
+            CanTakeMoreSimilarItemsOutcome {
+                result: InventoryResult::ItemMaxCount,
+                no_space_count: Some(3),
+                offending_item_id: None,
+            }
+        );
+        assert_eq!(
+            player.can_take_more_similar_items(CanTakeMoreSimilarItemsArgs {
+                proto: Some(&unlimited),
+                count: 3,
+                source_item: None,
+                current_item_count: 999,
+                limit_category: None,
+                current_limit_category_count: 0,
+            }),
+            can_take_more_similar_ok()
+        );
+
+        let mut source = Item::default();
+        source.set_loot_generated(true);
+        assert_eq!(
+            player.can_take_more_similar_items(CanTakeMoreSimilarItemsArgs {
+                proto: Some(&unlimited),
+                count: 3,
+                source_item: Some(&source),
+                current_item_count: 0,
+                limit_category: None,
+                current_limit_category_count: 0,
+            }),
+            CanTakeMoreSimilarItemsOutcome {
+                result: InventoryResult::LootGone,
+                no_space_count: None,
+                offending_item_id: None,
+            }
+        );
+
+        let limited = ItemStorageTemplate {
+            max_count: 10,
+            ..ItemStorageTemplate::regular_item(6948, 20)
+        };
+        assert_eq!(
+            player.can_take_more_similar_items(CanTakeMoreSimilarItemsArgs {
+                proto: Some(&limited),
+                count: 4,
+                source_item: None,
+                current_item_count: 8,
+                limit_category: None,
+                current_limit_category_count: 0,
+            }),
+            CanTakeMoreSimilarItemsOutcome {
+                result: InventoryResult::ItemMaxCount,
+                no_space_count: Some(2),
+                offending_item_id: None,
+            }
+        );
+
+        let max_int = ItemStorageTemplate {
+            max_count: i32::MAX,
+            ..ItemStorageTemplate::regular_item(6948, 20)
+        };
+        assert_eq!(
+            player.can_take_more_similar_items(CanTakeMoreSimilarItemsArgs {
+                proto: Some(&max_int),
+                count: 4,
+                source_item: None,
+                current_item_count: u32::MAX - 4,
+                limit_category: None,
+                current_limit_category_count: 0,
+            }),
+            can_take_more_similar_ok()
+        );
+    }
+
+    #[test]
+    fn can_take_more_similar_items_matches_cpp_limit_category_guards() {
+        let player = Player::new(None, false);
+        let limited_category = ItemStorageTemplate {
+            item_limit_category: 77,
+            ..ItemStorageTemplate::regular_item(6948, 20)
+        };
+
+        assert_eq!(
+            player.can_take_more_similar_items(CanTakeMoreSimilarItemsArgs {
+                proto: Some(&limited_category),
+                count: 3,
+                source_item: None,
+                current_item_count: 0,
+                limit_category: None,
+                current_limit_category_count: 0,
+            }),
+            CanTakeMoreSimilarItemsOutcome {
+                result: InventoryResult::NotEquippable,
+                no_space_count: Some(3),
+                offending_item_id: None,
+            }
+        );
+
+        let have_limit = ItemLimitCategoryTemplate {
+            id: 77,
+            quantity: 5,
+            flags: ITEM_LIMIT_CATEGORY_MODE_HAVE,
+        };
+        assert_eq!(
+            player.can_take_more_similar_items(CanTakeMoreSimilarItemsArgs {
+                proto: Some(&limited_category),
+                count: 3,
+                source_item: None,
+                current_item_count: 0,
+                limit_category: Some(&have_limit),
+                current_limit_category_count: 4,
+            }),
+            CanTakeMoreSimilarItemsOutcome {
+                result: InventoryResult::ItemMaxLimitCategoryCountExceededIs,
+                no_space_count: Some(2),
+                offending_item_id: Some(6948),
+            }
+        );
+
+        let equip_limit = ItemLimitCategoryTemplate {
+            id: 77,
+            quantity: 1,
+            flags: ITEM_LIMIT_CATEGORY_MODE_EQUIP,
+        };
+        assert_eq!(
+            player.can_take_more_similar_items(CanTakeMoreSimilarItemsArgs {
+                proto: Some(&limited_category),
+                count: 99,
+                source_item: None,
+                current_item_count: 0,
+                limit_category: Some(&equip_limit),
+                current_limit_category_count: 99,
+            }),
+            can_take_more_similar_ok()
+        );
+    }
+
+    #[test]
     fn can_store_item_preflight_matches_cpp_template_source_and_similar_guards() {
         let player = Player::new(None, false);
         let proto = ItemStorageTemplate::regular_item(6948, 20);
@@ -3390,14 +3652,17 @@ mod tests {
             }
         );
 
+        let limited_proto = ItemStorageTemplate {
+            max_count: 3,
+            ..ItemStorageTemplate::regular_item(6948, 20)
+        };
         let mut similar_args = can_store_args(
             INVENTORY_SLOT_BAG_0,
             INVENTORY_SLOT_ITEM_START,
-            Some(&proto),
+            Some(&limited_proto),
             3,
         );
-        similar_args.similar_result = InventoryResult::ItemMaxCount;
-        similar_args.no_similar_count = 3;
+        similar_args.current_item_count = 3;
         assert_eq!(
             player.can_store_item(&mut Vec::new(), similar_args),
             CanStoreItemOutcome {
@@ -3411,10 +3676,12 @@ mod tests {
     fn can_store_item_reports_item_max_count_after_partial_similar_limit_like_cpp() {
         let mut player = Player::new(None, false);
         player.set_inventory_slot_count(16);
-        let proto = ItemStorageTemplate::regular_item(6948, 20);
+        let proto = ItemStorageTemplate {
+            max_count: 10,
+            ..ItemStorageTemplate::regular_item(6948, 20)
+        };
         let mut args = can_store_args(NULL_BAG, NULL_SLOT, Some(&proto), 5);
-        args.similar_result = InventoryResult::ItemMaxCount;
-        args.no_similar_count = 2;
+        args.current_item_count = 7;
         let mut dest = Vec::new();
 
         assert_eq!(
