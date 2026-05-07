@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use tracing::{debug, info, trace, warn};
 
-use wow_constants::{ClientOpcodes, InventoryResult, ItemEnchantmentType};
+use wow_constants::{BuyResult, ClientOpcodes, InventoryResult, ItemEnchantmentType, SellResult};
 use wow_core::{ObjectGuid, ObjectGuidGenerator};
 use wow_data::{
     AreaTriggerStore, HotfixBlobCache, ItemAppearanceStore, ItemModifiedAppearanceStore,
@@ -32,6 +32,7 @@ use wow_packet::packets::item::{
     InventoryChangeFailure, ItemEnchantTimeUpdate, ItemInstance, ItemMod, ItemModList,
     ItemPushResult, ItemPushResultDisplayType, ItemTimeUpdate,
 };
+use wow_packet::packets::misc::{BuyFailed, SellResponse};
 use wow_packet::{ClientPacket, WorldPacket};
 
 /// Maximum number of packets processed per `update()` call.
@@ -2314,6 +2315,32 @@ impl WorldSession {
         self.send_packet(&packet);
     }
 
+    pub fn send_buy_error(
+        &self,
+        result: BuyResult,
+        creature_guid: Option<ObjectGuid>,
+        item: u32,
+    ) {
+        self.send_packet(&BuyFailed {
+            vendor_guid: creature_guid.unwrap_or(ObjectGuid::EMPTY),
+            muid: item as i32,
+            reason: result,
+        });
+    }
+
+    pub fn send_sell_error(
+        &self,
+        result: SellResult,
+        creature_guid: Option<ObjectGuid>,
+        item_guid: ObjectGuid,
+    ) {
+        self.send_packet(&SellResponse::error(
+            creature_guid.unwrap_or(ObjectGuid::EMPTY),
+            item_guid,
+            result,
+        ));
+    }
+
     fn item_push_result_from_send_new_item_plan(plan: &SendNewItemPlan) -> ItemPushResult {
         ItemPushResult {
             player_guid: plan.player_guid,
@@ -3524,6 +3551,31 @@ mod tests {
             0,
             777,
         );
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
+    }
+
+    #[test]
+    fn send_buy_and_sell_error_mirror_cpp_empty_vendor_fallback() {
+        let (session, _, send_rx) = make_session();
+        let vendor_guid = ObjectGuid::new(0, 0x0102);
+        let item_guid = ObjectGuid::new(0, 0x0506);
+
+        let expected = BuyFailed {
+            vendor_guid,
+            muid: 6948,
+            reason: BuyResult::CantFindItem,
+        }
+        .to_bytes();
+        session.send_buy_error(BuyResult::CantFindItem, Some(vendor_guid), 6948);
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
+
+        let expected = SellResponse::error(
+            ObjectGuid::EMPTY,
+            item_guid,
+            SellResult::YouDontOwnThatItem,
+        )
+        .to_bytes();
+        session.send_sell_error(SellResult::YouDontOwnThatItem, None, item_guid);
         assert_eq!(send_rx.try_recv().unwrap(), expected);
     }
 
