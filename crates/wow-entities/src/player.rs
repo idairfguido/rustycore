@@ -106,6 +106,14 @@ pub enum PlayerStorageError {
         expected: ObjectGuid,
         actual: ObjectGuid,
     },
+    InvalidSplitCount {
+        available: u32,
+        requested: u32,
+    },
+    TooFewItemsToSplit {
+        available: u32,
+        requested: u32,
+    },
     TopLevelBuybackHiddenFromGetItemByPos(u8),
 }
 
@@ -666,6 +674,21 @@ impl Player {
         Ok(cloned)
     }
 
+    pub fn split_item_to_empty_top_level_object(
+        &mut self,
+        slot: u8,
+        source: &mut Item,
+        new_guid: ObjectGuid,
+        count: u32,
+    ) -> Result<Item, PlayerStorageError> {
+        validate_split_count(source, count)?;
+
+        let cloned = self.store_cloned_item_object(slot, source, new_guid, count)?;
+        source.set_count(source.count() - count);
+        source.set_state(ItemUpdateState::Changed);
+        Ok(cloned)
+    }
+
     pub fn merge_top_level_item_stack_object(
         &mut self,
         slot: u8,
@@ -796,6 +819,24 @@ impl Player {
     ) -> Result<Item, PlayerStorageError> {
         let mut cloned = source.clone_item_for_store(new_guid, Some(self.guid()), count);
         self.store_bag_item_object(bag_slot, bag, item_slot, &mut cloned, count)?;
+        Ok(cloned)
+    }
+
+    pub fn split_item_to_empty_bag_item_object(
+        &mut self,
+        bag_slot: u8,
+        bag: &mut Bag,
+        item_slot: u8,
+        source: &mut Item,
+        new_guid: ObjectGuid,
+        count: u32,
+    ) -> Result<Item, PlayerStorageError> {
+        validate_split_count(source, count)?;
+
+        let cloned =
+            self.store_cloned_bag_item_object(bag_slot, bag, item_slot, source, new_guid, count)?;
+        source.set_count(source.count() - count);
+        source.set_state(ItemUpdateState::Changed);
         Ok(cloned)
     }
 
@@ -1266,6 +1307,25 @@ fn is_bag_storage_slot(slot: u8) -> bool {
 
 fn is_buyback_slot(slot: u8) -> bool {
     (BUYBACK_SLOT_START..BUYBACK_SLOT_END).contains(&slot)
+}
+
+fn validate_split_count(source: &Item, count: u32) -> Result<(), PlayerStorageError> {
+    let available = source.count();
+    if count == 0 || available == count {
+        return Err(PlayerStorageError::InvalidSplitCount {
+            available,
+            requested: count,
+        });
+    }
+
+    if available < count {
+        return Err(PlayerStorageError::TooFewItemsToSplit {
+            available,
+            requested: count,
+        });
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1795,6 +1855,93 @@ mod tests {
     }
 
     #[test]
+    fn split_item_to_empty_top_level_object_matches_cpp_split_allocation() {
+        let owner = ObjectGuid::create_player(1, 42);
+        let source_guid = ObjectGuid::create_item(1, 762);
+        let clone_guid = ObjectGuid::create_item(1, 763);
+        let mut player = Player::new(None, false);
+        let mut source = Item::default();
+
+        player.unit_mut().world_mut().object_mut().create(owner);
+        source.object_mut().create(source_guid);
+        source.object_mut().set_entry(6948);
+        source.set_count(8);
+        source.set_item_flag(ItemFieldFlags::REFUNDABLE | ItemFieldFlags::BOP_TRADEABLE);
+        source.force_state(ItemUpdateState::Unchanged);
+        player
+            .store_top_level_item(INVENTORY_SLOT_ITEM_START, source_guid)
+            .unwrap();
+
+        let cloned = player
+            .split_item_to_empty_top_level_object(
+                INVENTORY_SLOT_ITEM_START + 1,
+                &mut source,
+                clone_guid,
+                3,
+            )
+            .unwrap();
+
+        assert_eq!(source.count(), 5);
+        assert_eq!(source.update_state(), ItemUpdateState::Changed);
+        assert!(source.is_refundable());
+        assert!(source.is_bop_tradeable());
+        assert_eq!(
+            player.get_item_by_pos(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START),
+            Some(source_guid)
+        );
+        assert_eq!(
+            player.get_item_by_pos(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START + 1),
+            Some(clone_guid)
+        );
+        assert_eq!(cloned.object().guid(), clone_guid);
+        assert_eq!(cloned.count(), 3);
+        assert!(!cloned.is_refundable());
+        assert!(!cloned.is_bop_tradeable());
+        assert_eq!(cloned.update_state(), ItemUpdateState::New);
+    }
+
+    #[test]
+    fn split_item_to_empty_top_level_object_rolls_back_source_like_cpp_on_failure() {
+        let owner = ObjectGuid::create_player(1, 42);
+        let source_guid = ObjectGuid::create_item(1, 764);
+        let occupied_guid = ObjectGuid::create_item(1, 765);
+        let clone_guid = ObjectGuid::create_item(1, 766);
+        let mut player = Player::new(None, false);
+        let mut source = Item::default();
+
+        player.unit_mut().world_mut().object_mut().create(owner);
+        source.object_mut().create(source_guid);
+        source.object_mut().set_entry(6948);
+        source.set_count(8);
+        source.force_state(ItemUpdateState::Unchanged);
+        player
+            .store_top_level_item(INVENTORY_SLOT_ITEM_START, source_guid)
+            .unwrap();
+        player
+            .store_top_level_item(INVENTORY_SLOT_ITEM_START + 1, occupied_guid)
+            .unwrap();
+
+        assert_eq!(
+            player.split_item_to_empty_top_level_object(
+                INVENTORY_SLOT_ITEM_START + 1,
+                &mut source,
+                clone_guid,
+                3,
+            ),
+            Err(PlayerStorageError::OccupiedPlayerSlot(
+                INVENTORY_SLOT_ITEM_START + 1
+            ))
+        );
+
+        assert_eq!(source.count(), 8);
+        assert_eq!(source.update_state(), ItemUpdateState::Unchanged);
+        assert_eq!(
+            player.get_item_by_pos(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START + 1),
+            Some(occupied_guid)
+        );
+    }
+
+    #[test]
     fn store_bag_item_object_mutates_bag_branch_like_cpp_storeitem() {
         let owner = ObjectGuid::create_player(1, 42);
         let bag_guid = ObjectGuid::create_item(1, 800);
@@ -1960,6 +2107,117 @@ mod tests {
         assert_eq!(cloned.bag_slot(), INVENTORY_SLOT_BAG_START);
         assert_eq!(cloned.slot(), 2);
         assert_eq!(cloned.update_state(), ItemUpdateState::New);
+    }
+
+    #[test]
+    fn split_item_to_empty_bag_item_object_matches_cpp_split_allocation() {
+        let owner = ObjectGuid::create_player(1, 42);
+        let bag_guid = ObjectGuid::create_item(1, 870);
+        let source_guid = ObjectGuid::create_item(1, 871);
+        let clone_guid = ObjectGuid::create_item(1, 872);
+        let mut player = Player::new(None, false);
+        let mut bag = Bag::default();
+        let mut source = Item::default();
+
+        player.unit_mut().world_mut().object_mut().create(owner);
+        bag.try_initialize_created_state(crate::BagCreateInfo {
+            guid: bag_guid,
+            item_id: 100,
+            context: ItemContext::None,
+            owner: Some(owner),
+            max_durability: 0,
+            container_slots: 4,
+        })
+        .unwrap();
+        bag.item_mut().set_slot(INVENTORY_SLOT_BAG_START);
+        source.object_mut().create(source_guid);
+        source.object_mut().set_entry(6948);
+        source.set_count(8);
+        source.set_item_flag(ItemFieldFlags::REFUNDABLE | ItemFieldFlags::BOP_TRADEABLE);
+        bag.store_item(1, &mut source);
+        source.force_state(ItemUpdateState::Unchanged);
+
+        player
+            .register_bag_storage(INVENTORY_SLOT_BAG_START, bag_guid, 4)
+            .unwrap();
+        player
+            .store_bag_item(INVENTORY_SLOT_BAG_START, 1, source_guid)
+            .unwrap();
+        let cloned = player
+            .split_item_to_empty_bag_item_object(
+                INVENTORY_SLOT_BAG_START,
+                &mut bag,
+                2,
+                &mut source,
+                clone_guid,
+                3,
+            )
+            .unwrap();
+
+        assert_eq!(source.count(), 5);
+        assert_eq!(source.update_state(), ItemUpdateState::Changed);
+        assert_eq!(
+            player.get_item_by_pos(INVENTORY_SLOT_BAG_START, 1),
+            Some(source_guid)
+        );
+        assert_eq!(
+            player.get_item_by_pos(INVENTORY_SLOT_BAG_START, 2),
+            Some(clone_guid)
+        );
+        assert_eq!(bag.item_by_pos(1), Some(source_guid));
+        assert_eq!(bag.item_by_pos(2), Some(clone_guid));
+        assert_eq!(cloned.object().guid(), clone_guid);
+        assert_eq!(cloned.count(), 3);
+        assert!(!cloned.is_refundable());
+        assert!(!cloned.is_bop_tradeable());
+        assert_eq!(cloned.update_state(), ItemUpdateState::New);
+    }
+
+    #[test]
+    fn split_item_rejects_zero_all_or_too_many_like_cpp_guards() {
+        let mut player = Player::new(None, false);
+        let mut source = Item::default();
+        source.object_mut().create(ObjectGuid::create_item(1, 880));
+        source.set_count(8);
+
+        assert_eq!(
+            player.split_item_to_empty_top_level_object(
+                INVENTORY_SLOT_ITEM_START,
+                &mut source,
+                ObjectGuid::create_item(1, 881),
+                0,
+            ),
+            Err(PlayerStorageError::InvalidSplitCount {
+                available: 8,
+                requested: 0,
+            })
+        );
+        assert_eq!(
+            player.split_item_to_empty_top_level_object(
+                INVENTORY_SLOT_ITEM_START,
+                &mut source,
+                ObjectGuid::create_item(1, 882),
+                8,
+            ),
+            Err(PlayerStorageError::InvalidSplitCount {
+                available: 8,
+                requested: 8,
+            })
+        );
+        assert_eq!(
+            player.split_item_to_empty_top_level_object(
+                INVENTORY_SLOT_ITEM_START,
+                &mut source,
+                ObjectGuid::create_item(1, 883),
+                9,
+            ),
+            Err(PlayerStorageError::TooFewItemsToSplit {
+                available: 8,
+                requested: 9,
+            })
+        );
+        assert_eq!(source.count(), 8);
+        assert_eq!(source.update_state(), ItemUpdateState::New);
     }
 
     #[test]
