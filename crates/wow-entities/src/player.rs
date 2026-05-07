@@ -1394,10 +1394,25 @@ pub enum SendNewItemDelivery {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SendNewItemModifier {
+    pub value: i32,
+    pub modifier_type: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SendNewItemInstancePlan {
+    pub item_id: u32,
+    pub random_properties_seed: i32,
+    pub random_properties_id: i32,
+    pub modifications: Vec<SendNewItemModifier>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SendNewItemPlan {
     pub player_guid: ObjectGuid,
     pub item_guid: ObjectGuid,
     pub item_entry: u32,
+    pub item_instance: SendNewItemInstancePlan,
     pub slot: u8,
     pub slot_in_bag: i16,
     pub quest_log_item_id: u32,
@@ -6525,11 +6540,29 @@ impl Player {
             } else {
                 SendNewItemDelivery::Direct
             };
+        let modifications = item
+            .data()
+            .modifiers
+            .iter()
+            .enumerate()
+            .filter_map(|(modifier_type, &value)| {
+                (value != 0).then_some(SendNewItemModifier {
+                    value: value as i32,
+                    modifier_type: modifier_type as u8,
+                })
+            })
+            .collect();
 
         Some(SendNewItemPlan {
             player_guid: self.guid(),
             item_guid: item.object().guid(),
             item_entry: item.object().entry(),
+            item_instance: SendNewItemInstancePlan {
+                item_id: item.object().entry(),
+                random_properties_seed: item.data().property_seed,
+                random_properties_id: item.data().random_properties_id,
+                modifications,
+            },
             slot: item.bag_slot(),
             slot_in_bag: if item.count() == args.quantity {
                 i16::from(item.slot())
@@ -13362,6 +13395,8 @@ mod tests {
         item.set_count(3);
         item.set_slot(7);
         item.set_container_guid_and_slot(ObjectGuid::create_item(1, 700), 4);
+        item.set_property_seed(4567);
+        item.set_random_properties_id(-89);
         item.set_modifier(ItemModifier::BattlePetSpeciesId, 123);
         item.set_modifier(ItemModifier::BattlePetBreedData, 0x1A00_00BC);
         item.set_modifier(ItemModifier::BattlePetLevel, 25);
@@ -13374,6 +13409,25 @@ mod tests {
                 player_guid,
                 item_guid: item.object().guid(),
                 item_entry: 9001,
+                item_instance: SendNewItemInstancePlan {
+                    item_id: 9001,
+                    random_properties_seed: 4567,
+                    random_properties_id: -89,
+                    modifications: vec![
+                        SendNewItemModifier {
+                            value: 123,
+                            modifier_type: ItemModifier::BattlePetSpeciesId as u8,
+                        },
+                        SendNewItemModifier {
+                            value: 0x1A00_00BC,
+                            modifier_type: ItemModifier::BattlePetBreedData as u8,
+                        },
+                        SendNewItemModifier {
+                            value: 25,
+                            modifier_type: ItemModifier::BattlePetLevel as u8,
+                        },
+                    ],
+                },
                 slot: 4,
                 slot_in_bag: 7,
                 quest_log_item_id: 777,
