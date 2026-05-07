@@ -27,6 +27,12 @@ pub const MAX_MONEY_AMOUNT: u64 = 99_999_999_999;
 pub const TEAM_OTHER: u8 = 0;
 pub const TEAM_HORDE_ID: u32 = 67;
 pub const TEAM_ALLIANCE_ID: u32 = 469;
+pub const CLASS_WARRIOR: u8 = 1;
+pub const CLASS_PALADIN: u8 = 2;
+pub const CLASS_HUNTER: u8 = 3;
+pub const CLASS_SHAMAN: u8 = 7;
+pub const SKILL_PLATE_MAIL: u32 = 293;
+pub const SKILL_MAIL: u32 = 413;
 pub const NULL_BAG: u8 = 0;
 
 pub const PLAYER_DATA_PARENT_BIT: usize = 0;
@@ -349,6 +355,23 @@ pub struct CanUseItemTemplateArgs<'a> {
     pub has_effect1_spell: bool,
     pub artifact_specialization: Option<u32>,
     pub primary_specialization: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CanUseItemArgs<'a> {
+    pub source_item: Option<&'a Item>,
+    pub proto: Option<&'a ItemStorageTemplate>,
+    pub not_loading: bool,
+    pub is_alive: bool,
+    pub player_level: u8,
+    pub item_required_level: u8,
+    pub source_bop_trade_allowed_for_player: bool,
+    pub template_args: CanUseItemTemplateArgs<'a>,
+    pub item_skill: u32,
+    pub item_skill_value: u32,
+    pub has_item_skill: bool,
+    pub player_class: u8,
+    pub proto_is_heirloom: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2201,6 +2224,52 @@ impl Player {
         InventoryResult::Ok
     }
 
+    pub fn can_use_item(&self, mut args: CanUseItemArgs<'_>) -> InventoryResult {
+        let Some(source) = args.source_item else {
+            return InventoryResult::ItemNotFound;
+        };
+
+        if !args.is_alive && args.not_loading {
+            return InventoryResult::PlayerDead;
+        }
+
+        let Some(proto) = args.proto else {
+            return InventoryResult::ItemNotFound;
+        };
+
+        if source.is_binded_not_with(self.guid(), proto, args.source_bop_trade_allowed_for_player) {
+            return InventoryResult::NotOwner;
+        }
+
+        if args.player_level < args.item_required_level {
+            return InventoryResult::CantEquipLevelI;
+        }
+
+        args.template_args.proto = args.proto;
+        args.template_args.skip_required_level_check = true;
+        let template_result = self.can_use_item_template(args.template_args);
+        if template_result != InventoryResult::Ok {
+            return template_result;
+        }
+
+        if args.item_skill != 0 {
+            let allow_equip = args.proto_is_heirloom
+                && proto.class_id == ItemClass::Armor
+                && !args.has_item_skill
+                && match args.player_class {
+                    CLASS_HUNTER | CLASS_SHAMAN => args.item_skill == SKILL_MAIL,
+                    CLASS_PALADIN | CLASS_WARRIOR => args.item_skill == SKILL_PLATE_MAIL,
+                    _ => false,
+                };
+
+            if !allow_equip && args.item_skill_value == 0 {
+                return InventoryResult::ProficiencyNeeded;
+            }
+        }
+
+        InventoryResult::Ok
+    }
+
     pub fn can_bank_item(
         &self,
         dest: &mut Vec<ItemPosCount>,
@@ -3652,6 +3721,27 @@ mod tests {
         }
     }
 
+    fn can_use_args<'a>(
+        proto: Option<&'a ItemStorageTemplate>,
+        source_item: Option<&'a Item>,
+    ) -> CanUseItemArgs<'a> {
+        CanUseItemArgs {
+            source_item,
+            proto,
+            not_loading: true,
+            is_alive: true,
+            player_level: 70,
+            item_required_level: 0,
+            source_bop_trade_allowed_for_player: false,
+            template_args: can_use_template_args(proto),
+            item_skill: 0,
+            item_skill_value: 0,
+            has_item_skill: false,
+            player_class: CLASS_WARRIOR,
+            proto_is_heirloom: false,
+        }
+    }
+
     #[test]
     fn player_constructor_matches_cpp_base_state() {
         let player = Player::new(Some(42), false);
@@ -4437,6 +4527,102 @@ mod tests {
 
         args.primary_specialization = 2;
         assert_eq!(player.can_use_item_template(args), InventoryResult::Ok);
+    }
+
+    #[test]
+    fn can_use_item_object_matches_cpp_item_level_and_template_order() {
+        let player = Player::new(None, false);
+        let proto = ItemStorageTemplate::regular_item(600, 1);
+        let mut source = Item::default();
+        source.set_count(1);
+
+        assert_eq!(
+            player.can_use_item(can_use_args(Some(&proto), None)),
+            InventoryResult::ItemNotFound
+        );
+
+        let mut dead = can_use_args(Some(&proto), Some(&source));
+        dead.is_alive = false;
+        assert_eq!(player.can_use_item(dead), InventoryResult::PlayerDead);
+
+        dead.not_loading = false;
+        assert_eq!(player.can_use_item(dead), InventoryResult::Ok);
+
+        assert_eq!(
+            player.can_use_item(can_use_args(None, Some(&source))),
+            InventoryResult::ItemNotFound
+        );
+
+        source.set_item_flag(ItemFieldFlags::SOULBOUND);
+        source.set_owner_guid(ObjectGuid::create_player(1, 99));
+        assert_eq!(
+            player.can_use_item(can_use_args(Some(&proto), Some(&source))),
+            InventoryResult::NotOwner
+        );
+        source.remove_item_flag(ItemFieldFlags::SOULBOUND);
+
+        let mut level = can_use_args(Some(&proto), Some(&source));
+        level.player_level = 20;
+        level.item_required_level = 30;
+        level.template_args.internal_item = true;
+        assert_eq!(player.can_use_item(level), InventoryResult::CantEquipLevelI);
+
+        let mut template = can_use_args(Some(&proto), Some(&source));
+        template.template_args.internal_item = true;
+        assert_eq!(
+            player.can_use_item(template),
+            InventoryResult::CantEquipEver
+        );
+    }
+
+    #[test]
+    fn can_use_item_object_matches_cpp_skill_and_heirloom_morph() {
+        let player = Player::new(None, false);
+        let armor = ItemStorageTemplate {
+            class_id: ItemClass::Armor,
+            inventory_type: InventoryType::Chest,
+            ..ItemStorageTemplate::regular_item(601, 1)
+        };
+        let weapon = ItemStorageTemplate {
+            class_id: ItemClass::Weapon,
+            inventory_type: InventoryType::Weapon,
+            ..ItemStorageTemplate::regular_item(602, 1)
+        };
+        let source = Item::default();
+
+        let mut no_skill = can_use_args(Some(&weapon), Some(&source));
+        no_skill.item_skill = SKILL_MAIL;
+        no_skill.item_skill_value = 0;
+        assert_eq!(
+            player.can_use_item(no_skill),
+            InventoryResult::ProficiencyNeeded
+        );
+
+        no_skill.item_skill_value = 1;
+        assert_eq!(player.can_use_item(no_skill), InventoryResult::Ok);
+
+        let mut hunter_mail = can_use_args(Some(&armor), Some(&source));
+        hunter_mail.item_skill = SKILL_MAIL;
+        hunter_mail.item_skill_value = 0;
+        hunter_mail.has_item_skill = false;
+        hunter_mail.proto_is_heirloom = true;
+        hunter_mail.player_class = CLASS_HUNTER;
+        assert_eq!(player.can_use_item(hunter_mail), InventoryResult::Ok);
+
+        let mut warrior_mail = hunter_mail;
+        warrior_mail.player_class = CLASS_WARRIOR;
+        assert_eq!(
+            player.can_use_item(warrior_mail),
+            InventoryResult::ProficiencyNeeded
+        );
+
+        let mut paladin_plate = can_use_args(Some(&armor), Some(&source));
+        paladin_plate.item_skill = SKILL_PLATE_MAIL;
+        paladin_plate.item_skill_value = 0;
+        paladin_plate.has_item_skill = false;
+        paladin_plate.proto_is_heirloom = true;
+        paladin_plate.player_class = CLASS_PALADIN;
+        assert_eq!(player.can_use_item(paladin_plate), InventoryResult::Ok);
     }
 
     #[test]
