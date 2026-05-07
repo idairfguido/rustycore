@@ -1,5 +1,6 @@
 pub mod cell;
 pub mod coords;
+pub mod grid;
 pub mod spawn;
 
 use std::fmt;
@@ -10,6 +11,10 @@ pub use coords::{
     SIZE_OF_GRIDS, TOTAL_NUMBER_OF_CELLS_PER_MAP, cell_to_grid_local, compute_cell_coord,
     compute_cell_coord_with_offset, compute_grid_coord, compute_grid_coord_simple,
     is_valid_map_coord, normalize_map_coord,
+};
+pub use grid::{
+    DEFAULT_VISIBILITY_NOTIFY_PERIOD, GridInfo, GridStateKind, MapGridHost, NGrid, PeriodicTimer,
+    TimeTracker, update_grid_state,
 };
 pub use spawn::{
     CellSpawnGuids, Difficulty, PersonalSpawnMapKey, SpawnData, SpawnGroupFlags,
