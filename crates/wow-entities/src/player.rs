@@ -584,6 +584,28 @@ pub struct SwapItemPreflightPlan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwapItemEmptyDestinationResult {
+    OccupiedDestination,
+    InvalidDestinationNoop,
+    Error(InventoryResult),
+    MoveToInventory {
+        quest_added_from_bank: bool,
+    },
+    MoveToBank {
+        quest_removed: bool,
+    },
+    Equip {
+        dest: u16,
+        auto_unequip_offhand: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SwapItemEmptyDestinationPlan {
+    pub result: SwapItemEmptyDestinationResult,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitanGripPenaltyAction {
     None,
     Cast(u32),
@@ -3721,6 +3743,70 @@ impl Player {
             result: SwapItemPreflightResult::Continue,
             src_unequip_swap,
             dst_unequip_swap,
+        }
+    }
+
+    pub fn swap_item_empty_destination_plan(
+        &self,
+        src: u16,
+        dst: u16,
+        dst_item_present: bool,
+        can_store_result: InventoryResult,
+        can_bank_result: InventoryResult,
+        can_equip_result: InventoryResult,
+        equip_dest: u16,
+    ) -> SwapItemEmptyDestinationPlan {
+        if dst_item_present {
+            return SwapItemEmptyDestinationPlan {
+                result: SwapItemEmptyDestinationResult::OccupiedDestination,
+            };
+        }
+
+        if is_inventory_packed_pos(dst) {
+            if can_store_result != InventoryResult::Ok {
+                return SwapItemEmptyDestinationPlan {
+                    result: SwapItemEmptyDestinationResult::Error(can_store_result),
+                };
+            }
+
+            return SwapItemEmptyDestinationPlan {
+                result: SwapItemEmptyDestinationResult::MoveToInventory {
+                    quest_added_from_bank: is_bank_packed_pos(src),
+                },
+            };
+        }
+
+        if is_bank_packed_pos(dst) {
+            if can_bank_result != InventoryResult::Ok {
+                return SwapItemEmptyDestinationPlan {
+                    result: SwapItemEmptyDestinationResult::Error(can_bank_result),
+                };
+            }
+
+            return SwapItemEmptyDestinationPlan {
+                result: SwapItemEmptyDestinationResult::MoveToBank {
+                    quest_removed: true,
+                },
+            };
+        }
+
+        if is_equipment_packed_pos(dst) {
+            if can_equip_result != InventoryResult::Ok {
+                return SwapItemEmptyDestinationPlan {
+                    result: SwapItemEmptyDestinationResult::Error(can_equip_result),
+                };
+            }
+
+            return SwapItemEmptyDestinationPlan {
+                result: SwapItemEmptyDestinationResult::Equip {
+                    dest: equip_dest,
+                    auto_unequip_offhand: true,
+                },
+            };
+        }
+
+        SwapItemEmptyDestinationPlan {
+            result: SwapItemEmptyDestinationResult::InvalidDestinationNoop,
         }
     }
 
@@ -9933,6 +10019,114 @@ mod tests {
                 result: SwapItemPreflightResult::Error(InventoryResult::CantEquipEver),
                 src_unequip_swap: None,
                 dst_unequip_swap: Some(true),
+            }
+        );
+    }
+
+    #[test]
+    fn swap_item_empty_destination_plan_matches_cpp_move_case() {
+        let player = Player::new(None, false);
+        let inventory_src = make_item_pos(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START);
+        let inventory_dst = make_item_pos(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START + 1);
+        let bank_src = make_item_pos(INVENTORY_SLOT_BAG_0, BANK_SLOT_ITEM_START);
+        let bank_dst = make_item_pos(INVENTORY_SLOT_BAG_0, BANK_SLOT_ITEM_START + 1);
+        let equip_dst = make_item_pos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_CHEST);
+        let equip_dest = make_item_pos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_CHEST);
+
+        assert_eq!(
+            player.swap_item_empty_destination_plan(
+                inventory_src,
+                inventory_dst,
+                true,
+                InventoryResult::Ok,
+                InventoryResult::Ok,
+                InventoryResult::Ok,
+                equip_dest,
+            ),
+            SwapItemEmptyDestinationPlan {
+                result: SwapItemEmptyDestinationResult::OccupiedDestination,
+            }
+        );
+
+        assert_eq!(
+            player.swap_item_empty_destination_plan(
+                bank_src,
+                inventory_dst,
+                false,
+                InventoryResult::Ok,
+                InventoryResult::CantSwap,
+                InventoryResult::CantSwap,
+                equip_dest,
+            ),
+            SwapItemEmptyDestinationPlan {
+                result: SwapItemEmptyDestinationResult::MoveToInventory {
+                    quest_added_from_bank: true,
+                },
+            }
+        );
+
+        assert_eq!(
+            player.swap_item_empty_destination_plan(
+                inventory_src,
+                inventory_dst,
+                false,
+                InventoryResult::InvFull,
+                InventoryResult::Ok,
+                InventoryResult::Ok,
+                equip_dest,
+            ),
+            SwapItemEmptyDestinationPlan {
+                result: SwapItemEmptyDestinationResult::Error(InventoryResult::InvFull),
+            }
+        );
+
+        assert_eq!(
+            player.swap_item_empty_destination_plan(
+                inventory_src,
+                bank_dst,
+                false,
+                InventoryResult::CantSwap,
+                InventoryResult::Ok,
+                InventoryResult::CantSwap,
+                equip_dest,
+            ),
+            SwapItemEmptyDestinationPlan {
+                result: SwapItemEmptyDestinationResult::MoveToBank {
+                    quest_removed: true,
+                },
+            }
+        );
+
+        assert_eq!(
+            player.swap_item_empty_destination_plan(
+                inventory_src,
+                equip_dst,
+                false,
+                InventoryResult::CantSwap,
+                InventoryResult::CantSwap,
+                InventoryResult::Ok,
+                equip_dest,
+            ),
+            SwapItemEmptyDestinationPlan {
+                result: SwapItemEmptyDestinationResult::Equip {
+                    dest: equip_dest,
+                    auto_unequip_offhand: true,
+                },
+            }
+        );
+
+        assert_eq!(
+            player.swap_item_empty_destination_plan(
+                inventory_src,
+                make_item_pos(BUYBACK_SLOT_START, 0),
+                false,
+                InventoryResult::Ok,
+                InventoryResult::Ok,
+                InventoryResult::Ok,
+                equip_dest,
+            ),
+            SwapItemEmptyDestinationPlan {
+                result: SwapItemEmptyDestinationResult::InvalidDestinationNoop,
             }
         );
     }
