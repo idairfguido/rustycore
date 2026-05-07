@@ -5,6 +5,7 @@
 //! - `game/Entities/Object/Object.cpp`
 //! - `game/Entities/Object/ObjectGuid.h`
 
+mod creature;
 mod object;
 mod object_accessor;
 mod player;
@@ -12,6 +13,11 @@ mod unit;
 mod update_fields;
 mod world_object;
 
+pub use creature::{
+    CREATURE_REGEN_INTERVAL_MS, Creature, CreatureModelDimensions, DEFAULT_BOUNDARY_CHECK_TIME_MS,
+    DEFAULT_CORPSE_DELAY_SECS, DEFAULT_MONSTER_SIGHT_DISTANCE, DEFAULT_RESPAWN_DELAY_SECS,
+    LOOT_MODE_DEFAULT, MAX_CREATURE_SPELLS, MovementGeneratorType, ReactState,
+};
 pub use object::{CreateObjectFlags, EntityObject, EntityObjectState, ObjectChangedFields};
 pub use object_accessor::{
     AccessorObjectKind, AccessorPlayer, MapObjectRecord, ObjectAccessor, ObjectAccessorError,

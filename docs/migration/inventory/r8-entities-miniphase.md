@@ -35,6 +35,11 @@
   Rust targets: `crates/wow-entities/src/player.rs`, `crates/wow-entities/src/unit.rs`, `crates/wow-entities/src/update_fields.rs`, `crates/wow-entities/src/lib.rs`.
   Acceptance: base `Player` constructor retags `Unit` to `TYPEID_PLAYER`/`TYPEMASK_PLAYER`, stores session bridge, uses C++ hit chance/team/active/control/whisper defaults, exposes race/class/gender/native gender and target selection setters, ports PlayerData flags/loot/spec/bank setters, ports ActivePlayerData money/XP/backpack/inv-slot field masks, and splits `PlayerData` vs `ActivePlayerData` values updates for self vs other receivers.
 
+- [x] **#NEXT.R8.ENTITIES.015** Port `Creature` base state and core setters.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Creature/Creature.h`, `Creature.cpp`, `CreatureData.h`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Unit/StatSystem.cpp`, `UnitDefines.h`, `/home/server/woltk-trinity-legacy/src/server/game/Movement/MovementDefines.h`, `/home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/SharedDefines.h`, `/home/server/woltk-trinity-legacy/src/server/game/World/World.cpp`.
+  Rust targets: `crates/wow-entities/src/creature.rs`, `crates/wow-entities/src/unit.rs`, `crates/wow-entities/src/lib.rs`.
+  Acceptance: base `Creature` constructor remains `TYPEID_UNIT`/`TYPEMASK_UNIT`, preserves C++ defaults for respawn/corpse timers, regen, react state, idle movement, assistance flags, spell slots, loot mode, sight/combat distance and temp-world-object state; `Creature::GetPowerIndex` semantics are represented; faction/display setters update `UnitData`, with model dimensions passed explicitly until ObjectMgr template/model stores are canonical.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.R8.ENTITIES.003** Bind `wow-map` grid unload actions to real entity methods once Creature/GameObject/Corpse exist.
@@ -45,3 +50,6 @@
 - [ ] **#NEXT.R8.ENTITIES.012** Complete `Player` create/load/login lifecycle: `Player::Create`, `LoadFromDB`, login packet sequencing, world insertion, visibility bootstrap, stats initialization and DB2-backed `GetPowerIndexByClass`.
 - [ ] **#NEXT.R8.ENTITIES.013** Complete `Player` inventory/equipment bridge: real `Item` containers, equipment slots, visible items, `InvSlots`, buyback, `ObjectAccessor` `TYPEMASK_ITEM`, and save/load persistence.
 - [ ] **#NEXT.R8.ENTITIES.014** Complete `Player` gameplay state: quests, skills, spells/actions, taxi, social, mail, group/guild, battleground/arena queues, reputation, achievements, cooldowns and rest state.
+- [ ] **#NEXT.R8.ENTITIES.016** Complete `Creature` create/load/template lifecycle: `Creature::Create`, `CreateCreatureFromDB`, `LoadFromDB`, creature template/difficulty/model refs, spawn data, equipment, level/stat selection and map insertion.
+- [ ] **#NEXT.R8.ENTITIES.017** Complete `Creature` runtime lifecycle: update loop, death/corpse/respawn transitions, forced despawn, evade/combat cleanup, loot owner/tap list, reputation, pickpocket and grid unload bindings.
+- [ ] **#NEXT.R8.ENTITIES.018** Move real AI ownership from `wow-ai`/`wow-world::WorldCreature` bridge into canonical `Creature`/Map refs without mixing entity state into session.

@@ -283,6 +283,12 @@ impl Unit {
         }
     }
 
+    pub fn set_display_power(&mut self, power: PowerType) {
+        self.set_u8_field(UNIT_DATA_DISPLAY_POWER_BIT, power as u8, |data| {
+            &mut data.display_power
+        });
+    }
+
     pub fn set_target(&mut self, target: ObjectGuid) {
         self.set_guid_field(UNIT_DATA_TARGET_BIT, target, |data| &mut data.target);
     }
