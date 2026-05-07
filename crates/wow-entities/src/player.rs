@@ -1,7 +1,7 @@
 use bitflags::bitflags;
 use wow_constants::{
-    BagFamilyMask, Gender, InventoryResult, ItemClass, ItemFieldFlags, ItemSubClassContainer,
-    ItemUpdateState, PowerType, TypeId, TypeMask,
+    BagFamilyMask, Gender, InventoryResult, ItemBondingType, ItemClass, ItemFieldFlags,
+    ItemSubClassContainer, ItemUpdateState, PowerType, TypeId, TypeMask,
 };
 use wow_core::ObjectGuid;
 
@@ -175,11 +175,56 @@ impl<'a> ItemSlotRef<'a> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct BagTemplateRef<'a> {
+    pub bag: u8,
+    pub template: &'a ItemStorageTemplate,
+}
+
+impl<'a> BagTemplateRef<'a> {
+    pub const fn new(bag: u8, template: &'a ItemStorageTemplate) -> Self {
+        Self { bag, template }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CanStoreItemArgs<'a> {
+    pub bag: u8,
+    pub slot: u8,
+    pub entry: u32,
+    pub count: u32,
+    pub proto: Option<&'a ItemStorageTemplate>,
+    pub source_item: Option<&'a Item>,
+    pub source_is_not_empty_bag: bool,
+    pub source_is_binded_not_with_player: bool,
+    pub swap: bool,
+    pub similar_result: InventoryResult,
+    pub no_similar_count: u32,
+    pub slot_items: &'a [ItemSlotRef<'a>],
+    pub bag_templates: &'a [BagTemplateRef<'a>],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CanStoreItemOutcome {
+    pub result: InventoryResult,
+    pub no_space_count: Option<u32>,
+}
+
 fn item_ref_by_pos<'a>(items: &'a [ItemSlotRef<'a>], bag: u8, slot: u8) -> Option<&'a Item> {
     items
         .iter()
         .find(|slot_item| slot_item.bag == bag && slot_item.slot == slot)
         .map(|slot_item| slot_item.item)
+}
+
+fn bag_template_by_pos<'a>(
+    templates: &'a [BagTemplateRef<'a>],
+    bag: u8,
+) -> Option<&'a ItemStorageTemplate> {
+    templates
+        .iter()
+        .find(|bag_template| bag_template.bag == bag)
+        .map(|bag_template| bag_template.template)
 }
 
 fn cpp_keyring_family_gate_applies(slot: u8) -> bool {
@@ -1005,6 +1050,486 @@ impl Player {
         InventoryResult::Ok
     }
 
+    pub fn can_store_item(
+        &self,
+        dest: &mut Vec<ItemPosCount>,
+        args: CanStoreItemArgs<'_>,
+    ) -> CanStoreItemOutcome {
+        let Some(proto) = args.proto else {
+            return can_store_item_error(
+                if args.swap {
+                    InventoryResult::CantSwap
+                } else {
+                    InventoryResult::ItemNotFound
+                },
+                args.count,
+                0,
+            );
+        };
+
+        if let Some(source) = args.source_item {
+            if source.loot_generated() {
+                return can_store_item_error(InventoryResult::LootGone, args.count, 0);
+            }
+
+            if args.source_is_binded_not_with_player {
+                return can_store_item_error(InventoryResult::NotOwner, args.count, 0);
+            }
+        }
+
+        let mut count = args.count;
+        let no_similar_count = if args.similar_result == InventoryResult::Ok {
+            0
+        } else {
+            if count == args.no_similar_count {
+                return can_store_item_error(args.similar_result, args.no_similar_count, 0);
+            }
+            count -= args.no_similar_count;
+            args.no_similar_count
+        };
+
+        if args.bag != NULL_BAG && args.slot != NULL_SLOT {
+            let result = self.can_store_item_in_specific_slot(
+                args.bag,
+                args.slot,
+                dest,
+                proto,
+                &mut count,
+                args.swap,
+                item_ref_by_pos(args.slot_items, args.bag, args.slot),
+                args.source_item,
+                args.source_is_not_empty_bag,
+                bag_template_by_pos(args.bag_templates, args.bag),
+            );
+            if result != InventoryResult::Ok {
+                return can_store_item_error(result, count, no_similar_count);
+            }
+
+            if let Some(outcome) = can_store_item_count_zero(count, no_similar_count) {
+                return outcome;
+            }
+        }
+
+        let inventory_end = INVENTORY_SLOT_ITEM_START
+            .saturating_add(self.active_data.num_backpack_slots)
+            .min(INVENTORY_SLOT_ITEM_END);
+
+        if args.bag != NULL_BAG {
+            if proto.max_stack_size != 1 {
+                if args.bag == INVENTORY_SLOT_BAG_0 {
+                    let result = self.can_store_item_in_inventory_slots(
+                        CHILD_EQUIPMENT_SLOT_START,
+                        CHILD_EQUIPMENT_SLOT_END,
+                        dest,
+                        proto,
+                        &mut count,
+                        true,
+                        args.source_item,
+                        args.source_is_not_empty_bag,
+                        args.bag,
+                        args.slot,
+                        args.slot_items,
+                    );
+                    if result != InventoryResult::Ok {
+                        return can_store_item_error(result, count, no_similar_count);
+                    }
+                    if let Some(outcome) = can_store_item_count_zero(count, no_similar_count) {
+                        return outcome;
+                    }
+
+                    let result = self.can_store_item_in_inventory_slots(
+                        INVENTORY_SLOT_ITEM_START,
+                        inventory_end,
+                        dest,
+                        proto,
+                        &mut count,
+                        true,
+                        args.source_item,
+                        args.source_is_not_empty_bag,
+                        args.bag,
+                        args.slot,
+                        args.slot_items,
+                    );
+                    if result != InventoryResult::Ok {
+                        return can_store_item_error(result, count, no_similar_count);
+                    }
+                    if let Some(outcome) = can_store_item_count_zero(count, no_similar_count) {
+                        return outcome;
+                    }
+                } else {
+                    let mut result = self.can_store_item_in_bag(
+                        args.bag,
+                        dest,
+                        proto,
+                        &mut count,
+                        true,
+                        false,
+                        args.source_item,
+                        args.source_is_not_empty_bag,
+                        NULL_BAG,
+                        args.slot,
+                        bag_template_by_pos(args.bag_templates, args.bag),
+                        args.slot_items,
+                    );
+                    if result != InventoryResult::Ok {
+                        result = self.can_store_item_in_bag(
+                            args.bag,
+                            dest,
+                            proto,
+                            &mut count,
+                            true,
+                            true,
+                            args.source_item,
+                            args.source_is_not_empty_bag,
+                            NULL_BAG,
+                            args.slot,
+                            bag_template_by_pos(args.bag_templates, args.bag),
+                            args.slot_items,
+                        );
+                    }
+                    if result != InventoryResult::Ok {
+                        return can_store_item_error(result, count, no_similar_count);
+                    }
+                    if let Some(outcome) = can_store_item_count_zero(count, no_similar_count) {
+                        return outcome;
+                    }
+                }
+            }
+
+            if args.bag == INVENTORY_SLOT_BAG_0 {
+                if proto.bag_family.contains(BagFamilyMask::KEYS) {
+                    let result = self.can_store_item_in_inventory_slots(
+                        KEYRING_SLOT_START,
+                        KEYRING_SLOT_END,
+                        dest,
+                        proto,
+                        &mut count,
+                        false,
+                        args.source_item,
+                        args.source_is_not_empty_bag,
+                        args.bag,
+                        args.slot,
+                        args.slot_items,
+                    );
+                    if result != InventoryResult::Ok {
+                        return can_store_item_error(result, count, no_similar_count);
+                    }
+                    if let Some(outcome) = can_store_item_count_zero(count, no_similar_count) {
+                        return outcome;
+                    }
+                }
+
+                if args
+                    .source_item
+                    .is_some_and(|source| source.has_item_flag(ItemFieldFlags::CHILD))
+                {
+                    let result = self.can_store_item_in_inventory_slots(
+                        CHILD_EQUIPMENT_SLOT_START,
+                        CHILD_EQUIPMENT_SLOT_END,
+                        dest,
+                        proto,
+                        &mut count,
+                        false,
+                        args.source_item,
+                        args.source_is_not_empty_bag,
+                        args.bag,
+                        args.slot,
+                        args.slot_items,
+                    );
+                    if result != InventoryResult::Ok {
+                        return can_store_item_error(result, count, no_similar_count);
+                    }
+                    if let Some(outcome) = can_store_item_count_zero(count, no_similar_count) {
+                        return outcome;
+                    }
+                }
+
+                let result = self.can_store_item_in_inventory_slots(
+                    INVENTORY_SLOT_ITEM_START,
+                    inventory_end,
+                    dest,
+                    proto,
+                    &mut count,
+                    false,
+                    args.source_item,
+                    args.source_is_not_empty_bag,
+                    args.bag,
+                    args.slot,
+                    args.slot_items,
+                );
+                if result != InventoryResult::Ok {
+                    return can_store_item_error(result, count, no_similar_count);
+                }
+                if let Some(outcome) = can_store_item_count_zero(count, no_similar_count) {
+                    return outcome;
+                }
+            } else {
+                let mut result = self.can_store_item_in_bag(
+                    args.bag,
+                    dest,
+                    proto,
+                    &mut count,
+                    false,
+                    false,
+                    args.source_item,
+                    args.source_is_not_empty_bag,
+                    NULL_BAG,
+                    args.slot,
+                    bag_template_by_pos(args.bag_templates, args.bag),
+                    args.slot_items,
+                );
+                if result != InventoryResult::Ok {
+                    result = self.can_store_item_in_bag(
+                        args.bag,
+                        dest,
+                        proto,
+                        &mut count,
+                        false,
+                        true,
+                        args.source_item,
+                        args.source_is_not_empty_bag,
+                        NULL_BAG,
+                        args.slot,
+                        bag_template_by_pos(args.bag_templates, args.bag),
+                        args.slot_items,
+                    );
+                }
+                if result != InventoryResult::Ok {
+                    return can_store_item_error(result, count, no_similar_count);
+                }
+                if let Some(outcome) = can_store_item_count_zero(count, no_similar_count) {
+                    return outcome;
+                }
+            }
+        }
+
+        if proto.max_stack_size != 1 {
+            let result = self.can_store_item_in_inventory_slots(
+                CHILD_EQUIPMENT_SLOT_START,
+                CHILD_EQUIPMENT_SLOT_END,
+                dest,
+                proto,
+                &mut count,
+                true,
+                args.source_item,
+                args.source_is_not_empty_bag,
+                args.bag,
+                args.slot,
+                args.slot_items,
+            );
+            if result != InventoryResult::Ok {
+                return can_store_item_error(result, count, no_similar_count);
+            }
+            if let Some(outcome) = can_store_item_count_zero(count, no_similar_count) {
+                return outcome;
+            }
+
+            let result = self.can_store_item_in_inventory_slots(
+                INVENTORY_SLOT_ITEM_START,
+                inventory_end,
+                dest,
+                proto,
+                &mut count,
+                true,
+                args.source_item,
+                args.source_is_not_empty_bag,
+                args.bag,
+                args.slot,
+                args.slot_items,
+            );
+            if result != InventoryResult::Ok {
+                return can_store_item_error(result, count, no_similar_count);
+            }
+            if let Some(outcome) = can_store_item_count_zero(count, no_similar_count) {
+                return outcome;
+            }
+
+            if !proto.bag_family.is_empty() {
+                for bag_slot in INVENTORY_SLOT_BAG_START..INVENTORY_SLOT_BAG_END {
+                    let result = self.can_store_item_in_bag(
+                        bag_slot,
+                        dest,
+                        proto,
+                        &mut count,
+                        true,
+                        false,
+                        args.source_item,
+                        args.source_is_not_empty_bag,
+                        args.bag,
+                        args.slot,
+                        bag_template_by_pos(args.bag_templates, bag_slot),
+                        args.slot_items,
+                    );
+                    if result != InventoryResult::Ok {
+                        continue;
+                    }
+                    if let Some(outcome) = can_store_item_count_zero(count, no_similar_count) {
+                        return outcome;
+                    }
+                }
+            }
+
+            for bag_slot in INVENTORY_SLOT_BAG_START..INVENTORY_SLOT_BAG_END {
+                let result = self.can_store_item_in_bag(
+                    bag_slot,
+                    dest,
+                    proto,
+                    &mut count,
+                    true,
+                    true,
+                    args.source_item,
+                    args.source_is_not_empty_bag,
+                    args.bag,
+                    args.slot,
+                    bag_template_by_pos(args.bag_templates, bag_slot),
+                    args.slot_items,
+                );
+                if result != InventoryResult::Ok {
+                    continue;
+                }
+                if let Some(outcome) = can_store_item_count_zero(count, no_similar_count) {
+                    return outcome;
+                }
+            }
+        }
+
+        if !proto.bag_family.is_empty() {
+            if proto.bag_family.contains(BagFamilyMask::KEYS) {
+                let result = self.can_store_item_in_inventory_slots(
+                    KEYRING_SLOT_START,
+                    KEYRING_SLOT_END,
+                    dest,
+                    proto,
+                    &mut count,
+                    false,
+                    args.source_item,
+                    args.source_is_not_empty_bag,
+                    args.bag,
+                    args.slot,
+                    args.slot_items,
+                );
+                if result != InventoryResult::Ok {
+                    return can_store_item_error(result, count, no_similar_count);
+                }
+                if let Some(outcome) = can_store_item_count_zero(count, no_similar_count) {
+                    return outcome;
+                }
+            }
+
+            for bag_slot in INVENTORY_SLOT_BAG_START..INVENTORY_SLOT_BAG_END {
+                let result = self.can_store_item_in_bag(
+                    bag_slot,
+                    dest,
+                    proto,
+                    &mut count,
+                    false,
+                    false,
+                    args.source_item,
+                    args.source_is_not_empty_bag,
+                    args.bag,
+                    args.slot,
+                    bag_template_by_pos(args.bag_templates, bag_slot),
+                    args.slot_items,
+                );
+                if result != InventoryResult::Ok {
+                    continue;
+                }
+                if let Some(outcome) = can_store_item_count_zero(count, no_similar_count) {
+                    return outcome;
+                }
+            }
+        }
+
+        if args.source_is_not_empty_bag {
+            return CanStoreItemOutcome {
+                result: InventoryResult::BagInBag,
+                no_space_count: None,
+            };
+        }
+
+        if args
+            .source_item
+            .is_some_and(|source| source.has_item_flag(ItemFieldFlags::CHILD))
+        {
+            let result = self.can_store_item_in_inventory_slots(
+                CHILD_EQUIPMENT_SLOT_START,
+                CHILD_EQUIPMENT_SLOT_END,
+                dest,
+                proto,
+                &mut count,
+                false,
+                args.source_item,
+                args.source_is_not_empty_bag,
+                args.bag,
+                args.slot,
+                args.slot_items,
+            );
+            if result != InventoryResult::Ok {
+                return can_store_item_error(result, count, no_similar_count);
+            }
+            if let Some(outcome) = can_store_item_count_zero(count, no_similar_count) {
+                return outcome;
+            }
+        }
+
+        let mut search_slot_start = INVENTORY_SLOT_ITEM_START;
+        if args.source_item.is_none()
+            && proto.class_id == ItemClass::Container
+            && proto.subclass_id == ItemSubClassContainer::Container as u32
+            && matches!(
+                proto.bonding,
+                ItemBondingType::None | ItemBondingType::OnAcquire
+            )
+        {
+            search_slot_start = INVENTORY_SLOT_BAG_START;
+        }
+
+        let result = self.can_store_item_in_inventory_slots(
+            search_slot_start,
+            inventory_end,
+            dest,
+            proto,
+            &mut count,
+            false,
+            args.source_item,
+            args.source_is_not_empty_bag,
+            args.bag,
+            args.slot,
+            args.slot_items,
+        );
+        if result != InventoryResult::Ok {
+            return can_store_item_error(result, count, no_similar_count);
+        }
+        if let Some(outcome) = can_store_item_count_zero(count, no_similar_count) {
+            return outcome;
+        }
+
+        for bag_slot in INVENTORY_SLOT_BAG_START..INVENTORY_SLOT_BAG_END {
+            let result = self.can_store_item_in_bag(
+                bag_slot,
+                dest,
+                proto,
+                &mut count,
+                false,
+                true,
+                args.source_item,
+                args.source_is_not_empty_bag,
+                args.bag,
+                args.slot,
+                bag_template_by_pos(args.bag_templates, bag_slot),
+                args.slot_items,
+            );
+            if result != InventoryResult::Ok {
+                continue;
+            }
+            if let Some(outcome) = can_store_item_count_zero(count, no_similar_count) {
+                return outcome;
+            }
+        }
+
+        can_store_item_error(InventoryResult::InvFull, count, no_similar_count)
+    }
+
     pub fn top_level_item_guid(&self, slot: u8) -> Option<ObjectGuid> {
         self.inventory.items.get(slot as usize).copied().flatten()
     }
@@ -1779,6 +2304,30 @@ fn validate_split_source(source: &Item, count: u32) -> Result<(), PlayerStorageE
     Ok(())
 }
 
+fn can_store_item_error(
+    result: InventoryResult,
+    count: u32,
+    no_similar_count: u32,
+) -> CanStoreItemOutcome {
+    CanStoreItemOutcome {
+        result,
+        no_space_count: Some(count + no_similar_count),
+    }
+}
+
+fn can_store_item_count_zero(count: u32, no_similar_count: u32) -> Option<CanStoreItemOutcome> {
+    (count == 0).then(|| {
+        if no_similar_count == 0 {
+            CanStoreItemOutcome {
+                result: InventoryResult::Ok,
+                no_space_count: None,
+            }
+        } else {
+            can_store_item_error(InventoryResult::ItemMaxCount, count, no_similar_count)
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1786,6 +2335,29 @@ mod tests {
         BagFamilyMask, InventoryResult, ItemBondingType, ItemClass, ItemContext, ItemFieldFlags,
         ItemSubClassContainer,
     };
+
+    fn can_store_args<'a>(
+        bag: u8,
+        slot: u8,
+        proto: Option<&'a ItemStorageTemplate>,
+        count: u32,
+    ) -> CanStoreItemArgs<'a> {
+        CanStoreItemArgs {
+            bag,
+            slot,
+            entry: proto.map_or(0, |proto| proto.entry),
+            count,
+            proto,
+            source_item: None,
+            source_is_not_empty_bag: false,
+            source_is_binded_not_with_player: false,
+            swap: false,
+            similar_result: InventoryResult::Ok,
+            no_similar_count: 0,
+            slot_items: &[],
+            bag_templates: &[],
+        }
+    }
 
     #[test]
     fn player_constructor_matches_cpp_base_state() {
@@ -2755,6 +3327,202 @@ mod tests {
         );
         assert!(empty_dest.is_empty());
         assert_eq!(empty_count, 7);
+    }
+
+    #[test]
+    fn can_store_item_preflight_matches_cpp_template_source_and_similar_guards() {
+        let player = Player::new(None, false);
+        let proto = ItemStorageTemplate::regular_item(6948, 20);
+
+        assert_eq!(
+            player.can_store_item(
+                &mut Vec::new(),
+                can_store_args(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START, None, 3),
+            ),
+            CanStoreItemOutcome {
+                result: InventoryResult::ItemNotFound,
+                no_space_count: Some(3),
+            }
+        );
+
+        let mut swap_missing =
+            can_store_args(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START, None, 3);
+        swap_missing.swap = true;
+        assert_eq!(
+            player.can_store_item(&mut Vec::new(), swap_missing),
+            CanStoreItemOutcome {
+                result: InventoryResult::CantSwap,
+                no_space_count: Some(3),
+            }
+        );
+
+        let mut source = Item::default();
+        source.set_loot_generated(true);
+        let mut loot_args = can_store_args(
+            INVENTORY_SLOT_BAG_0,
+            INVENTORY_SLOT_ITEM_START,
+            Some(&proto),
+            3,
+        );
+        loot_args.source_item = Some(&source);
+        assert_eq!(
+            player.can_store_item(&mut Vec::new(), loot_args),
+            CanStoreItemOutcome {
+                result: InventoryResult::LootGone,
+                no_space_count: Some(3),
+            }
+        );
+
+        source.set_loot_generated(false);
+        let mut bound_args = can_store_args(
+            INVENTORY_SLOT_BAG_0,
+            INVENTORY_SLOT_ITEM_START,
+            Some(&proto),
+            3,
+        );
+        bound_args.source_item = Some(&source);
+        bound_args.source_is_binded_not_with_player = true;
+        assert_eq!(
+            player.can_store_item(&mut Vec::new(), bound_args),
+            CanStoreItemOutcome {
+                result: InventoryResult::NotOwner,
+                no_space_count: Some(3),
+            }
+        );
+
+        let mut similar_args = can_store_args(
+            INVENTORY_SLOT_BAG_0,
+            INVENTORY_SLOT_ITEM_START,
+            Some(&proto),
+            3,
+        );
+        similar_args.similar_result = InventoryResult::ItemMaxCount;
+        similar_args.no_similar_count = 3;
+        assert_eq!(
+            player.can_store_item(&mut Vec::new(), similar_args),
+            CanStoreItemOutcome {
+                result: InventoryResult::ItemMaxCount,
+                no_space_count: Some(3),
+            }
+        );
+    }
+
+    #[test]
+    fn can_store_item_reports_item_max_count_after_partial_similar_limit_like_cpp() {
+        let mut player = Player::new(None, false);
+        player.set_inventory_slot_count(16);
+        let proto = ItemStorageTemplate::regular_item(6948, 20);
+        let mut args = can_store_args(NULL_BAG, NULL_SLOT, Some(&proto), 5);
+        args.similar_result = InventoryResult::ItemMaxCount;
+        args.no_similar_count = 2;
+        let mut dest = Vec::new();
+
+        assert_eq!(
+            player.can_store_item(&mut dest, args),
+            CanStoreItemOutcome {
+                result: InventoryResult::ItemMaxCount,
+                no_space_count: Some(2),
+            }
+        );
+        assert_eq!(
+            dest,
+            vec![ItemPosCount::new(
+                make_item_pos(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START),
+                3,
+            )]
+        );
+    }
+
+    #[test]
+    fn can_store_item_fills_specific_slot_then_continues_search_like_cpp() {
+        let mut player = Player::new(None, false);
+        player.set_inventory_slot_count(16);
+        let proto = ItemStorageTemplate::regular_item(6948, 20);
+        let mut existing = Item::default();
+        existing
+            .object_mut()
+            .create(ObjectGuid::create_item(1, 401));
+        existing.object_mut().set_entry(6948);
+        existing.set_count(15);
+        let slot_items = [ItemSlotRef::new(
+            INVENTORY_SLOT_BAG_0,
+            INVENTORY_SLOT_ITEM_START,
+            &existing,
+        )];
+        let mut args = can_store_args(
+            INVENTORY_SLOT_BAG_0,
+            INVENTORY_SLOT_ITEM_START,
+            Some(&proto),
+            10,
+        );
+        args.slot_items = &slot_items;
+        let mut dest = Vec::new();
+
+        assert_eq!(
+            player.can_store_item(&mut dest, args),
+            CanStoreItemOutcome {
+                result: InventoryResult::Ok,
+                no_space_count: None,
+            }
+        );
+        assert_eq!(
+            dest,
+            vec![
+                ItemPosCount::new(
+                    make_item_pos(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START),
+                    5,
+                ),
+                ItemPosCount::new(
+                    make_item_pos(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START + 1),
+                    5,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn can_store_item_general_search_handles_new_bag_direct_equip_and_bag_in_bag() {
+        let mut player = Player::new(None, false);
+        player.set_inventory_slot_count(16);
+        let bag_proto = ItemStorageTemplate {
+            class_id: ItemClass::Container,
+            subclass_id: ItemSubClassContainer::Container as u32,
+            bonding: ItemBondingType::None,
+            max_stack_size: 1,
+            container_slots: 16,
+            ..ItemStorageTemplate::regular_item(100, 1)
+        };
+        let mut dest = Vec::new();
+
+        assert_eq!(
+            player.can_store_item(
+                &mut dest,
+                can_store_args(NULL_BAG, NULL_SLOT, Some(&bag_proto), 1)
+            ),
+            CanStoreItemOutcome {
+                result: InventoryResult::Ok,
+                no_space_count: None,
+            }
+        );
+        assert_eq!(
+            dest,
+            vec![ItemPosCount::new(
+                make_item_pos(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_BAG_START),
+                1,
+            )]
+        );
+
+        let source = Item::default();
+        let mut bag_in_bag_args = can_store_args(NULL_BAG, NULL_SLOT, Some(&bag_proto), 1);
+        bag_in_bag_args.source_item = Some(&source);
+        bag_in_bag_args.source_is_not_empty_bag = true;
+        assert_eq!(
+            player.can_store_item(&mut Vec::new(), bag_in_bag_args),
+            CanStoreItemOutcome {
+                result: InventoryResult::BagInBag,
+                no_space_count: None,
+            }
+        );
     }
 
     #[test]
