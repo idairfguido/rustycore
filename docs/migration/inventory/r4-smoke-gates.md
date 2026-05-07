@@ -1,0 +1,16 @@
+# R4 Smoke Gates
+
+> Generado: 2026-05-07
+> Smoke runtime minimo por capa antes de declarar que una mini-fase esta lista.
+
+| Smoke | Layer | Runtime smoke |
+|---|---|---|
+| `#REFINE.043.SMOKE.L0` | `L0` | load config, init logging, parse time/core helpers |
+| `#REFINE.043.SMOKE.L1` | `L1` | connect DB pools, load minimal DB2 fixture, crypto roundtrip |
+| `#REFINE.043.SMOKE.L2` | `L2` | decode one CMSG and serialize one SMSG with opcode registry row |
+| `#REFINE.043.SMOKE.L3` | `L3` | start world/map tick, create map key, grid state transition fixture |
+| `#REFINE.043.SMOKE.L4` | `L4` | spawn Object/Unit/Player with create/update packet golden fixture |
+| `#REFINE.043.SMOKE.L5` | `L5` | movement update, basic melee, spell cast and AI tick on real entity |
+| `#REFINE.043.SMOKE.L6` | `L6` | quest/loot/chat/group DB-backed flow with bot/client or integration harness |
+| `#REFINE.043.SMOKE.L7` | `L7` | instance/BG queue enter/leave and map lifecycle smoke |
+| `#REFINE.043.SMOKE.L8` | `L8` | script registration + one command + one spell script + one creature script load/unload |

@@ -1,0 +1,12 @@
+# R4 Temporary Stubs
+
+> Generado: 2026-05-07
+> Stubs permitidos solo si tienen regla de retirada. Extender un stub sin task de retirada reabre R4.
+
+| Stub | Surface | Allowed use | Removal rule |
+|---|---|---|---|
+| `#REFINE.042.STUB.001` | empty wow-script/wow-scripts/wow-pvp/wow-loot/wow-social/wow-chat/wow-achievement crates | compile-only placeholder allowed | must be replaced by first WBS task touching that subsystem; tracked in r3 registries |
+| `#REFINE.042.STUB.002` | missing opcode dispatch for C++ STATUS_UNHANDLED/Handle_NULL only | log-and-discard allowed | must not be used for LOGGEDIN/AUTHED functional handlers |
+| `#REFINE.042.STUB.003` | post-WoLK/product-disabled BattlePets/BlackMarket/Scenario/Conversation/SceneObject/service surfaces | explicit disabled/n/a allowed | must retain C++ coverage and client-safe behavior test/n/a |
+| `#REFINE.042.STUB.004` | E2E client bot unavailable | documentation gate allowed for planning only | runtime closure blocked until exact command or replacement harness task exists |
+| `#REFINE.042.STUB.005` | MapManager/WorldCreature flat session placeholders | read-only reference allowed | must not be extended; removal begins with L3/L4 mini-phase |

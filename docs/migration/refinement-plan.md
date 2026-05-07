@@ -92,11 +92,11 @@ Aceptacion de R3: los elementos transversales no quedan duplicados ni huerfanos 
 
 ### R4 — Revision de dependencias y gates
 
-- [ ] **#REFINE.040** Construir DAG de dependencias L0-L8 con aristas bloqueantes.
-- [ ] **#REFINE.041** Marcar gates de implementacion: que debe ser cierto antes de empezar cada fase.
-- [ ] **#REFINE.042** Identificar stubs temporales permitidos para progreso compile-only, con task IDs de retirada.
-- [ ] **#REFINE.043** Identificar smoke gates runtime para cada capa mayor.
-- [ ] **#REFINE.044** Reordenar tareas del roadmap cuando las dependencias C++ demuestren que el orden actual es incorrecto.
+- [x] **#REFINE.040** Construir DAG de dependencias L0-L8 con aristas bloqueantes.
+- [x] **#REFINE.041** Marcar gates de implementacion: que debe ser cierto antes de empezar cada fase.
+- [x] **#REFINE.042** Identificar stubs temporales permitidos para progreso compile-only, con task IDs de retirada.
+- [x] **#REFINE.043** Identificar smoke gates runtime para cada capa mayor.
+- [x] **#REFINE.044** Reordenar tareas del roadmap cuando las dependencias C++ demuestren que el orden actual es incorrecto.
 
 Aceptacion de R4: ninguna tarea depende de un sistema que no este implementado ni stubbeado explicitamente con ticket de retirada.
 
