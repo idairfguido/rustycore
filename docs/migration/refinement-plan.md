@@ -61,7 +61,7 @@ No crear tareas de implementacion llamadas solo "port X". Hay que partir por com
 - [x] **#REFINE.013** Generar `docs/migration/inventory/cpp-sql-prepared.md`: prepared statements y SQL inline por DB (`auth`, `characters`, `world`, `hotfixes`).
 - [x] **#REFINE.014** Generar `docs/migration/inventory/cpp-dbc-db2-stores.md`: stores DB2/DBC, tablas hotfix, loaders y dueño Rust.
 - [x] **#REFINE.015** Generar `docs/migration/inventory/cpp-config-keys.md`: claves de config world/bnet y equivalente Rust.
-- [ ] **#REFINE.016** Generar `docs/migration/inventory/cpp-entity-types.md`: archivos y ownership de Object/WorldObject/Unit/Player/Creature/GO/etc.
+- [x] **#REFINE.016** Generar `docs/migration/inventory/cpp-entity-types.md`: archivos y ownership de Object/WorldObject/Unit/Player/Creature/GO/etc.
 - [ ] **#REFINE.017** Generar `docs/migration/inventory/cpp-scripts-tree.md`: scripts por familia (`Commands`, `Spells`, continentes, raids, events, PvP).
 
 Aceptacion de R1: todo archivo fuente C++ queda asignado o excluido explicitamente.

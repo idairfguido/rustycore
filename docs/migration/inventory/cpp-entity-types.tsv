@@ -1,0 +1,24 @@
+component	type_name	kind	cxx_ref	bases	role	rust_refs	rust_status
+Object	Object	class	src/server/game/Entities/Object/Object.h:233	-	root replicated identity + update fields	crates/wow-core/src/guid.rs only	missing_runtime_type
+Object	WorldObject	class	src/server/game/Entities/Object/Object.h:496	Object|WorldLocation	map/phase/visibility/lifecycle base	crates/wow-core/src/position.rs only	missing_runtime_type
+Unit	Unit	class	src/server/game/Entities/Unit/Unit.h:613	WorldObject	combat/movement/aura/stat base	crates/wow-constants/src/unit.rs; crates/wow-packet/src/packets/update.rs	missing_runtime_type
+Player	Player	class	src/server/game/Entities/Player/Player.h:1065	Unit|GridObject<Player>	logged-in character entity	crates/wow-world/src/session.rs flat fields	flat_session_only
+Creature	Creature	class	src/server/game/Entities/Creature/Creature.h:69	Unit|GridObject<Creature>|MapObject	NPC/mob runtime entity	crates/wow-ai/src/lib.rs; crates/wow-world/src/map_manager.rs	partial_flat_runtime
+Creature	TempSummon	class	src/server/game/Entities/Creature/TemporarySummon.h:44	Creature	temporary summoned creature	-	missing
+Creature	Minion	class	src/server/game/Entities/Creature/TemporarySummon.h:90	TempSummon	owned summon base	-	missing
+Creature	Guardian	class	src/server/game/Entities/Creature/TemporarySummon.h:125	Minion	guardian/pet combat base	-	missing
+Creature	Puppet	class	src/server/game/Entities/Creature/TemporarySummon.h:151	Minion	controlled puppet summon	-	missing
+Pet	Pet	class	src/server/game/Entities/Pet/Pet.h:30	Guardian	persistent player pet	-	missing
+Totem	Totem	class	src/server/game/Entities/Totem/Totem.h:30	Minion	totem summon	-	missing
+GameObject	GameObject	class	src/server/game/Entities/GameObject/GameObject.h:160	WorldObject|GridObject<GameObject>|MapObject	door/chest/trap/fishing/etc runtime	crates/wow-packet/src/packets/update.rs create data	packet_data_only
+Transport	Transport	class	src/server/game/Entities/Transport/Transport.h:29	GameObject|TransportBase	moving passenger carrier	crates/wow-packet/src/packets/movement.rs TransportInfo	packet_data_only
+Item	Item	class	src/server/game/Entities/Item/Item.h:114	Object	inventory item entity	crates/wow-data/src/item.rs templates only	static_data_only
+Item	Bag	class	src/server/game/Entities/Item/Container/Bag.h:34	Item	container item	-	missing
+DynamicObject	DynamicObject	class	src/server/game/Entities/DynamicObject/DynamicObject.h:36	WorldObject|GridObject<DynamicObject>|MapObject	persistent AoE spell object	-	missing
+AreaTrigger	AreaTrigger	class	src/server/game/Entities/AreaTrigger/AreaTrigger.h:42	WorldObject|GridObject<AreaTrigger>|MapObject	live spell volume	crates/wow-data/src/area_trigger.rs static template only	static_data_only
+Conversation	Conversation	class	src/server/game/Entities/Conversation/Conversation.h:29	WorldObject|GridObject<Conversation>	multi-actor dialogue entity	-	missing
+Corpse	Corpse	class	src/server/game/Entities/Corpse/Corpse.h:52	WorldObject|GridObject<Corpse>	player corpse entity	ad-hoc timers in wow-world session	ad_hoc_only
+SceneObject	SceneObject	class	src/server/game/Entities/SceneObject/SceneObject.h:27	WorldObject|GridObject<SceneObject>	per-player scripted scene visual	-	missing
+Vehicle	Vehicle	class	src/server/game/Entities/Vehicle/Vehicle.h:30	TransportBase	vehicle seat/passenger manager	-	missing
+Taxi	PlayerTaxi	class	src/server/game/Entities/Player/PlayerTaxi.h:36	-	player flight path state	-	missing
+Taxi	TaxiPathGraph	class	src/server/game/Entities/Taxi/TaxiPathGraph.h:31	-	flight route graph	-	missing
