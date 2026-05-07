@@ -119,14 +119,16 @@ pub use player::{
     BUYBACK_SLOT_END, BUYBACK_SLOT_START, CHILD_EQUIPMENT_SLOT_END, CHILD_EQUIPMENT_SLOT_START,
     INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_END, INVENTORY_SLOT_BAG_START,
     INVENTORY_SLOT_ITEM_END, INVENTORY_SLOT_ITEM_START, ItemSearchCallbackResult,
-    ItemSearchLocation, KEYRING_SLOT_END, KEYRING_SLOT_START, MAX_MONEY_AMOUNT,
+    ItemSearchLocation, KEYRING_SLOT_END, KEYRING_SLOT_START, MAX_MONEY_AMOUNT, NULL_BAG,
     PLAYER_DATA_CURRENT_SPEC_ID_BIT, PLAYER_DATA_FLAGS_BIT, PLAYER_DATA_FLAGS_EX_BIT,
     PLAYER_DATA_LOOT_TARGET_GUID_BIT, PLAYER_DATA_NATIVE_SEX_BIT, PLAYER_DATA_NUM_BANK_SLOTS_BIT,
     PLAYER_DATA_PARENT_BIT, PLAYER_DATA_VISIBLE_ITEMS_FIRST_BIT,
     PLAYER_DATA_VISIBLE_ITEMS_PARENT_BIT, PLAYER_SLOT_END, Player, PlayerBagStorage,
     PlayerDataUpdate, PlayerDataValues, PlayerInventoryStorage, PlayerStorageError,
     PlayerValuesUpdate, REAGENT_BAG_SLOT_END, REAGENT_BAG_SLOT_START, TEAM_OTHER,
-    VisibleItemValues,
+    VisibleItemValues, is_bag_pos, is_bank_packed_pos, is_bank_pos, is_child_equipment_packed_pos,
+    is_child_equipment_pos, is_equipment_packed_pos, is_equipment_pos, is_inventory_packed_pos,
+    is_inventory_pos, make_item_pos,
 };
 pub use scene_object::{
     SCENE_OBJECT_DATA_CREATED_BY_BIT, SCENE_OBJECT_DATA_PARENT_BIT,
