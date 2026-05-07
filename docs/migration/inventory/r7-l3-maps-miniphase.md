@@ -30,7 +30,13 @@
   Rust targets: `crates/wow-map/src/grid_unload.rs`, `crates/wow-map/src/grid.rs`, `crates/wow-map/src/lib.rs`.
   Acceptance: `ObjectGridStoper` emits creature-only dynobject/areatrigger/combat-stop actions; `ObjectGridEvacuator` emits creature/GO respawn-relocation actions; `ObjectGridCleaner` emits destroyed+cleanup actions for grid object containers; `ObjectGridUnloader` deletes non-corpse grid objects and clears grid object sets in C++ order.
 
+- [x] **#NEXT.L3.MAPS.007** Port `MapManager` structural skeleton.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapManager.h`, `MapManager.cpp`.
+  Rust targets: `crates/wow-map/src/manager.rs`, `crates/wow-map/src/lib.rs`.
+  Acceptance: ordered `(map_id, instance_id)` map store; find/range iteration; delay clamps; serial update/delayed-update order; destroy/unload and reusable instance id allocator semantics; instance/player statistics and scheduled script counter.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.L3.MAPS.006** Bind grid unload actions to real entity lifecycle once canonical entities exist.
-- [ ] **#NEXT.L3.MAPS.007** Replace legacy `wow-world/src/map_manager.rs` only after the new `wow-map` skeleton owns grid lifecycle.
+- [ ] **#NEXT.L3.MAPS.008** Bind `MapManager::CreateMap(uint32, Player*)` to real Player/Group/InstanceLock/Battleground/DB2 models.
+- [ ] **#NEXT.L3.MAPS.009** Replace legacy `wow-world/src/map_manager.rs` only after the new `wow-map` skeleton owns grid lifecycle.

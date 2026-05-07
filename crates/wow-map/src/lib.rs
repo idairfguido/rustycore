@@ -2,6 +2,7 @@ pub mod cell;
 pub mod coords;
 pub mod grid;
 pub mod grid_unload;
+pub mod manager;
 pub mod map;
 pub mod object_grid_loader;
 pub mod personal_phase;
@@ -23,6 +24,10 @@ pub use grid::{
 pub use grid_unload::{
     GridObjectKind, GridUnloadAction, GuidGridUnloadLifecycle, object_grid_cleaner,
     object_grid_evacuator, object_grid_stoper, object_grid_unloader,
+};
+pub use manager::{
+    InstanceIdAllocator, MIN_GRID_DELAY_MS, MIN_MAP_UPDATE_DELAY_MS, ManagedMap, ManagedMapKind,
+    MapManager,
 };
 pub use map::{
     ActiveObjectKind, GridLifecycle, Map, NoopGridLifecycle, NoopTerrainGridLoader,
