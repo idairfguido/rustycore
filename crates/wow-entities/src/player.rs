@@ -1,7 +1,7 @@
 use bitflags::bitflags;
 use wow_constants::{
     BagFamilyMask, Gender, InventoryResult, InventoryType, ItemBondingType, ItemClass,
-    ItemFieldFlags, ItemSubClassContainer, ItemSubClassQuiver, ItemSubClassWeapon,
+    ItemFieldFlags, ItemFieldFlags2, ItemSubClassContainer, ItemSubClassQuiver, ItemSubClassWeapon,
     ItemSubclassProfession, ItemUpdateState, PowerType, TypeId, TypeMask,
 };
 use wow_core::ObjectGuid;
@@ -314,6 +314,12 @@ pub struct CanEquipItemOutcome {
     pub result: InventoryResult,
     pub dest: u16,
     pub unique_ignore_slot: Option<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EquipItemObjectOutcome {
+    Equipped,
+    Merged,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2858,6 +2864,58 @@ impl Player {
 
         item.set_state(ItemUpdateState::Changed);
         Ok(())
+    }
+
+    pub fn equip_item_object(
+        &mut self,
+        pos: u16,
+        item: &mut Item,
+        existing: Option<&mut Item>,
+        visible: VisibleItemValues,
+    ) -> Result<EquipItemObjectOutcome, PlayerStorageError> {
+        let bag = (pos >> 8) as u8;
+        let slot = pos as u8;
+        if bag != INVENTORY_SLOT_BAG_0 {
+            return Err(PlayerStorageError::UnknownBag(bag));
+        }
+        if slot as usize >= PLAYER_SLOT_END {
+            return Err(PlayerStorageError::InvalidPlayerSlot(slot));
+        }
+
+        match existing {
+            None => {
+                if self.top_level_item_guid(slot).is_some() {
+                    return Err(PlayerStorageError::OccupiedPlayerSlot(slot));
+                }
+
+                self.visualize_item_object(slot, item, visible)?;
+                item.set_item_flag2(ItemFieldFlags2::EQUIPPED);
+                Ok(EquipItemObjectOutcome::Equipped)
+            }
+            Some(existing) => {
+                let Some(expected_guid) = self.top_level_item_guid(slot) else {
+                    return Err(PlayerStorageError::EmptyPlayerSlot(slot));
+                };
+
+                let actual_guid = existing.object().guid();
+                if expected_guid != actual_guid {
+                    return Err(PlayerStorageError::MismatchedItemGuid {
+                        slot,
+                        expected: expected_guid,
+                        actual: actual_guid,
+                    });
+                }
+
+                existing.set_count(existing.count() + item.count());
+                existing.set_state(ItemUpdateState::Changed);
+
+                item.set_owner_guid(self.guid());
+                item.set_not_refundable();
+                item.clear_soulbound_tradeable();
+                item.set_state(ItemUpdateState::Removed);
+                Ok(EquipItemObjectOutcome::Merged)
+            }
+        }
     }
 
     pub fn store_item_object(
@@ -6937,6 +6995,103 @@ mod tests {
         assert_eq!(item.bag_slot(), INVENTORY_SLOT_BAG_0);
         assert!(item.is_soul_bound());
         assert_eq!(item.update_state(), ItemUpdateState::Changed);
+    }
+
+    #[test]
+    fn equip_item_object_empty_slot_visualizes_and_flags_item_like_cpp() {
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let item_guid = ObjectGuid::create_item(1, 510);
+        let mut player = Player::new(None, false);
+        let mut item = Item::default();
+        let visible = VisibleItemValues {
+            item_id: 510,
+            item_appearance_mod_id: 4,
+            item_visual: 9,
+        };
+
+        player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(player_guid);
+        item.object_mut().create(item_guid);
+        item.set_bonding(ItemBondingType::OnEquip);
+        item.force_state(ItemUpdateState::Unchanged);
+        item.clear_item_data_changes();
+
+        assert_eq!(
+            player
+                .equip_item_object(
+                    make_item_pos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_MAINHAND),
+                    &mut item,
+                    None,
+                    visible,
+                )
+                .unwrap(),
+            EquipItemObjectOutcome::Equipped
+        );
+
+        assert_eq!(
+            player.get_item_by_pos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_MAINHAND),
+            Some(item_guid)
+        );
+        assert_eq!(
+            player.data().visible_items[EQUIPMENT_SLOT_MAINHAND as usize],
+            visible
+        );
+        assert_eq!(item.data().contained_in, player_guid);
+        assert_eq!(item.owner_guid(), player_guid);
+        assert_eq!(item.slot(), EQUIPMENT_SLOT_MAINHAND);
+        assert_eq!(item.container_guid(), ObjectGuid::EMPTY);
+        assert!(item.is_soul_bound());
+        assert!(item.has_item_flag2(ItemFieldFlags2::EQUIPPED));
+        assert_eq!(item.update_state(), ItemUpdateState::Changed);
+    }
+
+    #[test]
+    fn equip_item_object_merges_existing_stack_like_cpp() {
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let existing_guid = ObjectGuid::create_item(1, 511);
+        let incoming_guid = ObjectGuid::create_item(1, 512);
+        let mut player = Player::new(None, false);
+        let mut existing = Item::default();
+        let mut incoming = Item::default();
+
+        player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(player_guid);
+        existing.object_mut().create(existing_guid);
+        existing.set_count(2);
+        existing.force_state(ItemUpdateState::Unchanged);
+        incoming.object_mut().create(incoming_guid);
+        incoming.set_count(3);
+        incoming.set_item_flag(ItemFieldFlags::REFUNDABLE | ItemFieldFlags::BOP_TRADEABLE);
+        incoming.force_state(ItemUpdateState::Unchanged);
+
+        player
+            .store_top_level_item(EQUIPMENT_SLOT_FINGER1, existing_guid)
+            .unwrap();
+
+        assert_eq!(
+            player
+                .equip_item_object(
+                    make_item_pos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_FINGER1),
+                    &mut incoming,
+                    Some(&mut existing),
+                    VisibleItemValues::default(),
+                )
+                .unwrap(),
+            EquipItemObjectOutcome::Merged
+        );
+
+        assert_eq!(existing.count(), 5);
+        assert_eq!(existing.update_state(), ItemUpdateState::Changed);
+        assert_eq!(incoming.owner_guid(), player_guid);
+        assert!(!incoming.has_item_flag(ItemFieldFlags::REFUNDABLE));
+        assert!(!incoming.has_item_flag(ItemFieldFlags::BOP_TRADEABLE));
+        assert_eq!(incoming.update_state(), ItemUpdateState::Removed);
     }
 
     #[test]
