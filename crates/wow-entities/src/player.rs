@@ -3048,6 +3048,77 @@ impl Player {
         Ok(removed)
     }
 
+    pub fn remove_item_object(
+        &mut self,
+        bag: u8,
+        slot: u8,
+        item: Option<&mut Item>,
+        bag_object: Option<&mut Bag>,
+    ) -> Result<Option<ObjectGuid>, PlayerStorageError> {
+        let Some(item) = item else {
+            return Ok(None);
+        };
+
+        let item_guid = item.object().guid();
+        let removed = if bag == INVENTORY_SLOT_BAG_0 {
+            let Some(expected_guid) = self.top_level_item_guid(slot) else {
+                return Err(PlayerStorageError::EmptyPlayerSlot(slot));
+            };
+            if expected_guid != item_guid {
+                return Err(PlayerStorageError::MismatchedItemGuid {
+                    slot,
+                    expected: expected_guid,
+                    actual: item_guid,
+                });
+            }
+
+            if slot < INVENTORY_SLOT_BAG_END {
+                item.remove_item_flag2(ItemFieldFlags2::EQUIPPED);
+            }
+
+            self.remove_top_level_item(slot)?
+        } else {
+            let Some(bag_object) = bag_object else {
+                return Err(PlayerStorageError::UnknownBag(bag));
+            };
+            let expected_bag_guid = self
+                .get_bag_by_pos(bag)
+                .ok_or(PlayerStorageError::UnknownBag(bag))?;
+            let actual_bag_guid = bag_object.item().object().guid();
+            if expected_bag_guid != actual_bag_guid {
+                return Err(PlayerStorageError::MismatchedBagGuid {
+                    bag,
+                    expected: expected_bag_guid,
+                    actual: actual_bag_guid,
+                });
+            }
+
+            let expected_guid = self
+                .inventory
+                .bags
+                .get(bag as usize)
+                .and_then(Option::as_ref)
+                .and_then(|bag_storage| bag_storage.item_by_pos(slot))
+                .ok_or(PlayerStorageError::EmptyBagItemSlot { bag, slot })?;
+            if expected_guid != item_guid {
+                return Err(PlayerStorageError::MismatchedBagItemGuid {
+                    bag,
+                    slot,
+                    expected: expected_guid,
+                    actual: item_guid,
+                });
+            }
+
+            bag_object.remove_item(slot);
+            self.remove_bag_item(bag, slot)?
+        };
+
+        item.set_contained_in(ObjectGuid::EMPTY);
+        item.set_slot(NULL_SLOT);
+        item.set_container_guid(ObjectGuid::EMPTY);
+        Ok(removed)
+    }
+
     pub fn store_bag_item(
         &mut self,
         bag: u8,
@@ -7155,6 +7226,101 @@ mod tests {
         assert_eq!(item.slot(), EQUIPMENT_SLOT_OFFHAND);
         assert!(item.has_item_flag2(ItemFieldFlags2::EQUIPPED));
         assert_eq!(item.update_state(), ItemUpdateState::Changed);
+    }
+
+    #[test]
+    fn remove_item_object_unlinks_equipment_without_clearing_owner_like_cpp() {
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let item_guid = ObjectGuid::create_item(1, 514);
+        let mut player = Player::new(None, false);
+        let mut item = Item::default();
+
+        player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(player_guid);
+        item.object_mut().create(item_guid);
+        item.set_owner_guid(player_guid);
+        item.set_contained_in(player_guid);
+        item.set_slot(EQUIPMENT_SLOT_MAINHAND);
+        item.set_item_flag2(ItemFieldFlags2::EQUIPPED);
+        player
+            .visualize_item(
+                EQUIPMENT_SLOT_MAINHAND,
+                item_guid,
+                VisibleItemValues {
+                    item_id: 514,
+                    item_appearance_mod_id: 3,
+                    item_visual: 2,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            player
+                .remove_item_object(
+                    INVENTORY_SLOT_BAG_0,
+                    EQUIPMENT_SLOT_MAINHAND,
+                    Some(&mut item),
+                    None,
+                )
+                .unwrap(),
+            Some(item_guid)
+        );
+
+        assert_eq!(
+            player.get_item_by_pos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_MAINHAND),
+            None
+        );
+        assert_eq!(
+            player.data().visible_items[EQUIPMENT_SLOT_MAINHAND as usize],
+            VisibleItemValues::default()
+        );
+        assert_eq!(item.data().contained_in, ObjectGuid::EMPTY);
+        assert_eq!(item.owner_guid(), player_guid);
+        assert_eq!(item.slot(), NULL_SLOT);
+        assert_eq!(item.container_guid(), ObjectGuid::EMPTY);
+        assert!(!item.has_item_flag2(ItemFieldFlags2::EQUIPPED));
+    }
+
+    #[test]
+    fn remove_item_object_unlinks_bag_item_like_cpp_bag_removeitem() {
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let bag_guid = ObjectGuid::create_item(1, 800);
+        let item_guid = ObjectGuid::create_item(1, 515);
+        let mut player = Player::new(None, false);
+        let mut bag = Bag::default();
+        let mut item = Item::default();
+
+        player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(player_guid);
+        bag.item_mut().object_mut().create(bag_guid);
+        bag.item_mut().set_owner_guid(player_guid);
+        item.object_mut().create(item_guid);
+        player
+            .register_bag_storage(INVENTORY_SLOT_BAG_START, bag_guid, 10)
+            .unwrap();
+        bag.store_item(2, &mut item);
+        player
+            .store_bag_item(INVENTORY_SLOT_BAG_START, 2, item_guid)
+            .unwrap();
+
+        assert_eq!(
+            player
+                .remove_item_object(INVENTORY_SLOT_BAG_START, 2, Some(&mut item), Some(&mut bag))
+                .unwrap(),
+            Some(item_guid)
+        );
+
+        assert_eq!(player.get_item_by_pos(INVENTORY_SLOT_BAG_START, 2), None);
+        assert_eq!(bag.data().slots[2], ObjectGuid::EMPTY);
+        assert_eq!(item.data().contained_in, ObjectGuid::EMPTY);
+        assert_eq!(item.container_guid(), ObjectGuid::EMPTY);
+        assert_eq!(item.slot(), NULL_SLOT);
     }
 
     #[test]
