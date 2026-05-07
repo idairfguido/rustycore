@@ -100,6 +100,11 @@
   Rust targets: `crates/wow-entities/src/item.rs`, `crates/wow-entities/src/update_fields.rs`, `crates/wow-entities/src/lib.rs`, `crates/wow-constants/src/item.rs`.
   Acceptance: base `Item` is represented as `Object`/`TYPEID_ITEM`/`TYPEMASK_ITEM`, not `WorldObject`; constructor state, slot/container bridge, update queue state, trade/refund/text fields, core `Create` initialization shape, dynamic item flags/flags2, stack/durability/expiration/context/appearance, spell charges, enchantments, item bonus key and `UF::ItemData` 43-bit masks are ported and tested. Template lookup, Bag/Container, DB save/load, item update packet serializers and Player inventory ownership remain pending under #NEXT.R8.ENTITIES.013/#008.
 
+- [x] **#NEXT.R8.ENTITIES.042** Port `Bag` base state and `UF::ContainerData` masks.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Item/Container/Bag.h`, `Bag.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Updates/UpdateFields.h`, `UpdateFields.cpp`.
+  Rust targets: `crates/wow-entities/src/bag.rs`, `crates/wow-entities/src/item.rs`, `crates/wow-entities/src/update_fields.rs`, `crates/wow-entities/src/lib.rs`.
+  Acceptance: base `Bag` retags `Item` to `TYPEID_CONTAINER`/`TYPEMASK_CONTAINER`, preserves `MAX_BAG_SIZE=36`, owns a GUID slot bridge for `m_bagslot`, ports `ContainerData::NumSlots` and `Slots[36]` bit positions, rejects templates with too many slots, stores/removes child `Item` state like C++ `StoreItem`/`RemoveItem`, and emits values updates with `TYPEID_CONTAINER`. Real `Item*` ownership/destruction, DB save/load recursion, Player inventory indexes and packet serializers remain pending under #NEXT.R8.ENTITIES.013/#008.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.R8.ENTITIES.003** Bind `wow-map` grid unload actions to real entity methods once Creature/GameObject/Corpse exist.
@@ -108,7 +113,7 @@
 - [ ] **#NEXT.R8.ENTITIES.008** Complete generated update-field sections beyond `ObjectData`: `UnitData`, `PlayerData`, `ActivePlayerData`, `GameObjectData`, `ItemData`, `CorpseData`, `DynamicObjectData`, `AreaTriggerData`, `SceneObjectData`, `ConversationData`, including visibility flag filters and dynamic/optional fields.
 - [ ] **#NEXT.R8.ENTITIES.010** Complete `Unit` subsystems beyond base fields: aura hooks, threat/combat manager, SpellHistory, MotionMaster/move spline, charm/minion ownership, vehicle hooks, AI references and runtime power-index implementations for Player/Creature/Pet.
 - [ ] **#NEXT.R8.ENTITIES.012** Complete `Player` create/load/login lifecycle: `Player::Create`, `LoadFromDB`, login packet sequencing, world insertion, visibility bootstrap, stats initialization and DB2-backed `GetPowerIndexByClass`.
-- [ ] **#NEXT.R8.ENTITIES.013** Complete `Player` inventory/equipment bridge: wire the base `Item` entity from #NEXT.R8.ENTITIES.041 into real Bag/Container ownership, equipment slots, visible items, `InvSlots`, buyback, `ObjectAccessor` `TYPEMASK_ITEM`, and save/load persistence.
+- [ ] **#NEXT.R8.ENTITIES.013** Complete `Player` inventory/equipment bridge: wire the base `Item`/#NEXT.R8.ENTITIES.041 and `Bag`/#NEXT.R8.ENTITIES.042 entities into real Player ownership, equipment slots, visible items, `InvSlots`, buyback, `ObjectAccessor` `TYPEMASK_ITEM`, and save/load persistence.
 - [ ] **#NEXT.R8.ENTITIES.014** Complete `Player` gameplay state: quests, skills, spells/actions, taxi, social, mail, group/guild, battleground/arena queues, reputation, achievements, cooldowns and rest state.
 - [ ] **#NEXT.R8.ENTITIES.016** Complete `Creature` create/load/template lifecycle: `Creature::Create`, `CreateCreatureFromDB`, `LoadFromDB`, creature template/difficulty/model refs, spawn data, equipment, level/stat selection and map insertion.
 - [ ] **#NEXT.R8.ENTITIES.017** Complete `Creature` runtime lifecycle: update loop, death/corpse/respawn transitions, forced despawn, evade/combat cleanup, loot owner/tap list, reputation, pickpocket and grid unload bindings.
