@@ -495,6 +495,57 @@ Note: Unit-replicated state changes (HP, mana, level, flags, auras, faction, emo
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#ENTITIES_UNIT.WBS.001** Cerrar la migracion auditada de `game/Entities/Unit/CharmInfo.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Unit/CharmInfo.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-ai`, `crates/wow-combat`, `crates/wow-spell`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_UNIT.WBS.002** Cerrar la migracion auditada de `game/Entities/Unit/CharmInfo.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Unit/CharmInfo.h`
+  Rust target: `crates/wow-world`, `crates/wow-ai`, `crates/wow-combat`, `crates/wow-spell`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_UNIT.WBS.003** Partir y cerrar la migracion auditada de `game/Entities/Unit/StatSystem.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Unit/StatSystem.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-ai`, `crates/wow-combat`, `crates/wow-spell`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1311 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#ENTITIES_UNIT.WBS.004** Partir y cerrar la migracion auditada de `game/Entities/Unit/Unit.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Unit/Unit.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-ai`, `crates/wow-combat`, `crates/wow-spell`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 13620 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#ENTITIES_UNIT.WBS.005** Partir y cerrar la migracion auditada de `game/Entities/Unit/Unit.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Unit/Unit.h`
+  Rust target: `crates/wow-world`, `crates/wow-ai`, `crates/wow-combat`, `crates/wow-spell`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1953 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#ENTITIES_UNIT.WBS.006** Partir y cerrar la migracion auditada de `game/Entities/Unit/UnitDefines.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Unit/UnitDefines.h`
+  Rust target: `crates/wow-world`, `crates/wow-ai`, `crates/wow-combat`, `crates/wow-spell`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 526 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#ENTITIES_UNIT.WBS.007** Partir y cerrar la migracion auditada de `game/Entities/Unit/enuminfo_UnitDefines.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Unit/enuminfo_UnitDefines.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-ai`, `crates/wow-combat`, `crates/wow-spell`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 619 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numbered as `UNIT.x` for cross-reference from `MIGRATION_ROADMAP.md` §5. Complexity: **L** (<1h), **M** (1–4h), **H** (4–12h), **XL** (>12h, split). Many of these are **blocked on `entities-object.md`** completing #OBJECT.5 (`Object`), #OBJECT.6 (`WorldObject`), #OBJECT.8 (`UpdateMask`), #OBJECT.9 (`UpdateField<T>`).
 
 - [ ] **#UNIT.1** Port enums from `UnitDefines.h`: `UnitFlags`/`UnitFlags2`/`UnitFlags3` (bitflags), `UnitState`, `MovementFlags`, `Powers` (10 in 3.4.3), `Stats` (5), `WeaponAttackType` (3), `UnitMoveType` (9), `SpellSchools` (7), `SpellSchoolMask`, `SpellImmunity` (7 buckets), `Mechanics` (37), `UnitModifierFlatType` (3), `UnitModifierPctType` (2), `UnitMods`, `WeaponDamageRange`, `DamageEffectType`, `VictimState`, `MeleeHitOutcome`, `UnitStandStateType`, `SheathState`, `UnitVisFlags`, `UnitPVPStateFlags`, `UnitPetFlag`, `AnimTier`, `CharmType`. Place in `wow-constants`. (M)

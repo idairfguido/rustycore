@@ -338,6 +338,21 @@ Plus every spell, melee, and movement packet implicitly depends on collision hav
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#COMMON_COLLISION.WBS.001** Cerrar la migracion auditada de `shared/DetourMemoryFunctions.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/DetourMemoryFunctions.h`
+  Rust target: `crates/wow-recastdetour`, `crates/wow-collision`, `crates/wow-spell`, `crates/wow-combat`, `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numbered for cross-reference from `MIGRATION_ROADMAP.md`. Complexity: **L** (<1h), **M** (1-4h), **H** (4-12h), **XL** (>12h, split before scheduling).
 
 - [ ] **#COLLISION.1** Create `crates/wow-collision/` skeleton (Cargo.toml, lib.rs with module stubs `bih`, `regular_grid`, `dynamic_tree`, `static_tree`, `models`, `manager`). Wire into workspace `Cargo.toml`. (L)

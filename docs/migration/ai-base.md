@@ -325,6 +325,213 @@ The base AI sub-module **does not own opcodes**. Side effects flow through other
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#AI_BASE.WBS.001** Cerrar la migracion auditada de `game/AI/CoreAI/AreaTriggerAI.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/AreaTriggerAI.cpp`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.002** Cerrar la migracion auditada de `game/AI/CoreAI/AreaTriggerAI.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/AreaTriggerAI.h`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.003** Cerrar la migracion auditada de `game/AI/CoreAI/CombatAI.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/CombatAI.cpp`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.004** Cerrar la migracion auditada de `game/AI/CoreAI/CombatAI.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/CombatAI.h`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.005** Cerrar la migracion auditada de `game/AI/CoreAI/GameObjectAI.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/GameObjectAI.cpp`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.006** Cerrar la migracion auditada de `game/AI/CoreAI/GameObjectAI.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/GameObjectAI.h`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.007** Cerrar la migracion auditada de `game/AI/CoreAI/GuardAI.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/GuardAI.cpp`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.008** Cerrar la migracion auditada de `game/AI/CoreAI/GuardAI.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/GuardAI.h`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.009** Cerrar la migracion auditada de `game/AI/CoreAI/PassiveAI.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/PassiveAI.cpp`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.010** Cerrar la migracion auditada de `game/AI/CoreAI/PassiveAI.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/PassiveAI.h`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.011** Partir y cerrar la migracion auditada de `game/AI/CoreAI/PetAI.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/PetAI.cpp`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 651 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.012** Cerrar la migracion auditada de `game/AI/CoreAI/PetAI.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/PetAI.h`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.013** Cerrar la migracion auditada de `game/AI/CoreAI/ReactorAI.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/ReactorAI.cpp`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.014** Cerrar la migracion auditada de `game/AI/CoreAI/ReactorAI.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/ReactorAI.h`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.015** Cerrar la migracion auditada de `game/AI/CoreAI/ScheduledChangeAI.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/ScheduledChangeAI.cpp`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.016** Cerrar la migracion auditada de `game/AI/CoreAI/ScheduledChangeAI.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/ScheduledChangeAI.h`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.017** Cerrar la migracion auditada de `game/AI/CoreAI/TotemAI.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/TotemAI.cpp`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.018** Cerrar la migracion auditada de `game/AI/CoreAI/TotemAI.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/TotemAI.h`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.019** Cerrar la migracion auditada de `game/AI/CoreAI/UnitAI.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/UnitAI.cpp`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.020** Cerrar la migracion auditada de `game/AI/CoreAI/UnitAI.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/UnitAI.h`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.021** Cerrar la migracion auditada de `game/AI/CoreAI/UnitAICommon.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/UnitAICommon.cpp`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.022** Cerrar la migracion auditada de `game/AI/CoreAI/UnitAICommon.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/UnitAICommon.h`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.023** Cerrar la migracion auditada de `game/AI/CoreAI/enuminfo_UnitAICommon.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CoreAI/enuminfo_UnitAICommon.cpp`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.024** Partir y cerrar la migracion auditada de `game/AI/PlayerAI/PlayerAI.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/PlayerAI/PlayerAI.cpp`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1307 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.025** Cerrar la migracion auditada de `game/AI/PlayerAI/PlayerAI.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/PlayerAI/PlayerAI.h`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.026** Partir y cerrar la migracion auditada de `game/AI/ScriptedAI/ScriptedCreature.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/ScriptedAI/ScriptedCreature.cpp`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 714 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.027** Cerrar la migracion auditada de `game/AI/ScriptedAI/ScriptedCreature.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/ScriptedAI/ScriptedCreature.h`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.028** Cerrar la migracion auditada de `game/AI/ScriptedAI/ScriptedEscortAI.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/ScriptedAI/ScriptedEscortAI.cpp`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.029** Cerrar la migracion auditada de `game/AI/ScriptedAI/ScriptedEscortAI.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/ScriptedAI/ScriptedEscortAI.h`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.030** Cerrar la migracion auditada de `game/AI/ScriptedAI/ScriptedFollowerAI.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/ScriptedAI/ScriptedFollowerAI.cpp`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.031** Cerrar la migracion auditada de `game/AI/ScriptedAI/ScriptedFollowerAI.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/ScriptedAI/ScriptedFollowerAI.h`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.032** Cerrar la migracion auditada de `game/AI/ScriptedAI/ScriptedGossip.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/ScriptedAI/ScriptedGossip.cpp`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_BASE.WBS.033** Cerrar la migracion auditada de `game/AI/ScriptedAI/ScriptedGossip.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/ScriptedAI/ScriptedGossip.h`
+  Rust target: `crates/wow-ai`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numbered for cross-reference from `MIGRATION_ROADMAP.md`. Complexity: **L** <1h, **M** 1–4h, **H** 4–12h, **XL** >12h (split before tackling).
 
 - [ ] **#AI-BASE.1** Create `crates/wow-ai/src/unit_ai.rs` — `trait UnitAI { fn update_ai(&mut self, diff_ms: u32); fn reset(&mut self) {} fn just_entered_combat(&mut self, who: &Unit) {} fn just_exited_combat(&mut self) {} fn on_despawn(&mut self) {} fn damage_dealt(&mut self, victim, dmg, ty) {} fn damage_taken(&mut self, attacker, dmg, ty, spell) {} fn heal_received(&mut self, by, amount) {} fn heal_done(&mut self, to, amount) {} fn spell_interrupted(&mut self, spell_id, time) {} fn on_charmed(&mut self, is_new) {} fn on_game_event(&mut self, start, event_id) {} }` (M)

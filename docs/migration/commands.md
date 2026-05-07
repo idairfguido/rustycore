@@ -371,6 +371,273 @@ Examples seen as command arguments:
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#COMMANDS.WBS.001** Partir y cerrar la migracion auditada de `scripts/Commands/cs_account.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_account.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1026 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.002** Cerrar la migracion auditada de `scripts/Commands/cs_achievement.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_achievement.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.003** Cerrar la migracion auditada de `scripts/Commands/cs_ahbot.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_ahbot.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.004** Cerrar la migracion auditada de `scripts/Commands/cs_arena.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_arena.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.005** Partir y cerrar la migracion auditada de `scripts/Commands/cs_ban.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_ban.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 765 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.006** Cerrar la migracion auditada de `scripts/Commands/cs_battlenet_account.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_battlenet_account.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.007** Cerrar la migracion auditada de `scripts/Commands/cs_bf.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_bf.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.008** Cerrar la migracion auditada de `scripts/Commands/cs_cast.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_cast.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.009** Partir y cerrar la migracion auditada de `scripts/Commands/cs_character.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_character.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 968 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.010** Cerrar la migracion auditada de `scripts/Commands/cs_cheat.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_cheat.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.011** Partir y cerrar la migracion auditada de `scripts/Commands/cs_debug.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_debug.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1799 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.012** Cerrar la migracion auditada de `scripts/Commands/cs_deserter.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_deserter.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.013** Cerrar la migracion auditada de `scripts/Commands/cs_disable.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_disable.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.014** Cerrar la migracion auditada de `scripts/Commands/cs_event.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_event.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.015** Cerrar la migracion auditada de `scripts/Commands/cs_gm.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_gm.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.016** Partir y cerrar la migracion auditada de `scripts/Commands/cs_go.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_go.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 623 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.017** Partir y cerrar la migracion auditada de `scripts/Commands/cs_gobject.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_gobject.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 636 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.018** Partir y cerrar la migracion auditada de `scripts/Commands/cs_group.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_group.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 531 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.019** Cerrar la migracion auditada de `scripts/Commands/cs_guild.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_guild.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.020** Cerrar la migracion auditada de `scripts/Commands/cs_honor.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_honor.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.021** Cerrar la migracion auditada de `scripts/Commands/cs_instance.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_instance.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.022** Cerrar la migracion auditada de `scripts/Commands/cs_learn.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_learn.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.023** Cerrar la migracion auditada de `scripts/Commands/cs_lfg.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_lfg.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.024** Partir y cerrar la migracion auditada de `scripts/Commands/cs_list.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_list.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 731 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.025** Partir y cerrar la migracion auditada de `scripts/Commands/cs_lookup.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_lookup.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1551 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.026** Cerrar la migracion auditada de `scripts/Commands/cs_message.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_message.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.027** Partir y cerrar la migracion auditada de `scripts/Commands/cs_misc.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_misc.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2687 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.028** Cerrar la migracion auditada de `scripts/Commands/cs_mmaps.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_mmaps.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.029** Partir y cerrar la migracion auditada de `scripts/Commands/cs_modify.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_modify.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1056 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.030** Partir y cerrar la migracion auditada de `scripts/Commands/cs_npc.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_npc.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1435 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.031** Cerrar la migracion auditada de `scripts/Commands/cs_pet.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_pet.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.032** Cerrar la migracion auditada de `scripts/Commands/cs_quest.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_quest.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.033** Cerrar la migracion auditada de `scripts/Commands/cs_rbac.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_rbac.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.034** Partir y cerrar la migracion auditada de `scripts/Commands/cs_reload.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_reload.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1168 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.035** Cerrar la migracion auditada de `scripts/Commands/cs_reset.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_reset.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.036** Cerrar la migracion auditada de `scripts/Commands/cs_scene.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_scene.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.037** Cerrar la migracion auditada de `scripts/Commands/cs_script_loader.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_script_loader.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.038** Cerrar la migracion auditada de `scripts/Commands/cs_send.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_send.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.039** Partir y cerrar la migracion auditada de `scripts/Commands/cs_server.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_server.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 530 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.040** Cerrar la migracion auditada de `scripts/Commands/cs_tele.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_tele.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.041** Cerrar la migracion auditada de `scripts/Commands/cs_ticket.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_ticket.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.042** Cerrar la migracion auditada de `scripts/Commands/cs_titles.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_titles.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMMANDS.WBS.043** Partir y cerrar la migracion auditada de `scripts/Commands/cs_wp.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Commands/cs_wp.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/bnet-server/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 508 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numbered for cross-reference from `MIGRATION_ROADMAP.md`. Complexity: **L** <1h, **M** 1-4h, **H** 4-12h, **XL** >12h (split).
 
 The order matters — a working `.tele` is the smallest end-to-end demo; everything else compounds on the dispatcher.

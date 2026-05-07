@@ -268,6 +268,51 @@ SmartScripts does not own opcodes; its actions cause traffic through other modul
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#AI_SMARTSCRIPTS.WBS.001** Partir y cerrar la migracion auditada de `game/AI/SmartScripts/SmartAI.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/SmartScripts/SmartAI.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-ai`, `crates/wow-conditions`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1259 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#AI_SMARTSCRIPTS.WBS.002** Cerrar la migracion auditada de `game/AI/SmartScripts/SmartAI.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/SmartScripts/SmartAI.h`
+  Rust target: `crates/wow-script`, `crates/wow-ai`, `crates/wow-conditions`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_SMARTSCRIPTS.WBS.003** Partir y cerrar la migracion auditada de `game/AI/SmartScripts/SmartScript.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/SmartScripts/SmartScript.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-ai`, `crates/wow-conditions`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 4253 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#AI_SMARTSCRIPTS.WBS.004** Cerrar la migracion auditada de `game/AI/SmartScripts/SmartScript.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/SmartScripts/SmartScript.h`
+  Rust target: `crates/wow-script`, `crates/wow-ai`, `crates/wow-conditions`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI_SMARTSCRIPTS.WBS.005** Partir y cerrar la migracion auditada de `game/AI/SmartScripts/SmartScriptMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/SmartScripts/SmartScriptMgr.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-ai`, `crates/wow-conditions`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2497 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#AI_SMARTSCRIPTS.WBS.006** Partir y cerrar la migracion auditada de `game/AI/SmartScripts/SmartScriptMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/SmartScripts/SmartScriptMgr.h`
+  Rust target: `crates/wow-script`, `crates/wow-ai`, `crates/wow-conditions`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1769 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numbered for cross-reference from `MIGRATION_ROADMAP.md`. Complexity: **L** <1h, **M** 1–4h, **H** 4–12h, **XL** >12h (split before tackling). Many of these are XL and **must** be split into smaller PRs in execution.
 
 **Foundation — enums + holder + loader (Wave A):**

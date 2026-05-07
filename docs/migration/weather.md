@@ -140,6 +140,39 @@ Payload: `WeatherState (uint32)`, `intensity (float, 0..1)`, `bool unk` (transit
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#WEATHER.WBS.001** Cerrar la migracion auditada de `game/Weather/Weather.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Weather/Weather.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-weather`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#WEATHER.WBS.002** Cerrar la migracion auditada de `game/Weather/Weather.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Weather/Weather.h`
+  Rust target: `crates/wow-world`, `crates/wow-weather`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#WEATHER.WBS.003** Cerrar la migracion auditada de `game/Weather/WeatherMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Weather/WeatherMgr.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-weather`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#WEATHER.WBS.004** Cerrar la migracion auditada de `game/Weather/WeatherMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Weather/WeatherMgr.h`
+  Rust target: `crates/wow-world`, `crates/wow-weather`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#WTH.1** Add `WeatherData` / `WeatherSeasonChances` structs and a `WeatherMgr` (or function on `WorldExt`) that loads `world.game_weather` at startup, with the same 100-cap clamp + warn behaviour. (complexity: **L**)
 - [ ] **#WTH.2** Implement `Weather` struct (`zone_id`, `kind`, `intensity`, timer, chances ref) with `update(diff_ms)` + `regenerate()` matching the 30/30/30/10 distribution exactly (use `rand` crate; document seed source). (complexity: **M**)
 - [ ] **#WTH.3** Add `weather_state()` mapping (RAIN/SNOW/STORM × intensity bands → `WEATHER_STATE_*` u32), and the BLACKRAIN/THUNDERS pass-through. (complexity: **L**)

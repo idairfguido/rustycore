@@ -176,6 +176,45 @@ This module *only* sends; nothing client-originated routes here.
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#TEXTS.WBS.001** Cerrar la migracion auditada de `game/Texts/ChatTextBuilder.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Texts/ChatTextBuilder.cpp`
+  Rust target: `crates/wow-chat`, `crates/wow-database`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#TEXTS.WBS.002** Cerrar la migracion auditada de `game/Texts/ChatTextBuilder.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Texts/ChatTextBuilder.h`
+  Rust target: `crates/wow-chat`, `crates/wow-database`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#TEXTS.WBS.003** Cerrar la migracion auditada de `game/Texts/CreatureTextMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Texts/CreatureTextMgr.cpp`
+  Rust target: `crates/wow-chat`, `crates/wow-database`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#TEXTS.WBS.004** Cerrar la migracion auditada de `game/Texts/CreatureTextMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Texts/CreatureTextMgr.h`
+  Rust target: `crates/wow-chat`, `crates/wow-database`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#TEXTS.WBS.005** Cerrar la migracion auditada de `game/Texts/CreatureTextMgrImpl.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Texts/CreatureTextMgrImpl.h`
+  Rust target: `crates/wow-chat`, `crates/wow-database`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#TXT.1** Add `CreatureTextEntry` struct + `CreatureTextRange`/`SoundKitPlayType` enums in `wow-chat`. Implement `CreatureTextMgr::load(pool)` reading via `SEL_CREATURE_TEXT`. Validate Sound/Emote/Lang/Type/BroadcastTextId/Range with the same warn-and-default behaviour. (complexity: **M**)
 - [ ] **#TXT.2** Add `CreatureTextLocale` and the `(entry, group, id) → Vec<String> per-locale` loader. (complexity: **L**)
 - [ ] **#TXT.3** Implement `SendChat`: weighted pick (`rand` + `Vec<f32>` probabilities), repeat-avoidance via a `text_repeat: HashMap<u8 group, Vec<u8 ids>>` field on `WorldCreature`. Return the `duration` ms. (complexity: **M**)

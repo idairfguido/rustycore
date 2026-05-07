@@ -267,6 +267,153 @@ The module also **processes** CMSG_MOVE_* packets indirectly via WorldSession â†
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#MAPS.WBS.001** Cerrar la migracion auditada de `game/Maps/AreaBoundary.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/AreaBoundary.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.002** Cerrar la migracion auditada de `game/Maps/AreaBoundary.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/AreaBoundary.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.003** Partir y cerrar la migracion auditada de `game/Maps/GridMap.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/GridMap.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 694 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.004** Cerrar la migracion auditada de `game/Maps/GridMap.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/GridMap.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.005** Partir y cerrar la migracion auditada de `game/Maps/Map.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 4014 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.006** Partir y cerrar la migracion auditada de `game/Maps/Map.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 917 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.007** Cerrar la migracion auditada de `game/Maps/MapManager.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapManager.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.008** Cerrar la migracion auditada de `game/Maps/MapManager.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapManager.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.009** Cerrar la migracion auditada de `game/Maps/MapObject.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapObject.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.010** Cerrar la migracion auditada de `game/Maps/MapRefManager.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapRefManager.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.011** Cerrar la migracion auditada de `game/Maps/MapReference.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapReference.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.012** Cerrar la migracion auditada de `game/Maps/MapReference.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapReference.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.013** Partir y cerrar la migracion auditada de `game/Maps/MapScripts.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapScripts.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 899 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.014** Cerrar la migracion auditada de `game/Maps/MapUpdater.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapUpdater.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.015** Cerrar la migracion auditada de `game/Maps/MapUpdater.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapUpdater.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.016** Cerrar la migracion auditada de `game/Maps/SpawnData.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/SpawnData.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.017** Partir y cerrar la migracion auditada de `game/Maps/TerrainMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/TerrainMgr.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 877 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.018** Cerrar la migracion auditada de `game/Maps/TerrainMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/TerrainMgr.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.019** Partir y cerrar la migracion auditada de `game/Maps/TransportMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/TransportMgr.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 714 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.020** Cerrar la migracion auditada de `game/Maps/TransportMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/TransportMgr.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.021** Cerrar la migracion auditada de `game/Maps/ZoneScript.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/ZoneScript.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.022** Cerrar la migracion auditada de `game/Maps/ZoneScript.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/ZoneScript.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MAPS.WBS.023** Cerrar la migracion auditada de `game/Maps/enuminfo_SpawnData.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/enuminfo_SpawnData.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numerated for reference in MIGRATION_ROADMAP.md section 5.
 
 Complexity: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>12h, split).

@@ -172,6 +172,33 @@ DBC stores:
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#ENTITIES_VEHICLE.WBS.001** Partir y cerrar la migracion auditada de `game/Entities/Vehicle/Vehicle.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Vehicle/Vehicle.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-data`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 995 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#ENTITIES_VEHICLE.WBS.002** Cerrar la migracion auditada de `game/Entities/Vehicle/Vehicle.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Vehicle/Vehicle.h`
+  Rust target: `crates/wow-world`, `crates/wow-data`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_VEHICLE.WBS.003** Cerrar la migracion auditada de `game/Entities/Vehicle/VehicleDefines.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Vehicle/VehicleDefines.h`
+  Rust target: `crates/wow-world`, `crates/wow-data`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#VEH.1** Define `VehicleEntry` / `VehicleSeatEntry` DBC readers in `wow-data` (L)
 - [ ] **#VEH.2** Port `VehicleFlags`, `PowerType`, `VehicleExitParameters`, `VehicleSpells` to `wow-constants` (L)
 - [ ] **#VEH.3** Define `VehicleSeat`, `VehicleSeatAddon`, `VehicleAccessory`, `VehicleTemplate`, `PassengerInfo` POD types in `wow-world` (L)

@@ -203,6 +203,45 @@ This module does not directly handle opcodes, but its `WriteRecord` is the body-
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#SHARED_DATASTORES.WBS.001** Cerrar la migracion auditada de `shared/DataStores/DB2DatabaseLoader.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/DataStores/DB2DatabaseLoader.cpp`
+  Rust target: `crates/wow-data`, `crates/wow-database`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_DATASTORES.WBS.002** Cerrar la migracion auditada de `shared/DataStores/DB2DatabaseLoader.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/DataStores/DB2DatabaseLoader.h`
+  Rust target: `crates/wow-data`, `crates/wow-database`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_DATASTORES.WBS.003** Cerrar la migracion auditada de `shared/DataStores/DB2Store.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/DataStores/DB2Store.cpp`
+  Rust target: `crates/wow-data`, `crates/wow-database`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_DATASTORES.WBS.004** Cerrar la migracion auditada de `shared/DataStores/DB2Store.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/DataStores/DB2Store.h`
+  Rust target: `crates/wow-data`, `crates/wow-database`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_DATASTORES.WBS.005** Cerrar la migracion auditada de `shared/DataStores/DBStorageIterator.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/DataStores/DBStorageIterator.h`
+  Rust target: `crates/wow-data`, `crates/wow-database`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numera los items para poder referenciarlos desde `MIGRATION_ROADMAP.md` sección 5.
 
 Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>12h, splitear).

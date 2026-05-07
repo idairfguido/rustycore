@@ -233,6 +233,51 @@ None directly. `AccountMgr` is invoked indirectly through:
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#ACCOUNTS.WBS.001** Partir y cerrar la migracion auditada de `game/Accounts/AccountMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Accounts/AccountMgr.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-network`, `crates/bnet-server`, `crates/wow-world`, `crates/wow-constants`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 607 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#ACCOUNTS.WBS.002** Cerrar la migracion auditada de `game/Accounts/AccountMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Accounts/AccountMgr.h`
+  Rust target: `crates/wow-database`, `crates/wow-network`, `crates/bnet-server`, `crates/wow-world`, `crates/wow-constants`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ACCOUNTS.WBS.003** Cerrar la migracion auditada de `game/Accounts/BattlenetAccountMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Accounts/BattlenetAccountMgr.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-network`, `crates/bnet-server`, `crates/wow-world`, `crates/wow-constants`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ACCOUNTS.WBS.004** Cerrar la migracion auditada de `game/Accounts/BattlenetAccountMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Accounts/BattlenetAccountMgr.h`
+  Rust target: `crates/wow-database`, `crates/wow-network`, `crates/bnet-server`, `crates/wow-world`, `crates/wow-constants`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ACCOUNTS.WBS.005** Cerrar la migracion auditada de `game/Accounts/RBAC.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Accounts/RBAC.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-network`, `crates/bnet-server`, `crates/wow-world`, `crates/wow-constants`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ACCOUNTS.WBS.006** Partir y cerrar la migracion auditada de `game/Accounts/RBAC.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Accounts/RBAC.h`
+  Rust target: `crates/wow-database`, `crates/wow-network`, `crates/bnet-server`, `crates/wow-world`, `crates/wow-constants`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1018 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numera los items para poder referenciarlos desde `MIGRATION_ROADMAP.md` sección 5.
 
 - [ ] **#ACC.1** Crear `crates/wow-account/` (nuevo crate, layer L1) con módulos `account_mgr`, `bnet_account_mgr`, `rbac`. (M)

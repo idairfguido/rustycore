@@ -266,6 +266,27 @@ DBC/DB2 stores read by Corpse:
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#ENTITIES_CORPSE.WBS.001** Cerrar la migracion auditada de `game/Entities/Corpse/Corpse.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Corpse/Corpse.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-packet`, `crates/wow-database`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_CORPSE.WBS.002** Cerrar la migracion auditada de `game/Entities/Corpse/Corpse.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Corpse/Corpse.h`
+  Rust target: `crates/wow-world`, `crates/wow-packet`, `crates/wow-database`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#COR.1** Define `CorpseType` and `CorpseFlags` enums in `wow-constants` (L)
 - [ ] **#COR.2** Define `Corpse` struct in `wow-world` (owner_guid, party_guid, guild_guid, display_id, items: [u32; 19], race, class, sex, flags, dynamic_flags, faction_template, customizations: Vec<ChrCustomizationChoice>, time, type_, cell_coord, position, map_id, instance_id, phase_shift) (M)
 - [ ] **#COR.3** Add 6 prepared statements to `wow-database`: `CHAR_INS_CORPSE`, `CHAR_INS_CORPSE_PHASES`, `CHAR_INS_CORPSE_CUSTOMIZATIONS`, `CHAR_DEL_CORPSE`, `CHAR_DEL_CORPSE_PHASES`, `CHAR_DEL_CORPSE_CUSTOMIZATIONS` plus the 3 SELECTs for load (M)

@@ -487,7 +487,7 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
 - [x] **#REFINE.017** Inventario `scripts/*` en `docs/migration/inventory/cpp-scripts-tree.md`.
 - [x] **#REFINE.020** Cobertura canonica de ficheros C++ en cada doc de modulo.
 - [x] **#REFINE.021** Rust target exacto por cada doc de modulo (`docs/migration/inventory/r2-rust-targets.md`).
-- [ ] **#REFINE.022** WBS granular por cada doc de modulo.
+- [x] **#REFINE.022** WBS granular por cada doc de modulo (`docs/migration/inventory/r2-task-wbs.md`).
 - [ ] **#REFINE.023** Divergencias/bugs conocidos con evidencia C++.
 - [ ] **#REFINE.024** Tests required por modulo.
 - [ ] **#REFINE.025** Sistemas post-WoLK/desactivados marcados sin omision silenciosa.

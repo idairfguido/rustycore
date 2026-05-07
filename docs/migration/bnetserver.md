@@ -263,6 +263,153 @@ HTTP routes (verb + path):
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#BNETSERVER.WBS.001** Cerrar la migracion auditada de `bnetserver/Main.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/Main.cpp`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.002** Cerrar la migracion auditada de `bnetserver/REST/LoginHttpSession.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/REST/LoginHttpSession.cpp`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.003** Cerrar la migracion auditada de `bnetserver/REST/LoginHttpSession.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/REST/LoginHttpSession.h`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.004** Partir y cerrar la migracion auditada de `bnetserver/REST/LoginRESTService.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/REST/LoginRESTService.cpp`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 825 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.005** Cerrar la migracion auditada de `bnetserver/REST/LoginRESTService.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/REST/LoginRESTService.h`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.006** Partir y cerrar la migracion auditada de `bnetserver/Server/Session.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/Server/Session.cpp`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 842 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.007** Cerrar la migracion auditada de `bnetserver/Server/Session.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/Server/Session.h`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.008** Cerrar la migracion auditada de `bnetserver/Server/SessionManager.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/Server/SessionManager.cpp`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.009** Cerrar la migracion auditada de `bnetserver/Server/SessionManager.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/Server/SessionManager.h`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.010** Cerrar la migracion auditada de `bnetserver/Server/SslContext.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/Server/SslContext.cpp`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.011** Cerrar la migracion auditada de `bnetserver/Server/SslContext.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/Server/SslContext.h`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.012** Cerrar la migracion auditada de `bnetserver/Services/AccountService.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/Services/AccountService.cpp`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.013** Cerrar la migracion auditada de `bnetserver/Services/AccountService.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/Services/AccountService.h`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.014** Cerrar la migracion auditada de `bnetserver/Services/AuthenticationService.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/Services/AuthenticationService.cpp`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.015** Cerrar la migracion auditada de `bnetserver/Services/AuthenticationService.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/Services/AuthenticationService.h`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.016** Cerrar la migracion auditada de `bnetserver/Services/ConnectionService.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/Services/ConnectionService.cpp`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.017** Cerrar la migracion auditada de `bnetserver/Services/ConnectionService.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/Services/ConnectionService.h`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.018** Cerrar la migracion auditada de `bnetserver/Services/GameUtilitiesService.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/Services/GameUtilitiesService.cpp`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.019** Cerrar la migracion auditada de `bnetserver/Services/GameUtilitiesService.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/Services/GameUtilitiesService.h`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.020** Cerrar la migracion auditada de `bnetserver/Services/Service.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/Services/Service.h`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.021** Cerrar la migracion auditada de `bnetserver/Services/ServiceDispatcher.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/Services/ServiceDispatcher.cpp`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.022** Cerrar la migracion auditada de `bnetserver/Services/ServiceDispatcher.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/Services/ServiceDispatcher.h`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BNETSERVER.WBS.023** Cerrar la migracion auditada de `bnetserver/resource.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/bnetserver/resource.h`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#BNET.1** Add CLI parser (`clap`): `--config`, `--config-dir`, `--update-databases-only`, `--version`, `--help`. (L)
 - [ ] **#BNET.2** Read `CertificatesFile` from config; support both PEM-bundle (`pkcs12`-equivalent) and the pair-of-files form. Fallback to current hardcoded names with a warning. (M)
 - [ ] **#BNET.3** Implement DB keep-alive timer: every `MaxPingTime` minutes (default 30) issue a `SELECT 1` against `LoginDatabase`. (L)

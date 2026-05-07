@@ -128,6 +128,27 @@ DynamicObjects are pushed via the generic `SMSG_UPDATE_OBJECT` path (object type
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#ENTITIES_DYNAMICOBJECT.WBS.001** Cerrar la migracion auditada de `game/Entities/DynamicObject/DynamicObject.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/DynamicObject/DynamicObject.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-spell`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_DYNAMICOBJECT.WBS.002** Cerrar la migracion auditada de `game/Entities/DynamicObject/DynamicObject.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/DynamicObject/DynamicObject.h`
+  Rust target: `crates/wow-world`, `crates/wow-spell`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#DYNOBJ.1** Port `DynamicObjectType` enum to `wow-constants` (L)
 - [ ] **#DYNOBJ.2** Define `DynamicObject` struct in `wow-world/src/entities/dynamic_object.rs` with caster GUID, spell id, radius, duration, type, aura ref (L)
 - [ ] **#DYNOBJ.3** Implement `create` / `update_tick` / `remove` lifecycle (M)

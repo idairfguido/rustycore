@@ -239,6 +239,129 @@ Grids module **does not originate** any packets directly. All object creation/de
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#GRIDS.WBS.001** Cerrar la migracion auditada de `game/Grids/Cells/Cell.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/Cells/Cell.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GRIDS.WBS.002** Cerrar la migracion auditada de `game/Grids/Cells/CellImpl.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/Cells/CellImpl.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GRIDS.WBS.003** Cerrar la migracion auditada de `game/Grids/Dynamic/TypeContainer.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/Dynamic/TypeContainer.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GRIDS.WBS.004** Cerrar la migracion auditada de `game/Grids/Dynamic/TypeContainerFunctions.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/Dynamic/TypeContainerFunctions.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GRIDS.WBS.005** Cerrar la migracion auditada de `game/Grids/Dynamic/TypeContainerVisitor.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/Dynamic/TypeContainerVisitor.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GRIDS.WBS.006** Cerrar la migracion auditada de `game/Grids/Grid.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/Grid.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GRIDS.WBS.007** Cerrar la migracion auditada de `game/Grids/GridDefines.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/GridDefines.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GRIDS.WBS.008** Cerrar la migracion auditada de `game/Grids/GridLoader.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/GridLoader.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GRIDS.WBS.009** Cerrar la migracion auditada de `game/Grids/GridRefManager.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/GridRefManager.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GRIDS.WBS.010** Cerrar la migracion auditada de `game/Grids/GridReference.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/GridReference.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GRIDS.WBS.011** Cerrar la migracion auditada de `game/Grids/GridStates.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/GridStates.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GRIDS.WBS.012** Cerrar la migracion auditada de `game/Grids/GridStates.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/GridStates.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GRIDS.WBS.013** Cerrar la migracion auditada de `game/Grids/NGrid.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/NGrid.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GRIDS.WBS.014** Cerrar la migracion auditada de `game/Grids/NGrid.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/NGrid.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GRIDS.WBS.015** Cerrar la migracion auditada de `game/Grids/Notifiers/GridNotifiers.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/Notifiers/GridNotifiers.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GRIDS.WBS.016** Partir y cerrar la migracion auditada de `game/Grids/Notifiers/GridNotifiers.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/Notifiers/GridNotifiers.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1804 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#GRIDS.WBS.017** Cerrar la migracion auditada de `game/Grids/Notifiers/GridNotifiersImpl.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/Notifiers/GridNotifiersImpl.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GRIDS.WBS.018** Cerrar la migracion auditada de `game/Grids/ObjectGridLoader.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/ObjectGridLoader.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GRIDS.WBS.019** Cerrar la migracion auditada de `game/Grids/ObjectGridLoader.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/ObjectGridLoader.h`
+  Rust target: `crates/wow-world`, `crates/wow-map`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numerated for reference in MIGRATION_ROADMAP.md section 5.
 
 Complexity: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>12h, split).

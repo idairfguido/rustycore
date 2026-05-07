@@ -147,6 +147,27 @@ Used to tell clients to drop their client-side name caches and re-query for that
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#CACHE.WBS.001** Cerrar la migracion auditada de `game/Cache/CharacterCache.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Cache/CharacterCache.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-cache`, `crates/wow-world`, `crates/wow-social`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#CACHE.WBS.002** Cerrar la migracion auditada de `game/Cache/CharacterCache.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Cache/CharacterCache.h`
+  Rust target: `crates/wow-database`, `crates/wow-cache`, `crates/wow-world`, `crates/wow-social`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#CCH.1** Define `CharacterCacheEntry` struct (mirror C++ exactly: `guid: ObjectGuid`, `name: String`, `account_id: u32`, `class_id: u8`, `race: u8`, `sex: u8`, `level: u8`, `guild_id: u64`, `arena_team_id: [u32; 3]`, `is_deleted: bool`). (complexity: **L**)
 - [ ] **#CCH.2** Implement `CharacterCache` as `Arc<RwLock<Inner>>` or `DashMap`-based — `by_guid: HashMap<ObjectGuid, CharacterCacheEntry>` + `by_name_lower: HashMap<String, ObjectGuid>` (use lowercase key — see gotcha). Avoid the C++ raw-pointer trick. (complexity: **M**)
 - [ ] **#CCH.3** Implement `load_from_db(pool)` running the startup SELECT and populating both maps; deleted characters go into `by_guid` only. (complexity: **L**)

@@ -176,6 +176,93 @@ N/A — `WorldSocket` (en `game/Server`) origina opcodes; Networking solo transp
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#SHARED_NETWORKING.WBS.001** Cerrar la migracion auditada de `shared/Networking/AsyncAcceptor.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Networking/AsyncAcceptor.h`
+  Rust target: `crates/wow-network`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_NETWORKING.WBS.002** Cerrar la migracion auditada de `shared/Networking/Http/BaseHttpSocket.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Networking/Http/BaseHttpSocket.cpp`
+  Rust target: `crates/wow-network`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_NETWORKING.WBS.003** Cerrar la migracion auditada de `shared/Networking/Http/BaseHttpSocket.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Networking/Http/BaseHttpSocket.h`
+  Rust target: `crates/wow-network`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_NETWORKING.WBS.004** Cerrar la migracion auditada de `shared/Networking/Http/HttpCommon.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Networking/Http/HttpCommon.h`
+  Rust target: `crates/wow-network`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_NETWORKING.WBS.005** Cerrar la migracion auditada de `shared/Networking/Http/HttpService.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Networking/Http/HttpService.cpp`
+  Rust target: `crates/wow-network`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_NETWORKING.WBS.006** Cerrar la migracion auditada de `shared/Networking/Http/HttpService.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Networking/Http/HttpService.h`
+  Rust target: `crates/wow-network`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_NETWORKING.WBS.007** Cerrar la migracion auditada de `shared/Networking/Http/HttpSessionState.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Networking/Http/HttpSessionState.h`
+  Rust target: `crates/wow-network`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_NETWORKING.WBS.008** Cerrar la migracion auditada de `shared/Networking/Http/HttpSocket.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Networking/Http/HttpSocket.h`
+  Rust target: `crates/wow-network`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_NETWORKING.WBS.009** Cerrar la migracion auditada de `shared/Networking/Http/HttpSslSocket.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Networking/Http/HttpSslSocket.h`
+  Rust target: `crates/wow-network`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_NETWORKING.WBS.010** Cerrar la migracion auditada de `shared/Networking/NetworkThread.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Networking/NetworkThread.h`
+  Rust target: `crates/wow-network`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_NETWORKING.WBS.011** Cerrar la migracion auditada de `shared/Networking/Socket.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Networking/Socket.h`
+  Rust target: `crates/wow-network`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_NETWORKING.WBS.012** Cerrar la migracion auditada de `shared/Networking/SocketMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Networking/SocketMgr.h`
+  Rust target: `crates/wow-network`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_NETWORKING.WBS.013** Cerrar la migracion auditada de `shared/Networking/SslSocket.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Networking/SslSocket.h`
+  Rust target: `crates/wow-network`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#NET.1** Tests unitarios para `WorldSocket` FSM (5 estados, edge cases). (M)
 - [ ] **#NET.2** Audit `ServerCounter`/`ClientCounter` matching exacto con C++. (M)
 - [ ] **#NET.3** Regression test: header encryption round-trip post-CMSG_AUTH_SESSION. (M)

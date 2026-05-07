@@ -329,6 +329,75 @@ DBC/DB2 stores read:
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#GROUPS.WBS.001** Partir y cerrar la migracion auditada de `game/Groups/Group.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Groups/Group.cpp`
+  Rust target: `crates/wow-network/src/group_registry.rs`, `crates/wow-world/src/handlers/group.rs`, `crates/wow-packet/src/packets/party.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1894 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#GROUPS.WBS.002** Cerrar la migracion auditada de `game/Groups/Group.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Groups/Group.h`
+  Rust target: `crates/wow-network/src/group_registry.rs`, `crates/wow-world/src/handlers/group.rs`, `crates/wow-packet/src/packets/party.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GROUPS.WBS.003** Cerrar la migracion auditada de `game/Groups/GroupInstanceRefManager.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Groups/GroupInstanceRefManager.h`
+  Rust target: `crates/wow-network/src/group_registry.rs`, `crates/wow-world/src/handlers/group.rs`, `crates/wow-packet/src/packets/party.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GROUPS.WBS.004** Cerrar la migracion auditada de `game/Groups/GroupInstanceReference.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Groups/GroupInstanceReference.cpp`
+  Rust target: `crates/wow-network/src/group_registry.rs`, `crates/wow-world/src/handlers/group.rs`, `crates/wow-packet/src/packets/party.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GROUPS.WBS.005** Cerrar la migracion auditada de `game/Groups/GroupInstanceReference.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Groups/GroupInstanceReference.h`
+  Rust target: `crates/wow-network/src/group_registry.rs`, `crates/wow-world/src/handlers/group.rs`, `crates/wow-packet/src/packets/party.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GROUPS.WBS.006** Cerrar la migracion auditada de `game/Groups/GroupMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Groups/GroupMgr.cpp`
+  Rust target: `crates/wow-network/src/group_registry.rs`, `crates/wow-world/src/handlers/group.rs`, `crates/wow-packet/src/packets/party.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GROUPS.WBS.007** Cerrar la migracion auditada de `game/Groups/GroupMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Groups/GroupMgr.h`
+  Rust target: `crates/wow-network/src/group_registry.rs`, `crates/wow-world/src/handlers/group.rs`, `crates/wow-packet/src/packets/party.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GROUPS.WBS.008** Cerrar la migracion auditada de `game/Groups/GroupRefManager.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Groups/GroupRefManager.h`
+  Rust target: `crates/wow-network/src/group_registry.rs`, `crates/wow-world/src/handlers/group.rs`, `crates/wow-packet/src/packets/party.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GROUPS.WBS.009** Cerrar la migracion auditada de `game/Groups/GroupReference.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Groups/GroupReference.cpp`
+  Rust target: `crates/wow-network/src/group_registry.rs`, `crates/wow-world/src/handlers/group.rs`, `crates/wow-packet/src/packets/party.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GROUPS.WBS.010** Cerrar la migracion auditada de `game/Groups/GroupReference.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Groups/GroupReference.h`
+  Rust target: `crates/wow-network/src/group_registry.rs`, `crates/wow-world/src/handlers/group.rs`, `crates/wow-packet/src/packets/party.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#GROUPS.1** Replace `GroupInfo.group_guid: u64` with proper `ObjectGuid` (HighGuid::Party); fix all wire serialisations. Complejidad: **M**
 - [ ] **#GROUPS.2** Implement `CMSG_PARTY_UNINVITE` — kick by guid, leader/assistant only, with `RemoveMethod::KICK`. Complejidad: **M**
 - [ ] **#GROUPS.3** Implement `CMSG_SET_PARTY_LEADER` — explicit leader transfer; emit `SMSG_GROUP_NEW_LEADER`. Complejidad: **L**

@@ -350,6 +350,39 @@ DBC/DB2 stores read:
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#GUILDS.WBS.001** Partir y cerrar la migracion auditada de `game/Guilds/Guild.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Guilds/Guild.cpp`
+  Rust target: `crates/wow-guild`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 3656 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#GUILDS.WBS.002** Partir y cerrar la migracion auditada de `game/Guilds/Guild.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Guilds/Guild.h`
+  Rust target: `crates/wow-guild`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 956 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#GUILDS.WBS.003** Partir y cerrar la migracion auditada de `game/Guilds/GuildMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Guilds/GuildMgr.cpp`
+  Rust target: `crates/wow-guild`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 565 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#GUILDS.WBS.004** Cerrar la migracion auditada de `game/Guilds/GuildMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Guilds/GuildMgr.h`
+  Rust target: `crates/wow-guild`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#GUILDS.1** Create new crate `crates/wow-guild` with `Cargo.toml`, register in workspace. Complejidad: **L**
 - [ ] **#GUILDS.2** Define enums in `wow-constants`: `GuildRankRights` (u32 bitflags!), `GuildBankRights` (u8 bitflags!), `GuildCommandType` (u8 enum), `GuildCommandError` (u8 enum, ~30 variants), `GuildEventLogTypes`, `GuildBankEventLogTypes`, `GuildEmblemError`, `GuildMemberFlags`, `GuildNews`, `GuildRankId(u8)`, `GuildRankOrder(u8)`. Complejidad: **M**
 - [ ] **#GUILDS.3** Define `GuildMisc` constants (`BANK_MAX_TABS=8`, `BANK_MAX_SLOTS=98`, `RANKS_MIN=2`/`MAX=10`, `RANK_NONE=0xFF`, `BANK_MONEY_LIMIT=100_000_000_000`). Complejidad: **L**

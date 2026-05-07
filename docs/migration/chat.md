@@ -280,6 +280,141 @@ DBC/DB2 stores read:
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#CHAT.WBS.001** Partir y cerrar la migracion auditada de `game/Chat/Channels/Channel.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/Channels/Channel.cpp`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1026 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.002** Cerrar la migracion auditada de `game/Chat/Channels/Channel.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/Channels/Channel.h`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.003** Cerrar la migracion auditada de `game/Chat/Channels/ChannelAppenders.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/Channels/ChannelAppenders.h`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.004** Cerrar la migracion auditada de `game/Chat/Channels/ChannelMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/Channels/ChannelMgr.cpp`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.005** Cerrar la migracion auditada de `game/Chat/Channels/ChannelMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/Channels/ChannelMgr.h`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.006** Cerrar la migracion auditada de `game/Chat/Channels/enuminfo_Channel.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/Channels/enuminfo_Channel.cpp`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.007** Partir y cerrar la migracion auditada de `game/Chat/Chat.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/Chat.cpp`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 795 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.008** Cerrar la migracion auditada de `game/Chat/Chat.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/Chat.h`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.009** Cerrar la migracion auditada de `game/Chat/ChatCommands/ChatCommand.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/ChatCommands/ChatCommand.cpp`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.010** Cerrar la migracion auditada de `game/Chat/ChatCommands/ChatCommand.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/ChatCommands/ChatCommand.h`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.011** Cerrar la migracion auditada de `game/Chat/ChatCommands/ChatCommandArgs.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/ChatCommands/ChatCommandArgs.cpp`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.012** Cerrar la migracion auditada de `game/Chat/ChatCommands/ChatCommandArgs.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/ChatCommands/ChatCommandArgs.h`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.013** Cerrar la migracion auditada de `game/Chat/ChatCommands/ChatCommandHelpers.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/ChatCommands/ChatCommandHelpers.cpp`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.014** Cerrar la migracion auditada de `game/Chat/ChatCommands/ChatCommandHelpers.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/ChatCommands/ChatCommandHelpers.h`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.015** Cerrar la migracion auditada de `game/Chat/ChatCommands/ChatCommandTags.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/ChatCommands/ChatCommandTags.cpp`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.016** Cerrar la migracion auditada de `game/Chat/ChatCommands/ChatCommandTags.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/ChatCommands/ChatCommandTags.h`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.017** Cerrar la migracion auditada de `game/Chat/HyperlinkTags.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/HyperlinkTags.cpp`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.018** Partir y cerrar la migracion auditada de `game/Chat/Hyperlinks.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/Hyperlinks.cpp`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 730 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.019** Partir y cerrar la migracion auditada de `game/Chat/Hyperlinks.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/Hyperlinks.h`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 549 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.020** Cerrar la migracion auditada de `game/Chat/LanguageMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/LanguageMgr.cpp`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#CHAT.WBS.021** Cerrar la migracion auditada de `game/Chat/LanguageMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Chat/LanguageMgr.h`
+  Rust target: `crates/wow-chat`, `crates/wow-packet`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#CHAT.1** Move `ChatMsg` enum to `wow-constants` (full 66-value parity with `SharedDefines.h`). Complejidad: **L**
 - [ ] **#CHAT.2** Move `Language` enum + `ChatFlags` enum to `wow-constants`. Complejidad: **L**
 - [ ] **#CHAT.3** Fix Party/Raid/Guild/Officer/RaidWarning/InstanceChat routing — use `GroupRegistry` + (future) `GuildRegistry` instead of proximity. Complejidad: **M**

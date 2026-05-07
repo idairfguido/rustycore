@@ -500,6 +500,153 @@ Categorised; only headline opcodes listed.
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#ENTITIES_PLAYER.WBS.001** Cerrar la migracion auditada de `game/Entities/Player/CUFProfile.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/CUFProfile.h`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.002** Cerrar la migracion auditada de `game/Entities/Player/CinematicMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/CinematicMgr.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.003** Cerrar la migracion auditada de `game/Entities/Player/CinematicMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/CinematicMgr.h`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.004** Partir y cerrar la migracion auditada de `game/Entities/Player/CollectionMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/CollectionMgr.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 939 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.005** Cerrar la migracion auditada de `game/Entities/Player/CollectionMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/CollectionMgr.h`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.006** Cerrar la migracion auditada de `game/Entities/Player/EquipmentSet.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/EquipmentSet.h`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.007** Cerrar la migracion auditada de `game/Entities/Player/KillRewarder.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/KillRewarder.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.008** Cerrar la migracion auditada de `game/Entities/Player/KillRewarder.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/KillRewarder.h`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.009** Partir y cerrar la migracion auditada de `game/Entities/Player/Player.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 29358 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.010** Partir y cerrar la migracion auditada de `game/Entities/Player/Player.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.h`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 3189 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.011** Cerrar la migracion auditada de `game/Entities/Player/PlayerTaxi.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/PlayerTaxi.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.012** Cerrar la migracion auditada de `game/Entities/Player/PlayerTaxi.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/PlayerTaxi.h`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.013** Cerrar la migracion auditada de `game/Entities/Player/RestMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/RestMgr.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.014** Cerrar la migracion auditada de `game/Entities/Player/RestMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/RestMgr.h`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.015** Cerrar la migracion auditada de `game/Entities/Player/SceneDefines.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/SceneDefines.h`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.016** Cerrar la migracion auditada de `game/Entities/Player/SceneMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/SceneMgr.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.017** Cerrar la migracion auditada de `game/Entities/Player/SceneMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/SceneMgr.h`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.018** Cerrar la migracion auditada de `game/Entities/Player/SocialMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/SocialMgr.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.019** Cerrar la migracion auditada de `game/Entities/Player/SocialMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/SocialMgr.h`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.020** Cerrar la migracion auditada de `game/Entities/Player/TradeData.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/TradeData.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.021** Cerrar la migracion auditada de `game/Entities/Player/TradeData.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/TradeData.h`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.022** Cerrar la migracion auditada de `game/Entities/Taxi/TaxiPathGraph.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Taxi/TaxiPathGraph.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_PLAYER.WBS.023** Cerrar la migracion auditada de `game/Entities/Taxi/TaxiPathGraph.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Taxi/TaxiPathGraph.h`
+  Rust target: `crates/wow-world`, `crates/wow-entities`, `crates/wow-database`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-loot`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numbered for cross-reference from `MIGRATION_ROADMAP.md` §5. Complexity: **L** <1h, **M** 1-4h, **H** 4-12h, **XL** >12h.
 
 ### 9.A Foundation — extract a `Player` aggregate

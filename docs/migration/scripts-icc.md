@@ -225,6 +225,117 @@ A future Rust port writes these via existing serializers in `wow-packet` — no 
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#SCRIPTS_ICC.WBS.001** Partir y cerrar la migracion auditada de `scripts/Northrend/IcecrownCitadel/boss_blood_prince_council.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/IcecrownCitadel/boss_blood_prince_council.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-world`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1341 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ICC.WBS.002** Partir y cerrar la migracion auditada de `scripts/Northrend/IcecrownCitadel/boss_blood_queen_lana_thel.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/IcecrownCitadel/boss_blood_queen_lana_thel.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-world`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 778 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ICC.WBS.003** Partir y cerrar la migracion auditada de `scripts/Northrend/IcecrownCitadel/boss_deathbringer_saurfang.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/IcecrownCitadel/boss_deathbringer_saurfang.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-world`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1257 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ICC.WBS.004** Cerrar la migracion auditada de `scripts/Northrend/IcecrownCitadel/boss_festergut.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/IcecrownCitadel/boss_festergut.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-world`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ICC.WBS.005** Partir y cerrar la migracion auditada de `scripts/Northrend/IcecrownCitadel/boss_icecrown_gunship_battle.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/IcecrownCitadel/boss_icecrown_gunship_battle.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-world`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2243 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ICC.WBS.006** Partir y cerrar la migracion auditada de `scripts/Northrend/IcecrownCitadel/boss_lady_deathwhisper.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/IcecrownCitadel/boss_lady_deathwhisper.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-world`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1081 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ICC.WBS.007** Partir y cerrar la migracion auditada de `scripts/Northrend/IcecrownCitadel/boss_lord_marrowgar.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/IcecrownCitadel/boss_lord_marrowgar.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-world`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 697 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ICC.WBS.008** Partir y cerrar la migracion auditada de `scripts/Northrend/IcecrownCitadel/boss_professor_putricide.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/IcecrownCitadel/boss_professor_putricide.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-world`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1488 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ICC.WBS.009** Partir y cerrar la migracion auditada de `scripts/Northrend/IcecrownCitadel/boss_rotface.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/IcecrownCitadel/boss_rotface.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-world`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 796 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ICC.WBS.010** Partir y cerrar la migracion auditada de `scripts/Northrend/IcecrownCitadel/boss_sindragosa.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/IcecrownCitadel/boss_sindragosa.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-world`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1526 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ICC.WBS.011** Partir y cerrar la migracion auditada de `scripts/Northrend/IcecrownCitadel/boss_sister_svalna.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/IcecrownCitadel/boss_sister_svalna.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-world`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1487 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ICC.WBS.012** Partir y cerrar la migracion auditada de `scripts/Northrend/IcecrownCitadel/boss_the_lich_king.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/IcecrownCitadel/boss_the_lich_king.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-world`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2815 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ICC.WBS.013** Partir y cerrar la migracion auditada de `scripts/Northrend/IcecrownCitadel/boss_valithria_dreamwalker.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/IcecrownCitadel/boss_valithria_dreamwalker.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-world`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1284 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ICC.WBS.014** Cerrar la migracion auditada de `scripts/Northrend/IcecrownCitadel/go_icecrown_citadel_teleport.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/IcecrownCitadel/go_icecrown_citadel_teleport.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-world`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ICC.WBS.015** Partir y cerrar la migracion auditada de `scripts/Northrend/IcecrownCitadel/icecrown_citadel.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/IcecrownCitadel/icecrown_citadel.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-world`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1596 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ICC.WBS.016** Partir y cerrar la migracion auditada de `scripts/Northrend/IcecrownCitadel/icecrown_citadel.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/IcecrownCitadel/icecrown_citadel.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-world`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 578 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ICC.WBS.017** Partir y cerrar la migracion auditada de `scripts/Northrend/IcecrownCitadel/instance_icecrown_citadel.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/IcecrownCitadel/instance_icecrown_citadel.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-world`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1420 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numbered for cross-reference from `MIGRATION_ROADMAP.md`. Complexity: **L** (<1h), **M** (1-4h), **H** (4-12h), **XL** (>12h, split before starting).
 
 Pre-requisite umbrella tasks (must precede any boss):

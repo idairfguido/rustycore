@@ -401,6 +401,21 @@ Los effects que solo emiten state changes (`EffectApplyAura`, `EffectModifyCoold
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#SPELLS_EFFECTS.WBS.001** Partir y cerrar la migracion auditada de `game/Spells/SpellEffects.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Spells/SpellEffects.cpp`
+  Rust target: `crates/wow-spell`, `crates/wow-packet`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 5956 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numerados como `#SPELLS-EFFECTS.N` para referencia desde `MIGRATION_ROADMAP.md`. Complejidad: **L** <1h, **M** 1-4h, **H** 4-12h, **XL** >12h.
 
 - [ ] **#SPELLS-EFFECTS.1** Definir `enum SpellEffectName` con las ~151 variantes (`#[repr(u32)]`) en `crates/wow-spell/src/effects/types.rs`. Marcar `RetailOnly_NNN` los que son post-WoLK (id > 270 ish) (M)

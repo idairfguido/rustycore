@@ -867,6 +867,3831 @@ There is no opcode used **only** by scripts — they reuse the entire game proto
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#SCRIPTS.WBS.001** Partir y cerrar la migracion auditada de `scripts/Battlefield/BattlefieldWG.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Battlefield/BattlefieldWG.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1857 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.002** Partir y cerrar la migracion auditada de `scripts/Battlefield/BattlefieldWG.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Battlefield/BattlefieldWG.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 551 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.003** Cerrar la migracion auditada de `scripts/Battlefield/battlefield_script_loader.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Battlefield/battlefield_script_loader.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.004** Cerrar la migracion auditada de `scripts/Custom/custom_script_loader.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Custom/custom_script_loader.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.005** Cerrar la migracion auditada de `scripts/EasternKingdoms/AlteracValley/alterac_valley.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/AlteracValley/alterac_valley.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.006** Cerrar la migracion auditada de `scripts/EasternKingdoms/AlteracValley/boss_balinda.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/AlteracValley/boss_balinda.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.007** Cerrar la migracion auditada de `scripts/EasternKingdoms/AlteracValley/boss_drekthar.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/AlteracValley/boss_drekthar.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.008** Cerrar la migracion auditada de `scripts/EasternKingdoms/AlteracValley/boss_galvangar.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/AlteracValley/boss_galvangar.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.009** Cerrar la migracion auditada de `scripts/EasternKingdoms/AlteracValley/boss_vanndar.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/AlteracValley/boss_vanndar.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.010** Cerrar la migracion auditada de `scripts/EasternKingdoms/ArathiBasin/arathi_basin.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ArathiBasin/arathi_basin.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.011** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/blackrock_depths.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/blackrock_depths.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 644 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.012** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/blackrock_depths.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/blackrock_depths.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.013** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/boss_ambassador_flamelash.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/boss_ambassador_flamelash.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.014** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/boss_coren_direbrew.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/boss_coren_direbrew.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 583 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.015** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/boss_emperor_dagran_thaurissan.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/boss_emperor_dagran_thaurissan.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.016** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/boss_general_angerforge.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/boss_general_angerforge.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.017** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/boss_high_interrogator_gerstahn.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/boss_high_interrogator_gerstahn.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.018** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/boss_magmus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/boss_magmus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.019** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/boss_moira_bronzebeard.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/boss_moira_bronzebeard.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.020** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/boss_tomb_of_seven.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/boss_tomb_of_seven.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.021** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/instance_blackrock_depths.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockDepths/instance_blackrock_depths.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.022** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/blackrock_spire.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/blackrock_spire.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.023** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_drakkisath.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_drakkisath.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.024** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_gizrul_the_slavener.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_gizrul_the_slavener.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.025** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_gyth.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_gyth.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.026** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_halycon.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_halycon.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.027** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_highlord_omokk.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_highlord_omokk.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.028** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_lord_valthalak.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_lord_valthalak.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.029** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_mother_smolderweb.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_mother_smolderweb.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.030** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_overlord_wyrmthalak.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_overlord_wyrmthalak.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.031** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_pyroguard_emberseer.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_pyroguard_emberseer.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.032** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_quartermaster_zigris.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_quartermaster_zigris.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.033** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_rend_blackhand.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_rend_blackhand.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.034** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_shadow_hunter_voshgajin.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_shadow_hunter_voshgajin.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.035** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_the_beast.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_the_beast.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.036** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_urok_doomhowl.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_urok_doomhowl.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.037** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_warmaster_voone.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/boss_warmaster_voone.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.038** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/instance_blackrock_spire.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackrockSpire/instance_blackrock_spire.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 640 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.039** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/blackwing_lair.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/blackwing_lair.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.040** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/boss_broodlord_lashlayer.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/boss_broodlord_lashlayer.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.041** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/boss_chromaggus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/boss_chromaggus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.042** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/boss_ebonroc.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/boss_ebonroc.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.043** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/boss_firemaw.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/boss_firemaw.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.044** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/boss_flamegor.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/boss_flamegor.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.045** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/boss_nefarian.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/boss_nefarian.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 584 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.046** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/boss_razorgore.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/boss_razorgore.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.047** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/boss_vaelastrasz.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/boss_vaelastrasz.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.048** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/instance_blackwing_lair.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/BlackwingLair/instance_blackwing_lair.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.049** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_baron_geddon.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_baron_geddon.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.050** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_garr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_garr.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.051** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_gehennas.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_gehennas.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.052** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_golemagg.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_golemagg.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.053** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_lucifron.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_lucifron.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.054** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_magmadar.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_magmadar.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.055** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_majordomo_executus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_majordomo_executus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.056** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_ragnaros.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_ragnaros.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.057** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_shazzrah.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_shazzrah.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.058** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_sulfuron_harbinger.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/MoltenCore/boss_sulfuron_harbinger.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.059** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/MoltenCore/instance_molten_core.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/MoltenCore/instance_molten_core.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.060** Cerrar la migracion auditada de `scripts/EasternKingdoms/BlackrockMountain/MoltenCore/molten_core.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/BlackrockMountain/MoltenCore/molten_core.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.061** Cerrar la migracion auditada de `scripts/EasternKingdoms/Deadmines/boss_mr_smite.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Deadmines/boss_mr_smite.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.062** Cerrar la migracion auditada de `scripts/EasternKingdoms/Deadmines/deadmines.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Deadmines/deadmines.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.063** Cerrar la migracion auditada de `scripts/EasternKingdoms/Deadmines/deadmines.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Deadmines/deadmines.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.064** Cerrar la migracion auditada de `scripts/EasternKingdoms/Deadmines/instance_deadmines.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Deadmines/instance_deadmines.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.065** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/Gnomeregan/gnomeregan.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Gnomeregan/gnomeregan.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 547 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.066** Cerrar la migracion auditada de `scripts/EasternKingdoms/Gnomeregan/gnomeregan.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Gnomeregan/gnomeregan.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.067** Cerrar la migracion auditada de `scripts/EasternKingdoms/Gnomeregan/instance_gnomeregan.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Gnomeregan/instance_gnomeregan.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.068** Cerrar la migracion auditada de `scripts/EasternKingdoms/Karazhan/boss_curator.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Karazhan/boss_curator.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.069** Cerrar la migracion auditada de `scripts/EasternKingdoms/Karazhan/boss_maiden_of_virtue.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Karazhan/boss_maiden_of_virtue.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.070** Cerrar la migracion auditada de `scripts/EasternKingdoms/Karazhan/boss_midnight.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Karazhan/boss_midnight.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.071** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/Karazhan/boss_moroes.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Karazhan/boss_moroes.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 817 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.072** Cerrar la migracion auditada de `scripts/EasternKingdoms/Karazhan/boss_netherspite.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Karazhan/boss_netherspite.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.073** Cerrar la migracion auditada de `scripts/EasternKingdoms/Karazhan/boss_nightbane.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Karazhan/boss_nightbane.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.074** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/Karazhan/boss_prince_malchezaar.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Karazhan/boss_prince_malchezaar.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 583 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.075** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/Karazhan/boss_shade_of_aran.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Karazhan/boss_shade_of_aran.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 607 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.076** Cerrar la migracion auditada de `scripts/EasternKingdoms/Karazhan/boss_terestian_illhoof.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Karazhan/boss_terestian_illhoof.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.077** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/Karazhan/bosses_opera.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Karazhan/bosses_opera.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1543 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.078** Cerrar la migracion auditada de `scripts/EasternKingdoms/Karazhan/instance_karazhan.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Karazhan/instance_karazhan.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.079** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/Karazhan/karazhan.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Karazhan/karazhan.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 629 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.080** Cerrar la migracion auditada de `scripts/EasternKingdoms/Karazhan/karazhan.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Karazhan/karazhan.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.081** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/MagistersTerrace/boss_felblood_kaelthas.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/MagistersTerrace/boss_felblood_kaelthas.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 510 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.082** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/MagistersTerrace/boss_priestess_delrissa.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/MagistersTerrace/boss_priestess_delrissa.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1322 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.083** Cerrar la migracion auditada de `scripts/EasternKingdoms/MagistersTerrace/boss_selin_fireheart.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/MagistersTerrace/boss_selin_fireheart.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.084** Cerrar la migracion auditada de `scripts/EasternKingdoms/MagistersTerrace/boss_vexallus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/MagistersTerrace/boss_vexallus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.085** Cerrar la migracion auditada de `scripts/EasternKingdoms/MagistersTerrace/instance_magisters_terrace.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/MagistersTerrace/instance_magisters_terrace.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.086** Cerrar la migracion auditada de `scripts/EasternKingdoms/MagistersTerrace/magisters_terrace.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/MagistersTerrace/magisters_terrace.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.087** Cerrar la migracion auditada de `scripts/EasternKingdoms/MagistersTerrace/magisters_terrace.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/MagistersTerrace/magisters_terrace.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.088** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/ScarletEnclave/chapter1.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ScarletEnclave/chapter1.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1328 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.089** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/ScarletEnclave/chapter2.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ScarletEnclave/chapter2.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 632 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.090** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/ScarletEnclave/chapter5.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ScarletEnclave/chapter5.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1666 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.091** Cerrar la migracion auditada de `scripts/EasternKingdoms/ScarletEnclave/zone_the_scarlet_enclave.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ScarletEnclave/zone_the_scarlet_enclave.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.092** Cerrar la migracion auditada de `scripts/EasternKingdoms/ScarletMonastery/boss_arcanist_doan.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ScarletMonastery/boss_arcanist_doan.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.093** Cerrar la migracion auditada de `scripts/EasternKingdoms/ScarletMonastery/boss_azshir_the_sleepless.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ScarletMonastery/boss_azshir_the_sleepless.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.094** Cerrar la migracion auditada de `scripts/EasternKingdoms/ScarletMonastery/boss_bloodmage_thalnos.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ScarletMonastery/boss_bloodmage_thalnos.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.095** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/ScarletMonastery/boss_headless_horseman.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ScarletMonastery/boss_headless_horseman.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1041 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.096** Cerrar la migracion auditada de `scripts/EasternKingdoms/ScarletMonastery/boss_herod.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ScarletMonastery/boss_herod.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.097** Cerrar la migracion auditada de `scripts/EasternKingdoms/ScarletMonastery/boss_high_inquisitor_fairbanks.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ScarletMonastery/boss_high_inquisitor_fairbanks.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.098** Cerrar la migracion auditada de `scripts/EasternKingdoms/ScarletMonastery/boss_houndmaster_loksey.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ScarletMonastery/boss_houndmaster_loksey.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.099** Cerrar la migracion auditada de `scripts/EasternKingdoms/ScarletMonastery/boss_interrogator_vishas.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ScarletMonastery/boss_interrogator_vishas.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.100** Cerrar la migracion auditada de `scripts/EasternKingdoms/ScarletMonastery/boss_mograine_and_whitemane.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ScarletMonastery/boss_mograine_and_whitemane.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.101** Cerrar la migracion auditada de `scripts/EasternKingdoms/ScarletMonastery/boss_scorn.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ScarletMonastery/boss_scorn.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.102** Cerrar la migracion auditada de `scripts/EasternKingdoms/ScarletMonastery/instance_scarlet_monastery.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ScarletMonastery/instance_scarlet_monastery.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.103** Cerrar la migracion auditada de `scripts/EasternKingdoms/ScarletMonastery/scarlet_monastery.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ScarletMonastery/scarlet_monastery.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.104** Cerrar la migracion auditada de `scripts/EasternKingdoms/Scholomance/boss_darkmaster_gandling.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Scholomance/boss_darkmaster_gandling.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.105** Cerrar la migracion auditada de `scripts/EasternKingdoms/Scholomance/boss_death_knight_darkreaver.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Scholomance/boss_death_knight_darkreaver.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.106** Cerrar la migracion auditada de `scripts/EasternKingdoms/Scholomance/boss_doctor_theolen_krastinov.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Scholomance/boss_doctor_theolen_krastinov.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.107** Cerrar la migracion auditada de `scripts/EasternKingdoms/Scholomance/boss_illucia_barov.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Scholomance/boss_illucia_barov.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.108** Cerrar la migracion auditada de `scripts/EasternKingdoms/Scholomance/boss_instructor_malicia.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Scholomance/boss_instructor_malicia.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.109** Cerrar la migracion auditada de `scripts/EasternKingdoms/Scholomance/boss_jandice_barov.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Scholomance/boss_jandice_barov.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.110** Cerrar la migracion auditada de `scripts/EasternKingdoms/Scholomance/boss_kirtonos_the_herald.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Scholomance/boss_kirtonos_the_herald.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.111** Cerrar la migracion auditada de `scripts/EasternKingdoms/Scholomance/boss_kormok.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Scholomance/boss_kormok.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.112** Cerrar la migracion auditada de `scripts/EasternKingdoms/Scholomance/boss_lord_alexei_barov.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Scholomance/boss_lord_alexei_barov.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.113** Cerrar la migracion auditada de `scripts/EasternKingdoms/Scholomance/boss_lorekeeper_polkelt.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Scholomance/boss_lorekeeper_polkelt.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.114** Cerrar la migracion auditada de `scripts/EasternKingdoms/Scholomance/boss_ras_frostwhisper.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Scholomance/boss_ras_frostwhisper.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.115** Cerrar la migracion auditada de `scripts/EasternKingdoms/Scholomance/boss_the_ravenian.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Scholomance/boss_the_ravenian.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.116** Cerrar la migracion auditada de `scripts/EasternKingdoms/Scholomance/boss_vectus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Scholomance/boss_vectus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.117** Cerrar la migracion auditada de `scripts/EasternKingdoms/Scholomance/instance_scholomance.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Scholomance/instance_scholomance.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.118** Cerrar la migracion auditada de `scripts/EasternKingdoms/Scholomance/scholomance.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Scholomance/scholomance.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.119** Cerrar la migracion auditada de `scripts/EasternKingdoms/ShadowfangKeep/boss_apothecary_hummel.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ShadowfangKeep/boss_apothecary_hummel.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.120** Cerrar la migracion auditada de `scripts/EasternKingdoms/ShadowfangKeep/instance_shadowfang_keep.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ShadowfangKeep/instance_shadowfang_keep.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.121** Cerrar la migracion auditada de `scripts/EasternKingdoms/ShadowfangKeep/shadowfang_keep.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ShadowfangKeep/shadowfang_keep.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.122** Cerrar la migracion auditada de `scripts/EasternKingdoms/ShadowfangKeep/shadowfang_keep.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ShadowfangKeep/shadowfang_keep.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.123** Cerrar la migracion auditada de `scripts/EasternKingdoms/Stratholme/boss_baron_rivendare.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Stratholme/boss_baron_rivendare.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.124** Cerrar la migracion auditada de `scripts/EasternKingdoms/Stratholme/boss_baroness_anastari.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Stratholme/boss_baroness_anastari.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.125** Cerrar la migracion auditada de `scripts/EasternKingdoms/Stratholme/boss_cannon_master_willey.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Stratholme/boss_cannon_master_willey.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.126** Cerrar la migracion auditada de `scripts/EasternKingdoms/Stratholme/boss_dathrohan_balnazzar.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Stratholme/boss_dathrohan_balnazzar.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.127** Cerrar la migracion auditada de `scripts/EasternKingdoms/Stratholme/boss_magistrate_barthilas.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Stratholme/boss_magistrate_barthilas.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.128** Cerrar la migracion auditada de `scripts/EasternKingdoms/Stratholme/boss_maleki_the_pallid.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Stratholme/boss_maleki_the_pallid.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.129** Cerrar la migracion auditada de `scripts/EasternKingdoms/Stratholme/boss_nerubenkan.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Stratholme/boss_nerubenkan.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.130** Cerrar la migracion auditada de `scripts/EasternKingdoms/Stratholme/boss_order_of_silver_hand.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Stratholme/boss_order_of_silver_hand.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.131** Cerrar la migracion auditada de `scripts/EasternKingdoms/Stratholme/boss_postmaster_malown.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Stratholme/boss_postmaster_malown.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.132** Cerrar la migracion auditada de `scripts/EasternKingdoms/Stratholme/boss_ramstein_the_gorger.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Stratholme/boss_ramstein_the_gorger.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.133** Cerrar la migracion auditada de `scripts/EasternKingdoms/Stratholme/boss_timmy_the_cruel.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Stratholme/boss_timmy_the_cruel.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.134** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/Stratholme/instance_stratholme.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Stratholme/instance_stratholme.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 541 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.135** Cerrar la migracion auditada de `scripts/EasternKingdoms/Stratholme/stratholme.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Stratholme/stratholme.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.136** Cerrar la migracion auditada de `scripts/EasternKingdoms/Stratholme/stratholme.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Stratholme/stratholme.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.137** Cerrar la migracion auditada de `scripts/EasternKingdoms/SunkenTemple/instance_sunken_temple.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/SunkenTemple/instance_sunken_temple.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.138** Cerrar la migracion auditada de `scripts/EasternKingdoms/SunkenTemple/sunken_temple.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/SunkenTemple/sunken_temple.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.139** Cerrar la migracion auditada de `scripts/EasternKingdoms/SunkenTemple/sunken_temple.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/SunkenTemple/sunken_temple.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.140** Cerrar la migracion auditada de `scripts/EasternKingdoms/SunwellPlateau/boss_brutallus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/SunwellPlateau/boss_brutallus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.141** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/SunwellPlateau/boss_eredar_twins.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/SunwellPlateau/boss_eredar_twins.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 745 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.142** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/SunwellPlateau/boss_felmyst.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/SunwellPlateau/boss_felmyst.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 552 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.143** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/SunwellPlateau/boss_kalecgos.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/SunwellPlateau/boss_kalecgos.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 793 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.144** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/SunwellPlateau/boss_kiljaeden.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/SunwellPlateau/boss_kiljaeden.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1466 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.145** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/SunwellPlateau/boss_muru.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/SunwellPlateau/boss_muru.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 633 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.146** Cerrar la migracion auditada de `scripts/EasternKingdoms/SunwellPlateau/instance_sunwell_plateau.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/SunwellPlateau/instance_sunwell_plateau.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.147** Cerrar la migracion auditada de `scripts/EasternKingdoms/SunwellPlateau/sunwell_plateau.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/SunwellPlateau/sunwell_plateau.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.148** Cerrar la migracion auditada de `scripts/EasternKingdoms/SunwellPlateau/sunwell_plateau.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/SunwellPlateau/sunwell_plateau.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.149** Cerrar la migracion auditada de `scripts/EasternKingdoms/TheStockade/boss_hogger.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/TheStockade/boss_hogger.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.150** Cerrar la migracion auditada de `scripts/EasternKingdoms/TheStockade/boss_lord_overheat.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/TheStockade/boss_lord_overheat.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.151** Cerrar la migracion auditada de `scripts/EasternKingdoms/TheStockade/boss_randolph_moloch.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/TheStockade/boss_randolph_moloch.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.152** Cerrar la migracion auditada de `scripts/EasternKingdoms/TheStockade/instance_the_stockade.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/TheStockade/instance_the_stockade.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.153** Cerrar la migracion auditada de `scripts/EasternKingdoms/TheStockade/the_stockade.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/TheStockade/the_stockade.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.154** Cerrar la migracion auditada de `scripts/EasternKingdoms/Uldaman/boss_archaedas.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Uldaman/boss_archaedas.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.155** Cerrar la migracion auditada de `scripts/EasternKingdoms/Uldaman/boss_ironaya.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Uldaman/boss_ironaya.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.156** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/Uldaman/instance_uldaman.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Uldaman/instance_uldaman.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 521 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.157** Cerrar la migracion auditada de `scripts/EasternKingdoms/Uldaman/uldaman.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Uldaman/uldaman.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.158** Cerrar la migracion auditada de `scripts/EasternKingdoms/Uldaman/uldaman.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/Uldaman/uldaman.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.159** Cerrar la migracion auditada de `scripts/EasternKingdoms/ZulAman/boss_akilzon.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulAman/boss_akilzon.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.160** Cerrar la migracion auditada de `scripts/EasternKingdoms/ZulAman/boss_daakara.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulAman/boss_daakara.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.161** Cerrar la migracion auditada de `scripts/EasternKingdoms/ZulAman/boss_halazzi.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulAman/boss_halazzi.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.162** Cerrar la migracion auditada de `scripts/EasternKingdoms/ZulAman/boss_hexlord.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulAman/boss_hexlord.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.163** Cerrar la migracion auditada de `scripts/EasternKingdoms/ZulAman/boss_janalai.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulAman/boss_janalai.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.164** Cerrar la migracion auditada de `scripts/EasternKingdoms/ZulAman/boss_nalorakk.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulAman/boss_nalorakk.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.165** Cerrar la migracion auditada de `scripts/EasternKingdoms/ZulAman/instance_zulaman.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulAman/instance_zulaman.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.166** Cerrar la migracion auditada de `scripts/EasternKingdoms/ZulAman/zulaman.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulAman/zulaman.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.167** Cerrar la migracion auditada de `scripts/EasternKingdoms/ZulAman/zulaman.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulAman/zulaman.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.168** Cerrar la migracion auditada de `scripts/EasternKingdoms/ZulGurub/boss_grilek.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulGurub/boss_grilek.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.169** Cerrar la migracion auditada de `scripts/EasternKingdoms/ZulGurub/boss_hazzarah.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulGurub/boss_hazzarah.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.170** Cerrar la migracion auditada de `scripts/EasternKingdoms/ZulGurub/boss_jindo_the_godbreaker.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulGurub/boss_jindo_the_godbreaker.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.171** Cerrar la migracion auditada de `scripts/EasternKingdoms/ZulGurub/boss_kilnara.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulGurub/boss_kilnara.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.172** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/ZulGurub/boss_mandokir.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulGurub/boss_mandokir.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 631 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.173** Cerrar la migracion auditada de `scripts/EasternKingdoms/ZulGurub/boss_renataki.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulGurub/boss_renataki.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.174** Cerrar la migracion auditada de `scripts/EasternKingdoms/ZulGurub/boss_venoxis.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulGurub/boss_venoxis.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.175** Cerrar la migracion auditada de `scripts/EasternKingdoms/ZulGurub/boss_wushoolay.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulGurub/boss_wushoolay.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.176** Cerrar la migracion auditada de `scripts/EasternKingdoms/ZulGurub/boss_zanzil.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulGurub/boss_zanzil.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.177** Cerrar la migracion auditada de `scripts/EasternKingdoms/ZulGurub/instance_zulgurub.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulGurub/instance_zulgurub.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.178** Cerrar la migracion auditada de `scripts/EasternKingdoms/ZulGurub/zulgurub.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/ZulGurub/zulgurub.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.179** Cerrar la migracion auditada de `scripts/EasternKingdoms/eastern_kingdoms_script_loader.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/eastern_kingdoms_script_loader.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.180** Cerrar la migracion auditada de `scripts/EasternKingdoms/zone_blasted_lands.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/zone_blasted_lands.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.181** Cerrar la migracion auditada de `scripts/EasternKingdoms/zone_burning_steppes.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/zone_burning_steppes.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.182** Cerrar la migracion auditada de `scripts/EasternKingdoms/zone_dun_morogh.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/zone_dun_morogh.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.183** Cerrar la migracion auditada de `scripts/EasternKingdoms/zone_dun_morogh_area_coldridge_valley.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/zone_dun_morogh_area_coldridge_valley.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.184** Cerrar la migracion auditada de `scripts/EasternKingdoms/zone_duskwood.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/zone_duskwood.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.185** Cerrar la migracion auditada de `scripts/EasternKingdoms/zone_eastern_plaguelands.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/zone_eastern_plaguelands.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.186** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/zone_elwynn_forest.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/zone_elwynn_forest.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 728 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.187** Cerrar la migracion auditada de `scripts/EasternKingdoms/zone_eversong_woods.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/zone_eversong_woods.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.188** Cerrar la migracion auditada de `scripts/EasternKingdoms/zone_hinterlands.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/zone_hinterlands.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.189** Cerrar la migracion auditada de `scripts/EasternKingdoms/zone_ironforge.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/zone_ironforge.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.190** Cerrar la migracion auditada de `scripts/EasternKingdoms/zone_isle_of_queldanas.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/zone_isle_of_queldanas.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.191** Cerrar la migracion auditada de `scripts/EasternKingdoms/zone_redridge_mountains.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/zone_redridge_mountains.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.192** Partir y cerrar la migracion auditada de `scripts/EasternKingdoms/zone_silverpine_forest.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/zone_silverpine_forest.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 5317 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.193** Cerrar la migracion auditada de `scripts/EasternKingdoms/zone_stormwind_city.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/zone_stormwind_city.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.194** Cerrar la migracion auditada de `scripts/EasternKingdoms/zone_tirisfal_glades.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/zone_tirisfal_glades.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.195** Cerrar la migracion auditada de `scripts/EasternKingdoms/zone_undercity.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/EasternKingdoms/zone_undercity.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.196** Partir y cerrar la migracion auditada de `scripts/Events/brewfest.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Events/brewfest.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 650 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.197** Partir y cerrar la migracion auditada de `scripts/Events/childrens_week.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Events/childrens_week.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1123 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.198** Cerrar la migracion auditada de `scripts/Events/darkmoon_faire.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Events/darkmoon_faire.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.199** Cerrar la migracion auditada de `scripts/Events/events_script_loader.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Events/events_script_loader.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.200** Partir y cerrar la migracion auditada de `scripts/Events/fireworks_show.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Events/fireworks_show.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 906 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.201** Cerrar la migracion auditada de `scripts/Events/hallows_end.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Events/hallows_end.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.202** Cerrar la migracion auditada de `scripts/Events/love_is_in_the_air.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Events/love_is_in_the_air.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.203** Cerrar la migracion auditada de `scripts/Events/lunar_festival.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Events/lunar_festival.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.204** Cerrar la migracion auditada de `scripts/Events/midsummer.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Events/midsummer.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.205** Cerrar la migracion auditada de `scripts/Events/operation_gnomeregan.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Events/operation_gnomeregan.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.206** Cerrar la migracion auditada de `scripts/Events/pilgrims_bounty.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Events/pilgrims_bounty.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.207** Cerrar la migracion auditada de `scripts/Events/winter_veil.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Events/winter_veil.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.208** Cerrar la migracion auditada de `scripts/Events/zalazane_fall.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Events/zalazane_fall.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.209** Cerrar la migracion auditada de `scripts/Kalimdor/BlackfathomDeeps/blackfathom_deeps.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/BlackfathomDeeps/blackfathom_deeps.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.210** Cerrar la migracion auditada de `scripts/Kalimdor/BlackfathomDeeps/blackfathom_deeps.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/BlackfathomDeeps/blackfathom_deeps.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.211** Cerrar la migracion auditada de `scripts/Kalimdor/BlackfathomDeeps/boss_aku_mai.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/BlackfathomDeeps/boss_aku_mai.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.212** Cerrar la migracion auditada de `scripts/Kalimdor/BlackfathomDeeps/boss_gelihast.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/BlackfathomDeeps/boss_gelihast.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.213** Cerrar la migracion auditada de `scripts/Kalimdor/BlackfathomDeeps/boss_kelris.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/BlackfathomDeeps/boss_kelris.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.214** Cerrar la migracion auditada de `scripts/Kalimdor/BlackfathomDeeps/instance_blackfathom_deeps.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/BlackfathomDeeps/instance_blackfathom_deeps.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.215** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/boss_anetheron.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/boss_anetheron.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.216** Partir y cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/boss_archimonde.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/boss_archimonde.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 641 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.217** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/boss_azgalor.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/boss_azgalor.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.218** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/boss_kazrogal.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/boss_kazrogal.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.219** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/boss_rage_winterchill.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/boss_rage_winterchill.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.220** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/hyjal.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/hyjal.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.221** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/hyjal.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/hyjal.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.222** Partir y cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/hyjalAI.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/hyjalAI.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1103 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.223** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/hyjalAI.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/hyjalAI.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.224** Partir y cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/hyjal_trash.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/hyjal_trash.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1523 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.225** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/hyjal_trash.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/hyjal_trash.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.226** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/instance_hyjal.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/BattleForMountHyjal/instance_hyjal.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.227** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/CullingOfStratholme/boss_chrono_lord_epoch.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/CullingOfStratholme/boss_chrono_lord_epoch.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.228** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/CullingOfStratholme/boss_infinite_corruptor.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/CullingOfStratholme/boss_infinite_corruptor.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.229** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/CullingOfStratholme/boss_mal_ganis.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/CullingOfStratholme/boss_mal_ganis.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.230** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/CullingOfStratholme/boss_meathook.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/CullingOfStratholme/boss_meathook.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.231** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/CullingOfStratholme/boss_salramm_the_fleshcrafter.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/CullingOfStratholme/boss_salramm_the_fleshcrafter.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.232** Partir y cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/CullingOfStratholme/culling_of_stratholme.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/CullingOfStratholme/culling_of_stratholme.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1484 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.233** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/CullingOfStratholme/culling_of_stratholme.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/CullingOfStratholme/culling_of_stratholme.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.234** Partir y cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/CullingOfStratholme/instance_culling_of_stratholme.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/CullingOfStratholme/instance_culling_of_stratholme.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 823 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.235** Partir y cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/CullingOfStratholme/npc_arthas.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/CullingOfStratholme/npc_arthas.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1677 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.236** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/EscapeFromDurnholdeKeep/boss_captain_skarloc.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/EscapeFromDurnholdeKeep/boss_captain_skarloc.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.237** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/EscapeFromDurnholdeKeep/boss_epoch_hunter.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/EscapeFromDurnholdeKeep/boss_epoch_hunter.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.238** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/EscapeFromDurnholdeKeep/boss_leutenant_drake.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/EscapeFromDurnholdeKeep/boss_leutenant_drake.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.239** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/EscapeFromDurnholdeKeep/instance_old_hillsbrad.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/EscapeFromDurnholdeKeep/instance_old_hillsbrad.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.240** Partir y cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/EscapeFromDurnholdeKeep/old_hillsbrad.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/EscapeFromDurnholdeKeep/old_hillsbrad.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 650 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.241** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/EscapeFromDurnholdeKeep/old_hillsbrad.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/EscapeFromDurnholdeKeep/old_hillsbrad.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.242** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/TheBlackMorass/boss_aeonus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/TheBlackMorass/boss_aeonus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.243** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/TheBlackMorass/boss_chrono_lord_deja.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/TheBlackMorass/boss_chrono_lord_deja.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.244** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/TheBlackMorass/boss_temporus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/TheBlackMorass/boss_temporus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.245** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/TheBlackMorass/instance_the_black_morass.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/TheBlackMorass/instance_the_black_morass.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.246** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/TheBlackMorass/the_black_morass.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/TheBlackMorass/the_black_morass.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.247** Cerrar la migracion auditada de `scripts/Kalimdor/CavernsOfTime/TheBlackMorass/the_black_morass.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/CavernsOfTime/TheBlackMorass/the_black_morass.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.248** Cerrar la migracion auditada de `scripts/Kalimdor/DireMaul/diremaul.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/DireMaul/diremaul.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.249** Cerrar la migracion auditada de `scripts/Kalimdor/DireMaul/instance_dire_maul.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/DireMaul/instance_dire_maul.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.250** Cerrar la migracion auditada de `scripts/Kalimdor/Maraudon/boss_celebras_the_cursed.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/Maraudon/boss_celebras_the_cursed.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.251** Cerrar la migracion auditada de `scripts/Kalimdor/Maraudon/boss_landslide.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/Maraudon/boss_landslide.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.252** Cerrar la migracion auditada de `scripts/Kalimdor/Maraudon/boss_noxxion.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/Maraudon/boss_noxxion.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.253** Cerrar la migracion auditada de `scripts/Kalimdor/Maraudon/boss_princess_theradras.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/Maraudon/boss_princess_theradras.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.254** Cerrar la migracion auditada de `scripts/Kalimdor/Maraudon/instance_maraudon.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/Maraudon/instance_maraudon.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.255** Cerrar la migracion auditada de `scripts/Kalimdor/Maraudon/maraudon.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/Maraudon/maraudon.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.256** Cerrar la migracion auditada de `scripts/Kalimdor/OnyxiasLair/boss_onyxia.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/OnyxiasLair/boss_onyxia.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.257** Cerrar la migracion auditada de `scripts/Kalimdor/OnyxiasLair/instance_onyxias_lair.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/OnyxiasLair/instance_onyxias_lair.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.258** Cerrar la migracion auditada de `scripts/Kalimdor/OnyxiasLair/onyxias_lair.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/OnyxiasLair/onyxias_lair.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.259** Cerrar la migracion auditada de `scripts/Kalimdor/RagefireChasm/instance_ragefire_chasm.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/RagefireChasm/instance_ragefire_chasm.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.260** Cerrar la migracion auditada de `scripts/Kalimdor/RazorfenDowns/boss_amnennar_the_coldbringer.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/RazorfenDowns/boss_amnennar_the_coldbringer.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.261** Cerrar la migracion auditada de `scripts/Kalimdor/RazorfenDowns/boss_glutton.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/RazorfenDowns/boss_glutton.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.262** Cerrar la migracion auditada de `scripts/Kalimdor/RazorfenDowns/boss_mordresh_fire_eye.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/RazorfenDowns/boss_mordresh_fire_eye.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.263** Cerrar la migracion auditada de `scripts/Kalimdor/RazorfenDowns/boss_tuten_kash.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/RazorfenDowns/boss_tuten_kash.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.264** Cerrar la migracion auditada de `scripts/Kalimdor/RazorfenDowns/instance_razorfen_downs.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/RazorfenDowns/instance_razorfen_downs.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.265** Cerrar la migracion auditada de `scripts/Kalimdor/RazorfenDowns/razorfen_downs.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/RazorfenDowns/razorfen_downs.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.266** Cerrar la migracion auditada de `scripts/Kalimdor/RazorfenDowns/razorfen_downs.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/RazorfenDowns/razorfen_downs.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.267** Cerrar la migracion auditada de `scripts/Kalimdor/RazorfenKraul/instance_razorfen_kraul.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/RazorfenKraul/instance_razorfen_kraul.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.268** Cerrar la migracion auditada de `scripts/Kalimdor/RazorfenKraul/razorfen_kraul.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/RazorfenKraul/razorfen_kraul.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.269** Cerrar la migracion auditada de `scripts/Kalimdor/RazorfenKraul/razorfen_kraul.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/RazorfenKraul/razorfen_kraul.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.270** Cerrar la migracion auditada de `scripts/Kalimdor/RuinsOfAhnQiraj/boss_ayamiss.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/RuinsOfAhnQiraj/boss_ayamiss.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.271** Cerrar la migracion auditada de `scripts/Kalimdor/RuinsOfAhnQiraj/boss_buru.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/RuinsOfAhnQiraj/boss_buru.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.272** Cerrar la migracion auditada de `scripts/Kalimdor/RuinsOfAhnQiraj/boss_kurinnaxx.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/RuinsOfAhnQiraj/boss_kurinnaxx.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.273** Cerrar la migracion auditada de `scripts/Kalimdor/RuinsOfAhnQiraj/boss_moam.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/RuinsOfAhnQiraj/boss_moam.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.274** Cerrar la migracion auditada de `scripts/Kalimdor/RuinsOfAhnQiraj/boss_ossirian.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/RuinsOfAhnQiraj/boss_ossirian.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.275** Cerrar la migracion auditada de `scripts/Kalimdor/RuinsOfAhnQiraj/boss_rajaxx.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/RuinsOfAhnQiraj/boss_rajaxx.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.276** Cerrar la migracion auditada de `scripts/Kalimdor/RuinsOfAhnQiraj/instance_ruins_of_ahnqiraj.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/RuinsOfAhnQiraj/instance_ruins_of_ahnqiraj.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.277** Cerrar la migracion auditada de `scripts/Kalimdor/RuinsOfAhnQiraj/ruins_of_ahnqiraj.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/RuinsOfAhnQiraj/ruins_of_ahnqiraj.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.278** Cerrar la migracion auditada de `scripts/Kalimdor/TempleOfAhnQiraj/boss_bug_trio.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/TempleOfAhnQiraj/boss_bug_trio.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.279** Partir y cerrar la migracion auditada de `scripts/Kalimdor/TempleOfAhnQiraj/boss_cthun.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/TempleOfAhnQiraj/boss_cthun.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1304 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.280** Cerrar la migracion auditada de `scripts/Kalimdor/TempleOfAhnQiraj/boss_fankriss.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/TempleOfAhnQiraj/boss_fankriss.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.281** Cerrar la migracion auditada de `scripts/Kalimdor/TempleOfAhnQiraj/boss_huhuran.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/TempleOfAhnQiraj/boss_huhuran.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.282** Cerrar la migracion auditada de `scripts/Kalimdor/TempleOfAhnQiraj/boss_ouro.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/TempleOfAhnQiraj/boss_ouro.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.283** Cerrar la migracion auditada de `scripts/Kalimdor/TempleOfAhnQiraj/boss_sartura.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/TempleOfAhnQiraj/boss_sartura.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.284** Cerrar la migracion auditada de `scripts/Kalimdor/TempleOfAhnQiraj/boss_skeram.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/TempleOfAhnQiraj/boss_skeram.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.285** Partir y cerrar la migracion auditada de `scripts/Kalimdor/TempleOfAhnQiraj/boss_twinemperors.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/TempleOfAhnQiraj/boss_twinemperors.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 601 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.286** Cerrar la migracion auditada de `scripts/Kalimdor/TempleOfAhnQiraj/boss_viscidus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/TempleOfAhnQiraj/boss_viscidus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.287** Cerrar la migracion auditada de `scripts/Kalimdor/TempleOfAhnQiraj/instance_temple_of_ahnqiraj.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/TempleOfAhnQiraj/instance_temple_of_ahnqiraj.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.288** Cerrar la migracion auditada de `scripts/Kalimdor/TempleOfAhnQiraj/mob_anubisath_sentinel.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/TempleOfAhnQiraj/mob_anubisath_sentinel.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.289** Cerrar la migracion auditada de `scripts/Kalimdor/TempleOfAhnQiraj/temple_of_ahnqiraj.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/TempleOfAhnQiraj/temple_of_ahnqiraj.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.290** Cerrar la migracion auditada de `scripts/Kalimdor/WailingCaverns/instance_wailing_caverns.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/WailingCaverns/instance_wailing_caverns.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.291** Cerrar la migracion auditada de `scripts/Kalimdor/WailingCaverns/wailing_caverns.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/WailingCaverns/wailing_caverns.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.292** Cerrar la migracion auditada de `scripts/Kalimdor/WailingCaverns/wailing_caverns.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/WailingCaverns/wailing_caverns.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.293** Cerrar la migracion auditada de `scripts/Kalimdor/ZulFarrak/boss_zum_rah.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/ZulFarrak/boss_zum_rah.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.294** Cerrar la migracion auditada de `scripts/Kalimdor/ZulFarrak/instance_zulfarrak.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/ZulFarrak/instance_zulfarrak.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.295** Cerrar la migracion auditada de `scripts/Kalimdor/ZulFarrak/zulfarrak.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/ZulFarrak/zulfarrak.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.296** Cerrar la migracion auditada de `scripts/Kalimdor/ZulFarrak/zulfarrak.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/ZulFarrak/zulfarrak.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.297** Cerrar la migracion auditada de `scripts/Kalimdor/kalimdor_script_loader.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/kalimdor_script_loader.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.298** Cerrar la migracion auditada de `scripts/Kalimdor/zone_ashenvale.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/zone_ashenvale.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.299** Cerrar la migracion auditada de `scripts/Kalimdor/zone_azshara.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/zone_azshara.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.300** Partir y cerrar la migracion auditada de `scripts/Kalimdor/zone_azuremyst_isle.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/zone_azuremyst_isle.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 671 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.301** Partir y cerrar la migracion auditada de `scripts/Kalimdor/zone_bloodmyst_isle.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/zone_bloodmyst_isle.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 823 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.302** Cerrar la migracion auditada de `scripts/Kalimdor/zone_darkshore.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/zone_darkshore.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.303** Cerrar la migracion auditada de `scripts/Kalimdor/zone_desolace.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/zone_desolace.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.304** Cerrar la migracion auditada de `scripts/Kalimdor/zone_durotar.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/zone_durotar.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.305** Cerrar la migracion auditada de `scripts/Kalimdor/zone_dustwallow_marsh.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/zone_dustwallow_marsh.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.306** Cerrar la migracion auditada de `scripts/Kalimdor/zone_felwood.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/zone_felwood.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.307** Cerrar la migracion auditada de `scripts/Kalimdor/zone_feralas.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/zone_feralas.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.308** Cerrar la migracion auditada de `scripts/Kalimdor/zone_moonglade.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/zone_moonglade.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.309** Cerrar la migracion auditada de `scripts/Kalimdor/zone_mulgore.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/zone_mulgore.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.310** Cerrar la migracion auditada de `scripts/Kalimdor/zone_orgrimmar.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/zone_orgrimmar.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.311** Partir y cerrar la migracion auditada de `scripts/Kalimdor/zone_silithus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/zone_silithus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1479 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.312** Cerrar la migracion auditada de `scripts/Kalimdor/zone_tanaris.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/zone_tanaris.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.313** Partir y cerrar la migracion auditada de `scripts/Kalimdor/zone_the_barrens.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/zone_the_barrens.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 518 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.314** Cerrar la migracion auditada de `scripts/Kalimdor/zone_thunder_bluff.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/zone_thunder_bluff.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.315** Partir y cerrar la migracion auditada de `scripts/Kalimdor/zone_winterspring.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Kalimdor/zone_winterspring.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 605 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.316** Cerrar la migracion auditada de `scripts/Maelstrom/Stonecore/boss_corborus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Maelstrom/Stonecore/boss_corborus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.317** Partir y cerrar la migracion auditada de `scripts/Maelstrom/Stonecore/boss_high_priestess_azil.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Maelstrom/Stonecore/boss_high_priestess_azil.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 713 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.318** Cerrar la migracion auditada de `scripts/Maelstrom/Stonecore/boss_ozruk.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Maelstrom/Stonecore/boss_ozruk.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.319** Partir y cerrar la migracion auditada de `scripts/Maelstrom/Stonecore/boss_slabhide.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Maelstrom/Stonecore/boss_slabhide.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 581 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.320** Cerrar la migracion auditada de `scripts/Maelstrom/Stonecore/instance_stonecore.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Maelstrom/Stonecore/instance_stonecore.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.321** Cerrar la migracion auditada de `scripts/Maelstrom/Stonecore/stonecore.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Maelstrom/Stonecore/stonecore.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.322** Cerrar la migracion auditada de `scripts/Maelstrom/Stonecore/stonecore.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Maelstrom/Stonecore/stonecore.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.323** Cerrar la migracion auditada de `scripts/Maelstrom/kezan.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Maelstrom/kezan.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.324** Cerrar la migracion auditada de `scripts/Maelstrom/maelstrom_script_loader.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Maelstrom/maelstrom_script_loader.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.325** Cerrar la migracion auditada de `scripts/Maelstrom/zone_deepholm.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Maelstrom/zone_deepholm.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.326** Cerrar la migracion auditada de `scripts/Northrend/AzjolNerub/Ahnkahet/ahnkahet.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/AzjolNerub/Ahnkahet/ahnkahet.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.327** Cerrar la migracion auditada de `scripts/Northrend/AzjolNerub/Ahnkahet/ahnkahet.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/AzjolNerub/Ahnkahet/ahnkahet.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.328** Cerrar la migracion auditada de `scripts/Northrend/AzjolNerub/Ahnkahet/boss_amanitar.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/AzjolNerub/Ahnkahet/boss_amanitar.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.329** Cerrar la migracion auditada de `scripts/Northrend/AzjolNerub/Ahnkahet/boss_elder_nadox.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/AzjolNerub/Ahnkahet/boss_elder_nadox.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.330** Partir y cerrar la migracion auditada de `scripts/Northrend/AzjolNerub/Ahnkahet/boss_herald_volazj.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/AzjolNerub/Ahnkahet/boss_herald_volazj.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 784 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.331** Partir y cerrar la migracion auditada de `scripts/Northrend/AzjolNerub/Ahnkahet/boss_jedoga_shadowseeker.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/AzjolNerub/Ahnkahet/boss_jedoga_shadowseeker.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 506 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.332** Cerrar la migracion auditada de `scripts/Northrend/AzjolNerub/Ahnkahet/boss_prince_taldaram.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/AzjolNerub/Ahnkahet/boss_prince_taldaram.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.333** Cerrar la migracion auditada de `scripts/Northrend/AzjolNerub/Ahnkahet/instance_ahnkahet.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/AzjolNerub/Ahnkahet/instance_ahnkahet.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.334** Cerrar la migracion auditada de `scripts/Northrend/AzjolNerub/AzjolNerub/azjol_nerub.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/AzjolNerub/AzjolNerub/azjol_nerub.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.335** Partir y cerrar la migracion auditada de `scripts/Northrend/AzjolNerub/AzjolNerub/boss_anubarak.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/AzjolNerub/AzjolNerub/boss_anubarak.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 647 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.336** Partir y cerrar la migracion auditada de `scripts/Northrend/AzjolNerub/AzjolNerub/boss_hadronox.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/AzjolNerub/AzjolNerub/boss_hadronox.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1040 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.337** Partir y cerrar la migracion auditada de `scripts/Northrend/AzjolNerub/AzjolNerub/boss_krikthir_the_gatewatcher.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/AzjolNerub/AzjolNerub/boss_krikthir_the_gatewatcher.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 923 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.338** Cerrar la migracion auditada de `scripts/Northrend/AzjolNerub/AzjolNerub/instance_azjol_nerub.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/AzjolNerub/AzjolNerub/instance_azjol_nerub.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.339** Partir y cerrar la migracion auditada de `scripts/Northrend/ChamberOfAspects/ObsidianSanctum/boss_sartharion.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/ChamberOfAspects/ObsidianSanctum/boss_sartharion.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 508 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.340** Cerrar la migracion auditada de `scripts/Northrend/ChamberOfAspects/ObsidianSanctum/instance_obsidian_sanctum.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/ChamberOfAspects/ObsidianSanctum/instance_obsidian_sanctum.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.341** Partir y cerrar la migracion auditada de `scripts/Northrend/ChamberOfAspects/ObsidianSanctum/obsidian_sanctum.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/ChamberOfAspects/ObsidianSanctum/obsidian_sanctum.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 936 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.342** Cerrar la migracion auditada de `scripts/Northrend/ChamberOfAspects/ObsidianSanctum/obsidian_sanctum.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/ChamberOfAspects/ObsidianSanctum/obsidian_sanctum.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.343** Cerrar la migracion auditada de `scripts/Northrend/ChamberOfAspects/RubySanctum/boss_baltharus_the_warborn.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/ChamberOfAspects/RubySanctum/boss_baltharus_the_warborn.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.344** Cerrar la migracion auditada de `scripts/Northrend/ChamberOfAspects/RubySanctum/boss_general_zarithrian.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/ChamberOfAspects/RubySanctum/boss_general_zarithrian.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.345** Partir y cerrar la migracion auditada de `scripts/Northrend/ChamberOfAspects/RubySanctum/boss_halion.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/ChamberOfAspects/RubySanctum/boss_halion.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1925 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.346** Cerrar la migracion auditada de `scripts/Northrend/ChamberOfAspects/RubySanctum/boss_saviana_ragefire.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/ChamberOfAspects/RubySanctum/boss_saviana_ragefire.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.347** Cerrar la migracion auditada de `scripts/Northrend/ChamberOfAspects/RubySanctum/instance_ruby_sanctum.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/ChamberOfAspects/RubySanctum/instance_ruby_sanctum.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.348** Cerrar la migracion auditada de `scripts/Northrend/ChamberOfAspects/RubySanctum/ruby_sanctum.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/ChamberOfAspects/RubySanctum/ruby_sanctum.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.349** Cerrar la migracion auditada de `scripts/Northrend/ChamberOfAspects/RubySanctum/ruby_sanctum.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/ChamberOfAspects/RubySanctum/ruby_sanctum.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.350** Partir y cerrar la migracion auditada de `scripts/Northrend/CrusadersColiseum/TrialOfTheChampion/boss_argent_challenge.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/CrusadersColiseum/TrialOfTheChampion/boss_argent_challenge.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 678 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.351** Cerrar la migracion auditada de `scripts/Northrend/CrusadersColiseum/TrialOfTheChampion/boss_black_knight.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/CrusadersColiseum/TrialOfTheChampion/boss_black_knight.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.352** Partir y cerrar la migracion auditada de `scripts/Northrend/CrusadersColiseum/TrialOfTheChampion/boss_grand_champions.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/CrusadersColiseum/TrialOfTheChampion/boss_grand_champions.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 857 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.353** Cerrar la migracion auditada de `scripts/Northrend/CrusadersColiseum/TrialOfTheChampion/instance_trial_of_the_champion.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/CrusadersColiseum/TrialOfTheChampion/instance_trial_of_the_champion.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.354** Partir y cerrar la migracion auditada de `scripts/Northrend/CrusadersColiseum/TrialOfTheChampion/trial_of_the_champion.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/CrusadersColiseum/TrialOfTheChampion/trial_of_the_champion.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 507 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.355** Cerrar la migracion auditada de `scripts/Northrend/CrusadersColiseum/TrialOfTheChampion/trial_of_the_champion.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/CrusadersColiseum/TrialOfTheChampion/trial_of_the_champion.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.356** Partir y cerrar la migracion auditada de `scripts/Northrend/CrusadersColiseum/TrialOfTheCrusader/boss_anubarak_trial.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/CrusadersColiseum/TrialOfTheCrusader/boss_anubarak_trial.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 887 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.357** Partir y cerrar la migracion auditada de `scripts/Northrend/CrusadersColiseum/TrialOfTheCrusader/boss_faction_champions.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/CrusadersColiseum/TrialOfTheCrusader/boss_faction_champions.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2184 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.358** Partir y cerrar la migracion auditada de `scripts/Northrend/CrusadersColiseum/TrialOfTheCrusader/boss_lord_jaraxxus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/CrusadersColiseum/TrialOfTheCrusader/boss_lord_jaraxxus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 552 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.359** Partir y cerrar la migracion auditada de `scripts/Northrend/CrusadersColiseum/TrialOfTheCrusader/boss_northrend_beasts.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/CrusadersColiseum/TrialOfTheCrusader/boss_northrend_beasts.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1358 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.360** Partir y cerrar la migracion auditada de `scripts/Northrend/CrusadersColiseum/TrialOfTheCrusader/boss_twin_valkyr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/CrusadersColiseum/TrialOfTheCrusader/boss_twin_valkyr.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 854 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.361** Partir y cerrar la migracion auditada de `scripts/Northrend/CrusadersColiseum/TrialOfTheCrusader/instance_trial_of_the_crusader.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/CrusadersColiseum/TrialOfTheCrusader/instance_trial_of_the_crusader.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 550 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.362** Partir y cerrar la migracion auditada de `scripts/Northrend/CrusadersColiseum/TrialOfTheCrusader/trial_of_the_crusader.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/CrusadersColiseum/TrialOfTheCrusader/trial_of_the_crusader.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 908 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.363** Cerrar la migracion auditada de `scripts/Northrend/CrusadersColiseum/TrialOfTheCrusader/trial_of_the_crusader.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/CrusadersColiseum/TrialOfTheCrusader/trial_of_the_crusader.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.364** Cerrar la migracion auditada de `scripts/Northrend/DraktharonKeep/boss_king_dred.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/DraktharonKeep/boss_king_dred.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.365** Cerrar la migracion auditada de `scripts/Northrend/DraktharonKeep/boss_novos.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/DraktharonKeep/boss_novos.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.366** Cerrar la migracion auditada de `scripts/Northrend/DraktharonKeep/boss_tharon_ja.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/DraktharonKeep/boss_tharon_ja.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.367** Cerrar la migracion auditada de `scripts/Northrend/DraktharonKeep/boss_trollgore.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/DraktharonKeep/boss_trollgore.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.368** Cerrar la migracion auditada de `scripts/Northrend/DraktharonKeep/drak_tharon_keep.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/DraktharonKeep/drak_tharon_keep.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.369** Cerrar la migracion auditada de `scripts/Northrend/DraktharonKeep/drak_tharon_keep.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/DraktharonKeep/drak_tharon_keep.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.370** Cerrar la migracion auditada de `scripts/Northrend/DraktharonKeep/instance_drak_tharon_keep.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/DraktharonKeep/instance_drak_tharon_keep.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.371** Cerrar la migracion auditada de `scripts/Northrend/FrozenHalls/ForgeOfSouls/boss_bronjahm.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/FrozenHalls/ForgeOfSouls/boss_bronjahm.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.372** Cerrar la migracion auditada de `scripts/Northrend/FrozenHalls/ForgeOfSouls/boss_devourer_of_souls.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/FrozenHalls/ForgeOfSouls/boss_devourer_of_souls.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.373** Cerrar la migracion auditada de `scripts/Northrend/FrozenHalls/ForgeOfSouls/forge_of_souls.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/FrozenHalls/ForgeOfSouls/forge_of_souls.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.374** Cerrar la migracion auditada de `scripts/Northrend/FrozenHalls/ForgeOfSouls/forge_of_souls.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/FrozenHalls/ForgeOfSouls/forge_of_souls.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.375** Cerrar la migracion auditada de `scripts/Northrend/FrozenHalls/ForgeOfSouls/instance_forge_of_souls.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/FrozenHalls/ForgeOfSouls/instance_forge_of_souls.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.376** Cerrar la migracion auditada de `scripts/Northrend/FrozenHalls/HallsOfReflection/boss_falric.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/FrozenHalls/HallsOfReflection/boss_falric.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.377** Cerrar la migracion auditada de `scripts/Northrend/FrozenHalls/HallsOfReflection/boss_horAI.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/FrozenHalls/HallsOfReflection/boss_horAI.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.378** Cerrar la migracion auditada de `scripts/Northrend/FrozenHalls/HallsOfReflection/boss_horAI.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/FrozenHalls/HallsOfReflection/boss_horAI.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.379** Cerrar la migracion auditada de `scripts/Northrend/FrozenHalls/HallsOfReflection/boss_marwyn.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/FrozenHalls/HallsOfReflection/boss_marwyn.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.380** Partir y cerrar la migracion auditada de `scripts/Northrend/FrozenHalls/HallsOfReflection/halls_of_reflection.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/FrozenHalls/HallsOfReflection/halls_of_reflection.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2881 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.381** Cerrar la migracion auditada de `scripts/Northrend/FrozenHalls/HallsOfReflection/halls_of_reflection.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/FrozenHalls/HallsOfReflection/halls_of_reflection.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.382** Partir y cerrar la migracion auditada de `scripts/Northrend/FrozenHalls/HallsOfReflection/instance_halls_of_reflection.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/FrozenHalls/HallsOfReflection/instance_halls_of_reflection.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 796 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.383** Cerrar la migracion auditada de `scripts/Northrend/FrozenHalls/PitOfSaron/boss_forgemaster_garfrost.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/FrozenHalls/PitOfSaron/boss_forgemaster_garfrost.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.384** Partir y cerrar la migracion auditada de `scripts/Northrend/FrozenHalls/PitOfSaron/boss_krickandick.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/FrozenHalls/PitOfSaron/boss_krickandick.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 662 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.385** Partir y cerrar la migracion auditada de `scripts/Northrend/FrozenHalls/PitOfSaron/boss_scourgelord_tyrannus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/FrozenHalls/PitOfSaron/boss_scourgelord_tyrannus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 512 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.386** Cerrar la migracion auditada de `scripts/Northrend/FrozenHalls/PitOfSaron/instance_pit_of_saron.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/FrozenHalls/PitOfSaron/instance_pit_of_saron.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.387** Cerrar la migracion auditada de `scripts/Northrend/FrozenHalls/PitOfSaron/pit_of_saron.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/FrozenHalls/PitOfSaron/pit_of_saron.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.388** Cerrar la migracion auditada de `scripts/Northrend/FrozenHalls/PitOfSaron/pit_of_saron.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/FrozenHalls/PitOfSaron/pit_of_saron.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.389** Cerrar la migracion auditada de `scripts/Northrend/Gundrak/boss_drakkari_colossus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Gundrak/boss_drakkari_colossus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.390** Cerrar la migracion auditada de `scripts/Northrend/Gundrak/boss_eck.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Gundrak/boss_eck.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.391** Cerrar la migracion auditada de `scripts/Northrend/Gundrak/boss_gal_darah.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Gundrak/boss_gal_darah.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.392** Cerrar la migracion auditada de `scripts/Northrend/Gundrak/boss_moorabi.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Gundrak/boss_moorabi.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.393** Cerrar la migracion auditada de `scripts/Northrend/Gundrak/boss_slad_ran.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Gundrak/boss_slad_ran.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.394** Cerrar la migracion auditada de `scripts/Northrend/Gundrak/gundrak.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Gundrak/gundrak.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.395** Cerrar la migracion auditada de `scripts/Northrend/Gundrak/instance_gundrak.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Gundrak/instance_gundrak.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.396** Cerrar la migracion auditada de `scripts/Northrend/IsleOfConquest/boss_ioc_horde_alliance.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/IsleOfConquest/boss_ioc_horde_alliance.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.397** Cerrar la migracion auditada de `scripts/Northrend/IsleOfConquest/isle_of_conquest.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/IsleOfConquest/isle_of_conquest.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.398** Cerrar la migracion auditada de `scripts/Northrend/Naxxramas/boss_anubrekhan.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Naxxramas/boss_anubrekhan.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.399** Cerrar la migracion auditada de `scripts/Northrend/Naxxramas/boss_faerlina.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Naxxramas/boss_faerlina.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.400** Partir y cerrar la migracion auditada de `scripts/Northrend/Naxxramas/boss_four_horsemen.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Naxxramas/boss_four_horsemen.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 707 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.401** Cerrar la migracion auditada de `scripts/Northrend/Naxxramas/boss_gluth.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Naxxramas/boss_gluth.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.402** Partir y cerrar la migracion auditada de `scripts/Northrend/Naxxramas/boss_gothik.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Naxxramas/boss_gothik.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 906 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.403** Cerrar la migracion auditada de `scripts/Northrend/Naxxramas/boss_grobbulus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Naxxramas/boss_grobbulus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.404** Cerrar la migracion auditada de `scripts/Northrend/Naxxramas/boss_heigan.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Naxxramas/boss_heigan.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.405** Partir y cerrar la migracion auditada de `scripts/Northrend/Naxxramas/boss_kelthuzad.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Naxxramas/boss_kelthuzad.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 977 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.406** Cerrar la migracion auditada de `scripts/Northrend/Naxxramas/boss_loatheb.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Naxxramas/boss_loatheb.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.407** Cerrar la migracion auditada de `scripts/Northrend/Naxxramas/boss_maexxna.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Naxxramas/boss_maexxna.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.408** Cerrar la migracion auditada de `scripts/Northrend/Naxxramas/boss_noth.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Naxxramas/boss_noth.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.409** Cerrar la migracion auditada de `scripts/Northrend/Naxxramas/boss_patchwerk.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Naxxramas/boss_patchwerk.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.410** Cerrar la migracion auditada de `scripts/Northrend/Naxxramas/boss_razuvious.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Naxxramas/boss_razuvious.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.411** Partir y cerrar la migracion auditada de `scripts/Northrend/Naxxramas/boss_sapphiron.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Naxxramas/boss_sapphiron.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 643 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.412** Partir y cerrar la migracion auditada de `scripts/Northrend/Naxxramas/boss_thaddius.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Naxxramas/boss_thaddius.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1182 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.413** Partir y cerrar la migracion auditada de `scripts/Northrend/Naxxramas/instance_naxxramas.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Naxxramas/instance_naxxramas.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 621 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.414** Cerrar la migracion auditada de `scripts/Northrend/Naxxramas/naxxramas.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Naxxramas/naxxramas.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.415** Cerrar la migracion auditada de `scripts/Northrend/Naxxramas/naxxramas.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Naxxramas/naxxramas.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.416** Partir y cerrar la migracion auditada de `scripts/Northrend/Nexus/EyeOfEternity/boss_malygos.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Nexus/EyeOfEternity/boss_malygos.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2151 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.417** Cerrar la migracion auditada de `scripts/Northrend/Nexus/EyeOfEternity/eye_of_eternity.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Nexus/EyeOfEternity/eye_of_eternity.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.418** Cerrar la migracion auditada de `scripts/Northrend/Nexus/EyeOfEternity/instance_eye_of_eternity.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Nexus/EyeOfEternity/instance_eye_of_eternity.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.419** Cerrar la migracion auditada de `scripts/Northrend/Nexus/Nexus/boss_anomalus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Nexus/Nexus/boss_anomalus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.420** Cerrar la migracion auditada de `scripts/Northrend/Nexus/Nexus/boss_keristrasza.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Nexus/Nexus/boss_keristrasza.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.421** Cerrar la migracion auditada de `scripts/Northrend/Nexus/Nexus/boss_magus_telestra.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Nexus/Nexus/boss_magus_telestra.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.422** Cerrar la migracion auditada de `scripts/Northrend/Nexus/Nexus/boss_nexus_commanders.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Nexus/Nexus/boss_nexus_commanders.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.423** Cerrar la migracion auditada de `scripts/Northrend/Nexus/Nexus/boss_ormorok.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Nexus/Nexus/boss_ormorok.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.424** Cerrar la migracion auditada de `scripts/Northrend/Nexus/Nexus/instance_nexus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Nexus/Nexus/instance_nexus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.425** Cerrar la migracion auditada de `scripts/Northrend/Nexus/Nexus/nexus.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Nexus/Nexus/nexus.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.426** Cerrar la migracion auditada de `scripts/Northrend/Nexus/Oculus/boss_drakos.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Nexus/Oculus/boss_drakos.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.427** Cerrar la migracion auditada de `scripts/Northrend/Nexus/Oculus/boss_eregos.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Nexus/Oculus/boss_eregos.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.428** Cerrar la migracion auditada de `scripts/Northrend/Nexus/Oculus/boss_urom.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Nexus/Oculus/boss_urom.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.429** Cerrar la migracion auditada de `scripts/Northrend/Nexus/Oculus/boss_varos.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Nexus/Oculus/boss_varos.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.430** Cerrar la migracion auditada de `scripts/Northrend/Nexus/Oculus/instance_oculus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Nexus/Oculus/instance_oculus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.431** Partir y cerrar la migracion auditada de `scripts/Northrend/Nexus/Oculus/oculus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Nexus/Oculus/oculus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 558 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.432** Cerrar la migracion auditada de `scripts/Northrend/Nexus/Oculus/oculus.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Nexus/Oculus/oculus.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.433** Cerrar la migracion auditada de `scripts/Northrend/UtgardeKeep/UtgardeKeep/boss_ingvar_the_plunderer.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/UtgardeKeep/UtgardeKeep/boss_ingvar_the_plunderer.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.434** Cerrar la migracion auditada de `scripts/Northrend/UtgardeKeep/UtgardeKeep/boss_keleseth.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/UtgardeKeep/UtgardeKeep/boss_keleseth.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.435** Cerrar la migracion auditada de `scripts/Northrend/UtgardeKeep/UtgardeKeep/boss_skarvald_dalronn.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/UtgardeKeep/UtgardeKeep/boss_skarvald_dalronn.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.436** Cerrar la migracion auditada de `scripts/Northrend/UtgardeKeep/UtgardeKeep/instance_utgarde_keep.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/UtgardeKeep/UtgardeKeep/instance_utgarde_keep.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.437** Cerrar la migracion auditada de `scripts/Northrend/UtgardeKeep/UtgardeKeep/utgarde_keep.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/UtgardeKeep/UtgardeKeep/utgarde_keep.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.438** Cerrar la migracion auditada de `scripts/Northrend/UtgardeKeep/UtgardeKeep/utgarde_keep.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/UtgardeKeep/UtgardeKeep/utgarde_keep.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.439** Partir y cerrar la migracion auditada de `scripts/Northrend/UtgardeKeep/UtgardePinnacle/boss_palehoof.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/UtgardeKeep/UtgardePinnacle/boss_palehoof.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 607 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.440** Partir y cerrar la migracion auditada de `scripts/Northrend/UtgardeKeep/UtgardePinnacle/boss_skadi.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/UtgardeKeep/UtgardePinnacle/boss_skadi.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 848 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.441** Partir y cerrar la migracion auditada de `scripts/Northrend/UtgardeKeep/UtgardePinnacle/boss_svala.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/UtgardeKeep/UtgardePinnacle/boss_svala.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 567 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.442** Cerrar la migracion auditada de `scripts/Northrend/UtgardeKeep/UtgardePinnacle/boss_ymiron.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/UtgardeKeep/UtgardePinnacle/boss_ymiron.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.443** Cerrar la migracion auditada de `scripts/Northrend/UtgardeKeep/UtgardePinnacle/instance_utgarde_pinnacle.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/UtgardeKeep/UtgardePinnacle/instance_utgarde_pinnacle.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.444** Cerrar la migracion auditada de `scripts/Northrend/UtgardeKeep/UtgardePinnacle/utgarde_pinnacle.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/UtgardeKeep/UtgardePinnacle/utgarde_pinnacle.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.445** Cerrar la migracion auditada de `scripts/Northrend/UtgardeKeep/UtgardePinnacle/utgarde_pinnacle.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/UtgardeKeep/UtgardePinnacle/utgarde_pinnacle.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.446** Cerrar la migracion auditada de `scripts/Northrend/VaultOfArchavon/boss_archavon.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/VaultOfArchavon/boss_archavon.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.447** Cerrar la migracion auditada de `scripts/Northrend/VaultOfArchavon/boss_emalon.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/VaultOfArchavon/boss_emalon.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.448** Cerrar la migracion auditada de `scripts/Northrend/VaultOfArchavon/boss_koralon.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/VaultOfArchavon/boss_koralon.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.449** Cerrar la migracion auditada de `scripts/Northrend/VaultOfArchavon/boss_toravon.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/VaultOfArchavon/boss_toravon.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.450** Cerrar la migracion auditada de `scripts/Northrend/VaultOfArchavon/instance_vault_of_archavon.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/VaultOfArchavon/instance_vault_of_archavon.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.451** Cerrar la migracion auditada de `scripts/Northrend/VaultOfArchavon/vault_of_archavon.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/VaultOfArchavon/vault_of_archavon.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.452** Cerrar la migracion auditada de `scripts/Northrend/VioletHold/boss_cyanigosa.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/VioletHold/boss_cyanigosa.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.453** Cerrar la migracion auditada de `scripts/Northrend/VioletHold/boss_erekem.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/VioletHold/boss_erekem.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.454** Cerrar la migracion auditada de `scripts/Northrend/VioletHold/boss_ichoron.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/VioletHold/boss_ichoron.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.455** Cerrar la migracion auditada de `scripts/Northrend/VioletHold/boss_lavanthor.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/VioletHold/boss_lavanthor.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.456** Cerrar la migracion auditada de `scripts/Northrend/VioletHold/boss_moragg.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/VioletHold/boss_moragg.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.457** Cerrar la migracion auditada de `scripts/Northrend/VioletHold/boss_xevozz.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/VioletHold/boss_xevozz.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.458** Cerrar la migracion auditada de `scripts/Northrend/VioletHold/boss_zuramat.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/VioletHold/boss_zuramat.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.459** Partir y cerrar la migracion auditada de `scripts/Northrend/VioletHold/instance_violet_hold.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/VioletHold/instance_violet_hold.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 956 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.460** Partir y cerrar la migracion auditada de `scripts/Northrend/VioletHold/violet_hold.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/VioletHold/violet_hold.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1445 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.461** Cerrar la migracion auditada de `scripts/Northrend/VioletHold/violet_hold.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/VioletHold/violet_hold.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.462** Cerrar la migracion auditada de `scripts/Northrend/northrend_script_loader.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/northrend_script_loader.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.463** Partir y cerrar la migracion auditada de `scripts/Northrend/zone_borean_tundra.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/zone_borean_tundra.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1722 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.464** Cerrar la migracion auditada de `scripts/Northrend/zone_dalaran.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/zone_dalaran.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.465** Partir y cerrar la migracion auditada de `scripts/Northrend/zone_dragonblight.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/zone_dragonblight.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 976 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.466** Partir y cerrar la migracion auditada de `scripts/Northrend/zone_grizzly_hills.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/zone_grizzly_hills.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 952 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.467** Partir y cerrar la migracion auditada de `scripts/Northrend/zone_howling_fjord.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/zone_howling_fjord.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 552 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.468** Partir y cerrar la migracion auditada de `scripts/Northrend/zone_icecrown.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/zone_icecrown.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 936 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.469** Partir y cerrar la migracion auditada de `scripts/Northrend/zone_sholazar_basin.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/zone_sholazar_basin.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 797 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.470** Partir y cerrar la migracion auditada de `scripts/Northrend/zone_storm_peaks.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/zone_storm_peaks.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1354 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.471** Partir y cerrar la migracion auditada de `scripts/Northrend/zone_wintergrasp.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/zone_wintergrasp.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 551 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.472** Partir y cerrar la migracion auditada de `scripts/Northrend/zone_zuldrak.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/zone_zuldrak.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1034 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.473** Cerrar la migracion auditada de `scripts/OutdoorPvP/OutdoorPvPHP.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/OutdoorPvP/OutdoorPvPHP.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.474** Cerrar la migracion auditada de `scripts/OutdoorPvP/OutdoorPvPHP.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/OutdoorPvP/OutdoorPvPHP.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.475** Partir y cerrar la migracion auditada de `scripts/OutdoorPvP/OutdoorPvPNA.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/OutdoorPvP/OutdoorPvPNA.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 518 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.476** Cerrar la migracion auditada de `scripts/OutdoorPvP/OutdoorPvPNA.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/OutdoorPvP/OutdoorPvPNA.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.477** Cerrar la migracion auditada de `scripts/OutdoorPvP/OutdoorPvPSI.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/OutdoorPvP/OutdoorPvPSI.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.478** Cerrar la migracion auditada de `scripts/OutdoorPvP/OutdoorPvPSI.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/OutdoorPvP/OutdoorPvPSI.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.479** Cerrar la migracion auditada de `scripts/OutdoorPvP/OutdoorPvPScriptLoader.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/OutdoorPvP/OutdoorPvPScriptLoader.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.480** Cerrar la migracion auditada de `scripts/OutdoorPvP/OutdoorPvPTF.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/OutdoorPvP/OutdoorPvPTF.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.481** Cerrar la migracion auditada de `scripts/OutdoorPvP/OutdoorPvPTF.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/OutdoorPvP/OutdoorPvPTF.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.482** Cerrar la migracion auditada de `scripts/OutdoorPvP/OutdoorPvPZM.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/OutdoorPvP/OutdoorPvPZM.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.483** Cerrar la migracion auditada de `scripts/OutdoorPvP/OutdoorPvPZM.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/OutdoorPvP/OutdoorPvPZM.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.484** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/AuchenaiCrypts/auchenai_crypts.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/AuchenaiCrypts/auchenai_crypts.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.485** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/AuchenaiCrypts/boss_exarch_maladaar.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/AuchenaiCrypts/boss_exarch_maladaar.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.486** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/AuchenaiCrypts/boss_shirrak_the_dead_watcher.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/AuchenaiCrypts/boss_shirrak_the_dead_watcher.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.487** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/AuchenaiCrypts/instance_auchenai_crypts.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/AuchenaiCrypts/instance_auchenai_crypts.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.488** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/ManaTombs/boss_nexusprince_shaffar.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/ManaTombs/boss_nexusprince_shaffar.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.489** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/ManaTombs/boss_pandemonius.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/ManaTombs/boss_pandemonius.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.490** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/ManaTombs/instance_mana_tombs.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/ManaTombs/instance_mana_tombs.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.491** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/ManaTombs/mana_tombs.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/ManaTombs/mana_tombs.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.492** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/SethekkHalls/boss_anzu.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/SethekkHalls/boss_anzu.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.493** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/SethekkHalls/boss_darkweaver_syth.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/SethekkHalls/boss_darkweaver_syth.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.494** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/SethekkHalls/boss_talon_king_ikiss.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/SethekkHalls/boss_talon_king_ikiss.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.495** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/SethekkHalls/instance_sethekk_halls.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/SethekkHalls/instance_sethekk_halls.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.496** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/SethekkHalls/sethekk_halls.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/SethekkHalls/sethekk_halls.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.497** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/ShadowLabyrinth/boss_ambassador_hellmaw.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/ShadowLabyrinth/boss_ambassador_hellmaw.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.498** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/ShadowLabyrinth/boss_blackheart_the_inciter.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/ShadowLabyrinth/boss_blackheart_the_inciter.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.499** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/ShadowLabyrinth/boss_grandmaster_vorpil.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/ShadowLabyrinth/boss_grandmaster_vorpil.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.500** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/ShadowLabyrinth/boss_murmur.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/ShadowLabyrinth/boss_murmur.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.501** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/ShadowLabyrinth/instance_shadow_labyrinth.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/ShadowLabyrinth/instance_shadow_labyrinth.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.502** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/ShadowLabyrinth/shadow_labyrinth.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/ShadowLabyrinth/shadow_labyrinth.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.503** Cerrar la migracion auditada de `scripts/Outland/Auchindoun/ShadowLabyrinth/shadow_labyrinth.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/Auchindoun/ShadowLabyrinth/shadow_labyrinth.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.504** Cerrar la migracion auditada de `scripts/Outland/BlackTemple/black_temple.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/BlackTemple/black_temple.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.505** Cerrar la migracion auditada de `scripts/Outland/BlackTemple/black_temple.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/BlackTemple/black_temple.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.506** Cerrar la migracion auditada de `scripts/Outland/BlackTemple/boss_gurtogg_bloodboil.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/BlackTemple/boss_gurtogg_bloodboil.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.507** Partir y cerrar la migracion auditada de `scripts/Outland/BlackTemple/boss_illidan.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/BlackTemple/boss_illidan.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2341 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.508** Partir y cerrar la migracion auditada de `scripts/Outland/BlackTemple/boss_illidari_council.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/BlackTemple/boss_illidari_council.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 806 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.509** Cerrar la migracion auditada de `scripts/Outland/BlackTemple/boss_mother_shahraz.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/BlackTemple/boss_mother_shahraz.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.510** Partir y cerrar la migracion auditada de `scripts/Outland/BlackTemple/boss_reliquary_of_souls.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/BlackTemple/boss_reliquary_of_souls.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 823 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.511** Partir y cerrar la migracion auditada de `scripts/Outland/BlackTemple/boss_shade_of_akama.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/BlackTemple/boss_shade_of_akama.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1118 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.512** Cerrar la migracion auditada de `scripts/Outland/BlackTemple/boss_supremus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/BlackTemple/boss_supremus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.513** Cerrar la migracion auditada de `scripts/Outland/BlackTemple/boss_teron_gorefiend.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/BlackTemple/boss_teron_gorefiend.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.514** Cerrar la migracion auditada de `scripts/Outland/BlackTemple/boss_warlord_najentus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/BlackTemple/boss_warlord_najentus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.515** Cerrar la migracion auditada de `scripts/Outland/BlackTemple/instance_black_temple.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/BlackTemple/instance_black_temple.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.516** Partir y cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/SerpentShrine/boss_fathomlord_karathress.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/SerpentShrine/boss_fathomlord_karathress.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 677 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.517** Cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/SerpentShrine/boss_hydross_the_unstable.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/SerpentShrine/boss_hydross_the_unstable.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.518** Partir y cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/SerpentShrine/boss_lady_vashj.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/SerpentShrine/boss_lady_vashj.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 889 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.519** Partir y cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/SerpentShrine/boss_leotheras_the_blind.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/SerpentShrine/boss_leotheras_the_blind.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 769 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.520** Cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/SerpentShrine/boss_lurker_below.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/SerpentShrine/boss_lurker_below.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.521** Cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/SerpentShrine/boss_morogrim_tidewalker.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/SerpentShrine/boss_morogrim_tidewalker.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.522** Cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/SerpentShrine/instance_serpent_shrine.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/SerpentShrine/instance_serpent_shrine.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.523** Cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/SerpentShrine/serpent_shrine.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/SerpentShrine/serpent_shrine.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.524** Cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/SteamVault/boss_hydromancer_thespia.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/SteamVault/boss_hydromancer_thespia.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.525** Cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/SteamVault/boss_mekgineer_steamrigger.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/SteamVault/boss_mekgineer_steamrigger.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.526** Cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/SteamVault/boss_warlord_kalithresh.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/SteamVault/boss_warlord_kalithresh.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.527** Cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/SteamVault/instance_steam_vault.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/SteamVault/instance_steam_vault.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.528** Cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/SteamVault/steam_vault.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/SteamVault/steam_vault.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.529** Partir y cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/TheSlavePens/boss_ahune.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/TheSlavePens/boss_ahune.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 890 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.530** Cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/TheSlavePens/boss_mennu_the_betrayer.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/TheSlavePens/boss_mennu_the_betrayer.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.531** Cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/TheSlavePens/boss_quagmirran.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/TheSlavePens/boss_quagmirran.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.532** Cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/TheSlavePens/boss_rokmar_the_crackler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/TheSlavePens/boss_rokmar_the_crackler.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.533** Cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/TheSlavePens/instance_the_slave_pens.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/TheSlavePens/instance_the_slave_pens.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.534** Cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/TheSlavePens/the_slave_pens.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/TheSlavePens/the_slave_pens.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.535** Cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/TheUnderbog/boss_hungarfen.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/TheUnderbog/boss_hungarfen.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.536** Cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/TheUnderbog/boss_the_black_stalker.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/TheUnderbog/boss_the_black_stalker.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.537** Cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/TheUnderbog/instance_the_underbog.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/TheUnderbog/instance_the_underbog.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.538** Cerrar la migracion auditada de `scripts/Outland/CoilfangReservoir/TheUnderbog/the_underbog.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/CoilfangReservoir/TheUnderbog/the_underbog.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.539** Cerrar la migracion auditada de `scripts/Outland/GruulsLair/boss_gruul.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/GruulsLair/boss_gruul.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.540** Partir y cerrar la migracion auditada de `scripts/Outland/GruulsLair/boss_high_king_maulgar.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/GruulsLair/boss_high_king_maulgar.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 579 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.541** Cerrar la migracion auditada de `scripts/Outland/GruulsLair/gruuls_lair.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/GruulsLair/gruuls_lair.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.542** Cerrar la migracion auditada de `scripts/Outland/GruulsLair/instance_gruuls_lair.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/GruulsLair/instance_gruuls_lair.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.543** Cerrar la migracion auditada de `scripts/Outland/HellfireCitadel/BloodFurnace/blood_furnace.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/HellfireCitadel/BloodFurnace/blood_furnace.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.544** Cerrar la migracion auditada de `scripts/Outland/HellfireCitadel/BloodFurnace/boss_broggok.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/HellfireCitadel/BloodFurnace/boss_broggok.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.545** Cerrar la migracion auditada de `scripts/Outland/HellfireCitadel/BloodFurnace/boss_kelidan_the_breaker.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/HellfireCitadel/BloodFurnace/boss_kelidan_the_breaker.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.546** Cerrar la migracion auditada de `scripts/Outland/HellfireCitadel/BloodFurnace/boss_the_maker.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/HellfireCitadel/BloodFurnace/boss_the_maker.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.547** Cerrar la migracion auditada de `scripts/Outland/HellfireCitadel/BloodFurnace/instance_blood_furnace.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/HellfireCitadel/BloodFurnace/instance_blood_furnace.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.548** Cerrar la migracion auditada de `scripts/Outland/HellfireCitadel/HellfireRamparts/boss_omor_the_unscarred.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/HellfireCitadel/HellfireRamparts/boss_omor_the_unscarred.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.549** Partir y cerrar la migracion auditada de `scripts/Outland/HellfireCitadel/HellfireRamparts/boss_vazruden_the_herald.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/HellfireCitadel/HellfireRamparts/boss_vazruden_the_herald.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 531 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.550** Cerrar la migracion auditada de `scripts/Outland/HellfireCitadel/HellfireRamparts/boss_watchkeeper_gargolmar.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/HellfireCitadel/HellfireRamparts/boss_watchkeeper_gargolmar.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.551** Cerrar la migracion auditada de `scripts/Outland/HellfireCitadel/HellfireRamparts/hellfire_ramparts.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/HellfireCitadel/HellfireRamparts/hellfire_ramparts.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.552** Cerrar la migracion auditada de `scripts/Outland/HellfireCitadel/HellfireRamparts/instance_hellfire_ramparts.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/HellfireCitadel/HellfireRamparts/instance_hellfire_ramparts.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.553** Partir y cerrar la migracion auditada de `scripts/Outland/HellfireCitadel/MagtheridonsLair/boss_magtheridon.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/HellfireCitadel/MagtheridonsLair/boss_magtheridon.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 529 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.554** Cerrar la migracion auditada de `scripts/Outland/HellfireCitadel/MagtheridonsLair/instance_magtheridons_lair.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/HellfireCitadel/MagtheridonsLair/instance_magtheridons_lair.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.555** Cerrar la migracion auditada de `scripts/Outland/HellfireCitadel/MagtheridonsLair/magtheridons_lair.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/HellfireCitadel/MagtheridonsLair/magtheridons_lair.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.556** Cerrar la migracion auditada de `scripts/Outland/HellfireCitadel/ShatteredHalls/boss_nethekurse.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/HellfireCitadel/ShatteredHalls/boss_nethekurse.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.557** Cerrar la migracion auditada de `scripts/Outland/HellfireCitadel/ShatteredHalls/boss_warbringer_omrogg.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/HellfireCitadel/ShatteredHalls/boss_warbringer_omrogg.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.558** Cerrar la migracion auditada de `scripts/Outland/HellfireCitadel/ShatteredHalls/boss_warchief_kargath_bladefist.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/HellfireCitadel/ShatteredHalls/boss_warchief_kargath_bladefist.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.559** Cerrar la migracion auditada de `scripts/Outland/HellfireCitadel/ShatteredHalls/instance_shattered_halls.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/HellfireCitadel/ShatteredHalls/instance_shattered_halls.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.560** Cerrar la migracion auditada de `scripts/Outland/HellfireCitadel/ShatteredHalls/shattered_halls.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/HellfireCitadel/ShatteredHalls/shattered_halls.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.561** Cerrar la migracion auditada de `scripts/Outland/HellfireCitadel/ShatteredHalls/shattered_halls.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/HellfireCitadel/ShatteredHalls/shattered_halls.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.562** Partir y cerrar la migracion auditada de `scripts/Outland/TempestKeep/Eye/boss_alar.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/Eye/boss_alar.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 574 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.563** Partir y cerrar la migracion auditada de `scripts/Outland/TempestKeep/Eye/boss_astromancer.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/Eye/boss_astromancer.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 504 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.564** Partir y cerrar la migracion auditada de `scripts/Outland/TempestKeep/Eye/boss_kaelthas.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/Eye/boss_kaelthas.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1423 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.565** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/Eye/boss_void_reaver.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/Eye/boss_void_reaver.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.566** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/Eye/instance_the_eye.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/Eye/instance_the_eye.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.567** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/Eye/the_eye.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/Eye/the_eye.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.568** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/Mechanar/boss_gatewatcher_gyrokill.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/Mechanar/boss_gatewatcher_gyrokill.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.569** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/Mechanar/boss_gatewatcher_ironhand.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/Mechanar/boss_gatewatcher_ironhand.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.570** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/Mechanar/boss_mechano_lord_capacitus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/Mechanar/boss_mechano_lord_capacitus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.571** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/Mechanar/boss_nethermancer_sepethrea.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/Mechanar/boss_nethermancer_sepethrea.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.572** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/Mechanar/boss_pathaleon_the_calculator.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/Mechanar/boss_pathaleon_the_calculator.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.573** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/Mechanar/instance_mechanar.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/Mechanar/instance_mechanar.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.574** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/Mechanar/mechanar.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/Mechanar/mechanar.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.575** Partir y cerrar la migracion auditada de `scripts/Outland/TempestKeep/arcatraz/arcatraz.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/arcatraz/arcatraz.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 501 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.576** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/arcatraz/arcatraz.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/arcatraz/arcatraz.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.577** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/arcatraz/boss_dalliah_the_doomsayer.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/arcatraz/boss_dalliah_the_doomsayer.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.578** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/arcatraz/boss_harbinger_skyriss.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/arcatraz/boss_harbinger_skyriss.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.579** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/arcatraz/boss_wrath_scryer_soccothrates.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/arcatraz/boss_wrath_scryer_soccothrates.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.580** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/arcatraz/boss_zereketh_the_unbound.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/arcatraz/boss_zereketh_the_unbound.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.581** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/arcatraz/instance_arcatraz.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/arcatraz/instance_arcatraz.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.582** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/botanica/boss_commander_sarannis.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/botanica/boss_commander_sarannis.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.583** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/botanica/boss_high_botanist_freywinn.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/botanica/boss_high_botanist_freywinn.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.584** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/botanica/boss_laj.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/botanica/boss_laj.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.585** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/botanica/boss_thorngrin_the_tender.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/botanica/boss_thorngrin_the_tender.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.586** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/botanica/boss_warp_splinter.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/botanica/boss_warp_splinter.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.587** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/botanica/instance_the_botanica.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/botanica/instance_the_botanica.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.588** Cerrar la migracion auditada de `scripts/Outland/TempestKeep/botanica/the_botanica.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/TempestKeep/botanica/the_botanica.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.589** Cerrar la migracion auditada de `scripts/Outland/boss_doomlord_kazzak.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/boss_doomlord_kazzak.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.590** Cerrar la migracion auditada de `scripts/Outland/boss_doomwalker.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/boss_doomwalker.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.591** Cerrar la migracion auditada de `scripts/Outland/outland_script_loader.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/outland_script_loader.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.592** Partir y cerrar la migracion auditada de `scripts/Outland/zone_blades_edge_mountains.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/zone_blades_edge_mountains.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1019 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.593** Partir y cerrar la migracion auditada de `scripts/Outland/zone_hellfire_peninsula.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/zone_hellfire_peninsula.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 855 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.594** Partir y cerrar la migracion auditada de `scripts/Outland/zone_nagrand.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/zone_nagrand.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 793 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.595** Partir y cerrar la migracion auditada de `scripts/Outland/zone_netherstorm.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/zone_netherstorm.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 536 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.596** Partir y cerrar la migracion auditada de `scripts/Outland/zone_shadowmoon_valley.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/zone_shadowmoon_valley.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1659 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.597** Cerrar la migracion auditada de `scripts/Outland/zone_terokkar_forest.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Outland/zone_terokkar_forest.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.598** Cerrar la migracion auditada de `scripts/Pet/pet_dk.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Pet/pet_dk.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.599** Cerrar la migracion auditada de `scripts/Pet/pet_generic.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Pet/pet_generic.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.600** Cerrar la migracion auditada de `scripts/Pet/pet_hunter.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Pet/pet_hunter.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.601** Cerrar la migracion auditada de `scripts/Pet/pet_mage.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Pet/pet_mage.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.602** Cerrar la migracion auditada de `scripts/Pet/pet_priest.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Pet/pet_priest.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.603** Cerrar la migracion auditada de `scripts/Pet/pet_script_loader.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Pet/pet_script_loader.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.604** Cerrar la migracion auditada de `scripts/Pet/pet_shaman.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Pet/pet_shaman.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.605** Cerrar la migracion auditada de `scripts/ScriptLoader.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/ScriptLoader.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.606** Cerrar la migracion auditada de `scripts/ScriptPCH.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/ScriptPCH.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.607** Partir y cerrar la migracion auditada de `scripts/Spells/spell_dk.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Spells/spell_dk.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 924 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.608** Partir y cerrar la migracion auditada de `scripts/Spells/spell_druid.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Spells/spell_druid.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2137 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.609** Partir y cerrar la migracion auditada de `scripts/Spells/spell_generic.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Spells/spell_generic.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 5538 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.610** Partir y cerrar la migracion auditada de `scripts/Spells/spell_hunter.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Spells/spell_hunter.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 809 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.611** Partir y cerrar la migracion auditada de `scripts/Spells/spell_item.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Spells/spell_item.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 4799 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.612** Partir y cerrar la migracion auditada de `scripts/Spells/spell_mage.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Spells/spell_mage.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1551 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.613** Partir y cerrar la migracion auditada de `scripts/Spells/spell_paladin.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Spells/spell_paladin.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 927 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.614** Partir y cerrar la migracion auditada de `scripts/Spells/spell_pet.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Spells/spell_pet.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1631 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.615** Partir y cerrar la migracion auditada de `scripts/Spells/spell_priest.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Spells/spell_priest.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2809 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.616** Partir y cerrar la migracion auditada de `scripts/Spells/spell_quest.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Spells/spell_quest.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1959 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.617** Partir y cerrar la migracion auditada de `scripts/Spells/spell_rogue.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Spells/spell_rogue.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1069 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.618** Cerrar la migracion auditada de `scripts/Spells/spell_script_loader.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Spells/spell_script_loader.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.619** Partir y cerrar la migracion auditada de `scripts/Spells/spell_shaman.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Spells/spell_shaman.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1051 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.620** Partir y cerrar la migracion auditada de `scripts/Spells/spell_warlock.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Spells/spell_warlock.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1041 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.621** Partir y cerrar la migracion auditada de `scripts/Spells/spell_warrior.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Spells/spell_warrior.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 850 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.622** Cerrar la migracion auditada de `scripts/World/achievement_scripts.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/World/achievement_scripts.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.623** Cerrar la migracion auditada de `scripts/World/action_ip_logger.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/World/action_ip_logger.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.624** Cerrar la migracion auditada de `scripts/World/areatrigger_scripts.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/World/areatrigger_scripts.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.625** Cerrar la migracion auditada de `scripts/World/boosted_xp.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/World/boosted_xp.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.626** Partir y cerrar la migracion auditada de `scripts/World/boss_emerald_dragons.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/World/boss_emerald_dragons.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 820 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.627** Cerrar la migracion auditada de `scripts/World/chat_log.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/World/chat_log.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.628** Cerrar la migracion auditada de `scripts/World/conversation_scripts.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/World/conversation_scripts.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.629** Cerrar la migracion auditada de `scripts/World/duel_reset.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/World/duel_reset.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.630** Partir y cerrar la migracion auditada de `scripts/World/go_scripts.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/World/go_scripts.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1169 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.631** Cerrar la migracion auditada de `scripts/World/item_scripts.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/World/item_scripts.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.632** Cerrar la migracion auditada de `scripts/World/npc_guard.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/World/npc_guard.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.633** Partir y cerrar la migracion auditada de `scripts/World/npc_professions.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/World/npc_professions.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1311 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.634** Partir y cerrar la migracion auditada de `scripts/World/npcs_special.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/World/npcs_special.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2315 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.635** Cerrar la migracion auditada de `scripts/World/scene_scripts.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/World/scene_scripts.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS.WBS.636** Cerrar la migracion auditada de `scripts/World/world_script_loader.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/World/world_script_loader.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-spell`, `crates/wow-pvp`, `crates/wow-battleground`, `crates/wow-pet`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numbering: `#SCRIPTS.N`. Complexity: **L** (<1h), **M** (1–4h), **H** (4–12h), **XL** (>12h, split further). This list is intentionally long; expect to split each XL further at execution time.
 
 ### Phase A — scaffolding

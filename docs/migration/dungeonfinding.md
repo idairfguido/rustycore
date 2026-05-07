@@ -266,6 +266,99 @@ Todas las rutas relativas a `/home/server/woltk-trinity-legacy/`.
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#DUNGEONFINDING.WBS.001** Cerrar la migracion auditada de `game/DungeonFinding/LFG.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DungeonFinding/LFG.cpp`
+  Rust target: `crates/wow-world/src/handlers`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DUNGEONFINDING.WBS.002** Cerrar la migracion auditada de `game/DungeonFinding/LFG.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DungeonFinding/LFG.h`
+  Rust target: `crates/wow-world/src/handlers`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DUNGEONFINDING.WBS.003** Cerrar la migracion auditada de `game/DungeonFinding/LFGGroupData.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DungeonFinding/LFGGroupData.cpp`
+  Rust target: `crates/wow-world/src/handlers`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DUNGEONFINDING.WBS.004** Cerrar la migracion auditada de `game/DungeonFinding/LFGGroupData.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DungeonFinding/LFGGroupData.h`
+  Rust target: `crates/wow-world/src/handlers`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DUNGEONFINDING.WBS.005** Cerrar la migracion auditada de `game/DungeonFinding/LFGList.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DungeonFinding/LFGList.cpp`
+  Rust target: `crates/wow-world/src/handlers`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DUNGEONFINDING.WBS.006** Cerrar la migracion auditada de `game/DungeonFinding/LFGList.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DungeonFinding/LFGList.h`
+  Rust target: `crates/wow-world/src/handlers`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DUNGEONFINDING.WBS.007** Partir y cerrar la migracion auditada de `game/DungeonFinding/LFGMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DungeonFinding/LFGMgr.cpp`
+  Rust target: `crates/wow-world/src/handlers`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2241 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#DUNGEONFINDING.WBS.008** Partir y cerrar la migracion auditada de `game/DungeonFinding/LFGMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DungeonFinding/LFGMgr.h`
+  Rust target: `crates/wow-world/src/handlers`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 509 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#DUNGEONFINDING.WBS.009** Cerrar la migracion auditada de `game/DungeonFinding/LFGPlayerData.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DungeonFinding/LFGPlayerData.cpp`
+  Rust target: `crates/wow-world/src/handlers`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DUNGEONFINDING.WBS.010** Cerrar la migracion auditada de `game/DungeonFinding/LFGPlayerData.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DungeonFinding/LFGPlayerData.h`
+  Rust target: `crates/wow-world/src/handlers`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DUNGEONFINDING.WBS.011** Partir y cerrar la migracion auditada de `game/DungeonFinding/LFGQueue.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DungeonFinding/LFGQueue.cpp`
+  Rust target: `crates/wow-world/src/handlers`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 739 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#DUNGEONFINDING.WBS.012** Cerrar la migracion auditada de `game/DungeonFinding/LFGQueue.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DungeonFinding/LFGQueue.h`
+  Rust target: `crates/wow-world/src/handlers`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DUNGEONFINDING.WBS.013** Cerrar la migracion auditada de `game/DungeonFinding/LFGScripts.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DungeonFinding/LFGScripts.cpp`
+  Rust target: `crates/wow-world/src/handlers`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DUNGEONFINDING.WBS.014** Cerrar la migracion auditada de `game/DungeonFinding/LFGScripts.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DungeonFinding/LFGScripts.h`
+  Rust target: `crates/wow-world/src/handlers`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Complejidad: **L** (<1h), **M** (1-4h), **H** (4-12h), **XL** (>12h).
 
 - [ ] **#LFG.1** Crear crate-module `crates/wow-world/src/lfg/mod.rs` con submódulos `mgr`, `queue`, `player_data`, `group_data`, `proposal`, `boot`, `roles`, `reward` (L)

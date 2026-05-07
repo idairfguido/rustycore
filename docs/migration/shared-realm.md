@@ -174,6 +174,39 @@ Y para realm list updates:
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#SHARED_REALM.WBS.001** Cerrar la migracion auditada de `shared/Realm/Realm.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Realm/Realm.cpp`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_REALM.WBS.002** Cerrar la migracion auditada de `shared/Realm/Realm.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Realm/Realm.h`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_REALM.WBS.003** Cerrar la migracion auditada de `shared/Realm/RealmList.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Realm/RealmList.cpp`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_REALM.WBS.004** Cerrar la migracion auditada de `shared/Realm/RealmList.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Realm/RealmList.h`
+  Rust target: `crates/bnet-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#REALM.1** Implementar `RealmHandle { region, site, realm }` con `get_address() -> u32` y `get_address_string() -> String`. (L)
 - [ ] **#REALM.2** Cambiar `RealmManager.realms` a `HashMap<RealmHandle, Realm>` y propagar a calls sites. (M)
 - [ ] **#REALM.3** Auditar `cfg_timezones_id` vs `cfg_categories_id` contra `RealmList.cpp:332`. (L)

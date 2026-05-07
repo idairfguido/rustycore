@@ -172,6 +172,51 @@ Todas las rutas relativas a `/home/server/woltk-trinity-legacy/`.
 
 ## 9. Migration sub-tasks (ESQUELETO ONLY)
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#SCENARIOS.WBS.001** Cerrar la migracion auditada de `game/Scenarios/InstanceScenario.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Scenarios/InstanceScenario.cpp`
+  Rust target: `crates/wow-world/src/scenarios`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCENARIOS.WBS.002** Cerrar la migracion auditada de `game/Scenarios/InstanceScenario.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Scenarios/InstanceScenario.h`
+  Rust target: `crates/wow-world/src/scenarios`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCENARIOS.WBS.003** Cerrar la migracion auditada de `game/Scenarios/Scenario.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Scenarios/Scenario.cpp`
+  Rust target: `crates/wow-world/src/scenarios`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCENARIOS.WBS.004** Cerrar la migracion auditada de `game/Scenarios/Scenario.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Scenarios/Scenario.h`
+  Rust target: `crates/wow-world/src/scenarios`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCENARIOS.WBS.005** Cerrar la migracion auditada de `game/Scenarios/ScenarioMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Scenarios/ScenarioMgr.cpp`
+  Rust target: `crates/wow-world/src/scenarios`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCENARIOS.WBS.006** Cerrar la migracion auditada de `game/Scenarios/ScenarioMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Scenarios/ScenarioMgr.h`
+  Rust target: `crates/wow-world/src/scenarios`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Complejidad: **L** (<1h), **M** (1-4h), **H** (4-12h).
 
 > **Política recomendada:** ejecutar #SCN.1–#SCN.3 sólo cuando el equipo decida soportar un cliente MoP+ (5.x). Para 3.4.x, marcar el módulo como **WONT-IMPLEMENT** y dejar el directorio inexistente.

@@ -224,6 +224,27 @@ Tile generation is offline (`mmaps_generator` tool from Trinity); the runtime on
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#MOVEMENT_PATHGEN.WBS.001** Partir y cerrar la migracion auditada de `game/Movement/PathGenerator.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/PathGenerator.cpp`
+  Rust target: `crates/wow-recastdetour`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1045 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#MOVEMENT_PATHGEN.WBS.002** Cerrar la migracion auditada de `game/Movement/PathGenerator.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/PathGenerator.h`
+  Rust target: `crates/wow-recastdetour`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numbered for cross-reference from `MIGRATION_ROADMAP.md` §5. Complexity: **L** (<1h), **M** (1-4h), **H** (4-12h), **XL** (>12h, splitear).
 
 - [ ] **#MOVE-PATH.1** Decide FFI strategy: `recastnavigation-sys` crate from crates.io vs vendored `dep/recastnavigation` + `cxx` bridge. Document choice. (M)

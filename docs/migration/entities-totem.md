@@ -149,6 +149,27 @@ DBC stores:
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#ENTITIES_TOTEM.WBS.001** Cerrar la migracion auditada de `game/Entities/Totem/Totem.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Totem/Totem.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-spell`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_TOTEM.WBS.002** Cerrar la migracion auditada de `game/Entities/Totem/Totem.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Totem/Totem.h`
+  Rust target: `crates/wow-world`, `crates/wow-spell`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#TOT.1** Add `SummonSlot` constants to `wow-constants` (`Pet=0`, `Totem1..4`, `Quest`, `MiniPet`, `MAX_TOTEM_SLOT=5`) (L)
 - [ ] **#TOT.2** Add `m_SummonSlot: [ObjectGuid; 7]` (or analog) on the Unit equivalent in `wow-world` (L)
 - [ ] **#TOT.3** Port `TotemType` enum to `wow-constants` (L)

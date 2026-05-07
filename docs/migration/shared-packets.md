@@ -163,6 +163,27 @@ Bit-packing: `WriteBits` puede mezclarse con bytes planos en mismo packet; `Flus
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#SHARED_PACKETS.WBS.001** Cerrar la migracion auditada de `shared/Packets/ByteBuffer.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Packets/ByteBuffer.cpp`
+  Rust target: `crates/wow-packet`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_PACKETS.WBS.002** Partir y cerrar la migracion auditada de `shared/Packets/ByteBuffer.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Packets/ByteBuffer.h`
+  Rust target: `crates/wow-packet`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 666 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#PACKETS.1** Verificar bit-packing: secuencia C++ → leer en Rust → comparar resultado byte-a-byte. (H)
 - [ ] **#PACKETS.2** Implementar `ReadPackedGuid` / `WritePackedGuid` (variable-length GUID compression). (M)
 - [ ] **#PACKETS.3** Auditar string encoding por opcode (null-term vs length-prefix). (H, ~30+ opcodes)

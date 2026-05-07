@@ -249,6 +249,87 @@ The actual byte layout (compressed packed deltas vs `UncompressedPath`, paraboli
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#MOVEMENT_SPLINE.WBS.001** Cerrar la migracion auditada de `game/Movement/Spline/MoveSpline.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/Spline/MoveSpline.cpp`
+  Rust target: `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MOVEMENT_SPLINE.WBS.002** Cerrar la migracion auditada de `game/Movement/Spline/MoveSpline.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/Spline/MoveSpline.h`
+  Rust target: `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MOVEMENT_SPLINE.WBS.003** Cerrar la migracion auditada de `game/Movement/Spline/MoveSplineFlag.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/Spline/MoveSplineFlag.h`
+  Rust target: `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MOVEMENT_SPLINE.WBS.004** Cerrar la migracion auditada de `game/Movement/Spline/MoveSplineInit.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/Spline/MoveSplineInit.cpp`
+  Rust target: `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MOVEMENT_SPLINE.WBS.005** Cerrar la migracion auditada de `game/Movement/Spline/MoveSplineInit.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/Spline/MoveSplineInit.h`
+  Rust target: `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MOVEMENT_SPLINE.WBS.006** Cerrar la migracion auditada de `game/Movement/Spline/MoveSplineInitArgs.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/Spline/MoveSplineInitArgs.h`
+  Rust target: `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MOVEMENT_SPLINE.WBS.007** Cerrar la migracion auditada de `game/Movement/Spline/MovementTypedefs.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/Spline/MovementTypedefs.h`
+  Rust target: `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MOVEMENT_SPLINE.WBS.008** Cerrar la migracion auditada de `game/Movement/Spline/MovementUtil.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/Spline/MovementUtil.cpp`
+  Rust target: `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MOVEMENT_SPLINE.WBS.009** Cerrar la migracion auditada de `game/Movement/Spline/Spline.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/Spline/Spline.cpp`
+  Rust target: `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MOVEMENT_SPLINE.WBS.010** Cerrar la migracion auditada de `game/Movement/Spline/Spline.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/Spline/Spline.h`
+  Rust target: `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MOVEMENT_SPLINE.WBS.011** Cerrar la migracion auditada de `game/Movement/Spline/SplineChain.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/Spline/SplineChain.h`
+  Rust target: `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MOVEMENT_SPLINE.WBS.012** Cerrar la migracion auditada de `game/Movement/Spline/SplineImpl.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/Spline/SplineImpl.h`
+  Rust target: `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numbered for cross-reference from `MIGRATION_ROADMAP.md` §5. Complexity: **L** (<1h), **M** (1-4h), **H** (4-12h), **XL** (>12h).
 
 - [ ] **#MOVE-SPL.1** Create `crates/wow-movement/src/spline/` skeleton (`mod.rs`, `move_spline_flag.rs`, `spline.rs`, `move_spline.rs`, `move_spline_init.rs`, `movement_util.rs`). (L)

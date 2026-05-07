@@ -347,6 +347,75 @@ There is **no central `ObjectMgr` analogue** — its responsibilities are split 
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#GLOBALS.WBS.001** Cerrar la migracion auditada de `game/Globals/AreaTriggerDataStore.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Globals/AreaTriggerDataStore.cpp`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-world`, `crates/wow-network`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GLOBALS.WBS.002** Cerrar la migracion auditada de `game/Globals/AreaTriggerDataStore.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Globals/AreaTriggerDataStore.h`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-world`, `crates/wow-network`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GLOBALS.WBS.003** Cerrar la migracion auditada de `game/Globals/CharacterTemplateDataStore.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Globals/CharacterTemplateDataStore.cpp`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-world`, `crates/wow-network`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GLOBALS.WBS.004** Cerrar la migracion auditada de `game/Globals/CharacterTemplateDataStore.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Globals/CharacterTemplateDataStore.h`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-world`, `crates/wow-network`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GLOBALS.WBS.005** Cerrar la migracion auditada de `game/Globals/ConversationDataStore.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Globals/ConversationDataStore.cpp`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-world`, `crates/wow-network`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GLOBALS.WBS.006** Cerrar la migracion auditada de `game/Globals/ConversationDataStore.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Globals/ConversationDataStore.h`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-world`, `crates/wow-network`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GLOBALS.WBS.007** Cerrar la migracion auditada de `game/Globals/ObjectAccessor.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectAccessor.cpp`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-world`, `crates/wow-network`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GLOBALS.WBS.008** Cerrar la migracion auditada de `game/Globals/ObjectAccessor.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectAccessor.h`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-world`, `crates/wow-network`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#GLOBALS.WBS.009** Partir y cerrar la migracion auditada de `game/Globals/ObjectMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-world`, `crates/wow-network`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 11444 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#GLOBALS.WBS.010** Partir y cerrar la migracion auditada de `game/Globals/ObjectMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.h`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-world`, `crates/wow-network`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1944 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numera los items para poder referenciarlos desde `MIGRATION_ROADMAP.md` sección 5.
 
 Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>12h, splitear).

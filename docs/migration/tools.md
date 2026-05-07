@@ -152,6 +152,39 @@ None. Both tools are local — they don't speak to clients. Output paths are: lo
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#TOOLS.WBS.001** Cerrar la migracion auditada de `game/Tools/CharacterDatabaseCleaner.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Tools/CharacterDatabaseCleaner.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-tools`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#TOOLS.WBS.002** Cerrar la migracion auditada de `game/Tools/CharacterDatabaseCleaner.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Tools/CharacterDatabaseCleaner.h`
+  Rust target: `crates/wow-database`, `crates/wow-tools`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#TOOLS.WBS.003** Partir y cerrar la migracion auditada de `game/Tools/PlayerDump.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Tools/PlayerDump.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-tools`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1071 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#TOOLS.WBS.004** Cerrar la migracion auditada de `game/Tools/PlayerDump.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Tools/PlayerDump.h`
+  Rust target: `crates/wow-database`, `crates/wow-tools`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#TLS.1** Implement `CharacterDatabaseCleaner` as `pub fn run(pool: &Pool, flags: u32) -> Result<u32 /* remaining flags */, sqlx::Error>` in `wow-database/src/cleaner.rs`. Five sub-routines mirroring C++. Use parameterized `IN` lists rather than string-concat (sqlx supports `Vec<u32>` binds against MariaDB). (complexity: **M**)
 - [ ] **#TLS.2** Wire flag persistence: read `CharacterDatabaseCleaningFlagsVarId` from `world_variables`, write back the masked-down value after the run. Plumb through whatever world-config struct ends up holding world-variables. (complexity: **L**)
 - [ ] **#TLS.3** Hook `cleaner::run` into the world startup sequence behind `CONFIG_CLEAN_CHARACTER_DB`. Cleaning happens **before** sessions are accepted. (complexity: **L**)

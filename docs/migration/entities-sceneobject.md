@@ -145,6 +145,27 @@ DBC stores (post-WoLK):
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#ENTITIES_SCENEOBJECT.WBS.001** Cerrar la migracion auditada de `game/Entities/SceneObject/SceneObject.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/SceneObject/SceneObject.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-data`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_SCENEOBJECT.WBS.002** Cerrar la migracion auditada de `game/Entities/SceneObject/SceneObject.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/SceneObject/SceneObject.h`
+  Rust target: `crates/wow-world`, `crates/wow-data`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#SCENE.1** **Decision gate:** confirm whether 3.4 backport content needs SceneObject (almost certainly no). If no — close as `n/a`. (L)
 - [ ] **#SCENE.2** Port `SceneType` enum to `wow-constants` (L)
 - [ ] **#SCENE.3** Define `SceneObject` entity struct (`script_package_id`, `created_by`, `created_by_spell_cast`, `private_owner`) (L)

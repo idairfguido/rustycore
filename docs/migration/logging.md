@@ -202,6 +202,27 @@ None. Logging emits no client packets.
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#LOGGING.WBS.001** Cerrar la migracion auditada de `database/Logging/AppenderDB.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Logging/AppenderDB.cpp`
+  Rust target: `crates/wow-logging`, `crates/wow-config`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#LOGGING.WBS.002** Cerrar la migracion auditada de `database/Logging/AppenderDB.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Logging/AppenderDB.h`
+  Rust target: `crates/wow-logging`, `crates/wow-config`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numbered for cross-reference. Complexity: **L** (<1h), **M** (1-4h), **H** (4-12h), **XL** (>12h).
 
 - [ ] **#LOG.1** Add `tracing-appender = "0.2"` to workspace; expose a file-rolling layer in `init_logging`. Behaviour: daily rotation under `<logs_dir>/server.YYYY-MM-DD.log`, configurable max files. Resolves the `AppenderFile` gap. (M)

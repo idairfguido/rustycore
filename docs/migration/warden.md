@@ -302,6 +302,81 @@ u32 checksum                                                 // 5×u32 XOR-fold 
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#WARDEN.WBS.001** Partir y cerrar la migracion auditada de `game/Warden/Modules/WardenModuleMac.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Warden/Modules/WardenModuleMac.h`
+  Rust target: `crates/wow-constants/src/opcodes.rs`, `crates/wow-world/src/session.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 613 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#WARDEN.WBS.002** Partir y cerrar la migracion auditada de `game/Warden/Modules/WardenModuleWin.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Warden/Modules/WardenModuleWin.h`
+  Rust target: `crates/wow-constants/src/opcodes.rs`, `crates/wow-world/src/session.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1239 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#WARDEN.WBS.003** Cerrar la migracion auditada de `game/Warden/Warden.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Warden/Warden.cpp`
+  Rust target: `crates/wow-constants/src/opcodes.rs`, `crates/wow-world/src/session.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#WARDEN.WBS.004** Cerrar la migracion auditada de `game/Warden/Warden.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Warden/Warden.h`
+  Rust target: `crates/wow-constants/src/opcodes.rs`, `crates/wow-world/src/session.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#WARDEN.WBS.005** Cerrar la migracion auditada de `game/Warden/WardenCheckMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Warden/WardenCheckMgr.cpp`
+  Rust target: `crates/wow-constants/src/opcodes.rs`, `crates/wow-world/src/session.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#WARDEN.WBS.006** Cerrar la migracion auditada de `game/Warden/WardenCheckMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Warden/WardenCheckMgr.h`
+  Rust target: `crates/wow-constants/src/opcodes.rs`, `crates/wow-world/src/session.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#WARDEN.WBS.007** Cerrar la migracion auditada de `game/Warden/WardenMac.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Warden/WardenMac.cpp`
+  Rust target: `crates/wow-constants/src/opcodes.rs`, `crates/wow-world/src/session.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#WARDEN.WBS.008** Cerrar la migracion auditada de `game/Warden/WardenMac.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Warden/WardenMac.h`
+  Rust target: `crates/wow-constants/src/opcodes.rs`, `crates/wow-world/src/session.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#WARDEN.WBS.009** Partir y cerrar la migracion auditada de `game/Warden/WardenWin.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Warden/WardenWin.cpp`
+  Rust target: `crates/wow-constants/src/opcodes.rs`, `crates/wow-world/src/session.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 560 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#WARDEN.WBS.010** Cerrar la migracion auditada de `game/Warden/WardenWin.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Warden/WardenWin.h`
+  Rust target: `crates/wow-constants/src/opcodes.rs`, `crates/wow-world/src/session.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#WARDEN.WBS.011** Cerrar la migracion auditada de `game/Warden/enuminfo_WardenCheckMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Warden/enuminfo_WardenCheckMgr.cpp`
+  Rust target: `crates/wow-constants/src/opcodes.rs`, `crates/wow-world/src/session.rs`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numera los items para poder referenciarlos desde `MIGRATION_ROADMAP.md` sección 5.
 
 Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>12h, splitear).

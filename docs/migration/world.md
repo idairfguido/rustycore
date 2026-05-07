@@ -227,6 +227,45 @@ World module doesn't directly send packets; instead, it calls methods on session
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#WORLD.WBS.001** Partir y cerrar la migracion auditada de `game/World/World.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/World/World.cpp`
+  Rust target: `crates/world-server`, `crates/wow-network`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 3971 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#WORLD.WBS.002** Partir y cerrar la migracion auditada de `game/World/World.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/World/World.h`
+  Rust target: `crates/world-server`, `crates/wow-network`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 934 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#WORLD.WBS.003** Cerrar la migracion auditada de `game/World/WorldStates/WorldStateDefines.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/World/WorldStates/WorldStateDefines.h`
+  Rust target: `crates/world-server`, `crates/wow-network`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#WORLD.WBS.004** Cerrar la migracion auditada de `game/World/WorldStates/WorldStateMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/World/WorldStates/WorldStateMgr.cpp`
+  Rust target: `crates/world-server`, `crates/wow-network`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#WORLD.WBS.005** Cerrar la migracion auditada de `game/World/WorldStates/WorldStateMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/World/WorldStates/WorldStateMgr.h`
+  Rust target: `crates/world-server`, `crates/wow-network`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#WORLD.1** Create World singleton with config arrays (bool/int/float); load from TOML or environment; expose setter methods with hot-reload hook (complejidad: M)
 - [ ] **#WORLD.2** Implement periodic timer system: `IntervalTimer` array for WUPDATE_* timers; tick all timers in update loop, dispatch callbacks (complejidad: M)
 - [ ] **#WORLD.3** Port server shutdown orchestration: `ShutdownServ()` method with N-second countdown, broadcast shutdown messages every 10s, save all players/guilds, graceful exit (complejidad: M)

@@ -368,6 +368,63 @@ El módulo emite queries directamente vía `WorldDatabase.Query(...)` (no usa pr
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#SPELLS.WBS.001** Partir y cerrar la migracion auditada de `game/Spells/Spell.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Spells/Spell.cpp`
+  Rust target: `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 9303 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SPELLS.WBS.002** Partir y cerrar la migracion auditada de `game/Spells/Spell.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Spells/Spell.h`
+  Rust target: `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 994 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SPELLS.WBS.003** Cerrar la migracion auditada de `game/Spells/SpellCastRequest.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Spells/SpellCastRequest.h`
+  Rust target: `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SPELLS.WBS.004** Partir y cerrar la migracion auditada de `game/Spells/SpellDefines.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Spells/SpellDefines.h`
+  Rust target: `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 549 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SPELLS.WBS.005** Partir y cerrar la migracion auditada de `game/Spells/SpellHistory.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Spells/SpellHistory.cpp`
+  Rust target: `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1093 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SPELLS.WBS.006** Cerrar la migracion auditada de `game/Spells/SpellHistory.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Spells/SpellHistory.h`
+  Rust target: `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SPELLS.WBS.007** Partir y cerrar la migracion auditada de `game/Spells/SpellScript.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Spells/SpellScript.cpp`
+  Rust target: `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1200 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SPELLS.WBS.008** Partir y cerrar la migracion auditada de `game/Spells/SpellScript.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Spells/SpellScript.h`
+  Rust target: `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2271 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numerados para referencia desde `MIGRATION_ROADMAP.md`. Complejidad: **L** <1h, **M** 1-4h, **H** 4-12h, **XL** >12h.
 
 - [ ] **#SPELLS.1** Crear `crates/wow-spell/src/lib.rs` con módulos `spell_info`, `spell`, `aura`, `spell_history`, `spell_mgr`, `effects`, `defines` (XL — splitear)

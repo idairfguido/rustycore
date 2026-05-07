@@ -416,6 +416,999 @@ Server module handles ALL opcode dispatch. Listed by category:
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#SERVER.WBS.001** Cerrar la migracion auditada de `game/Server/Packet.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packet.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.002** Cerrar la migracion auditada de `game/Server/Packet.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packet.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.003** Cerrar la migracion auditada de `game/Server/Packets/AccountPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/AccountPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.004** Cerrar la migracion auditada de `game/Server/Packets/AccountPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/AccountPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.005** Cerrar la migracion auditada de `game/Server/Packets/AchievementPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/AchievementPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.006** Cerrar la migracion auditada de `game/Server/Packets/AchievementPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/AchievementPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.007** Cerrar la migracion auditada de `game/Server/Packets/AddonPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/AddonPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.008** Cerrar la migracion auditada de `game/Server/Packets/AddonPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/AddonPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.009** Cerrar la migracion auditada de `game/Server/Packets/AdventureJournalPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/AdventureJournalPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.010** Cerrar la migracion auditada de `game/Server/Packets/AdventureJournalPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/AdventureJournalPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.011** Cerrar la migracion auditada de `game/Server/Packets/AdventureMapPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/AdventureMapPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.012** Cerrar la migracion auditada de `game/Server/Packets/AdventureMapPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/AdventureMapPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.013** Cerrar la migracion auditada de `game/Server/Packets/AllPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/AllPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.014** Cerrar la migracion auditada de `game/Server/Packets/AreaTriggerPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/AreaTriggerPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.015** Cerrar la migracion auditada de `game/Server/Packets/AreaTriggerPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/AreaTriggerPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.016** Cerrar la migracion auditada de `game/Server/Packets/ArenaTeamPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ArenaTeamPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.017** Cerrar la migracion auditada de `game/Server/Packets/ArenaTeamPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ArenaTeamPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.018** Cerrar la migracion auditada de `game/Server/Packets/ArtifactPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ArtifactPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.019** Cerrar la migracion auditada de `game/Server/Packets/ArtifactPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ArtifactPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.020** Partir y cerrar la migracion auditada de `game/Server/Packets/AuctionHousePackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/AuctionHousePackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 772 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.021** Partir y cerrar la migracion auditada de `game/Server/Packets/AuctionHousePackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/AuctionHousePackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 642 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.022** Cerrar la migracion auditada de `game/Server/Packets/AuthenticationPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/AuthenticationPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.023** Cerrar la migracion auditada de `game/Server/Packets/AuthenticationPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/AuthenticationPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.024** Cerrar la migracion auditada de `game/Server/Packets/AzeritePackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/AzeritePackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.025** Cerrar la migracion auditada de `game/Server/Packets/AzeritePackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/AzeritePackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.026** Cerrar la migracion auditada de `game/Server/Packets/BankPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/BankPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.027** Cerrar la migracion auditada de `game/Server/Packets/BankPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/BankPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.028** Cerrar la migracion auditada de `game/Server/Packets/BattlePayPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/BattlePayPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.029** Cerrar la migracion auditada de `game/Server/Packets/BattlePayPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/BattlePayPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.030** Cerrar la migracion auditada de `game/Server/Packets/BattlePetPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/BattlePetPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.031** Cerrar la migracion auditada de `game/Server/Packets/BattlePetPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/BattlePetPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.032** Partir y cerrar la migracion auditada de `game/Server/Packets/BattlegroundPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/BattlegroundPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 523 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.033** Partir y cerrar la migracion auditada de `game/Server/Packets/BattlegroundPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/BattlegroundPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 717 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.034** Cerrar la migracion auditada de `game/Server/Packets/BattlenetPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/BattlenetPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.035** Cerrar la migracion auditada de `game/Server/Packets/BattlenetPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/BattlenetPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.036** Cerrar la migracion auditada de `game/Server/Packets/BlackMarketPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/BlackMarketPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.037** Cerrar la migracion auditada de `game/Server/Packets/BlackMarketPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/BlackMarketPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.038** Partir y cerrar la migracion auditada de `game/Server/Packets/CalendarPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/CalendarPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 512 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.039** Partir y cerrar la migracion auditada de `game/Server/Packets/CalendarPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/CalendarPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 590 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.040** Cerrar la migracion auditada de `game/Server/Packets/ChannelPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ChannelPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.041** Cerrar la migracion auditada de `game/Server/Packets/ChannelPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ChannelPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.042** Partir y cerrar la migracion auditada de `game/Server/Packets/CharacterPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/CharacterPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 727 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.043** Partir y cerrar la migracion auditada de `game/Server/Packets/CharacterPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/CharacterPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 835 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.044** Cerrar la migracion auditada de `game/Server/Packets/ChatPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ChatPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.045** Cerrar la migracion auditada de `game/Server/Packets/ChatPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ChatPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.046** Cerrar la migracion auditada de `game/Server/Packets/ClientConfigPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ClientConfigPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.047** Cerrar la migracion auditada de `game/Server/Packets/ClientConfigPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ClientConfigPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.048** Cerrar la migracion auditada de `game/Server/Packets/CollectionPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/CollectionPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.049** Cerrar la migracion auditada de `game/Server/Packets/CollectionPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/CollectionPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.050** Cerrar la migracion auditada de `game/Server/Packets/CombatLogPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/CombatLogPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.051** Cerrar la migracion auditada de `game/Server/Packets/CombatLogPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/CombatLogPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.052** Cerrar la migracion auditada de `game/Server/Packets/CombatLogPacketsCommon.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/CombatLogPacketsCommon.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.053** Cerrar la migracion auditada de `game/Server/Packets/CombatLogPacketsCommon.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/CombatLogPacketsCommon.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.054** Cerrar la migracion auditada de `game/Server/Packets/CombatPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/CombatPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.055** Cerrar la migracion auditada de `game/Server/Packets/CombatPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/CombatPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.056** Cerrar la migracion auditada de `game/Server/Packets/CraftingPacketsCommon.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/CraftingPacketsCommon.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.057** Cerrar la migracion auditada de `game/Server/Packets/CraftingPacketsCommon.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/CraftingPacketsCommon.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.058** Cerrar la migracion auditada de `game/Server/Packets/DuelPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/DuelPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.059** Cerrar la migracion auditada de `game/Server/Packets/DuelPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/DuelPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.060** Cerrar la migracion auditada de `game/Server/Packets/EquipmentSetPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/EquipmentSetPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.061** Cerrar la migracion auditada de `game/Server/Packets/EquipmentSetPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/EquipmentSetPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.062** Cerrar la migracion auditada de `game/Server/Packets/EventPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/EventPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.063** Cerrar la migracion auditada de `game/Server/Packets/EventPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/EventPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.064** Cerrar la migracion auditada de `game/Server/Packets/GameObjectPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/GameObjectPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.065** Cerrar la migracion auditada de `game/Server/Packets/GameObjectPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/GameObjectPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.066** Cerrar la migracion auditada de `game/Server/Packets/GarrisonPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/GarrisonPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.067** Cerrar la migracion auditada de `game/Server/Packets/GarrisonPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/GarrisonPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.068** Partir y cerrar la migracion auditada de `game/Server/Packets/GuildPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/GuildPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1047 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.069** Partir y cerrar la migracion auditada de `game/Server/Packets/GuildPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/GuildPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1307 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.070** Cerrar la migracion auditada de `game/Server/Packets/HotfixPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/HotfixPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.071** Cerrar la migracion auditada de `game/Server/Packets/HotfixPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/HotfixPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.072** Cerrar la migracion auditada de `game/Server/Packets/InspectPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/InspectPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.073** Cerrar la migracion auditada de `game/Server/Packets/InspectPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/InspectPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.074** Cerrar la migracion auditada de `game/Server/Packets/InstancePackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/InstancePackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.075** Cerrar la migracion auditada de `game/Server/Packets/InstancePackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/InstancePackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.076** Cerrar la migracion auditada de `game/Server/Packets/ItemPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ItemPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.077** Partir y cerrar la migracion auditada de `game/Server/Packets/ItemPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ItemPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 538 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.078** Cerrar la migracion auditada de `game/Server/Packets/ItemPacketsCommon.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ItemPacketsCommon.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.079** Cerrar la migracion auditada de `game/Server/Packets/ItemPacketsCommon.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ItemPacketsCommon.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.080** Cerrar la migracion auditada de `game/Server/Packets/LFGPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/LFGPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.081** Partir y cerrar la migracion auditada de `game/Server/Packets/LFGPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/LFGPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 559 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.082** Cerrar la migracion auditada de `game/Server/Packets/LFGPacketsCommon.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/LFGPacketsCommon.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.083** Cerrar la migracion auditada de `game/Server/Packets/LFGPacketsCommon.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/LFGPacketsCommon.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.084** Cerrar la migracion auditada de `game/Server/Packets/LootPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/LootPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.085** Cerrar la migracion auditada de `game/Server/Packets/LootPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/LootPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.086** Cerrar la migracion auditada de `game/Server/Packets/MailPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/MailPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.087** Cerrar la migracion auditada de `game/Server/Packets/MailPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/MailPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.088** Partir y cerrar la migracion auditada de `game/Server/Packets/MiscPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/MiscPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 832 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.089** Partir y cerrar la migracion auditada de `game/Server/Packets/MiscPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/MiscPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1052 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.090** Partir y cerrar la migracion auditada de `game/Server/Packets/MovementPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/MovementPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1097 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.091** Partir y cerrar la migracion auditada de `game/Server/Packets/MovementPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/MovementPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 728 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.092** Cerrar la migracion auditada de `game/Server/Packets/MythicPlusPacketsCommon.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/MythicPlusPacketsCommon.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.093** Cerrar la migracion auditada de `game/Server/Packets/MythicPlusPacketsCommon.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/MythicPlusPacketsCommon.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.094** Cerrar la migracion auditada de `game/Server/Packets/NPCPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/NPCPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.095** Cerrar la migracion auditada de `game/Server/Packets/NPCPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/NPCPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.096** Cerrar la migracion auditada de `game/Server/Packets/PacketUtilities.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/PacketUtilities.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.097** Cerrar la migracion auditada de `game/Server/Packets/PacketUtilities.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/PacketUtilities.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.098** Partir y cerrar la migracion auditada de `game/Server/Packets/PartyPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/PartyPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 790 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.099** Partir y cerrar la migracion auditada de `game/Server/Packets/PartyPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/PartyPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 774 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.100** Cerrar la migracion auditada de `game/Server/Packets/PerksProgramPacketsCommon.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/PerksProgramPacketsCommon.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.101** Cerrar la migracion auditada de `game/Server/Packets/PerksProgramPacketsCommon.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/PerksProgramPacketsCommon.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.102** Cerrar la migracion auditada de `game/Server/Packets/PetPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/PetPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.103** Cerrar la migracion auditada de `game/Server/Packets/PetPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/PetPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.104** Cerrar la migracion auditada de `game/Server/Packets/PetitionPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/PetitionPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.105** Cerrar la migracion auditada de `game/Server/Packets/PetitionPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/PetitionPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.106** Partir y cerrar la migracion auditada de `game/Server/Packets/QueryPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/QueryPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 534 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.107** Cerrar la migracion auditada de `game/Server/Packets/QueryPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/QueryPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.108** Partir y cerrar la migracion auditada de `game/Server/Packets/QuestPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/QuestPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 823 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.109** Partir y cerrar la migracion auditada de `game/Server/Packets/QuestPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/QuestPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 776 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.110** Cerrar la migracion auditada de `game/Server/Packets/ReferAFriendPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ReferAFriendPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.111** Cerrar la migracion auditada de `game/Server/Packets/ReferAFriendPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ReferAFriendPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.112** Cerrar la migracion auditada de `game/Server/Packets/ReputationPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ReputationPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.113** Cerrar la migracion auditada de `game/Server/Packets/ReputationPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ReputationPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.114** Cerrar la migracion auditada de `game/Server/Packets/ScenarioPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ScenarioPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.115** Cerrar la migracion auditada de `game/Server/Packets/ScenarioPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ScenarioPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.116** Cerrar la migracion auditada de `game/Server/Packets/ScenePackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ScenePackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.117** Cerrar la migracion auditada de `game/Server/Packets/ScenePackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ScenePackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.118** Cerrar la migracion auditada de `game/Server/Packets/SocialPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/SocialPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.119** Cerrar la migracion auditada de `game/Server/Packets/SocialPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/SocialPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.120** Partir y cerrar la migracion auditada de `game/Server/Packets/SpellPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/SpellPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1042 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.121** Partir y cerrar la migracion auditada de `game/Server/Packets/SpellPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/SpellPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1090 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.122** Cerrar la migracion auditada de `game/Server/Packets/SystemPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/SystemPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.123** Cerrar la migracion auditada de `game/Server/Packets/SystemPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/SystemPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.124** Cerrar la migracion auditada de `game/Server/Packets/TalentPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/TalentPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.125** Cerrar la migracion auditada de `game/Server/Packets/TalentPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/TalentPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.126** Cerrar la migracion auditada de `game/Server/Packets/TaxiPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/TaxiPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.127** Cerrar la migracion auditada de `game/Server/Packets/TaxiPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/TaxiPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.128** Cerrar la migracion auditada de `game/Server/Packets/TicketPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/TicketPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.129** Cerrar la migracion auditada de `game/Server/Packets/TicketPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/TicketPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.130** Cerrar la migracion auditada de `game/Server/Packets/TokenPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/TokenPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.131** Cerrar la migracion auditada de `game/Server/Packets/TokenPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/TokenPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.132** Cerrar la migracion auditada de `game/Server/Packets/TotemPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/TotemPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.133** Cerrar la migracion auditada de `game/Server/Packets/TotemPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/TotemPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.134** Cerrar la migracion auditada de `game/Server/Packets/ToyPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ToyPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.135** Cerrar la migracion auditada de `game/Server/Packets/ToyPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ToyPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.136** Cerrar la migracion auditada de `game/Server/Packets/TradePackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/TradePackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.137** Cerrar la migracion auditada de `game/Server/Packets/TradePackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/TradePackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.138** Cerrar la migracion auditada de `game/Server/Packets/TraitPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/TraitPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.139** Cerrar la migracion auditada de `game/Server/Packets/TraitPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/TraitPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.140** Cerrar la migracion auditada de `game/Server/Packets/TraitPacketsCommon.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/TraitPacketsCommon.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.141** Cerrar la migracion auditada de `game/Server/Packets/TraitPacketsCommon.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/TraitPacketsCommon.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.142** Cerrar la migracion auditada de `game/Server/Packets/TransmogrificationPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/TransmogrificationPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.143** Cerrar la migracion auditada de `game/Server/Packets/TransmogrificationPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/TransmogrificationPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.144** Cerrar la migracion auditada de `game/Server/Packets/VehiclePackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/VehiclePackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.145** Cerrar la migracion auditada de `game/Server/Packets/VehiclePackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/VehiclePackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.146** Cerrar la migracion auditada de `game/Server/Packets/VoidStoragePackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/VoidStoragePackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.147** Cerrar la migracion auditada de `game/Server/Packets/VoidStoragePackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/VoidStoragePackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.148** Cerrar la migracion auditada de `game/Server/Packets/WardenPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/WardenPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.149** Cerrar la migracion auditada de `game/Server/Packets/WardenPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/WardenPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.150** Cerrar la migracion auditada de `game/Server/Packets/WhoPackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/WhoPackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.151** Cerrar la migracion auditada de `game/Server/Packets/WhoPackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/WhoPackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.152** Cerrar la migracion auditada de `game/Server/Packets/WorldStatePackets.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/WorldStatePackets.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.153** Cerrar la migracion auditada de `game/Server/Packets/WorldStatePackets.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/WorldStatePackets.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.154** Partir y cerrar la migracion auditada de `game/Server/Protocol/Opcodes.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Protocol/Opcodes.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2280 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.155** Partir y cerrar la migracion auditada de `game/Server/Protocol/Opcodes.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Protocol/Opcodes.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2274 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.156** Cerrar la migracion auditada de `game/Server/Protocol/PacketLog.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Protocol/PacketLog.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.157** Cerrar la migracion auditada de `game/Server/Protocol/PacketLog.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Protocol/PacketLog.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.158** Cerrar la migracion auditada de `game/Server/WorldPacket.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/WorldPacket.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.159** Partir y cerrar la migracion auditada de `game/Server/WorldSession.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/WorldSession.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1596 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.160** Partir y cerrar la migracion auditada de `game/Server/WorldSession.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/WorldSession.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2125 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.161** Partir y cerrar la migracion auditada de `game/Server/WorldSocket.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/WorldSocket.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1083 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.162** Cerrar la migracion auditada de `game/Server/WorldSocket.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/WorldSocket.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.163** Cerrar la migracion auditada de `game/Server/WorldSocketMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/WorldSocketMgr.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVER.WBS.164** Cerrar la migracion auditada de `game/Server/WorldSocketMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/WorldSocketMgr.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#SERVER.1** Implement `WorldSessionMgr` equivalent: `SessionRegistry` struct holding all active sessions with broadcasting + session lookup by account_id (complejidad: M)
 - [ ] **#SERVER.2** Port all 400+ opcode handlers from C++ packet classes; prioritize common ones (login, movement, chat, spells, items) over rare ones (complejidad: XL)
 - [ ] **#SERVER.3** Implement grid-based creature/gameobject visibility culling: replace flat HashSet with grid-based proximity tracking using existing MapManager grid (complejidad: H)

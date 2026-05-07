@@ -219,6 +219,63 @@ This module is **mostly absent** as a coherent unit; bits and pieces are scatter
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#MISCELLANEOUS.WBS.001** Cerrar la migracion auditada de `game/Miscellaneous/CommonPredicates.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/CommonPredicates.cpp`
+  Rust target: `crates/wow-constants`, `crates/wow-core`, `crates/wow-combat`, `crates/wow-data`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MISCELLANEOUS.WBS.002** Cerrar la migracion auditada de `game/Miscellaneous/CommonPredicates.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/CommonPredicates.h`
+  Rust target: `crates/wow-constants`, `crates/wow-core`, `crates/wow-combat`, `crates/wow-data`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MISCELLANEOUS.WBS.003** Cerrar la migracion auditada de `game/Miscellaneous/Formulas.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/Formulas.h`
+  Rust target: `crates/wow-constants`, `crates/wow-core`, `crates/wow-combat`, `crates/wow-data`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MISCELLANEOUS.WBS.004** Partir y cerrar la migracion auditada de `game/Miscellaneous/Language.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/Language.h`
+  Rust target: `crates/wow-constants`, `crates/wow-core`, `crates/wow-combat`, `crates/wow-data`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1245 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#MISCELLANEOUS.WBS.005** Cerrar la migracion auditada de `game/Miscellaneous/RaceMask.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/RaceMask.h`
+  Rust target: `crates/wow-constants`, `crates/wow-core`, `crates/wow-combat`, `crates/wow-data`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MISCELLANEOUS.WBS.006** Partir y cerrar la migracion auditada de `game/Miscellaneous/SharedDefines.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/SharedDefines.h`
+  Rust target: `crates/wow-constants`, `crates/wow-core`, `crates/wow-combat`, `crates/wow-data`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 8184 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#MISCELLANEOUS.WBS.007** Cerrar la migracion auditada de `game/Miscellaneous/enuminfo_RaceMask.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/enuminfo_RaceMask.cpp`
+  Rust target: `crates/wow-constants`, `crates/wow-core`, `crates/wow-combat`, `crates/wow-data`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MISCELLANEOUS.WBS.008** Partir y cerrar la migracion auditada de `game/Miscellaneous/enuminfo_SharedDefines.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/enuminfo_SharedDefines.cpp`
+  Rust target: `crates/wow-constants`, `crates/wow-core`, `crates/wow-combat`, `crates/wow-data`, `crates/wow-script`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 5199 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numera los items para poder referenciarlos desde `MIGRATION_ROADMAP.md` sección 5.
 
 Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>12h, splitear).

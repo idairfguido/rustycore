@@ -139,6 +139,27 @@ N/A directo. Indirectamente: el output JSON va dentro de payloads bnet auth, no 
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#SHARED_JSON.WBS.001** Cerrar la migracion auditada de `shared/JSON/ProtobufJSON.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/JSON/ProtobufJSON.cpp`
+  Rust target: `crates/wow-proto`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_JSON.WBS.002** Cerrar la migracion auditada de `shared/JSON/ProtobufJSON.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/JSON/ProtobufJSON.h`
+  Rust target: `crates/wow-proto`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#JSON.1** Test golden: capturar payload bnet de TrinityCore real (`tcpdump`/Wireshark del JoinRealm response), descomprimir zlib, comparar string-to-string con output de RustyCore para misma input. (M)
 - [ ] **#JSON.2** Auditar omisión de default values: `serde_json` con `#[serde(skip_serializing_if = "is_default")]` per-field si C++ lo omite. (M)
 - [ ] **#JSON.3** Auditar field ordering: añadir test `serde_json::to_string` produce keys en orden esperado por cliente. (L)

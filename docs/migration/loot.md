@@ -321,6 +321,57 @@ Out-of-tree touchpoints:
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#LOOT.WBS.001** Partir y cerrar la migracion auditada de `game/Loot/Loot.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Loot/Loot.cpp`
+  Rust target: `crates/wow-loot`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1083 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#LOOT.WBS.002** Cerrar la migracion auditada de `game/Loot/Loot.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Loot/Loot.h`
+  Rust target: `crates/wow-loot`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#LOOT.WBS.003** Cerrar la migracion auditada de `game/Loot/LootItemStorage.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Loot/LootItemStorage.cpp`
+  Rust target: `crates/wow-loot`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#LOOT.WBS.004** Cerrar la migracion auditada de `game/Loot/LootItemStorage.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Loot/LootItemStorage.h`
+  Rust target: `crates/wow-loot`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#LOOT.WBS.005** Cerrar la migracion auditada de `game/Loot/LootItemType.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Loot/LootItemType.h`
+  Rust target: `crates/wow-loot`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#LOOT.WBS.006** Partir y cerrar la migracion auditada de `game/Loot/LootMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Loot/LootMgr.cpp`
+  Rust target: `crates/wow-loot`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1350 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#LOOT.WBS.007** Cerrar la migracion auditada de `game/Loot/LootMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Loot/LootMgr.h`
+  Rust target: `crates/wow-loot`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numbered for cross-reference from `MIGRATION_ROADMAP.md` §5. Complexity: **L** (<1h), **M** (1-4h), **H** (4-12h), **XL** (>12h, split).
 
 - [ ] **#LOOT.1** Populate `crates/wow-loot/src/lib.rs` skeleton: re-export `LootStore`, `LootTemplate`, `LootStoreItem`, `LootGroup`, `LootItem`, `Loot` (server-side), `LootRoll`, `LootMethod`, `LootType`, `RollType`, `LootError`, `LootSlotType`, `LootMode` (L)

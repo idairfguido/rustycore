@@ -351,6 +351,69 @@ DBC/DB2 stores consumed:
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#MOVEMENT.WBS.001** Cerrar la migracion auditada de `game/Movement/AbstractFollower.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/AbstractFollower.cpp`
+  Rust target: `crates/wow-packet`, `crates/wow-world`, `crates/wow-recastdetour`, `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MOVEMENT.WBS.002** Cerrar la migracion auditada de `game/Movement/AbstractFollower.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/AbstractFollower.h`
+  Rust target: `crates/wow-packet`, `crates/wow-world`, `crates/wow-recastdetour`, `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MOVEMENT.WBS.003** Partir y cerrar la migracion auditada de `game/Movement/MotionMaster.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/MotionMaster.cpp`
+  Rust target: `crates/wow-packet`, `crates/wow-world`, `crates/wow-recastdetour`, `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1376 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#MOVEMENT.WBS.004** Cerrar la migracion auditada de `game/Movement/MotionMaster.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/MotionMaster.h`
+  Rust target: `crates/wow-packet`, `crates/wow-world`, `crates/wow-recastdetour`, `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MOVEMENT.WBS.005** Cerrar la migracion auditada de `game/Movement/MovementDefines.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/MovementDefines.cpp`
+  Rust target: `crates/wow-packet`, `crates/wow-world`, `crates/wow-recastdetour`, `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MOVEMENT.WBS.006** Cerrar la migracion auditada de `game/Movement/MovementDefines.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/MovementDefines.h`
+  Rust target: `crates/wow-packet`, `crates/wow-world`, `crates/wow-recastdetour`, `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MOVEMENT.WBS.007** Cerrar la migracion auditada de `game/Movement/MovementGenerator.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/MovementGenerator.cpp`
+  Rust target: `crates/wow-packet`, `crates/wow-world`, `crates/wow-recastdetour`, `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MOVEMENT.WBS.008** Cerrar la migracion auditada de `game/Movement/MovementGenerator.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/MovementGenerator.h`
+  Rust target: `crates/wow-packet`, `crates/wow-world`, `crates/wow-recastdetour`, `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#MOVEMENT.WBS.009** Cerrar la migracion auditada de `game/Movement/enuminfo_MovementDefines.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/enuminfo_MovementDefines.cpp`
+  Rust target: `crates/wow-packet`, `crates/wow-world`, `crates/wow-recastdetour`, `crates/wow-movement`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numera para referencia desde `MIGRATION_ROADMAP.md` §5.
 Complejidad: **L** (<1h), **M** (1-4h), **H** (4-12h), **XL** (>12h, splitear).
 

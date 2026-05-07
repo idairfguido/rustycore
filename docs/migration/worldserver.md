@@ -265,6 +265,63 @@ DBUpdater (auto-applies pending `.sql` files) is invoked by `DatabaseLoader::Loa
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#WORLDSERVER.WBS.001** Cerrar la migracion auditada de `worldserver/CommandLine/CliRunnable.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/worldserver/CommandLine/CliRunnable.cpp`
+  Rust target: `crates/world-server`, `crates/wow-network`, `crates/wow-database`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#WORLDSERVER.WBS.002** Cerrar la migracion auditada de `worldserver/CommandLine/CliRunnable.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/worldserver/CommandLine/CliRunnable.h`
+  Rust target: `crates/world-server`, `crates/wow-network`, `crates/wow-database`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#WORLDSERVER.WBS.003** Partir y cerrar la migracion auditada de `worldserver/Main.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/worldserver/Main.cpp`
+  Rust target: `crates/world-server`, `crates/wow-network`, `crates/wow-database`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 742 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#WORLDSERVER.WBS.004** Cerrar la migracion auditada de `worldserver/RemoteAccess/RASession.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/worldserver/RemoteAccess/RASession.cpp`
+  Rust target: `crates/world-server`, `crates/wow-network`, `crates/wow-database`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#WORLDSERVER.WBS.005** Cerrar la migracion auditada de `worldserver/RemoteAccess/RASession.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/worldserver/RemoteAccess/RASession.h`
+  Rust target: `crates/world-server`, `crates/wow-network`, `crates/wow-database`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#WORLDSERVER.WBS.006** Cerrar la migracion auditada de `worldserver/TCSoap/TCSoap.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/worldserver/TCSoap/TCSoap.cpp`
+  Rust target: `crates/world-server`, `crates/wow-network`, `crates/wow-database`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#WORLDSERVER.WBS.007** Cerrar la migracion auditada de `worldserver/TCSoap/TCSoap.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/worldserver/TCSoap/TCSoap.h`
+  Rust target: `crates/world-server`, `crates/wow-network`, `crates/wow-database`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#WORLDSERVER.WBS.008** Cerrar la migracion auditada de `worldserver/resource.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/worldserver/resource.h`
+  Rust target: `crates/world-server`, `crates/wow-network`, `crates/wow-database`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#WS.1** Implement `World` singleton (or equivalent state holder): `is_stopped() -> bool`, `stop_now(exit_code: i32)`, `get_exit_code() -> i32`, `m_world_loop_counter: AtomicU32`. (M)
 - [ ] **#WS.2** Implement a global `WorldUpdateLoop` task that ticks `MapManager` + (eventually) every `WorldSession` from one place, at a `MinWorldUpdateTime` cadence. Increment the loop counter each iteration. (XL — coupled to migrating sessions off per-task ticks; cf. `_attic/` notes)
 - [ ] **#WS.3** Implement `FreezeDetector`: `tokio::time::interval(1s)`; reads `m_world_loop_counter`; if unchanged for `MaxCoreStuckTime` ms, `tracing::error!` + `std::process::abort()`. (M)

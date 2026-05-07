@@ -72,7 +72,7 @@ Para cada modulo de `_INDEX.md`:
 
 - [x] **#REFINE.020** Asegurar seccion "C++ canonical files" con todos los archivos C++ asignados.
 - [x] **#REFINE.021** Asegurar seccion "Rust target" con crates/modulos exactos.
-- [ ] **#REFINE.022** Añadir "Task WBS" con IDs, dependencias y criterios de aceptacion.
+- [x] **#REFINE.022** Añadir "Task WBS" con IDs, dependencias y criterios de aceptacion.
 - [ ] **#REFINE.023** Añadir "Known divergences / bugs" con evidencia desde C++.
 - [ ] **#REFINE.024** Añadir "Tests required" con gates unit, golden, integration y E2E.
 - [ ] **#REFINE.025** Marcar explicitamente sistemas post-WoLK o desactivados por producto, sin descartarlos en silencio.

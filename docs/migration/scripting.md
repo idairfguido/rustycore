@@ -248,6 +248,51 @@ The script framework is fundamentally a server-side dispatcher; protocol effects
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#SCRIPTING.WBS.001** Partir y cerrar la migracion auditada de `game/Scripting/ScriptMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Scripting/ScriptMgr.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 3271 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTING.WBS.002** Partir y cerrar la migracion auditada de `game/Scripting/ScriptMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Scripting/ScriptMgr.h`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1421 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTING.WBS.003** Partir y cerrar la migracion auditada de `game/Scripting/ScriptReloadMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Scripting/ScriptReloadMgr.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1626 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTING.WBS.004** Cerrar la migracion auditada de `game/Scripting/ScriptReloadMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Scripting/ScriptReloadMgr.h`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTING.WBS.005** Cerrar la migracion auditada de `game/Scripting/ScriptSystem.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Scripting/ScriptSystem.cpp`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTING.WBS.006** Cerrar la migracion auditada de `game/Scripting/ScriptSystem.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Scripting/ScriptSystem.h`
+  Rust target: `crates/wow-script`, `crates/wow-scripts`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numbering: `#SCRIPTING.N`. Complexity legend: **L** (<1h), **M** (1–4h), **H** (4–12h), **XL** (>12h, split further).
 
 ### Phase A — bootstrap framework (no game-side wiring yet)

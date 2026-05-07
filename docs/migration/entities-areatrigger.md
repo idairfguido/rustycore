@@ -178,6 +178,39 @@ DBC stores:
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#ENTITIES_AREATRIGGER.WBS.001** Partir y cerrar la migracion auditada de `game/Entities/AreaTrigger/AreaTrigger.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/AreaTrigger/AreaTrigger.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1453 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#ENTITIES_AREATRIGGER.WBS.002** Cerrar la migracion auditada de `game/Entities/AreaTrigger/AreaTrigger.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/AreaTrigger/AreaTrigger.h`
+  Rust target: `crates/wow-world`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_AREATRIGGER.WBS.003** Cerrar la migracion auditada de `game/Entities/AreaTrigger/AreaTriggerTemplate.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/AreaTrigger/AreaTriggerTemplate.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_AREATRIGGER.WBS.004** Cerrar la migracion auditada de `game/Entities/AreaTrigger/AreaTriggerTemplate.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/AreaTrigger/AreaTriggerTemplate.h`
+  Rust target: `crates/wow-world`, `crates/wow-data`, `crates/wow-spell`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#AT.1** Decide scope for WoLK 3.4: minimum is `AreaTriggerShapeType::Sphere` + `Polygon` + server-side actions; spline/orbit/curves can be deferred (planning) (L)
 - [ ] **#AT.2** Port `AreaTriggerFlag`, `AreaTriggerShapeType`, `AreaTriggerActionTypes`, `AreaTriggerActionUserTypes`, `AreaTriggerCreatePropertiesFlag` to `wow-constants` (L)
 - [ ] **#AT.3** Port `AreaTriggerTemplate` + `AreaTriggerCreateProperties` + `AreaTriggerShapeInfo` to `wow-data` (M)

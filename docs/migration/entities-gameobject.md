@@ -267,6 +267,39 @@ DBC/DB2 stores read by GameObject:
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#ENTITIES_GAMEOBJECT.WBS.001** Partir y cerrar la migracion auditada de `game/Entities/GameObject/GameObject.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-packet`, `crates/wow-data`, `crates/wow-database`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 4488 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#ENTITIES_GAMEOBJECT.WBS.002** Partir y cerrar la migracion auditada de `game/Entities/GameObject/GameObject.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.h`
+  Rust target: `crates/wow-world`, `crates/wow-packet`, `crates/wow-data`, `crates/wow-database`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 516 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#ENTITIES_GAMEOBJECT.WBS.003** Partir y cerrar la migracion auditada de `game/Entities/GameObject/GameObjectData.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObjectData.h`
+  Rust target: `crates/wow-world`, `crates/wow-packet`, `crates/wow-data`, `crates/wow-database`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1412 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#ENTITIES_GAMEOBJECT.WBS.004** Cerrar la migracion auditada de `game/Entities/GameObject/QuaternionData.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/QuaternionData.h`
+  Rust target: `crates/wow-world`, `crates/wow-packet`, `crates/wow-data`, `crates/wow-database`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#GO.1** Define `GameObjectTemplate` enum-of-structs (one variant per `GameobjectTypes`, sharing common header: entry, type, displayId, name, size, ContentTuningId) in `wow-data` (XL — split per type group)
   - [ ] **#GO.1a** Group A: container-like (Door, Button, QuestGiver, Chest, Generic, Goober, Chair, Mailbox) (M)
   - [ ] **#GO.1b** Group B: combat (Trap, SpellFocus, SpellCaster, NewFlag, NewFlagDrop, ControlZone, DestructibleBuilding) (M)

@@ -334,6 +334,45 @@ Player-side touchpoints (out-of-tree):
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#QUESTS.WBS.001** Partir y cerrar la migracion auditada de `game/Quests/QuestDef.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Quests/QuestDef.cpp`
+  Rust target: `crates/wow-data`, `crates/wow-quest`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 724 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#QUESTS.WBS.002** Partir y cerrar la migracion auditada de `game/Quests/QuestDef.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Quests/QuestDef.h`
+  Rust target: `crates/wow-data`, `crates/wow-quest`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 835 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#QUESTS.WBS.003** Cerrar la migracion auditada de `game/Quests/QuestObjectiveCriteriaMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Quests/QuestObjectiveCriteriaMgr.cpp`
+  Rust target: `crates/wow-data`, `crates/wow-quest`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#QUESTS.WBS.004** Cerrar la migracion auditada de `game/Quests/QuestObjectiveCriteriaMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Quests/QuestObjectiveCriteriaMgr.h`
+  Rust target: `crates/wow-data`, `crates/wow-quest`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#QUESTS.WBS.005** Cerrar la migracion auditada de `game/Quests/enuminfo_QuestDef.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Quests/enuminfo_QuestDef.cpp`
+  Rust target: `crates/wow-data`, `crates/wow-quest`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numbered for cross-reference from `MIGRATION_ROADMAP.md` §5. Complexity: **L** (<1h), **M** (1-4h), **H** (4-12h), **XL** (>12h, split).
 
 - [ ] **#QUESTS.1** Create dedicated `crates/wow-quest/` crate; move `quest.rs` + `quest_xp.rs` out of `wow-data`; expose `QuestStore`, `QuestPoolMgr`, `QuestObjectiveCriteriaMgr` (M)

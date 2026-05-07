@@ -220,6 +220,27 @@ There are no CMSG opcodes — threat is pure server-side state inferred from dam
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#COMBAT_THREAT.WBS.001** Partir y cerrar la migracion auditada de `game/Combat/ThreatManager.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Combat/ThreatManager.cpp`
+  Rust target: `crates/wow-combat`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 913 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#COMBAT_THREAT.WBS.002** Cerrar la migracion auditada de `game/Combat/ThreatManager.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Combat/ThreatManager.h`
+  Rust target: `crates/wow-combat`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numbered for `MIGRATION_ROADMAP.md` §5 reference.
 Complexity: **L** (<1h), **M** (1-4h), **H** (4-12h), **XL** (>12h).
 

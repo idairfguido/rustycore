@@ -223,6 +223,27 @@ There are no CMSG opcodes specific to CombatManager — combat state is purely s
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#COMBAT_MANAGER.WBS.001** Cerrar la migracion auditada de `game/Combat/CombatManager.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Combat/CombatManager.cpp`
+  Rust target: `crates/wow-combat`, `crates/wow-ai`, `crates/wow-packet`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#COMBAT_MANAGER.WBS.002** Cerrar la migracion auditada de `game/Combat/CombatManager.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Combat/CombatManager.h`
+  Rust target: `crates/wow-combat`, `crates/wow-ai`, `crates/wow-packet`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numbered for `MIGRATION_ROADMAP.md` §5 reference.
 Complexity: **L** (<1h), **M** (1-4h), **H** (4-12h), **XL** (>12h).
 

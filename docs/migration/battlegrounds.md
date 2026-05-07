@@ -356,6 +356,273 @@ Approx total: **~6,650 lines core + ~10,730 zone-script lines = ~17,400 lines**.
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#BATTLEGROUNDS.WBS.001** Cerrar la migracion auditada de `game/Battlegrounds/Arena.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Arena.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.002** Cerrar la migracion auditada de `game/Battlegrounds/Arena.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Arena.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.003** Cerrar la migracion auditada de `game/Battlegrounds/ArenaScore.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/ArenaScore.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.004** Cerrar la migracion auditada de `game/Battlegrounds/ArenaScore.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/ArenaScore.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.005** Partir y cerrar la migracion auditada de `game/Battlegrounds/ArenaTeam.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/ArenaTeam.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 834 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.006** Cerrar la migracion auditada de `game/Battlegrounds/ArenaTeam.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/ArenaTeam.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.007** Cerrar la migracion auditada de `game/Battlegrounds/ArenaTeamMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/ArenaTeamMgr.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.008** Cerrar la migracion auditada de `game/Battlegrounds/ArenaTeamMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/ArenaTeamMgr.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.009** Partir y cerrar la migracion auditada de `game/Battlegrounds/Battleground.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Battleground.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1883 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.010** Partir y cerrar la migracion auditada de `game/Battlegrounds/Battleground.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Battleground.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 604 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.011** Partir y cerrar la migracion auditada de `game/Battlegrounds/BattlegroundMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/BattlegroundMgr.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 754 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.012** Cerrar la migracion auditada de `game/Battlegrounds/BattlegroundMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/BattlegroundMgr.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.013** Partir y cerrar la migracion auditada de `game/Battlegrounds/BattlegroundQueue.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/BattlegroundQueue.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1089 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.014** Cerrar la migracion auditada de `game/Battlegrounds/BattlegroundQueue.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/BattlegroundQueue.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.015** Cerrar la migracion auditada de `game/Battlegrounds/BattlegroundScore.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/BattlegroundScore.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.016** Cerrar la migracion auditada de `game/Battlegrounds/BattlegroundScore.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/BattlegroundScore.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.017** Partir y cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundAB.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundAB.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 529 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.018** Cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundAB.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundAB.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.019** Partir y cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundAV.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundAV.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1483 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.020** Partir y cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundAV.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundAV.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1734 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.021** Cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundBE.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundBE.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.022** Cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundBE.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundBE.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.023** Cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundBFG.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundBFG.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.024** Cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundBFG.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundBFG.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.025** Cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundDS.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundDS.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.026** Cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundDS.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundDS.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.027** Partir y cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundEY.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundEY.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 533 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.028** Cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundEY.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundEY.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.029** Partir y cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundIC.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundIC.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 913 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.030** Partir y cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundIC.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundIC.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1056 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.031** Cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundNA.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundNA.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.032** Cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundNA.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundNA.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.033** Cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundRL.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundRL.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.034** Cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundRL.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundRL.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.035** Cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundRV.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundRV.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.036** Cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundRV.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundRV.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.037** Partir y cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundSA.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundSA.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1036 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.038** Partir y cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundSA.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundSA.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 710 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.039** Cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundTP.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundTP.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.040** Cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundTP.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundTP.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.041** Partir y cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundWS.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundWS.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 580 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.042** Cerrar la migracion auditada de `game/Battlegrounds/Zones/BattlegroundWS.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/Zones/BattlegroundWS.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#BATTLEGROUNDS.WBS.043** Cerrar la migracion auditada de `game/Battlegrounds/enuminfo_ArenaTeam.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Battlegrounds/enuminfo_ArenaTeam.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-core`, `crates/wow-constants`, `crates/wow-world/src/handlers`, `crates/wow-maps`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numera los items para poder referenciarlos desde `MIGRATION_ROADMAP.md` sección 5.
 
 Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>12h, splitear).

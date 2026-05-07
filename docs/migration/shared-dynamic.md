@@ -171,6 +171,51 @@ N/A.
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#SHARED_DYNAMIC.WBS.001** Cerrar la migracion auditada de `shared/Dynamic/FactoryHolder.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Dynamic/FactoryHolder.h`
+  Rust target: `crates/wow-handler`, `crates/wow-combat`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_DYNAMIC.WBS.002** Cerrar la migracion auditada de `shared/Dynamic/LinkedList.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Dynamic/LinkedList.h`
+  Rust target: `crates/wow-handler`, `crates/wow-combat`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_DYNAMIC.WBS.003** Cerrar la migracion auditada de `shared/Dynamic/LinkedReference/RefManager.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Dynamic/LinkedReference/RefManager.h`
+  Rust target: `crates/wow-handler`, `crates/wow-combat`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_DYNAMIC.WBS.004** Cerrar la migracion auditada de `shared/Dynamic/LinkedReference/Reference.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Dynamic/LinkedReference/Reference.h`
+  Rust target: `crates/wow-handler`, `crates/wow-combat`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_DYNAMIC.WBS.005** Cerrar la migracion auditada de `shared/Dynamic/ObjectRegistry.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Dynamic/ObjectRegistry.h`
+  Rust target: `crates/wow-handler`, `crates/wow-combat`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_DYNAMIC.WBS.006** Cerrar la migracion auditada de `shared/Dynamic/TypeList.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Dynamic/TypeList.h`
+  Rust target: `crates/wow-handler`, `crates/wow-combat`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 > **Objetivo:** no portar el código sino documentar y enforce el idiom Rust en cada call site.
 
 - [ ] **#DYN.1** Auditar combat: `wow-combat` threat list — ¿usa `ObjectGuid` plano o `Weak<Unit>`? Documentar en `combat.md`. (M)

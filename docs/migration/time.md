@@ -176,6 +176,51 @@ The `ByteBuffer << WowTime` overload is the canonical encoder for all of these.
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#TIME.WBS.001** Cerrar la migracion auditada de `game/Time/GameTime.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Time/GameTime.cpp`
+  Rust target: `crates/wow-core`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#TIME.WBS.002** Cerrar la migracion auditada de `game/Time/GameTime.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Time/GameTime.h`
+  Rust target: `crates/wow-core`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#TIME.WBS.003** Cerrar la migracion auditada de `game/Time/UpdateTime.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Time/UpdateTime.cpp`
+  Rust target: `crates/wow-core`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#TIME.WBS.004** Cerrar la migracion auditada de `game/Time/UpdateTime.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Time/UpdateTime.h`
+  Rust target: `crates/wow-core`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#TIME.WBS.005** Cerrar la migracion auditada de `game/Time/WowTime.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Time/WowTime.cpp`
+  Rust target: `crates/wow-core`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#TIME.WBS.006** Cerrar la migracion auditada de `game/Time/WowTime.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Time/WowTime.h`
+  Rust target: `crates/wow-core`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#TIM.1** Add a `WorldClock` (or `GameClock`) struct in `wow-core` that holds the snapshot fields (`unix_secs`, `ms_since_start`, `system_now`, `steady_now`, `local_tm: chrono::DateTime<Local>`, `utc_wow: WowTime`, `local_wow: WowTime`) behind an `Arc<RwLock<...>>` or `ArcSwap`. Add `update_now()` to refresh all of them atomically. (complexity: **M**)
 - [ ] **#TIM.2** Wire `WorldClock::update_now()` into the world-server main tick (immediately after `tick.recv()`). Replace ad-hoc `SystemTime::now()` calls in handler/tick code with `clock.unix_secs()` etc. (complexity: **M**)
 - [ ] **#TIM.3** Replace the approximate `GameTime::to_packed` with a real `WowTime` struct mirroring `WowTime.h`: `year, month, month_day, week_day, hour, minute, flags, holiday_offset`. Implement `to_packed_u32` / `from_packed_u32` to bit-exact spec. Use `chrono::NaiveDateTime` for the `year/month/day/hour/minute` decomposition; **anchor year on 2000**, not 1970, not 1900. (complexity: **M**)

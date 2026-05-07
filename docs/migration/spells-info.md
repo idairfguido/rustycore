@@ -338,6 +338,27 @@ DB2 stores read **directly** by the `SpellInfo` ctor (after `SpellInfoLoadHelper
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#SPELLS_INFO.WBS.001** Partir y cerrar la migracion auditada de `game/Spells/SpellInfo.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Spells/SpellInfo.cpp`
+  Rust target: `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 5022 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SPELLS_INFO.WBS.002** Partir y cerrar la migracion auditada de `game/Spells/SpellInfo.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Spells/SpellInfo.h`
+  Rust target: `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 625 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numbered for `MIGRATION_ROADMAP.md` cross-reference. Complexity: **L** <1h, **M** 1-4h, **H** 4-12h, **XL** >12h.
 
 - [ ] **#SPELLINFO.1** Create `crates/wow-spell/src/spell_info.rs` with the `SpellInfo` struct skeleton (~80 fields), `Arc`-shareable, all-pub immutable API (M)

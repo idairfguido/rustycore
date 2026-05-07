@@ -9,7 +9,7 @@
 
 Cross-links: [scripts.md](scripts.md), [scripting.md](scripting.md), [ai.md](ai.md) (`BossAI` / `VehicleAI`), [spells.md](spells.md). The `_attic/STATUS_MIGRATION.md` brief in `crates/wow-world/_attic/` lists the dispatch stubs a content port plugs into.
 
-The sibling `Northrend/Ulduar/HallsOfLightning/` and `HallsOfStone/` directories are 5-mans, **not covered by this doc** — they belong with the dungeon content batch.
+The sibling `Northrend/Ulduar/HallsOfLightning/` and `HallsOfStone/` directories are 5-mans, but the C++ tree places them under the same `scripts/Northrend/Ulduar/` prefix. R2 keeps them covered here until a later split creates dedicated dungeon-content docs; they must not disappear silently.
 
 ---
 
@@ -254,6 +254,189 @@ Same opcodes as ICC; nothing new is defined.
 ---
 
 ## 9. Migration sub-tasks
+
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#SCRIPTS_ULDUAR.WBS.001** Cerrar la migracion auditada de `scripts/Northrend/Ulduar/HallsOfLightning/boss_general_bjarngrim.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/HallsOfLightning/boss_general_bjarngrim.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.002** Cerrar la migracion auditada de `scripts/Northrend/Ulduar/HallsOfLightning/boss_ionar.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/HallsOfLightning/boss_ionar.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.003** Cerrar la migracion auditada de `scripts/Northrend/Ulduar/HallsOfLightning/boss_loken.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/HallsOfLightning/boss_loken.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.004** Cerrar la migracion auditada de `scripts/Northrend/Ulduar/HallsOfLightning/boss_volkhan.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/HallsOfLightning/boss_volkhan.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.005** Cerrar la migracion auditada de `scripts/Northrend/Ulduar/HallsOfLightning/halls_of_lightning.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/HallsOfLightning/halls_of_lightning.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.006** Cerrar la migracion auditada de `scripts/Northrend/Ulduar/HallsOfLightning/instance_halls_of_lightning.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/HallsOfLightning/instance_halls_of_lightning.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.007** Cerrar la migracion auditada de `scripts/Northrend/Ulduar/HallsOfStone/boss_krystallus.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/HallsOfStone/boss_krystallus.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.008** Cerrar la migracion auditada de `scripts/Northrend/Ulduar/HallsOfStone/boss_maiden_of_grief.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/HallsOfStone/boss_maiden_of_grief.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.009** Cerrar la migracion auditada de `scripts/Northrend/Ulduar/HallsOfStone/boss_sjonnir.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/HallsOfStone/boss_sjonnir.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.010** Partir y cerrar la migracion auditada de `scripts/Northrend/Ulduar/HallsOfStone/halls_of_stone.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/HallsOfStone/halls_of_stone.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 726 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.011** Cerrar la migracion auditada de `scripts/Northrend/Ulduar/HallsOfStone/halls_of_stone.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/HallsOfStone/halls_of_stone.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.012** Cerrar la migracion auditada de `scripts/Northrend/Ulduar/HallsOfStone/instance_halls_of_stone.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/HallsOfStone/instance_halls_of_stone.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.013** Partir y cerrar la migracion auditada de `scripts/Northrend/Ulduar/Ulduar/boss_algalon_the_observer.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/Ulduar/boss_algalon_the_observer.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1227 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.014** Partir y cerrar la migracion auditada de `scripts/Northrend/Ulduar/Ulduar/boss_assembly_of_iron.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/Ulduar/boss_assembly_of_iron.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 870 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.015** Partir y cerrar la migracion auditada de `scripts/Northrend/Ulduar/Ulduar/boss_auriaya.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/Ulduar/boss_auriaya.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 671 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.016** Partir y cerrar la migracion auditada de `scripts/Northrend/Ulduar/Ulduar/boss_flame_leviathan.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/Ulduar/boss_flame_leviathan.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1804 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.017** Partir y cerrar la migracion auditada de `scripts/Northrend/Ulduar/Ulduar/boss_freya.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/Ulduar/boss_freya.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1694 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.018** Partir y cerrar la migracion auditada de `scripts/Northrend/Ulduar/Ulduar/boss_general_vezax.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/Ulduar/boss_general_vezax.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 600 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.019** Partir y cerrar la migracion auditada de `scripts/Northrend/Ulduar/Ulduar/boss_hodir.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/Ulduar/boss_hodir.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1092 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.020** Partir y cerrar la migracion auditada de `scripts/Northrend/Ulduar/Ulduar/boss_ignis.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/Ulduar/boss_ignis.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 508 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.021** Partir y cerrar la migracion auditada de `scripts/Northrend/Ulduar/Ulduar/boss_kologarn.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/Ulduar/boss_kologarn.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 674 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.022** Partir y cerrar la migracion auditada de `scripts/Northrend/Ulduar/Ulduar/boss_mimiron.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/Ulduar/boss_mimiron.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2791 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.023** Partir y cerrar la migracion auditada de `scripts/Northrend/Ulduar/Ulduar/boss_razorscale.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/Ulduar/boss_razorscale.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1733 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.024** Partir y cerrar la migracion auditada de `scripts/Northrend/Ulduar/Ulduar/boss_thorim.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/Ulduar/boss_thorim.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2121 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.025** Partir y cerrar la migracion auditada de `scripts/Northrend/Ulduar/Ulduar/boss_xt002.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/Ulduar/boss_xt002.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1002 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.026** Partir y cerrar la migracion auditada de `scripts/Northrend/Ulduar/Ulduar/boss_yogg_saron.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/Ulduar/boss_yogg_saron.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 3172 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.027** Partir y cerrar la migracion auditada de `scripts/Northrend/Ulduar/Ulduar/instance_ulduar.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/Ulduar/instance_ulduar.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1009 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.028** Cerrar la migracion auditada de `scripts/Northrend/Ulduar/Ulduar/ulduar.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/Ulduar/ulduar.cpp`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SCRIPTS_ULDUAR.WBS.029** Partir y cerrar la migracion auditada de `scripts/Northrend/Ulduar/Ulduar/ulduar.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/scripts/Northrend/Ulduar/Ulduar/ulduar.h`
+  Rust target: `crates/wow-scripts`, `crates/wow-script`, `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 526 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
 
 Pre-requisites (shared with [scripts-icc.md](scripts-icc.md) #ICC.0a..0e):
 

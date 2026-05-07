@@ -327,6 +327,291 @@ Rust: `attack_swing`, `attack_stop`. Faltan duel-related (5).
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#HANDLERS.WBS.001** Cerrar la migracion auditada de `game/Handlers/AdventureJournalHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/AdventureJournalHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.002** Cerrar la migracion auditada de `game/Handlers/AdventureMapHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/AdventureMapHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.003** Partir y cerrar la migracion auditada de `game/Handlers/AuctionHouseHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/AuctionHouseHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1124 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.004** Cerrar la migracion auditada de `game/Handlers/AuthHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/AuthHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.005** Cerrar la migracion auditada de `game/Handlers/BankHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/BankHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.006** Partir y cerrar la migracion auditada de `game/Handlers/BattleGroundHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/BattleGroundHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1346 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.007** Cerrar la migracion auditada de `game/Handlers/BattlePetHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/BattlePetHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.008** Cerrar la migracion auditada de `game/Handlers/BattlenetHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/BattlenetHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.009** Cerrar la migracion auditada de `game/Handlers/BlackMarketHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/BlackMarketHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.010** Partir y cerrar la migracion auditada de `game/Handlers/CalendarHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/CalendarHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 575 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.011** Cerrar la migracion auditada de `game/Handlers/ChannelHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/ChannelHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.012** Partir y cerrar la migracion auditada de `game/Handlers/CharacterHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/CharacterHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2895 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.013** Partir y cerrar la migracion auditada de `game/Handlers/ChatHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/ChatHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 830 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.014** Cerrar la migracion auditada de `game/Handlers/CollectionsHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/CollectionsHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.015** Cerrar la migracion auditada de `game/Handlers/CombatHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/CombatHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.016** Cerrar la migracion auditada de `game/Handlers/DuelHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/DuelHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.017** Cerrar la migracion auditada de `game/Handlers/GarrisonHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/GarrisonHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.018** Partir y cerrar la migracion auditada de `game/Handlers/GroupHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/GroupHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 783 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.019** Partir y cerrar la migracion auditada de `game/Handlers/GuildHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/GuildHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 813 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.020** Cerrar la migracion auditada de `game/Handlers/HotfixHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/HotfixHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.021** Cerrar la migracion auditada de `game/Handlers/InspectHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/InspectHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.022** Partir y cerrar la migracion auditada de `game/Handlers/ItemHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/ItemHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1220 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.023** Partir y cerrar la migracion auditada de `game/Handlers/LFGHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/LFGHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 971 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.024** Partir y cerrar la migracion auditada de `game/Handlers/LootHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/LootHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 508 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.025** Partir y cerrar la migracion auditada de `game/Handlers/MailHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/MailHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 676 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.026** Partir y cerrar la migracion auditada de `game/Handlers/MiscHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/MiscHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1440 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.027** Partir y cerrar la migracion auditada de `game/Handlers/MovementHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/MovementHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 816 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.028** Partir y cerrar la migracion auditada de `game/Handlers/NPCHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/NPCHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 577 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.029** Cerrar la migracion auditada de `game/Handlers/NPCHandler.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/NPCHandler.h`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.030** Partir y cerrar la migracion auditada de `game/Handlers/PetHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/PetHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 810 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.031** Cerrar la migracion auditada de `game/Handlers/PetitionsHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/PetitionsHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.032** Cerrar la migracion auditada de `game/Handlers/QueryHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/QueryHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.033** Partir y cerrar la migracion auditada de `game/Handlers/QuestHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/QuestHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 849 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.034** Cerrar la migracion auditada de `game/Handlers/ScenarioHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/ScenarioHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.035** Cerrar la migracion auditada de `game/Handlers/SceneHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/SceneHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.036** Cerrar la migracion auditada de `game/Handlers/SkillHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/SkillHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.037** Cerrar la migracion auditada de `game/Handlers/SocialHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/SocialHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.038** Partir y cerrar la migracion auditada de `game/Handlers/SpellHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/SpellHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 569 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.039** Cerrar la migracion auditada de `game/Handlers/TaxiHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/TaxiHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.040** Cerrar la migracion auditada de `game/Handlers/TicketHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/TicketHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.041** Cerrar la migracion auditada de `game/Handlers/TokenHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/TokenHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.042** Cerrar la migracion auditada de `game/Handlers/ToyHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/ToyHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.043** Partir y cerrar la migracion auditada de `game/Handlers/TradeHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/TradeHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 814 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.044** Cerrar la migracion auditada de `game/Handlers/TransmogrificationHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/TransmogrificationHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.045** Cerrar la migracion auditada de `game/Handlers/VehicleHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/VehicleHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#HANDLERS.WBS.046** Cerrar la migracion auditada de `game/Handlers/VoidStorageHandler.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/VoidStorageHandler.cpp`
+  Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 **Character handlers (10 missing)**
 - [ ] **#HANDLERS.1** CharacterRenameRequest (M)
 - [ ] **#HANDLERS.2** CharCustomize (M)

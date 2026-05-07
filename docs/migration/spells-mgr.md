@@ -276,6 +276,39 @@ DB2 overlay rows can also generate `SMSG_DB_REPLY` to clients via `DB2Storage<T>
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#SPELLS_MGR.WBS.001** Partir y cerrar la migracion auditada de `game/Spells/SpellMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Spells/SpellMgr.cpp`
+  Rust target: `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 5028 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SPELLS_MGR.WBS.002** Partir y cerrar la migracion auditada de `game/Spells/SpellMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Spells/SpellMgr.h`
+  Rust target: `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 827 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SPELLS_MGR.WBS.003** Partir y cerrar la migracion auditada de `game/Spells/TraitMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Spells/TraitMgr.cpp`
+  Rust target: `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 752 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SPELLS_MGR.WBS.004** Cerrar la migracion auditada de `game/Spells/TraitMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Spells/TraitMgr.h`
+  Rust target: `crates/wow-spell`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numbered for `MIGRATION_ROADMAP.md` cross-reference. Complexity: **L** <1h, **M** 1-4h, **H** 4-12h, **XL** >12h.
 
 - [ ] **#SPELLMGR.1** Scaffold `crates/wow-spell/src/spell_mgr.rs` with the `SpellMgr` struct, `OnceCell`-backed accessor, and a `SpellMgrBuilder` for staged loads (M)

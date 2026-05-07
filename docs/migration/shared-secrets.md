@@ -146,6 +146,27 @@ N/A — módulo enteramente offline/setup.
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#SHARED_SECRETS.WBS.001** Cerrar la migracion auditada de `shared/Secrets/SecretMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Secrets/SecretMgr.cpp`
+  Rust target: `crates/wow-crypto`, `crates/bnet-server`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SHARED_SECRETS.WBS.002** Cerrar la migracion auditada de `shared/Secrets/SecretMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/shared/Secrets/SecretMgr.h`
+  Rust target: `crates/wow-crypto`, `crates/bnet-server`, `crates/world-server`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#SEC.1** Añadir crate dep `argon2` (RustCrypto) en `wow-crypto/Cargo.toml`. (L)
 - [ ] **#SEC.2** Implementar `wow_crypto::argon2::{hash, verify}` con parámetros TC-compatibles (Argon2id, mismas iters/memory que el C++ default — verificar `Argon2.cpp` upstream). (M)
 - [ ] **#SEC.3** Implementar `wow_crypto::aes_keywrap::{encrypt_with_random_iv, decrypt}` para `Vec<u8>` payload con clave de 16 bytes (formato C++: `[IV(12)][cipher][tag(16)]` — confirmar). (M)

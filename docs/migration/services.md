@@ -162,6 +162,45 @@ Inside each envelope: `(service_hash: u32, method_id: u32, token: u32, payload_l
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#SERVICES.WBS.001** Cerrar la migracion auditada de `game/Services/WorldserverGameUtilitiesService.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Services/WorldserverGameUtilitiesService.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`, `crates/wow-proto`, `crates/wow-proto/proto`, `crates/wow-world/src`, `crates/wow-social`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVICES.WBS.002** Cerrar la migracion auditada de `game/Services/WorldserverGameUtilitiesService.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Services/WorldserverGameUtilitiesService.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`, `crates/wow-proto`, `crates/wow-proto/proto`, `crates/wow-world/src`, `crates/wow-social`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVICES.WBS.003** Cerrar la migracion auditada de `game/Services/WorldserverService.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Services/WorldserverService.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`, `crates/wow-proto`, `crates/wow-proto/proto`, `crates/wow-world/src`, `crates/wow-social`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVICES.WBS.004** Cerrar la migracion auditada de `game/Services/WorldserverServiceDispatcher.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Services/WorldserverServiceDispatcher.cpp`
+  Rust target: `crates/wow-network`, `crates/wow-world`, `crates/wow-proto`, `crates/wow-proto/proto`, `crates/wow-world/src`, `crates/wow-social`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#SERVICES.WBS.005** Cerrar la migracion auditada de `game/Services/WorldserverServiceDispatcher.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Services/WorldserverServiceDispatcher.h`
+  Rust target: `crates/wow-network`, `crates/wow-world`, `crates/wow-proto`, `crates/wow-proto/proto`, `crates/wow-world/src`, `crates/wow-social`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 > **Scoping note:** for the WotLK 3.4.3 Classic target, treat this entire module as **out-of-scope** unless and until the live client is observed sending `CMSG_BATTLENET_REQUEST` to the world-server. Sub-tasks below are listed for completeness; do not start work on them without an opcode capture demonstrating the need.
 
 - [ ] **#SVC.1** Pcap-trace a 3.4.3.54261 client doing in-game `/realms`, character logout-to-realm-list, and friend/social actions. If `CMSG_BATTLENET_REQUEST` (opcode 0x4F3) never fires, mark this module as out-of-scope and stop. (L)

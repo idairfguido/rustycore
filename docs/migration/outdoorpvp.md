@@ -184,6 +184,39 @@ OutdoorPvP no tiene opcodes propios; piggybacks sobre los existentes:
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#OUTDOORPVP.WBS.001** Cerrar la migracion auditada de `game/OutdoorPvP/OutdoorPvP.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/OutdoorPvP/OutdoorPvP.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#OUTDOORPVP.WBS.002** Cerrar la migracion auditada de `game/OutdoorPvP/OutdoorPvP.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/OutdoorPvP/OutdoorPvP.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#OUTDOORPVP.WBS.003** Cerrar la migracion auditada de `game/OutdoorPvP/OutdoorPvPMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/OutdoorPvP/OutdoorPvPMgr.cpp`
+  Rust target: `crates/wow-pvp`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#OUTDOORPVP.WBS.004** Cerrar la migracion auditada de `game/OutdoorPvP/OutdoorPvPMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/OutdoorPvP/OutdoorPvPMgr.h`
+  Rust target: `crates/wow-pvp`, `crates/wow-world`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Complejidad: **L** (<1h), **M** (1-4h), **H** (4-12h), **XL** (>12h).
 
 - [ ] **#OPVP.1** Crear módulo `crates/wow-pvp/src/outdoor/mod.rs` con enums `OutdoorPvpType` (HP/NA/TF/ZM/SI), `ObjectiveState` (7 variantes), `OutdoorPvpEvent` (control-zone events) (L)

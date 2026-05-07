@@ -191,6 +191,27 @@ The Rust opcode constants for these already exist in `crates/wow-constants/src/o
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#SUPPORT.WBS.001** Partir y cerrar la migracion auditada de `game/Support/SupportMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Support/SupportMgr.cpp`
+  Rust target: `crates/wow-support`, `crates/wow-social`, `crates/wow-handler`, `crates/wow-database/src/statements`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 808 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#SUPPORT.WBS.002** Cerrar la migracion auditada de `game/Support/SupportMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Support/SupportMgr.h`
+  Rust target: `crates/wow-support`, `crates/wow-social`, `crates/wow-handler`, `crates/wow-database/src/statements`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#SUP.1** Add a `wow-support` crate (or module under `wow-social`). Define `enum TicketKind { Bug, Complaint, Suggestion }`, `ReportType`, `ReportMajorCategory`, `ReportMinorCategory` (bitflags), `Ticket` base struct with the shared fields (`id, player_guid, map_id, position, create_time, closed_by, assigned_to, comment`), and `BugTicket` / `ComplaintTicket` / `SuggestionTicket` value types holding their per-kind extras. (complexity: **M**)
 - [ ] **#SUP.2** Add prepared statements to `crates/wow-database/src/statements/character.rs`: `SEL_GM_BUGS`, `SEL_GM_COMPLAINTS`, `SEL_GM_COMPLAINT_CHATLINES`, `SEL_GM_SUGGESTIONS`, plus the REP/DEL counterparts for each. Schema is already in TrinityCore's `character_database.sql` — port as-is. (complexity: **M**)
 - [ ] **#SUP.3** Implement `SupportMgr` as `Arc<RwLock<Inner>>` holding three `BTreeMap<u32, Ticket>` and `last_*_id: u32` + `open_*_count: u32`. Add `load_all(pool)`, `add_ticket`, `close_ticket(kind, id, closed_by)`, `remove_ticket(kind, id)`, `reset_tickets(kind)`, `get<T>(id)`, `get_complaints_by_player(guid)`, plus the four system-status booleans loaded from config. (complexity: **H**)

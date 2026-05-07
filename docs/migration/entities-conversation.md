@@ -147,6 +147,27 @@ DBC stores (post-WoLK):
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#ENTITIES_CONVERSATION.WBS.001** Cerrar la migracion auditada de `game/Entities/Conversation/Conversation.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Conversation/Conversation.cpp`
+  Rust target: `crates/wow-world`, `crates/wow-data`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#ENTITIES_CONVERSATION.WBS.002** Cerrar la migracion auditada de `game/Entities/Conversation/Conversation.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Conversation/Conversation.h`
+  Rust target: `crates/wow-world`, `crates/wow-data`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 - [ ] **#CONV.1** **Decision gate:** confirm whether any 3.4 backport content (custom server scripts) needs Conversation. If no — close as `n/a` and stop. If yes — proceed. (L)
 - [ ] **#CONV.2** Port `ConversationActorType` enum to `wow-constants` (L)
 - [ ] **#CONV.3** Define `Conversation` entity struct in `wow-world/src/entities/conversation.rs` (M)

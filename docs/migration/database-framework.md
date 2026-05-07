@@ -348,6 +348,279 @@ Not applicable — the database framework does not handle WoW client packets. (I
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#DATABASE_FRAMEWORK.WBS.001** Cerrar la migracion auditada de `database/Database/AdhocStatement.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/AdhocStatement.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.002** Cerrar la migracion auditada de `database/Database/AdhocStatement.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/AdhocStatement.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.003** Cerrar la migracion auditada de `database/Database/DatabaseEnv.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/DatabaseEnv.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.004** Cerrar la migracion auditada de `database/Database/DatabaseEnv.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/DatabaseEnv.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.005** Cerrar la migracion auditada de `database/Database/DatabaseEnvFwd.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/DatabaseEnvFwd.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.006** Cerrar la migracion auditada de `database/Database/DatabaseLoader.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/DatabaseLoader.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.007** Cerrar la migracion auditada de `database/Database/DatabaseLoader.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/DatabaseLoader.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.008** Partir y cerrar la migracion auditada de `database/Database/DatabaseWorkerPool.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/DatabaseWorkerPool.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 585 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.009** Cerrar la migracion auditada de `database/Database/DatabaseWorkerPool.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/DatabaseWorkerPool.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.010** Cerrar la migracion auditada de `database/Database/Field.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/Field.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.011** Cerrar la migracion auditada de `database/Database/Field.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/Field.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.012** Cerrar la migracion auditada de `database/Database/FieldValueConverter.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/FieldValueConverter.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.013** Cerrar la migracion auditada de `database/Database/FieldValueConverter.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/FieldValueConverter.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.014** Cerrar la migracion auditada de `database/Database/FieldValueConverters.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/FieldValueConverters.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.015** Partir y cerrar la migracion auditada de `database/Database/Implementation/CharacterDatabase.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/Implementation/CharacterDatabase.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 732 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.016** Partir y cerrar la migracion auditada de `database/Database/Implementation/CharacterDatabase.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/Implementation/CharacterDatabase.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 611 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.017** Partir y cerrar la migracion auditada de `database/Database/Implementation/HotfixDatabase.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/Implementation/HotfixDatabase.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1916 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.018** Partir y cerrar la migracion auditada de `database/Database/Implementation/HotfixDatabase.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/Implementation/HotfixDatabase.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1122 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.019** Cerrar la migracion auditada de `database/Database/Implementation/LoginDatabase.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/Implementation/LoginDatabase.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.020** Cerrar la migracion auditada de `database/Database/Implementation/LoginDatabase.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/Implementation/LoginDatabase.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.021** Cerrar la migracion auditada de `database/Database/Implementation/WorldDatabase.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/Implementation/WorldDatabase.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.022** Cerrar la migracion auditada de `database/Database/Implementation/WorldDatabase.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/Implementation/WorldDatabase.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.023** Partir y cerrar la migracion auditada de `database/Database/MySQLConnection.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/MySQLConnection.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 605 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.024** Cerrar la migracion auditada de `database/Database/MySQLConnection.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/MySQLConnection.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.025** Cerrar la migracion auditada de `database/Database/MySQLHacks.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/MySQLHacks.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.026** Cerrar la migracion auditada de `database/Database/MySQLPreparedStatement.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/MySQLPreparedStatement.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.027** Cerrar la migracion auditada de `database/Database/MySQLPreparedStatement.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/MySQLPreparedStatement.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.028** Cerrar la migracion auditada de `database/Database/MySQLThreading.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/MySQLThreading.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.029** Cerrar la migracion auditada de `database/Database/MySQLThreading.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/MySQLThreading.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.030** Cerrar la migracion auditada de `database/Database/MySQLWorkaround.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/MySQLWorkaround.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.031** Cerrar la migracion auditada de `database/Database/PreparedStatement.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/PreparedStatement.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.032** Cerrar la migracion auditada de `database/Database/PreparedStatement.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/PreparedStatement.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.033** Cerrar la migracion auditada de `database/Database/QueryCallback.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/QueryCallback.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.034** Cerrar la migracion auditada de `database/Database/QueryCallback.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/QueryCallback.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.035** Cerrar la migracion auditada de `database/Database/QueryHolder.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/QueryHolder.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.036** Cerrar la migracion auditada de `database/Database/QueryHolder.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/QueryHolder.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.037** Cerrar la migracion auditada de `database/Database/QueryResult.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/QueryResult.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.038** Cerrar la migracion auditada de `database/Database/QueryResult.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/QueryResult.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.039** Cerrar la migracion auditada de `database/Database/Transaction.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/Transaction.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.040** Cerrar la migracion auditada de `database/Database/Transaction.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Database/Transaction.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.041** Cerrar la migracion auditada de `database/Updater/DBUpdater.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Updater/DBUpdater.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.042** Cerrar la migracion auditada de `database/Updater/DBUpdater.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Updater/DBUpdater.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.043** Cerrar la migracion auditada de `database/Updater/UpdateFetcher.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Updater/UpdateFetcher.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATABASE_FRAMEWORK.WBS.044** Cerrar la migracion auditada de `database/Updater/UpdateFetcher.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/database/Updater/UpdateFetcher.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numbered for cross-reference from `MIGRATION_ROADMAP.md`. Complexity: **L** <1h, **M** 1-4h, **H** 4-12h, **XL** >12h.
 
 - [ ] **#DB.1** Expose per-pool `max_connections` config: read `LoginDatabaseInfo.PoolSize`, `CharacterDatabaseInfo.PoolSize`, `WorldDatabaseInfo.PoolSize`, `HotfixDatabaseInfo.PoolSize` in `world-server/src/main.rs`; pass each to `Database::open_with_pool_size`. Default to `8` if unset (matches TC default `LoginDatabase.WorkerThreads + LoginDatabase.SynchPool = 1 + 1` → 2 for login, but 8 is a safer first cut). (L) — **same as `worldserver.md` #WS.21**

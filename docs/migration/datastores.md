@@ -315,6 +315,93 @@ Plus the ~783 per-table statements registered through `DB2LoadInfo::Instance.Sta
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#DATASTORES.WBS.001** Cerrar la migracion auditada de `game/DataStores/DB2HotfixGenerator.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DataStores/DB2HotfixGenerator.cpp`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATASTORES.WBS.002** Cerrar la migracion auditada de `game/DataStores/DB2HotfixGenerator.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DataStores/DB2HotfixGenerator.h`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATASTORES.WBS.003** Partir y cerrar la migracion auditada de `game/DataStores/DB2LoadInfo.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DataStores/DB2LoadInfo.h`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 6357 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#DATASTORES.WBS.004** Partir y cerrar la migracion auditada de `game/DataStores/DB2Metadata.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DataStores/DB2Metadata.h`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 12067 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#DATASTORES.WBS.005** Partir y cerrar la migracion auditada de `game/DataStores/DB2Stores.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DataStores/DB2Stores.cpp`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 3104 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#DATASTORES.WBS.006** Partir y cerrar la migracion auditada de `game/DataStores/DB2Stores.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DataStores/DB2Stores.h`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 516 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#DATASTORES.WBS.007** Partir y cerrar la migracion auditada de `game/DataStores/DB2Structure.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DataStores/DB2Structure.h`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 4538 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#DATASTORES.WBS.008** Partir y cerrar la migracion auditada de `game/DataStores/DBCEnums.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DataStores/DBCEnums.h`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2514 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#DATASTORES.WBS.009** Cerrar la migracion auditada de `game/DataStores/GameTables.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DataStores/GameTables.cpp`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATASTORES.WBS.010** Cerrar la migracion auditada de `game/DataStores/GameTables.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DataStores/GameTables.h`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATASTORES.WBS.011** Cerrar la migracion auditada de `game/DataStores/M2Stores.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DataStores/M2Stores.cpp`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATASTORES.WBS.012** Cerrar la migracion auditada de `game/DataStores/M2Stores.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DataStores/M2Stores.h`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#DATASTORES.WBS.013** Cerrar la migracion auditada de `game/DataStores/M2Structure.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/DataStores/M2Structure.h`
+  Rust target: `crates/wow-data`, `crates/wow-database`, `crates/wow-constants`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numera los items para poder referenciarlos desde `MIGRATION_ROADMAP.md` sección 5.
 
 Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>12h, splitear).

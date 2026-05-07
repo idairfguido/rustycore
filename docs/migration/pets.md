@@ -413,6 +413,33 @@ DB2/DBC stores read by the Pet module:
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#PETS.WBS.001** Partir y cerrar la migracion auditada de `game/Entities/Pet/Pet.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Pet/Pet.cpp`
+  Rust target: `crates/wow-database`, `crates/wow-database/src/statements`, `crates/wow-ai/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1954 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PETS.WBS.002** Cerrar la migracion auditada de `game/Entities/Pet/Pet.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Pet/Pet.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src/statements`, `crates/wow-ai/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PETS.WBS.003** Cerrar la migracion auditada de `game/Entities/Pet/PetDefines.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Pet/PetDefines.h`
+  Rust target: `crates/wow-database`, `crates/wow-database/src/statements`, `crates/wow-ai/src`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numera los items para poder referenciarlos desde `MIGRATION_ROADMAP.md` sección 5.
 
 Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>12h, splitear).

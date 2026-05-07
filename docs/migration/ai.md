@@ -339,6 +339,81 @@ Resumen: AI consume hooks del engine, no ve sockets directamente. Los efectos (m
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#AI.WBS.001** Cerrar la migracion auditada de `game/AI/AIException.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/AIException.h`
+  Rust target: `crates/wow-ai`, `crates/wow-script`, `crates/wow-scripts`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI.WBS.002** Cerrar la migracion auditada de `game/AI/CreatureAI.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CreatureAI.cpp`
+  Rust target: `crates/wow-ai`, `crates/wow-script`, `crates/wow-scripts`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI.WBS.003** Cerrar la migracion auditada de `game/AI/CreatureAI.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CreatureAI.h`
+  Rust target: `crates/wow-ai`, `crates/wow-script`, `crates/wow-scripts`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI.WBS.004** Cerrar la migracion auditada de `game/AI/CreatureAIFactory.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CreatureAIFactory.h`
+  Rust target: `crates/wow-ai`, `crates/wow-script`, `crates/wow-scripts`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI.WBS.005** Cerrar la migracion auditada de `game/AI/CreatureAIImpl.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CreatureAIImpl.h`
+  Rust target: `crates/wow-ai`, `crates/wow-script`, `crates/wow-scripts`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI.WBS.006** Cerrar la migracion auditada de `game/AI/CreatureAIRegistry.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CreatureAIRegistry.cpp`
+  Rust target: `crates/wow-ai`, `crates/wow-script`, `crates/wow-scripts`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI.WBS.007** Cerrar la migracion auditada de `game/AI/CreatureAIRegistry.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CreatureAIRegistry.h`
+  Rust target: `crates/wow-ai`, `crates/wow-script`, `crates/wow-scripts`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI.WBS.008** Cerrar la migracion auditada de `game/AI/CreatureAISelector.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CreatureAISelector.cpp`
+  Rust target: `crates/wow-ai`, `crates/wow-script`, `crates/wow-scripts`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI.WBS.009** Cerrar la migracion auditada de `game/AI/CreatureAISelector.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/CreatureAISelector.h`
+  Rust target: `crates/wow-ai`, `crates/wow-script`, `crates/wow-scripts`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI.WBS.010** Cerrar la migracion auditada de `game/AI/GameObjectAIFactory.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/GameObjectAIFactory.h`
+  Rust target: `crates/wow-ai`, `crates/wow-script`, `crates/wow-scripts`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#AI.WBS.011** Cerrar la migracion auditada de `game/AI/SelectableAI.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/SelectableAI.h`
+  Rust target: `crates/wow-ai`, `crates/wow-script`, `crates/wow-scripts`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numerados para referencia desde `MIGRATION_ROADMAP.md`. Complejidad: **L** <1h, **M** 1-4h, **H** 4-12h, **XL** >12h.
 
 - [ ] **#AI.1** Refactor `CreatureAI` actual a `trait CreatureAI` (en `crates/wow-ai/src/creature_ai.rs`) con métodos virtuales: `update_ai(&mut self, diff_ms: u32)`, `reset(&mut self)`, `just_entered_combat(&mut self, who: &Unit)`, `just_died(&mut self, killer: &Unit)`, `killed_unit(&mut self, victim: &Unit)`, `move_in_line_of_sight(&mut self, who: &Unit)`, `enter_evade_mode(&mut self, reason: EvadeReason)`, `spell_hit(&mut self, caster: &Unit, info: &SpellInfo)`, `just_summoned(&mut self, summon: &Creature)`, `movement_inform(&mut self, ty: u32, id: u32)`, `receive_emote(&mut self, p: &Player, emote_id: u32)` (H)

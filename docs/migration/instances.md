@@ -248,6 +248,57 @@ NOTE: `InstanceSaveMgr` no longer exists as a separate class in this WoLK 3.4.3 
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#INSTANCES.WBS.001** Partir y cerrar la migracion auditada de `game/Instances/InstanceLockMgr.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceLockMgr.cpp`
+  Rust target: `crates/wow-instances`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 599 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#INSTANCES.WBS.002** Cerrar la migracion auditada de `game/Instances/InstanceLockMgr.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceLockMgr.h`
+  Rust target: `crates/wow-instances`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#INSTANCES.WBS.003** Partir y cerrar la migracion auditada de `game/Instances/InstanceScript.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceScript.cpp`
+  Rust target: `crates/wow-instances`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 971 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#INSTANCES.WBS.004** Cerrar la migracion auditada de `game/Instances/InstanceScript.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceScript.h`
+  Rust target: `crates/wow-instances`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#INSTANCES.WBS.005** Cerrar la migracion auditada de `game/Instances/InstanceScriptData.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceScriptData.cpp`
+  Rust target: `crates/wow-instances`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#INSTANCES.WBS.006** Cerrar la migracion auditada de `game/Instances/InstanceScriptData.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceScriptData.h`
+  Rust target: `crates/wow-instances`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#INSTANCES.WBS.007** Cerrar la migracion auditada de `game/Instances/enuminfo_InstanceScript.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Instances/enuminfo_InstanceScript.cpp`
+  Rust target: `crates/wow-instances`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numera los items para poder referenciarlos desde `MIGRATION_ROADMAP.md` sección 5.
 
 Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>12h, splitear).

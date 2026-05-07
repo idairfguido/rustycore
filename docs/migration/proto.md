@@ -364,6 +364,429 @@ The Rust port is in `crates/wow-proto`, using `prost` + `prost-build` to compile
 
 ## 9. Migration sub-tasks
 
+<!-- REFINE.022:BEGIN task-wbs -->
+
+### R2 Task WBS (generated)
+
+> Fuente: `docs/migration/inventory/cpp-files-by-module.md` + targets verificados en `docs/migration/inventory/r2-rust-targets.tsv`. C++ sigue siendo el oraculo; estas tareas son el suelo de cobertura por archivo, no una prueba de port correcto.
+
+- [ ] **#PROTO.WBS.001** Partir y cerrar la migracion auditada de `proto/BattlenetRpcErrorCodes.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/BattlenetRpcErrorCodes.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 671 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.002** Partir y cerrar la migracion auditada de `proto/Client/account_service.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/account_service.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 4780 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.003** Partir y cerrar la migracion auditada de `proto/Client/account_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/account_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 10692 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.004** Cerrar la migracion auditada de `proto/Client/api/client/v1/channel_id.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/api/client/v1/channel_id.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.005** Partir y cerrar la migracion auditada de `proto/Client/api/client/v2/attribute_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/api/client/v2/attribute_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 857 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.006** Cerrar la migracion auditada de `proto/Client/api/client/v2/report_service.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/api/client/v2/report_service.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.007** Partir y cerrar la migracion auditada de `proto/Client/api/client/v2/report_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/api/client/v2/report_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1065 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.008** Partir y cerrar la migracion auditada de `proto/Client/attribute_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/attribute_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1069 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.009** Partir y cerrar la migracion auditada de `proto/Client/authentication_service.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/authentication_service.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 3109 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.010** Partir y cerrar la migracion auditada de `proto/Client/challenge_service.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/challenge_service.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 608 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.011** Partir y cerrar la migracion auditada de `proto/Client/channel_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/channel_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2362 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.012** Partir y cerrar la migracion auditada de `proto/Client/club_ban.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_ban.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 738 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.013** Partir y cerrar la migracion auditada de `proto/Client/club_core.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_core.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 6073 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.014** Cerrar la migracion auditada de `proto/Client/club_enum.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_enum.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.015** Partir y cerrar la migracion auditada de `proto/Client/club_invitation.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_invitation.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2267 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.016** Cerrar la migracion auditada de `proto/Client/club_listener.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_listener.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.017** Partir y cerrar la migracion auditada de `proto/Client/club_member.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_member.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 3438 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.018** Cerrar la migracion auditada de `proto/Client/club_member_id.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_member_id.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.019** Partir y cerrar la migracion auditada de `proto/Client/club_membership_listener.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_membership_listener.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1498 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.020** Partir y cerrar la migracion auditada de `proto/Client/club_membership_service.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_membership_service.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1559 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.021** Partir y cerrar la migracion auditada de `proto/Client/club_membership_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_membership_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1308 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.022** Partir y cerrar la migracion auditada de `proto/Client/club_name_generator.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_name_generator.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1015 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.023** Partir y cerrar la migracion auditada de `proto/Client/club_notification.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_notification.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 4522 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.024** Partir y cerrar la migracion auditada de `proto/Client/club_range_set.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_range_set.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1708 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.025** Partir y cerrar la migracion auditada de `proto/Client/club_request.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_request.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 14861 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.026** Partir y cerrar la migracion auditada de `proto/Client/club_role.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_role.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2330 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.027** Cerrar la migracion auditada de `proto/Client/club_service.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_service.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.028** Partir y cerrar la migracion auditada de `proto/Client/club_stream.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_stream.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 4552 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.029** Partir y cerrar la migracion auditada de `proto/Client/club_tag.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_tag.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 676 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.030** Cerrar la migracion auditada de `proto/Client/club_type.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_type.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.031** Cerrar la migracion auditada de `proto/Client/club_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/club_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.032** Partir y cerrar la migracion auditada de `proto/Client/connection_service.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/connection_service.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2701 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.033** Partir y cerrar la migracion auditada de `proto/Client/content_handle_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/content_handle_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 516 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.034** Partir y cerrar la migracion auditada de `proto/Client/embed_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/embed_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1233 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.035** Cerrar la migracion auditada de `proto/Client/entity_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/entity_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.036** Cerrar la migracion auditada de `proto/Client/ets_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/ets_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.037** Cerrar la migracion auditada de `proto/Client/event_view_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/event_view_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.038** Partir y cerrar la migracion auditada de `proto/Client/friends_service.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/friends_service.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 3384 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.039** Partir y cerrar la migracion auditada de `proto/Client/friends_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/friends_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2690 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.040** Partir y cerrar la migracion auditada de `proto/Client/game_utilities_service.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/game_utilities_service.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2085 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.041** Cerrar la migracion auditada de `proto/Client/game_utilities_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/game_utilities_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.042** Partir y cerrar la migracion auditada de `proto/Client/global_extensions/field_options.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/global_extensions/field_options.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2342 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.043** Cerrar la migracion auditada de `proto/Client/global_extensions/message_options.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/global_extensions/message_options.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.044** Partir y cerrar la migracion auditada de `proto/Client/global_extensions/method_options.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/global_extensions/method_options.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 764 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.045** Cerrar la migracion auditada de `proto/Client/global_extensions/range.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/global_extensions/range.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.046** Cerrar la migracion auditada de `proto/Client/global_extensions/register_method_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/global_extensions/register_method_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.047** Cerrar la migracion auditada de `proto/Client/global_extensions/routing.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/global_extensions/routing.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.048** Partir y cerrar la migracion auditada de `proto/Client/global_extensions/service_options.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/global_extensions/service_options.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 754 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.049** Partir y cerrar la migracion auditada de `proto/Client/invitation_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/invitation_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 848 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.050** Cerrar la migracion auditada de `proto/Client/message_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/message_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.051** Partir y cerrar la migracion auditada de `proto/Client/notification_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/notification_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1270 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.052** Cerrar la migracion auditada de `proto/Client/presence_listener.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/presence_listener.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.053** Partir y cerrar la migracion auditada de `proto/Client/presence_service.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/presence_service.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1869 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.054** Partir y cerrar la migracion auditada de `proto/Client/presence_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/presence_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1141 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.055** Cerrar la migracion auditada de `proto/Client/profanity_filter_config.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/profanity_filter_config.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.056** Cerrar la migracion auditada de `proto/Client/report_service.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/report_service.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.057** Partir y cerrar la migracion auditada de `proto/Client/report_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/report_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2324 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.058** Partir y cerrar la migracion auditada de `proto/Client/resource_service.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/resource_service.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 533 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.059** Partir y cerrar la migracion auditada de `proto/Client/role_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/role_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 971 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.060** Partir y cerrar la migracion auditada de `proto/Client/rpc_config.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/rpc_config.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 984 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.061** Partir y cerrar la migracion auditada de `proto/Client/rpc_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/rpc_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2138 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.062** Cerrar la migracion auditada de `proto/Client/semantic_version.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/semantic_version.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.063** Partir y cerrar la migracion auditada de `proto/Client/user_manager_service.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/user_manager_service.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 1896 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.064** Partir y cerrar la migracion auditada de `proto/Client/user_manager_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/user_manager_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 662 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.065** Partir y cerrar la migracion auditada de `proto/Client/voice_types.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Client/voice_types.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 536 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.066** Partir y cerrar la migracion auditada de `proto/Login/Login.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/Login/Login.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 3351 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.067** Partir y cerrar la migracion auditada de `proto/RealmList/RealmList.pb.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/RealmList/RealmList.pb.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `needs_split`; C++ file has 2671 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.068** Cerrar la migracion auditada de `proto/ServiceBase.cpp`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/ServiceBase.cpp`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+- [ ] **#PROTO.WBS.069** Cerrar la migracion auditada de `proto/ServiceBase.h`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/proto/ServiceBase.h`
+  Rust target: `crates/wow-proto`, `crates/wow-proto/proto/bgs/low/pb/client`, `crates/bnet-server`, `crates/wow-handler`
+  Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
+  Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
+  Notes: `ready_for_small_task`; Single source-file coverage task; split further if C++ review exposes multiple independent behaviors. Assignment basis: prefix.
+
+<!-- REFINE.022:END task-wbs -->
+
 Numera los items para poder referenciarlos desde `MIGRATION_ROADMAP.md` sección 5.
 
 Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>12h, splitear).
