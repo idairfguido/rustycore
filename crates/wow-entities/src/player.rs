@@ -162,6 +162,26 @@ impl ItemPosCount {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ItemSlotRef<'a> {
+    pub bag: u8,
+    pub slot: u8,
+    pub item: &'a Item,
+}
+
+impl<'a> ItemSlotRef<'a> {
+    pub const fn new(bag: u8, slot: u8, item: &'a Item) -> Self {
+        Self { bag, slot, item }
+    }
+}
+
+fn item_ref_by_pos<'a>(items: &'a [ItemSlotRef<'a>], bag: u8, slot: u8) -> Option<&'a Item> {
+    items
+        .iter()
+        .find(|slot_item| slot_item.bag == bag && slot_item.slot == slot)
+        .map(|slot_item| slot_item.item)
+}
+
 fn cpp_keyring_family_gate_applies(slot: u8) -> bool {
     let keyring_limit =
         i16::from(KEYRING_SLOT_START) + i16::from(KEYRING_SLOT_START) - i16::from(KEYRING_SLOT_END);
@@ -821,6 +841,70 @@ impl Player {
         if !new_position.is_contained_in(dest) {
             dest.push(new_position);
             *count -= need_space;
+        }
+
+        InventoryResult::Ok
+    }
+
+    pub fn can_store_item_in_inventory_slots(
+        &self,
+        slot_begin: u8,
+        slot_end: u8,
+        dest: &mut Vec<ItemPosCount>,
+        proto: &ItemStorageTemplate,
+        count: &mut u32,
+        merge: bool,
+        source_item: Option<&Item>,
+        source_is_not_empty_bag: bool,
+        skip_bag: u8,
+        skip_slot: u8,
+        slot_items: &[ItemSlotRef<'_>],
+    ) -> InventoryResult {
+        if source_item.is_some() && source_is_not_empty_bag {
+            return InventoryResult::DestroyNonemptyBag;
+        }
+
+        for slot in slot_begin..slot_end {
+            if skip_bag == INVENTORY_SLOT_BAG_0 && slot == skip_slot {
+                continue;
+            }
+
+            if slot == REAGENT_BAG_SLOT_START {
+                continue;
+            }
+
+            let existing_item =
+                item_ref_by_pos(slot_items, INVENTORY_SLOT_BAG_0, slot).filter(|existing| {
+                    source_item
+                        .is_none_or(|source| existing.object().guid() != source.object().guid())
+                });
+
+            if existing_item.is_some() != merge {
+                continue;
+            }
+
+            let mut need_space = proto.max_stack_size;
+            if let Some(existing_item) = existing_item {
+                if existing_item.can_be_merged_partly_with(proto.entry, proto.max_stack_size)
+                    != InventoryResult::Ok
+                {
+                    continue;
+                }
+
+                need_space -= existing_item.count();
+            }
+
+            need_space = need_space.min(*count);
+            let new_position =
+                ItemPosCount::new(make_item_pos(INVENTORY_SLOT_BAG_0, slot), need_space);
+            if !new_position.is_contained_in(dest) {
+                dest.push(new_position);
+                *count -= need_space;
+
+                if *count == 0 {
+                    return InventoryResult::Ok;
+                }
+            }
         }
 
         InventoryResult::Ok
@@ -2132,6 +2216,171 @@ mod tests {
             ),
             InventoryResult::Ok
         );
+    }
+
+    #[test]
+    fn can_store_item_in_inventory_slots_merges_matching_stacks_like_cpp() {
+        let player = Player::new(None, false);
+        let proto = ItemStorageTemplate::regular_item(6948, 20);
+        let mut matching = Item::default();
+        matching
+            .object_mut()
+            .create(ObjectGuid::create_item(1, 200));
+        matching.object_mut().set_entry(6948);
+        matching.set_count(16);
+        let mut wrong_entry = Item::default();
+        wrong_entry
+            .object_mut()
+            .create(ObjectGuid::create_item(1, 201));
+        wrong_entry.object_mut().set_entry(6949);
+        wrong_entry.set_count(1);
+        let slot_items = [
+            ItemSlotRef::new(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START, &matching),
+            ItemSlotRef::new(
+                INVENTORY_SLOT_BAG_0,
+                INVENTORY_SLOT_ITEM_START + 1,
+                &wrong_entry,
+            ),
+        ];
+        let mut dest = Vec::new();
+        let mut count = 6;
+
+        assert_eq!(
+            player.can_store_item_in_inventory_slots(
+                INVENTORY_SLOT_ITEM_START,
+                INVENTORY_SLOT_ITEM_START + 3,
+                &mut dest,
+                &proto,
+                &mut count,
+                true,
+                None,
+                false,
+                NULL_BAG,
+                NULL_SLOT,
+                &slot_items,
+            ),
+            InventoryResult::Ok
+        );
+        assert_eq!(
+            dest,
+            vec![ItemPosCount::new(
+                make_item_pos(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START),
+                4,
+            )]
+        );
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn can_store_item_in_inventory_slots_allocates_empty_slots_like_cpp() {
+        let player = Player::new(None, false);
+        let proto = ItemStorageTemplate::regular_item(6948, 20);
+        let mut occupied = Item::default();
+        occupied
+            .object_mut()
+            .create(ObjectGuid::create_item(1, 202));
+        occupied.object_mut().set_entry(6948);
+        occupied.set_count(1);
+        let slot_items = [ItemSlotRef::new(
+            INVENTORY_SLOT_BAG_0,
+            INVENTORY_SLOT_ITEM_START,
+            &occupied,
+        )];
+        let mut dest = vec![ItemPosCount::new(
+            make_item_pos(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START + 1),
+            1,
+        )];
+        let mut count = 7;
+
+        assert_eq!(
+            player.can_store_item_in_inventory_slots(
+                INVENTORY_SLOT_ITEM_START,
+                INVENTORY_SLOT_ITEM_START + 3,
+                &mut dest,
+                &proto,
+                &mut count,
+                false,
+                None,
+                false,
+                NULL_BAG,
+                NULL_SLOT,
+                &slot_items,
+            ),
+            InventoryResult::Ok
+        );
+        assert_eq!(
+            dest,
+            vec![
+                ItemPosCount::new(
+                    make_item_pos(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START + 1),
+                    1,
+                ),
+                ItemPosCount::new(
+                    make_item_pos(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START + 2),
+                    7,
+                ),
+            ]
+        );
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn can_store_item_in_inventory_slots_applies_cpp_source_and_skip_rules() {
+        let player = Player::new(None, false);
+        let proto = ItemStorageTemplate::regular_item(6948, 20);
+        let mut source = Item::default();
+        source.object_mut().create(ObjectGuid::create_item(1, 203));
+        source.object_mut().set_entry(6948);
+        source.set_count(1);
+
+        assert_eq!(
+            player.can_store_item_in_inventory_slots(
+                INVENTORY_SLOT_ITEM_START,
+                INVENTORY_SLOT_ITEM_START + 1,
+                &mut Vec::new(),
+                &proto,
+                &mut 1,
+                false,
+                Some(&source),
+                true,
+                NULL_BAG,
+                NULL_SLOT,
+                &[],
+            ),
+            InventoryResult::DestroyNonemptyBag
+        );
+
+        let slot_items = [ItemSlotRef::new(
+            INVENTORY_SLOT_BAG_0,
+            INVENTORY_SLOT_ITEM_START,
+            &source,
+        )];
+        let mut dest = Vec::new();
+        let mut count = 1;
+        assert_eq!(
+            player.can_store_item_in_inventory_slots(
+                INVENTORY_SLOT_ITEM_START,
+                INVENTORY_SLOT_ITEM_START + 2,
+                &mut dest,
+                &proto,
+                &mut count,
+                false,
+                Some(&source),
+                false,
+                INVENTORY_SLOT_BAG_0,
+                INVENTORY_SLOT_ITEM_START + 1,
+                &slot_items,
+            ),
+            InventoryResult::Ok
+        );
+        assert_eq!(
+            dest,
+            vec![ItemPosCount::new(
+                make_item_pos(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START),
+                1,
+            )]
+        );
+        assert_eq!(count, 0);
     }
 
     #[test]
