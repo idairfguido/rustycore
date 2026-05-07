@@ -1,8 +1,8 @@
 use bitflags::bitflags;
 use wow_constants::{
     BagFamilyMask, Gender, InventoryResult, InventoryType, ItemBondingType, ItemClass,
-    ItemFieldFlags, ItemSubClassContainer, ItemSubclassProfession, ItemUpdateState, PowerType,
-    TypeId, TypeMask,
+    ItemFieldFlags, ItemSubClassContainer, ItemSubClassQuiver, ItemSubClassWeapon,
+    ItemSubclassProfession, ItemUpdateState, PowerType, TypeId, TypeMask,
 };
 use wow_core::ObjectGuid;
 
@@ -15,7 +15,8 @@ use crate::{
     INVENTORY_SLOT_BAG_0, Item, ItemStorageTemplate, MAX_BAG_SIZE, NULL_SLOT, ObjectDataUpdate,
     PROFESSION_SLOT_COOKING_GEAR1, PROFESSION_SLOT_COOKING_TOOL, PROFESSION_SLOT_END,
     PROFESSION_SLOT_FISHING_TOOL, PROFESSION_SLOT_MAX_COUNT, PROFESSION_SLOT_PROFESSION1_GEAR1,
-    PROFESSION_SLOT_PROFESSION1_GEAR2, PROFESSION_SLOT_PROFESSION1_TOOL, PROFESSION_SLOT_START,
+    PROFESSION_SLOT_PROFESSION1_GEAR2, PROFESSION_SLOT_PROFESSION1_TOOL,
+    PROFESSION_SLOT_PROFESSION2_GEAR1, PROFESSION_SLOT_PROFESSION2_GEAR2, PROFESSION_SLOT_START,
     Unit, UnitDataUpdate, UpdateMask, item_can_go_into_bag,
     update_fields::{
         ACTIVE_PLAYER_DATA_BITS, PLAYER_DATA_BITS, TYPEID_ACTIVE_PLAYER, TYPEID_PLAYER,
@@ -267,6 +268,44 @@ pub struct FindEquipSlotArgs<'a> {
     pub has_required_profession_skill: bool,
     pub profession_slot: Option<u8>,
     pub equipped_items: &'a [ItemSlotRef<'a>],
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CanEquipItemArgs<'a> {
+    pub slot: u8,
+    pub proto: Option<&'a ItemStorageTemplate>,
+    pub source_item: Option<&'a Item>,
+    pub source_bop_trade_allowed_for_player: bool,
+    pub swap: bool,
+    pub not_loading: bool,
+    pub is_stunned: bool,
+    pub is_charmed: bool,
+    pub is_in_combat: bool,
+    pub is_in_progress_arena: bool,
+    pub weapon_change_timer_active: bool,
+    pub current_generic_spell_allows_equip: Option<bool>,
+    pub current_channeled_spell_allows_equip: Option<bool>,
+    pub heirloom_required_level_failed: bool,
+    pub can_use_result: InventoryResult,
+    pub can_equip_unique_result: InventoryResult,
+    pub can_dual_wield: bool,
+    pub can_titan_grip: bool,
+    pub is_two_hand_used: bool,
+    pub proto_always_allow_dual_wield: bool,
+    pub has_required_profession_skill: bool,
+    pub profession_slot: Option<u8>,
+    pub offhand_can_unequip_result: InventoryResult,
+    pub offhand_can_store_result: InventoryResult,
+    pub limit_category: Option<&'a ItemLimitCategoryTemplate>,
+    pub equipped_items: &'a [ItemSlotRef<'a>],
+    pub stored_items: &'a [ItemStorageRef<'a>],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CanEquipItemOutcome {
+    pub result: InventoryResult,
+    pub dest: u16,
+    pub unique_ignore_slot: Option<u8>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1803,6 +1842,218 @@ impl Player {
         NULL_SLOT
     }
 
+    pub fn can_equip_item(&self, args: CanEquipItemArgs<'_>) -> CanEquipItemOutcome {
+        let Some(source) = args.source_item else {
+            return can_equip_item_outcome(if args.swap {
+                InventoryResult::CantSwap
+            } else {
+                InventoryResult::ItemNotFound
+            });
+        };
+
+        let Some(proto) = args.proto else {
+            return can_equip_item_outcome(if args.swap {
+                InventoryResult::CantSwap
+            } else {
+                InventoryResult::ItemNotFound
+            });
+        };
+
+        if source.loot_generated() {
+            return can_equip_item_outcome(InventoryResult::LootGone);
+        }
+
+        if source.is_binded_not_with(self.guid(), proto, args.source_bop_trade_allowed_for_player) {
+            return can_equip_item_outcome(InventoryResult::NotOwner);
+        }
+
+        let similar_result = self.can_take_more_similar_items(CanTakeMoreSimilarItemsArgs {
+            proto: args.proto,
+            count: source.count(),
+            source_item: args.source_item,
+            current_item_count: self.item_count_by_entry(
+                proto.entry,
+                false,
+                args.source_item,
+                args.stored_items,
+            ),
+            limit_category: args.limit_category,
+            current_limit_category_count: self.item_count_with_limit_category(
+                proto.item_limit_category,
+                args.source_item,
+                args.stored_items,
+            ),
+        });
+        if similar_result.result != InventoryResult::Ok {
+            return can_equip_item_outcome(similar_result.result);
+        }
+
+        if args.not_loading {
+            if args.is_stunned {
+                return can_equip_item_outcome(InventoryResult::GenericStunned);
+            }
+
+            if args.is_charmed {
+                return can_equip_item_outcome(InventoryResult::ClientLockedOut);
+            }
+
+            if !proto.can_change_equip_state_in_combat() {
+                if args.is_in_combat {
+                    return can_equip_item_outcome(InventoryResult::NotInCombat);
+                }
+
+                if args.is_in_progress_arena {
+                    return can_equip_item_outcome(InventoryResult::NotDuringArenaMatch);
+                }
+            }
+
+            if args.is_in_combat
+                && (proto.class_id == ItemClass::Weapon
+                    || proto.inventory_type == InventoryType::Relic)
+                && args.weapon_change_timer_active
+            {
+                return can_equip_item_outcome(InventoryResult::ItemCooldown);
+            }
+
+            if matches!(args.current_generic_spell_allows_equip, Some(false))
+                || matches!(args.current_channeled_spell_allows_equip, Some(false))
+            {
+                return can_equip_item_outcome(InventoryResult::ClientLockedOut);
+            }
+        }
+
+        if args.heirloom_required_level_failed {
+            return can_equip_item_outcome(InventoryResult::NotEquippable);
+        }
+
+        let eslot = self.find_equip_slot(FindEquipSlotArgs {
+            proto,
+            slot: args.slot,
+            swap: args.swap,
+            can_dual_wield: args.can_dual_wield,
+            can_titan_grip: args.can_titan_grip,
+            is_two_hand_used: args.is_two_hand_used,
+            has_required_profession_skill: args.has_required_profession_skill,
+            profession_slot: args.profession_slot,
+            equipped_items: args.equipped_items,
+        });
+        if eslot == NULL_SLOT {
+            return can_equip_item_outcome(InventoryResult::NotEquippable);
+        }
+
+        if args.can_use_result != InventoryResult::Ok {
+            return can_equip_item_outcome(args.can_use_result);
+        }
+
+        if !args.swap && item_ref_by_pos(args.equipped_items, INVENTORY_SLOT_BAG_0, eslot).is_some()
+        {
+            return can_equip_item_outcome(InventoryResult::NoSlotAvailable);
+        }
+
+        let mut ignore = paired_unique_ignore_slot(eslot).unwrap_or(NULL_SLOT);
+        if ignore == NULL_SLOT
+            || !item_ref_by_pos(args.equipped_items, INVENTORY_SLOT_BAG_0, ignore)
+                .is_some_and(|equipped| std::ptr::eq(equipped, source))
+        {
+            ignore = eslot;
+        }
+        let unique_ignore_slot = if args.swap { ignore } else { NULL_SLOT };
+        if args.can_equip_unique_result != InventoryResult::Ok {
+            return CanEquipItemOutcome {
+                result: args.can_equip_unique_result,
+                dest: 0,
+                unique_ignore_slot: Some(unique_ignore_slot),
+            };
+        }
+
+        if proto.class_id == ItemClass::Quiver {
+            for stored in args.stored_items {
+                if stored.bag != INVENTORY_SLOT_BAG_0
+                    || !(INVENTORY_SLOT_BAG_START..INVENTORY_SLOT_BAG_END).contains(&stored.slot)
+                    || std::ptr::eq(stored.item, source)
+                {
+                    continue;
+                }
+
+                if let Some(bag_proto) = stored.template {
+                    if bag_proto.class_id == proto.class_id && (!args.swap || stored.slot != eslot)
+                    {
+                        return CanEquipItemOutcome {
+                            result: if bag_proto.subclass_id == ItemSubClassQuiver::AmmoPouch as u32
+                            {
+                                InventoryResult::OnlyOneAmmo
+                            } else {
+                                InventoryResult::OnlyOneQuiver
+                            },
+                            dest: 0,
+                            unique_ignore_slot: Some(unique_ignore_slot),
+                        };
+                    }
+                }
+            }
+        }
+
+        if eslot == EQUIPMENT_SLOT_OFFHAND {
+            match proto.inventory_type {
+                InventoryType::Weapon
+                    if proto.subclass_id == ItemSubClassWeapon::Polearm as u32 =>
+                {
+                    return can_equip_item_outcome(InventoryResult::TwoHandSkillNotFound);
+                }
+                InventoryType::Weapon if !args.can_dual_wield => {
+                    return can_equip_item_outcome(InventoryResult::TwoHandSkillNotFound);
+                }
+                InventoryType::WeaponOffhand
+                    if !args.can_dual_wield && !args.proto_always_allow_dual_wield =>
+                {
+                    return can_equip_item_outcome(InventoryResult::TwoHandSkillNotFound);
+                }
+                InventoryType::Weapon2Hand if !args.can_dual_wield || !args.can_titan_grip => {
+                    return can_equip_item_outcome(InventoryResult::TwoHandSkillNotFound);
+                }
+                _ => {}
+            }
+
+            if args.is_two_hand_used {
+                return can_equip_item_outcome(InventoryResult::Equipped2handed);
+            }
+        }
+
+        if proto.inventory_type == InventoryType::Weapon2Hand {
+            if eslot == EQUIPMENT_SLOT_OFFHAND {
+                if !args.can_titan_grip {
+                    return can_equip_item_outcome(InventoryResult::NotEquippable);
+                }
+            } else if eslot != EQUIPMENT_SLOT_MAINHAND {
+                return can_equip_item_outcome(InventoryResult::NotEquippable);
+            }
+
+            if !args.can_titan_grip
+                && item_ref_by_pos(
+                    args.equipped_items,
+                    INVENTORY_SLOT_BAG_0,
+                    EQUIPMENT_SLOT_OFFHAND,
+                )
+                .is_some()
+                && (!args.not_loading
+                    || args.offhand_can_unequip_result != InventoryResult::Ok
+                    || args.offhand_can_store_result != InventoryResult::Ok)
+            {
+                return can_equip_item_outcome(if args.swap {
+                    InventoryResult::CantSwap
+                } else {
+                    InventoryResult::InvFull
+                });
+            }
+        }
+
+        CanEquipItemOutcome {
+            result: InventoryResult::Ok,
+            dest: make_item_pos(INVENTORY_SLOT_BAG_0, eslot),
+            unique_ignore_slot: Some(unique_ignore_slot),
+        }
+    }
+
     pub fn can_bank_item(
         &self,
         dest: &mut Vec<ItemPosCount>,
@@ -3002,6 +3253,22 @@ fn equip_slot_candidates(args: FindEquipSlotArgs<'_>) -> [u8; 4] {
     slots
 }
 
+fn paired_unique_ignore_slot(slot: u8) -> Option<u8> {
+    match slot {
+        EQUIPMENT_SLOT_MAINHAND => Some(EQUIPMENT_SLOT_OFFHAND),
+        EQUIPMENT_SLOT_OFFHAND => Some(EQUIPMENT_SLOT_MAINHAND),
+        EQUIPMENT_SLOT_FINGER1 => Some(EQUIPMENT_SLOT_FINGER2),
+        EQUIPMENT_SLOT_FINGER2 => Some(EQUIPMENT_SLOT_FINGER1),
+        EQUIPMENT_SLOT_TRINKET1 => Some(EQUIPMENT_SLOT_TRINKET2),
+        EQUIPMENT_SLOT_TRINKET2 => Some(EQUIPMENT_SLOT_TRINKET1),
+        PROFESSION_SLOT_PROFESSION1_GEAR1 => Some(PROFESSION_SLOT_PROFESSION1_GEAR2),
+        PROFESSION_SLOT_PROFESSION1_GEAR2 => Some(PROFESSION_SLOT_PROFESSION1_GEAR1),
+        PROFESSION_SLOT_PROFESSION2_GEAR1 => Some(PROFESSION_SLOT_PROFESSION2_GEAR2),
+        PROFESSION_SLOT_PROFESSION2_GEAR2 => Some(PROFESSION_SLOT_PROFESSION2_GEAR1),
+        _ => None,
+    }
+}
+
 fn is_bag_storage_slot(slot: u8) -> bool {
     (INVENTORY_SLOT_BAG_START..INVENTORY_SLOT_BAG_END).contains(&slot)
         || (BANK_SLOT_BAG_START..BANK_SLOT_BAG_END).contains(&slot)
@@ -3061,6 +3328,14 @@ fn can_store_item_count_zero(count: u32, no_similar_count: u32) -> Option<CanSto
             can_store_item_error(InventoryResult::ItemMaxCount, count, no_similar_count)
         }
     })
+}
+
+fn can_equip_item_outcome(result: InventoryResult) -> CanEquipItemOutcome {
+    CanEquipItemOutcome {
+        result,
+        dest: 0,
+        unique_ignore_slot: None,
+    }
 }
 
 fn can_take_more_similar_ok() -> CanTakeMoreSimilarItemsOutcome {
@@ -3142,6 +3417,42 @@ mod tests {
             has_required_profession_skill: false,
             profession_slot: None,
             equipped_items,
+        }
+    }
+
+    fn can_equip_args<'a>(
+        slot: u8,
+        proto: Option<&'a ItemStorageTemplate>,
+        source_item: Option<&'a Item>,
+    ) -> CanEquipItemArgs<'a> {
+        CanEquipItemArgs {
+            slot,
+            proto,
+            source_item,
+            source_bop_trade_allowed_for_player: false,
+            swap: false,
+            not_loading: true,
+            is_stunned: false,
+            is_charmed: false,
+            is_in_combat: false,
+            is_in_progress_arena: false,
+            weapon_change_timer_active: false,
+            current_generic_spell_allows_equip: None,
+            current_channeled_spell_allows_equip: None,
+            heirloom_required_level_failed: false,
+            can_use_result: InventoryResult::Ok,
+            can_equip_unique_result: InventoryResult::Ok,
+            can_dual_wield: false,
+            can_titan_grip: false,
+            is_two_hand_used: false,
+            proto_always_allow_dual_wield: false,
+            has_required_profession_skill: false,
+            profession_slot: None,
+            offhand_can_unequip_result: InventoryResult::Ok,
+            offhand_can_store_result: InventoryResult::Ok,
+            limit_category: None,
+            equipped_items: &[],
+            stored_items: &[],
         }
     }
 
@@ -3443,6 +3754,255 @@ mod tests {
         assert_eq!(
             player.find_equip_slot(profession_args),
             PROFESSION_SLOT_PROFESSION1_GEAR2
+        );
+    }
+
+    #[test]
+    fn can_equip_item_preflight_and_runtime_guards_match_cpp_order() {
+        let player = Player::new(None, false);
+        let proto = ItemStorageTemplate {
+            inventory_type: InventoryType::Head,
+            ..ItemStorageTemplate::regular_item(100, 1)
+        };
+        let mut source = Item::default();
+        source.set_count(1);
+
+        assert_eq!(
+            player
+                .can_equip_item(can_equip_args(NULL_SLOT, Some(&proto), None))
+                .result,
+            InventoryResult::ItemNotFound
+        );
+
+        let mut swap_missing = can_equip_args(NULL_SLOT, None, Some(&source));
+        swap_missing.swap = true;
+        assert_eq!(
+            player.can_equip_item(swap_missing).result,
+            InventoryResult::CantSwap
+        );
+
+        source.set_loot_generated(true);
+        assert_eq!(
+            player
+                .can_equip_item(can_equip_args(NULL_SLOT, Some(&proto), Some(&source)))
+                .result,
+            InventoryResult::LootGone
+        );
+        source.set_loot_generated(false);
+
+        source.set_item_flag(ItemFieldFlags::SOULBOUND);
+        source.set_owner_guid(ObjectGuid::create_player(1, 99));
+        assert_eq!(
+            player
+                .can_equip_item(can_equip_args(NULL_SLOT, Some(&proto), Some(&source)))
+                .result,
+            InventoryResult::NotOwner
+        );
+        source.remove_item_flag(ItemFieldFlags::SOULBOUND);
+
+        let limited = ItemStorageTemplate {
+            max_count: 1,
+            ..proto
+        };
+        source.object_mut().create(ObjectGuid::create_item(1, 900));
+        source.object_mut().set_entry(limited.entry);
+        let mut stored = Item::default();
+        stored.object_mut().create(ObjectGuid::create_item(1, 901));
+        stored.object_mut().set_entry(limited.entry);
+        stored.set_count(1);
+        let stored_items = [ItemStorageRef::new(
+            INVENTORY_SLOT_BAG_0,
+            INVENTORY_SLOT_ITEM_START,
+            &stored,
+            Some(&limited),
+        )];
+        let mut limit_args = can_equip_args(NULL_SLOT, Some(&limited), Some(&source));
+        limit_args.stored_items = &stored_items;
+        assert_eq!(
+            player.can_equip_item(limit_args).result,
+            InventoryResult::ItemMaxCount
+        );
+
+        let mut stunned = can_equip_args(NULL_SLOT, Some(&proto), Some(&source));
+        stunned.is_stunned = true;
+        stunned.is_charmed = true;
+        assert_eq!(
+            player.can_equip_item(stunned).result,
+            InventoryResult::GenericStunned
+        );
+
+        let mut combat = can_equip_args(NULL_SLOT, Some(&proto), Some(&source));
+        combat.is_in_combat = true;
+        assert_eq!(
+            player.can_equip_item(combat).result,
+            InventoryResult::NotInCombat
+        );
+
+        let weapon = ItemStorageTemplate {
+            class_id: ItemClass::Weapon,
+            inventory_type: InventoryType::Weapon,
+            ..ItemStorageTemplate::regular_item(101, 1)
+        };
+        let mut cooldown = can_equip_args(NULL_SLOT, Some(&weapon), Some(&source));
+        cooldown.is_in_combat = true;
+        cooldown.weapon_change_timer_active = true;
+        assert_eq!(
+            player.can_equip_item(cooldown).result,
+            InventoryResult::ItemCooldown
+        );
+
+        let mut casting = can_equip_args(NULL_SLOT, Some(&weapon), Some(&source));
+        casting.current_generic_spell_allows_equip = Some(false);
+        assert_eq!(
+            player.can_equip_item(casting).result,
+            InventoryResult::ClientLockedOut
+        );
+    }
+
+    #[test]
+    fn can_equip_item_destination_use_and_unique_paths_match_cpp() {
+        let player = Player::new(None, false);
+        let head = ItemStorageTemplate {
+            inventory_type: InventoryType::Head,
+            ..ItemStorageTemplate::regular_item(200, 1)
+        };
+        let finger = ItemStorageTemplate {
+            inventory_type: InventoryType::Finger,
+            ..ItemStorageTemplate::regular_item(201, 1)
+        };
+        let mut source = Item::default();
+        source.set_count(1);
+        let mut equipped_head = Item::default();
+        equipped_head.set_count(1);
+        let equipped = [ItemSlotRef::new(
+            INVENTORY_SLOT_BAG_0,
+            EQUIPMENT_SLOT_HEAD,
+            &equipped_head,
+        )];
+
+        let outcome = player.can_equip_item(can_equip_args(NULL_SLOT, Some(&head), Some(&source)));
+        assert_eq!(outcome.result, InventoryResult::Ok);
+        assert_eq!(
+            outcome.dest,
+            make_item_pos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_HEAD)
+        );
+        assert_eq!(outcome.unique_ignore_slot, Some(NULL_SLOT));
+
+        let mut occupied = can_equip_args(NULL_SLOT, Some(&head), Some(&source));
+        occupied.equipped_items = &equipped;
+        assert_eq!(
+            player.can_equip_item(occupied).result,
+            InventoryResult::NotEquippable
+        );
+
+        let mut can_use = can_equip_args(NULL_SLOT, Some(&head), Some(&source));
+        can_use.can_use_result = InventoryResult::CantEquipSkill;
+        assert_eq!(
+            player.can_equip_item(can_use).result,
+            InventoryResult::CantEquipSkill
+        );
+
+        let mut source_ring = Item::default();
+        source_ring.set_count(1);
+        let other_ring = Item::default();
+        let rings = [
+            ItemSlotRef::new(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_FINGER1, &other_ring),
+            ItemSlotRef::new(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_FINGER2, &source_ring),
+        ];
+        let mut unique = can_equip_args(EQUIPMENT_SLOT_FINGER1, Some(&finger), Some(&source_ring));
+        unique.swap = true;
+        unique.equipped_items = &rings;
+        unique.can_equip_unique_result = InventoryResult::ItemUniqueEquippable;
+        let outcome = player.can_equip_item(unique);
+        assert_eq!(outcome.result, InventoryResult::ItemUniqueEquippable);
+        assert_eq!(outcome.unique_ignore_slot, Some(EQUIPMENT_SLOT_FINGER2));
+    }
+
+    #[test]
+    fn can_equip_item_quiver_offhand_and_twohand_edges_match_cpp() {
+        let player = Player::new(None, false);
+        let mut source = Item::default();
+        source.set_count(1);
+        let bag_quiver = ItemStorageTemplate {
+            class_id: ItemClass::Quiver,
+            subclass_id: ItemSubClassQuiver::AmmoPouch as u32,
+            inventory_type: InventoryType::Bag,
+            ..ItemStorageTemplate::regular_item(300, 1)
+        };
+        let existing_quiver = Item::default();
+        let stored_items = [ItemStorageRef::new(
+            INVENTORY_SLOT_BAG_0,
+            INVENTORY_SLOT_BAG_START,
+            &existing_quiver,
+            Some(&bag_quiver),
+        )];
+        let mut quiver_args = can_equip_args(NULL_SLOT, Some(&bag_quiver), Some(&source));
+        quiver_args.stored_items = &stored_items;
+        assert_eq!(
+            player.can_equip_item(quiver_args).result,
+            InventoryResult::OnlyOneAmmo
+        );
+
+        let polearm = ItemStorageTemplate {
+            class_id: ItemClass::Weapon,
+            subclass_id: ItemSubClassWeapon::Polearm as u32,
+            inventory_type: InventoryType::Weapon,
+            ..ItemStorageTemplate::regular_item(301, 1)
+        };
+        let mut polearm_args =
+            can_equip_args(EQUIPMENT_SLOT_OFFHAND, Some(&polearm), Some(&source));
+        polearm_args.can_dual_wield = true;
+        assert_eq!(
+            player.can_equip_item(polearm_args).result,
+            InventoryResult::TwoHandSkillNotFound
+        );
+
+        let offhand_weapon = ItemStorageTemplate {
+            inventory_type: InventoryType::WeaponOffhand,
+            ..ItemStorageTemplate::regular_item(302, 1)
+        };
+        assert_eq!(
+            player
+                .can_equip_item(can_equip_args(
+                    EQUIPMENT_SLOT_OFFHAND,
+                    Some(&offhand_weapon),
+                    Some(&source)
+                ))
+                .result,
+            InventoryResult::TwoHandSkillNotFound
+        );
+
+        let mut twohand_used =
+            can_equip_args(EQUIPMENT_SLOT_OFFHAND, Some(&offhand_weapon), Some(&source));
+        twohand_used.proto_always_allow_dual_wield = true;
+        twohand_used.is_two_hand_used = true;
+        assert_eq!(
+            player.can_equip_item(twohand_used).result,
+            InventoryResult::Equipped2handed
+        );
+
+        let twohand = ItemStorageTemplate {
+            inventory_type: InventoryType::Weapon2Hand,
+            ..ItemStorageTemplate::regular_item(303, 1)
+        };
+        let offhand_item = Item::default();
+        let equipped_offhand = [ItemSlotRef::new(
+            INVENTORY_SLOT_BAG_0,
+            EQUIPMENT_SLOT_OFFHAND,
+            &offhand_item,
+        )];
+        let mut twohand_args = can_equip_args(NULL_SLOT, Some(&twohand), Some(&source));
+        twohand_args.equipped_items = &equipped_offhand;
+        twohand_args.offhand_can_store_result = InventoryResult::InvFull;
+        assert_eq!(
+            player.can_equip_item(twohand_args).result,
+            InventoryResult::InvFull
+        );
+
+        twohand_args.swap = true;
+        assert_eq!(
+            player.can_equip_item(twohand_args).result,
+            InventoryResult::CantSwap
         );
     }
 
