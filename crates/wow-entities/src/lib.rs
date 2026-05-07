@@ -6,5 +6,7 @@
 //! - `game/Entities/Object/ObjectGuid.h`
 
 mod object;
+mod world_object;
 
 pub use object::{CreateObjectFlags, EntityObject, EntityObjectState, ObjectChangedFields};
+pub use world_object::{MAPID_INVALID, MapBindingError, PhaseShift, WorldLocation, WorldObject};
