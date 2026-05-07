@@ -1,6 +1,6 @@
 use wow_constants::{
-    EnchantmentSlot, ItemContext, ItemFieldFlags, ItemFieldFlags2, ItemUpdateState, TypeId,
-    TypeMask,
+    EnchantmentSlot, ItemContext, ItemFieldFlags, ItemFieldFlags2, ItemModifier, ItemUpdateState,
+    TypeId, TypeMask,
 };
 use wow_core::ObjectGuid;
 
@@ -12,6 +12,8 @@ use crate::{
 pub const MAX_ITEM_SPELLS: usize = 5;
 pub const MAX_ENCHANTMENT_SLOT: usize = 13;
 pub const MAX_INSPECTED_ENCHANTMENT_SLOT: usize = 8;
+pub const MAX_SPECIALIZATIONS: usize = 5;
+pub const ITEM_MODIFIER_COUNT: usize = 58;
 pub const INVENTORY_SLOT_BAG_0: u8 = 255;
 pub const EQUIPMENT_SLOT_END: u8 = 19;
 pub const PROFESSION_SLOT_START: u8 = 19;
@@ -47,6 +49,30 @@ pub const ITEM_DATA_ENCHANTMENT_FIRST_BIT: usize = 30;
 
 pub const ITEM_DATA_BASE_ALLOWED_MASK: [u32; 2] = [0xE029_CE7F, 0x0000_07FF];
 pub const ITEM_DATA_OWNER_ALLOWED_MASK: [u32; 2] = [0x1FD6_3180, 0x0000_0000];
+
+pub const APPEARANCE_MODIFIER_SLOT_BY_SPEC: [ItemModifier; MAX_SPECIALIZATIONS] = [
+    ItemModifier::TransmogAppearanceSpec1,
+    ItemModifier::TransmogAppearanceSpec2,
+    ItemModifier::TransmogAppearanceSpec3,
+    ItemModifier::TransmogAppearanceSpec4,
+    ItemModifier::TransmogAppearanceSpec5,
+];
+
+pub const ILLUSION_MODIFIER_SLOT_BY_SPEC: [ItemModifier; MAX_SPECIALIZATIONS] = [
+    ItemModifier::EnchantIllusionSpec1,
+    ItemModifier::EnchantIllusionSpec2,
+    ItemModifier::EnchantIllusionSpec3,
+    ItemModifier::EnchantIllusionSpec4,
+    ItemModifier::EnchantIllusionSpec5,
+];
+
+pub const SECONDARY_APPEARANCE_MODIFIER_SLOT_BY_SPEC: [ItemModifier; MAX_SPECIALIZATIONS] = [
+    ItemModifier::TransmogSecondaryAppearanceSpec1,
+    ItemModifier::TransmogSecondaryAppearanceSpec2,
+    ItemModifier::TransmogSecondaryAppearanceSpec3,
+    ItemModifier::TransmogSecondaryAppearanceSpec4,
+    ItemModifier::TransmogSecondaryAppearanceSpec5,
+];
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ItemBonusKey {
@@ -98,6 +124,7 @@ pub struct ItemDataValues {
     pub artifact_xp: u64,
     pub item_appearance_mod_id: u8,
     pub dynamic_flags2: u32,
+    pub modifiers: [u32; ITEM_MODIFIER_COUNT],
     pub item_bonus_key: ItemBonusKey,
     pub debug_item_level: u16,
     pub spell_charges: [i32; MAX_ITEM_SPELLS],
@@ -126,6 +153,7 @@ impl Default for ItemDataValues {
             artifact_xp: 0,
             item_appearance_mod_id: 0,
             dynamic_flags2: 0,
+            modifiers: [0; ITEM_MODIFIER_COUNT],
             item_bonus_key: ItemBonusKey::default(),
             debug_item_level: 0,
             spell_charges: [0; MAX_ITEM_SPELLS],
@@ -673,6 +701,87 @@ impl Item {
         self.mark_item_data(ITEM_DATA_MODIFIERS_BIT);
     }
 
+    pub fn get_modifier(&self, modifier: ItemModifier) -> u32 {
+        self.data.modifiers[modifier as usize]
+    }
+
+    pub fn set_modifier(&mut self, modifier: ItemModifier, value: u32) {
+        let target = &mut self.data.modifiers[modifier as usize];
+        if *target != value {
+            *target = value;
+            self.mark_modifiers_changed();
+        }
+    }
+
+    pub fn visible_entry(
+        &self,
+        active_talent_group: usize,
+        item_modified_appearance: impl Fn(u32) -> Option<(u32, u16)>,
+    ) -> u32 {
+        let item_modified_appearance_id =
+            self.visible_modified_appearance_modifier(active_talent_group);
+
+        if let Some((item_id, _)) = item_modified_appearance(item_modified_appearance_id) {
+            item_id
+        } else {
+            self.object.entry()
+        }
+    }
+
+    pub fn visible_appearance_mod_id(
+        &self,
+        active_talent_group: usize,
+        item_modified_appearance: impl Fn(u32) -> Option<(u32, u16)>,
+    ) -> u16 {
+        let item_modified_appearance_id =
+            self.visible_modified_appearance_modifier(active_talent_group);
+
+        if let Some((_, item_appearance_modifier_id)) =
+            item_modified_appearance(item_modified_appearance_id)
+        {
+            item_appearance_modifier_id
+        } else {
+            u16::from(self.data.item_appearance_mod_id)
+        }
+    }
+
+    pub fn visible_enchantment_id(&self, active_talent_group: usize) -> u32 {
+        let mut enchantment_id = self.get_modifier(spec_modifier(
+            active_talent_group,
+            &ILLUSION_MODIFIER_SLOT_BY_SPEC,
+        ));
+        if enchantment_id == 0 {
+            enchantment_id = self.get_modifier(ItemModifier::EnchantIllusionAllSpecs);
+        }
+        if enchantment_id == 0 {
+            enchantment_id = u32::try_from(
+                self.data.enchantments[EnchantmentSlot::EnhancementPermanent as usize].id,
+            )
+            .unwrap_or(0);
+        }
+        enchantment_id
+    }
+
+    pub fn visible_item_visual(
+        &self,
+        active_talent_group: usize,
+        spell_item_enchantment_visual: impl Fn(u32) -> Option<u16>,
+    ) -> u16 {
+        spell_item_enchantment_visual(self.visible_enchantment_id(active_talent_group)).unwrap_or(0)
+    }
+
+    pub fn visible_secondary_modified_appearance_id(&self, active_talent_group: usize) -> u32 {
+        let mut item_modified_appearance_id = self.get_modifier(spec_modifier(
+            active_talent_group,
+            &SECONDARY_APPEARANCE_MODIFIER_SLOT_BY_SPEC,
+        ));
+        if item_modified_appearance_id == 0 {
+            item_modified_appearance_id =
+                self.get_modifier(ItemModifier::TransmogSecondaryAppearanceAllSpecs);
+        }
+        item_modified_appearance_id
+    }
+
     pub fn changed_object_type_mask(&self) -> u32 {
         self.object.changed_object_type_mask()
             | if self.item_data_changes.is_any_set() {
@@ -794,6 +903,25 @@ impl Item {
         self.item_data_changes.set(parent_bit);
         self.item_data_changes.set(first_element_bit + index);
     }
+
+    fn visible_modified_appearance_modifier(&self, active_talent_group: usize) -> u32 {
+        let mut item_modified_appearance_id = self.get_modifier(spec_modifier(
+            active_talent_group,
+            &APPEARANCE_MODIFIER_SLOT_BY_SPEC,
+        ));
+        if item_modified_appearance_id == 0 {
+            item_modified_appearance_id =
+                self.get_modifier(ItemModifier::TransmogAppearanceAllSpecs);
+        }
+        item_modified_appearance_id
+    }
+}
+
+fn spec_modifier(
+    active_talent_group: usize,
+    slots: &[ItemModifier; MAX_SPECIALIZATIONS],
+) -> ItemModifier {
+    slots.get(active_talent_group).copied().unwrap_or(slots[0])
 }
 
 #[cfg(test)]
@@ -927,6 +1055,83 @@ mod tests {
             item.item_data_changes_mask()
                 .is_set(ITEM_DATA_ENCHANTMENT_FIRST_BIT + 2)
         );
+    }
+
+    #[test]
+    fn item_modifiers_mark_cpp_modifiers_bit() {
+        let mut item = Item::default();
+        item.clear_item_data_changes();
+
+        item.set_modifier(ItemModifier::TransmogAppearanceSpec2, 1234);
+
+        assert_eq!(
+            item.get_modifier(ItemModifier::TransmogAppearanceSpec2),
+            1234
+        );
+        assert!(
+            item.item_data_changes_mask()
+                .is_set(ITEM_DATA_MODIFIERS_BIT)
+        );
+    }
+
+    #[test]
+    fn visible_entry_and_appearance_follow_cpp_transmog_precedence() {
+        let mut item = Item::default();
+        item.object_mut().set_entry(19019);
+        item.set_appearance_mod_id(7);
+        item.set_modifier(ItemModifier::TransmogAppearanceAllSpecs, 10);
+
+        let lookup = |id| match id {
+            10 => Some((25_000, 3)),
+            20 => Some((26_000, 4)),
+            _ => None,
+        };
+
+        assert_eq!(item.visible_entry(1, lookup), 25_000);
+        assert_eq!(item.visible_appearance_mod_id(1, lookup), 3);
+
+        item.set_modifier(ItemModifier::TransmogAppearanceSpec2, 20);
+        assert_eq!(item.visible_entry(1, lookup), 26_000);
+        assert_eq!(item.visible_appearance_mod_id(1, lookup), 4);
+
+        item.set_modifier(ItemModifier::TransmogAppearanceSpec2, 999);
+        assert_eq!(item.visible_entry(1, lookup), 19019);
+        assert_eq!(item.visible_appearance_mod_id(1, lookup), 7);
+    }
+
+    #[test]
+    fn visible_item_visual_follows_cpp_illusion_then_permanent_enchant() {
+        let mut item = Item::default();
+        item.set_enchantment(EnchantmentSlot::EnhancementPermanent, 500, 0, 0);
+
+        let enchant_visual = |id| match id {
+            500 => Some(12),
+            700 => Some(34),
+            800 => Some(56),
+            _ => None,
+        };
+
+        assert_eq!(item.visible_enchantment_id(0), 500);
+        assert_eq!(item.visible_item_visual(0, enchant_visual), 12);
+
+        item.set_modifier(ItemModifier::EnchantIllusionAllSpecs, 700);
+        assert_eq!(item.visible_enchantment_id(1), 700);
+        assert_eq!(item.visible_item_visual(1, enchant_visual), 34);
+
+        item.set_modifier(ItemModifier::EnchantIllusionSpec2, 800);
+        assert_eq!(item.visible_enchantment_id(1), 800);
+        assert_eq!(item.visible_item_visual(1, enchant_visual), 56);
+    }
+
+    #[test]
+    fn visible_secondary_modified_appearance_uses_spec_then_all_specs() {
+        let mut item = Item::default();
+
+        item.set_modifier(ItemModifier::TransmogSecondaryAppearanceAllSpecs, 11);
+        assert_eq!(item.visible_secondary_modified_appearance_id(2), 11);
+
+        item.set_modifier(ItemModifier::TransmogSecondaryAppearanceSpec3, 22);
+        assert_eq!(item.visible_secondary_modified_appearance_id(2), 22);
     }
 
     #[test]

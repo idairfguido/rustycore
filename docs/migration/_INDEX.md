@@ -70,7 +70,7 @@ Layer: L0–L8 según `MIGRATION_ROADMAP.md` § 2.
 |---|---|---|---|---|---|
 | L4 | Entities | `src/server/game/Entities/` | [entities.md](entities.md) | 🔧 ~5% (no UpdateMask) | ⚠️ |
 | L4 | Entities/Pet | `src/server/game/Entities/Pet/` | [pets.md](pets.md) | ❌ (16 opcodes + 1 stub) | ✅ |
-| L4 | Entities/Item (Inventory) | `src/server/game/Entities/Item/` + Player inventory | [inventory.md](inventory.md) | ⚠️ ~25% (base Item+Bag + Player storage/ObjectAccessor lookup + visible item state; InventoryType bridge fixed; no ownership/runtime/DB) | ⚠️ |
+| L4 | Entities/Item (Inventory) | `src/server/game/Entities/Item/` + Player inventory | [inventory.md](inventory.md) | ⚠️ ~26% (base Item+Bag + Player storage/ObjectAccessor lookup + visible item/modifier state; InventoryType bridge fixed; no ownership/runtime/DB) | ⚠️ |
 
 > Nota: Entities es un mega-módulo con ~16 sub-tipos (Object, WorldObject, Unit, Player, Creature, GameObject, Pet, DynamicObject, AreaTrigger, Conversation, Corpse, Vehicle, Transport, SceneObject, Totem, Item). Si su doc supera ~500 líneas, splitear en `entities-<subtipo>.md`.
 

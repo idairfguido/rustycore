@@ -3,7 +3,7 @@
 > **C++ canonical path:** `src/server/game/Entities/Item/`, `src/server/game/Entities/Player/PlayerStorage.cpp` (logical split of `Player.cpp`), `src/server/game/Handlers/ItemHandler.cpp` + `BankHandler.cpp` + `VoidStorageHandler.cpp`, `src/server/game/Server/Packets/ItemPackets*.cpp`/`BankPackets.cpp`/`VoidStoragePackets.cpp`
 > **Rust target crate(s):** `crates/wow-data/` (Item.db2, ItemTemplate, ItemStats), `crates/wow-world/` (handlers, session inventory state), `crates/wow-database/` (item_instance + character_inventory + character_void_storage + character_transmog_outfits + character_equipmentsets prepared statements), `crates/wow-packet/` (item/bank/void packets)
 > **Layer:** L4 (item entity) + L6 (player storage logic + handlers) — straddles layers; primary index entry is L6.
-> **Status:** ⚠️ partial (base `wow-entities` Item/Bag/Player storage exists and legacy flat `wow-world` inventory bridge remains; no canonical ownership/runtime/DB persistence yet)
+> **Status:** ⚠️ partial (base `wow-entities` Item/Bag/Player storage and visible modifier helpers exist; legacy flat `wow-world` inventory bridge remains; no canonical ownership/runtime/DB persistence yet)
 > **Audited vs C++:** ✅ complete (re-audit 2026-05-01)
 > **Last updated:** 2026-05-07
 
@@ -125,6 +125,7 @@ Todas las rutas relativas a `/home/server/woltk-trinity-legacy/`.
 | `Item::GetCount()` / `SetCount(n)` | Stack count | — |
 | `Item::GetSpellCharges(0..5)` / `SetSpellCharges` | Charges per Use spell | — |
 | `Item::GetEnchantmentId(slot)` / `SetEnchantment(slot, id, duration, charges, casterGuid)` | Per-slot enchantment | — |
+| `Item::GetVisibleEntry/GetVisibleAppearanceModId/GetVisibleItemVisual` | Resolve transmog/illusion modifiers for equipment display | `ItemModifiedAppearance`, `SpellItemEnchantment` |
 | `Item::SetNotRefundable(player)` | Strip refund flag, delete `item_refund_instance` row | DB |
 | `Item::AddBonuses(...)` | Push BonusListIDs, recompute `_bonusData` | — |
 | `Bag::IsEmpty()` / `GetFreeSlots()` / `GetItemByPos(slot)` | Container access | — |
@@ -708,6 +709,7 @@ Cross-checked C++ canonical sources at `/home/server/woltk-trinity-legacy/src/se
 
 - `crates/wow-data/src/item.rs:21 ItemRecord` reads only 6 fields from `Item.db2`: id, class, subclass, material, inventory_type, sheathe. `inventory_type` remains loaded as C++ `int8`; as of `#NEXT.R8.ENTITIES.046`, negative/zero values return `None` for equip mapping and no longer wrap to the `INVENTORY_SLOT_BAG_0=255` sentinel.
 - `crates/wow-data/src/item_stats.rs` (424 lines) holds ItemSparse-derived stat allocation logic (not deeply audited here, but doc claims it exists and grep confirms a `PlayerStatsStore` is wired into `WorldSession.player_stats`).
+- `crates/wow-entities/src/item.rs` now ports base `Item` state plus modifier storage and pure visible helper precedence (`GetVisibleEntry`, appearance modifier, enchant illusion/permanent visual). `ItemModifiedAppearance` and `SpellItemEnchantment` lookups are still caller-provided bridges because the canonical DB2 stores are not yet implemented in `wow-data`.
 - `crates/wow-packet/src/packets/item.rs:19 InventoryResult` enum exposes **14 codes** (Ok, CantEquipLevelI, WrongSlot, BagFull, NotEquippable, CantSwap, SlotEmpty, ItemNotFound, DropBoundItem, NotABag, NotOwner, PlayerDead, InvFull, InternalBagError) vs **118 codes** in C++ `ItemDefines.h::InventoryResult`. ~88% of reject paths are unrepresentable.
 - `crates/wow-world/src/session.rs:197` carries `inventory_items: HashMap<u8, InventoryItem>` keyed by slot byte. The `InventoryItem` struct (`session.rs:321`) is just `{ guid: ObjectGuid, entry_id: u32, db_guid: u64, inventory_type: Option<u8> }` — **no stack count, no durability, no enchantments, no charges, no soulbound flag, no creator GUID, no gems, no transmog, no random property, no expiration, no bonus list IDs.** Compared to C++ `Item` which has all of those plus the `UF::ItemData` update fields blob. The Rust struct is the bare minimum to remember "slot N has item X".
 - `crates/wow-world/src/handlers/character.rs` does the inventory work directly (no method on `Player` — there is no `Player`):
