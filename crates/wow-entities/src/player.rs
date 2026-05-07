@@ -2,9 +2,9 @@ use std::collections::HashSet;
 
 use bitflags::bitflags;
 use wow_constants::{
-    BagFamilyMask, Gender, InventoryResult, InventoryType, ItemBondingType, ItemClass,
-    ItemFieldFlags, ItemFieldFlags2, ItemSubClassContainer, ItemSubClassQuiver, ItemSubClassWeapon,
-    ItemSubclassProfession, ItemUpdateState, PowerType, TypeId, TypeMask,
+    BagFamilyMask, EnchantmentSlot, Gender, InventoryResult, InventoryType, ItemBondingType,
+    ItemClass, ItemFieldFlags, ItemFieldFlags2, ItemSubClassContainer, ItemSubClassQuiver,
+    ItemSubClassWeapon, ItemSubclassProfession, ItemUpdateState, PowerType, TypeId, TypeMask,
 };
 use wow_core::ObjectGuid;
 
@@ -14,12 +14,13 @@ use crate::{
     EQUIPMENT_SLOT_HEAD, EQUIPMENT_SLOT_LEGS, EQUIPMENT_SLOT_MAINHAND, EQUIPMENT_SLOT_NECK,
     EQUIPMENT_SLOT_OFFHAND, EQUIPMENT_SLOT_SHOULDERS, EQUIPMENT_SLOT_TABARD,
     EQUIPMENT_SLOT_TRINKET1, EQUIPMENT_SLOT_TRINKET2, EQUIPMENT_SLOT_WAIST, EQUIPMENT_SLOT_WRISTS,
-    INVENTORY_SLOT_BAG_0, Item, ItemStorageTemplate, MAX_BAG_SIZE, NULL_SLOT, ObjectDataUpdate,
-    PROFESSION_SLOT_COOKING_GEAR1, PROFESSION_SLOT_COOKING_TOOL, PROFESSION_SLOT_END,
-    PROFESSION_SLOT_FISHING_TOOL, PROFESSION_SLOT_MAX_COUNT, PROFESSION_SLOT_PROFESSION1_GEAR1,
-    PROFESSION_SLOT_PROFESSION1_GEAR2, PROFESSION_SLOT_PROFESSION1_TOOL,
-    PROFESSION_SLOT_PROFESSION2_GEAR1, PROFESSION_SLOT_PROFESSION2_GEAR2, PROFESSION_SLOT_START,
-    Unit, UnitDataUpdate, UpdateMask, item_can_go_into_bag,
+    INVENTORY_SLOT_BAG_0, Item, ItemStorageTemplate, MAX_BAG_SIZE, MAX_ENCHANTMENT_SLOT, NULL_SLOT,
+    ObjectDataUpdate, PROFESSION_SLOT_COOKING_GEAR1, PROFESSION_SLOT_COOKING_TOOL,
+    PROFESSION_SLOT_END, PROFESSION_SLOT_FISHING_TOOL, PROFESSION_SLOT_MAX_COUNT,
+    PROFESSION_SLOT_PROFESSION1_GEAR1, PROFESSION_SLOT_PROFESSION1_GEAR2,
+    PROFESSION_SLOT_PROFESSION1_TOOL, PROFESSION_SLOT_PROFESSION2_GEAR1,
+    PROFESSION_SLOT_PROFESSION2_GEAR2, PROFESSION_SLOT_START, Unit, UnitDataUpdate, UpdateMask,
+    item_can_go_into_bag,
     update_fields::{
         ACTIVE_PLAYER_DATA_BITS, PLAYER_DATA_BITS, TYPEID_ACTIVE_PLAYER, TYPEID_PLAYER,
     },
@@ -79,6 +80,22 @@ pub const CHILD_EQUIPMENT_SLOT_START: u8 = 138;
 pub const CHILD_EQUIPMENT_SLOT_END: u8 = 141;
 pub const ITEM_LIMIT_CATEGORY_MODE_HAVE: u8 = 0;
 pub const ITEM_LIMIT_CATEGORY_MODE_EQUIP: u8 = 1;
+
+const ENCHANTMENT_DURATION_SLOTS: [EnchantmentSlot; MAX_ENCHANTMENT_SLOT] = [
+    EnchantmentSlot::EnhancementPermanent,
+    EnchantmentSlot::EnhancementTemporary,
+    EnchantmentSlot::EnhancementSocket,
+    EnchantmentSlot::EnhancementSocket2,
+    EnchantmentSlot::EnhancementSocket3,
+    EnchantmentSlot::EnhancementSocketBonus,
+    EnchantmentSlot::EnhancementSocketPrismatic,
+    EnchantmentSlot::EnhancementUse,
+    EnchantmentSlot::Property0,
+    EnchantmentSlot::Property1,
+    EnchantmentSlot::Property2,
+    EnchantmentSlot::Property3,
+    EnchantmentSlot::Property4,
+];
 
 pub const fn make_item_pos(bag: u8, slot: u8) -> u16 {
     u16::from_be_bytes([bag, slot])
@@ -792,6 +809,86 @@ impl SoulboundTradeableItemRef {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlayerItemTimeUpdate {
+    pub item_guid: ObjectGuid,
+    pub expiration: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemDurationRef {
+    pub guid: ObjectGuid,
+    pub expiration: u32,
+    pub real_duration: bool,
+}
+
+impl ItemDurationRef {
+    pub const fn new(guid: ObjectGuid, expiration: u32, real_duration: bool) -> Self {
+        Self {
+            guid,
+            expiration,
+            real_duration,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpdateItemDurationAction {
+    MissingItem {
+        item_guid: ObjectGuid,
+    },
+    UpdateExpiration {
+        item_guid: ObjectGuid,
+        expiration: u32,
+    },
+    Expire {
+        item_guid: ObjectGuid,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlayerEnchantDuration {
+    pub item_guid: ObjectGuid,
+    pub slot: EnchantmentSlot,
+    pub left_duration_ms: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlayerEnchantTimeUpdate {
+    pub item_guid: ObjectGuid,
+    pub slot: EnchantmentSlot,
+    pub duration_secs: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlayerEnchantDurationItemRef {
+    pub item_guid: ObjectGuid,
+    pub slot: EnchantmentSlot,
+    pub enchantment_id: i32,
+}
+
+impl PlayerEnchantDurationItemRef {
+    pub const fn new(item_guid: ObjectGuid, slot: EnchantmentSlot, enchantment_id: i32) -> Self {
+        Self {
+            item_guid,
+            slot,
+            enchantment_id,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpdateEnchantTimeAction {
+    RemoveMissingEnchantment {
+        item_guid: ObjectGuid,
+        slot: EnchantmentSlot,
+    },
+    ClearExpired {
+        item_guid: ObjectGuid,
+        slot: EnchantmentSlot,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitanGripPenaltyAction {
     None,
     Cast(u32),
@@ -1069,6 +1166,8 @@ pub struct Player {
     can_titan_grip: bool,
     titan_grip_penalty_spell_id: u32,
     soulbound_tradeable_items: HashSet<ObjectGuid>,
+    item_durations: Vec<ObjectGuid>,
+    enchant_durations: Vec<PlayerEnchantDuration>,
 }
 
 impl Player {
@@ -1100,6 +1199,8 @@ impl Player {
             can_titan_grip: false,
             titan_grip_penalty_spell_id: 0,
             soulbound_tradeable_items: HashSet::new(),
+            item_durations: Vec::new(),
+            enchant_durations: Vec::new(),
         }
     }
 
@@ -1137,6 +1238,14 @@ impl Player {
 
     pub fn soulbound_tradeable_items(&self) -> &HashSet<ObjectGuid> {
         &self.soulbound_tradeable_items
+    }
+
+    pub fn item_durations(&self) -> &[ObjectGuid] {
+        &self.item_durations
+    }
+
+    pub fn enchant_durations(&self) -> &[PlayerEnchantDuration] {
+        &self.enchant_durations
     }
 
     pub const fn hit_chances(&self) -> (f32, f32, f32) {
@@ -4878,6 +4987,180 @@ impl Player {
             keep
         });
         removed
+    }
+
+    pub fn add_item_durations(&mut self, item: &Item) -> Option<PlayerItemTimeUpdate> {
+        let expiration = item.data().expiration;
+        if expiration == 0 {
+            return None;
+        }
+
+        let item_guid = item.object().guid();
+        self.item_durations.push(item_guid);
+        Some(PlayerItemTimeUpdate {
+            item_guid,
+            expiration,
+        })
+    }
+
+    pub fn remove_item_durations(&mut self, item: &Item) -> bool {
+        let item_guid = item.object().guid();
+        if let Some(index) = self
+            .item_durations
+            .iter()
+            .position(|stored_guid| *stored_guid == item_guid)
+        {
+            self.item_durations.remove(index);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn update_item_duration_plan(
+        &self,
+        items: &[ItemDurationRef],
+        time: u32,
+        realtime_only: bool,
+    ) -> Vec<UpdateItemDurationAction> {
+        let mut actions = Vec::new();
+        for item_guid in &self.item_durations {
+            if let Some(item) = items.iter().find(|item| item.guid == *item_guid) {
+                if realtime_only && !item.real_duration {
+                    continue;
+                }
+                if item.expiration == 0 {
+                    continue;
+                }
+                if item.expiration <= time {
+                    actions.push(UpdateItemDurationAction::Expire {
+                        item_guid: *item_guid,
+                    });
+                } else {
+                    actions.push(UpdateItemDurationAction::UpdateExpiration {
+                        item_guid: *item_guid,
+                        expiration: item.expiration - time,
+                    });
+                }
+            } else {
+                actions.push(UpdateItemDurationAction::MissingItem {
+                    item_guid: *item_guid,
+                });
+            }
+        }
+        actions
+    }
+
+    pub fn add_enchantment_durations(&mut self, item: &mut Item) -> Vec<PlayerEnchantTimeUpdate> {
+        let mut updates = Vec::new();
+        for slot in ENCHANTMENT_DURATION_SLOTS {
+            let enchantment = item.data().enchantments[slot as usize];
+            if enchantment.id != 0 && enchantment.duration > 0 {
+                if let Some(update) =
+                    self.add_enchantment_duration(item, slot, enchantment.duration)
+                {
+                    updates.push(update);
+                }
+            }
+        }
+        updates
+    }
+
+    pub fn add_enchantment_duration(
+        &mut self,
+        item: &mut Item,
+        slot: EnchantmentSlot,
+        duration_ms: u32,
+    ) -> Option<PlayerEnchantTimeUpdate> {
+        let item_guid = item.object().guid();
+        if let Some(index) = self
+            .enchant_durations
+            .iter()
+            .position(|duration| duration.item_guid == item_guid && duration.slot == slot)
+        {
+            let old_duration = self.enchant_durations.remove(index);
+            item.set_enchantment_duration(slot, old_duration.left_duration_ms);
+        }
+
+        if duration_ms == 0 {
+            return None;
+        }
+
+        self.enchant_durations.push(PlayerEnchantDuration {
+            item_guid,
+            slot,
+            left_duration_ms: duration_ms,
+        });
+        Some(PlayerEnchantTimeUpdate {
+            item_guid,
+            slot,
+            duration_secs: duration_ms / 1000,
+        })
+    }
+
+    pub fn remove_enchantment_durations(&mut self, item: &mut Item) -> Vec<PlayerEnchantDuration> {
+        let item_guid = item.object().guid();
+        let mut removed = Vec::new();
+        self.enchant_durations.retain(|duration| {
+            if duration.item_guid == item_guid {
+                item.set_enchantment_duration(duration.slot, duration.left_duration_ms);
+                removed.push(*duration);
+                false
+            } else {
+                true
+            }
+        });
+        removed
+    }
+
+    pub fn remove_enchantment_duration_references(
+        &mut self,
+        item: &Item,
+    ) -> Vec<PlayerEnchantDuration> {
+        let item_guid = item.object().guid();
+        let mut removed = Vec::new();
+        self.enchant_durations.retain(|duration| {
+            if duration.item_guid == item_guid {
+                removed.push(*duration);
+                false
+            } else {
+                true
+            }
+        });
+        removed
+    }
+
+    pub fn update_enchant_time(
+        &mut self,
+        items: &[PlayerEnchantDurationItemRef],
+        time_ms: u32,
+    ) -> Vec<UpdateEnchantTimeAction> {
+        let mut actions = Vec::new();
+        let mut kept = Vec::with_capacity(self.enchant_durations.len());
+        for mut duration in std::mem::take(&mut self.enchant_durations) {
+            let item = items
+                .iter()
+                .find(|item| item.item_guid == duration.item_guid && item.slot == duration.slot);
+            if item.is_none_or(|item| item.enchantment_id == 0) {
+                actions.push(UpdateEnchantTimeAction::RemoveMissingEnchantment {
+                    item_guid: duration.item_guid,
+                    slot: duration.slot,
+                });
+                continue;
+            }
+            if duration.left_duration_ms <= time_ms {
+                actions.push(UpdateEnchantTimeAction::ClearExpired {
+                    item_guid: duration.item_guid,
+                    slot: duration.slot,
+                });
+                continue;
+            }
+
+            duration.left_duration_ms -= time_ms;
+            kept.push(duration);
+        }
+        self.enchant_durations = kept;
+        actions
     }
 
     pub const fn can_titan_grip(&self) -> bool {
@@ -10572,6 +10855,202 @@ mod tests {
         assert!(removed.contains(&wrong_owner.object().guid()));
         assert!(removed.contains(&missing.object().guid()));
         assert!(!removed.contains(&removed_directly.object().guid()));
+    }
+
+    #[test]
+    fn item_duration_list_matches_cpp_add_remove_and_update_plan() {
+        let mut player = Player::new(None, false);
+        let mut item = item_with_guid_entry(1210, 7100);
+        assert_eq!(player.add_item_durations(&item), None);
+        assert!(player.item_durations().is_empty());
+
+        item.set_expiration(900);
+        assert_eq!(
+            player.add_item_durations(&item),
+            Some(PlayerItemTimeUpdate {
+                item_guid: item.object().guid(),
+                expiration: 900,
+            })
+        );
+        player.add_item_durations(&item);
+        assert_eq!(
+            player.item_durations(),
+            &[item.object().guid(), item.object().guid()]
+        );
+
+        assert!(player.remove_item_durations(&item));
+        assert_eq!(player.item_durations(), &[item.object().guid()]);
+
+        assert!(
+            player
+                .update_item_duration_plan(
+                    &[ItemDurationRef::new(item.object().guid(), 900, false)],
+                    300,
+                    true,
+                )
+                .is_empty()
+        );
+        assert_eq!(
+            player.update_item_duration_plan(
+                &[ItemDurationRef::new(item.object().guid(), 900, false)],
+                300,
+                false,
+            ),
+            vec![UpdateItemDurationAction::UpdateExpiration {
+                item_guid: item.object().guid(),
+                expiration: 600,
+            }]
+        );
+        assert_eq!(
+            player.update_item_duration_plan(
+                &[ItemDurationRef::new(item.object().guid(), 900, true)],
+                900,
+                true,
+            ),
+            vec![UpdateItemDurationAction::Expire {
+                item_guid: item.object().guid(),
+            }]
+        );
+        assert_eq!(
+            player.update_item_duration_plan(&[], 1, false),
+            vec![UpdateItemDurationAction::MissingItem {
+                item_guid: item.object().guid(),
+            }]
+        );
+    }
+
+    #[test]
+    fn enchantment_durations_match_cpp_add_replace_remove_and_tick() {
+        let mut player = Player::new(None, false);
+        let mut item = item_with_guid_entry(1220, 7200);
+        item.set_enchantment(EnchantmentSlot::EnhancementTemporary, 500, 5_000, 0);
+
+        assert_eq!(
+            player.add_enchantment_durations(&mut item),
+            vec![PlayerEnchantTimeUpdate {
+                item_guid: item.object().guid(),
+                slot: EnchantmentSlot::EnhancementTemporary,
+                duration_secs: 5,
+            }]
+        );
+        assert_eq!(
+            player.enchant_durations(),
+            &[PlayerEnchantDuration {
+                item_guid: item.object().guid(),
+                slot: EnchantmentSlot::EnhancementTemporary,
+                left_duration_ms: 5_000,
+            }]
+        );
+
+        assert_eq!(
+            player.add_enchantment_duration(
+                &mut item,
+                EnchantmentSlot::EnhancementTemporary,
+                8_000,
+            ),
+            Some(PlayerEnchantTimeUpdate {
+                item_guid: item.object().guid(),
+                slot: EnchantmentSlot::EnhancementTemporary,
+                duration_secs: 8,
+            })
+        );
+        assert_eq!(item.data().enchantments[1].duration, 5_000);
+        assert_eq!(player.enchant_durations()[0].left_duration_ms, 8_000);
+
+        assert!(
+            player
+                .update_enchant_time(
+                    &[PlayerEnchantDurationItemRef::new(
+                        item.object().guid(),
+                        EnchantmentSlot::EnhancementTemporary,
+                        500,
+                    )],
+                    3_000,
+                )
+                .is_empty()
+        );
+        assert_eq!(player.enchant_durations()[0].left_duration_ms, 5_000);
+        assert_eq!(
+            player.update_enchant_time(
+                &[PlayerEnchantDurationItemRef::new(
+                    item.object().guid(),
+                    EnchantmentSlot::EnhancementTemporary,
+                    500,
+                )],
+                5_000,
+            ),
+            vec![UpdateEnchantTimeAction::ClearExpired {
+                item_guid: item.object().guid(),
+                slot: EnchantmentSlot::EnhancementTemporary,
+            }]
+        );
+        assert!(player.enchant_durations().is_empty());
+    }
+
+    #[test]
+    fn enchantment_duration_remove_saves_left_duration_unlike_reference_cleanup() {
+        let mut player = Player::new(None, false);
+        let mut item = item_with_guid_entry(1230, 7300);
+        item.set_enchantment(EnchantmentSlot::EnhancementPermanent, 600, 9_000, 0);
+        player.add_enchantment_duration(&mut item, EnchantmentSlot::EnhancementPermanent, 9_000);
+        player.update_enchant_time(
+            &[PlayerEnchantDurationItemRef::new(
+                item.object().guid(),
+                EnchantmentSlot::EnhancementPermanent,
+                600,
+            )],
+            4_000,
+        );
+
+        let removed = player.remove_enchantment_durations(&mut item);
+        assert_eq!(
+            removed,
+            vec![PlayerEnchantDuration {
+                item_guid: item.object().guid(),
+                slot: EnchantmentSlot::EnhancementPermanent,
+                left_duration_ms: 5_000,
+            }]
+        );
+        assert_eq!(item.data().enchantments[0].duration, 5_000);
+        assert!(player.enchant_durations().is_empty());
+
+        item.set_enchantment_duration(EnchantmentSlot::EnhancementPermanent, 9_000);
+        player.add_enchantment_duration(&mut item, EnchantmentSlot::EnhancementPermanent, 7_000);
+        let removed_refs = player.remove_enchantment_duration_references(&item);
+        assert_eq!(removed_refs[0].left_duration_ms, 7_000);
+        assert_eq!(item.data().enchantments[0].duration, 9_000);
+        assert!(player.enchant_durations().is_empty());
+    }
+
+    #[test]
+    fn enchantment_time_update_removes_missing_or_zero_enchantments_like_cpp() {
+        let mut player = Player::new(None, false);
+        let mut missing = item_with_guid_entry(1240, 7400);
+        let mut zero = item_with_guid_entry(1241, 7401);
+        player.add_enchantment_duration(&mut missing, EnchantmentSlot::EnhancementSocket, 2_000);
+        player.add_enchantment_duration(&mut zero, EnchantmentSlot::EnhancementSocket2, 3_000);
+
+        assert_eq!(
+            player.update_enchant_time(
+                &[PlayerEnchantDurationItemRef::new(
+                    zero.object().guid(),
+                    EnchantmentSlot::EnhancementSocket2,
+                    0,
+                )],
+                100,
+            ),
+            vec![
+                UpdateEnchantTimeAction::RemoveMissingEnchantment {
+                    item_guid: missing.object().guid(),
+                    slot: EnchantmentSlot::EnhancementSocket,
+                },
+                UpdateEnchantTimeAction::RemoveMissingEnchantment {
+                    item_guid: zero.object().guid(),
+                    slot: EnchantmentSlot::EnhancementSocket2,
+                },
+            ]
+        );
+        assert!(player.enchant_durations().is_empty());
     }
 
     #[test]
