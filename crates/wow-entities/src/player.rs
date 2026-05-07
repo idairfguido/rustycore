@@ -3,7 +3,7 @@ use wow_constants::{Gender, ItemUpdateState, PowerType, TypeId, TypeMask};
 use wow_core::ObjectGuid;
 
 use crate::{
-    EQUIPMENT_SLOT_END, INVENTORY_SLOT_BAG_0, Item, MAX_BAG_SIZE, ObjectDataUpdate,
+    Bag, EQUIPMENT_SLOT_END, INVENTORY_SLOT_BAG_0, Item, MAX_BAG_SIZE, ObjectDataUpdate,
     PROFESSION_SLOT_END, PROFESSION_SLOT_START, Unit, UnitDataUpdate, UpdateMask,
     update_fields::{
         ACTIVE_PLAYER_DATA_BITS, PLAYER_DATA_BITS, TYPEID_ACTIVE_PLAYER, TYPEID_PLAYER,
@@ -81,6 +81,15 @@ pub enum PlayerStorageError {
     InvalidBagItemSlot(u8),
     UnknownBag(u8),
     OccupiedPlayerSlot(u8),
+    OccupiedBagItemSlot {
+        bag: u8,
+        slot: u8,
+    },
+    MismatchedBagGuid {
+        bag: u8,
+        expected: ObjectGuid,
+        actual: ObjectGuid,
+    },
     TopLevelBuybackHiddenFromGetItemByPos(u8),
 }
 
@@ -668,6 +677,50 @@ impl Player {
         Ok(())
     }
 
+    pub fn store_bag_item_object(
+        &mut self,
+        bag_slot: u8,
+        bag: &mut Bag,
+        item_slot: u8,
+        item: &mut Item,
+        count: u32,
+    ) -> Result<(), PlayerStorageError> {
+        let bag_guid = bag.item().object().guid();
+        let bag_storage = self
+            .inventory
+            .bags
+            .get(bag_slot as usize)
+            .and_then(Option::as_ref)
+            .ok_or(PlayerStorageError::UnknownBag(bag_slot))?;
+
+        if bag_storage.bag_guid != bag_guid {
+            return Err(PlayerStorageError::MismatchedBagGuid {
+                bag: bag_slot,
+                expected: bag_storage.bag_guid,
+                actual: bag_guid,
+            });
+        }
+
+        if item_slot as usize >= MAX_BAG_SIZE || item_slot >= bag_storage.bag_size {
+            return Err(PlayerStorageError::InvalidBagItemSlot(item_slot));
+        }
+
+        if bag_storage.item_by_pos(item_slot).is_some() {
+            return Err(PlayerStorageError::OccupiedBagItemSlot {
+                bag: bag_slot,
+                slot: item_slot,
+            });
+        }
+
+        item.set_count(count);
+        item.bind_if_stored(false);
+        bag.store_item(item_slot, item);
+        self.store_bag_item(bag_slot, item_slot, item.object().guid())?;
+        item.set_state(ItemUpdateState::Changed);
+        bag.item_mut().set_state(ItemUpdateState::Changed);
+        Ok(())
+    }
+
     pub fn remove_bag_item(
         &mut self,
         bag: u8,
@@ -1072,7 +1125,7 @@ fn is_buyback_slot(slot: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wow_constants::ItemBondingType;
+    use wow_constants::{ItemBondingType, ItemContext};
 
     #[test]
     fn player_constructor_matches_cpp_base_state() {
@@ -1553,6 +1606,109 @@ mod tests {
         );
         assert_eq!(item.count(), 0);
         assert_eq!(item.update_state(), ItemUpdateState::Unchanged);
+    }
+
+    #[test]
+    fn store_bag_item_object_mutates_bag_branch_like_cpp_storeitem() {
+        let owner = ObjectGuid::create_player(1, 42);
+        let bag_guid = ObjectGuid::create_item(1, 800);
+        let item_guid = ObjectGuid::create_item(1, 801);
+        let mut player = Player::new(None, false);
+        let mut bag = Bag::default();
+        let mut item = Item::default();
+
+        player.unit_mut().world_mut().object_mut().create(owner);
+        bag.try_initialize_created_state(crate::BagCreateInfo {
+            guid: bag_guid,
+            item_id: 100,
+            context: ItemContext::None,
+            owner: Some(owner),
+            max_durability: 0,
+            container_slots: 4,
+        })
+        .unwrap();
+        bag.item_mut().set_slot(INVENTORY_SLOT_BAG_START);
+        bag.item_mut().force_state(ItemUpdateState::Unchanged);
+        bag.clear_container_data_changes();
+        item.object_mut().create(item_guid);
+        item.set_bonding(ItemBondingType::Quest);
+        item.force_state(ItemUpdateState::Unchanged);
+
+        player
+            .register_bag_storage(INVENTORY_SLOT_BAG_START, bag_guid, 4)
+            .unwrap();
+        player
+            .store_bag_item_object(INVENTORY_SLOT_BAG_START, &mut bag, 2, &mut item, 3)
+            .unwrap();
+
+        assert_eq!(
+            player.get_item_by_pos(INVENTORY_SLOT_BAG_START, 2),
+            Some(item_guid)
+        );
+        assert_eq!(bag.item_by_pos(2), Some(item_guid));
+        assert_eq!(item.count(), 3);
+        assert_eq!(item.data().contained_in, bag_guid);
+        assert_eq!(item.owner_guid(), owner);
+        assert_eq!(item.container_guid(), bag_guid);
+        assert_eq!(item.bag_slot(), INVENTORY_SLOT_BAG_START);
+        assert_eq!(item.slot(), 2);
+        assert!(item.is_soul_bound());
+        assert_eq!(item.update_state(), ItemUpdateState::Changed);
+        assert_eq!(bag.item().update_state(), ItemUpdateState::Changed);
+        assert!(
+            bag.container_data_changes_mask()
+                .is_set(crate::CONTAINER_DATA_SLOTS_FIRST_BIT + 2)
+        );
+    }
+
+    #[test]
+    fn store_bag_item_object_rejects_mismatched_or_occupied_bag_slot() {
+        let owner = ObjectGuid::create_player(1, 42);
+        let registered_bag = ObjectGuid::create_item(1, 810);
+        let actual_bag = ObjectGuid::create_item(1, 811);
+        let existing = ObjectGuid::create_item(1, 812);
+        let mut player = Player::new(None, false);
+        let mut bag = Bag::default();
+        let mut item = Item::default();
+
+        bag.try_initialize_created_state(crate::BagCreateInfo {
+            guid: actual_bag,
+            item_id: 100,
+            context: ItemContext::None,
+            owner: Some(owner),
+            max_durability: 0,
+            container_slots: 4,
+        })
+        .unwrap();
+        item.object_mut().create(ObjectGuid::create_item(1, 813));
+        player
+            .register_bag_storage(INVENTORY_SLOT_BAG_START, registered_bag, 4)
+            .unwrap();
+
+        assert_eq!(
+            player.store_bag_item_object(INVENTORY_SLOT_BAG_START, &mut bag, 2, &mut item, 1),
+            Err(PlayerStorageError::MismatchedBagGuid {
+                bag: INVENTORY_SLOT_BAG_START,
+                expected: registered_bag,
+                actual: actual_bag,
+            })
+        );
+
+        player
+            .register_bag_storage(INVENTORY_SLOT_BAG_START + 1, actual_bag, 4)
+            .unwrap();
+        player
+            .store_bag_item(INVENTORY_SLOT_BAG_START + 1, 2, existing)
+            .unwrap();
+        assert_eq!(
+            player.store_bag_item_object(INVENTORY_SLOT_BAG_START + 1, &mut bag, 2, &mut item, 1),
+            Err(PlayerStorageError::OccupiedBagItemSlot {
+                bag: INVENTORY_SLOT_BAG_START + 1,
+                slot: 2,
+            })
+        );
+        assert_eq!(item.count(), 0);
+        assert_eq!(bag.item_by_pos(2), None);
     }
 
     #[test]
