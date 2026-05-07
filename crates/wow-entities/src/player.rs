@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use bitflags::bitflags;
 use wow_constants::{
     BagFamilyMask, Gender, InventoryResult, InventoryType, ItemBondingType, ItemClass,
@@ -773,6 +775,23 @@ pub struct SwapItemOrchestrationPlan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SoulboundTradeableItemRef {
+    pub guid: ObjectGuid,
+    pub owner_guid: ObjectGuid,
+    pub trade_expired: bool,
+}
+
+impl SoulboundTradeableItemRef {
+    pub const fn new(guid: ObjectGuid, owner_guid: ObjectGuid, trade_expired: bool) -> Self {
+        Self {
+            guid,
+            owner_guid,
+            trade_expired,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitanGripPenaltyAction {
     None,
     Cast(u32),
@@ -1049,6 +1068,7 @@ pub struct Player {
     accept_whispers: bool,
     can_titan_grip: bool,
     titan_grip_penalty_spell_id: u32,
+    soulbound_tradeable_items: HashSet<ObjectGuid>,
 }
 
 impl Player {
@@ -1079,6 +1099,7 @@ impl Player {
             accept_whispers: !can_filter_whispers,
             can_titan_grip: false,
             titan_grip_penalty_spell_id: 0,
+            soulbound_tradeable_items: HashSet::new(),
         }
     }
 
@@ -1112,6 +1133,10 @@ impl Player {
 
     pub const fn inventory(&self) -> &PlayerInventoryStorage {
         &self.inventory
+    }
+
+    pub fn soulbound_tradeable_items(&self) -> &HashSet<ObjectGuid> {
+        &self.soulbound_tradeable_items
     }
 
     pub const fn hit_chances(&self) -> (f32, f32, f32) {
@@ -4827,6 +4852,32 @@ impl Player {
         }
 
         Ok(slot)
+    }
+
+    pub fn add_tradeable_item(&mut self, item: &Item) {
+        self.soulbound_tradeable_items.insert(item.object().guid());
+    }
+
+    pub fn remove_tradeable_item(&mut self, item: &Item) {
+        self.soulbound_tradeable_items.remove(&item.object().guid());
+    }
+
+    pub fn update_soulbound_trade_items(
+        &mut self,
+        items: &[SoulboundTradeableItemRef],
+    ) -> Vec<ObjectGuid> {
+        let player_guid = self.guid();
+        let mut removed = Vec::new();
+        self.soulbound_tradeable_items.retain(|guid| {
+            let keep = items.iter().any(|item| {
+                item.guid == *guid && item.owner_guid == player_guid && !item.trade_expired
+            });
+            if !keep {
+                removed.push(*guid);
+            }
+            keep
+        });
+        removed
     }
 
     pub const fn can_titan_grip(&self) -> bool {
@@ -10469,6 +10520,58 @@ mod tests {
         assert_eq!(player.get_item_from_buyback_slot(slot), Some(expected));
         assert_eq!(player.active_data().buyback_price[0], 123);
         assert_eq!(player.active_data().buyback_timestamp[0], 456);
+    }
+
+    #[test]
+    fn soulbound_tradeable_item_set_matches_cpp_add_remove_and_update() {
+        let mut player = Player::new(None, false);
+        let mut keep = item_with_guid_entry(1200, 7000);
+        keep.set_owner_guid(player.guid());
+        let mut expired = item_with_guid_entry(1201, 7001);
+        expired.set_owner_guid(player.guid());
+        let mut wrong_owner = item_with_guid_entry(1202, 7002);
+        wrong_owner.set_owner_guid(ObjectGuid::create_player(1, 99));
+        let missing = item_with_guid_entry(1203, 7003);
+        let removed_directly = item_with_guid_entry(1204, 7004);
+
+        player.add_tradeable_item(&keep);
+        player.add_tradeable_item(&expired);
+        player.add_tradeable_item(&wrong_owner);
+        player.add_tradeable_item(&missing);
+        player.add_tradeable_item(&removed_directly);
+        player.remove_tradeable_item(&removed_directly);
+
+        assert!(
+            player
+                .soulbound_tradeable_items()
+                .contains(&keep.object().guid())
+        );
+        assert!(
+            !player
+                .soulbound_tradeable_items()
+                .contains(&removed_directly.object().guid())
+        );
+
+        let removed = player.update_soulbound_trade_items(&[
+            SoulboundTradeableItemRef::new(keep.object().guid(), keep.owner_guid(), false),
+            SoulboundTradeableItemRef::new(expired.object().guid(), expired.owner_guid(), true),
+            SoulboundTradeableItemRef::new(
+                wrong_owner.object().guid(),
+                wrong_owner.owner_guid(),
+                false,
+            ),
+        ]);
+
+        assert!(
+            player
+                .soulbound_tradeable_items()
+                .contains(&keep.object().guid())
+        );
+        assert_eq!(player.soulbound_tradeable_items().len(), 1);
+        assert!(removed.contains(&expired.object().guid()));
+        assert!(removed.contains(&wrong_owner.object().guid()));
+        assert!(removed.contains(&missing.object().guid()));
+        assert!(!removed.contains(&removed_directly.object().guid()));
     }
 
     #[test]
