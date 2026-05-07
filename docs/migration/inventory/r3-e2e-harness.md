@@ -1,0 +1,19 @@
+# R3 E2E Harness Registry
+
+> Generado: 2026-05-07
+> The current workspace does not prove an executable Rust client bot exists; this registry records located candidates and required acceptance.
+
+## Summary
+
+| Metric | Count |
+|---|---:|
+| `harness_rows` | 4 |
+
+## Registry
+
+| component | path | status | usage | acceptance |
+|---|---|---|---|---|
+| legacy bot patch notes | /home/server/woltk-trinity-legacy/BOT_PATCHES.md | file_present | Reference only until executable client simulator is located or created. | R6 mini-phase must name exact bot/client command or mark harness missing with replacement task. |
+| LFG bot SQL notes | /home/server/woltk-trinity-legacy/sql/custom/lfg_bot_test_migrations.md | file_present | Reference only until executable client simulator is located or created. | R6 mini-phase must name exact bot/client command or mark harness missing with replacement task. |
+| AuctionHouseBot C++ subsystem | /home/server/woltk-trinity-legacy/src/server/game/AuctionHouseBot | directory_present_not_e2e_harness | Reference only until executable client simulator is located or created. | R6 mini-phase must name exact bot/client command or mark harness missing with replacement task. |
+| Rust login/client delta notes | /home/server/rustycore/docs/phase4-analysis-and-fixes.md | file_present | Use as Rust auth/login delta checklist; not a simulator. | R6 mini-phase must name exact bot/client command or mark harness missing with replacement task. |

@@ -81,12 +81,12 @@ Aceptacion de R2: ningun doc de modulo queda solo con tareas de alto nivel; toda
 
 ### R3 — Registros transversales
 
-- [ ] **#REFINE.030** Crear/actualizar registro de opcodes: cada CMSG/SMSG con owner, parser, serializer, handler, status, processing mode y test.
-- [ ] **#REFINE.031** Crear/actualizar registro de base de datos: cada tabla/statement/load path con owner y target Rust.
-- [ ] **#REFINE.032** Crear/actualizar registro de update fields: cada grupo por entidad con owner y plan de test de packet.
-- [ ] **#REFINE.033** Crear/actualizar registro de runtime managers: World, MapManager, ObjectMgr, SpellMgr, LFGMgr, GuildMgr, AuctionMgr, etc.
-- [ ] **#REFINE.034** Crear/actualizar registro de scripts: command scripts, spell scripts, world scripts, instance/boss scripts.
-- [ ] **#REFINE.035** Crear/actualizar registro de harness E2E: bot C++, deltas auth/login Rust y secuencia de aceptacion.
+- [x] **#REFINE.030** Crear/actualizar registro de opcodes: cada CMSG/SMSG con owner, parser, serializer, handler, status, processing mode y test.
+- [x] **#REFINE.031** Crear/actualizar registro de base de datos: cada tabla/statement/load path con owner y target Rust.
+- [x] **#REFINE.032** Crear/actualizar registro de update fields: cada grupo por entidad con owner y plan de test de packet.
+- [x] **#REFINE.033** Crear/actualizar registro de runtime managers: World, MapManager, ObjectMgr, SpellMgr, LFGMgr, GuildMgr, AuctionMgr, etc.
+- [x] **#REFINE.034** Crear/actualizar registro de scripts: command scripts, spell scripts, world scripts, instance/boss scripts.
+- [x] **#REFINE.035** Crear/actualizar registro de harness E2E: bot C++, deltas auth/login Rust y secuencia de aceptacion.
 
 Aceptacion de R3: los elementos transversales no quedan duplicados ni huerfanos entre docs de modulo.
 
