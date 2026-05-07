@@ -3,15 +3,15 @@
 //! Each database has its own statement enum that maps variant → SQL string.
 //! The [`StatementDef`] trait is implemented by each enum.
 
-pub mod login;
-pub mod world;
 pub mod character;
 pub mod hotfix;
+pub mod login;
+pub mod world;
 
-pub use login::LoginStatements;
-pub use world::WorldStatements;
 pub use character::CharStatements;
 pub use hotfix::HotfixStatements;
+pub use login::LoginStatements;
+pub use world::WorldStatements;
 
 /// Trait implemented by database statement enums.
 ///
@@ -44,7 +44,11 @@ mod tests {
     #[test]
     fn login_sql_contains_expected_tables() {
         assert!(LoginStatements::SEL_REALMLIST.sql().contains("realmlist"));
-        assert!(LoginStatements::SEL_BNET_AUTHENTICATION.sql().contains("battlenet_accounts"));
+        assert!(
+            LoginStatements::SEL_BNET_AUTHENTICATION
+                .sql()
+                .contains("battlenet_accounts")
+        );
         assert!(LoginStatements::INS_IP_BANNED.sql().contains("ip_banned"));
         assert!(LoginStatements::SEL_CHECK_PASSWORD.sql().contains("salt"));
     }
@@ -52,7 +56,11 @@ mod tests {
     #[test]
     fn login_unregistered_statement_is_empty() {
         // SEL_BNET_ACCOUNT_SALT_BY_ID has no SQL in C# source
-        assert!(LoginStatements::SEL_BNET_ACCOUNT_SALT_BY_ID.sql().is_empty());
+        assert!(
+            LoginStatements::SEL_BNET_ACCOUNT_SALT_BY_ID
+                .sql()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -65,8 +73,16 @@ mod tests {
 
     #[test]
     fn world_sql_contains_expected_tables() {
-        assert!(WorldStatements::SEL_CREATURE_TEXT.sql().contains("creature_text"));
-        assert!(WorldStatements::SEL_SMART_SCRIPTS.sql().contains("smart_scripts"));
+        assert!(
+            WorldStatements::SEL_CREATURE_TEXT
+                .sql()
+                .contains("creature_text")
+        );
+        assert!(
+            WorldStatements::SEL_SMART_SCRIPTS
+                .sql()
+                .contains("smart_scripts")
+        );
         assert!(WorldStatements::INS_GAME_TELE.sql().contains("game_tele"));
     }
 
@@ -74,6 +90,25 @@ mod tests {
     fn world_unregistered_statement_is_empty() {
         // SEL_GAMEOBJECT_TARGET has no SQL in C# source
         assert!(WorldStatements::SEL_GAMEOBJECT_TARGET.sql().is_empty());
+    }
+
+    #[test]
+    fn hotfix_control_statements_match_cpp_tables() {
+        assert!(
+            HotfixStatements::SEL_HOTFIX_DATA
+                .sql()
+                .contains("hotfix_data")
+        );
+        assert!(
+            HotfixStatements::SEL_HOTFIX_BLOB
+                .sql()
+                .contains("hotfix_blob")
+        );
+        assert!(
+            HotfixStatements::SEL_HOTFIX_OPTIONAL_DATA
+                .sql()
+                .contains("hotfix_optional_data")
+        );
     }
 
     #[test]

@@ -504,6 +504,11 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
 - [x] **#NEXT.L0.CONFIG.002** Portar `WorldBoolConfigs`/`WorldFloatConfigs`/`WorldIntConfigs`/`WorldInt64Configs` contra `World.cpp`.
   Estado: cerrado con `#NEXT.L0.CONFIG.002.a` registry/defaults, `#NEXT.L0.CONFIG.002.b` validaciones C++ y `#NEXT.L0.CONFIG.002.c` wiring runtime.
 
+### Inmediato (R7 — L1 infra gate)
+
+- [ ] **#NEXT.L1.INFRA.001** Ejecutar `docs/migration/inventory/r7-l1-infra-miniphase.md`: database/prepared + DB2/hotfix gate contra C++.
+  Estado: `#NEXT.L1.INFRA.001.a` cerrado; siguen `#NEXT.L1.INFRA.001.b` prepared-statement closure y `#NEXT.L1.INFRA.001.c` DB2 store closure.
+
 ### Inmediato (Fase 0 — Maps rewrite)
 
 - [x] **#001** `wow-map`: módulo `coords.rs` con constantes y `compute_grid_coord` / `compute_cell_coord`. Tests vs `GridDefines.h`. Cerrado en `crates/wow-map/src/coords.rs` contra `GridDefines.h`.

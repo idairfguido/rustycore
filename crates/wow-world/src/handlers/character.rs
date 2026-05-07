@@ -1097,10 +1097,8 @@ impl WorldSession {
 
     /// Handle CMSG_DB_QUERY_BULK — client requests DB2 records.
     ///
-    /// We don't have a DB2 storage engine, so we respond with Status::Invalid
-    /// for every requested record. This tells the client to use its local data
-    /// and prevents it from trying to download from CDN (which causes
-    /// "Streaming Error" and gets stuck at 80% loading).
+    /// DB2 records are served from the startup hotfix blob cache, which is
+    /// populated from local DB2 files plus the C++ `hotfixes.hotfix_blob` table.
     pub async fn handle_db_query_bulk(&mut self, query: wow_packet::packets::misc::DbQueryBulk) {
         info!(
             "DbQueryBulk: table=0x{:08X}, {} records {:?} for account {}",
@@ -1109,12 +1107,9 @@ impl WorldSession {
             query.queries,
             self.account_id
         );
-        // Look up each record in the hotfix blob cache (populated from DB2 files at startup).
         // Status 1 = Valid (send blob), Status 3 = Invalid (client uses its own DB2 cache).
         let cache = self.hotfix_blob_cache().map(Arc::clone);
-        let world_db = self.world_db().map(Arc::clone);
         for record_id in &query.queries {
-            // 1. Try the in-memory file cache first (O(1) lookup)
             if let Some(ref c) = cache {
                 if let Some(blob) = c.get(query.table_hash, *record_id) {
                     info!("DbQueryBulk: FOUND blob table=0x{:08X} record={} ({} bytes)", query.table_hash, record_id, blob.len());
@@ -1122,26 +1117,8 @@ impl WorldSession {
                     continue;
                 }
             }
-            // 2. Fallback: query hotfixes.hotfix_blob table for server-side custom records
-            let table_known = cache.as_ref().map_or(false, |c| c.has_table(query.table_hash));
-            if table_known {
-                if let Some(ref db) = world_db {
-                    let mut stmt = db.prepare(WorldStatements::SEL_HOTFIX_BLOB);
-                    stmt.set_u32(0, query.table_hash);
-                    stmt.set_i32(1, *record_id);
-                    if let Ok(r) = db.query(&stmt).await {
-                        if !r.is_empty() {
-                            let blob: Vec<u8> = r.try_read(0).unwrap_or_default();
-                            if !blob.is_empty() {
-                                info!("DbQueryBulk: FOUND in hotfix_blob DB table=0x{:08X} record={} ({} bytes)", query.table_hash, record_id, blob.len());
-                                self.send_packet(&DBReply::found(query.table_hash, *record_id, blob));
-                                continue;
-                            }
-                        }
-                    }
-                }
-            }
-            // 3. Not found anywhere → send Invalid(3) so the client uses its local DB2 copy.
+
+            // Not found anywhere → send Invalid(3) so the client uses its local DB2 copy.
             // RecordRemoved(2) would tell the client to DELETE the record from its cache,
             // which is wrong for items that exist in the client's DB2 but not on the server.
             info!(
@@ -1149,10 +1126,8 @@ impl WorldSession {
                 query.table_hash, record_id
             );
             self.send_packet(&DBReply::not_found(query.table_hash, *record_id));
-
         }
     }
-
 
     /// Handle CMSG_HOTFIX_REQUEST — client requests hotfix data.
     ///

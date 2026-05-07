@@ -10,13 +10,69 @@
 //! each requested record.  This module pre-loads record blobs from `.db2`
 //! files at startup so they can be looked up with O(1) cost at runtime.
 
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::Result;
 use tracing::info;
+use wow_database::{HotfixDatabase, HotfixStatements};
 
 use crate::wdc4::Wdc4Reader;
+
+/// C++ `DB2Manager::HotfixId`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct HotfixId {
+    pub push_id: i32,
+    pub unique_id: u32,
+}
+
+/// C++ `DB2Manager::HotfixRecord::Status`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum HotfixRecordStatus {
+    NotSet = 0,
+    Valid = 1,
+    RecordRemoved = 2,
+    Invalid = 3,
+    NotPublic = 4,
+}
+
+impl From<u8> for HotfixRecordStatus {
+    fn from(value: u8) -> Self {
+        match value {
+            1 => Self::Valid,
+            2 => Self::RecordRemoved,
+            3 => Self::Invalid,
+            4 => Self::NotPublic,
+            _ => Self::NotSet,
+        }
+    }
+}
+
+/// C++ `DB2Manager::HotfixRecord`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HotfixRecord {
+    pub table_hash: u32,
+    pub record_id: i32,
+    pub id: HotfixId,
+    pub status: HotfixRecordStatus,
+    pub available_locales_mask: u32,
+}
+
+/// C++ `DB2Manager::HotfixPush`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HotfixPush {
+    pub records: Vec<HotfixRecord>,
+    pub available_locales_mask: u32,
+}
+
+/// C++ `DB2Manager::HotfixOptionalData`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HotfixOptionalData {
+    pub key: u32,
+    pub data: Vec<u8>,
+}
 
 /// Cached raw record bytes indexed by `(table_hash, record_id)`.
 #[derive(Default)]
@@ -25,6 +81,9 @@ pub struct HotfixBlobCache {
     /// Inner key: record_id.
     /// Value: raw record bytes (inline strings, no copy-table dedup).
     blobs: HashMap<u32, HashMap<u32, Vec<u8>>>,
+    hotfix_data: BTreeMap<i32, HotfixPush>,
+    optional_data: HashMap<String, HashMap<(u32, i32), Vec<HotfixOptionalData>>>,
+    max_hotfix_id: i32,
 }
 
 impl HotfixBlobCache {
@@ -56,6 +115,137 @@ impl HotfixBlobCache {
         Ok(count)
     }
 
+    /// Insert or replace one raw DB2 blob.
+    pub fn insert_blob(&mut self, table_hash: u32, record_id: i32, bytes: Vec<u8>) {
+        self.blobs
+            .entry(table_hash)
+            .or_default()
+            .insert(record_id as u32, bytes);
+    }
+
+    /// Load C++ `hotfix_blob` rows from the Hotfix database for one locale.
+    pub async fn load_hotfix_blobs_from_db(
+        &mut self,
+        db: &HotfixDatabase,
+        locale: &str,
+    ) -> Result<usize> {
+        let stmt = db.prepare(HotfixStatements::SEL_HOTFIX_BLOB);
+        let mut result = db.query(&stmt).await?;
+        if result.is_empty() {
+            return Ok(0);
+        }
+
+        let mut count = 0usize;
+        loop {
+            let table_hash: u32 = result.read(0);
+            let record_id: i32 = result.read(1);
+            let row_locale = result.read_string(2);
+            let blob: Vec<u8> = result.try_read(3).unwrap_or_default();
+
+            if row_locale == locale {
+                self.insert_blob(table_hash, record_id, blob);
+                count += 1;
+            }
+
+            if !result.next_row() {
+                break;
+            }
+        }
+
+        Ok(count)
+    }
+
+    /// Load C++ `hotfix_data` rows and group them by push id.
+    pub async fn load_hotfix_data_from_db(
+        &mut self,
+        db: &HotfixDatabase,
+        locale: &str,
+    ) -> Result<usize> {
+        let stmt = db.prepare(HotfixStatements::SEL_HOTFIX_DATA);
+        let mut result = db.query(&stmt).await?;
+        if result.is_empty() {
+            return Ok(0);
+        }
+
+        let locale_mask = locale_mask_for_name(locale);
+        let mut count = 0usize;
+        loop {
+            let push_id: i32 = result.read(0);
+            let unique_id: u32 = result.read(1);
+            let table_hash: u32 = result.read(2);
+            let record_id: i32 = result.read(3);
+            let status = HotfixRecordStatus::from(result.read::<u8>(4));
+
+            if status == HotfixRecordStatus::Valid
+                && !self.has_table(table_hash)
+                && self.get(table_hash, record_id).is_none()
+            {
+                if !result.next_row() {
+                    break;
+                }
+                continue;
+            }
+
+            let record = HotfixRecord {
+                table_hash,
+                record_id,
+                id: HotfixId { push_id, unique_id },
+                status,
+                available_locales_mask: locale_mask,
+            };
+
+            let push = self.hotfix_data.entry(push_id).or_default();
+            push.available_locales_mask |= record.available_locales_mask;
+            push.records.push(record);
+            self.max_hotfix_id = self.max_hotfix_id.max(push_id);
+            count += 1;
+
+            if !result.next_row() {
+                break;
+            }
+        }
+
+        Ok(count)
+    }
+
+    /// Load C++ `hotfix_optional_data` rows for one locale.
+    pub async fn load_hotfix_optional_data_from_db(
+        &mut self,
+        db: &HotfixDatabase,
+        locale: &str,
+    ) -> Result<usize> {
+        let stmt = db.prepare(HotfixStatements::SEL_HOTFIX_OPTIONAL_DATA);
+        let mut result = db.query(&stmt).await?;
+        if result.is_empty() {
+            return Ok(0);
+        }
+
+        let mut count = 0usize;
+        loop {
+            let table_hash: u32 = result.read(0);
+            let record_id: i32 = result.read(1);
+            let row_locale = result.read_string(2);
+            let key: u32 = result.read(3);
+            let data: Vec<u8> = result.try_read(4).unwrap_or_default();
+
+            if row_locale == locale {
+                self.optional_data
+                    .entry(row_locale)
+                    .or_default()
+                    .entry((table_hash, record_id))
+                    .or_default()
+                    .push(HotfixOptionalData { key, data });
+                count += 1;
+            }
+
+            if !result.next_row() {
+                break;
+            }
+        }
+
+        Ok(count)
+    }
+
     /// Look up the raw blob for a `(table_hash, record_id)` pair.
     pub fn get(&self, table_hash: u32, record_id: i32) -> Option<&[u8]> {
         let table = self.blobs.get(&table_hash)?;
@@ -70,6 +260,43 @@ impl HotfixBlobCache {
     /// Total number of blobs cached across all tables.
     pub fn total_blobs(&self) -> usize {
         self.blobs.values().map(|t| t.len()).sum()
+    }
+
+    pub fn hotfix_pushes(&self) -> &BTreeMap<i32, HotfixPush> {
+        &self.hotfix_data
+    }
+
+    pub fn hotfix_count(&self) -> usize {
+        self.hotfix_data
+            .values()
+            .map(|push| push.records.len())
+            .sum()
+    }
+
+    pub fn max_hotfix_id(&self) -> i32 {
+        self.max_hotfix_id
+    }
+}
+
+fn locale_mask_for_name(locale: &str) -> u32 {
+    locale_index(locale).map_or(0, |index| 1_u32 << index)
+}
+
+fn locale_index(locale: &str) -> Option<u32> {
+    match locale {
+        "enUS" => Some(0),
+        "koKR" => Some(1),
+        "frFR" => Some(2),
+        "deDE" => Some(3),
+        "zhCN" => Some(4),
+        "zhTW" => Some(5),
+        "esES" => Some(6),
+        "esMX" => Some(7),
+        "ruRU" => Some(8),
+        "jaJP" => Some(9),
+        "ptBR" => Some(10),
+        "itIT" => Some(11),
+        _ => None,
     }
 }
 
@@ -87,7 +314,10 @@ pub fn build_hotfix_blob_cache(data_dir: &str, locale: &str) -> HotfixBlobCache 
             Err(e) => tracing::warn!("HotfixBlobCache: failed to load Item.db2: {e}"),
         }
     } else {
-        tracing::warn!("HotfixBlobCache: Item.db2 not found at {}", item_db2.display());
+        tracing::warn!(
+            "HotfixBlobCache: Item.db2 not found at {}",
+            item_db2.display()
+        );
     }
 
     // Load ItemSparse.db2
@@ -99,7 +329,10 @@ pub fn build_hotfix_blob_cache(data_dir: &str, locale: &str) -> HotfixBlobCache 
             Err(e) => tracing::warn!("HotfixBlobCache: failed to load ItemSparse.db2: {e}"),
         }
     } else {
-        tracing::warn!("HotfixBlobCache: ItemSparse.db2 not found at {}", item_sparse.display());
+        tracing::warn!(
+            "HotfixBlobCache: ItemSparse.db2 not found at {}",
+            item_sparse.display()
+        );
     }
 
     info!(
@@ -109,3 +342,37 @@ pub fn build_hotfix_blob_cache(data_dir: &str, locale: &str) -> HotfixBlobCache 
     cache
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hotfix_record_status_matches_cpp_values() {
+        assert_eq!(HotfixRecordStatus::from(0), HotfixRecordStatus::NotSet);
+        assert_eq!(HotfixRecordStatus::from(1), HotfixRecordStatus::Valid);
+        assert_eq!(
+            HotfixRecordStatus::from(2),
+            HotfixRecordStatus::RecordRemoved
+        );
+        assert_eq!(HotfixRecordStatus::from(3), HotfixRecordStatus::Invalid);
+        assert_eq!(HotfixRecordStatus::from(4), HotfixRecordStatus::NotPublic);
+    }
+
+    #[test]
+    fn locale_masks_match_dbc_locale_order() {
+        assert_eq!(locale_mask_for_name("enUS"), 1);
+        assert_eq!(locale_mask_for_name("esES"), 1 << 6);
+        assert_eq!(locale_mask_for_name("itIT"), 1 << 11);
+        assert_eq!(locale_mask_for_name("bad"), 0);
+    }
+
+    #[test]
+    fn insert_blob_indexes_by_table_hash_and_record_id() {
+        let mut cache = HotfixBlobCache::new();
+        cache.insert_blob(0x919B_E54E, 58256, vec![1, 2, 3]);
+
+        assert_eq!(cache.get(0x919B_E54E, 58256), Some(&[1, 2, 3][..]));
+        assert!(cache.has_table(0x919B_E54E));
+        assert_eq!(cache.total_blobs(), 1);
+    }
+}

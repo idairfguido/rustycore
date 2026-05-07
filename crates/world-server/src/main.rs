@@ -371,8 +371,30 @@ async fn main() -> Result<()> {
         item_stats_store.len()
     );
 
-    // Build hotfix blob cache — pre-loads raw DB2 record bytes for DBReply
-    let hotfix_blob_cache = Arc::new(wow_data::build_hotfix_blob_cache(&data_dir, &locale));
+    // Build hotfix blob cache — pre-loads raw DB2 record bytes and hotfix DB overlays for DBReply.
+    let mut hotfix_blob_cache = wow_data::build_hotfix_blob_cache(&data_dir, &locale);
+    match hotfix_blob_cache
+        .load_hotfix_blobs_from_db(&hotfix_db, &locale)
+        .await
+    {
+        Ok(n) => info!("HotfixBlobCache: loaded {n} hotfix_blob rows"),
+        Err(e) => tracing::warn!("HotfixBlobCache: failed to load hotfix_blob rows: {e}"),
+    }
+    match hotfix_blob_cache
+        .load_hotfix_data_from_db(&hotfix_db, &locale)
+        .await
+    {
+        Ok(n) => info!("HotfixBlobCache: loaded {n} hotfix_data rows"),
+        Err(e) => tracing::warn!("HotfixBlobCache: failed to load hotfix_data rows: {e}"),
+    }
+    match hotfix_blob_cache
+        .load_hotfix_optional_data_from_db(&hotfix_db, &locale)
+        .await
+    {
+        Ok(n) => info!("HotfixBlobCache: loaded {n} hotfix_optional_data rows"),
+        Err(e) => tracing::warn!("HotfixBlobCache: failed to load hotfix_optional_data rows: {e}"),
+    }
+    let hotfix_blob_cache = Arc::new(hotfix_blob_cache);
 
     // Diagnostic: check if known problem items exist in cache
     for item_id in [58256i32, 58274, 58257] {

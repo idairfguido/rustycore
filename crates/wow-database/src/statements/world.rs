@@ -87,9 +87,6 @@ pub enum WorldStatements {
     SEL_PLAYER_LEVELSTATS,
     /// Load initial action buttons for character creation.
     SEL_PLAYER_CREATEINFO_ACTION,
-    /// Fetch raw DB2 blob for a specific (TableHash, RecordId) from hotfix_blob.
-    /// Used to serve CMSG_DB_QUERY_BULK responses with server-side overrides.
-    SEL_HOTFIX_BLOB,
     /// Gossip MenuID for a creature entry (creature_template_gossip).
     SEL_CREATURE_GOSSIP_MENU,
     /// Gossip menu text ID (gossip_menu).
@@ -287,10 +284,6 @@ impl StatementDef for WorldStatements {
                 "Data32, Data33, Data34, ContentTuningId ",
                 "FROM gameobject_template WHERE entry = ?",
             ),
-            Self::SEL_HOTFIX_BLOB => {
-                "SELECT Blob FROM hotfixes.hotfix_blob \
-                 WHERE TableHash = ? AND RecordId = ? AND locale = 'enUS'"
-            }
             Self::SEL_CREATURE_GOSSIP_MENU => {
                 "SELECT MenuID FROM creature_template_gossip WHERE CreatureID = ?"
             }
