@@ -230,6 +230,24 @@ pub struct CanStoreItemArgs<'a> {
     pub bag_templates: &'a [BagTemplateRef<'a>],
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct CanBankItemArgs<'a> {
+    pub bag: u8,
+    pub slot: u8,
+    pub proto: Option<&'a ItemStorageTemplate>,
+    pub source_item: Option<&'a Item>,
+    pub source_is_not_empty_bag: bool,
+    pub source_is_bag: bool,
+    pub source_is_currency_token: bool,
+    pub source_bop_trade_allowed_for_player: bool,
+    pub swap: bool,
+    pub can_use_result: InventoryResult,
+    pub limit_category: Option<&'a ItemLimitCategoryTemplate>,
+    pub slot_items: &'a [ItemSlotRef<'a>],
+    pub stored_items: &'a [ItemStorageRef<'a>],
+    pub bag_templates: &'a [BagTemplateRef<'a>],
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CanStoreItemOutcome {
     pub result: InventoryResult,
@@ -1711,6 +1729,365 @@ impl Player {
         can_store_item_error(InventoryResult::InvFull, count, no_similar_count)
     }
 
+    pub fn can_bank_item(
+        &self,
+        dest: &mut Vec<ItemPosCount>,
+        args: CanBankItemArgs<'_>,
+    ) -> InventoryResult {
+        let Some(source) = args.source_item else {
+            return if args.swap {
+                InventoryResult::CantSwap
+            } else {
+                InventoryResult::ItemNotFound
+            };
+        };
+
+        let Some(proto) = args.proto else {
+            return if args.swap {
+                InventoryResult::CantSwap
+            } else {
+                InventoryResult::ItemNotFound
+            };
+        };
+
+        if source.loot_generated() {
+            return InventoryResult::LootGone;
+        }
+
+        if source.is_binded_not_with(self.guid(), proto, args.source_bop_trade_allowed_for_player) {
+            return InventoryResult::NotOwner;
+        }
+
+        if args.source_is_currency_token {
+            return InventoryResult::CantSwap;
+        }
+
+        let similar_result = self.can_take_more_similar_items(CanTakeMoreSimilarItemsArgs {
+            proto: args.proto,
+            count: source.count(),
+            source_item: args.source_item,
+            current_item_count: self.item_count_by_entry(
+                proto.entry,
+                true,
+                args.source_item,
+                args.stored_items,
+            ),
+            limit_category: args.limit_category,
+            current_limit_category_count: self.item_count_with_limit_category(
+                proto.item_limit_category,
+                args.source_item,
+                args.stored_items,
+            ),
+        });
+        if similar_result.result != InventoryResult::Ok {
+            return similar_result.result;
+        }
+
+        let mut count = source.count();
+
+        if args.bag != NULL_BAG && args.slot != NULL_SLOT {
+            if (BANK_SLOT_BAG_START..BANK_SLOT_BAG_END).contains(&args.slot) {
+                if !args.source_is_bag {
+                    return InventoryResult::WrongSlot;
+                }
+
+                if args.slot - BANK_SLOT_BAG_START >= self.data.num_bank_slots {
+                    return InventoryResult::NoBankSlot;
+                }
+
+                if args.can_use_result != InventoryResult::Ok {
+                    return args.can_use_result;
+                }
+            }
+
+            let result = self.can_store_item_in_specific_slot(
+                args.bag,
+                args.slot,
+                dest,
+                proto,
+                &mut count,
+                args.swap,
+                item_ref_by_pos(args.slot_items, args.bag, args.slot),
+                args.source_item,
+                args.source_is_not_empty_bag,
+                bag_template_by_pos(args.bag_templates, args.bag),
+            );
+            if result != InventoryResult::Ok {
+                return result;
+            }
+
+            if count == 0 {
+                return InventoryResult::Ok;
+            }
+        }
+
+        if args.bag != NULL_BAG {
+            if args.source_is_not_empty_bag {
+                return InventoryResult::BagInBag;
+            }
+
+            if proto.max_stack_size != 1 {
+                if args.bag == INVENTORY_SLOT_BAG_0 {
+                    let result = self.can_store_item_in_inventory_slots(
+                        BANK_SLOT_ITEM_START,
+                        BANK_SLOT_ITEM_END,
+                        dest,
+                        proto,
+                        &mut count,
+                        true,
+                        args.source_item,
+                        args.source_is_not_empty_bag,
+                        args.bag,
+                        args.slot,
+                        args.slot_items,
+                    );
+                    if result != InventoryResult::Ok {
+                        return result;
+                    }
+                    if count == 0 {
+                        return InventoryResult::Ok;
+                    }
+                } else {
+                    let mut result = self.can_store_item_in_bag(
+                        args.bag,
+                        dest,
+                        proto,
+                        &mut count,
+                        true,
+                        false,
+                        args.source_item,
+                        args.source_is_not_empty_bag,
+                        NULL_BAG,
+                        args.slot,
+                        bag_template_by_pos(args.bag_templates, args.bag),
+                        args.slot_items,
+                    );
+                    if result != InventoryResult::Ok {
+                        result = self.can_store_item_in_bag(
+                            args.bag,
+                            dest,
+                            proto,
+                            &mut count,
+                            true,
+                            true,
+                            args.source_item,
+                            args.source_is_not_empty_bag,
+                            NULL_BAG,
+                            args.slot,
+                            bag_template_by_pos(args.bag_templates, args.bag),
+                            args.slot_items,
+                        );
+                    }
+                    if result != InventoryResult::Ok {
+                        return result;
+                    }
+                    if count == 0 {
+                        return InventoryResult::Ok;
+                    }
+                }
+            }
+
+            if args.bag == INVENTORY_SLOT_BAG_0 {
+                let result = self.can_store_item_in_inventory_slots(
+                    BANK_SLOT_ITEM_START,
+                    BANK_SLOT_ITEM_END,
+                    dest,
+                    proto,
+                    &mut count,
+                    false,
+                    args.source_item,
+                    args.source_is_not_empty_bag,
+                    args.bag,
+                    args.slot,
+                    args.slot_items,
+                );
+                if result != InventoryResult::Ok {
+                    return result;
+                }
+                if count == 0 {
+                    return InventoryResult::Ok;
+                }
+            } else {
+                let mut result = self.can_store_item_in_bag(
+                    args.bag,
+                    dest,
+                    proto,
+                    &mut count,
+                    false,
+                    false,
+                    args.source_item,
+                    args.source_is_not_empty_bag,
+                    NULL_BAG,
+                    args.slot,
+                    bag_template_by_pos(args.bag_templates, args.bag),
+                    args.slot_items,
+                );
+                if result != InventoryResult::Ok {
+                    result = self.can_store_item_in_bag(
+                        args.bag,
+                        dest,
+                        proto,
+                        &mut count,
+                        false,
+                        true,
+                        args.source_item,
+                        args.source_is_not_empty_bag,
+                        NULL_BAG,
+                        args.slot,
+                        bag_template_by_pos(args.bag_templates, args.bag),
+                        args.slot_items,
+                    );
+                }
+                if result != InventoryResult::Ok {
+                    return result;
+                }
+                if count == 0 {
+                    return InventoryResult::Ok;
+                }
+            }
+        }
+
+        if proto.max_stack_size != 1 {
+            let result = self.can_store_item_in_inventory_slots(
+                BANK_SLOT_ITEM_START,
+                BANK_SLOT_ITEM_END,
+                dest,
+                proto,
+                &mut count,
+                true,
+                args.source_item,
+                args.source_is_not_empty_bag,
+                args.bag,
+                args.slot,
+                args.slot_items,
+            );
+            if result != InventoryResult::Ok {
+                return result;
+            }
+            if count == 0 {
+                return InventoryResult::Ok;
+            }
+
+            if !proto.bag_family.is_empty() {
+                for bag_slot in BANK_SLOT_BAG_START..BANK_SLOT_BAG_END {
+                    let result = self.can_store_item_in_bag(
+                        bag_slot,
+                        dest,
+                        proto,
+                        &mut count,
+                        true,
+                        false,
+                        args.source_item,
+                        args.source_is_not_empty_bag,
+                        args.bag,
+                        args.slot,
+                        bag_template_by_pos(args.bag_templates, bag_slot),
+                        args.slot_items,
+                    );
+                    if result != InventoryResult::Ok {
+                        continue;
+                    }
+                    if count == 0 {
+                        return InventoryResult::Ok;
+                    }
+                }
+            }
+
+            for bag_slot in BANK_SLOT_BAG_START..BANK_SLOT_BAG_END {
+                let result = self.can_store_item_in_bag(
+                    bag_slot,
+                    dest,
+                    proto,
+                    &mut count,
+                    true,
+                    true,
+                    args.source_item,
+                    args.source_is_not_empty_bag,
+                    args.bag,
+                    args.slot,
+                    bag_template_by_pos(args.bag_templates, bag_slot),
+                    args.slot_items,
+                );
+                if result != InventoryResult::Ok {
+                    continue;
+                }
+                if count == 0 {
+                    return InventoryResult::Ok;
+                }
+            }
+        }
+
+        if !proto.bag_family.is_empty() {
+            for bag_slot in BANK_SLOT_BAG_START..BANK_SLOT_BAG_END {
+                let result = self.can_store_item_in_bag(
+                    bag_slot,
+                    dest,
+                    proto,
+                    &mut count,
+                    false,
+                    false,
+                    args.source_item,
+                    args.source_is_not_empty_bag,
+                    args.bag,
+                    args.slot,
+                    bag_template_by_pos(args.bag_templates, bag_slot),
+                    args.slot_items,
+                );
+                if result != InventoryResult::Ok {
+                    continue;
+                }
+                if count == 0 {
+                    return InventoryResult::Ok;
+                }
+            }
+        }
+
+        let result = self.can_store_item_in_inventory_slots(
+            BANK_SLOT_ITEM_START,
+            BANK_SLOT_ITEM_END,
+            dest,
+            proto,
+            &mut count,
+            false,
+            args.source_item,
+            args.source_is_not_empty_bag,
+            args.bag,
+            args.slot,
+            args.slot_items,
+        );
+        if result != InventoryResult::Ok {
+            return result;
+        }
+        if count == 0 {
+            return InventoryResult::Ok;
+        }
+
+        for bag_slot in BANK_SLOT_BAG_START..BANK_SLOT_BAG_END {
+            let result = self.can_store_item_in_bag(
+                bag_slot,
+                dest,
+                proto,
+                &mut count,
+                false,
+                true,
+                args.source_item,
+                args.source_is_not_empty_bag,
+                args.bag,
+                args.slot,
+                bag_template_by_pos(args.bag_templates, bag_slot),
+                args.slot_items,
+            );
+            if result != InventoryResult::Ok {
+                continue;
+            }
+            if count == 0 {
+                return InventoryResult::Ok;
+            }
+        }
+
+        InventoryResult::BankFull
+    }
+
     pub fn top_level_item_guid(&self, slot: u8) -> Option<ObjectGuid> {
         self.inventory.items.get(slot as usize).copied().flatten()
     }
@@ -2541,6 +2918,30 @@ mod tests {
             source_is_not_empty_bag: false,
             source_bop_trade_allowed_for_player: false,
             swap: false,
+            limit_category: None,
+            slot_items: &[],
+            stored_items: &[],
+            bag_templates: &[],
+        }
+    }
+
+    fn can_bank_args<'a>(
+        bag: u8,
+        slot: u8,
+        proto: Option<&'a ItemStorageTemplate>,
+        source_item: Option<&'a Item>,
+    ) -> CanBankItemArgs<'a> {
+        CanBankItemArgs {
+            bag,
+            slot,
+            proto,
+            source_item,
+            source_is_not_empty_bag: false,
+            source_is_bag: false,
+            source_is_currency_token: false,
+            source_bop_trade_allowed_for_player: false,
+            swap: false,
+            can_use_result: InventoryResult::Ok,
             limit_category: None,
             slot_items: &[],
             stored_items: &[],
@@ -3993,6 +4394,258 @@ mod tests {
                 result: InventoryResult::BagInBag,
                 no_space_count: None,
             }
+        );
+    }
+
+    #[test]
+    fn can_bank_item_preflight_matches_cpp_item_template_and_source_guards() {
+        let player = Player::new(None, false);
+        let proto = ItemStorageTemplate::regular_item(6948, 20);
+        let mut source = Item::default();
+        source.object_mut().create(ObjectGuid::create_item(1, 700));
+        source.object_mut().set_entry(6948);
+        source.set_count(3);
+
+        assert_eq!(
+            player.can_bank_item(
+                &mut Vec::new(),
+                can_bank_args(
+                    INVENTORY_SLOT_BAG_0,
+                    BANK_SLOT_ITEM_START,
+                    Some(&proto),
+                    None
+                ),
+            ),
+            InventoryResult::ItemNotFound
+        );
+
+        let mut missing_swap = can_bank_args(
+            INVENTORY_SLOT_BAG_0,
+            BANK_SLOT_ITEM_START,
+            Some(&proto),
+            None,
+        );
+        missing_swap.swap = true;
+        assert_eq!(
+            player.can_bank_item(&mut Vec::new(), missing_swap),
+            InventoryResult::CantSwap
+        );
+
+        assert_eq!(
+            player.can_bank_item(
+                &mut Vec::new(),
+                can_bank_args(
+                    INVENTORY_SLOT_BAG_0,
+                    BANK_SLOT_ITEM_START,
+                    None,
+                    Some(&source)
+                ),
+            ),
+            InventoryResult::ItemNotFound
+        );
+
+        source.set_loot_generated(true);
+        assert_eq!(
+            player.can_bank_item(
+                &mut Vec::new(),
+                can_bank_args(
+                    INVENTORY_SLOT_BAG_0,
+                    BANK_SLOT_ITEM_START,
+                    Some(&proto),
+                    Some(&source),
+                ),
+            ),
+            InventoryResult::LootGone
+        );
+
+        source.set_loot_generated(false);
+        source.set_owner_guid(ObjectGuid::create_player(1, 42));
+        source.set_item_flag(ItemFieldFlags::SOULBOUND);
+        assert_eq!(
+            player.can_bank_item(
+                &mut Vec::new(),
+                can_bank_args(
+                    INVENTORY_SLOT_BAG_0,
+                    BANK_SLOT_ITEM_START,
+                    Some(&proto),
+                    Some(&source),
+                ),
+            ),
+            InventoryResult::NotOwner
+        );
+
+        source.remove_item_flag(ItemFieldFlags::SOULBOUND);
+        let mut currency_args = can_bank_args(
+            INVENTORY_SLOT_BAG_0,
+            BANK_SLOT_ITEM_START,
+            Some(&proto),
+            Some(&source),
+        );
+        currency_args.source_is_currency_token = true;
+        assert_eq!(
+            player.can_bank_item(&mut Vec::new(), currency_args),
+            InventoryResult::CantSwap
+        );
+
+        let limited_proto = ItemStorageTemplate {
+            max_count: 3,
+            ..proto
+        };
+        let mut existing = Item::default();
+        existing
+            .object_mut()
+            .create(ObjectGuid::create_item(1, 701));
+        existing.object_mut().set_entry(6948);
+        existing.set_count(3);
+        let stored = [ItemStorageRef::new(
+            INVENTORY_SLOT_BAG_0,
+            INVENTORY_SLOT_ITEM_START,
+            &existing,
+            Some(&limited_proto),
+        )];
+        let mut limit_args = can_bank_args(
+            INVENTORY_SLOT_BAG_0,
+            BANK_SLOT_ITEM_START,
+            Some(&limited_proto),
+            Some(&source),
+        );
+        limit_args.stored_items = &stored;
+        assert_eq!(
+            player.can_bank_item(&mut Vec::new(), limit_args),
+            InventoryResult::ItemMaxCount
+        );
+    }
+
+    #[test]
+    fn can_bank_item_specific_bank_bag_slot_matches_cpp_guards() {
+        let mut player = Player::new(None, false);
+        let proto = ItemStorageTemplate::regular_item(6948, 1);
+        let mut source = Item::default();
+        source.object_mut().create(ObjectGuid::create_item(1, 710));
+        source.object_mut().set_entry(6948);
+        source.set_count(1);
+
+        assert_eq!(
+            player.can_bank_item(
+                &mut Vec::new(),
+                can_bank_args(
+                    INVENTORY_SLOT_BAG_0,
+                    BANK_SLOT_BAG_START,
+                    Some(&proto),
+                    Some(&source),
+                ),
+            ),
+            InventoryResult::WrongSlot
+        );
+
+        let mut bag_args = can_bank_args(
+            INVENTORY_SLOT_BAG_0,
+            BANK_SLOT_BAG_START,
+            Some(&proto),
+            Some(&source),
+        );
+        bag_args.source_is_bag = true;
+        assert_eq!(
+            player.can_bank_item(&mut Vec::new(), bag_args),
+            InventoryResult::NoBankSlot
+        );
+
+        player.set_bank_bag_slot_count(1);
+        bag_args.can_use_result = InventoryResult::CantUseItem;
+        assert_eq!(
+            player.can_bank_item(&mut Vec::new(), bag_args),
+            InventoryResult::CantUseItem
+        );
+    }
+
+    #[test]
+    fn can_bank_item_fills_specific_slot_then_continues_bank_search_like_cpp() {
+        let player = Player::new(None, false);
+        let proto = ItemStorageTemplate::regular_item(6948, 20);
+        let mut source = Item::default();
+        source.object_mut().create(ObjectGuid::create_item(1, 720));
+        source.object_mut().set_entry(6948);
+        source.set_count(10);
+        let mut existing = Item::default();
+        existing
+            .object_mut()
+            .create(ObjectGuid::create_item(1, 721));
+        existing.object_mut().set_entry(6948);
+        existing.set_count(15);
+        let slot_items = [ItemSlotRef::new(
+            INVENTORY_SLOT_BAG_0,
+            BANK_SLOT_ITEM_START,
+            &existing,
+        )];
+        let mut args = can_bank_args(
+            INVENTORY_SLOT_BAG_0,
+            BANK_SLOT_ITEM_START,
+            Some(&proto),
+            Some(&source),
+        );
+        args.slot_items = &slot_items;
+        let mut dest = Vec::new();
+
+        assert_eq!(player.can_bank_item(&mut dest, args), InventoryResult::Ok);
+        assert_eq!(
+            dest,
+            vec![
+                ItemPosCount::new(make_item_pos(INVENTORY_SLOT_BAG_0, BANK_SLOT_ITEM_START), 5),
+                ItemPosCount::new(
+                    make_item_pos(INVENTORY_SLOT_BAG_0, BANK_SLOT_ITEM_START + 1),
+                    5
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn can_bank_item_general_search_and_full_bank_match_cpp() {
+        let proto = ItemStorageTemplate::regular_item(6948, 20);
+        let mut source = Item::default();
+        source.object_mut().create(ObjectGuid::create_item(1, 730));
+        source.object_mut().set_entry(6948);
+        source.set_count(3);
+        let player = Player::new(None, false);
+        let mut dest = Vec::new();
+
+        assert_eq!(
+            player.can_bank_item(
+                &mut dest,
+                can_bank_args(NULL_BAG, NULL_SLOT, Some(&proto), Some(&source)),
+            ),
+            InventoryResult::Ok
+        );
+        assert_eq!(
+            dest,
+            vec![ItemPosCount::new(
+                make_item_pos(INVENTORY_SLOT_BAG_0, BANK_SLOT_ITEM_START),
+                3,
+            )]
+        );
+
+        let mut occupied_items = Vec::new();
+        for idx in 0..(BANK_SLOT_ITEM_END - BANK_SLOT_ITEM_START) {
+            let mut occupied = Item::default();
+            occupied
+                .object_mut()
+                .create(ObjectGuid::create_item(1, 800 + idx as i64));
+            occupied.object_mut().set_entry(9999);
+            occupied.set_count(1);
+            occupied_items.push(occupied);
+        }
+        let slot_items = occupied_items
+            .iter()
+            .enumerate()
+            .map(|(idx, item)| {
+                ItemSlotRef::new(INVENTORY_SLOT_BAG_0, BANK_SLOT_ITEM_START + idx as u8, item)
+            })
+            .collect::<Vec<_>>();
+        let mut full_args = can_bank_args(NULL_BAG, NULL_SLOT, Some(&proto), Some(&source));
+        full_args.slot_items = &slot_items;
+        assert_eq!(
+            player.can_bank_item(&mut Vec::new(), full_args),
+            InventoryResult::BankFull
         );
     }
 
