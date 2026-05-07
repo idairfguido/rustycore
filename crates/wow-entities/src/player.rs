@@ -3159,6 +3159,76 @@ impl Player {
         true
     }
 
+    pub fn destroy_item_object(
+        &mut self,
+        bag: u8,
+        slot: u8,
+        item: Option<&mut Item>,
+        bag_object: Option<&mut Bag>,
+    ) -> Result<Option<ObjectGuid>, PlayerStorageError> {
+        let Some(item) = item else {
+            return Ok(None);
+        };
+
+        let item_guid = item.object().guid();
+        let removed = if bag == INVENTORY_SLOT_BAG_0 {
+            let Some(expected_guid) = self.top_level_item_guid(slot) else {
+                return Err(PlayerStorageError::EmptyPlayerSlot(slot));
+            };
+            if expected_guid != item_guid {
+                return Err(PlayerStorageError::MismatchedItemGuid {
+                    slot,
+                    expected: expected_guid,
+                    actual: item_guid,
+                });
+            }
+
+            self.remove_top_level_item(slot)?
+        } else {
+            let Some(bag_object) = bag_object else {
+                return Err(PlayerStorageError::UnknownBag(bag));
+            };
+            let expected_bag_guid = self
+                .get_bag_by_pos(bag)
+                .ok_or(PlayerStorageError::UnknownBag(bag))?;
+            let actual_bag_guid = bag_object.item().object().guid();
+            if expected_bag_guid != actual_bag_guid {
+                return Err(PlayerStorageError::MismatchedBagGuid {
+                    bag,
+                    expected: expected_bag_guid,
+                    actual: actual_bag_guid,
+                });
+            }
+
+            let expected_guid = self
+                .inventory
+                .bags
+                .get(bag as usize)
+                .and_then(Option::as_ref)
+                .and_then(|bag_storage| bag_storage.item_by_pos(slot))
+                .ok_or(PlayerStorageError::EmptyBagItemSlot { bag, slot })?;
+            if expected_guid != item_guid {
+                return Err(PlayerStorageError::MismatchedBagItemGuid {
+                    bag,
+                    slot,
+                    expected: expected_guid,
+                    actual: item_guid,
+                });
+            }
+
+            bag_object.remove_item(slot);
+            self.remove_bag_item(bag, slot)?
+        };
+
+        item.set_not_refundable();
+        item.clear_soulbound_tradeable();
+        item.set_contained_in(ObjectGuid::EMPTY);
+        item.set_slot(NULL_SLOT);
+        item.set_container_guid(ObjectGuid::EMPTY);
+        item.set_state(ItemUpdateState::Removed);
+        Ok(removed)
+    }
+
     pub fn store_bag_item(
         &mut self,
         bag: u8,
@@ -7457,6 +7527,110 @@ mod tests {
         assert!(!player.finalize_move_item_to_inventory_object(original_guid, &mut merged, false));
         assert_eq!(merged.owner_guid(), ObjectGuid::EMPTY);
         assert_eq!(merged.update_state(), ItemUpdateState::Unchanged);
+    }
+
+    #[test]
+    fn destroy_item_object_removes_top_level_item_like_cpp() {
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let item_guid = ObjectGuid::create_item(1, 520);
+        let mut player = Player::new(None, false);
+        let mut item = Item::default();
+
+        player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(player_guid);
+        item.object_mut().create(item_guid);
+        item.set_owner_guid(player_guid);
+        item.set_contained_in(player_guid);
+        item.set_slot(EQUIPMENT_SLOT_MAINHAND);
+        item.set_item_flag(ItemFieldFlags::REFUNDABLE | ItemFieldFlags::BOP_TRADEABLE);
+        item.set_item_flag2(ItemFieldFlags2::EQUIPPED);
+        item.force_state(ItemUpdateState::Unchanged);
+        player
+            .visualize_item(
+                EQUIPMENT_SLOT_MAINHAND,
+                item_guid,
+                VisibleItemValues {
+                    item_id: 520,
+                    item_appearance_mod_id: 6,
+                    item_visual: 7,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            player
+                .destroy_item_object(
+                    INVENTORY_SLOT_BAG_0,
+                    EQUIPMENT_SLOT_MAINHAND,
+                    Some(&mut item),
+                    None,
+                )
+                .unwrap(),
+            Some(item_guid)
+        );
+
+        assert_eq!(
+            player.get_item_by_pos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_MAINHAND),
+            None
+        );
+        assert_eq!(
+            player.data().visible_items[EQUIPMENT_SLOT_MAINHAND as usize],
+            VisibleItemValues::default()
+        );
+        assert_eq!(item.data().contained_in, ObjectGuid::EMPTY);
+        assert_eq!(item.owner_guid(), player_guid);
+        assert_eq!(item.slot(), NULL_SLOT);
+        assert!(!item.has_item_flag(ItemFieldFlags::REFUNDABLE));
+        assert!(!item.has_item_flag(ItemFieldFlags::BOP_TRADEABLE));
+        assert!(item.has_item_flag2(ItemFieldFlags2::EQUIPPED));
+        assert_eq!(item.update_state(), ItemUpdateState::Removed);
+    }
+
+    #[test]
+    fn destroy_item_object_removes_bag_item_like_cpp() {
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let bag_guid = ObjectGuid::create_item(1, 801);
+        let item_guid = ObjectGuid::create_item(1, 521);
+        let mut player = Player::new(None, false);
+        let mut bag = Bag::default();
+        let mut item = Item::default();
+
+        player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(player_guid);
+        bag.item_mut().object_mut().create(bag_guid);
+        bag.item_mut().set_owner_guid(player_guid);
+        item.object_mut().create(item_guid);
+        item.set_item_flag(ItemFieldFlags::REFUNDABLE | ItemFieldFlags::BOP_TRADEABLE);
+        item.force_state(ItemUpdateState::Unchanged);
+        player
+            .register_bag_storage(INVENTORY_SLOT_BAG_START, bag_guid, 10)
+            .unwrap();
+        bag.store_item(3, &mut item);
+        player
+            .store_bag_item(INVENTORY_SLOT_BAG_START, 3, item_guid)
+            .unwrap();
+
+        assert_eq!(
+            player
+                .destroy_item_object(INVENTORY_SLOT_BAG_START, 3, Some(&mut item), Some(&mut bag))
+                .unwrap(),
+            Some(item_guid)
+        );
+
+        assert_eq!(player.get_item_by_pos(INVENTORY_SLOT_BAG_START, 3), None);
+        assert_eq!(bag.data().slots[3], ObjectGuid::EMPTY);
+        assert_eq!(item.data().contained_in, ObjectGuid::EMPTY);
+        assert_eq!(item.container_guid(), ObjectGuid::EMPTY);
+        assert_eq!(item.slot(), NULL_SLOT);
+        assert!(!item.has_item_flag(ItemFieldFlags::REFUNDABLE));
+        assert!(!item.has_item_flag(ItemFieldFlags::BOP_TRADEABLE));
+        assert_eq!(item.update_state(), ItemUpdateState::Removed);
     }
 
     #[test]
