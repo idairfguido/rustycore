@@ -200,6 +200,26 @@ where
         counts
     }
 
+    pub fn has_personal_spawns(&self, phase_id: u32) -> bool {
+        self.spawn_store
+            .has_personal_spawns(self.map_id, self.difficulty, phase_id)
+    }
+
+    pub fn load_personal_phase(&mut self, grid: &mut NGrid, phase_id: u32) -> ObjectGridLoadCounts {
+        let mut counts = ObjectGridLoadCounts::default();
+
+        for x in 0..MAX_NUMBER_OF_CELLS {
+            for y in 0..MAX_NUMBER_OF_CELLS {
+                let cell = grid
+                    .get_grid_type_mut(x, y)
+                    .expect("NGrid local cell coordinates are bounded by MAX_NUMBER_OF_CELLS");
+                self.load_personal_phase_cell(cell, phase_id, &mut counts);
+            }
+        }
+
+        counts
+    }
+
     fn load_cell(&mut self, cell: &mut Cell, counts: &mut ObjectGridLoadCounts) {
         let cell_id = cell.cell_coord().get_id();
         if let Some(cell_guids) =
@@ -235,6 +255,35 @@ where
                 cell.grid_objects.corpses.insert(corpse.guid);
             }
             counts.corpses += 1;
+        }
+    }
+
+    fn load_personal_phase_cell(
+        &mut self,
+        cell: &mut Cell,
+        phase_id: u32,
+        counts: &mut ObjectGridLoadCounts,
+    ) {
+        let cell_id = cell.cell_coord().get_id();
+        if let Some(cell_guids) = self.spawn_store.cell_personal_object_guids(
+            self.map_id,
+            self.difficulty,
+            phase_id,
+            cell_id,
+        ) {
+            for spawn_id in &cell_guids.gameobjects {
+                if let Some(guid) = self.load_spawn_guid(SpawnObjectType::GameObject, *spawn_id) {
+                    cell.grid_objects.gameobjects.insert(guid);
+                    counts.gameobjects += 1;
+                }
+            }
+
+            for spawn_id in &cell_guids.creatures {
+                if let Some(guid) = self.load_spawn_guid(SpawnObjectType::Creature, *spawn_id) {
+                    cell.grid_objects.creatures.insert(guid);
+                    counts.creatures += 1;
+                }
+            }
         }
     }
 

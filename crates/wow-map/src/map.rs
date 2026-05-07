@@ -12,6 +12,8 @@ use crate::coords::{
     TOTAL_NUMBER_OF_CELLS_PER_MAP, compute_cell_coord,
 };
 use crate::grid::{GridStateKind, MapGridHost, NGrid, update_grid_state};
+use crate::object_grid_loader::{GridSpawnLoadFilter, ObjectGridLoader};
+use crate::personal_phase::{MultiPersonalPhaseTracker, PhaseShift};
 use crate::spawn::Difficulty;
 
 const GRID_SLOT_COUNT: usize = (MAX_NUMBER_OF_GRIDS * MAX_NUMBER_OF_GRIDS) as usize;
@@ -66,6 +68,7 @@ pub struct Map<Terrain = NoopTerrainGridLoader, Lifecycle = NoopGridLifecycle> {
     terrain: Terrain,
     lifecycle: Lifecycle,
     active_cells: HashSet<CellCoord>,
+    personal_phase_tracker: MultiPersonalPhaseTracker,
     grid_state_unloaded: bool,
 }
 
@@ -113,6 +116,7 @@ where
             terrain,
             lifecycle,
             active_cells: HashSet::new(),
+            personal_phase_tracker: MultiPersonalPhaseTracker::default(),
             grid_state_unloaded: false,
         }
     }
@@ -143,6 +147,10 @@ where
 
     pub fn lifecycle(&self) -> &Lifecycle {
         &self.lifecycle
+    }
+
+    pub fn personal_phase_tracker(&self) -> &MultiPersonalPhaseTracker {
+        &self.personal_phase_tracker
     }
 
     pub fn mark_active_cell(&mut self, cell: CellCoord) {
@@ -218,12 +226,39 @@ where
         self.mark_active_cell(cell.cell_coord());
 
         if matches!(kind, ActiveObjectKind::Player) {
-            // C++ also loads MultiPersonalPhaseTracker here. The tracker is a
-            // separate port item because it consumes phase-shift state.
+            // Use `ensure_grid_loaded_for_player_phase` when phase-shift state
+            // is available; this entry point only has the object kind.
         }
 
         let active_expiry_ms = (self.grid_expiry_ms as f32 * 0.1) as i64;
         let grid = self.get_ngrid_mut(coord).expect("grid was just loaded");
+        if grid.state() != GridStateKind::Active {
+            grid.info_mut().reset_time_tracker(active_expiry_ms);
+            grid.set_state(GridStateKind::Active);
+        }
+
+        loaded_now
+    }
+
+    pub fn ensure_grid_loaded_for_player_phase<Filter>(
+        &mut self,
+        cell: &Cell,
+        phase_shift: &PhaseShift,
+        loader: &mut ObjectGridLoader<'_, Filter>,
+    ) -> bool
+    where
+        Filter: GridSpawnLoadFilter,
+    {
+        let loaded_now = self.ensure_grid_loaded(cell);
+        let coord = GridCoord::new(cell.grid_x(), cell.grid_y());
+        self.mark_active_cell(cell.cell_coord());
+
+        let active_expiry_ms = (self.grid_expiry_ms as f32 * 0.1) as i64;
+        let index = checked_grid_index(coord);
+        let grid = self.grids[index].as_mut().expect("grid was just loaded");
+        self.personal_phase_tracker
+            .load_grid(phase_shift, grid, loader);
+
         if grid.state() != GridStateKind::Active {
             grid.info_mut().reset_time_tracker(active_expiry_ms);
             grid.set_state(GridStateKind::Active);
@@ -516,6 +551,53 @@ mod tests {
         assert_eq!(grid.state(), GridStateKind::Active);
         assert_eq!(grid.info().time_tracker().remaining_ms(), 100);
         assert!(map.active_objects_near_grid(grid));
+    }
+
+    #[test]
+    fn player_phase_loading_invokes_personal_phase_tracker_before_activation() {
+        let mut store = crate::spawn::SpawnStore::new();
+        let spawn = crate::spawn::SpawnData {
+            object_type: crate::spawn::SpawnObjectType::Creature,
+            spawn_id: 100,
+            map_id: 571,
+            db_data: true,
+            id: 42,
+            spawn_point: crate::spawn::SpawnPosition::new(0.0, 0.0, 1.0, 2.0),
+            phase_use_flags: 0,
+            phase_id: 9,
+            phase_group: 0,
+            terrain_swap_map: -1,
+            pool_id: 0,
+            spawn_time_secs: 120,
+            spawn_difficulties: vec![1],
+            script_id: 0,
+            string_id: String::new(),
+        };
+        store.add_object_spawn(&spawn, |phase_id| phase_id == 9);
+        let corpses = crate::object_grid_loader::CorpseCellStore::new();
+        let mut loader =
+            crate::object_grid_loader::ObjectGridLoader::new(&store, &corpses, 571, 1, 1, 1);
+        let owner = ObjectGuid::create_player(1, 100);
+        let phase_shift = crate::personal_phase::PhaseShift::new(
+            Some(owner),
+            vec![crate::personal_phase::PhaseRef::new(9, true)],
+        );
+        let mut map = test_map();
+        let cell = cell_from_grid_center(GridCoord::new(32, 32));
+
+        assert!(map.ensure_grid_loaded_for_player_phase(&cell, &phase_shift, &mut loader));
+
+        let grid = map.get_ngrid(GridCoord::new(32, 32)).unwrap();
+        assert_eq!(grid.state(), GridStateKind::Active);
+        assert_eq!(
+            grid.get_grid_type(0, 0)
+                .unwrap()
+                .grid_objects
+                .creatures
+                .len(),
+            1
+        );
+        assert_eq!(map.personal_phase_tracker().tracker_count(), 1);
     }
 
     #[test]

@@ -3,6 +3,7 @@ pub mod coords;
 pub mod grid;
 pub mod map;
 pub mod object_grid_loader;
+pub mod personal_phase;
 pub mod spawn;
 
 use std::fmt;
@@ -25,6 +26,10 @@ pub use map::{
 pub use object_grid_loader::{
     CorpseCellStore, CorpseGridObject, GridSpawnLoadFilter, LoadAllGridSpawns,
     ObjectGridLoadCounts, ObjectGridLoader, SpawnGridLifecycle,
+};
+pub use personal_phase::{
+    MultiPersonalPhaseTracker, PERSONAL_PHASE_DELETE_TIME_DEFAULT_MS, PersonalPhaseSpawns,
+    PhaseRef, PhaseShift, PlayerPersonalPhasesTracker,
 };
 pub use spawn::{
     CellSpawnGuids, Difficulty, PersonalSpawnMapKey, SpawnData, SpawnGroupFlags,
