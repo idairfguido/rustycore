@@ -1,6 +1,6 @@
 use wow_constants::{
-    EnchantmentSlot, ItemBondingType, ItemContext, ItemFieldFlags, ItemFieldFlags2, ItemModifier,
-    ItemUpdateState, TypeId, TypeMask,
+    EnchantmentSlot, InventoryResult, ItemBondingType, ItemContext, ItemFieldFlags,
+    ItemFieldFlags2, ItemModifier, ItemUpdateState, TypeId, TypeMask,
 };
 use wow_core::ObjectGuid;
 
@@ -392,6 +392,22 @@ impl Item {
         {
             self.set_binding(true);
         }
+    }
+
+    pub fn can_be_merged_partly_with(&self, entry: u32, max_stack_size: u32) -> InventoryResult {
+        if self.loot_generated {
+            return InventoryResult::LootGone;
+        }
+
+        if self.object.entry() != entry {
+            return InventoryResult::CantStack;
+        }
+
+        if self.count() >= max_stack_size {
+            return InventoryResult::CantStack;
+        }
+
+        InventoryResult::Ok
     }
 
     pub fn position(&self) -> u16 {
@@ -1234,6 +1250,35 @@ mod tests {
         assert!(
             item.item_data_changes_mask()
                 .is_set(ITEM_DATA_ENCHANTMENT_FIRST_BIT + 2)
+        );
+    }
+
+    #[test]
+    fn can_be_merged_partly_with_matches_cpp_guards() {
+        let mut item = Item::default();
+        item.object_mut().set_entry(6948);
+        item.set_count(4);
+
+        assert_eq!(
+            item.can_be_merged_partly_with(6948, 20),
+            InventoryResult::Ok
+        );
+        assert_eq!(
+            item.can_be_merged_partly_with(6949, 20),
+            InventoryResult::CantStack
+        );
+
+        item.set_count(20);
+        assert_eq!(
+            item.can_be_merged_partly_with(6948, 20),
+            InventoryResult::CantStack
+        );
+
+        item.set_count(4);
+        item.set_loot_generated(true);
+        assert_eq!(
+            item.can_be_merged_partly_with(6948, 20),
+            InventoryResult::LootGone
         );
     }
 
