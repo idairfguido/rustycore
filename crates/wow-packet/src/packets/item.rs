@@ -12,26 +12,7 @@ use crate::{ClientPacket, PacketError, ServerPacket, WorldPacket};
 
 // ── InventoryResult ─────────────────────────────────────────────────
 
-/// Result codes for inventory operations (matches C# InventoryResult).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(i32)]
-#[allow(dead_code)]
-pub enum InventoryResult {
-    Ok = 0,
-    CantEquipLevelI = 1,
-    WrongSlot = 3,
-    BagFull = 4,
-    NotEquippable = 20,
-    CantSwap = 21,
-    SlotEmpty = 22,
-    ItemNotFound = 23,
-    DropBoundItem = 24,
-    NotABag = 31,
-    NotOwner = 33,
-    PlayerDead = 39,
-    InvFull = 51,
-    InternalBagError = 83,
-}
+pub use wow_constants::InventoryResult;
 
 // ── InvUpdate (bit-packed item position list) ──────────────────────
 
@@ -184,6 +165,8 @@ pub struct InventoryChangeFailure {
     pub bag_result: InventoryResult,
     pub item: [ObjectGuid; 2],
     pub container_b_slot: u8,
+    pub level: u32,
+    pub limit_category: u32,
 }
 
 impl ServerPacket for InventoryChangeFailure {
@@ -194,7 +177,17 @@ impl ServerPacket for InventoryChangeFailure {
         pkt.write_packed_guid(&self.item[0]);
         pkt.write_packed_guid(&self.item[1]);
         pkt.write_uint8(self.container_b_slot);
-        // Extra fields based on bag_result omitted for now
+        match self.bag_result {
+            InventoryResult::CantEquipLevelI | InventoryResult::PurchaseLevelTooLow => {
+                pkt.write_uint32(self.level);
+            }
+            InventoryResult::ItemMaxLimitCategoryCountExceededIs
+            | InventoryResult::ItemMaxLimitCategorySocketedExceededIs
+            | InventoryResult::ItemMaxLimitCategoryEquippedExceededIs => {
+                pkt.write_uint32(self.limit_category);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -205,12 +198,24 @@ impl InventoryChangeFailure {
             bag_result: result,
             item: [item1, item2],
             container_b_slot: 0,
+            level: 0,
+            limit_category: 0,
         }
     }
 
     /// Create a simple error with no item context.
     pub fn error(result: InventoryResult) -> Self {
         Self::new(result, ObjectGuid::EMPTY, ObjectGuid::EMPTY)
+    }
+
+    pub fn with_level(mut self, level: u32) -> Self {
+        self.level = level;
+        self
+    }
+
+    pub fn with_limit_category(mut self, limit_category: u32) -> Self {
+        self.limit_category = limit_category;
+        self
     }
 }
 
@@ -270,6 +275,24 @@ mod tests {
         let bytes = pkt.to_bytes();
         // opcode(2) + result(4) + guid1(2) + guid2(2) + containerBSlot(1) = 11 bytes
         assert!(bytes.len() >= 11, "Packet too small: {} bytes", bytes.len());
+    }
+
+    #[test]
+    fn inventory_change_failure_serializes_level_like_cpp_send_equip_error() {
+        let pkt = InventoryChangeFailure::error(InventoryResult::CantEquipLevelI).with_level(42);
+        let bytes = pkt.to_bytes();
+
+        assert_eq!(&bytes[bytes.len() - 4..], &42u32.to_le_bytes());
+    }
+
+    #[test]
+    fn inventory_change_failure_serializes_limit_category_like_cpp_send_equip_error() {
+        let pkt =
+            InventoryChangeFailure::error(InventoryResult::ItemMaxLimitCategoryCountExceededIs)
+                .with_limit_category(777);
+        let bytes = pkt.to_bytes();
+
+        assert_eq!(&bytes[bytes.len() - 4..], &777u32.to_le_bytes());
     }
 
     #[test]
