@@ -73,12 +73,24 @@ pub enum WorldStatements {
     INS_CONDITION,
     /// Load creatures in a bounding box around a position on a map.
     SEL_CREATURES_IN_RANGE,
+    /// Load all creature spawn rows into the C++ ObjectMgr-style spawn store.
+    SEL_CREATURE_SPAWNS,
     /// Load creature template for query response (name, type, display, etc.).
     SEL_CREATURE_QUERY_RESPONSE,
     /// Load creature display models for a template entry.
     SEL_CREATURE_DISPLAY_MODELS,
     /// Load gameobjects in a bounding box around a position on a map.
     SEL_GAMEOBJECTS_IN_RANGE,
+    /// Load all gameobject spawn rows into the C++ ObjectMgr-style spawn store.
+    SEL_GAMEOBJECT_SPAWNS,
+    /// Load all static areatrigger spawn rows into the C++ AreaTriggerDataStore-style spawn store.
+    SEL_AREATRIGGER_SPAWNS,
+    /// Load C++ spawn group templates.
+    SEL_SPAWN_GROUP_TEMPLATES,
+    /// Load C++ spawn group members.
+    SEL_SPAWN_GROUP_MEMBERS,
+    /// Load C++ instance spawn groups.
+    SEL_INSTANCE_SPAWN_GROUPS,
     /// Load gameobject template for query response.
     SEL_GAMEOBJECT_TEMPLATE_BY_ENTRY,
     /// SELECT InventoryType FROM item_template WHERE entry = ?
@@ -242,6 +254,14 @@ impl StatementDef for WorldStatements {
                 "LEFT JOIN creature_template_model ctm ON ct.entry = ctm.CreatureID AND ctm.Idx = 0 ",
                 "WHERE c.map = ? AND c.position_x BETWEEN ? AND ? AND c.position_y BETWEEN ? AND ?",
             ),
+            Self::SEL_CREATURE_SPAWNS => concat!(
+                "SELECT creature.guid, id, map, position_x, position_y, position_z, orientation, modelid, equipment_id, spawntimesecs, wander_distance, ",
+                "currentwaypoint, curhealth, curmana, MovementType, spawnDifficulties, eventEntry, poolSpawnId, creature.npcflag, creature.unit_flags, creature.unit_flags2, creature.unit_flags3, ",
+                "creature.phaseUseFlags, creature.phaseid, creature.phasegroup, creature.terrainSwapMap, creature.ScriptName, creature.StringId ",
+                "FROM creature ",
+                "LEFT OUTER JOIN game_event_creature ON creature.guid = game_event_creature.guid ",
+                "LEFT OUTER JOIN pool_members ON pool_members.type = 0 AND creature.guid = pool_members.spawnId",
+            ),
             Self::SEL_CREATURE_QUERY_RESPONSE => concat!(
                 "SELECT ct.entry, ct.name, ct.femaleName, ct.subname, ct.TitleAlt, ct.IconName, ",
                 "ct.type, ct.family, ct.Classification, ct.KillCredit1, ct.KillCredit2, ",
@@ -266,6 +286,25 @@ impl StatementDef for WorldStatements {
                 "JOIN gameobject_template gt ON g.id = gt.entry ",
                 "WHERE g.map = ? AND g.position_x BETWEEN ? AND ? AND g.position_y BETWEEN ? AND ?",
             ),
+            Self::SEL_GAMEOBJECT_SPAWNS => concat!(
+                "SELECT gameobject.guid, id, map, position_x, position_y, position_z, orientation, ",
+                "rotation0, rotation1, rotation2, rotation3, spawntimesecs, animprogress, state, spawnDifficulties, eventEntry, poolSpawnId, ",
+                "phaseUseFlags, phaseid, phasegroup, terrainSwapMap, ScriptName, StringId ",
+                "FROM gameobject LEFT OUTER JOIN game_event_gameobject ON gameobject.guid = game_event_gameobject.guid ",
+                "LEFT OUTER JOIN pool_members ON pool_members.type = 1 AND gameobject.guid = pool_members.spawnId",
+            ),
+            Self::SEL_AREATRIGGER_SPAWNS => {
+                "SELECT SpawnId, AreaTriggerCreatePropertiesId, IsCustom, MapId, SpawnDifficulties, PosX, PosY, PosZ, Orientation, PhaseUseFlags, PhaseId, PhaseGroup, SpellForVisuals, ScriptName FROM `areatrigger`"
+            }
+            Self::SEL_SPAWN_GROUP_TEMPLATES => {
+                "SELECT groupId, groupName, groupFlags FROM spawn_group_template"
+            }
+            Self::SEL_SPAWN_GROUP_MEMBERS => {
+                "SELECT groupId, spawnType, spawnId FROM spawn_group"
+            }
+            Self::SEL_INSTANCE_SPAWN_GROUPS => {
+                "SELECT instanceMapId, bossStateId, bossStates, spawnGroupId, flags FROM instance_spawn_groups"
+            }
             Self::SEL_ITEM_INVENTORY_TYPE => {
                 "SELECT InventoryType FROM item_template WHERE entry = ?"
             }

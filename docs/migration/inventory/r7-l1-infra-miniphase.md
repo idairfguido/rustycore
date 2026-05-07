@@ -33,3 +33,7 @@ This mini-phase closes the R4 `L1_INFRA` gate enough to unblock packet and map w
 - [ ] **#NEXT.L1.DB.PREP.CHARACTER** Split the 511 missing C++ `CharacterDatabase` prepared statements into boot/login/save/social/guild/mail/auction/instance batches.
 - [ ] **#NEXT.L1.DB.PREP.HOTFIX** Split or generate HotfixDatabase per-table statements from C++ `HotfixDatabase.cpp`/`DB2LoadInfo.h`; `#NEXT.L1.INFRA.001.a` only covers DB2Manager control queries.
 - [ ] **#NEXT.L1.DB2.STORES** Define DB2 store implementation order: minimal runtime stores for Maps/Entities first, then full generated 325-store plan.
+- [x] **#NEXT.L1.DB.PREP.MAP_SPAWNS** Add map-spawn prepared SQL and the runtime spawn index needed by Maps.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:2167`, `:2449`, `:2492`; `/home/server/woltk-trinity-legacy/src/server/game/Globals/AreaTriggerDataStore.cpp:312`.
+  Rust targets: `crates/wow-database/src/statements/world.rs`, `crates/wow-map/src/spawn.rs`.
+  Acceptance: creature/gameobject/areatrigger spawn SQL is global preload SQL, not per-cell SQL; `SpawnStore` indexes creature/gameobject GUIDs exactly like `ObjectMgr::AddSpawnDataToGrid`, including personal phase variant; static areatriggers use the non-personal `AreaTriggerDataStore` location index.

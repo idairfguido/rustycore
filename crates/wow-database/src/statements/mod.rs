@@ -112,6 +112,44 @@ mod tests {
     }
 
     #[test]
+    fn world_spawn_loader_statements_match_cpp_objectmgr_tables() {
+        let creature = WorldStatements::SEL_CREATURE_SPAWNS.sql();
+        assert!(creature.starts_with("SELECT creature.guid, id, map"));
+        assert!(creature.contains("FROM creature"));
+        assert!(creature.contains("LEFT OUTER JOIN game_event_creature"));
+        assert!(creature.contains("pool_members.type = 0"));
+        assert_eq!(creature.matches('?').count(), 0);
+
+        let gameobject = WorldStatements::SEL_GAMEOBJECT_SPAWNS.sql();
+        assert!(gameobject.starts_with("SELECT gameobject.guid, id, map"));
+        assert!(gameobject.contains("FROM gameobject"));
+        assert!(gameobject.contains("LEFT OUTER JOIN game_event_gameobject"));
+        assert!(gameobject.contains("pool_members.type = 1"));
+        assert_eq!(gameobject.matches('?').count(), 0);
+
+        let areatrigger = WorldStatements::SEL_AREATRIGGER_SPAWNS.sql();
+        assert!(areatrigger.contains("FROM `areatrigger`"));
+        assert!(areatrigger.contains("SpawnId, AreaTriggerCreatePropertiesId"));
+        assert_eq!(areatrigger.matches('?').count(), 0);
+    }
+
+    #[test]
+    fn world_spawn_group_statements_match_cpp_objectmgr_tables() {
+        assert_eq!(
+            WorldStatements::SEL_SPAWN_GROUP_TEMPLATES.sql(),
+            "SELECT groupId, groupName, groupFlags FROM spawn_group_template"
+        );
+        assert_eq!(
+            WorldStatements::SEL_SPAWN_GROUP_MEMBERS.sql(),
+            "SELECT groupId, spawnType, spawnId FROM spawn_group"
+        );
+        assert_eq!(
+            WorldStatements::SEL_INSTANCE_SPAWN_GROUPS.sql(),
+            "SELECT instanceMapId, bossStateId, bossStates, spawnGroupId, flags FROM instance_spawn_groups"
+        );
+    }
+
+    #[test]
     fn login_sql_has_correct_placeholders() {
         // SEL_IP_INFO has 1 placeholder
         let sql = LoginStatements::SEL_IP_INFO.sql();
