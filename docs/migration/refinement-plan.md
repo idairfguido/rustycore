@@ -112,12 +112,14 @@ Aceptacion de R5: no quedan "unknown unknowns" a nivel de inventario de archivos
 
 ### R6 — Preparacion para implementar
 
-- [ ] **#REFINE.060** Elegir la siguiente mini-fase desde el DAG refinado.
-- [ ] **#REFINE.061** Confirmar que todas sus refs C++ estan listadas.
-- [ ] **#REFINE.062** Confirmar que los tests de aceptacion estan listados antes de programar.
-- [ ] **#REFINE.063** Confirmar plan de rollback/parking para cambios exploratorios.
+- [x] **#REFINE.060** Elegir la siguiente mini-fase desde el DAG refinado.
+- [x] **#REFINE.061** Confirmar que todas sus refs C++ estan listadas.
+- [x] **#REFINE.062** Confirmar que los tests de aceptacion estan listados antes de programar.
+- [x] **#REFINE.063** Confirmar plan de rollback/parking para cambios exploratorios.
 
 Aceptacion de R6: la implementacion puede reanudarse con una mini-fase acotada y sin adivinar.
+
+Resultado R6: la siguiente mini-fase es `#NEXT.L0.CONFIG.001` (L0 config parity / startup config schema), documentada en `docs/migration/inventory/r6-next-miniphase.md` y `docs/migration/inventory/r6-next-miniphase.tsv`. Maps sigue en cola L3, pero queda bloqueado por los gates L0/L1/L2 del DAG refinado.
 
 ---
 

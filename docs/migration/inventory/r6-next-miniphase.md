@@ -1,0 +1,82 @@
+# R6 Next Mini-Phase
+
+> Generated: 2026-05-07
+> Decision source: R4 dependency DAG and C++ config audit.
+> Rule: Rust state is not trusted unless contrasted with the C++ references below.
+
+## Decision
+
+The next implementation mini-phase is `#NEXT.L0.CONFIG.001`:
+
+**L0 config parity / startup config schema**
+
+This runs before the inherited Maps rewrite queue. Maps remains the next L3 focus, but R4 proves that L3 depends on L0/L1/L2 gates. Config is the first L0 blocker because every executable startup path depends on it, and `cpp-config-keys.md` already found real Rust/C++ divergence:
+
+- C++ loads `worldserver.conf`, `worldserver.conf.d`, `bnetserver.conf`, and `bnetserver.conf.d`; Rust currently tries `WorldServer.conf` and `BNetServer.conf`.
+- C++ database settings are semicolon values like `LoginDatabaseInfo = "host;port;user;pass;db"`; Rust currently uses invented subkeys such as `LoginDatabaseInfo.Host`.
+- C++ supports additional config directories and `TC_*` environment overrides; Rust config currently loads one plain file.
+
+## Required C++ References
+
+These references must be open beside the Rust patch when implementation starts:
+
+| Area | C++ refs | Rust targets |
+|---|---|---|
+| Initial config load | `/home/server/woltk-trinity-legacy/src/common/Configuration/Config.cpp:139` | `crates/wow-config/src/lib.rs` |
+| Additional config files/dirs | `/home/server/woltk-trinity-legacy/src/common/Configuration/Config.cpp:160`, `/home/server/woltk-trinity-legacy/src/common/Configuration/Config.cpp:174` | `crates/wow-config/src/lib.rs` |
+| Env override | `/home/server/woltk-trinity-legacy/src/common/Configuration/Config.cpp:125`, `/home/server/woltk-trinity-legacy/src/common/Configuration/Config.cpp:200`, `/home/server/woltk-trinity-legacy/src/common/Configuration/Config.cpp:232` | `crates/wow-config/src/lib.rs` |
+| World config filenames and startup | `/home/server/woltk-trinity-legacy/src/server/worldserver/Main.cpp:74`, `/home/server/woltk-trinity-legacy/src/server/worldserver/Main.cpp:141`, `/home/server/woltk-trinity-legacy/src/server/worldserver/Main.cpp:202`, `/home/server/woltk-trinity-legacy/src/server/worldserver/Main.cpp:212` | `crates/world-server/src/main.rs` |
+| BNet config filenames and startup | `/home/server/woltk-trinity-legacy/src/server/bnetserver/Main.cpp:60`, `/home/server/woltk-trinity-legacy/src/server/bnetserver/Main.cpp:97`, `/home/server/woltk-trinity-legacy/src/server/bnetserver/Main.cpp:119`, `/home/server/woltk-trinity-legacy/src/server/bnetserver/Main.cpp:129` | `crates/bnet-server/src/main.rs` |
+| Database info lookup | `/home/server/woltk-trinity-legacy/src/server/database/Database/DatabaseLoader.cpp:39` | `crates/wow-database/src/database.rs`, `crates/world-server/src/main.rs`, `crates/bnet-server/src/main.rs` |
+| Canonical DB defaults | `/home/server/woltk-trinity-legacy/src/server/worldserver/worldserver.conf.dist:91`, `/home/server/woltk-trinity-legacy/src/server/bnetserver/bnetserver.conf.dist:233` | tests/golden data in Rust |
+
+## Implementation Tasks
+
+- [ ] **#NEXT.L0.CONFIG.001.a** Align default config filenames and command-line/default search with C++ lowercase names.
+  C++ refs: `worldserver/Main.cpp:74`, `worldserver/Main.cpp:141`, `bnetserver/Main.cpp:60`, `bnetserver/Main.cpp:97`.
+  Rust target: `crates/world-server/src/main.rs`, `crates/bnet-server/src/main.rs`, `crates/wow-config/src/lib.rs`.
+  Acceptance: Linux case-sensitive test proves `worldserver.conf`/`bnetserver.conf` are canonical. Uppercase Rust names, if kept, are logged as temporary legacy fallback only.
+
+- [ ] **#NEXT.L0.CONFIG.001.b** Implement canonical semicolon `*DatabaseInfo` parsing.
+  C++ refs: `database/Database/DatabaseLoader.cpp:39`, `worldserver/worldserver.conf.dist:91`, `bnetserver/bnetserver.conf.dist:233`.
+  Rust target: `crates/wow-config/src/lib.rs`, `crates/wow-database/src/database.rs`.
+  Acceptance: unit/golden tests parse host, numeric port, username, password, database, and optional `ssl` from C++ default strings.
+
+- [ ] **#NEXT.L0.CONFIG.001.c** Implement additional `.conf.d` overlay loading.
+  C++ refs: `Configuration/Config.cpp:160`, `Configuration/Config.cpp:174`, `worldserver/Main.cpp:212`, `bnetserver/Main.cpp:129`.
+  Rust target: `crates/wow-config/src/lib.rs`.
+  Acceptance: tests cover recursive `.conf` loading, non-`.conf` ignore, override behavior, loaded-file reporting, and error reporting.
+
+- [ ] **#NEXT.L0.CONFIG.001.d** Implement `TC_*` env override parity for scalar keys.
+  C++ refs: `Configuration/Config.cpp:125`, `Configuration/Config.cpp:200`, `Configuration/Config.cpp:232`.
+  Rust target: `crates/wow-config/src/lib.rs`.
+  Acceptance: tests cover dotted-key transform, override-after-directory-load order, and no invented non-`TC_*` namespace.
+
+- [ ] **#NEXT.L0.CONFIG.001.e** Switch `world-server` and `bnet-server` startup to canonical config consumption.
+  C++ refs: `worldserver/Main.cpp:202`, `bnetserver/Main.cpp:119`, `database/Database/DatabaseLoader.cpp:39`.
+  Rust target: `crates/world-server/src/main.rs`, `crates/bnet-server/src/main.rs`.
+  Acceptance: both binaries can be configured using C++-style lowercase filenames and semicolon DB settings without `*.Host`/`*.Port` subkeys.
+
+## Tests Required Before Code Is Accepted
+
+- `cargo test -p wow-config`
+- Unit tests in `wow-config` for quoted values, comments, case-insensitive lookup parity already present, semicolon DB info, `.conf.d` overlays, and `TC_*` env override.
+- Startup config-resolution tests for `world-server` and `bnet-server` using temp config dirs.
+- Golden tests using the C++ default DB strings from `worldserver.conf.dist` and `bnetserver.conf.dist`.
+- `git diff --check` and clean worktree after commit.
+
+## Rollback And Parking
+
+- No Maps, entities, packet, database schema, or gameplay changes are allowed in `#NEXT.L0.CONFIG.001`.
+- The legacy Rust split DB keys (`LoginDatabaseInfo.Host`, etc.) may remain only as a logged compatibility fallback during this mini-phase.
+- The fallback must be removed or product-approved in `#NEXT.L0.CONFIG.REMOVE_LEGACY_DB_SUBKEYS`.
+- Full `WorldBoolConfigs`/`WorldFloatConfigs`/`WorldIntConfigs`/`WorldInt64Configs` parity is not silently skipped: it is the explicit follow-up `#NEXT.L0.CONFIG.002`, backed by `docs/migration/inventory/cpp-world-config-registry.tsv`.
+
+## R6 Closure
+
+| Refine task | Status | Evidence |
+|---|---|---|
+| `#REFINE.060` | complete | Next mini-phase selected from R4 DAG: `#NEXT.L0.CONFIG.001`. |
+| `#REFINE.061` | complete | C++ refs listed above and in `r6-next-miniphase.tsv`. |
+| `#REFINE.062` | complete | Acceptance tests listed before implementation. |
+| `#REFINE.063` | complete | Rollback/parking rules listed above. |

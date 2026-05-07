@@ -23,6 +23,7 @@ Contraste realizado contra el árbol C++ real en `/home/server/woltk-trinity-leg
 - `scripts/` no es un bloque genérico solamente: tiene `Commands`, `Spells`, `Battlefield`, `Events`, `OutdoorPvP`, `World` y scripts por continente/expansión. La fase de contenido debe mantener esa subdivisión cuando llegue.
 - La matriz histórica de este roadmap estaba más optimista que `_INDEX.md`. Desde esta revisión, `_INDEX.md` manda para status/audit; este roadmap manda para orden de ejecución.
 - La Fase 0 necesitaba afinarse: en C++ `ObjectGridLoader` no consulta directamente cada tabla por celda. Carga GUIDs preclasificados por `ObjectMgr`/`AreaTriggerDataStore` (`GetCellObjectGuids`, `GetAreaTriggersForMapAndCell`) a partir de `SpawnData`, difficulty, personal phases y respawn state. La cola inmediata se ajusta para no implementar un loader Rust incorrecto.
+- R6 corrige el siguiente paso operativo: antes de continuar la Fase 0/L3 Maps, se ejecuta `#NEXT.L0.CONFIG.001` (L0 config parity / startup config schema). Maps no se descarta; queda bloqueado por los gates L0/L1/L2 definidos en R4.
 
 ---
 
@@ -361,9 +362,10 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
 6. Para bugs y missing críticos: añadir TODO en sección 5.
 7. Commit `docs(audit): audit <modulo>` con el mini-informe.
 
-### Fase 0 — Fundación de Maps (rehacer L3) — *🔧 prioridad inmediata*
+### Fase 0 — Fundación de Maps (rehacer L3) — *🔧 siguiente tras gates L0-L2*
 
 > El bloqueante de TODO lo demás. Sin Map/Grid/Cell correctos, ni entidades, ni AI, ni multi-player escalable.
+> Nota R6: esta fase no se reanuda hasta cerrar `#NEXT.L0.CONFIG.001`.
 
 - **0.1** `wow-map`: constantes (`SIZE_OF_GRIDS=533.3333`, `MAX_NUMBER_OF_GRIDS=64`, `MAX_NUMBER_OF_CELLS=8`), tipos `GridCoord`, `CellCoord`, `MapKey`, conversión `compute_grid_coord(x,y)` / `compute_cell_coord(x,y)`. Tests unitarios contra `GridDefines.h`. **Cerrado #001-#003.**
 - **0.2** `wow-map`: `GridInfo`, `GridStateKind` y `NGrid` 8×8 `Cell`, siguiendo `NGrid.h` y `GridStates.cpp`.
@@ -494,7 +496,11 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
 - [x] **#REFINE.030** Registros transversales de opcodes, SQL, update fields, managers, scripts y harness (`docs/migration/inventory/r3-cross-registry-summary.md`).
 - [x] **#REFINE.040** DAG de dependencias y gates por fase (`docs/migration/inventory/r4-dependency-gate-summary.md`).
 - [x] **#REFINE.050** Gap audit de archivos/opcodes/SQL/scripts (`docs/migration/inventory/r5-gap-audit.md`).
-- [ ] **#REFINE.060** Selección de la siguiente mini-fase lista para implementación.
+- [x] **#REFINE.060** Selección de la siguiente mini-fase lista para implementación (`docs/migration/inventory/r6-next-miniphase.md`).
+
+### Inmediato (R6 — L0 config parity)
+
+- [ ] **#NEXT.L0.CONFIG.001** Ejecutar `docs/migration/inventory/r6-next-miniphase.md`: nombres canonicos `worldserver.conf`/`bnetserver.conf`, parsing semicolonado `*DatabaseInfo`, overlays `.conf.d`, override `TC_*`, y consumo de startup world/bnet contra C++.
 
 ### Inmediato (Fase 0 — Maps rewrite)
 
@@ -625,6 +631,7 @@ Las auditorías son commits `docs(audit): ...` separados; no se mezclan con cód
 | 2026-05-01 | Añadido Fase A (auditoría obligatoria), columna "Auditado vs C++" en matriz, ADR-007, riesgo "lo existente puede tener bugs" | (este commit) |
 | 2026-05-07 | Revisión manual del plan contra el árbol C++: `_INDEX.md` pasa a ser inventario de estado, Fase 0 se ajusta a `NGrid.h`/`GridStates.cpp`/`ObjectGridLoader.cpp`/`SpawnData.h`, Fase 1 adelanta `ObjectAccessor` y UpdateFields, Fase 8 separa `scripts/Commands` del contenido masivo. | pendiente |
 | 2026-05-07 | Añadida Fase R de refinamiento WBS completo antes de continuar implementación. | pendiente |
+| 2026-05-07 | Cerrada R6: la siguiente mini-fase implementable es `#NEXT.L0.CONFIG.001` antes de reanudar Maps/L3. | pendiente |
 
 ---
 
