@@ -269,6 +269,26 @@ DB2 stores read **directly** by the `SpellInfo` ctor (after `SpellInfoLoadHelper
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-spell/src/spell_info.rs` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-data/src/spell.rs` | `file` | 1 | 225 | `exists_active` | file exists |
+| `crates/wow-spell/src/lib.rs` | `file` | 1 | 0 | `exists_empty` | file exists but has 0 lines |
+| `crates/wow-world/src/handlers/spell.rs` | `file` | 1 | 288 | `exists_active` | file exists |
+| `crates/wow-data/src/wdc4.rs` | `file` | 1 | 915 | `exists_active` | file exists |
+| `crates/wow-data/src/hotfix_cache.rs` | `file` | 1 | 111 | `exists_active` | file exists |
+| `crates/wow-spell/src/diminish` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-spell/src/immunity` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-spell` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-spell/src/lib.rs` — **0 lines** (verified `wc -l`). No `SpellInfo` struct, no `SpellEffectInfo`, no `SpellImplicitTargetInfo`, no `SpellPowerCost`, no `SpellDiminishInfo`, no `SpellSpecificType`, no `SpellCustomAttributes`, no `SpellTarget*` enums.
 - `crates/wow-data/src/spell.rs` — exposes a tiny stub `SpellInfo` consumed by `crates/wow-world/src/handlers/spell.rs`. Fields confirmed: `cast_time_ms`, `recovery_time_ms`, `effective_cooldown_ms`, plus method `has_cast_time()`. No attribute bitmasks, no effect array, no school mask, no mechanic, no range, no power costs, no reagents, no totems, no equipped items, no target restrictions, no levels, no scaling, no interrupts, no proc data.

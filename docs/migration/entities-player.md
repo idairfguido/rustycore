@@ -369,6 +369,38 @@ Categorised; only headline opcodes listed.
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+| `crates/wow-entities` | `crate_dir` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-database` | `crate_dir` | 12 | 2262 | `exists_active` | crate exists |
+| `crates/wow-data` | `crate_dir` | 11 | 3505 | `exists_active` | crate exists |
+| `crates/wow-spell` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
+| `crates/wow-loot` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
+| `crates/wow-world/src/session.rs` | `file` | 1 | 3138 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/character.rs` | `file` | 1 | 4612 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/quest.rs` | `file` | 1 | 851 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/spell.rs` | `file` | 1 | 288 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/loot.rs` | `file` | 1 | 247 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/group.rs` | `file` | 1 | 467 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/social.rs` | `file` | 1 | 360 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/movement.rs` | `file` | 1 | 204 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/combat.rs` | `file` | 1 | 152 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/chat.rs` | `file` | 1 | 413 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/trainer.rs` | `file` | 1 | 432 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/inspect.rs` | `file` | 1 | 82 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/misc.rs` | `file` | 1 | 661 | `exists_active` | file exists |
+| `crates/wow-database/src/statements/character.rs` | `file` | 1 | 284 | `exists_active` | file exists |
+| `crates/wow-world/src/map_manager.rs` | `file` | 1 | 784 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 
 - `crates/wow-world/src/session.rs` — 3138 lines — `WorldSession` struct holds the *flat* per-character state. Player-relevant fields live at lines 175-309: `total_played_time`, `level_played_time`, `player_gold`, `player_xp`, `player_next_level_xp`, `selection_guid`, `player_guid`, `inventory_items: HashMap<u8, InventoryItem>`, `current_map_id`, `player_race`, `player_class`, `player_level`, `player_gender`, `known_spells: Vec<i32>`, `player_position`, `player_name`, `combat_target`, `in_combat`, `visible_auras: HashMap<u8, AuraApplication>`, `active_spell_cast`, `last_spell_cast_time`, `last_spell_cast_time_per_spell`, `quest_store`, `quest_xp_store`, `player_xp_table`, `player_quests: HashMap<u32, PlayerQuestStatus>`, `rewarded_quests: HashSet<u32>`, `loot_table`, `visible_creatures`, `visible_gameobjects`, `last_visibility_pos`, `gossip_options`, `gossip_source_guid`, `active_area_trigger`, `pending_teleport`, `creature_query_cache`, `logout_time`, `login_time`. There is **no `Player` struct**.

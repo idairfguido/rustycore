@@ -135,6 +135,24 @@ All four SMSG opcodes are already listed in `crates/wow-constants/src/opcodes.rs
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-world/src/blackmarket` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-blackmarket` | `crate_dir` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+| `crates/wow-database` | `crate_dir` | 12 | 2262 | `exists_active` | crate exists |
+| `crates/wow-packet` | `crate_dir` | 25 | 13058 | `exists_active` | crate exists |
+| `crates/wow-constants/src/opcodes.rs` | `file` | 1 | 1642 | `exists_active` | file exists |
+| `crates/wow-constants/src/item.rs` | `file` | 1 | 1239 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - *None.* No `wow-blackmarket` crate, no `blackmarket` module, no DB statements registered, no handlers.
 - The four SMSG opcodes are defined in `crates/wow-constants/src/opcodes.rs` (~lines 804-807) — these are **dead enum variants**.

@@ -179,6 +179,21 @@ Note: in WoLK 3.4.3 most skill state propagation goes through **player update-fi
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-data` | `crate_dir` | 11 | 3505 | `exists_active` | crate exists |
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+| `crates/wow-database` | `crate_dir` | 12 | 2262 | `exists_active` | crate exists |
+| `crates/wow-data/src/skill.rs` | `file` | 1 | 608 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-data/src/skill.rs` — 608 lines — `SkillStore` reader for `SkillLineAbility.db2` + `SkillRaceClassInfo.db2`. Provides `default_starting_skills(race, class)` and per-skill ability iteration. Used by `LearnDefaultSkills` equivalent in character handler.
 - (no per-player skill state)

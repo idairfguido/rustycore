@@ -212,6 +212,21 @@ Todas las rutas relativas a `/home/server/woltk-trinity-legacy/`.
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-world/src/lfg` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-world/src/handlers` | `module_dir` | 14 | 8843 | `exists_active` | directory exists |
+| `crates/wow-world/src/handlers/misc.rs` | `file` | 1 | 661 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/mod.rs` | `file` | 1 | 20 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - *NINGUNO* dedicado a LFG.
 - Stubs vacíos en `crates/wow-world/src/handlers/misc.rs`:

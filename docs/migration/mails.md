@@ -186,6 +186,21 @@ Worldserver tables referenced by `LootTemplates_Mail`:
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+| `crates/wow-database` | `crate_dir` | 12 | 2262 | `exists_active` | crate exists |
+| `crates/wow-packet` | `crate_dir` | 25 | 13058 | `exists_active` | crate exists |
+| `crates/wow-world/src/handlers/misc.rs` | `file` | 1 | 661 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - *(none specific to mails)*
 - `crates/wow-world/src/handlers/misc.rs` — only stub: `handle_query_next_mail_time` returns "no mail" hard-coded `MailQueryNextTimeResult::no_mail()`.

@@ -256,6 +256,25 @@ Resumen: AI consume hooks del engine, no ve sockets directamente. Los efectos (m
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-ai` | `crate_dir` | 1 | 346 | `exists_active` | crate exists |
+| `crates/wow-script` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
+| `crates/wow-scripts` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
+| `crates/wow-ai/src/lib.rs` | `file` | 1 | 346 | `exists_active` | file exists |
+| `crates/wow-script/src/lib.rs` | `file` | 1 | 0 | `exists_empty` | file exists but has 0 lines |
+| `crates/wow-scripts/src/lib.rs` | `file` | 1 | 0 | `exists_empty` | file exists but has 0 lines |
+| `crates/wow-world/src/session.rs` | `file` | 1 | 3138 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/misc.rs` | `file` | 1 | 661 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-ai/src/lib.rs` — ~346 líneas — **un único struct `CreatureAI`** plain (no polimórfico, no trait), con states `Idle/WalkingRandom/WalkingWaypoint/InCombat/Dead/Returning`
 - `crates/wow-script/src/lib.rs` — **0 líneas (vacío)** — crate placeholder

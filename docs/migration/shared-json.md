@@ -90,6 +90,19 @@ N/A directo. Indirectamente: el output JSON va dentro de payloads bnet auth, no 
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/bnet-server/src/realm/mod.rs` | `file` | 1 | 392 | `exists_active` | file exists |
+| `crates/wow-proto` | `crate_dir` | 2 | 254 | `exists_active` | crate exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - **(ningún módulo dedicado).** Sustituido por `serde_json` (workspace dep) + structs `#[derive(Serialize, Deserialize)]` per-uso.
 

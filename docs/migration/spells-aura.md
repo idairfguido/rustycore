@@ -208,6 +208,22 @@ Todas las rutas relativas a `/home/server/woltk-trinity-legacy/`.
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-spell` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
+| `crates/wow-packet/src/packets/aura.rs` | `file` | 1 | 123 | `exists_active` | file exists |
+| `crates/wow-spell/src/lib.rs` | `file` | 1 | 0 | `exists_empty` | file exists but has 0 lines |
+| `crates/wow-world/src/handlers/spell.rs` | `file` | 1 | 288 | `exists_active` | file exists |
+| `crates/wow-world/src/session.rs` | `file` | 1 | 3138 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-spell/src/lib.rs` — **0 líneas (vacío)**. **No existe ninguna implementación de aura, AuraEffect, AuraApplication, AuraType, AuraRemoveMode, AuraEffectHandleModes**
 - `crates/wow-packet/src/packets/aura.rs` — ~123 líneas — `AuraData` POD + `AuraUpdate` writer (SMSG_AURA_UPDATE) — sólo wire shape, sin estado server-side

@@ -256,6 +256,20 @@ Rust: `attack_swing`, `attack_stop`. Faltan duel-related (5).
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-world/src/handlers` | `module_dir` | 14 | 8843 | `exists_active` | directory exists |
+| `crates/wow-handler` | `crate_dir` | 1 | 116 | `exists_active` | crate exists |
+| `crates/wow-world/tests` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Handler files in `/home/server/rustycore/crates/wow-world/src/handlers/`:**
 
 | File | Opcodes | Coverage of corresponding C++ |

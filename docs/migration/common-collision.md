@@ -292,6 +292,24 @@ Plus every spell, melee, and movement packet implicitly depends on collision hav
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-recastdetour` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
+| `crates/wow-collision` | `crate_dir` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-recastdetour/src/lib.rs` | `file` | 1 | 0 | `exists_empty` | file exists but has 0 lines |
+| `crates/wow-map/src/lib.rs` | `file` | 1 | 70 | `exists_active` | file exists |
+| `crates/wow-spell` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
+| `crates/wow-combat` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
+| `crates/wow-ai` | `crate_dir` | 1 | 346 | `exists_active` | crate exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 
 - `crates/wow-recastdetour/src/lib.rs` — **0 bytes**. The crate exists with a `Cargo.toml` listing only `thiserror`; there is no FFI to Recast/Detour, no vmap loader, no BIH, no `DynamicMapTree`, no `StaticMapTree`, no `WorldModel`, nothing.

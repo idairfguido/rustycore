@@ -207,6 +207,23 @@ DB2/DBC stores read by Calendar:
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+| `crates/wow-database` | `crate_dir` | 12 | 2262 | `exists_active` | crate exists |
+| `crates/wow-packet` | `crate_dir` | 25 | 13058 | `exists_active` | crate exists |
+| `crates/wow-core` | `crate_dir` | 4 | 1153 | `exists_active` | crate exists |
+| `crates/wow-world/src/handlers/misc.rs` | `file` | 1 | 661 | `exists_active` | file exists |
+| `crates/wow-world/src/session.rs` | `file` | 1 | 3138 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-world/src/handlers/misc.rs` — 2 noop stubs (`handle_calendar_get_num_pending`, `handle_calendar_get`) that consume the WorldPacket and return without sending anything.
 - `crates/wow-world/src/session.rs` — dispatch entries for the same 2 opcodes (`ClientOpcodes::CalendarGet`, `ClientOpcodes::CalendarGetNumPending`).

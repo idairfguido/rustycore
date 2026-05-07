@@ -260,6 +260,35 @@ GUID generators rely on `MAX(guid)` queries from `creature`, `gameobject`, `item
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-data` | `crate_dir` | 11 | 3505 | `exists_active` | crate exists |
+| `crates/wow-database` | `crate_dir` | 12 | 2262 | `exists_active` | crate exists |
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+| `crates/wow-network` | `crate_dir` | 6 | 1716 | `exists_active` | crate exists |
+| `crates/wow-data/src/quest.rs` | `file` | 1 | 337 | `exists_active` | file exists |
+| `crates/wow-data/src/quest_xp.rs` | `file` | 1 | 116 | `exists_active` | file exists |
+| `crates/wow-data/src/item.rs` | `file` | 1 | 123 | `exists_active` | file exists |
+| `crates/wow-data/src/spell.rs` | `file` | 1 | 225 | `exists_active` | file exists |
+| `crates/wow-data/src/skill.rs` | `file` | 1 | 608 | `exists_active` | file exists |
+| `crates/wow-data/src/area_trigger.rs` | `file` | 1 | 312 | `exists_active` | file exists |
+| `crates/wow-data/src/player_stats.rs` | `file` | 1 | 307 | `exists_active` | file exists |
+| `crates/wow-data/src/hotfix_cache.rs` | `file` | 1 | 111 | `exists_active` | file exists |
+| `crates/wow-data/src/wdc4.rs` | `file` | 1 | 915 | `exists_active` | file exists |
+| `crates/wow-database/src/statements/{world.rs,character.rs,login.rs,hotfix.rs}` | `declared_pattern` | 0 | 0 | `declared_pattern` | pattern/proposed path; not resolvable as one file or directory |
+| `crates/wow-network/src/player_registry.rs` | `file` | 1 | 47 | `exists_active` | file exists |
+| `crates/wow-world/src/map_manager.rs` | `file` | 1 | 784 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/character.rs` | `file` | 1 | 4612 | `exists_active` | file exists |
+| `crates/wow-data/src/{quest,item,player_stats}.rs` | `declared_pattern` | 0 | 0 | `declared_pattern` | pattern/proposed path; not resolvable as one file or directory |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 There is **no central `ObjectMgr` analogue** — its responsibilities are split across multiple crates with no unifying registry.
 
 **Files in `/home/server/rustycore`:**

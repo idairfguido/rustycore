@@ -161,6 +161,21 @@ No CMSG opcode is consumed by Phasing directly — phase state is purely server-
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+| `crates/wow-data` | `crate_dir` | 11 | 3505 | `exists_active` | crate exists |
+| `crates/wow-packet/src/packets/misc.rs` | `file` | 1 | 2613 | `exists_active` | file exists |
+| `crates/wow-phasing` | `crate_dir` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-packet/src/packets/misc.rs` — ~30 lines around `PhaseShiftChange` (1611–1638). Only sends a hard-coded "Unphased, no phases, no visible maps, no UI maps" packet. Sufficient to keep the client rendering, **not** sufficient for any quest, instance, garrison, scenario, terrain-swap, or personal-spawn scenario.
 

@@ -111,6 +111,20 @@ The module itself does not emit/receive packets; its consumer does:
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-social` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+| `crates/wow-network` | `crate_dir` | 6 | 1716 | `exists_active` | crate exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - None. Searches for `WhoList`, `WhoListStorage`, `who_list` across `crates/` return zero hits.
 - `PlayerRegistry` (in `wow-network`, ~referenced from `CLAUDE.md`) is a related primitive — it tracks online sessions — but it is not the same shape. The who-list cache is a denormalized read-only snapshot containing fields (level, class, zone, guild name, lowercase wide name) that aren't necessarily on the registry entry. Even if they were, hitting the live registry per `/who` query under any contention would lock-bottleneck — the explicit snapshot pattern exists exactly to avoid that.

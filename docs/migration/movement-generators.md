@@ -263,6 +263,25 @@ Generators do not own packet writers directly; every motion is serialized throug
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-movement/src/motion_master.rs` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-movement/src/generators` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-movement` | `crate_dir` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-ai/src` | `module_dir` | 1 | 346 | `exists_active` | directory exists |
+| `crates/wow-world/src/handlers/movement.rs` | `file` | 1 | 204 | `exists_active` | file exists |
+| `crates/wow-constants` | `crate_dir` | 10 | 5477 | `exists_active` | crate exists |
+| `crates/wow-ai` | `crate_dir` | 1 | 346 | `exists_active` | crate exists |
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - *None.* No `crates/wow-movement/` exists. There is no `MotionMaster`, no `MovementGenerator` trait, no slot stack, no per-tick generator update.
 

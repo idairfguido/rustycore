@@ -158,6 +158,26 @@ None directly. The constants in `SharedDefines.h` are referenced by every packet
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-constants` | `crate_dir` | 10 | 5477 | `exists_active` | crate exists |
+| `crates/wow-core` | `crate_dir` | 4 | 1153 | `exists_active` | crate exists |
+| `crates/wow-combat` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
+| `crates/wow-data` | `crate_dir` | 11 | 3505 | `exists_active` | crate exists |
+| `crates/wow-script` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
+| `crates/wow-constants/src/lib.rs` | `file` | 1 | 30 | `exists_active` | file exists |
+| `crates/wow-constants/src/shared.rs` | `file` | 1 | 464 | `exists_active` | file exists |
+| `crates/wow-data/src/quest_xp.rs` | `file` | 1 | 116 | `exists_active` | file exists |
+| `crates/wow-data/src/player_stats.rs` | `file` | 1 | 307 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 This module is **mostly absent** as a coherent unit; bits and pieces are scattered across crates.
 
 **Files in `/home/server/rustycore`:**

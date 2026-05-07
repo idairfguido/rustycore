@@ -151,6 +151,23 @@ This module does not directly handle opcodes, but its `WriteRecord` is the body-
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-data` | `crate_dir` | 11 | 3505 | `exists_active` | crate exists |
+| `crates/wow-data/src/wdc4.rs` | `file` | 1 | 915 | `exists_active` | file exists |
+| `crates/wow-data/src/hotfix_cache.rs` | `file` | 1 | 111 | `exists_active` | file exists |
+| `crates/wow-data/src/{item,item_stats,player_stats,skill,area_trigger,spell,quest,quest_xp}.rs` | `declared_pattern` | 0 | 0 | `declared_pattern` | pattern/proposed path; not resolvable as one file or directory |
+| `crates/wow-database/src/statements/hotfix.rs` | `file` | 1 | 25 | `exists_active` | file exists |
+| `crates/wow-database` | `crate_dir` | 12 | 2262 | `exists_active` | crate exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-data/src/wdc4.rs` — 915 lines — the WDC4 parser. Covers the equivalent of `DB2FileLoader` + `DB2FileLoaderImpl` + `DB2Record` accessors. **Does not** cover the `DB2Storage<T>` typed wrapper or hotfix-DB overlay.
 - `crates/wow-data/src/hotfix_cache.rs` — 111 lines — `HotfixBlobCache`: pre-loads raw record bytes from `.db2` files at startup so they can be served verbatim via `SMSG_DB_REPLY`. **Bypasses** the typed-storage layer entirely; just a `(table_hash, record_id) → Vec<u8>` map. Does not consult the `hotfixes` DB.

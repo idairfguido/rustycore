@@ -154,6 +154,24 @@ There are no CMSG opcodes specific to CombatManager — combat state is purely s
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-combat` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
+| `crates/wow-combat/src/lib.rs` | `file` | 1 | 0 | `exists_empty` | file exists but has 0 lines |
+| `crates/wow-world/src/session.rs` | `file` | 1 | 3138 | `exists_active` | file exists |
+| `crates/wow-ai/src/lib.rs` | `file` | 1 | 346 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/combat.rs` | `file` | 1 | 152 | `exists_active` | file exists |
+| `crates/wow-ai` | `crate_dir` | 1 | 346 | `exists_active` | crate exists |
+| `crates/wow-packet` | `crate_dir` | 25 | 13058 | `exists_active` | crate exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-combat/src/lib.rs` — **0 lines** (empty crate; see §13). No `CombatManager`, no `CombatReference`, no `PvPCombatReference`, no PvP timer, no suppress flags, no `RevalidateCombat`, no `EndCombatBeyondRange`, no `CanBeginCombat`.
 - `crates/wow-world/src/session.rs` (and `WorldSession` definition) — `WorldSession.in_combat: bool` (per-player flag), `WorldSession.combat_target: Option<ObjectGuid>` (single-target).

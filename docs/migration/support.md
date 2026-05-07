@@ -153,6 +153,25 @@ The Rust opcode constants for these already exist in `crates/wow-constants/src/o
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-support` | `crate_dir` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-social` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
+| `crates/wow-handler` | `crate_dir` | 1 | 116 | `exists_active` | crate exists |
+| `crates/wow-constants/src/opcodes.rs` | `file` | 1 | 1642 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/misc.rs` | `file` | 1 | 661 | `exists_active` | file exists |
+| `crates/wow-packet/src/packets/misc.rs` | `file` | 1 | 2613 | `exists_active` | file exists |
+| `crates/wow-world/src/session.rs` | `file` | 1 | 3138 | `exists_active` | file exists |
+| `crates/wow-database/src/statements` | `module_dir` | 5 | 1100 | `exists_active` | directory exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-constants/src/opcodes.rs` — all relevant opcode constants (see above).
 - `crates/wow-world/src/handlers/misc.rs:245`/`604` — `handle_gm_ticket_get_case_status` registered and dispatched, but the body is `pub async fn handle_gm_ticket_get_case_status(&mut self, _pkt: WorldPacket) {}` — empty no-op.

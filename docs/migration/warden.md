@@ -246,6 +246,19 @@ u32 checksum                                                 // 5×u32 XOR-fold 
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-constants/src/opcodes.rs` | `file` | 1 | 1642 | `exists_active` | file exists |
+| `crates/wow-world/src/session.rs` | `file` | 1 | 3138 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-constants/src/opcodes.rs:671` — `Warden3Data = 0x35ed` (CMSG)
 - `crates/wow-constants/src/opcodes.rs:1619-1621` — `Warden3Data = 0x2577` (SMSG), `Warden3Disabled = 0x2823`, `Warden3Enabled = 0x2822`

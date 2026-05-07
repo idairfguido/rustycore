@@ -349,6 +349,26 @@ DB: `character` (player-owned items + inventory layout) and `world` (`item_templ
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-data` | `crate_dir` | 11 | 3505 | `exists_active` | crate exists |
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+| `crates/wow-database` | `crate_dir` | 12 | 2262 | `exists_active` | crate exists |
+| `crates/wow-packet` | `crate_dir` | 25 | 13058 | `exists_active` | crate exists |
+| `crates/wow-data/src/item.rs` | `file` | 1 | 123 | `exists_active` | file exists |
+| `crates/wow-data/src/item_stats.rs` | `file` | 1 | 424 | `exists_active` | file exists |
+| `crates/wow-packet/src/packets/item.rs` | `file` | 1 | 395 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/character.rs` | `file` | 1 | 4612 | `exists_active` | file exists |
+| `crates/wow-database/src/statements/character.rs` | `file` | 1 | 284 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-data/src/item.rs` — 123 lines — minimal `ItemRecord` reader for `Item.db2` (id, class, subclass, material, inventory_type, sheathe). Provides `inventory_type(entry_id)` lookup.
 - `crates/wow-data/src/item_stats.rs` — 424 lines — likely ItemSparse.db2 stats / stat-allocation logic (not deeply audited here).

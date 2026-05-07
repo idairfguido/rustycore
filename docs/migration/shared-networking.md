@@ -124,6 +124,24 @@ N/A — `WorldSocket` (en `game/Server`) origina opcodes; Networking solo transp
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-network` | `crate_dir` | 6 | 1716 | `exists_active` | crate exists |
+| `crates/wow-network/src/world_socket.rs` | `file` | 1 | 1023 | `exists_active` | file exists |
+| `crates/wow-network/src/accept.rs` | `file` | 1 | 386 | `exists_active` | file exists |
+| `crates/wow-network/src/session_mgr.rs` | `file` | 1 | 188 | `exists_active` | file exists |
+| `crates/wow-network/src/lib.rs` | `file` | 1 | 19 | `exists_active` | file exists |
+| `crates/wow-network/src/player_registry.rs` | `file` | 1 | 47 | `exists_active` | file exists |
+| `crates/world-server` | `crate_dir` | 1 | 818 | `exists_active` | crate exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-network/src/world_socket.rs` — ~1023 líneas — equivalente a `Socket` + `WorldSocket`
 - `crates/wow-network/src/accept.rs` — `start_world_listener()` (≈ `AsyncAcceptor`)

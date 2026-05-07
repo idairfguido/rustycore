@@ -206,6 +206,27 @@ DBC/DB2 stores read by Creature/Gossip/Trainer code:
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+| `crates/wow-ai` | `crate_dir` | 1 | 346 | `exists_active` | crate exists |
+| `crates/wow-data` | `crate_dir` | 11 | 3505 | `exists_active` | crate exists |
+| `crates/wow-database` | `crate_dir` | 12 | 2262 | `exists_active` | crate exists |
+| `crates/wow-world/src/map_manager.rs` | `file` | 1 | 784 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/character.rs` | `file` | 1 | 4612 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/loot.rs` | `file` | 1 | 247 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/misc.rs` | `file` | 1 | 661 | `exists_active` | file exists |
+| `crates/wow-packet/src/packets/update.rs` | `file` | 1 | 3072 | `exists_active` | file exists |
+| `crates/wow-database/src/world_ext.rs` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/archived/rustycore_ARCHIVED_20260312`:**
 - `crates/wow-world/src/map_manager.rs` — `WorldCreature` flat struct (lines 52-300, ~890 LOC total file). Carries: guid, entry, level, hp/max_hp, position, home_pos, state (Idle/Wandering/Returning/InCombat/Dead), move_target, corpse_despawn_at, npc_flags, unit_flags, aggro_radius, min/max dmg, display_id, faction, respawn_time_secs, wander_radius, combat_target, swing_timer. `MapManager` 64×64 grid. **No** template/difficulty/addon/static-flag concept.
 - `crates/wow-world/src/handlers/character.rs` — `send_nearby_creatures`, `send_nearby_gameobjects`. Spawns from world DB row by row via `SEL_CREATURES_IN_RANGE`/`SEL_GAMEOBJECTS_IN_RANGE`. Uses `CreatureCreateData` not `CreatureTemplate`.

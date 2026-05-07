@@ -176,6 +176,22 @@ ConditionMgr is server-internal — it emits no packets directly. Indirectly, wh
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-data` | `crate_dir` | 11 | 3505 | `exists_active` | crate exists |
+| `crates/wow-world/src/conditions` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-logging` | `crate_dir` | 1 | 464 | `exists_active` | crate exists |
+| `crates/wow-logging/src/lib.rs` | `file` | 1 | 464 | `exists_active` | file exists |
+| `crates/wow-packet/src/packets/character.rs` | `file` | 1 | 550 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - None directly. The `wow-logging` crate has a `LogFilter::Condition` variant (`crates/wow-logging/src/lib.rs:84`) that is currently unused.
 - Stub-level dependencies: a few packets (`crates/wow-packet/src/packets/character.rs`, `quest.rs`, `update.rs`) write `0` for `UnlockedConditionalAppearanceCount`, `ConditionalDescriptionText count`, `ContentTuningConditionMask`, `ConditionalTransmog.Size` — none of these are ConditionMgr concerns, they are unrelated DB2-driven optional client fields.

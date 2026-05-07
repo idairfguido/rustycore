@@ -233,6 +233,24 @@ Out-of-tree touchpoints:
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-loot` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
+| `crates/wow-packet/src/packets/loot.rs` | `file` | 1 | 210 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/loot.rs` | `file` | 1 | 247 | `exists_active` | file exists |
+| `crates/wow-loot/src/lib.rs` | `file` | 1 | 0 | `exists_empty` | file exists but has 0 lines |
+| `crates/wow-core` | `crate_dir` | 4 | 1153 | `exists_active` | crate exists |
+| `crates/wow-constants` | `crate_dir` | 10 | 5477 | `exists_active` | crate exists |
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-loot/src/lib.rs` — **0 bytes / empty** — crate exists in `Cargo.toml` (depends on `wow-core`, `wow-constants`, `rand`) but has no code at all. The whole module is unimplemented.
 - `crates/wow-packet/src/packets/loot.rs` — 211 lines — packet structs only: `LootUnit`, `LootItemPkt`, `LootItemRequest`, `LootRelease`, `LootItemData`, `LootResponse`, `LootRemoved`, `SLootRelease`, plus the in-memory `CreatureLoot` / `LootEntry` helpers used by the world handler.

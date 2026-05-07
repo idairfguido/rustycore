@@ -133,6 +133,27 @@ DBC stores:
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+| `crates/wow-data` | `crate_dir` | 11 | 3505 | `exists_active` | crate exists |
+| `crates/wow-spell` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
+| `crates/wow-constants` | `crate_dir` | 10 | 5477 | `exists_active` | crate exists |
+| `crates/wow-data/src/area_trigger.rs` | `file` | 1 | 312 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/misc.rs` | `file` | 1 | 661 | `exists_active` | file exists |
+| `crates/wow-world/src/session.rs` | `file` | 1 | 3138 | `exists_active` | file exists |
+| `crates/wow-constants/src/object.rs` | `file` | 1 | 173 | `exists_active` | file exists |
+| `crates/wow-core/src/guid.rs` | `file` | 1 | 790 | `exists_active` | file exists |
+| `crates/wow-constants/src/opcodes.rs` | `file` | 1 | 1642 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-data/src/area_trigger.rs` — `AreaTriggerData`, `AreaTriggerStore`, `AreaTriggerTeleport`, `TriggerShape`, `load_area_triggers` (DB loader). **This is the legacy DBC-table side**, not the entity.
 - `crates/wow-world/src/handlers/misc.rs` — `handle_area_trigger` consumes `CMSG_AREA_TRIGGER` and consults `AreaTriggerStore` for teleport/quest checks

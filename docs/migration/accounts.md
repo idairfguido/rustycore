@@ -177,6 +177,27 @@ None directly. `AccountMgr` is invoked indirectly through:
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-database` | `crate_dir` | 12 | 2262 | `exists_active` | crate exists |
+| `crates/wow-network` | `crate_dir` | 6 | 1716 | `exists_active` | crate exists |
+| `crates/bnet-server` | `crate_dir` | 13 | 2831 | `exists_active` | crate exists |
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+| `crates/wow-database/src/statements/login.rs` | `file` | 1 | 327 | `exists_active` | file exists |
+| `crates/wow-database/src/statements/character.rs` | `file` | 1 | 284 | `exists_active` | file exists |
+| `crates/wow-network/src/world_socket.rs` | `file` | 1 | 1023 | `exists_active` | file exists |
+| `crates/bnet-server/src/rest/handlers.rs` | `file` | 1 | 573 | `exists_active` | file exists |
+| `crates/wow-constants` | `crate_dir` | 10 | 5477 | `exists_active` | crate exists |
+| `crates/world-server` | `crate_dir` | 1 | 818 | `exists_active` | crate exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-database/src/statements/login.rs` — declares the SQL constants (`SEL_RBAC_ACCOUNT_PERMISSIONS`, `INS_RBAC_ACCOUNT_PERMISSION`, `DEL_RBAC_ACCOUNT_PERMISSION`, `INS_ACCOUNT`, `UPD_LOGON`, `UPD_USERNAME`, `UPD_EMAIL`, `UPD_REG_EMAIL`, `SEL_CHECK_PASSWORD*`, `GET_GMLEVEL_BY_REALMID`, `INS/DEL_ACCOUNT_ACCESS*`, `INS_BNET_ACCOUNT`, `SEL_BNET_*`) — strings only, no callers.
 - `crates/wow-database/src/statements/character.rs` — `SEL_SUM_CHARS`, `DEL_TUTORIALS`, `DEL_ACCOUNT_DATA`, `DEL_CHARACTER_BAN`, `SEL_CHARS_BY_ACCOUNT_ID` — same: declared, not used.

@@ -112,6 +112,19 @@ Payload: `WeatherState (uint32)`, `intensity (float, 0..1)`, `bool unk` (transit
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+| `crates/wow-weather` | `crate_dir` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - None. No `weather.rs`, no `crates/wow-weather`, no opcode binding for `SMSG_Weather`'s payload (the opcode constant `Weather = 0x26a6` exists in `wow-constants/src/opcodes.rs:1625` but no packet body type and no handler).
 

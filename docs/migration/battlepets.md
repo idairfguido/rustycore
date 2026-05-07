@@ -215,6 +215,22 @@ The opcodes are **already present in `crates/wow-constants/src/opcodes.rs`** (se
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-packet/src/packets/misc.rs` | `file` | 1 | 2613 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/character.rs` | `file` | 1 | 4612 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/misc.rs` | `file` | 1 | 661 | `exists_active` | file exists |
+| `crates/wow-constants/src/opcodes.rs` | `file` | 1 | 1642 | `exists_active` | file exists |
+| `crates/wow-world/src/session.rs` | `file` | 1 | 3138 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-constants/src/opcodes.rs` — 22 BattlePet-related opcode constants present (see §7).
 - `crates/wow-packet/src/packets/misc.rs:1005-1015` — `pub struct BattlePetJournalLockAcquired;` (zero-byte unit struct) implementing `ServerPacket` with `OPCODE = ServerOpcodes::BattlePetJournalLockAcquired`. Plus a unit test at `:2382` building the packet.

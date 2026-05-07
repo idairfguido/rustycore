@@ -227,6 +227,23 @@ DB2 overlay rows can also generate `SMSG_DB_REPLY` to clients via `DB2Storage<T>
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-spell/src/spell_mgr.rs` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-data/src/spell.rs` | `file` | 1 | 225 | `exists_active` | file exists |
+| `crates/wow-spell/src/lib.rs` | `file` | 1 | 0 | `exists_empty` | file exists but has 0 lines |
+| `crates/wow-data/src/wdc4.rs` | `file` | 1 | 915 | `exists_active` | file exists |
+| `crates/wow-data/src/hotfix_cache.rs` | `file` | 1 | 111 | `exists_active` | file exists |
+| `crates/wow-spell` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-spell/src/lib.rs` — **0 lines (empty file)** — verified `wc -l = 0`. The crate is registered in the workspace but has no code.
 - `crates/wow-data/src/spell.rs` — exists; provides a minimal `SpellInfo`-shaped POD that exposes `cast_time_ms`, `recovery_time_ms`, `effective_cooldown_ms`, `has_cast_time`. **Not the SpellInfo type tracked here** — see `spells-info.md`.

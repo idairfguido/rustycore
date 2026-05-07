@@ -293,6 +293,24 @@ The `Header` is `bgs.protocol.Header` (in `rpc_types.pb.h`), with fields:
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-proto` | `crate_dir` | 2 | 254 | `exists_active` | crate exists |
+| `crates/wow-proto/Cargo.toml` | `file` | 1 | 14 | `exists_manifest` | manifest exists; not counted as active Rust source |
+| `crates/wow-proto/build.rs` | `file` | 1 | 30 | `exists_active` | file exists |
+| `crates/wow-proto/src/lib.rs` | `file` | 1 | 224 | `exists_active` | file exists |
+| `crates/wow-proto/proto/bgs/low/pb/client` | `module_dir` | 0 | 0 | `exists_empty` | directory exists; no active Rust source lines |
+| `crates/bnet-server` | `crate_dir` | 13 | 2831 | `exists_active` | crate exists |
+| `crates/wow-handler` | `crate_dir` | 1 | 116 | `exists_active` | crate exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 The Rust port is in `crates/wow-proto`, using `prost` + `prost-build` to compile a curated subset of `.proto` files at build time.
 
 **Files in `/home/server/rustycore`:**

@@ -190,6 +190,27 @@ HTTP routes (verb + path):
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/bnet-server` | `crate_dir` | 13 | 2831 | `exists_active` | crate exists |
+| `crates/bnet-server/src/main.rs` | `file` | 1 | 245 | `exists_active` | file exists |
+| `crates/bnet-server/src/state.rs` | `file` | 1 | 112 | `exists_active` | file exists |
+| `crates/bnet-server/src/rest/mod.rs` | `file` | 1 | 198 | `exists_active` | file exists |
+| `crates/bnet-server/src/rest/handlers.rs` | `file` | 1 | 573 | `exists_active` | file exists |
+| `crates/bnet-server/src/rest/types.rs` | `file` | 1 | 86 | `exists_active` | file exists |
+| `crates/bnet-server/src/rpc/mod.rs` | `file` | 1 | 42 | `exists_active` | file exists |
+| `crates/bnet-server/src/rpc/session.rs` | `file` | 1 | 263 | `exists_active` | file exists |
+| `crates/bnet-server/src/rpc/services/{account,authentication,connection,game_utilities}.rs` | `declared_pattern` | 0 | 0 | `declared_pattern` | pattern/proposed path; not resolvable as one file or directory |
+| `crates/bnet-server/src/realm/mod.rs` | `file` | 1 | 392 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/bnet-server/src/main.rs` — 245 lines — entry point, tokio runtime
 - `crates/bnet-server/src/state.rs` — 112 lines — `AppState` shared across REST + RPC tasks

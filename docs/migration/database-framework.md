@@ -255,6 +255,33 @@ Not applicable — the database framework does not handle WoW client packets. (I
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-database` | `crate_dir` | 12 | 2262 | `exists_active` | crate exists |
+| `crates/wow-database/src/lib.rs` | `file` | 1 | 58 | `exists_active` | file exists |
+| `crates/wow-database/src/database.rs` | `file` | 1 | 178 | `exists_active` | file exists |
+| `crates/wow-database/src/error.rs` | `file` | 1 | 21 | `exists_active` | file exists |
+| `crates/wow-database/src/params.rs` | `file` | 1 | 208 | `exists_active` | file exists |
+| `crates/wow-database/src/result.rs` | `file` | 1 | 198 | `exists_active` | file exists |
+| `crates/wow-database/src/transaction.rs` | `file` | 1 | 108 | `exists_active` | file exists |
+| `crates/wow-database/src/updater.rs` | `file` | 1 | 391 | `exists_active` | file exists |
+| `crates/wow-database/src/statements/mod.rs` | `file` | 1 | 93 | `exists_active` | file exists |
+| `crates/wow-database/src/statements/login.rs` | `file` | 1 | 327 | `exists_active` | file exists |
+| `crates/wow-database/src/statements/character.rs` | `file` | 1 | 284 | `exists_active` | file exists |
+| `crates/wow-database/src/statements/world.rs` | `file` | 1 | 371 | `exists_active` | file exists |
+| `crates/wow-database/src/statements/hotfix.rs` | `file` | 1 | 25 | `exists_active` | file exists |
+| `crates/world-server/src/main.rs` | `file` | 1 | 818 | `exists_active` | file exists |
+| `crates/wow-data/src/hotfix_blob_cache.rs` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-database/src` | `module_dir` | 12 | 2262 | `exists_active` | directory exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-database/src/lib.rs` — 58 lines — public re-exports + four `LoginDatabase`/`WorldDatabase`/`CharacterDatabase`/`HotfixDatabase` type aliases
 - `crates/wow-database/src/database.rs` — 178 lines — `Database<S: StatementDef>` wrapper around `sqlx::MySqlPool`

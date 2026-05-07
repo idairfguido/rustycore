@@ -206,6 +206,25 @@ The module also **processes** CMSG_MOVE_* packets indirectly via WorldSession �
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+| `crates/wow-map` | `crate_dir` | 3 | 558 | `exists_active` | crate exists |
+| `crates/wow-map/src/coords.rs` | `file` | 1 | 254 | `exists_active` | file exists |
+| `crates/wow-map/src/cell.rs` | `file` | 1 | 234 | `exists_active` | file exists |
+| `crates/wow-map/src/lib.rs` | `file` | 1 | 70 | `exists_active` | file exists |
+| `crates/wow-world/src/map_manager.rs` | `file` | 1 | 784 | `exists_active` | file exists |
+| `crates/wow-world/src/map.rs` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-world/src/session.rs` | `file` | 1 | 3138 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-map/src/coords.rs` — coordinate foundation ported from `GridDefines.h`; no Map/NGrid lifecycle yet.
 - `crates/wow-map/src/cell.rs` — cell-level coordinate decomposition and typed GUID containers; no Map/NGrid lifecycle yet.

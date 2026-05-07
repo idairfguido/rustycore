@@ -245,6 +245,31 @@ Plus the ~783 per-table statements registered through `DB2LoadInfo::Instance.Sta
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-data` | `crate_dir` | 11 | 3505 | `exists_active` | crate exists |
+| `crates/wow-database` | `crate_dir` | 12 | 2262 | `exists_active` | crate exists |
+| `crates/wow-data/src/wdc4.rs` | `file` | 1 | 915 | `exists_active` | file exists |
+| `crates/wow-data/src/hotfix_cache.rs` | `file` | 1 | 111 | `exists_active` | file exists |
+| `crates/wow-data/src/item.rs` | `file` | 1 | 123 | `exists_active` | file exists |
+| `crates/wow-data/src/item_stats.rs` | `file` | 1 | 424 | `exists_active` | file exists |
+| `crates/wow-data/src/player_stats.rs` | `file` | 1 | 307 | `exists_active` | file exists |
+| `crates/wow-data/src/skill.rs` | `file` | 1 | 608 | `exists_active` | file exists |
+| `crates/wow-data/src/area_trigger.rs` | `file` | 1 | 312 | `exists_active` | file exists |
+| `crates/wow-data/src/spell.rs` | `file` | 1 | 225 | `exists_active` | file exists |
+| `crates/wow-data/src/quest.rs` | `file` | 1 | 337 | `exists_active` | file exists |
+| `crates/wow-data/src/quest_xp.rs` | `file` | 1 | 116 | `exists_active` | file exists |
+| `crates/wow-database/src/statements/hotfix.rs` | `file` | 1 | 25 | `exists_active` | file exists |
+| `crates/wow-constants` | `crate_dir` | 10 | 5477 | `exists_active` | crate exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-data/src/wdc4.rs` — 915 lines — generic WDC4 binary reader (covers shared layer; see `shared-datastores.md`).
 - `crates/wow-data/src/hotfix_cache.rs` — 111 lines — pre-loads `Item.db2` + `ItemSparse.db2` raw bytes for `SMSG_DB_REPLY`. **Not** the equivalent of `DB2Manager::LoadHotfixBlob` despite the similar name — this caches *file* bytes, not *DB hotfix* bytes.

@@ -316,6 +316,24 @@ Approx total: **~6,650 lines core + ~10,730 zone-script lines = ~17,400 lines**.
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-pvp` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
+| `crates/wow-pvp/Cargo.toml` | `file` | 1 | 10 | `exists_manifest` | manifest exists; not counted as active Rust source |
+| `crates/wow-core` | `crate_dir` | 4 | 1153 | `exists_active` | crate exists |
+| `crates/wow-constants` | `crate_dir` | 10 | 5477 | `exists_active` | crate exists |
+| `crates/wow-pvp/src/lib.rs` | `file` | 1 | 0 | `exists_empty` | file exists but has 0 lines |
+| `crates/wow-world/src/handlers` | `module_dir` | 14 | 8843 | `exists_active` | directory exists |
+| `crates/wow-maps` | `crate_dir` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-pvp/Cargo.toml` — declares deps on `wow-core`, `wow-constants`. Empty package.
 - `crates/wow-pvp/src/lib.rs` — empty file (0 lines).

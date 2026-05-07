@@ -238,6 +238,26 @@ The wire format is essentially: per-object `(updateType: u8, packed_guid, mask_b
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-core` | `crate_dir` | 4 | 1153 | `exists_active` | crate exists |
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+| `crates/wow-packet` | `crate_dir` | 25 | 13058 | `exists_active` | crate exists |
+| `crates/wow-core/src/guid.rs` | `file` | 1 | 790 | `exists_active` | file exists |
+| `crates/wow-core/src/position.rs` | `file` | 1 | 190 | `exists_active` | file exists |
+| `crates/wow-core/src/lib.rs` | `file` | 1 | 7 | `exists_active` | file exists |
+| `crates/wow-packet/src/world_packet.rs` | `file` | 1 | 673 | `exists_active` | file exists |
+| `crates/wow-packet/src/update.rs` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-ai` | `crate_dir` | 1 | 346 | `exists_active` | crate exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 
 | File | Lines | Coverage of C++ Object/ |

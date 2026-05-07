@@ -167,6 +167,22 @@ World module doesn't directly send packets; instead, it calls methods on session
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/world-server` | `crate_dir` | 1 | 818 | `exists_active` | crate exists |
+| `crates/wow-network` | `crate_dir` | 6 | 1716 | `exists_active` | crate exists |
+| `crates/world-server/src/main.rs` | `file` | 1 | 818 | `exists_active` | file exists |
+| `crates/wow-world/src/lib.rs` | `file` | 1 | 13 | `exists_active` | file exists |
+| `crates/wow-world/src/map_manager.rs` | `file` | 1 | 784 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/world-server/src/main.rs` — ~500 lines — TCP listener, session spawning, basic event loop skeleton
 - `crates/wow-world/src/lib.rs` — module exports (session, map_manager, handlers)

@@ -190,6 +190,30 @@ DBC/DB2 stores read by GameObject:
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+| `crates/wow-packet` | `crate_dir` | 25 | 13058 | `exists_active` | crate exists |
+| `crates/wow-data` | `crate_dir` | 11 | 3505 | `exists_active` | crate exists |
+| `crates/wow-database` | `crate_dir` | 12 | 2262 | `exists_active` | crate exists |
+| `crates/wow-packet/src/packets/update.rs` | `file` | 1 | 3072 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/character.rs:2109,2454` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-world/src/session.rs:264,444` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-world/src/session.rs:996,1196` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-database/src/statements/world.rs:79,253` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-constants/src/opcodes.rs` | `file` | 1 | 1642 | `exists_active` | file exists |
+| `crates/wow-constants/src/object.rs:22,72` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-core/src/guid.rs` | `file` | 1 | 790 | `exists_active` | file exists |
+| `crates/wow-packet/src/packets/query.rs` | `file` | 1 | 616 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/archived/rustycore_ARCHIVED_20260312`:**
 - `crates/wow-packet/src/packets/update.rs` — `GameObjectCreateData` (lines 1271-1395). Has: `guid, entry, display_id, go_type: u8, position, rotation: [f32; 4], anim_progress, state: i8, faction_template, scale`. Implements `write_values_create` (matches client `GameObjectFieldData.WriteCreate`) and `packed_rotation()` (X:22/Y:21/Z:21 layout, validated against C# reference).
 - `crates/wow-world/src/handlers/character.rs:2109,2454` — `send_nearby_gameobjects(map_id, position, zone_id)`. Loads from `SEL_GAMEOBJECTS_IN_RANGE`, sets `HighGuid::GameObject`, builds a `GameObjectCreateData`, pushes a `create_gameobject_block`. **No** `GameObject` runtime entity, no `Use`, no state machine, no template caching.

@@ -344,6 +344,26 @@ DB2/DBC stores read by the Pet module:
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-world/src/pets` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-world/src/handlers/pets.rs` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-packet/src/packets/pets.rs` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-database` | `crate_dir` | 12 | 2262 | `exists_active` | crate exists |
+| `crates/wow-constants/src/opcodes.rs` | `file` | 1 | 1642 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/character.rs:3040–3045` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-database/src/statements` | `module_dir` | 5 | 1100 | `exists_active` | directory exists |
+| `crates/wow-ai/src` | `module_dir` | 1 | 346 | `exists_active` | directory exists |
+| `crates/wow-handler/src/lib.rs` | `file` | 1 | 116 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-constants/src/opcodes.rs` — ~16 pet/stable opcode constants present (PetAbandon, PetAction, PetCancelAura, PetRename, PetSetAction, PetSpellAutocast, PetStopAttack, RequestPetInfo, DismissCritter, LearnPreviewTalentsPet, StablePet, StableSwapPet, UnstablePet, BuyStableSlot, RequestStabledPets [in NPC group], plus all the SMSG: PetActionFeedback, PetActionSound, PetMode, PetSpellsMessage, PetStableResult, PetTameFailure). No Rust-side enum mirrors of CommandStates/ReactStates/ActiveStates/PetType/PetSaveMode.
 - `crates/wow-world/src/handlers/character.rs:3040–3045` — `handle_request_stabled_pets` is a single-line info-log stub ("RequestStabledPets account {} (stub)"); does not query DB, does not send `SMSG_PET_STABLE_LIST`.

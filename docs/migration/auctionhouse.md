@@ -214,6 +214,23 @@ Tables: `auctionhouse`, `auction_items`, `auction_bidders`, `character_auction_f
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+| `crates/wow-database` | `crate_dir` | 12 | 2262 | `exists_active` | crate exists |
+| `crates/wow-packet` | `crate_dir` | 25 | 13058 | `exists_active` | crate exists |
+| `crates/wow-packet/src/packets/misc.rs` | `file` | 1 | 2613 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/misc.rs` | `file` | 1 | 661 | `exists_active` | file exists |
+| `crates/wow-constants/src/opcodes.rs` | `file` | 1 | 1642 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-packet/src/packets/misc.rs` (~lines 1900-2010) — only `AuctionHelloResponse` builder + 3 empty-shell result packets (`AuctionListBidderItemsResult`, `AuctionListOwnerItemsResult`, `AuctionListPendingSalesResult`) — covers ~5% of the wire surface
 - `crates/wow-world/src/handlers/misc.rs` — placeholder dispatch entries for `AuctionListBidderItems`, `AuctionListOwnerItems`, `AuctionListPendingSales` (all stub)

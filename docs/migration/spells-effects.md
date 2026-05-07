@@ -349,6 +349,24 @@ Los effects que solo emiten state changes (`EffectApplyAura`, `EffectModifyCoold
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-spell` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
+| `crates/wow-spell/src/effects/dispatch.rs` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-spell/src/lib.rs` | `file` | 1 | 0 | `exists_empty` | file exists but has 0 lines |
+| `crates/wow-world/src/handlers/spell.rs` | `file` | 1 | 288 | `exists_active` | file exists |
+| `crates/wow-packet/src/packets/spell.rs` | `file` | 1 | 466 | `exists_active` | file exists |
+| `crates/wow-data/src/spell_info.rs` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-packet` | `crate_dir` | 25 | 13058 | `exists_active` | crate exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-spell/src/lib.rs` — **0 líneas (vacío)**. **Cero handlers de effects**.
 - `crates/wow-world/src/handlers/spell.rs` — handler `CMSG_CAST_SPELL` con stub `execute_spell(spell_id, target_guid)` cuyo cuerpo no aplica daño, heal, aura, teleport, ni ningún SpellEffect concreto. Es un placeholder de nombre.

@@ -173,6 +173,32 @@ DBC/DB2 stores read by Corpse:
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+| `crates/wow-packet` | `crate_dir` | 25 | 13058 | `exists_active` | crate exists |
+| `crates/wow-database` | `crate_dir` | 12 | 2262 | `exists_active` | crate exists |
+| `crates/wow-constants` | `crate_dir` | 10 | 5477 | `exists_active` | crate exists |
+| `crates/wow-constants/src/object.rs:24,75` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-core/src/guid.rs` | `file` | 1 | 790 | `exists_active` | file exists |
+| `crates/wow-constants/src/opcodes.rs` | `file` | 1 | 1642 | `exists_active` | file exists |
+| `crates/wow-constants/src/spell.rs` | `file` | 1 | 569 | `exists_active` | file exists |
+| `crates/wow-constants/src/unit.rs` | `file` | 1 | 599 | `exists_active` | file exists |
+| `crates/wow-constants/src/object.rs` | `file` | 1 | 173 | `exists_active` | file exists |
+| `crates/wow-constants/src/shared.rs` | `file` | 1 | 464 | `exists_active` | file exists |
+| `crates/wow-constants/src/item.rs` | `file` | 1 | 1239 | `exists_active` | file exists |
+| `crates/wow-packet/src/packets/update_stubs.rs` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-world/src/handlers/loot.rs:172,199-218` | `path` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-world/src/session.rs` | `file` | 1 | 3138 | `exists_active` | file exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/archived/rustycore_ARCHIVED_20260312`:**
 - `crates/wow-constants/src/object.rs:24,75` — `TypeMask::Corpse = 10`, `TypeId::Corpse = 14`
 - `crates/wow-core/src/guid.rs` — `HighGuid::Corpse` variant defined (used in nothing yet)

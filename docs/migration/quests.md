@@ -247,6 +247,24 @@ Player-side touchpoints (out-of-tree):
 
 ## 8. Current state in RustyCore
 
+<!-- REFINE.021:BEGIN rust-target-coverage -->
+
+### R2 Rust target coverage (generated)
+
+> Fuente: cabecera `Rust target crate(s)` y seccion 8 del doc; verificado contra `/home/server/rustycore`. Esto solo valida existencia/estado del target Rust, no correccion funcional contra C++.
+
+| Rust target | Kind | Rust files | Lines | Status | Notes |
+|---|---|---:|---:|---|---|
+| `crates/wow-data` | `crate_dir` | 11 | 3505 | `exists_active` | crate exists |
+| `crates/wow-packet/src/packets/quest.rs` | `file` | 1 | 603 | `exists_active` | file exists |
+| `crates/wow-world/src/handlers/quest.rs` | `file` | 1 | 851 | `exists_active` | file exists |
+| `crates/wow-quest` | `crate_dir` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-data/src/quest.rs` | `file` | 1 | 337 | `exists_active` | file exists |
+| `crates/wow-data/src/quest_xp.rs` | `file` | 1 | 116 | `exists_active` | file exists |
+| `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
+
+<!-- REFINE.021:END rust-target-coverage -->
+
 **Files in `/home/server/rustycore`:**
 - `crates/wow-data/src/quest.rs` — 337 lines — `QuestObjective`, `QuestTemplate`, `QuestStore`, `load_quests` (templates + objectives + creature starter/ender from world DB). Has `is_repeatable`, `is_available_for(race, class, level)` helpers. Covers ~30% of `Quest` C++ surface.
 - `crates/wow-data/src/quest_xp.rs` — 116 lines — `QuestXpStore` loads `QuestXP.db2`, `calculate_xp(quest_level, player_level, xp_difficulty)` mirrors `Quest::XPValue` + `RoundXPValue` (round-to-5).
