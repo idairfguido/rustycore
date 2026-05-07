@@ -384,6 +384,17 @@ async fn main() -> Result<()> {
         item_random_suffix_store.len()
     );
 
+    // Load SpellItemEnchantment.db2 for ApplyEnchantment and arena enchantment checks.
+    let spell_item_enchantment_store = Arc::new(
+        wow_data::SpellItemEnchantmentStore::load(&data_dir, &locale).context(
+            "Failed to load SpellItemEnchantment.db2 — check DataDir and DBC.Locale config",
+        )?,
+    );
+    info!(
+        "Loaded {} spell item enchantments from SpellItemEnchantment.db2",
+        spell_item_enchantment_store.len()
+    );
+
     // Build hotfix blob cache — pre-loads raw DB2 record bytes and hotfix DB overlays for DBReply.
     let mut hotfix_blob_cache = wow_data::build_hotfix_blob_cache(&data_dir, &locale);
     match hotfix_blob_cache
@@ -533,6 +544,7 @@ async fn main() -> Result<()> {
         player_stats: Some(Arc::clone(&player_stats)),
         item_stats_store: Some(Arc::clone(&item_stats_store)),
         item_random_suffix_store: Some(Arc::clone(&item_random_suffix_store)),
+        spell_item_enchantment_store: Some(Arc::clone(&spell_item_enchantment_store)),
         hotfix_blob_cache: Some(Arc::clone(&hotfix_blob_cache)),
         skill_store: Some(Arc::clone(&skill_store)),
         spell_store: Some(Arc::clone(&spell_store)),
@@ -861,6 +873,9 @@ async fn create_session(
     }
     if let Some(ref store) = resources.item_random_suffix_store {
         session.set_item_random_suffix_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.spell_item_enchantment_store {
+        session.set_spell_item_enchantment_store(Arc::clone(store));
     }
     if let Some(ref cache) = resources.hotfix_blob_cache {
         session.set_hotfix_blob_cache(Arc::clone(cache));

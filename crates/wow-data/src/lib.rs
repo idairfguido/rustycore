@@ -14,6 +14,7 @@ pub mod player_stats;
 pub mod skill;
 pub mod area_trigger;
 pub mod spell;
+pub mod spell_item_enchantment;
 pub mod quest;
 pub mod quest_xp;
 
@@ -27,3 +28,4 @@ pub use area_trigger::{
     AreaTriggerTeleport, AreaTriggerData, AreaTriggerStore, TriggerShape, load_area_triggers,
 };
 pub use spell::{SpellInfo, SpellStore};
+pub use spell_item_enchantment::{SpellItemEnchantmentEntry, SpellItemEnchantmentStore};

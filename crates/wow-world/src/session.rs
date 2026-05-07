@@ -12,16 +12,17 @@ use std::time::Instant;
 
 use tracing::{debug, info, trace, warn};
 
-use wow_constants::{ClientOpcodes, InventoryResult};
+use wow_constants::{ClientOpcodes, InventoryResult, ItemEnchantmentType};
 use wow_core::{ObjectGuid, ObjectGuidGenerator};
 use wow_data::{
     AreaTriggerStore, HotfixBlobCache, ItemRandomSuffixStore, ItemStatsStore, ItemStore,
-    PlayerStatsStore, SkillStore, SpellStore,
+    PlayerStatsStore, SkillStore, SpellItemEnchantmentStore, SpellStore,
 };
 use wow_database::{CharacterDatabase, LoginDatabase, WorldDatabase};
 use wow_entities::{
-    ApplyEnchantmentRandomSuffixRef, PlayerEnchantTimeUpdate, PlayerItemTimeUpdate,
-    SendNewItemDelivery, SendNewItemDisplayText, SendNewItemPlan,
+    ApplyEnchantmentEffectRef, ApplyEnchantmentRandomSuffixRef, ApplyEnchantmentTemplateRef,
+    PlayerEnchantTimeUpdate, PlayerItemTimeUpdate, SendNewItemDelivery, SendNewItemDisplayText,
+    SendNewItemPlan,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus, build_dispatch_table};
 use wow_network::session_mgr::{InstanceLink, SessionManager};
@@ -117,6 +118,9 @@ pub struct WorldSession {
 
     // Item random suffix store (ItemRandomSuffix.db2 data)
     item_random_suffix_store: Option<Arc<ItemRandomSuffixStore>>,
+
+    // Spell item enchantment store (SpellItemEnchantment.db2 data)
+    spell_item_enchantment_store: Option<Arc<SpellItemEnchantmentStore>>,
 
     // Hotfix blob cache: raw DB2 record bytes for DBReply responses
     hotfix_blob_cache: Option<Arc<HotfixBlobCache>>,
@@ -426,6 +430,7 @@ impl WorldSession {
             player_stats: None,
             item_stats_store: None,
             item_random_suffix_store: None,
+            spell_item_enchantment_store: None,
             hotfix_blob_cache: None,
             skill_store: None,
             area_trigger_store: None,
@@ -610,6 +615,66 @@ impl WorldSession {
                     entry.enchantments,
                     entry.allocation_pct,
                 )
+            })
+    }
+
+    /// Set the spell item enchantment store for this session.
+    pub fn set_spell_item_enchantment_store(&mut self, store: Arc<SpellItemEnchantmentStore>) {
+        self.spell_item_enchantment_store = Some(store);
+    }
+
+    /// Get the spell item enchantment store reference.
+    pub fn spell_item_enchantment_store(&self) -> Option<&Arc<SpellItemEnchantmentStore>> {
+        self.spell_item_enchantment_store.as_ref()
+    }
+
+    /// C++ `SpellMgr::IsArenaAllowedEnchancment`.
+    pub fn is_arena_allowed_enchantment(&self, enchantment_id: u32) -> bool {
+        self.spell_item_enchantment_store
+            .as_ref()
+            .is_some_and(|store| store.is_arena_allowed_enchantment(enchantment_id))
+    }
+
+    /// Build the entity-level `ApplyEnchantment` template from `SpellItemEnchantment.db2`.
+    pub fn apply_enchantment_template_ref(
+        &self,
+        enchantment_id: i32,
+        required_skill_value: u16,
+        condition_fits: bool,
+    ) -> Option<ApplyEnchantmentTemplateRef> {
+        let id = u32::try_from(enchantment_id).ok()?;
+        self.spell_item_enchantment_store
+            .as_ref()
+            .and_then(|store| store.get(id))
+            .map(|entry| {
+                let mut template = ApplyEnchantmentTemplateRef::new(enchantment_id);
+                template.condition_id = u32::from(entry.condition_id);
+                template.condition_fits = condition_fits;
+                template.min_level = entry.min_level;
+                template.required_skill_id = u32::from(entry.required_skill_id);
+                template.required_skill_rank = entry.required_skill_rank;
+                template.required_skill_value = required_skill_value;
+                template
+            })
+    }
+
+    /// Build the C++ three `SpellItemEnchantmentEntry` effect refs.
+    pub fn apply_enchantment_effect_refs(
+        &self,
+        enchantment_id: u32,
+    ) -> Option<[ApplyEnchantmentEffectRef; 3]> {
+        self.spell_item_enchantment_store
+            .as_ref()
+            .and_then(|store| store.get(enchantment_id))
+            .map(|entry| {
+                std::array::from_fn(|index| {
+                    let amount = entry.effect_points_min[index] as u32;
+                    let arg = entry.effect_arg[index];
+                    match <ItemEnchantmentType as num_traits::FromPrimitive>::from_u8(entry.effect[index]) {
+                        Some(effect_type) => ApplyEnchantmentEffectRef::known(effect_type, amount, arg),
+                        None => ApplyEnchantmentEffectRef::unknown(u32::from(entry.effect[index]), amount, arg),
+                    }
+                })
             })
     }
 
@@ -3215,9 +3280,12 @@ fn default_available_classes() -> Vec<wow_packet::packets::auth::RaceClassAvaila
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wow_constants::EnchantmentSlot;
+    use wow_constants::{EnchantmentSlot, SpellItemEnchantmentFlags};
     use wow_core::Position;
-    use wow_data::{ItemRandomSuffixEntry, ItemRandomSuffixStore};
+    use wow_data::{
+        ItemRandomSuffixEntry, ItemRandomSuffixStore, SpellItemEnchantmentEntry,
+        SpellItemEnchantmentStore,
+    };
     use wow_entities::{SendNewItemInstancePlan, SendNewItemModifier};
     use wow_network::{GroupInfo, PlayerBroadcastInfo};
     use wow_packet::ServerPacket;
@@ -3408,6 +3476,55 @@ mod tests {
         assert_eq!(suffix.allocation_pct, [1_000, 2_000, 3_000, 0, 0]);
         assert!(session.apply_enchantment_random_suffix_ref(0).is_none());
         assert!(session.apply_enchantment_random_suffix_ref(-78).is_none());
+    }
+
+    #[test]
+    fn spell_item_enchantment_helpers_use_cpp_store_fields() {
+        let (mut session, _, _) = make_session();
+        session.set_spell_item_enchantment_store(Arc::new(
+            SpellItemEnchantmentStore::from_entries([SpellItemEnchantmentEntry {
+                id: 900,
+                effect_arg: [7, 8, 9],
+                effect_points_min: [10, -2, 30],
+                item_visual: 44,
+                flags: SpellItemEnchantmentFlags::ALLOW_ENTERING_ARENA,
+                required_skill_id: 333,
+                required_skill_rank: 75,
+                item_level: 11,
+                charges: 0,
+                effect: [
+                    ItemEnchantmentType::Resistance as u8,
+                    ItemEnchantmentType::Stat as u8,
+                    250,
+                ],
+                condition_id: 12,
+                min_level: 20,
+                max_level: 0,
+            }])),
+        );
+
+        assert!(session.is_arena_allowed_enchantment(900));
+        assert!(!session.is_arena_allowed_enchantment(901));
+
+        let template = session
+            .apply_enchantment_template_ref(900, 80, false)
+            .expect("template should resolve from SpellItemEnchantment.db2");
+        assert_eq!(template.enchantment_id, 900);
+        assert_eq!(template.condition_id, 12);
+        assert!(!template.condition_fits);
+        assert_eq!(template.min_level, 20);
+        assert_eq!(template.required_skill_id, 333);
+        assert_eq!(template.required_skill_rank, 75);
+        assert_eq!(template.required_skill_value, 80);
+
+        assert_eq!(
+            session.apply_enchantment_effect_refs(900).unwrap(),
+            [
+                ApplyEnchantmentEffectRef::known(ItemEnchantmentType::Resistance, 10, 7),
+                ApplyEnchantmentEffectRef::known(ItemEnchantmentType::Stat, (-2i16) as u32, 8),
+                ApplyEnchantmentEffectRef::unknown(250, 30, 9),
+            ]
+        );
     }
 
     #[test]
