@@ -1,7 +1,7 @@
 use wow_constants::{
-    BagFamilyMask, EnchantmentSlot, InventoryResult, ItemBondingType, ItemClass, ItemContext,
-    ItemFieldFlags, ItemFieldFlags2, ItemModifier, ItemSubClassContainer, ItemSubClassQuiver,
-    ItemUpdateState, TypeId, TypeMask,
+    BagFamilyMask, EnchantmentSlot, InventoryResult, InventoryType, ItemBondingType, ItemClass,
+    ItemContext, ItemFieldFlags, ItemFieldFlags2, ItemModifier, ItemSubClassContainer,
+    ItemSubClassQuiver, ItemUpdateState, TypeId, TypeMask,
 };
 use wow_core::ObjectGuid;
 
@@ -16,9 +16,40 @@ pub const MAX_INSPECTED_ENCHANTMENT_SLOT: usize = 8;
 pub const MAX_SPECIALIZATIONS: usize = 5;
 pub const ITEM_MODIFIER_COUNT: usize = 58;
 pub const INVENTORY_SLOT_BAG_0: u8 = 255;
+pub const EQUIPMENT_SLOT_HEAD: u8 = 0;
+pub const EQUIPMENT_SLOT_NECK: u8 = 1;
+pub const EQUIPMENT_SLOT_SHOULDERS: u8 = 2;
+pub const EQUIPMENT_SLOT_BODY: u8 = 3;
+pub const EQUIPMENT_SLOT_CHEST: u8 = 4;
+pub const EQUIPMENT_SLOT_WAIST: u8 = 5;
+pub const EQUIPMENT_SLOT_LEGS: u8 = 6;
+pub const EQUIPMENT_SLOT_FEET: u8 = 7;
+pub const EQUIPMENT_SLOT_WRISTS: u8 = 8;
+pub const EQUIPMENT_SLOT_HANDS: u8 = 9;
+pub const EQUIPMENT_SLOT_FINGER1: u8 = 10;
+pub const EQUIPMENT_SLOT_FINGER2: u8 = 11;
+pub const EQUIPMENT_SLOT_TRINKET1: u8 = 12;
+pub const EQUIPMENT_SLOT_TRINKET2: u8 = 13;
+pub const EQUIPMENT_SLOT_BACK: u8 = 14;
+pub const EQUIPMENT_SLOT_MAINHAND: u8 = 15;
+pub const EQUIPMENT_SLOT_OFFHAND: u8 = 16;
+pub const EQUIPMENT_SLOT_RANGED: u8 = 17;
+pub const EQUIPMENT_SLOT_TABARD: u8 = 18;
 pub const EQUIPMENT_SLOT_END: u8 = 19;
+pub const PROFESSION_SLOT_PROFESSION1_TOOL: u8 = 19;
+pub const PROFESSION_SLOT_PROFESSION1_GEAR1: u8 = 20;
+pub const PROFESSION_SLOT_PROFESSION1_GEAR2: u8 = 21;
+pub const PROFESSION_SLOT_PROFESSION2_TOOL: u8 = 22;
+pub const PROFESSION_SLOT_PROFESSION2_GEAR1: u8 = 23;
+pub const PROFESSION_SLOT_PROFESSION2_GEAR2: u8 = 24;
+pub const PROFESSION_SLOT_COOKING_TOOL: u8 = 25;
+pub const PROFESSION_SLOT_COOKING_GEAR1: u8 = 26;
+pub const PROFESSION_SLOT_FISHING_TOOL: u8 = 27;
+pub const PROFESSION_SLOT_FISHING_GEAR1: u8 = 28;
+pub const PROFESSION_SLOT_FISHING_GEAR2: u8 = 29;
 pub const PROFESSION_SLOT_START: u8 = 19;
 pub const PROFESSION_SLOT_END: u8 = 30;
+pub const PROFESSION_SLOT_MAX_COUNT: u8 = 3;
 
 pub const ITEM_DATA_PARENT_BIT: usize = 0;
 pub const ITEM_DATA_ARTIFACT_POWERS_BIT: usize = 1;
@@ -179,6 +210,7 @@ pub struct ItemStorageTemplate {
     pub entry: u32,
     pub class_id: ItemClass,
     pub subclass_id: u32,
+    pub inventory_type: InventoryType,
     pub bonding: ItemBondingType,
     pub bag_family: BagFamilyMask,
     pub max_stack_size: u32,
@@ -195,6 +227,7 @@ impl ItemStorageTemplate {
             entry,
             class_id: ItemClass::Miscellaneous,
             subclass_id: 0,
+            inventory_type: InventoryType::NonEquip,
             bonding: ItemBondingType::None,
             bag_family: BagFamilyMask::NONE,
             max_stack_size,

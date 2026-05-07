@@ -1,14 +1,22 @@
 use bitflags::bitflags;
 use wow_constants::{
-    BagFamilyMask, Gender, InventoryResult, ItemBondingType, ItemClass, ItemFieldFlags,
-    ItemSubClassContainer, ItemUpdateState, PowerType, TypeId, TypeMask,
+    BagFamilyMask, Gender, InventoryResult, InventoryType, ItemBondingType, ItemClass,
+    ItemFieldFlags, ItemSubClassContainer, ItemSubclassProfession, ItemUpdateState, PowerType,
+    TypeId, TypeMask,
 };
 use wow_core::ObjectGuid;
 
 use crate::{
-    Bag, EQUIPMENT_SLOT_END, INVENTORY_SLOT_BAG_0, Item, ItemStorageTemplate, MAX_BAG_SIZE,
-    NULL_SLOT, ObjectDataUpdate, PROFESSION_SLOT_END, PROFESSION_SLOT_START, Unit, UnitDataUpdate,
-    UpdateMask, item_can_go_into_bag,
+    Bag, EQUIPMENT_SLOT_BACK, EQUIPMENT_SLOT_BODY, EQUIPMENT_SLOT_CHEST, EQUIPMENT_SLOT_END,
+    EQUIPMENT_SLOT_FEET, EQUIPMENT_SLOT_FINGER1, EQUIPMENT_SLOT_FINGER2, EQUIPMENT_SLOT_HANDS,
+    EQUIPMENT_SLOT_HEAD, EQUIPMENT_SLOT_LEGS, EQUIPMENT_SLOT_MAINHAND, EQUIPMENT_SLOT_NECK,
+    EQUIPMENT_SLOT_OFFHAND, EQUIPMENT_SLOT_SHOULDERS, EQUIPMENT_SLOT_TABARD,
+    EQUIPMENT_SLOT_TRINKET1, EQUIPMENT_SLOT_TRINKET2, EQUIPMENT_SLOT_WAIST, EQUIPMENT_SLOT_WRISTS,
+    INVENTORY_SLOT_BAG_0, Item, ItemStorageTemplate, MAX_BAG_SIZE, NULL_SLOT, ObjectDataUpdate,
+    PROFESSION_SLOT_COOKING_GEAR1, PROFESSION_SLOT_COOKING_TOOL, PROFESSION_SLOT_END,
+    PROFESSION_SLOT_FISHING_TOOL, PROFESSION_SLOT_MAX_COUNT, PROFESSION_SLOT_PROFESSION1_GEAR1,
+    PROFESSION_SLOT_PROFESSION1_GEAR2, PROFESSION_SLOT_PROFESSION1_TOOL, PROFESSION_SLOT_START,
+    Unit, UnitDataUpdate, UpdateMask, item_can_go_into_bag,
     update_fields::{
         ACTIVE_PLAYER_DATA_BITS, PLAYER_DATA_BITS, TYPEID_ACTIVE_PLAYER, TYPEID_PLAYER,
     },
@@ -246,6 +254,19 @@ pub struct CanBankItemArgs<'a> {
     pub slot_items: &'a [ItemSlotRef<'a>],
     pub stored_items: &'a [ItemStorageRef<'a>],
     pub bag_templates: &'a [BagTemplateRef<'a>],
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct FindEquipSlotArgs<'a> {
+    pub proto: &'a ItemStorageTemplate,
+    pub slot: u8,
+    pub swap: bool,
+    pub can_dual_wield: bool,
+    pub can_titan_grip: bool,
+    pub is_two_hand_used: bool,
+    pub has_required_profession_skill: bool,
+    pub profession_slot: Option<u8>,
+    pub equipped_items: &'a [ItemSlotRef<'a>],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1729,6 +1750,59 @@ impl Player {
         can_store_item_error(InventoryResult::InvFull, count, no_similar_count)
     }
 
+    pub fn find_equip_slot(&self, args: FindEquipSlotArgs<'_>) -> u8 {
+        let slots = equip_slot_candidates(args);
+        if slots[0] == NULL_SLOT {
+            return NULL_SLOT;
+        }
+
+        if args.slot != NULL_SLOT {
+            if args.swap
+                || item_ref_by_pos(args.equipped_items, INVENTORY_SLOT_BAG_0, args.slot).is_none()
+            {
+                for candidate in slots {
+                    if candidate == args.slot {
+                        return args.slot;
+                    }
+                }
+            }
+        } else {
+            for candidate in slots {
+                if candidate != NULL_SLOT
+                    && item_ref_by_pos(args.equipped_items, INVENTORY_SLOT_BAG_0, candidate)
+                        .is_none()
+                    && (candidate != EQUIPMENT_SLOT_OFFHAND || !args.is_two_hand_used)
+                {
+                    return candidate;
+                }
+            }
+
+            if args.swap {
+                let mut min_item_level = u32::MAX;
+                let mut min_item_level_index = 0usize;
+                for (index, candidate) in slots.into_iter().enumerate() {
+                    if candidate == NULL_SLOT {
+                        continue;
+                    }
+
+                    if let Some(equipped) =
+                        item_ref_by_pos(args.equipped_items, INVENTORY_SLOT_BAG_0, candidate)
+                    {
+                        let item_level = u32::from(equipped.data().debug_item_level);
+                        if item_level < min_item_level {
+                            min_item_level = item_level;
+                            min_item_level_index = index;
+                        }
+                    }
+                }
+
+                return slots[min_item_level_index];
+            }
+        }
+
+        NULL_SLOT
+    }
+
     pub fn can_bank_item(
         &self,
         dest: &mut Vec<ItemPosCount>,
@@ -2825,6 +2899,109 @@ impl Player {
     }
 }
 
+fn equip_slot_candidates(args: FindEquipSlotArgs<'_>) -> [u8; 4] {
+    let mut slots = [NULL_SLOT; 4];
+    match args.proto.inventory_type {
+        InventoryType::Head => slots[0] = EQUIPMENT_SLOT_HEAD,
+        InventoryType::Neck => slots[0] = EQUIPMENT_SLOT_NECK,
+        InventoryType::Shoulders => slots[0] = EQUIPMENT_SLOT_SHOULDERS,
+        InventoryType::Body => slots[0] = EQUIPMENT_SLOT_BODY,
+        InventoryType::Chest | InventoryType::Robe => slots[0] = EQUIPMENT_SLOT_CHEST,
+        InventoryType::Waist => slots[0] = EQUIPMENT_SLOT_WAIST,
+        InventoryType::Legs => slots[0] = EQUIPMENT_SLOT_LEGS,
+        InventoryType::Feet => slots[0] = EQUIPMENT_SLOT_FEET,
+        InventoryType::Wrists => slots[0] = EQUIPMENT_SLOT_WRISTS,
+        InventoryType::Hands => slots[0] = EQUIPMENT_SLOT_HANDS,
+        InventoryType::Finger => {
+            slots[0] = EQUIPMENT_SLOT_FINGER1;
+            slots[1] = EQUIPMENT_SLOT_FINGER2;
+        }
+        InventoryType::Trinket => {
+            slots[0] = EQUIPMENT_SLOT_TRINKET1;
+            slots[1] = EQUIPMENT_SLOT_TRINKET2;
+        }
+        InventoryType::Cloak => slots[0] = EQUIPMENT_SLOT_BACK,
+        InventoryType::Weapon => {
+            slots[0] = EQUIPMENT_SLOT_MAINHAND;
+            if args.can_dual_wield {
+                slots[1] = EQUIPMENT_SLOT_OFFHAND;
+            }
+        }
+        InventoryType::Shield | InventoryType::WeaponOffhand | InventoryType::Holdable => {
+            slots[0] = EQUIPMENT_SLOT_OFFHAND;
+        }
+        InventoryType::Ranged | InventoryType::WeaponMainhand | InventoryType::RangedRight => {
+            slots[0] = EQUIPMENT_SLOT_MAINHAND;
+        }
+        InventoryType::Weapon2Hand => {
+            slots[0] = EQUIPMENT_SLOT_MAINHAND;
+            if args.can_dual_wield && args.can_titan_grip {
+                slots[1] = EQUIPMENT_SLOT_OFFHAND;
+            }
+        }
+        InventoryType::Tabard => slots[0] = EQUIPMENT_SLOT_TABARD,
+        InventoryType::Bag => {
+            slots[0] = INVENTORY_SLOT_BAG_START;
+            slots[1] = INVENTORY_SLOT_BAG_START + 1;
+            slots[2] = INVENTORY_SLOT_BAG_START + 2;
+            slots[3] = INVENTORY_SLOT_BAG_START + 3;
+        }
+        InventoryType::ProfessionTool | InventoryType::ProfessionGear => {
+            if args.proto.class_id != ItemClass::Profession || !args.has_required_profession_skill {
+                return slots;
+            }
+
+            let is_tool = args.proto.inventory_type == InventoryType::ProfessionTool;
+            match args.proto.subclass_id {
+                value if value == ItemSubclassProfession::Cooking as u32 => {
+                    slots[0] = if is_tool {
+                        PROFESSION_SLOT_COOKING_TOOL
+                    } else {
+                        PROFESSION_SLOT_COOKING_GEAR1
+                    };
+                }
+                value if value == ItemSubclassProfession::Fishing as u32 => {
+                    if !is_tool {
+                        return [NULL_SLOT; 4];
+                    }
+                    slots[0] = PROFESSION_SLOT_FISHING_TOOL;
+                }
+                value
+                    if value == ItemSubclassProfession::Blacksmithing as u32
+                        || value == ItemSubclassProfession::Leatherworking as u32
+                        || value == ItemSubclassProfession::Alchemy as u32
+                        || value == ItemSubclassProfession::Herbalism as u32
+                        || value == ItemSubclassProfession::Mining as u32
+                        || value == ItemSubclassProfession::Tailoring as u32
+                        || value == ItemSubclassProfession::Engineering as u32
+                        || value == ItemSubclassProfession::Enchanting as u32
+                        || value == ItemSubclassProfession::Skinning as u32
+                        || value == ItemSubclassProfession::Jewelcrafting as u32
+                        || value == ItemSubclassProfession::Inscription as u32 =>
+                {
+                    let Some(profession_slot) = args.profession_slot else {
+                        return [NULL_SLOT; 4];
+                    };
+
+                    if is_tool {
+                        slots[0] = PROFESSION_SLOT_PROFESSION1_TOOL
+                            + profession_slot * PROFESSION_SLOT_MAX_COUNT;
+                    } else {
+                        // C++ writes slots[0] twice here, so primary profession gear1 is unreachable.
+                        slots[0] = PROFESSION_SLOT_PROFESSION1_GEAR1
+                            + profession_slot * PROFESSION_SLOT_MAX_COUNT;
+                        slots[0] = PROFESSION_SLOT_PROFESSION1_GEAR2
+                            + profession_slot * PROFESSION_SLOT_MAX_COUNT;
+                    }
+                }
+                _ => return [NULL_SLOT; 4],
+            }
+        }
+        _ => return slots,
+    }
+    slots
+}
+
 fn is_bag_storage_slot(slot: u8) -> bool {
     (INVENTORY_SLOT_BAG_START..INVENTORY_SLOT_BAG_END).contains(&slot)
         || (BANK_SLOT_BAG_START..BANK_SLOT_BAG_END).contains(&slot)
@@ -2898,8 +3075,8 @@ fn can_take_more_similar_ok() -> CanTakeMoreSimilarItemsOutcome {
 mod tests {
     use super::*;
     use wow_constants::{
-        BagFamilyMask, InventoryResult, ItemBondingType, ItemClass, ItemContext, ItemFieldFlags,
-        ItemSubClassContainer,
+        BagFamilyMask, InventoryResult, InventoryType, ItemBondingType, ItemClass, ItemContext,
+        ItemFieldFlags, ItemSubClassContainer, ItemSubclassProfession,
     };
 
     fn can_store_args<'a>(
@@ -2946,6 +3123,25 @@ mod tests {
             slot_items: &[],
             stored_items: &[],
             bag_templates: &[],
+        }
+    }
+
+    fn find_equip_args<'a>(
+        proto: &'a ItemStorageTemplate,
+        slot: u8,
+        swap: bool,
+        equipped_items: &'a [ItemSlotRef<'a>],
+    ) -> FindEquipSlotArgs<'a> {
+        FindEquipSlotArgs {
+            proto,
+            slot,
+            swap,
+            can_dual_wield: false,
+            can_titan_grip: false,
+            is_two_hand_used: false,
+            has_required_profession_skill: false,
+            profession_slot: None,
+            equipped_items,
         }
     }
 
@@ -3090,6 +3286,164 @@ mod tests {
         assert!(player.is_valid_pos(INVENTORY_SLOT_BAG_START, 3, true));
         assert!(!player.is_valid_pos(INVENTORY_SLOT_BAG_START, 4, true));
         assert!(player.is_valid_packed_pos(make_item_pos(INVENTORY_SLOT_BAG_START, 3), true));
+    }
+
+    #[test]
+    fn find_equip_slot_maps_inventory_types_like_cpp() {
+        let player = Player::new(None, false);
+        let head = ItemStorageTemplate {
+            inventory_type: InventoryType::Head,
+            ..ItemStorageTemplate::regular_item(1, 1)
+        };
+        let robe = ItemStorageTemplate {
+            inventory_type: InventoryType::Robe,
+            ..ItemStorageTemplate::regular_item(2, 1)
+        };
+        let bag = ItemStorageTemplate {
+            inventory_type: InventoryType::Bag,
+            ..ItemStorageTemplate::regular_item(3, 1)
+        };
+        let weapon = ItemStorageTemplate {
+            inventory_type: InventoryType::Weapon,
+            ..ItemStorageTemplate::regular_item(4, 1)
+        };
+        let two_hand = ItemStorageTemplate {
+            inventory_type: InventoryType::Weapon2Hand,
+            ..ItemStorageTemplate::regular_item(5, 1)
+        };
+
+        assert_eq!(
+            player.find_equip_slot(find_equip_args(&head, NULL_SLOT, false, &[])),
+            EQUIPMENT_SLOT_HEAD
+        );
+        assert_eq!(
+            player.find_equip_slot(find_equip_args(&robe, NULL_SLOT, false, &[])),
+            EQUIPMENT_SLOT_CHEST
+        );
+        assert_eq!(
+            player.find_equip_slot(find_equip_args(&bag, NULL_SLOT, false, &[])),
+            INVENTORY_SLOT_BAG_START
+        );
+        assert_eq!(
+            player.find_equip_slot(find_equip_args(&weapon, EQUIPMENT_SLOT_OFFHAND, false, &[])),
+            NULL_SLOT
+        );
+
+        let mut dual_args = find_equip_args(&weapon, EQUIPMENT_SLOT_OFFHAND, false, &[]);
+        dual_args.can_dual_wield = true;
+        assert_eq!(player.find_equip_slot(dual_args), EQUIPMENT_SLOT_OFFHAND);
+
+        let mut titan_args = find_equip_args(&two_hand, EQUIPMENT_SLOT_OFFHAND, false, &[]);
+        titan_args.can_dual_wield = true;
+        assert_eq!(player.find_equip_slot(titan_args), NULL_SLOT);
+        titan_args.can_titan_grip = true;
+        assert_eq!(player.find_equip_slot(titan_args), EQUIPMENT_SLOT_OFFHAND);
+    }
+
+    #[test]
+    fn find_equip_slot_requested_free_and_swap_paths_match_cpp() {
+        let player = Player::new(None, false);
+        let finger = ItemStorageTemplate {
+            inventory_type: InventoryType::Finger,
+            ..ItemStorageTemplate::regular_item(10, 1)
+        };
+        let mut ring1 = Item::default();
+        ring1.set_debug_item_level(120);
+        let mut ring2 = Item::default();
+        ring2.set_debug_item_level(45);
+        let equipped = [
+            ItemSlotRef::new(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_FINGER1, &ring1),
+            ItemSlotRef::new(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_FINGER2, &ring2),
+        ];
+
+        assert_eq!(
+            player.find_equip_slot(find_equip_args(
+                &finger,
+                EQUIPMENT_SLOT_FINGER1,
+                false,
+                &equipped
+            )),
+            NULL_SLOT
+        );
+        assert_eq!(
+            player.find_equip_slot(find_equip_args(
+                &finger,
+                EQUIPMENT_SLOT_FINGER1,
+                true,
+                &equipped
+            )),
+            EQUIPMENT_SLOT_FINGER1
+        );
+        assert_eq!(
+            player.find_equip_slot(find_equip_args(&finger, NULL_SLOT, true, &equipped)),
+            EQUIPMENT_SLOT_FINGER2
+        );
+
+        let equipped = [ItemSlotRef::new(
+            INVENTORY_SLOT_BAG_0,
+            EQUIPMENT_SLOT_FINGER1,
+            &ring1,
+        )];
+        assert_eq!(
+            player.find_equip_slot(find_equip_args(&finger, NULL_SLOT, false, &equipped)),
+            EQUIPMENT_SLOT_FINGER2
+        );
+    }
+
+    #[test]
+    fn find_equip_slot_twohand_offhand_and_professions_match_cpp_edges() {
+        let player = Player::new(None, false);
+        let weapon = ItemStorageTemplate {
+            inventory_type: InventoryType::Weapon,
+            ..ItemStorageTemplate::regular_item(20, 1)
+        };
+        let mut mainhand = Item::default();
+        mainhand.set_debug_item_level(100);
+        let equipped = [ItemSlotRef::new(
+            INVENTORY_SLOT_BAG_0,
+            EQUIPMENT_SLOT_MAINHAND,
+            &mainhand,
+        )];
+        let mut args = find_equip_args(&weapon, NULL_SLOT, false, &equipped);
+        args.can_dual_wield = true;
+        args.is_two_hand_used = true;
+        assert_eq!(player.find_equip_slot(args), NULL_SLOT);
+
+        let cooking_gear = ItemStorageTemplate {
+            class_id: ItemClass::Profession,
+            subclass_id: ItemSubclassProfession::Cooking as u32,
+            inventory_type: InventoryType::ProfessionGear,
+            ..ItemStorageTemplate::regular_item(21, 1)
+        };
+        let fishing_gear = ItemStorageTemplate {
+            class_id: ItemClass::Profession,
+            subclass_id: ItemSubclassProfession::Fishing as u32,
+            inventory_type: InventoryType::ProfessionGear,
+            ..ItemStorageTemplate::regular_item(22, 1)
+        };
+        let blacksmithing_gear = ItemStorageTemplate {
+            class_id: ItemClass::Profession,
+            subclass_id: ItemSubclassProfession::Blacksmithing as u32,
+            inventory_type: InventoryType::ProfessionGear,
+            ..ItemStorageTemplate::regular_item(23, 1)
+        };
+
+        let mut profession_args = find_equip_args(&cooking_gear, NULL_SLOT, false, &[]);
+        profession_args.has_required_profession_skill = true;
+        assert_eq!(
+            player.find_equip_slot(profession_args),
+            PROFESSION_SLOT_COOKING_GEAR1
+        );
+
+        profession_args.proto = &fishing_gear;
+        assert_eq!(player.find_equip_slot(profession_args), NULL_SLOT);
+
+        profession_args.proto = &blacksmithing_gear;
+        profession_args.profession_slot = Some(0);
+        assert_eq!(
+            player.find_equip_slot(profession_args),
+            PROFESSION_SLOT_PROFESSION1_GEAR2
+        );
     }
 
     #[test]
