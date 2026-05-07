@@ -5,7 +5,7 @@ use wow_constants::{
     BagFamilyMask, EnchantmentSlot, Gender, InventoryResult, InventoryType, ItemBondingType,
     ItemClass, ItemEnchantmentType, ItemFieldFlags, ItemFieldFlags2, ItemModType,
     ItemSubClassContainer, ItemSubClassQuiver, ItemSubClassWeapon, ItemSubclassProfession,
-    ItemUpdateState, PowerType, TypeId, TypeMask, WeaponAttackType,
+    ItemUpdateState, PowerType, Stats, TypeId, TypeMask, WeaponAttackType,
 };
 use wow_core::ObjectGuid;
 
@@ -1143,12 +1143,40 @@ pub enum ApplyEnchantmentEffectAction {
         spell_id: u32,
         item_guid: ObjectGuid,
     },
-    ResistanceModifier {
-        resistance: u32,
+    UnitModifier {
+        unit_mod: ApplyEnchantmentUnitMod,
+        modifier: ApplyEnchantmentUnitModifier,
         amount: u32,
         apply: bool,
     },
-    StatModifier {
+    UpdateStatBuffMod(Stats),
+    RatingModifier {
+        rating: ApplyEnchantmentCombatRating,
+        amount: u32,
+        apply: bool,
+    },
+    ManaRegenBonus {
+        amount: u32,
+        apply: bool,
+    },
+    SpellPowerBonus {
+        amount: u32,
+        apply: bool,
+    },
+    HealthRegenBonus {
+        amount: u32,
+        apply: bool,
+    },
+    SpellPenetrationBonus {
+        amount: u32,
+        apply: bool,
+    },
+    BaseModFlatValue {
+        base_mod: ApplyEnchantmentBaseMod,
+        amount: u32,
+        apply: bool,
+    },
+    UnhandledStatModifier {
         item_mod: ItemModType,
         amount: u32,
         apply: bool,
@@ -1159,6 +1187,50 @@ pub enum ApplyEnchantmentEffectAction {
     Unknown {
         effect_type: u32,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyEnchantmentUnitModifier {
+    BaseValue,
+    TotalValue,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyEnchantmentUnitMod {
+    Mana,
+    Health,
+    StatAgility,
+    StatStrength,
+    StatIntellect,
+    StatSpirit,
+    StatStamina,
+    AttackPower,
+    AttackPowerRanged,
+    Resistance(u32),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyEnchantmentCombatRating {
+    DefenseSkill,
+    Dodge,
+    Parry,
+    Block,
+    HitMelee,
+    HitRanged,
+    HitSpell,
+    CritMelee,
+    CritRanged,
+    CritSpell,
+    HasteMelee,
+    HasteRanged,
+    HasteSpell,
+    Expertise,
+    ArmorPenetration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyEnchantmentBaseMod {
+    ShieldBlockValue,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1222,63 +1294,60 @@ fn apply_enchantment_effect_action(
     enchantment_slot: EnchantmentSlot,
     apply: bool,
     effect: ApplyEnchantmentEffectRef,
-) -> ApplyEnchantmentEffectAction {
+) -> Vec<ApplyEnchantmentEffectAction> {
     match effect.effect_kind {
         ApplyEnchantmentEffectKind::Known(ItemEnchantmentType::None) => {
-            ApplyEnchantmentEffectAction::Noop
+            vec![ApplyEnchantmentEffectAction::Noop]
         }
         ApplyEnchantmentEffectKind::Known(ItemEnchantmentType::CombatSpell) => {
-            ApplyEnchantmentEffectAction::DeferredCombatSpell
+            vec![ApplyEnchantmentEffectAction::DeferredCombatSpell]
         }
         ApplyEnchantmentEffectKind::Known(
             kind @ (ItemEnchantmentType::Damage | ItemEnchantmentType::Totem),
         ) => {
             let Some(template) = item_template else {
-                return ApplyEnchantmentEffectAction::MissingItemTemplateForAttack {
+                return vec![ApplyEnchantmentEffectAction::MissingItemTemplateForAttack {
                     effect_kind: ApplyEnchantmentEffectKind::Known(kind),
-                };
+                }];
             };
             let attack_type = get_attack_by_slot(item.slot(), template.inventory_type);
             if attack_type == WeaponAttackType::Max {
-                ApplyEnchantmentEffectAction::Noop
+                vec![ApplyEnchantmentEffectAction::Noop]
             } else {
-                ApplyEnchantmentEffectAction::UpdateDamageDoneMods {
+                vec![ApplyEnchantmentEffectAction::UpdateDamageDoneMods {
                     attack_type,
                     modifier_slot: if apply { -1 } else { enchantment_slot as i16 },
-                }
+                }]
             }
         }
         ApplyEnchantmentEffectKind::Known(ItemEnchantmentType::EquipSpell) => {
             if effect.arg == 0 {
-                ApplyEnchantmentEffectAction::Noop
+                vec![ApplyEnchantmentEffectAction::Noop]
             } else if apply {
-                ApplyEnchantmentEffectAction::CastEquipSpell {
+                vec![ApplyEnchantmentEffectAction::CastEquipSpell {
                     spell_id: effect.arg,
                     item_guid: item.object().guid(),
-                }
+                }]
             } else {
-                ApplyEnchantmentEffectAction::RemoveEquipSpellAura {
+                vec![ApplyEnchantmentEffectAction::RemoveEquipSpellAura {
                     spell_id: effect.arg,
                     item_guid: item.object().guid(),
-                }
+                }]
             }
         }
         ApplyEnchantmentEffectKind::Known(ItemEnchantmentType::Resistance) => {
-            ApplyEnchantmentEffectAction::ResistanceModifier {
-                resistance: effect.arg,
+            vec![ApplyEnchantmentEffectAction::UnitModifier {
+                unit_mod: ApplyEnchantmentUnitMod::Resistance(effect.arg),
+                modifier: ApplyEnchantmentUnitModifier::TotalValue,
                 amount: effect.amount,
                 apply,
-            }
+            }]
         }
         ApplyEnchantmentEffectKind::Known(ItemEnchantmentType::Stat) => {
-            ApplyEnchantmentEffectAction::StatModifier {
-                item_mod: item_mod_type_from_u32(effect.arg),
-                amount: effect.amount,
-                apply,
-            }
+            apply_enchantment_stat_actions(item_mod_type_from_u32(effect.arg), effect.amount, apply)
         }
         ApplyEnchantmentEffectKind::Known(ItemEnchantmentType::UseSpell) => {
-            ApplyEnchantmentEffectAction::DeferredUseSpell
+            vec![ApplyEnchantmentEffectAction::DeferredUseSpell]
         }
         ApplyEnchantmentEffectKind::Known(
             ItemEnchantmentType::PrismaticSocket
@@ -1287,11 +1356,218 @@ fn apply_enchantment_effect_action(
             | ItemEnchantmentType::BonusListID
             | ItemEnchantmentType::BonusListCurve
             | ItemEnchantmentType::ArtifactPowerBonusRankPicker,
-        ) => ApplyEnchantmentEffectAction::Noop,
+        ) => vec![ApplyEnchantmentEffectAction::Noop],
         ApplyEnchantmentEffectKind::Unknown(effect_type) => {
-            ApplyEnchantmentEffectAction::Unknown { effect_type }
+            vec![ApplyEnchantmentEffectAction::Unknown { effect_type }]
         }
     }
+}
+
+fn apply_enchantment_stat_actions(
+    item_mod: ItemModType,
+    amount: u32,
+    apply: bool,
+) -> Vec<ApplyEnchantmentEffectAction> {
+    match item_mod {
+        ItemModType::Mana => vec![unit_modifier(
+            ApplyEnchantmentUnitMod::Mana,
+            ApplyEnchantmentUnitModifier::BaseValue,
+            amount,
+            apply,
+        )],
+        ItemModType::Health => vec![unit_modifier(
+            ApplyEnchantmentUnitMod::Health,
+            ApplyEnchantmentUnitModifier::BaseValue,
+            amount,
+            apply,
+        )],
+        ItemModType::Agility => primary_stat_actions(
+            ApplyEnchantmentUnitMod::StatAgility,
+            Stats::Agility,
+            amount,
+            apply,
+        ),
+        ItemModType::Strength => primary_stat_actions(
+            ApplyEnchantmentUnitMod::StatStrength,
+            Stats::Strength,
+            amount,
+            apply,
+        ),
+        ItemModType::Intellect => primary_stat_actions(
+            ApplyEnchantmentUnitMod::StatIntellect,
+            Stats::Intellect,
+            amount,
+            apply,
+        ),
+        ItemModType::Spirit => primary_stat_actions(
+            ApplyEnchantmentUnitMod::StatSpirit,
+            Stats::Spirit,
+            amount,
+            apply,
+        ),
+        ItemModType::Stamina => primary_stat_actions(
+            ApplyEnchantmentUnitMod::StatStamina,
+            Stats::Stamina,
+            amount,
+            apply,
+        ),
+        ItemModType::DefenseSkillRating => {
+            rating_actions(&[ApplyEnchantmentCombatRating::DefenseSkill], amount, apply)
+        }
+        ItemModType::DodgeRating => {
+            rating_actions(&[ApplyEnchantmentCombatRating::Dodge], amount, apply)
+        }
+        ItemModType::ParryRating => {
+            rating_actions(&[ApplyEnchantmentCombatRating::Parry], amount, apply)
+        }
+        ItemModType::BlockRating => {
+            rating_actions(&[ApplyEnchantmentCombatRating::Block], amount, apply)
+        }
+        ItemModType::HitMeleeRating => {
+            rating_actions(&[ApplyEnchantmentCombatRating::HitMelee], amount, apply)
+        }
+        ItemModType::HitRangedRating => {
+            rating_actions(&[ApplyEnchantmentCombatRating::HitRanged], amount, apply)
+        }
+        ItemModType::HitSpellRating => {
+            rating_actions(&[ApplyEnchantmentCombatRating::HitSpell], amount, apply)
+        }
+        ItemModType::CritMeleeRating => {
+            rating_actions(&[ApplyEnchantmentCombatRating::CritMelee], amount, apply)
+        }
+        ItemModType::CritRangedRating => {
+            rating_actions(&[ApplyEnchantmentCombatRating::CritRanged], amount, apply)
+        }
+        ItemModType::CritSpellRating => {
+            rating_actions(&[ApplyEnchantmentCombatRating::CritSpell], amount, apply)
+        }
+        ItemModType::HasteSpellRating => {
+            rating_actions(&[ApplyEnchantmentCombatRating::HasteSpell], amount, apply)
+        }
+        ItemModType::HitRating => rating_actions(
+            &[
+                ApplyEnchantmentCombatRating::HitMelee,
+                ApplyEnchantmentCombatRating::HitRanged,
+                ApplyEnchantmentCombatRating::HitSpell,
+            ],
+            amount,
+            apply,
+        ),
+        ItemModType::CritRating => rating_actions(
+            &[
+                ApplyEnchantmentCombatRating::CritMelee,
+                ApplyEnchantmentCombatRating::CritRanged,
+                ApplyEnchantmentCombatRating::CritSpell,
+            ],
+            amount,
+            apply,
+        ),
+        ItemModType::HasteRating => rating_actions(
+            &[
+                ApplyEnchantmentCombatRating::HasteMelee,
+                ApplyEnchantmentCombatRating::HasteRanged,
+                ApplyEnchantmentCombatRating::HasteSpell,
+            ],
+            amount,
+            apply,
+        ),
+        ItemModType::ExpertiseRating => {
+            rating_actions(&[ApplyEnchantmentCombatRating::Expertise], amount, apply)
+        }
+        ItemModType::AttackPower => vec![
+            unit_modifier(
+                ApplyEnchantmentUnitMod::AttackPower,
+                ApplyEnchantmentUnitModifier::TotalValue,
+                amount,
+                apply,
+            ),
+            unit_modifier(
+                ApplyEnchantmentUnitMod::AttackPowerRanged,
+                ApplyEnchantmentUnitModifier::TotalValue,
+                amount,
+                apply,
+            ),
+        ],
+        ItemModType::RangedAttackPower => vec![unit_modifier(
+            ApplyEnchantmentUnitMod::AttackPowerRanged,
+            ApplyEnchantmentUnitModifier::TotalValue,
+            amount,
+            apply,
+        )],
+        ItemModType::ManaRegeneration => {
+            vec![ApplyEnchantmentEffectAction::ManaRegenBonus { amount, apply }]
+        }
+        ItemModType::ArmorPenetrationRating => rating_actions(
+            &[ApplyEnchantmentCombatRating::ArmorPenetration],
+            amount,
+            apply,
+        ),
+        ItemModType::SpellPower => {
+            vec![ApplyEnchantmentEffectAction::SpellPowerBonus { amount, apply }]
+        }
+        ItemModType::HealthRegen => {
+            vec![ApplyEnchantmentEffectAction::HealthRegenBonus { amount, apply }]
+        }
+        ItemModType::SpellPenetration => {
+            vec![ApplyEnchantmentEffectAction::SpellPenetrationBonus { amount, apply }]
+        }
+        ItemModType::BlockValue => vec![ApplyEnchantmentEffectAction::BaseModFlatValue {
+            base_mod: ApplyEnchantmentBaseMod::ShieldBlockValue,
+            amount,
+            apply,
+        }],
+        _ => vec![ApplyEnchantmentEffectAction::UnhandledStatModifier {
+            item_mod,
+            amount,
+            apply,
+        }],
+    }
+}
+
+fn primary_stat_actions(
+    unit_mod: ApplyEnchantmentUnitMod,
+    stat: Stats,
+    amount: u32,
+    apply: bool,
+) -> Vec<ApplyEnchantmentEffectAction> {
+    vec![
+        unit_modifier(
+            unit_mod,
+            ApplyEnchantmentUnitModifier::TotalValue,
+            amount,
+            apply,
+        ),
+        ApplyEnchantmentEffectAction::UpdateStatBuffMod(stat),
+    ]
+}
+
+fn unit_modifier(
+    unit_mod: ApplyEnchantmentUnitMod,
+    modifier: ApplyEnchantmentUnitModifier,
+    amount: u32,
+    apply: bool,
+) -> ApplyEnchantmentEffectAction {
+    ApplyEnchantmentEffectAction::UnitModifier {
+        unit_mod,
+        modifier,
+        amount,
+        apply,
+    }
+}
+
+fn rating_actions(
+    ratings: &[ApplyEnchantmentCombatRating],
+    amount: u32,
+    apply: bool,
+) -> Vec<ApplyEnchantmentEffectAction> {
+    ratings
+        .iter()
+        .map(|rating| ApplyEnchantmentEffectAction::RatingModifier {
+            rating: *rating,
+            amount,
+            apply,
+        })
+        .collect()
 }
 
 const fn get_attack_by_slot(slot: u8, inventory_type: InventoryType) -> WeaponAttackType {
@@ -5847,7 +6123,7 @@ impl Player {
 
         effects
             .iter()
-            .map(|effect| {
+            .flat_map(|effect| {
                 apply_enchantment_effect_action(
                     item,
                     item_template,
@@ -12279,16 +12555,19 @@ mod tests {
                 ],
             ),
             vec![
-                ApplyEnchantmentEffectAction::ResistanceModifier {
-                    resistance: 2,
+                ApplyEnchantmentEffectAction::UnitModifier {
+                    unit_mod: ApplyEnchantmentUnitMod::Resistance(2),
+                    modifier: ApplyEnchantmentUnitModifier::TotalValue,
                     amount: 17,
                     apply: true,
                 },
-                ApplyEnchantmentEffectAction::StatModifier {
-                    item_mod: ItemModType::Strength,
+                ApplyEnchantmentEffectAction::UnitModifier {
+                    unit_mod: ApplyEnchantmentUnitMod::StatStrength,
+                    modifier: ApplyEnchantmentUnitModifier::TotalValue,
                     amount: 31,
                     apply: true,
                 },
+                ApplyEnchantmentEffectAction::UpdateStatBuffMod(Stats::Strength),
             ]
         );
 
@@ -12308,6 +12587,135 @@ mod tests {
                     )],
                 )
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn apply_enchantment_effect_actions_expand_cpp_stat_switch_special_cases() {
+        let player = Player::new(None, false);
+        let mut item = item_with_guid_entry(12494, 7468);
+        item.set_slot(EQUIPMENT_SLOT_CHEST);
+
+        assert_eq!(
+            player.apply_enchantment_effect_actions(
+                &item,
+                None,
+                EnchantmentSlot::EnhancementTemporary,
+                true,
+                &[
+                    ApplyEnchantmentEffectRef::known(
+                        ItemEnchantmentType::Stat,
+                        11,
+                        ItemModType::HitRating as u32,
+                    ),
+                    ApplyEnchantmentEffectRef::known(
+                        ItemEnchantmentType::Stat,
+                        12,
+                        ItemModType::CritRating as u32,
+                    ),
+                    ApplyEnchantmentEffectRef::known(
+                        ItemEnchantmentType::Stat,
+                        13,
+                        ItemModType::HasteRating as u32,
+                    ),
+                ],
+            ),
+            vec![
+                ApplyEnchantmentEffectAction::RatingModifier {
+                    rating: ApplyEnchantmentCombatRating::HitMelee,
+                    amount: 11,
+                    apply: true,
+                },
+                ApplyEnchantmentEffectAction::RatingModifier {
+                    rating: ApplyEnchantmentCombatRating::HitRanged,
+                    amount: 11,
+                    apply: true,
+                },
+                ApplyEnchantmentEffectAction::RatingModifier {
+                    rating: ApplyEnchantmentCombatRating::HitSpell,
+                    amount: 11,
+                    apply: true,
+                },
+                ApplyEnchantmentEffectAction::RatingModifier {
+                    rating: ApplyEnchantmentCombatRating::CritMelee,
+                    amount: 12,
+                    apply: true,
+                },
+                ApplyEnchantmentEffectAction::RatingModifier {
+                    rating: ApplyEnchantmentCombatRating::CritRanged,
+                    amount: 12,
+                    apply: true,
+                },
+                ApplyEnchantmentEffectAction::RatingModifier {
+                    rating: ApplyEnchantmentCombatRating::CritSpell,
+                    amount: 12,
+                    apply: true,
+                },
+                ApplyEnchantmentEffectAction::RatingModifier {
+                    rating: ApplyEnchantmentCombatRating::HasteMelee,
+                    amount: 13,
+                    apply: true,
+                },
+                ApplyEnchantmentEffectAction::RatingModifier {
+                    rating: ApplyEnchantmentCombatRating::HasteRanged,
+                    amount: 13,
+                    apply: true,
+                },
+                ApplyEnchantmentEffectAction::RatingModifier {
+                    rating: ApplyEnchantmentCombatRating::HasteSpell,
+                    amount: 13,
+                    apply: true,
+                },
+            ]
+        );
+
+        assert_eq!(
+            player.apply_enchantment_effect_actions(
+                &item,
+                None,
+                EnchantmentSlot::EnhancementTemporary,
+                false,
+                &[
+                    ApplyEnchantmentEffectRef::known(
+                        ItemEnchantmentType::Stat,
+                        20,
+                        ItemModType::AttackPower as u32,
+                    ),
+                    ApplyEnchantmentEffectRef::known(
+                        ItemEnchantmentType::Stat,
+                        21,
+                        ItemModType::SpellPower as u32,
+                    ),
+                    ApplyEnchantmentEffectRef::known(
+                        ItemEnchantmentType::Stat,
+                        22,
+                        ItemModType::BlockValue as u32,
+                    ),
+                ],
+            ),
+            vec![
+                ApplyEnchantmentEffectAction::UnitModifier {
+                    unit_mod: ApplyEnchantmentUnitMod::AttackPower,
+                    modifier: ApplyEnchantmentUnitModifier::TotalValue,
+                    amount: 20,
+                    apply: false,
+                },
+                ApplyEnchantmentEffectAction::UnitModifier {
+                    unit_mod: ApplyEnchantmentUnitMod::AttackPowerRanged,
+                    modifier: ApplyEnchantmentUnitModifier::TotalValue,
+                    amount: 20,
+                    apply: false,
+                },
+                ApplyEnchantmentEffectAction::SpellPowerBonus {
+                    amount: 21,
+                    apply: false,
+                },
+                ApplyEnchantmentEffectAction::BaseModFlatValue {
+                    base_mod: ApplyEnchantmentBaseMod::ShieldBlockValue,
+                    amount: 22,
+                    apply: false,
+                },
+            ]
         );
     }
 
