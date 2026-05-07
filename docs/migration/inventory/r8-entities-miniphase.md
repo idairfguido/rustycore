@@ -55,6 +55,11 @@
   Rust targets: `crates/wow-entities/src/dynamic_object.rs`, `crates/wow-entities/src/update_fields.rs`, `crates/wow-entities/src/lib.rs`.
   Acceptance: base `DynamicObject` constructor matches C++ type id/mask, `WorldObject(isWorldObject)`, stationary create flag and duration/aura/caster/viewpoint null state; `DynamicObjectType` enum and `DynamicObjectData` caster/type/spell visual/spell id/radius/cast-time setters use C++ bit positions; non-aura duration ticking follows C++; values update sets `TYPEID_DYNAMICOBJECT`.
 
+- [x] **#NEXT.R8.ENTITIES.026** Port `AreaTrigger` base state and core setters.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/AreaTrigger/AreaTrigger.h`, `AreaTrigger.cpp`, `AreaTriggerTemplate.h`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Updates/UpdateFields.h`.
+  Rust targets: `crates/wow-entities/src/area_trigger.rs`, `crates/wow-entities/src/update_fields.rs`, `crates/wow-entities/src/lib.rs`.
+  Acceptance: base `AreaTrigger` constructor matches C++ type id/mask, `WorldObject(false)`, stationary and area-trigger create flags, spawn/target/aura/stationary-position/duration/time/removal/movement/template bridge defaults; permanent duration is sent as zero; runtime duration updates do not mark the update mask; scalar `AreaTriggerData`, simple scale-curve constants and `VisualAnim` use C++ bit positions; values update sets `TYPEID_AREATRIGGER`.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.R8.ENTITIES.003** Bind `wow-map` grid unload actions to real entity methods once Creature/GameObject/Corpse exist.
@@ -72,3 +77,4 @@
 - [ ] **#NEXT.R8.ENTITIES.021** Complete `GameObject` runtime lifecycle: update loop, loot/use state machine, door/button/trap/chest/fishing/destructible behavior, cooldown/restock, despawn/respawn persistence and grid unload bindings.
 - [ ] **#NEXT.R8.ENTITIES.023** Complete `Corpse` create/load/persistence lifecycle: player-owned corpse creation, DB save/load/delete, character cache invalidation, phasing, loot object and map registration.
 - [ ] **#NEXT.R8.ENTITIES.025** Complete `DynamicObject` create/add-to-map/update runtime: caster map inheritance, GUID creation, phase inheritance, caster registration, Aura ownership/removal, SpellInfo lookup, farsight viewpoint, transport passenger offset and map relocation.
+- [ ] **#NEXT.R8.ENTITIES.027** Complete `AreaTrigger` create/load/update runtime: AreaTriggerDataStore templates/spawns, GUID creation, phase inheritance, static spawn store, AI selection, shape search, unit enter/exit actions, splines/orbit/attached movement, server-side visibility, transport offset and map relocation.
