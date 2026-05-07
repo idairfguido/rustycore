@@ -364,6 +364,9 @@ pub struct InventoryChangeFailure {
     pub bag_result: InventoryResult,
     pub item: [ObjectGuid; 2],
     pub container_b_slot: u8,
+    pub src_container: ObjectGuid,
+    pub dst_container: ObjectGuid,
+    pub src_slot: i32,
     pub level: u32,
     pub limit_category: u32,
 }
@@ -379,6 +382,11 @@ impl ServerPacket for InventoryChangeFailure {
         match self.bag_result {
             InventoryResult::CantEquipLevelI | InventoryResult::PurchaseLevelTooLow => {
                 pkt.write_uint32(self.level);
+            }
+            InventoryResult::EventAutoequipBindConfirm => {
+                pkt.write_packed_guid(&self.src_container);
+                pkt.write_int32(self.src_slot);
+                pkt.write_packed_guid(&self.dst_container);
             }
             InventoryResult::ItemMaxLimitCategoryCountExceededIs
             | InventoryResult::ItemMaxLimitCategorySocketedExceededIs
@@ -397,6 +405,9 @@ impl InventoryChangeFailure {
             bag_result: result,
             item: [item1, item2],
             container_b_slot: 0,
+            src_container: ObjectGuid::EMPTY,
+            dst_container: ObjectGuid::EMPTY,
+            src_slot: 0,
             level: 0,
             limit_category: 0,
         }
@@ -414,6 +425,18 @@ impl InventoryChangeFailure {
 
     pub fn with_limit_category(mut self, limit_category: u32) -> Self {
         self.limit_category = limit_category;
+        self
+    }
+
+    pub fn with_bind_confirm_context(
+        mut self,
+        src_container: ObjectGuid,
+        src_slot: i32,
+        dst_container: ObjectGuid,
+    ) -> Self {
+        self.src_container = src_container;
+        self.src_slot = src_slot;
+        self.dst_container = dst_container;
         self
     }
 }
@@ -492,6 +515,26 @@ mod tests {
         let bytes = pkt.to_bytes();
 
         assert_eq!(&bytes[bytes.len() - 4..], &777u32.to_le_bytes());
+    }
+
+    #[test]
+    fn inventory_change_failure_serializes_bind_confirm_context_like_cpp() {
+        let pkt = InventoryChangeFailure::error(InventoryResult::EventAutoequipBindConfirm)
+            .with_bind_confirm_context(
+                ObjectGuid::new(0, 0x0102),
+                37,
+                ObjectGuid::new(0, 0x0506),
+            );
+        let bytes = pkt.to_bytes();
+
+        assert_eq!(
+            &bytes[bytes.len() - 12..],
+            &[
+                0x03, 0x00, 0x02, 0x01,
+                37, 0, 0, 0,
+                0x03, 0x00, 0x06, 0x05,
+            ]
+        );
     }
 
     #[test]

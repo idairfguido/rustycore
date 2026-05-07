@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use tracing::{debug, info, trace, warn};
 
-use wow_constants::ClientOpcodes;
+use wow_constants::{ClientOpcodes, InventoryResult};
 use wow_core::{ObjectGuid, ObjectGuidGenerator};
 use wow_data::{HotfixBlobCache, ItemStore, ItemStatsStore, PlayerStatsStore, SkillStore, AreaTriggerStore, SpellStore};
 use wow_database::{CharacterDatabase, LoginDatabase, WorldDatabase};
@@ -24,8 +24,8 @@ use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus, build_dis
 use wow_network::session_mgr::{InstanceLink, SessionManager};
 use wow_network::{GroupRegistry, PendingInvites, PlayerBroadcastInfo, PlayerRegistry};
 use wow_packet::packets::item::{
-    ItemEnchantTimeUpdate, ItemInstance, ItemMod, ItemModList, ItemPushResult,
-    ItemPushResultDisplayType, ItemTimeUpdate,
+    InventoryChangeFailure, ItemEnchantTimeUpdate, ItemInstance, ItemMod, ItemModList,
+    ItemPushResult, ItemPushResultDisplayType, ItemTimeUpdate,
 };
 use wow_packet::{ClientPacket, WorldPacket};
 
@@ -2108,6 +2108,38 @@ impl WorldSession {
         }
     }
 
+    pub fn send_equip_error(
+        &self,
+        result: InventoryResult,
+        item1: Option<ObjectGuid>,
+        item2: Option<ObjectGuid>,
+        required_level: u32,
+        limit_category: u32,
+    ) {
+        let mut packet = InventoryChangeFailure::new(
+            result,
+            item1.unwrap_or(ObjectGuid::EMPTY),
+            item2.unwrap_or(ObjectGuid::EMPTY),
+        );
+
+        if result != InventoryResult::Ok {
+            packet.container_b_slot = 0;
+            match result {
+                InventoryResult::CantEquipLevelI | InventoryResult::PurchaseLevelTooLow => {
+                    packet.level = required_level;
+                }
+                InventoryResult::ItemMaxLimitCategoryCountExceededIs
+                | InventoryResult::ItemMaxLimitCategorySocketedExceededIs
+                | InventoryResult::ItemMaxLimitCategoryEquippedExceededIs => {
+                    packet.limit_category = limit_category;
+                }
+                _ => {}
+            }
+        }
+
+        self.send_packet(&packet);
+    }
+
     fn item_push_result_from_send_new_item_plan(plan: &SendNewItemPlan) -> ItemPushResult {
         ItemPushResult {
             player_guid: plan.player_guid,
@@ -3277,6 +3309,43 @@ mod tests {
 
         let data = send_rx.try_recv().unwrap();
         assert_eq!(data.len(), 6); // opcode(2) + serial(4)
+    }
+
+    #[test]
+    fn send_equip_error_preserves_cpp_item_level_and_limit_fields() {
+        let (session, _, send_rx) = make_session();
+        let item1 = ObjectGuid::new(0, 0x0102);
+        let item2 = ObjectGuid::new(0, 0x0506);
+        let expected = InventoryChangeFailure::new(
+            InventoryResult::CantEquipLevelI,
+            item1,
+            item2,
+        )
+        .with_level(42)
+        .to_bytes();
+
+        session.send_equip_error(
+            InventoryResult::CantEquipLevelI,
+            Some(item1),
+            Some(item2),
+            42,
+            0,
+        );
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
+
+        let expected = InventoryChangeFailure::error(
+            InventoryResult::ItemMaxLimitCategoryEquippedExceededIs,
+        )
+        .with_limit_category(777)
+        .to_bytes();
+        session.send_equip_error(
+            InventoryResult::ItemMaxLimitCategoryEquippedExceededIs,
+            None,
+            None,
+            0,
+            777,
+        );
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
     }
 
     #[test]
