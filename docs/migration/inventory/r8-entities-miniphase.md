@@ -428,17 +428,17 @@
 - [x] **#NEXT.R8.ENTITIES.107** Port representable `Player::SendNewItem` packet plan.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp`.
   Rust targets: `crates/wow-entities/src/player.rs`, `crates/wow-entities/src/lib.rs`.
-  Acceptance: `SendNewItem` is represented as a packet plan that preserves the null-item no-op, player/item GUIDs, bag slot and slot-in-bag quantity rule, quest log item id, quantity and quantity-in-inventory, battle pet modifier extraction, pushed/created flags, encounter loot display/dungeon fields, and direct-vs-group broadcast selection with the party loot-log suppression flag. Session/group delivery remains pending in runtime wiring.
+  Acceptance: `SendNewItem` is represented as a packet plan that preserves the null-item no-op, player/item GUIDs, bag slot and slot-in-bag quantity rule, quest log item id, quantity and quantity-in-inventory, battle pet modifier extraction, pushed/created flags, encounter loot display/dungeon fields, and direct-vs-group broadcast selection with the party loot-log suppression flag. Session/group delivery bridge is closed by #NEXT.R8.ENTITIES.110; concrete call-site replacement remains pending with canonical entity inventory operations.
 
 - [x] **#NEXT.R8.ENTITIES.108** Port `ItemInstance` and `ItemPushResult` packet serialization.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ItemPacketsCommon.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ItemPacketsCommon.h`, `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ItemPackets.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ItemPackets.h`.
   Rust targets: `crates/wow-packet/src/packets/item.rs`.
-  Acceptance: `ItemInstance`, `ItemModList`, `ItemMod`, `ItemBonuses` and `ItemPushResult` serialize in C++ field order, using packed GUIDs, the same item-bonus presence bit, 6-bit modification count, item bonus payload order, and `ItemPushResult` pushed/created/display/bonus-roll/encounter-loot bit layout. Conversion from `wow-entities` send-new-item plans to session/group dispatch remains pending in runtime wiring.
+  Acceptance: `ItemInstance`, `ItemModList`, `ItemMod`, `ItemBonuses` and `ItemPushResult` serialize in C++ field order, using packed GUIDs, the same item-bonus presence bit, 6-bit modification count, item bonus payload order, and `ItemPushResult` pushed/created/display/bonus-roll/encounter-loot bit layout. Conversion from `wow-entities` send-new-item plans to session/group dispatch is closed by #NEXT.R8.ENTITIES.110.
 
 - [x] **#NEXT.R8.ENTITIES.109** Close `SendNewItem` item-instance plan gap.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ItemPacketsCommon.cpp`.
   Rust targets: `crates/wow-entities/src/player.rs`, `crates/wow-entities/src/lib.rs`.
-  Acceptance: `SendNewItemPlan` now includes the item instance fields C++ gets from `packet.Item.Initialize(item)`: item id, random property seed, random properties id and the non-zero item modifier values with their modifier type ids. This keeps packet conversion lossless for the item-instance data currently represented by Rust entities. Session/group delivery remains pending in runtime wiring.
+  Acceptance: `SendNewItemPlan` now includes the item instance fields C++ gets from `packet.Item.Initialize(item)`: item id, random property seed, random properties id and the non-zero item modifier values with their modifier type ids. This keeps packet conversion lossless for the item-instance data currently represented by Rust entities and feeds the session/group delivery bridge closed by #NEXT.R8.ENTITIES.110.
 
 - [x] **#NEXT.R8.ENTITIES.110** Wire `SendNewItemPlan` conversion and delivery.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/ItemPackets.cpp`.
