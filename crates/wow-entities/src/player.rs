@@ -1,10 +1,14 @@
 use bitflags::bitflags;
-use wow_constants::{Gender, ItemUpdateState, PowerType, TypeId, TypeMask};
+use wow_constants::{
+    BagFamilyMask, Gender, InventoryResult, ItemFieldFlags, ItemUpdateState, PowerType, TypeId,
+    TypeMask,
+};
 use wow_core::ObjectGuid;
 
 use crate::{
-    Bag, EQUIPMENT_SLOT_END, INVENTORY_SLOT_BAG_0, Item, MAX_BAG_SIZE, NULL_SLOT, ObjectDataUpdate,
-    PROFESSION_SLOT_END, PROFESSION_SLOT_START, Unit, UnitDataUpdate, UpdateMask,
+    Bag, EQUIPMENT_SLOT_END, INVENTORY_SLOT_BAG_0, Item, ItemStorageTemplate, MAX_BAG_SIZE,
+    NULL_SLOT, ObjectDataUpdate, PROFESSION_SLOT_END, PROFESSION_SLOT_START, Unit, UnitDataUpdate,
+    UpdateMask, item_can_go_into_bag,
     update_fields::{
         ACTIVE_PLAYER_DATA_BITS, PLAYER_DATA_BITS, TYPEID_ACTIVE_PLAYER, TYPEID_PLAYER,
     },
@@ -140,6 +144,28 @@ pub fn is_child_equipment_pos(bag: u8, slot: u8) -> bool {
 pub fn is_child_equipment_packed_pos(pos: u16) -> bool {
     let [bag, slot] = pos.to_be_bytes();
     is_child_equipment_pos(bag, slot)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemPosCount {
+    pub pos: u16,
+    pub count: u32,
+}
+
+impl ItemPosCount {
+    pub const fn new(pos: u16, count: u32) -> Self {
+        Self { pos, count }
+    }
+
+    pub fn is_contained_in(&self, positions: &[ItemPosCount]) -> bool {
+        positions.iter().any(|position| position.pos == self.pos)
+    }
+}
+
+fn cpp_keyring_family_gate_applies(slot: u8) -> bool {
+    let keyring_limit =
+        i16::from(KEYRING_SLOT_START) + i16::from(KEYRING_SLOT_START) - i16::from(KEYRING_SLOT_END);
+    i16::from(slot) >= i16::from(KEYRING_SLOT_START) && i16::from(slot) < keyring_limit
 }
 
 bitflags! {
@@ -710,6 +736,94 @@ impl Player {
     pub fn is_valid_packed_pos(&self, pos: u16, explicit_pos: bool) -> bool {
         let [bag, slot] = pos.to_be_bytes();
         self.is_valid_pos(bag, slot, explicit_pos)
+    }
+
+    pub fn can_store_item_in_specific_slot(
+        &self,
+        bag: u8,
+        slot: u8,
+        dest: &mut Vec<ItemPosCount>,
+        proto: &ItemStorageTemplate,
+        count: &mut u32,
+        swap: bool,
+        existing_item: Option<&Item>,
+        source_item: Option<&Item>,
+        source_is_not_empty_bag: bool,
+        bag_proto: Option<&ItemStorageTemplate>,
+    ) -> InventoryResult {
+        let existing_item = existing_item.filter(|existing| {
+            source_item.is_none_or(|source| existing.object().guid() != source.object().guid())
+        });
+
+        if let Some(source) = source_item {
+            if source_is_not_empty_bag && !is_bag_pos(make_item_pos(bag, slot)) {
+                return InventoryResult::DestroyNonemptyBag;
+            }
+
+            let source_is_child = source.has_item_flag(ItemFieldFlags::CHILD);
+            if source_is_child && !is_equipment_pos(bag, slot) && !is_child_equipment_pos(bag, slot)
+            {
+                return InventoryResult::WrongBagType3;
+            }
+            if !source_is_child && is_child_equipment_pos(bag, slot) {
+                return InventoryResult::WrongBagType3;
+            }
+        }
+
+        let need_space = if existing_item.is_none() || swap {
+            if slot == REAGENT_BAG_SLOT_START {
+                return InventoryResult::WrongBagType;
+            }
+
+            if bag == INVENTORY_SLOT_BAG_0 {
+                if cpp_keyring_family_gate_applies(slot)
+                    && !proto.bag_family.contains(BagFamilyMask::KEYS)
+                {
+                    return InventoryResult::WrongBagType;
+                }
+
+                if (BUYBACK_SLOT_START..BUYBACK_SLOT_END).contains(&slot)
+                    || slot as usize >= PLAYER_SLOT_END
+                {
+                    return InventoryResult::WrongBagType;
+                }
+            } else {
+                if self.get_bag_by_pos(bag).is_none() {
+                    return InventoryResult::WrongBagType;
+                }
+
+                let Some(bag_proto) = bag_proto else {
+                    return InventoryResult::WrongBagType;
+                };
+
+                if slot >= bag_proto.container_slots {
+                    return InventoryResult::WrongBagType;
+                }
+
+                if !item_can_go_into_bag(proto, bag_proto) {
+                    return InventoryResult::WrongBagType;
+                }
+            }
+
+            proto.max_stack_size
+        } else {
+            let existing_item = existing_item.expect("checked Some above");
+            let result = existing_item.can_be_merged_partly_with(proto.entry, proto.max_stack_size);
+            if result != InventoryResult::Ok {
+                return result;
+            }
+
+            proto.max_stack_size - existing_item.count()
+        };
+
+        let need_space = need_space.min(*count);
+        let new_position = ItemPosCount::new(make_item_pos(bag, slot), need_space);
+        if !new_position.is_contained_in(dest) {
+            dest.push(new_position);
+            *count -= need_space;
+        }
+
+        InventoryResult::Ok
     }
 
     pub fn top_level_item_guid(&self, slot: u8) -> Option<ObjectGuid> {
@@ -1489,7 +1603,10 @@ fn validate_split_source(source: &Item, count: u32) -> Result<(), PlayerStorageE
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wow_constants::{ItemBondingType, ItemContext, ItemFieldFlags};
+    use wow_constants::{
+        BagFamilyMask, InventoryResult, ItemBondingType, ItemClass, ItemContext, ItemFieldFlags,
+        ItemSubClassContainer,
+    };
 
     #[test]
     fn player_constructor_matches_cpp_base_state() {
@@ -1632,6 +1749,389 @@ mod tests {
         assert!(player.is_valid_pos(INVENTORY_SLOT_BAG_START, 3, true));
         assert!(!player.is_valid_pos(INVENTORY_SLOT_BAG_START, 4, true));
         assert!(player.is_valid_packed_pos(make_item_pos(INVENTORY_SLOT_BAG_START, 3), true));
+    }
+
+    #[test]
+    fn item_pos_count_containment_matches_cpp_pos_only_check() {
+        let target = ItemPosCount::new(make_item_pos(INVENTORY_SLOT_BAG_0, 10), 1);
+        let positions = [ItemPosCount::new(
+            make_item_pos(INVENTORY_SLOT_BAG_0, 10),
+            99,
+        )];
+
+        assert!(target.is_contained_in(&positions));
+        assert!(
+            !ItemPosCount::new(make_item_pos(INVENTORY_SLOT_BAG_0, 11), 1)
+                .is_contained_in(&positions)
+        );
+    }
+
+    #[test]
+    fn can_store_item_in_specific_slot_allocates_empty_top_level_like_cpp() {
+        let player = Player::new(None, false);
+        let proto = ItemStorageTemplate::regular_item(6948, 20);
+        let mut dest = Vec::new();
+        let mut count = 7;
+
+        assert_eq!(
+            player.can_store_item_in_specific_slot(
+                INVENTORY_SLOT_BAG_0,
+                INVENTORY_SLOT_ITEM_START,
+                &mut dest,
+                &proto,
+                &mut count,
+                false,
+                None,
+                None,
+                false,
+                None,
+            ),
+            InventoryResult::Ok
+        );
+        assert_eq!(
+            dest,
+            vec![ItemPosCount::new(
+                make_item_pos(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START),
+                7,
+            )]
+        );
+        assert_eq!(count, 0);
+
+        let mut duplicate_count = 3;
+        assert_eq!(
+            player.can_store_item_in_specific_slot(
+                INVENTORY_SLOT_BAG_0,
+                INVENTORY_SLOT_ITEM_START,
+                &mut dest,
+                &proto,
+                &mut duplicate_count,
+                false,
+                None,
+                None,
+                false,
+                None,
+            ),
+            InventoryResult::Ok
+        );
+        assert_eq!(dest.len(), 1);
+        assert_eq!(duplicate_count, 3);
+    }
+
+    #[test]
+    fn can_store_item_in_specific_slot_merges_existing_stack_like_cpp() {
+        let player = Player::new(None, false);
+        let proto = ItemStorageTemplate::regular_item(6948, 20);
+        let mut existing = Item::default();
+        existing
+            .object_mut()
+            .create(ObjectGuid::create_item(1, 100));
+        existing.object_mut().set_entry(6948);
+        existing.set_count(12);
+        let mut dest = Vec::new();
+        let mut count = 10;
+
+        assert_eq!(
+            player.can_store_item_in_specific_slot(
+                INVENTORY_SLOT_BAG_0,
+                INVENTORY_SLOT_ITEM_START,
+                &mut dest,
+                &proto,
+                &mut count,
+                false,
+                Some(&existing),
+                None,
+                false,
+                None,
+            ),
+            InventoryResult::Ok
+        );
+        assert_eq!(
+            dest,
+            vec![ItemPosCount::new(
+                make_item_pos(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START),
+                8,
+            )]
+        );
+        assert_eq!(count, 2);
+
+        existing.object_mut().set_entry(6949);
+        let mut swap_count = 1;
+        assert_eq!(
+            player.can_store_item_in_specific_slot(
+                INVENTORY_SLOT_BAG_0,
+                INVENTORY_SLOT_ITEM_START + 1,
+                &mut Vec::new(),
+                &proto,
+                &mut swap_count,
+                true,
+                Some(&existing),
+                None,
+                false,
+                None,
+            ),
+            InventoryResult::Ok
+        );
+
+        let mut blocked_count = 2;
+        assert_eq!(
+            player.can_store_item_in_specific_slot(
+                INVENTORY_SLOT_BAG_0,
+                INVENTORY_SLOT_ITEM_START + 1,
+                &mut Vec::new(),
+                &proto,
+                &mut blocked_count,
+                false,
+                Some(&existing),
+                None,
+                false,
+                None,
+            ),
+            InventoryResult::CantStack
+        );
+        assert_eq!(blocked_count, 2);
+    }
+
+    #[test]
+    fn can_store_item_in_specific_slot_applies_source_move_guards_like_cpp() {
+        let player = Player::new(None, false);
+        let proto = ItemStorageTemplate::regular_item(6948, 20);
+        let mut source = Item::default();
+        source.object_mut().create(ObjectGuid::create_item(1, 101));
+        source.object_mut().set_entry(6948);
+        source.set_count(1);
+
+        assert_eq!(
+            player.can_store_item_in_specific_slot(
+                INVENTORY_SLOT_BAG_0,
+                INVENTORY_SLOT_ITEM_START,
+                &mut Vec::new(),
+                &proto,
+                &mut 1,
+                false,
+                None,
+                Some(&source),
+                true,
+                None,
+            ),
+            InventoryResult::DestroyNonemptyBag
+        );
+
+        let mut bag_slot_count = 1;
+        assert_eq!(
+            player.can_store_item_in_specific_slot(
+                INVENTORY_SLOT_BAG_0,
+                INVENTORY_SLOT_BAG_START,
+                &mut Vec::new(),
+                &proto,
+                &mut bag_slot_count,
+                false,
+                None,
+                Some(&source),
+                true,
+                None,
+            ),
+            InventoryResult::Ok
+        );
+
+        let mut same_source_count = 1;
+        assert_eq!(
+            player.can_store_item_in_specific_slot(
+                INVENTORY_SLOT_BAG_0,
+                INVENTORY_SLOT_ITEM_START,
+                &mut Vec::new(),
+                &proto,
+                &mut same_source_count,
+                false,
+                Some(&source),
+                Some(&source),
+                false,
+                None,
+            ),
+            InventoryResult::Ok
+        );
+
+        source.set_item_flag(ItemFieldFlags::CHILD);
+        assert_eq!(
+            player.can_store_item_in_specific_slot(
+                INVENTORY_SLOT_BAG_0,
+                INVENTORY_SLOT_ITEM_START,
+                &mut Vec::new(),
+                &proto,
+                &mut 1,
+                false,
+                None,
+                Some(&source),
+                false,
+                None,
+            ),
+            InventoryResult::WrongBagType3
+        );
+        assert_eq!(
+            player.can_store_item_in_specific_slot(
+                INVENTORY_SLOT_BAG_0,
+                CHILD_EQUIPMENT_SLOT_START,
+                &mut Vec::new(),
+                &proto,
+                &mut 1,
+                false,
+                None,
+                Some(&source),
+                false,
+                None,
+            ),
+            InventoryResult::Ok
+        );
+    }
+
+    #[test]
+    fn can_store_item_in_specific_slot_applies_empty_slot_fit_guards_like_cpp() {
+        let mut player = Player::new(None, false);
+        let proto = ItemStorageTemplate::regular_item(6948, 20);
+        let regular_bag_proto = ItemStorageTemplate {
+            class_id: ItemClass::Container,
+            subclass_id: ItemSubClassContainer::Container as u32,
+            container_slots: 2,
+            ..ItemStorageTemplate::regular_item(100, 1)
+        };
+        let herb_bag_proto = ItemStorageTemplate {
+            class_id: ItemClass::Container,
+            subclass_id: ItemSubClassContainer::HerbContainer as u32,
+            container_slots: 2,
+            ..ItemStorageTemplate::regular_item(101, 1)
+        };
+        let herb = ItemStorageTemplate {
+            bag_family: BagFamilyMask::HERBS,
+            ..ItemStorageTemplate::regular_item(2447, 20)
+        };
+
+        assert_eq!(
+            player.can_store_item_in_specific_slot(
+                INVENTORY_SLOT_BAG_0,
+                REAGENT_BAG_SLOT_START,
+                &mut Vec::new(),
+                &proto,
+                &mut 1,
+                false,
+                None,
+                None,
+                false,
+                None,
+            ),
+            InventoryResult::WrongBagType
+        );
+        assert_eq!(
+            player.can_store_item_in_specific_slot(
+                INVENTORY_SLOT_BAG_0,
+                BUYBACK_SLOT_START,
+                &mut Vec::new(),
+                &proto,
+                &mut 1,
+                false,
+                None,
+                None,
+                false,
+                None,
+            ),
+            InventoryResult::WrongBagType
+        );
+        assert_eq!(
+            player.can_store_item_in_specific_slot(
+                INVENTORY_SLOT_BAG_START,
+                0,
+                &mut Vec::new(),
+                &proto,
+                &mut 1,
+                false,
+                None,
+                None,
+                false,
+                None,
+            ),
+            InventoryResult::WrongBagType
+        );
+
+        player
+            .register_bag_storage(INVENTORY_SLOT_BAG_START, ObjectGuid::create_item(1, 300), 2)
+            .unwrap();
+        assert_eq!(
+            player.can_store_item_in_specific_slot(
+                INVENTORY_SLOT_BAG_START,
+                2,
+                &mut Vec::new(),
+                &proto,
+                &mut 1,
+                false,
+                None,
+                None,
+                false,
+                Some(&regular_bag_proto),
+            ),
+            InventoryResult::WrongBagType
+        );
+        assert_eq!(
+            player.can_store_item_in_specific_slot(
+                INVENTORY_SLOT_BAG_START,
+                0,
+                &mut Vec::new(),
+                &proto,
+                &mut 1,
+                false,
+                None,
+                None,
+                false,
+                Some(&herb_bag_proto),
+            ),
+            InventoryResult::WrongBagType
+        );
+
+        let mut dest = Vec::new();
+        let mut count = 3;
+        assert_eq!(
+            player.can_store_item_in_specific_slot(
+                INVENTORY_SLOT_BAG_START,
+                0,
+                &mut dest,
+                &herb,
+                &mut count,
+                false,
+                None,
+                None,
+                false,
+                Some(&herb_bag_proto),
+            ),
+            InventoryResult::Ok
+        );
+        assert_eq!(
+            dest,
+            vec![ItemPosCount::new(
+                make_item_pos(INVENTORY_SLOT_BAG_START, 0),
+                3
+            )]
+        );
+    }
+
+    #[test]
+    fn can_store_item_in_specific_slot_preserves_cpp_keyring_gate_condition() {
+        let player = Player::new(None, false);
+        let proto = ItemStorageTemplate::regular_item(6948, 20);
+        let mut count = 1;
+
+        assert!(!cpp_keyring_family_gate_applies(KEYRING_SLOT_START));
+        assert_eq!(
+            player.can_store_item_in_specific_slot(
+                INVENTORY_SLOT_BAG_0,
+                KEYRING_SLOT_START,
+                &mut Vec::new(),
+                &proto,
+                &mut count,
+                false,
+                None,
+                None,
+                false,
+                None,
+            ),
+            InventoryResult::Ok
+        );
     }
 
     #[test]
