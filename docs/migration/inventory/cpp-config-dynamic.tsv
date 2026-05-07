@@ -1,0 +1,15 @@
+expr	accessor	cxx_ref	default_expr	target	notes
+key	String	common/Configuration/BuiltInConfig.cpp:26	""	const value	clave no literal; requiere revisar flujo C++ local
+appenderName	String	common/Logging/Log.cpp:120	""		clave no literal; requiere revisar flujo C++ local
+loggerName	String	common/Logging/Log.cpp:180	""		clave no literal; requiere revisar flujo C++ local
+thresholdSetting	Int	common/Metric/Metric.cpp:75	0	int thresholdValue	clave no literal; requiere revisar flujo C++ local
+name + "DatabaseInfo"	String	server/database/Database/DatabaseLoader.cpp:39	""	const dbString	clave no literal; requiere revisar flujo C++ local
+name + "Database.WorkerThreads"	Int	server/database/Database/DatabaseLoader.cpp:46	1		clave no literal; requiere revisar flujo C++ local
+name + "Database.SynchThreads"	Int	server/database/Database/DatabaseLoader.cpp:54	1		clave no literal; requiere revisar flujo C++ local
+fieldname	Int	server/game/AuctionHouseBot/AuctionHouseBot.cpp:95	defvalue		clave no literal; requiere revisar flujo C++ local
+fieldname	Int	server/game/AuctionHouseBot/AuctionHouseBot.cpp:106	defvalue		clave no literal; requiere revisar flujo C++ local
+fieldname	Int	server/game/AuctionHouseBot/AuctionHouseBot.cpp:117	defvalue		clave no literal; requiere revisar flujo C++ local
+fieldname	Bool	server/game/AuctionHouseBot/AuctionHouseBot.cpp:134	defvalue		clave no literal; requiere revisar flujo C++ local
+fieldname	Float	server/game/AuctionHouseBot/AuctionHouseBot.cpp:139	defvalue		clave no literal; requiere revisar flujo C++ local
+configKey	Float	server/game/World/World.cpp:607	1.0f		clave no literal; requiere revisar flujo C++ local
+configKey	String	server/shared/Secrets/SecretMgr.cpp:62	""	std::string str	clave no literal; requiere revisar flujo C++ local

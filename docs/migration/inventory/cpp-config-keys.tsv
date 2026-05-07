@@ -1,0 +1,672 @@
+key	cxx_dist_refs	cxx_dist_defaults	cxx_direct_refs	cxx_direct_defaults	cxx_targets	rust_refs	status	notes
+Account.PasswordChangeSecurity	worldserver:server/worldserver/worldserver.conf.dist:1380	worldserver=0	Int:server/game/World/World.cpp:1608	Int=0	CONFIG_ACC_PASSCHANGESEC		missing_in_rust	-
+AccountInstancesPerHour	worldserver:server/worldserver/worldserver.conf.dist:1371	worldserver=5	Int:server/game/World/World.cpp:1619	Int=5	CONFIG_MAX_INSTANCES_PER_HOUR		missing_in_rust	-
+ActivateWeather	worldserver:server/worldserver/worldserver.conf.dist:1009	worldserver=1	Bool:server/game/World/World.cpp:1228	Bool=true	CONFIG_WEATHER		missing_in_rust	-
+AddonChannel	worldserver:server/worldserver/worldserver.conf.dist:509	worldserver=1	Bool:server/game/World/World.cpp:769	Bool=true	CONFIG_ADDON_CHANNEL		missing_in_rust	-
+AllFlightPaths	worldserver:server/worldserver/worldserver.conf.dist:992	worldserver=0	Bool:server/game/World/World.cpp:1110	Bool=false	CONFIG_ALL_TAXI_PATHS		missing_in_rust	-
+Allow.IP.Based.Action.Logging	worldserver:server/worldserver/worldserver.conf.dist:4269	worldserver=0	Bool:server/game/World/World.cpp:1678	Bool=false	CONFIG_IP_BASED_ACTION_LOGGING		missing_in_rust	-
+AllowLoggingIPAddressesInDatabase	worldserver:server/worldserver/worldserver.conf.dist:1431|bnetserver:server/bnetserver/bnetserver.conf.dist:225	worldserver=1|bnetserver=1	Bool:server/game/World/World.cpp:1723	Bool=true	CONFIG_ALLOW_LOGGING_IP_ADDRESSES_IN_DATABASE		missing_in_rust	-
+AllowTwoSide.Interaction.Auction	worldserver:server/worldserver/worldserver.conf.dist:1707	worldserver=1	Bool:server/game/World/World.cpp:915	Bool=true	CONFIG_ALLOW_TWO_SIDE_INTERACTION_AUCTION		missing_in_rust	-
+AllowTwoSide.Interaction.Calendar	worldserver:server/worldserver/worldserver.conf.dist:1666	worldserver=0	Bool:server/game/World/World.cpp:911	Bool=false	CONFIG_ALLOW_TWO_SIDE_INTERACTION_CALENDAR		missing_in_rust	-
+AllowTwoSide.Interaction.Channel	worldserver:server/worldserver/worldserver.conf.dist:1674	worldserver=0	Bool:server/game/World/World.cpp:912	Bool=false	CONFIG_ALLOW_TWO_SIDE_INTERACTION_CHANNEL		missing_in_rust	-
+AllowTwoSide.Interaction.Group	worldserver:server/worldserver/worldserver.conf.dist:1682	worldserver=0	Bool:server/game/World/World.cpp:913	Bool=false	CONFIG_ALLOW_TWO_SIDE_INTERACTION_GROUP		missing_in_rust	-
+AllowTwoSide.Interaction.Guild	worldserver:server/worldserver/worldserver.conf.dist:1690	worldserver=0	Bool:server/game/World/World.cpp:914	Bool=false	CONFIG_ALLOW_TWO_SIDE_INTERACTION_GUILD		missing_in_rust	-
+AllowTwoSide.Trade	worldserver:server/worldserver/worldserver.conf.dist:1715	worldserver=0	Bool:server/game/World/World.cpp:916	Bool=false	CONFIG_ALLOW_TWO_SIDE_TRADE		missing_in_rust	-
+Appender.Bnet	bnetserver:server/bnetserver/bnetserver.conf.dist:415	bnetserver=2,2,0,Bnet.log,w					missing_in_rust	-
+Appender.Console	worldserver:server/worldserver/worldserver.conf.dist:4157|bnetserver:server/bnetserver/bnetserver.conf.dist:414	worldserver=1,3,0|bnetserver=1,2,0					missing_in_rust	-
+Appender.DBErrors	worldserver:server/worldserver/worldserver.conf.dist:4160	worldserver=2,2,0,DBErrors.log					missing_in_rust	-
+Appender.GM	worldserver:server/worldserver/worldserver.conf.dist:4159	worldserver=2,2,1,GM.log					missing_in_rust	-
+Appender.Server	worldserver:server/worldserver/worldserver.conf.dist:4158	worldserver=2,2,0,Server.log,w					missing_in_rust	-
+Arena.ArenaLoseRatingModifier	worldserver:server/worldserver/worldserver.conf.dist:3141	worldserver=24	Float:server/game/World/World.cpp:1358	Float=24.0f	CONFIG_ARENA_LOSE_RATING_MODIFIER		missing_in_rust	-
+Arena.ArenaMatchmakerRatingModifier	worldserver:server/worldserver/worldserver.conf.dist:3148	worldserver=24	Float:server/game/World/World.cpp:1359	Float=24.0f	CONFIG_ARENA_MATCHMAKER_RATING_MODIFIER		missing_in_rust	-
+Arena.ArenaSeason.ID	worldserver:server/worldserver/worldserver.conf.dist:3087	worldserver=32	Int:server/game/World/World.cpp:1350	Int=32	CONFIG_ARENA_SEASON_ID		missing_in_rust	-
+Arena.ArenaSeason.InProgress	worldserver:server/worldserver/worldserver.conf.dist:3095	worldserver=1	Bool:server/game/World/World.cpp:1354	Bool=false	CONFIG_ARENA_SEASON_IN_PROGRESS		missing_in_rust	-
+Arena.ArenaStartMatchmakerRating	worldserver:server/worldserver/worldserver.conf.dist:3116	worldserver=1500	Int:server/game/World/World.cpp:1353	Int=1500	CONFIG_ARENA_START_MATCHMAKER_RATING		missing_in_rust	-
+Arena.ArenaStartPersonalRating	worldserver:server/worldserver/worldserver.conf.dist:3109	worldserver=0	Int:server/game/World/World.cpp:1352	Int=1000	CONFIG_ARENA_START_PERSONAL_RATING		missing_in_rust	-
+Arena.ArenaStartRating	worldserver:server/worldserver/worldserver.conf.dist:3102	worldserver=0	Int:server/game/World/World.cpp:1351	Int=0	CONFIG_ARENA_START_RATING		missing_in_rust	-
+Arena.ArenaWinRatingModifier1	worldserver:server/worldserver/worldserver.conf.dist:3125	worldserver=48	Float:server/game/World/World.cpp:1356	Float=48.0f	CONFIG_ARENA_WIN_RATING_MODIFIER_1		missing_in_rust	-
+Arena.ArenaWinRatingModifier2	worldserver:server/worldserver/worldserver.conf.dist:3133	worldserver=24	Float:server/game/World/World.cpp:1357	Float=24.0f	CONFIG_ARENA_WIN_RATING_MODIFIER_2		missing_in_rust	-
+Arena.AutoDistributeInterval	worldserver:server/worldserver/worldserver.conf.dist:3072	worldserver=7					missing_in_rust	-
+Arena.AutoDistributePoints	worldserver:server/worldserver/worldserver.conf.dist:3064	worldserver=0					missing_in_rust	-
+Arena.MaxRatingDifference	worldserver:server/worldserver/worldserver.conf.dist:3040	worldserver=150	Int:server/game/World/World.cpp:1346	Int=150	CONFIG_ARENA_MAX_RATING_DIFFERENCE		missing_in_rust	-
+Arena.QueueAnnouncer.Enable	worldserver:server/worldserver/worldserver.conf.dist:3080	worldserver=0	Bool:server/game/World/World.cpp:1349	Bool=false	CONFIG_ARENA_QUEUE_ANNOUNCER_ENABLE		missing_in_rust	-
+Arena.RatedUpdateTimer	worldserver:server/worldserver/worldserver.conf.dist:3056	worldserver=5000	Int:server/game/World/World.cpp:1348	Int=5 * IN_MILLISECONDS	CONFIG_ARENA_RATED_UPDATE_TIMER		missing_in_rust	-
+Arena.RatingDiscardTimer	worldserver:server/worldserver/worldserver.conf.dist:3049	worldserver=600000	Int:server/game/World/World.cpp:1347	Int=10 * MINUTE * IN_MILLISECONDS	CONFIG_ARENA_RATING_DISCARD_TIMER		missing_in_rust	-
+ArenaLog.ExtendedInfo	worldserver:server/worldserver/worldserver.conf.dist:3157	worldserver=0	Bool:server/game/World/World.cpp:1355	Bool=false	CONFIG_ARENA_LOG_EXTENDED_INFO		missing_in_rust	-
+ArenaTeam.CharterCost.2v2	worldserver:server/worldserver/worldserver.conf.dist:760	worldserver=800000	Int:server/game/World/World.cpp:943	Int=800000			missing_in_rust	-
+ArenaTeam.CharterCost.3v3	worldserver:server/worldserver/worldserver.conf.dist:761	worldserver=1200000	Int:server/game/World/World.cpp:944	Int=1200000			missing_in_rust	-
+ArenaTeam.CharterCost.5v5	worldserver:server/worldserver/worldserver.conf.dist:762	worldserver=2000000	Int:server/game/World/World.cpp:945	Int=2000000			missing_in_rust	-
+Auction.ReplicateItemsCooldown	worldserver:server/worldserver/worldserver.conf.dist:543	worldserver=900	Int:server/game/World/World.cpp:772	Int=900	CONFIG_AUCTION_REPLICATE_DELAY		missing_in_rust	-
+Auction.SearchDelay	worldserver:server/worldserver/worldserver.conf.dist:552	worldserver=300	Int:server/game/World/World.cpp:773	Int=300	CONFIG_AUCTION_SEARCH_DELAY		missing_in_rust	-
+Auction.TaintedSearchDelay	worldserver:server/worldserver/worldserver.conf.dist:561	worldserver=3000	Int:server/game/World/World.cpp:779	Int=3000	CONFIG_AUCTION_TAINTED_SEARCH_DELAY		missing_in_rust	-
+AuctionHouseBot.Account	worldserver:server/worldserver/worldserver.conf.dist:3577	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Alliance.Items.Amount.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3600	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Alliance.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3738	worldserver=100					missing_in_rust	-
+AuctionHouseBot.BidPrice.Max	worldserver:server/worldserver/worldserver.conf.dist:3731	worldserver=0.9					missing_in_rust	-
+AuctionHouseBot.BidPrice.Min	worldserver:server/worldserver/worldserver.conf.dist:3730	worldserver=0.6					missing_in_rust	-
+AuctionHouseBot.Bind.Equip	worldserver:server/worldserver/worldserver.conf.dist:3688	worldserver=1					missing_in_rust	-
+AuctionHouseBot.Bind.No	worldserver:server/worldserver/worldserver.conf.dist:3686	worldserver=1					missing_in_rust	-
+AuctionHouseBot.Bind.Pickup	worldserver:server/worldserver/worldserver.conf.dist:3687	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Bind.Quest	worldserver:server/worldserver/worldserver.conf.dist:3690	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Bind.Use	worldserver:server/worldserver/worldserver.conf.dist:3689	worldserver=1					missing_in_rust	-
+AuctionHouseBot.BuyPrice.Seller	worldserver:server/worldserver/worldserver.conf.dist:3722	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Buyer.Alliance.Enabled	worldserver:server/worldserver/worldserver.conf.dist:3997	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Buyer.Baseprice.Blue	worldserver:server/worldserver/worldserver.conf.dist:4023	worldserver=36463					missing_in_rust	-
+AuctionHouseBot.Buyer.Baseprice.Gray	worldserver:server/worldserver/worldserver.conf.dist:4020	worldserver=3504					missing_in_rust	-
+AuctionHouseBot.Buyer.Baseprice.Green	worldserver:server/worldserver/worldserver.conf.dist:4022	worldserver=21752					missing_in_rust	-
+AuctionHouseBot.Buyer.Baseprice.Orange	worldserver:server/worldserver/worldserver.conf.dist:4025	worldserver=214347					missing_in_rust	-
+AuctionHouseBot.Buyer.Baseprice.Purple	worldserver:server/worldserver/worldserver.conf.dist:4024	worldserver=87124					missing_in_rust	-
+AuctionHouseBot.Buyer.Baseprice.White	worldserver:server/worldserver/worldserver.conf.dist:4021	worldserver=5429					missing_in_rust	-
+AuctionHouseBot.Buyer.Baseprice.Yellow	worldserver:server/worldserver/worldserver.conf.dist:4026	worldserver=407406					missing_in_rust	-
+AuctionHouseBot.Buyer.ChanceFactor	worldserver:server/worldserver/worldserver.conf.dist:4006	worldserver=2					missing_in_rust	-
+AuctionHouseBot.Buyer.ChanceMultiplier.Blue	worldserver:server/worldserver/worldserver.conf.dist:4043	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Buyer.ChanceMultiplier.Gray	worldserver:server/worldserver/worldserver.conf.dist:4040	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Buyer.ChanceMultiplier.Green	worldserver:server/worldserver/worldserver.conf.dist:4042	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Buyer.ChanceMultiplier.Orange	worldserver:server/worldserver/worldserver.conf.dist:4045	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Buyer.ChanceMultiplier.Purple	worldserver:server/worldserver/worldserver.conf.dist:4044	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Buyer.ChanceMultiplier.White	worldserver:server/worldserver/worldserver.conf.dist:4041	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Buyer.ChanceMultiplier.Yellow	worldserver:server/worldserver/worldserver.conf.dist:4046	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Buyer.Enabled	worldserver:server/worldserver/worldserver.conf.dist:3989	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Buyer.Horde.Enabled	worldserver:server/worldserver/worldserver.conf.dist:3998	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Buyer.Neutral.Enabled	worldserver:server/worldserver/worldserver.conf.dist:3999	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Buyer.Recheck.Interval	worldserver:server/worldserver/worldserver.conf.dist:4054	worldserver=20					missing_in_rust	-
+AuctionHouseBot.Class.Armor	worldserver:server/worldserver/worldserver.conf.dist:3852	worldserver=8					missing_in_rust	-
+AuctionHouseBot.Class.Armor.Allow.Zero	worldserver:server/worldserver/worldserver.conf.dist:3640	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Armor.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3776	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.Consumable	worldserver:server/worldserver/worldserver.conf.dist:3848	worldserver=6					missing_in_rust	-
+AuctionHouseBot.Class.Consumable.Allow.Zero	worldserver:server/worldserver/worldserver.conf.dist:3636	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Consumable.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3772	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.Container	worldserver:server/worldserver/worldserver.conf.dist:3849	worldserver=4					missing_in_rust	-
+AuctionHouseBot.Class.Container.Allow.Zero	worldserver:server/worldserver/worldserver.conf.dist:3637	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Container.ItemLevel.Max	worldserver:server/worldserver/worldserver.conf.dist:3918	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Container.ItemLevel.Min	worldserver:server/worldserver/worldserver.conf.dist:3917	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Container.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3773	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.Gem	worldserver:server/worldserver/worldserver.conf.dist:3851	worldserver=3					missing_in_rust	-
+AuctionHouseBot.Class.Gem.Allow.Zero	worldserver:server/worldserver/worldserver.conf.dist:3639	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Gem.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3775	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.Generic	worldserver:server/worldserver/worldserver.conf.dist:3856	worldserver=1					missing_in_rust	-
+AuctionHouseBot.Class.Generic.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3780	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.Glyph	worldserver:server/worldserver/worldserver.conf.dist:3862	worldserver=3					missing_in_rust	-
+AuctionHouseBot.Class.Glyph.Allow.Zero	worldserver:server/worldserver/worldserver.conf.dist:3649	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Glyph.ItemLevel.Max	worldserver:server/worldserver/worldserver.conf.dist:3902	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Glyph.ItemLevel.Min	worldserver:server/worldserver/worldserver.conf.dist:3901	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Glyph.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3786	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.Glyph.ReqLevel.Max	worldserver:server/worldserver/worldserver.conf.dist:3894	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Glyph.ReqLevel.Min	worldserver:server/worldserver/worldserver.conf.dist:3893	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Key	worldserver:server/worldserver/worldserver.conf.dist:3860	worldserver=1					missing_in_rust	-
+AuctionHouseBot.Class.Key.Allow.Zero	worldserver:server/worldserver/worldserver.conf.dist:3647	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Key.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3784	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.Misc	worldserver:server/worldserver/worldserver.conf.dist:3861	worldserver=5					missing_in_rust	-
+AuctionHouseBot.Class.Misc.Allow.Zero	worldserver:server/worldserver/worldserver.conf.dist:3648	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Misc.Mount.ReqLevel.Max	worldserver:server/worldserver/worldserver.conf.dist:3878	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Misc.Mount.ReqLevel.Min	worldserver:server/worldserver/worldserver.conf.dist:3877	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Misc.Mount.ReqSkill.Max	worldserver:server/worldserver/worldserver.conf.dist:3886	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Misc.Mount.ReqSkill.Min	worldserver:server/worldserver/worldserver.conf.dist:3885	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Misc.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3785	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.Projectile	worldserver:server/worldserver/worldserver.conf.dist:3854	worldserver=2					missing_in_rust	-
+AuctionHouseBot.Class.Projectile.Allow.Zero	worldserver:server/worldserver/worldserver.conf.dist:3642	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Projectile.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3778	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.Quest	worldserver:server/worldserver/worldserver.conf.dist:3859	worldserver=1					missing_in_rust	-
+AuctionHouseBot.Class.Quest.Allow.Zero	worldserver:server/worldserver/worldserver.conf.dist:3646	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Quest.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3783	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.Quiver	worldserver:server/worldserver/worldserver.conf.dist:3858	worldserver=1					missing_in_rust	-
+AuctionHouseBot.Class.Quiver.Allow.Zero	worldserver:server/worldserver/worldserver.conf.dist:3645	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Quiver.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3782	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.RandomStackRatio.Armor	worldserver:server/worldserver/worldserver.conf.dist:3966	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.RandomStackRatio.Consumable	worldserver:server/worldserver/worldserver.conf.dist:3962	worldserver=20					missing_in_rust	-
+AuctionHouseBot.Class.RandomStackRatio.Container	worldserver:server/worldserver/worldserver.conf.dist:3963	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.RandomStackRatio.Gem	worldserver:server/worldserver/worldserver.conf.dist:3965	worldserver=20					missing_in_rust	-
+AuctionHouseBot.Class.RandomStackRatio.Generic	worldserver:server/worldserver/worldserver.conf.dist:3970	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.RandomStackRatio.Glyph	worldserver:server/worldserver/worldserver.conf.dist:3976	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.RandomStackRatio.Key	worldserver:server/worldserver/worldserver.conf.dist:3974	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.RandomStackRatio.Misc	worldserver:server/worldserver/worldserver.conf.dist:3975	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.RandomStackRatio.Projectile	worldserver:server/worldserver/worldserver.conf.dist:3968	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.RandomStackRatio.Quest	worldserver:server/worldserver/worldserver.conf.dist:3973	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.RandomStackRatio.Quiver	worldserver:server/worldserver/worldserver.conf.dist:3972	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.RandomStackRatio.Reagent	worldserver:server/worldserver/worldserver.conf.dist:3967	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.RandomStackRatio.Recipe	worldserver:server/worldserver/worldserver.conf.dist:3971	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.RandomStackRatio.TradeGood	worldserver:server/worldserver/worldserver.conf.dist:3969	worldserver=50					missing_in_rust	-
+AuctionHouseBot.Class.RandomStackRatio.Weapon	worldserver:server/worldserver/worldserver.conf.dist:3964	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Reagent	worldserver:server/worldserver/worldserver.conf.dist:3853	worldserver=1					missing_in_rust	-
+AuctionHouseBot.Class.Reagent.Allow.Zero	worldserver:server/worldserver/worldserver.conf.dist:3641	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Reagent.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3777	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.Recipe	worldserver:server/worldserver/worldserver.conf.dist:3857	worldserver=6					missing_in_rust	-
+AuctionHouseBot.Class.Recipe.Allow.Zero	worldserver:server/worldserver/worldserver.conf.dist:3644	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Recipe.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3781	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.TradeGood	worldserver:server/worldserver/worldserver.conf.dist:3855	worldserver=10					missing_in_rust	-
+AuctionHouseBot.Class.TradeGood.Allow.Zero	worldserver:server/worldserver/worldserver.conf.dist:3643	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.TradeGood.ItemLevel.Max	worldserver:server/worldserver/worldserver.conf.dist:3910	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.TradeGood.ItemLevel.Min	worldserver:server/worldserver/worldserver.conf.dist:3909	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.TradeGood.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3779	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Class.Weapon	worldserver:server/worldserver/worldserver.conf.dist:3850	worldserver=8					missing_in_rust	-
+AuctionHouseBot.Class.Weapon.Allow.Zero	worldserver:server/worldserver/worldserver.conf.dist:3638	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Class.Weapon.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3774	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Horde.Items.Amount.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3607	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Horde.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3745	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Items.Amount.Blue	worldserver:server/worldserver/worldserver.conf.dist:3823	worldserver=1500					missing_in_rust	-
+AuctionHouseBot.Items.Amount.Gray	worldserver:server/worldserver/worldserver.conf.dist:3820	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Items.Amount.Green	worldserver:server/worldserver/worldserver.conf.dist:3822	worldserver=2500					missing_in_rust	-
+AuctionHouseBot.Items.Amount.Orange	worldserver:server/worldserver/worldserver.conf.dist:3825	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Items.Amount.Purple	worldserver:server/worldserver/worldserver.conf.dist:3824	worldserver=1000					missing_in_rust	-
+AuctionHouseBot.Items.Amount.White	worldserver:server/worldserver/worldserver.conf.dist:3821	worldserver=2000					missing_in_rust	-
+AuctionHouseBot.Items.Amount.Yellow	worldserver:server/worldserver/worldserver.conf.dist:3826	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Items.Blue.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3762	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Items.Gray.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3759	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Items.Green.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3761	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Items.ItemLevel.Max	worldserver:server/worldserver/worldserver.conf.dist:3794	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Items.ItemLevel.Min	worldserver:server/worldserver/worldserver.conf.dist:3793	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Items.Loot	worldserver:server/worldserver/worldserver.conf.dist:3665	worldserver=1					missing_in_rust	-
+AuctionHouseBot.Items.Misc	worldserver:server/worldserver/worldserver.conf.dist:3673	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Items.Orange.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3764	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Items.Purple.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3763	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Items.ReqLevel.Max	worldserver:server/worldserver/worldserver.conf.dist:3802	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Items.ReqLevel.Min	worldserver:server/worldserver/worldserver.conf.dist:3801	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Items.ReqSkill.Max	worldserver:server/worldserver/worldserver.conf.dist:3811	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Items.ReqSkill.Min	worldserver:server/worldserver/worldserver.conf.dist:3810	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Items.Vendor	worldserver:server/worldserver/worldserver.conf.dist:3657	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Items.White.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3760	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Items.Yellow.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3765	worldserver=100					missing_in_rust	-
+AuctionHouseBot.ItemsPerCycle.Boost	worldserver:server/worldserver/worldserver.conf.dist:3706	worldserver=1000					missing_in_rust	-
+AuctionHouseBot.ItemsPerCycle.Normal	worldserver:server/worldserver/worldserver.conf.dist:3714	worldserver=20					missing_in_rust	-
+AuctionHouseBot.LockBox.Enabled	worldserver:server/worldserver/worldserver.conf.dist:3698	worldserver=0					missing_in_rust	-
+AuctionHouseBot.MaxTime	worldserver:server/worldserver/worldserver.conf.dist:3628	worldserver=72					missing_in_rust	-
+AuctionHouseBot.MinTime	worldserver:server/worldserver/worldserver.conf.dist:3621	worldserver=1					missing_in_rust	-
+AuctionHouseBot.Neutral.Items.Amount.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3614	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Neutral.Price.Ratio	worldserver:server/worldserver/worldserver.conf.dist:3752	worldserver=100					missing_in_rust	-
+AuctionHouseBot.Seller.Enabled	worldserver:server/worldserver/worldserver.conf.dist:3593	worldserver=0					missing_in_rust	-
+AuctionHouseBot.Update.Interval	worldserver:server/worldserver/worldserver.conf.dist:3585	worldserver=20	Int:server/game/World/World.cpp:1681	Int=20	CONFIG_AHBOT_UPDATE_INTERVAL		missing_in_rust	-
+AuctionHouseBot.forceExcludeItems	worldserver:server/worldserver/worldserver.conf.dist:3936	worldserver=""	String:server/game/AuctionHouseBot/AuctionHouseBot.cpp:152	String=""	SetAHBotExcludes(		missing_in_rust	-
+AuctionHouseBot.forceIncludeItems	worldserver:server/worldserver/worldserver.conf.dist:3926	worldserver=""	String:server/game/AuctionHouseBot/AuctionHouseBot.cpp:151	String=""	SetAHBotIncludes(		missing_in_rust	-
+AutoBroadcast.Center	worldserver:server/worldserver/worldserver.conf.dist:2792	worldserver=0	Int:server/game/World/World.cpp:1626	Int=0	CONFIG_AUTOBROADCAST_CENTER		missing_in_rust	-
+AutoBroadcast.On	worldserver:server/worldserver/worldserver.conf.dist:2783	worldserver=0	Bool:server/game/World/World.cpp:1625	Bool=false	CONFIG_AUTOBROADCAST		missing_in_rust	-
+AutoBroadcast.Timer	worldserver:server/worldserver/worldserver.conf.dist:2799	worldserver=600000	Int:server/game/World/World.cpp:1627	Int=60000	CONFIG_AUTOBROADCAST_INTERVAL		missing_in_rust	-
+BanExpiryCheckInterval	bnetserver:server/bnetserver/bnetserver.conf.dist:187	bnetserver=60	Int:server/bnetserver/Main.cpp:264	Int=60	int32 banExpiryCheckInterval	get_value:crates/bnet-server/src/main.rs:84	rust_exact_key	-
+BaseMapLoadAllGrids	worldserver:server/worldserver/worldserver.conf.dist:321	worldserver=0	Bool:server/game/World/World.cpp:798	Bool=false	CONFIG_BASEMAP_LOAD_GRIDS		missing_in_rust	-
+Battleground.CastDeserter	worldserver:server/worldserver/worldserver.conf.dist:2812	worldserver=1	Bool:server/game/World/World.cpp:1327	Bool=true	CONFIG_BATTLEGROUND_CAST_DESERTER		missing_in_rust	-
+Battleground.GiveXPForKills	worldserver:server/worldserver/worldserver.conf.dist:2874	worldserver=0	Bool:server/game/World/World.cpp:1345	Bool=false	CONFIG_BG_XP_FOR_KILL		missing_in_rust	-
+Battleground.InvitationType	worldserver:server/worldserver/worldserver.conf.dist:2847	worldserver=0	Int:server/game/World/World.cpp:1342	Int=0	CONFIG_BATTLEGROUND_INVITATION_TYPE		missing_in_rust	-
+Battleground.PremadeGroupWaitForMatch	worldserver:server/worldserver/worldserver.conf.dist:2865	worldserver=1800000	Int:server/game/World/World.cpp:1344	Int=30 * MINUTE * IN_MILLISECONDS	CONFIG_BATTLEGROUND_PREMADE_GROUP_WAIT_FOR_MATCH		missing_in_rust	-
+Battleground.PrematureFinishTimer	worldserver:server/worldserver/worldserver.conf.dist:2856	worldserver=300000	Int:server/game/World/World.cpp:1343	Int=5 * MINUTE * IN_MILLISECONDS	CONFIG_BATTLEGROUND_PREMATURE_FINISH_TIMER		missing_in_rust	-
+Battleground.QueueAnnouncer.Enable	worldserver:server/worldserver/worldserver.conf.dist:2820	worldserver=0	Bool:server/game/World/World.cpp:1328	Bool=false	CONFIG_BATTLEGROUND_QUEUE_ANNOUNCER_ENABLE		missing_in_rust	-
+Battleground.QueueAnnouncer.PlayerOnly	worldserver:server/worldserver/worldserver.conf.dist:2828	worldserver=0	Bool:server/game/World/World.cpp:1329	Bool=false	CONFIG_BATTLEGROUND_QUEUE_ANNOUNCER_PLAYERONLY		missing_in_rust	-
+Battleground.Random.ResetHour	worldserver:server/worldserver/worldserver.conf.dist:2882	worldserver=6	Int:server/game/World/World.cpp:1269	Int=6	CONFIG_RANDOM_BG_RESET_HOUR		missing_in_rust	-
+Battleground.ReportAFK	worldserver:server/worldserver/worldserver.conf.dist:2913	worldserver=3	Int:server/game/World/World.cpp:1331	Int=3	CONFIG_BATTLEGROUND_REPORT_AFK		missing_in_rust	-
+Battleground.RewardLoserHonorFirst	worldserver:server/worldserver/worldserver.conf.dist:2904	worldserver=4500	Int:server/game/World/World.cpp:1615	Int=4500	CONFIG_BG_REWARD_LOSER_HONOR_FIRST		missing_in_rust	-
+Battleground.RewardLoserHonorLast	worldserver:server/worldserver/worldserver.conf.dist:2905	worldserver=3500	Int:server/game/World/World.cpp:1616	Int=3500	CONFIG_BG_REWARD_LOSER_HONOR_LAST		missing_in_rust	-
+Battleground.RewardWinnerConquestFirst	worldserver:server/worldserver/worldserver.conf.dist:2901	worldserver=10000	Int:server/game/World/World.cpp:1612	Int=10000	CONFIG_BG_REWARD_WINNER_CONQUEST_FIRST		missing_in_rust	-
+Battleground.RewardWinnerConquestLast	worldserver:server/worldserver/worldserver.conf.dist:2903	worldserver=5000	Int:server/game/World/World.cpp:1614	Int=5000	CONFIG_BG_REWARD_WINNER_CONQUEST_LAST		missing_in_rust	-
+Battleground.RewardWinnerHonorFirst	worldserver:server/worldserver/worldserver.conf.dist:2900	worldserver=27000	Int:server/game/World/World.cpp:1611	Int=27000	CONFIG_BG_REWARD_WINNER_HONOR_FIRST		missing_in_rust	-
+Battleground.RewardWinnerHonorLast	worldserver:server/worldserver/worldserver.conf.dist:2902	worldserver=13500	Int:server/game/World/World.cpp:1613	Int=13500	CONFIG_BG_REWARD_WINNER_HONOR_LAST		missing_in_rust	-
+Battleground.StoreStatistics.Enable	worldserver:server/worldserver/worldserver.conf.dist:2836	worldserver=0	Bool:server/game/World/World.cpp:1330	Bool=false	CONFIG_BATTLEGROUND_STORE_STATISTICS_ENABLE		missing_in_rust	-
+BattlegroundMapLoadAllGrids	worldserver:server/worldserver/worldserver.conf.dist:339	worldserver=1	Bool:server/game/World/World.cpp:810	Bool=true	CONFIG_BATTLEGROUNDMAP_LOAD_GRIDS		missing_in_rust	-
+BattlenetPort	bnetserver:server/bnetserver/bnetserver.conf.dist:56	bnetserver=1119	Int:server/bnetserver/Main.cpp:220|Int:server/bnetserver/REST/LoginRESTService.cpp:243	Int=1119|Int=1119	int32 bnport	get_value:crates/bnet-server/src/main.rs:76	rust_exact_key	-
+BeepAtStart	worldserver:server/worldserver/worldserver.conf.dist:1314	worldserver=1	Bool:server/worldserver/CommandLine/CliRunnable.cpp:123	Bool=true			missing_in_rust	-
+BindIP	worldserver:server/worldserver/worldserver.conf.dist:180|bnetserver:server/bnetserver/bnetserver.conf.dist:88	worldserver="0.0.0.0"|bnetserver="0.0.0.0"	String:server/worldserver/Main.cpp:370|String:server/bnetserver/Main.cpp:203|String:server/bnetserver/Main.cpp:232	String="0.0.0.0"|String="0.0.0.0"|String="0.0.0.0"	std::string worldListener|std::string httpBindIp|std::string bindIp	get_string_default:crates/bnet-server/src/main.rs:74|get_string_default:crates/world-server/src/main.rs:457	rust_exact_key	-
+BirthdayTime	worldserver:server/worldserver/worldserver.conf.dist:1388	worldserver=1222964635					missing_in_rust	-
+BlackMarket.Enabled	worldserver:server/worldserver/worldserver.conf.dist:4068	worldserver=1	Bool:server/game/World/World.cpp:1687	Bool=true	CONFIG_BLACKMARKET_ENABLED		missing_in_rust	-
+BlackMarket.MaxAuctions	worldserver:server/worldserver/worldserver.conf.dist:4076	worldserver=12	Int:server/game/World/World.cpp:1689	Int=12	CONFIG_BLACKMARKET_MAXAUCTIONS		missing_in_rust	-
+BlackMarket.UpdatePeriod	worldserver:server/worldserver/worldserver.conf.dist:4084	worldserver=24	Int:server/game/World/World.cpp:1690	Int=24	CONFIG_BLACKMARKET_UPDATE_PERIOD		missing_in_rust	-
+Bot.AccountPrefix	worldserver:server/worldserver/worldserver.conf.dist:4441	worldserver=""	String:server/game/Handlers/CharacterHandler.cpp:1027	String=""	const botPrefix		missing_in_rust	-
+BuildDirectory	worldserver:server/worldserver/worldserver.conf.dist:212	worldserver=""					missing_in_rust	-
+CMakeCommand	worldserver:server/worldserver/worldserver.conf.dist:203	worldserver=""					missing_in_rust	-
+CacheDataQueries	worldserver:server/worldserver/worldserver.conf.dist:1399	worldserver=1	Bool:server/game/World/World.cpp:1707	Bool=true	CONFIG_CACHE_DATA_QUERIES		missing_in_rust	-
+Calculate.Creature.Zone.Area.Data	worldserver:server/worldserver/worldserver.conf.dist:3509	worldserver=0	Bool:server/game/World/World.cpp:1683	Bool=false	CONFIG_CALCULATE_CREATURE_ZONE_AREA_DATA		missing_in_rust	-
+Calculate.Gameoject.Zone.Area.Data	worldserver:server/worldserver/worldserver.conf.dist:3516	worldserver=0	Bool:server/game/World/World.cpp:1684	Bool=false	CONFIG_CALCULATE_GAMEOBJECT_ZONE_AREA_DATA		missing_in_rust	-
+Calendar.DeleteOldEventsHour	worldserver:server/worldserver/worldserver.conf.dist:1146	worldserver=6	Int:server/game/World/World.cpp:1276	Int=6	CONFIG_CALENDAR_DELETE_OLD_EVENTS_HOUR		missing_in_rust	-
+CastUnstuck	worldserver:server/worldserver/worldserver.conf.dist:1018	worldserver=1	Bool:server/game/World/World.cpp:1116	Bool=true	CONFIG_CAST_UNSTUCK		missing_in_rust	-
+CertificatesFile	bnetserver:server/bnetserver/bnetserver.conf.dist:104	bnetserver="./bnetserver.cert.pem"	String:server/bnetserver/Server/SslContext.cpp:42	String="./bnetserver.cert.pem"	std::string certificateChainFile	get_string_default:crates/bnet-server/src/main.rs:68	rust_exact_key	-
+ChangeWeatherInterval	worldserver:server/worldserver/worldserver.conf.dist:392	worldserver=600000	Int:server/game/World/World.cpp:840	Int=10 * MINUTE * IN_MILLISECONDS	CONFIG_INTERVAL_CHANGEWEATHER		missing_in_rust	-
+Channel.RestrictedLfg	worldserver:server/worldserver/worldserver.conf.dist:2150	worldserver=1	Bool:server/game/World/World.cpp:1292	Bool=true	CONFIG_RESTRICTED_LFG_CHANNEL		missing_in_rust	-
+CharDelete.DeathKnight.MinLevel	worldserver:server/worldserver/worldserver.conf.dist:3287	worldserver=0	Int:server/game/World/World.cpp:1452	Int=0	CONFIG_CHARDELETE_DEATH_KNIGHT_MIN_LEVEL		missing_in_rust	-
+CharDelete.DemonHunter.MinLevel	worldserver:server/worldserver/worldserver.conf.dist:3295	worldserver=0	Int:server/game/World/World.cpp:1453	Int=0	CONFIG_CHARDELETE_DEMON_HUNTER_MIN_LEVEL		missing_in_rust	-
+CharDelete.KeepDays	worldserver:server/worldserver/worldserver.conf.dist:3303	worldserver=30	Int:server/game/World/World.cpp:1454	Int=30	CONFIG_CHARDELETE_KEEP_DAYS		missing_in_rust	-
+CharDelete.Method	worldserver:server/worldserver/worldserver.conf.dist:3271	worldserver=0	Int:server/game/World/World.cpp:1450	Int=0	CONFIG_CHARDELETE_METHOD		missing_in_rust	-
+CharDelete.MinLevel	worldserver:server/worldserver/worldserver.conf.dist:3279	worldserver=0	Int:server/game/World/World.cpp:1451	Int=0	CONFIG_CHARDELETE_MIN_LEVEL		missing_in_rust	-
+CharacterCreating.DisableAlliedRaceAchievementRequirement	worldserver:server/worldserver/worldserver.conf.dist:883	worldserver=0	Bool:server/game/World/World.cpp:975	Bool=false	CONFIG_CHARACTER_CREATING_DISABLE_ALLIED_RACE_ACHIEVEMENT_REQUIREMENT		missing_in_rust	-
+CharacterCreating.Disabled	worldserver:server/worldserver/worldserver.conf.dist:780	worldserver=0	Int:server/game/World/World.cpp:947	Int=0	CONFIG_CHARACTER_CREATING_DISABLED		missing_in_rust	-
+CharacterCreating.Disabled.ClassMask	worldserver:server/worldserver/worldserver.conf.dist:833	worldserver=0	Int:server/game/World/World.cpp:949	Int=0	CONFIG_CHARACTER_CREATING_DISABLED_CLASSMASK		missing_in_rust	-
+CharacterCreating.Disabled.RaceMask	worldserver:server/worldserver/worldserver.conf.dist:813	worldserver=0	Int64:server/game/World/World.cpp:948	Int64=0	CONFIG_CHARACTER_CREATING_DISABLED_RACEMASK		missing_in_rust	-
+CharacterCreating.EvokersPerRealm	worldserver:server/worldserver/worldserver.conf.dist:857	worldserver=1	Int:server/game/World/World.cpp:966	Int=1	CONFIG_CHARACTER_CREATING_EVOKERS_PER_REALM		missing_in_rust	-
+CharacterCreating.MinLevelForDemonHunter	worldserver:server/worldserver/worldserver.conf.dist:866	worldserver=0	Int:server/game/World/World.cpp:973	Int=0	CONFIG_CHARACTER_CREATING_MIN_LEVEL_FOR_DEMON_HUNTER		missing_in_rust	-
+CharacterCreating.MinLevelForEvoker	worldserver:server/worldserver/worldserver.conf.dist:875	worldserver=0	Int:server/game/World/World.cpp:974	Int=50	CONFIG_CHARACTER_CREATING_MIN_LEVEL_FOR_EVOKER		missing_in_rust	-
+CharacterDatabase.SynchThreads	worldserver:server/worldserver/worldserver.conf.dist:151	worldserver=2					missing_in_rust	-
+CharacterDatabase.WorkerThreads	worldserver:server/worldserver/worldserver.conf.dist:135	worldserver=1					missing_in_rust	-
+CharacterDatabaseInfo	worldserver:server/worldserver/worldserver.conf.dist:117	worldserver="127.0.0.1;3306;trinity;trinity;characters"					missing_in_rust	Rust usa subclaves CharacterDatabaseInfo.Host/Port/Username/Password/Database; C++ usa valor semicolonado CharacterDatabaseInfo
+CharacterDatabaseInfo.Database						get_string_default:crates/world-server/src/main.rs:189	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+CharacterDatabaseInfo.Host						get_string_default:crates/world-server/src/main.rs:184	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+CharacterDatabaseInfo.Password						get_string_default:crates/world-server/src/main.rs:187	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+CharacterDatabaseInfo.Port						get_value:crates/world-server/src/main.rs:185	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+CharacterDatabaseInfo.Username						get_string_default:crates/world-server/src/main.rs:186	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+CharactersPerAccount	worldserver:server/worldserver/worldserver.conf.dist:841	worldserver=60	Int:server/game/World/World.cpp:959	Int=60	CONFIG_CHARACTERS_PER_ACCOUNT		missing_in_rust	-
+CharactersPerRealm	worldserver:server/worldserver/worldserver.conf.dist:849	worldserver=60	Int:server/game/World/World.cpp:951	Int=60	CONFIG_CHARACTERS_PER_REALM		missing_in_rust	-
+ChatFakeMessagePreventing	worldserver:server/worldserver/worldserver.conf.dist:2082	worldserver=1	Bool:server/game/World/World.cpp:1294	Bool=false	CONFIG_CHAT_FAKE_MESSAGE_PREVENTING		missing_in_rust	-
+ChatFlood.AddonMessageCount	worldserver:server/worldserver/worldserver.conf.dist:2128	worldserver=100	Int:server/game/World/World.cpp:1243	Int=100	CONFIG_CHATFLOOD_ADDON_MESSAGE_COUNT		missing_in_rust	-
+ChatFlood.AddonMessageDelay	worldserver:server/worldserver/worldserver.conf.dist:2135	worldserver=1	Int:server/game/World/World.cpp:1244	Int=1	CONFIG_CHATFLOOD_ADDON_MESSAGE_DELAY		missing_in_rust	-
+ChatFlood.MessageCount	worldserver:server/worldserver/worldserver.conf.dist:2113	worldserver=10	Int:server/game/World/World.cpp:1241	Int=10	CONFIG_CHATFLOOD_MESSAGE_COUNT		missing_in_rust	-
+ChatFlood.MessageDelay	worldserver:server/worldserver/worldserver.conf.dist:2120	worldserver=1	Int:server/game/World/World.cpp:1242	Int=1	CONFIG_CHATFLOOD_MESSAGE_DELAY		missing_in_rust	-
+ChatFlood.MuteTime	worldserver:server/worldserver/worldserver.conf.dist:2142	worldserver=10	Int:server/game/World/World.cpp:1245	Int=10	CONFIG_CHATFLOOD_MUTE_TIME		missing_in_rust	-
+ChatLevelReq.Channel	worldserver:server/worldserver/worldserver.conf.dist:2161	worldserver=1	Int:server/game/World/World.cpp:785	Int=1	CONFIG_CHAT_CHANNEL_LEVEL_REQ		missing_in_rust	-
+ChatLevelReq.Emote	worldserver:server/worldserver/worldserver.conf.dist:2163	worldserver=1	Int:server/game/World/World.cpp:787	Int=1	CONFIG_CHAT_EMOTE_LEVEL_REQ		missing_in_rust	-
+ChatLevelReq.Say	worldserver:server/worldserver/worldserver.conf.dist:2164	worldserver=1	Int:server/game/World/World.cpp:788	Int=1	CONFIG_CHAT_SAY_LEVEL_REQ		missing_in_rust	-
+ChatLevelReq.Whisper	worldserver:server/worldserver/worldserver.conf.dist:2162	worldserver=1	Int:server/game/World/World.cpp:786	Int=1	CONFIG_CHAT_WHISPER_LEVEL_REQ		missing_in_rust	-
+ChatLevelReq.Yell	worldserver:server/worldserver/worldserver.conf.dist:2165	worldserver=1	Int:server/game/World/World.cpp:789	Int=1	CONFIG_CHAT_YELL_LEVEL_REQ		missing_in_rust	-
+ChatStrictLinkChecking.Kick	worldserver:server/worldserver/worldserver.conf.dist:2105	worldserver=0	Int:server/game/World/World.cpp:1296	Int=0	CONFIG_CHAT_STRICT_LINK_CHECKING_KICK		missing_in_rust	-
+ChatStrictLinkChecking.Severity	worldserver:server/worldserver/worldserver.conf.dist:2096	worldserver=0	Int:server/game/World/World.cpp:1295	Int=0	CONFIG_CHAT_STRICT_LINK_CHECKING_SEVERITY		missing_in_rust	-
+CheckGameObjectLoS	worldserver:server/worldserver/worldserver.conf.dist:467	worldserver=1	Bool:server/game/World/World.cpp:1714	Bool=true	CONFIG_CHECK_GOBJECT_LOS		missing_in_rust	-
+CleanCharacterDB	worldserver:server/worldserver/worldserver.conf.dist:524	worldserver=0	Bool:server/game/World/World.cpp:770	Bool=false	CONFIG_CLEAN_CHARACTER_DB		missing_in_rust	-
+CleanOldMailTime	worldserver:server/worldserver/worldserver.conf.dist:1265	worldserver=4	Int:server/game/World/World.cpp:1170	Int=4	CONFIG_CLEAN_OLD_MAIL_TIME		missing_in_rust	-
+ClientCacheVersion	worldserver:server/worldserver/worldserver.conf.dist:1298	worldserver=0	Int:server/game/World/World.cpp:1372	Int=0	int32 clientCacheId		missing_in_rust	-
+Command.LookupMaxResults	worldserver:server/worldserver/worldserver.conf.dist:1345	worldserver=0	Int:server/game/World/World.cpp:1584	Int=0	CONFIG_MAX_RESULTS_LOOKUP_COMMANDS		missing_in_rust	-
+Compression	worldserver:server/worldserver/worldserver.conf.dist:283	worldserver=1	Int:server/game/World/World.cpp:763	Int=1	CONFIG_COMPRESSION		missing_in_rust	-
+Console.Enable	worldserver:server/worldserver/worldserver.conf.dist:3206	worldserver=1	Bool:server/worldserver/Main.cpp:420|Bool:server/worldserver/Main.cpp:422	Bool=true|Bool=true			missing_in_rust	-
+Corpse.Decay.Elite	worldserver:server/worldserver/worldserver.conf.dist:1807	worldserver=300	Int:server/game/World/World.cpp:1299	Int=300	CONFIG_CORPSE_DECAY_ELITE		missing_in_rust	-
+Corpse.Decay.MinusMob	worldserver:server/worldserver/worldserver.conf.dist:1812	worldserver=150	Int:server/game/World/World.cpp:1304	Int=150	CONFIG_CORPSE_DECAY_MINUSMOB		missing_in_rust	-
+Corpse.Decay.Normal	worldserver:server/worldserver/worldserver.conf.dist:1806	worldserver=300	Int:server/game/World/World.cpp:1298	Int=60	CONFIG_CORPSE_DECAY_NORMAL		missing_in_rust	-
+Corpse.Decay.Obsolete	worldserver:server/worldserver/worldserver.conf.dist:1809	worldserver=3600	Int:server/game/World/World.cpp:1301	Int=3600	CONFIG_CORPSE_DECAY_OBSOLETE		missing_in_rust	-
+Corpse.Decay.Rare	worldserver:server/worldserver/worldserver.conf.dist:1810	worldserver=300	Int:server/game/World/World.cpp:1302	Int=300	CONFIG_CORPSE_DECAY_RARE		missing_in_rust	-
+Corpse.Decay.RareElite	worldserver:server/worldserver/worldserver.conf.dist:1808	worldserver=300	Int:server/game/World/World.cpp:1300	Int=300	CONFIG_CORPSE_DECAY_RAREELITE		missing_in_rust	-
+Corpse.Decay.Trivial	worldserver:server/worldserver/worldserver.conf.dist:1811	worldserver=300	Int:server/game/World/World.cpp:1303	Int=300	CONFIG_CORPSE_DECAY_TRIVIAL		missing_in_rust	-
+Creature.CheckInvalidPosition	worldserver:server/worldserver/worldserver.conf.dist:3548	worldserver=0	Bool:server/game/World/World.cpp:1710	Bool=false	CONFIG_CREATURE_CHECK_INVALID_POSITION		missing_in_rust	-
+Creature.MovingStopTimeForPlayer	worldserver:server/worldserver/worldserver.conf.dist:1934	worldserver=180000	Int:server/game/World/World.cpp:1370	Int=3 * MINUTE * IN_MILLISECONDS	CONFIG_CREATURE_STOP_FOR_PLAYER		missing_in_rust	-
+Creature.PickPocketRefillDelay	worldserver:server/worldserver/worldserver.conf.dist:1903	worldserver=600	Int:server/game/World/World.cpp:1369	Int=10 * MINUTE	CONFIG_CREATURE_PICKPOCKET_REFILL		missing_in_rust	-
+Creature.RegenHPCannotReachTargetInRaid	worldserver:server/worldserver/worldserver.conf.dist:1950	worldserver=1	Bool:server/game/World/World.cpp:891	Bool=true	CONFIG_REGEN_HP_CANNOT_REACH_TARGET_IN_RAID		missing_in_rust	-
+CreatureFamilyAssistanceDelay	worldserver:server/worldserver/worldserver.conf.dist:1772	worldserver=1500	Int:server/game/World/World.cpp:1251	Int=1500	CONFIG_CREATURE_FAMILY_ASSISTANCE_DELAY		missing_in_rust	-
+CreatureFamilyAssistanceRadius	worldserver:server/worldserver/worldserver.conf.dist:1765	worldserver=10	Float:server/game/World/World.cpp:1250	Float=10.0f	CONFIG_CREATURE_FAMILY_ASSISTANCE_RADIUS		missing_in_rust	-
+CreatureFamilyFleeAssistanceRadius	worldserver:server/worldserver/worldserver.conf.dist:1756	worldserver=30	Float:server/game/World/World.cpp:1249	Float=30.0f	CONFIG_CREATURE_FAMILY_FLEE_ASSISTANCE_RADIUS		missing_in_rust	-
+CreatureFamilyFleeDelay	worldserver:server/worldserver/worldserver.conf.dist:1780	worldserver=7000	Int:server/game/World/World.cpp:1252	Int=7000	CONFIG_CREATURE_FAMILY_FLEE_DELAY		missing_in_rust	-
+Currency.ResetDay	worldserver:server/worldserver/worldserver.conf.dist:4290	worldserver=3	Int:server/game/World/World.cpp:1088	Int=3	CONFIG_CURRENCY_RESET_DAY		missing_in_rust	-
+Currency.ResetHour	worldserver:server/worldserver/worldserver.conf.dist:4298	worldserver=6	Int:server/game/World/World.cpp:1082	Int=3	CONFIG_CURRENCY_RESET_HOUR		missing_in_rust	-
+Currency.ResetInterval	worldserver:server/worldserver/worldserver.conf.dist:4282	worldserver=7	Int:server/game/World/World.cpp:1094	Int=7	CONFIG_CURRENCY_RESET_INTERVAL		missing_in_rust	-
+DBC.EnforceItemAttributes	worldserver:server/worldserver/worldserver.conf.dist:1364	worldserver=1	Bool:server/game/World/World.cpp:1605	Bool=true	CONFIG_DBC_ENFORCE_ITEM_ATTRIBUTES		missing_in_rust	-
+DBC.Locale	worldserver:server/worldserver/worldserver.conf.dist:697	worldserver=0	Int:server/game/World/World.cpp:569	Int=0		get_string_default:crates/world-server/src/main.rs:300	rust_exact_key	-
+DataDir	worldserver:server/worldserver/worldserver.conf.dist:79	worldserver="."	String:server/game/World/World.cpp:1523	String="./"	std::string dataPath	get_string_default:crates/world-server/src/main.rs:299	rust_exact_key	-
+Death.Bones.BattlegroundOrArena	worldserver:server/worldserver/worldserver.conf.dist:2740	worldserver=1	Bool:server/game/World/World.cpp:1310	Bool=true	CONFIG_DEATH_BONES_BG_OR_ARENA		missing_in_rust	-
+Death.Bones.World	worldserver:server/worldserver/worldserver.conf.dist:2739	worldserver=1	Bool:server/game/World/World.cpp:1309	Bool=true	CONFIG_DEATH_BONES_WORLD		missing_in_rust	-
+Death.CorpseReclaimDelay.PvE	worldserver:server/worldserver/worldserver.conf.dist:2728	worldserver=0	Bool:server/game/World/World.cpp:1308	Bool=true	CONFIG_DEATH_CORPSE_RECLAIM_DELAY_PVE		missing_in_rust	-
+Death.CorpseReclaimDelay.PvP	worldserver:server/worldserver/worldserver.conf.dist:2727	worldserver=1	Bool:server/game/World/World.cpp:1307	Bool=true	CONFIG_DEATH_CORPSE_RECLAIM_DELAY_PVP		missing_in_rust	-
+Death.SicknessLevel	worldserver:server/worldserver/worldserver.conf.dist:2718	worldserver=11	Int:server/game/World/World.cpp:1306	Int=11	CONFIG_DEATH_SICKNESS_LEVEL		missing_in_rust	-
+DeclinedNames	worldserver:server/worldserver/worldserver.conf.dist:705	worldserver=0	Bool:server/game/World/World.cpp:1316	Bool=false	CONFIG_DECLINED_NAMES_USED		missing_in_rust	-
+DetectPosCollision	worldserver:server/worldserver/worldserver.conf.dist:458	worldserver=1	Bool:server/game/World/World.cpp:1290	Bool=true	CONFIG_DETECT_POS_COLLISION		missing_in_rust	-
+Die.Command.Mode	worldserver:server/worldserver/worldserver.conf.dist:2748	worldserver=1	Bool:server/game/World/World.cpp:1312	Bool=true	CONFIG_DIE_COMMAND_MODE		missing_in_rust	-
+DisableWaterBreath	worldserver:server/worldserver/worldserver.conf.dist:984	worldserver=4	Int:server/game/World/World.cpp:1230	Int=SEC_CONSOLE	CONFIG_DISABLE_BREATHING		missing_in_rust	-
+DisconnectToleranceInterval	worldserver:server/worldserver/worldserver.conf.dist:422	worldserver=0	Int:server/game/World/World.cpp:812	Int=0	CONFIG_INTERVAL_DISCONNECT_TOLERANCE		missing_in_rust	-
+DungeonFinder.OptionsMask	worldserver:server/worldserver/worldserver.conf.dist:1355	worldserver=1	Int:server/game/World/World.cpp:1602	Int=1	CONFIG_LFG_OPTIONSMASK		missing_in_rust	-
+DurabilityLoss.InPvP	worldserver:server/worldserver/worldserver.conf.dist:2668	worldserver=0	Bool:server/game/World/World.cpp:761	Bool=false	CONFIG_DURABILITY_LOSS_IN_PVP		missing_in_rust	-
+DurabilityLoss.OnDeath	worldserver:server/worldserver/worldserver.conf.dist:2675	worldserver=10	Float:server/game/World/World.cpp:710	Float=10.0f	RATE_DURABILITY_LOSS_ON_DEATH		missing_in_rust	-
+DurabilityLossChance.Absorb	worldserver:server/worldserver/worldserver.conf.dist:2690	worldserver=0.5	Float:server/game/World/World.cpp:729	Float=0.5f	RATE_DURABILITY_LOSS_ABSORB		missing_in_rust	-
+DurabilityLossChance.Block	worldserver:server/worldserver/worldserver.conf.dist:2706	worldserver=0.05	Float:server/game/World/World.cpp:741	Float=0.05f	RATE_DURABILITY_LOSS_BLOCK		missing_in_rust	-
+DurabilityLossChance.Damage	worldserver:server/worldserver/worldserver.conf.dist:2682	worldserver=0.5	Float:server/game/World/World.cpp:723	Float=0.5f	RATE_DURABILITY_LOSS_DAMAGE		missing_in_rust	-
+DurabilityLossChance.Parry	worldserver:server/worldserver/worldserver.conf.dist:2698	worldserver=0.05	Float:server/game/World/World.cpp:735	Float=0.05f	RATE_DURABILITY_LOSS_PARRY		missing_in_rust	-
+EnableAELoot	worldserver:server/worldserver/worldserver.conf.dist:3563	worldserver=0	Bool:server/game/World/World.cpp:1520	Bool=false	CONFIG_ENABLE_AE_LOOT		missing_in_rust	-
+Event.Announce	worldserver:server/worldserver/worldserver.conf.dist:1306	worldserver=0	Bool:server/game/World/World.cpp:1247	Bool=false	CONFIG_EVENT_ANNOUNCE		missing_in_rust	-
+Expansion	worldserver:server/worldserver/worldserver.conf.dist:722	worldserver=9	Int:server/game/World/World.cpp:1234|Int:server/game/World/World.cpp:1239	Int=CURRENT_EXPANSION|Int=CURRENT_EXPANSION	uint32 val|CONFIG_EXPANSION		missing_in_rust	-
+FeatureSystem.BpayStore.Enabled	worldserver:server/worldserver/worldserver.conf.dist:1407	worldserver=0	Bool:server/game/World/World.cpp:1597	Bool=false	CONFIG_FEATURE_SYSTEM_BPAY_STORE_ENABLED		missing_in_rust	-
+FeatureSystem.CharacterUndelete.Cooldown	worldserver:server/worldserver/worldserver.conf.dist:1422	worldserver=2592000	Int:server/game/World/World.cpp:1599	Int=2592000	CONFIG_FEATURE_SYSTEM_CHARACTER_UNDELETE_COOLDOWN		missing_in_rust	-
+FeatureSystem.CharacterUndelete.Enabled	worldserver:server/worldserver/worldserver.conf.dist:1415	worldserver=0	Bool:server/game/World/World.cpp:1598	Bool=false	CONFIG_FEATURE_SYSTEM_CHARACTER_UNDELETE_ENABLED		missing_in_rust	-
+FlashAtStart	worldserver:server/worldserver/worldserver.conf.dist:1322	worldserver=1	Bool:server/worldserver/CommandLine/CliRunnable.cpp:127	Bool=true			missing_in_rust	-
+GM.AllowInvite	worldserver:server/worldserver/worldserver.conf.dist:2295	worldserver=0	Bool:server/game/World/World.cpp:1163	Bool=false	CONFIG_ALLOW_GM_GROUP		missing_in_rust	-
+GM.Chat	worldserver:server/worldserver/worldserver.conf.dist:2242	worldserver=2	Int:server/game/World/World.cpp:1145	Int=2	CONFIG_GM_CHAT		missing_in_rust	-
+GM.ForceShutdownThreshold	worldserver:server/worldserver/worldserver.conf.dist:2311	worldserver=30	Int:server/game/World/World.cpp:1165	Int=30	CONFIG_FORCE_SHUTDOWN_THRESHOLD		missing_in_rust	-
+GM.FreezeAuraDuration	worldserver:server/worldserver/worldserver.conf.dist:2260	worldserver=0	Int:server/game/World/World.cpp:1147	Int=0	CONFIG_GM_FREEZE_DURATION		missing_in_rust	-
+GM.InGMList.Level	worldserver:server/worldserver/worldserver.conf.dist:2270	worldserver=3	Int:server/game/World/World.cpp:1149	Int=SEC_ADMINISTRATOR	CONFIG_GM_LEVEL_IN_GM_LIST		missing_in_rust	-
+GM.InWhoList.Level	worldserver:server/worldserver/worldserver.conf.dist:2280	worldserver=3	Int:server/game/World/World.cpp:1150	Int=SEC_ADMINISTRATOR	CONFIG_GM_LEVEL_IN_WHO_LIST		missing_in_rust	-
+GM.LoginState	worldserver:server/worldserver/worldserver.conf.dist:2224	worldserver=2	Int:server/game/World/World.cpp:1143	Int=2	CONFIG_GM_LOGIN_STATE		missing_in_rust	-
+GM.LowerSecurity	worldserver:server/worldserver/worldserver.conf.dist:2304	worldserver=0	Bool:server/game/World/World.cpp:1164	Bool=false	CONFIG_GM_LOWER_SECURITY		missing_in_rust	-
+GM.StartLevel	worldserver:server/worldserver/worldserver.conf.dist:2287	worldserver=1	Int:server/game/World/World.cpp:1151	Int=1	CONFIG_START_GM_LEVEL		missing_in_rust	-
+GM.Visible	worldserver:server/worldserver/worldserver.conf.dist:2233	worldserver=2	Int:server/game/World/World.cpp:1144	Int=2	CONFIG_GM_VISIBLE_STATE		missing_in_rust	-
+GM.WhisperingTo	worldserver:server/worldserver/worldserver.conf.dist:2251	worldserver=2	Int:server/game/World/World.cpp:1146	Int=2	CONFIG_GM_WHISPERING_TO		missing_in_rust	-
+GameObject.CheckInvalidPosition	worldserver:server/worldserver/worldserver.conf.dist:3555	worldserver=0	Bool:server/game/World/World.cpp:1711	Bool=false	CONFIG_GAME_OBJECT_CHECK_INVALID_POSITION		missing_in_rust	-
+GameType	worldserver:server/worldserver/worldserver.conf.dist:602	worldserver=0	Int:server/game/World/World.cpp:895|Int:server/game/World/World.cpp:900	Int=0|Int=0	uint32 val|CONFIG_GAME_TYPE		missing_in_rust	-
+GridCleanUpDelay	worldserver:server/worldserver/worldserver.conf.dist:371	worldserver=300000	Int:server/game/World/World.cpp:822	Int=5 * MINUTE * IN_MILLISECONDS	CONFIG_INTERVAL_GRIDCLEAN		missing_in_rust	-
+GridUnload	worldserver:server/worldserver/worldserver.conf.dist:311	worldserver=1	Bool:server/game/World/World.cpp:797	Bool=true	CONFIG_GRID_UNLOAD		missing_in_rust	-
+Guild.AllowMultipleGuildMaster	worldserver:server/worldserver/worldserver.conf.dist:3434	worldserver=0	Bool:server/game/Guilds/Guild.cpp:2638	Bool=false			missing_in_rust	-
+Guild.BankEventLogRecordsCount	worldserver:server/worldserver/worldserver.conf.dist:1173	worldserver=25	Int:server/game/World/World.cpp:1388	Int=GUILD_BANKLOG_MAX_RECORDS	CONFIG_GUILD_BANK_EVENT_LOG_COUNT		missing_in_rust	-
+Guild.CharterCost	worldserver:server/worldserver/worldserver.conf.dist:759	worldserver=1000	Int:server/game/World/World.cpp:942	Int=1000	CONFIG_CHARTER_COST_GUILD		missing_in_rust	-
+Guild.EventLogRecordsCount	worldserver:server/worldserver/worldserver.conf.dist:1155	worldserver=100	Int:server/game/World/World.cpp:1385	Int=GUILD_EVENTLOG_MAX_RECORDS	CONFIG_GUILD_EVENT_LOG_COUNT		missing_in_rust	-
+Guild.NewsLogRecordsCount	worldserver:server/worldserver/worldserver.conf.dist:1183	worldserver=250	Int:server/game/World/World.cpp:1382	Int=GUILD_NEWSLOG_MAX_RECORDS	CONFIG_GUILD_NEWS_LOG_COUNT		missing_in_rust	-
+Guild.ResetHour	worldserver:server/worldserver/worldserver.conf.dist:1163	worldserver=6	Int:server/game/World/World.cpp:1283	Int=6	CONFIG_GUILD_RESET_HOUR		missing_in_rust	-
+Guild.SaveInterval	worldserver:server/worldserver/worldserver.conf.dist:1190	worldserver=15	Int:server/game/World/World.cpp:1638	Int=15	CONFIG_GUILD_SAVE_INTERVAL		missing_in_rust	-
+HonorPointsAfterDuel	worldserver:server/worldserver/worldserver.conf.dist:3368	worldserver=0	Int:server/game/World/World.cpp:1567	Int=0	CONFIG_HONOR_AFTER_DUEL		missing_in_rust	-
+HotSwap.EnableBuildFileRecreation	worldserver:server/worldserver/worldserver.conf.dist:1564	worldserver=1	Bool:server/game/World/World.cpp:1696	Bool=true	CONFIG_HOTSWAP_BUILD_FILE_RECREATION_ENABLED		missing_in_rust	-
+HotSwap.EnableEarlyTermination	worldserver:server/worldserver/worldserver.conf.dist:1556	worldserver=1	Bool:server/game/World/World.cpp:1695	Bool=true	CONFIG_HOTSWAP_EARLY_TERMINATION_ENABLED		missing_in_rust	-
+HotSwap.EnableInstall	worldserver:server/worldserver/worldserver.conf.dist:1572	worldserver=1	Bool:server/game/World/World.cpp:1697	Bool=true	CONFIG_HOTSWAP_INSTALL_ENABLED		missing_in_rust	-
+HotSwap.EnablePrefixCorrection	worldserver:server/worldserver/worldserver.conf.dist:1581	worldserver=1	Bool:server/game/World/World.cpp:1698	Bool=true	CONFIG_HOTSWAP_PREFIX_CORRECTION_ENABLED		missing_in_rust	-
+HotSwap.EnableReCompiler	worldserver:server/worldserver/worldserver.conf.dist:1548	worldserver=1	Bool:server/game/World/World.cpp:1694	Bool=true	CONFIG_HOTSWAP_RECOMPILER_ENABLED		missing_in_rust	-
+HotSwap.Enabled	worldserver:server/worldserver/worldserver.conf.dist:1531	worldserver=1	Bool:server/game/World/World.cpp:1693	Bool=true	CONFIG_HOTSWAP_ENABLED		missing_in_rust	-
+HotSwap.ReCompilerBuildType	worldserver:server/worldserver/worldserver.conf.dist:1589	worldserver=""	String:server/game/Scripting/ScriptReloadMgr.cpp:1109	String=""	auto directive		missing_in_rust	-
+HotSwap.ScriptDir	worldserver:server/worldserver/worldserver.conf.dist:1539	worldserver="scripts"	String:server/game/Scripting/ScriptReloadMgr.cpp:556	String="scripts"			missing_in_rust	-
+HotfixDatabase.SynchThreads	worldserver:server/worldserver/worldserver.conf.dist:152	worldserver=1					missing_in_rust	-
+HotfixDatabase.WorkerThreads	worldserver:server/worldserver/worldserver.conf.dist:136	worldserver=1					missing_in_rust	-
+HotfixDatabaseInfo	worldserver:server/worldserver/worldserver.conf.dist:118	worldserver="127.0.0.1;3306;trinity;trinity;hotfixes"					missing_in_rust	Rust usa subclaves HotfixDatabaseInfo.Host/Port/Username/Password/Database; C++ usa valor semicolonado HotfixDatabaseInfo
+HotfixDatabaseInfo.Database						get_string_default:crates/world-server/src/main.rs:222	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+HotfixDatabaseInfo.Host						get_string_default:crates/world-server/src/main.rs:217	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+HotfixDatabaseInfo.Password						get_string_default:crates/world-server/src/main.rs:220	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+HotfixDatabaseInfo.Port						get_value:crates/world-server/src/main.rs:218	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+HotfixDatabaseInfo.Username						get_string_default:crates/world-server/src/main.rs:219	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+IPLocationFile	worldserver:server/worldserver/worldserver.conf.dist:241|bnetserver:server/bnetserver/bnetserver.conf.dist:216	worldserver=""|bnetserver=""	String:common/IPLocation/IPLocation.cpp:41	String=""	std::string databaseFilePath		missing_in_rust	-
+Instance.IgnoreLevel	worldserver:server/worldserver/worldserver.conf.dist:1026	worldserver=0	Bool:server/game/World/World.cpp:1113	Bool=false	CONFIG_INSTANCE_IGNORE_LEVEL		missing_in_rust	-
+Instance.IgnoreRaid	worldserver:server/worldserver/worldserver.conf.dist:1034	worldserver=0	Bool:server/game/World/World.cpp:1114	Bool=false	CONFIG_INSTANCE_IGNORE_RAID		missing_in_rust	-
+Instance.UnloadDelay	worldserver:server/worldserver/worldserver.conf.dist:1044	worldserver=1800000	Int:server/game/World/World.cpp:1119	Int=30 * MINUTE * IN_MILLISECONDS	CONFIG_INSTANCE_UNLOAD_DELAY		missing_in_rust	-
+InstanceMapLoadAllGrids	worldserver:server/worldserver/worldserver.conf.dist:330	worldserver=0	Bool:server/game/World/World.cpp:804	Bool=false	CONFIG_INSTANCEMAP_LOAD_GRIDS		missing_in_rust	-
+InstanceServerPort	worldserver:server/worldserver/worldserver.conf.dist:173	worldserver=8086	Int:server/game/World/World.cpp:848|Int:server/game/World/World.cpp:855	Int=8086|Int=8086	CONFIG_PORT_INSTANCE	get_value:crates/world-server/src/main.rs:459	rust_exact_key	-
+InstancesResetAnnounce	worldserver:server/worldserver/worldserver.conf.dist:1052	worldserver=false	Bool:server/game/World/World.cpp:1622	Bool=false	CONFIG_INSTANCES_RESET_ANNOUNCE		missing_in_rust	-
+InstantFlightPaths	worldserver:server/worldserver/worldserver.conf.dist:1001	worldserver=0	Bool:server/game/World/World.cpp:1111	Bool=false	CONFIG_INSTANT_TAXI		missing_in_rust	-
+LevelReq.Auction	worldserver:server/worldserver/worldserver.conf.dist:3481	worldserver=1	Int:server/game/World/World.cpp:792	Int=1	CONFIG_AUCTION_LEVEL_REQ		missing_in_rust	-
+LevelReq.Mail	worldserver:server/worldserver/worldserver.conf.dist:3488	worldserver=1	Int:server/game/World/World.cpp:793	Int=1	CONFIG_MAIL_LEVEL_REQ		missing_in_rust	-
+LevelReq.Trade	worldserver:server/worldserver/worldserver.conf.dist:3474	worldserver=1	Int:server/game/World/World.cpp:791	Int=1	CONFIG_TRADE_LEVEL_REQ		missing_in_rust	-
+ListenRange.Say	worldserver:server/worldserver/worldserver.conf.dist:1911	worldserver=40	Float:server/game/World/World.cpp:1323	Float=25.0f	CONFIG_LISTEN_RANGE_SAY		missing_in_rust	-
+ListenRange.TextEmote	worldserver:server/worldserver/worldserver.conf.dist:1918	worldserver=40	Float:server/game/World/World.cpp:1324	Float=25.0f	CONFIG_LISTEN_RANGE_TEXTEMOTE		missing_in_rust	-
+ListenRange.Yell	worldserver:server/worldserver/worldserver.conf.dist:1926	worldserver=300	Float:server/game/World/World.cpp:1325	Float=300.0f	CONFIG_LISTEN_RANGE_YELL		missing_in_rust	-
+Log.Async.Enable	worldserver:server/worldserver/worldserver.conf.dist:4260	worldserver=0	Bool:server/worldserver/Main.cpp:230	Bool=false			missing_in_rust	-
+LogDB.Opt.ClearInterval	worldserver:server/worldserver/worldserver.conf.dist:484	worldserver=10	Int:server/game/World/World.cpp:1190	Int=10	CONFIG_LOGDB_CLEARINTERVAL		missing_in_rust	-
+LogDB.Opt.ClearTime	worldserver:server/worldserver/worldserver.conf.dist:492	worldserver=1209600	Int:server/game/World/World.cpp:1201	Int=1209600	CONFIG_LOGDB_CLEARTIME		missing_in_rust	-
+Logger.commands.gm	worldserver:server/worldserver/worldserver.conf.dist:4182	worldserver=3,Console GM					missing_in_rust	-
+Logger.mmaps	worldserver:server/worldserver/worldserver.conf.dist:4186	worldserver=3,Server					missing_in_rust	-
+Logger.realmlist	bnetserver:server/bnetserver/bnetserver.conf.dist:436	bnetserver=3,Console Bnet					missing_in_rust	-
+Logger.root	worldserver:server/worldserver/worldserver.conf.dist:4180|bnetserver:server/bnetserver/bnetserver.conf.dist:435	worldserver=5,Console Server|bnetserver=3,Console Bnet					missing_in_rust	-
+Logger.scripts.hotswap	worldserver:server/worldserver/worldserver.conf.dist:4183	worldserver=3,Console Server					missing_in_rust	-
+Logger.server	worldserver:server/worldserver/worldserver.conf.dist:4181	worldserver=3,Console Server					missing_in_rust	-
+Logger.server.http	bnetserver:server/bnetserver/bnetserver.conf.dist:437	bnetserver=3,Console Bnet					missing_in_rust	-
+Logger.server.http.dispatcher.login	bnetserver:server/bnetserver/bnetserver.conf.dist:439	bnetserver=3,Console Bnet					missing_in_rust	-
+Logger.server.http.login	bnetserver:server/bnetserver/bnetserver.conf.dist:438	bnetserver=3,Console Bnet					missing_in_rust	-
+Logger.server.http.session.login	bnetserver:server/bnetserver/bnetserver.conf.dist:440	bnetserver=3,Console Bnet					missing_in_rust	-
+Logger.session	bnetserver:server/bnetserver/bnetserver.conf.dist:441	bnetserver=3,Console Bnet					missing_in_rust	-
+Logger.session.packets	bnetserver:server/bnetserver/bnetserver.conf.dist:442	bnetserver=3,Console Bnet					missing_in_rust	-
+Logger.sql.sql	worldserver:server/worldserver/worldserver.conf.dist:4184	worldserver=5,Console DBErrors					missing_in_rust	-
+Logger.sql.updates	worldserver:server/worldserver/worldserver.conf.dist:4185|bnetserver:server/bnetserver/bnetserver.conf.dist:443	worldserver=3,Console Server|bnetserver=3,Console Bnet					missing_in_rust	-
+LoginDatabase.SynchThreads	worldserver:server/worldserver/worldserver.conf.dist:149|bnetserver:server/bnetserver/bnetserver.conf.dist:262	worldserver=1|bnetserver=1					missing_in_rust	-
+LoginDatabase.WorkerThreads	worldserver:server/worldserver/worldserver.conf.dist:133|bnetserver:server/bnetserver/bnetserver.conf.dist:255	worldserver=1|bnetserver=1					missing_in_rust	-
+LoginDatabaseInfo	worldserver:server/worldserver/worldserver.conf.dist:115|bnetserver:server/bnetserver/bnetserver.conf.dist:246	worldserver="127.0.0.1;3306;trinity;trinity;auth"|bnetserver="127.0.0.1;3306;trinity;trinity;auth"					missing_in_rust	Rust usa subclaves LoginDatabaseInfo.Host/Port/Username/Password/Database; C++ usa valor semicolonado LoginDatabaseInfo
+LoginDatabaseInfo.Database						get_string_default:crates/bnet-server/src/main.rs:41|get_string_default:crates/world-server/src/main.rs:174	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+LoginDatabaseInfo.Host						get_string_default:crates/bnet-server/src/main.rs:37|get_string_default:crates/world-server/src/main.rs:170	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+LoginDatabaseInfo.Password						get_string_default:crates/bnet-server/src/main.rs:40|get_string_default:crates/world-server/src/main.rs:173	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+LoginDatabaseInfo.Port						get_value:crates/bnet-server/src/main.rs:38|get_value:crates/world-server/src/main.rs:171	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+LoginDatabaseInfo.Username						get_string_default:crates/bnet-server/src/main.rs:39|get_string_default:crates/world-server/src/main.rs:172	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+LoginREST.ExternalAddress	bnetserver:server/bnetserver/bnetserver.conf.dist:78	bnetserver=127.0.0.1	String:server/bnetserver/REST/LoginRESTService.cpp:94	String="127.0.0.1"		get_string_default:crates/bnet-server/src/main.rs:77	rust_exact_key	-
+LoginREST.LocalAddress	bnetserver:server/bnetserver/bnetserver.conf.dist:79	bnetserver=127.0.0.1	String:server/bnetserver/REST/LoginRESTService.cpp:104	String="127.0.0.1"		get_string_default:crates/bnet-server/src/main.rs:78	rust_exact_key	-
+LoginREST.Port	bnetserver:server/bnetserver/bnetserver.conf.dist:77	bnetserver=8081	Int:server/bnetserver/Main.cpp:204	Int=8081	int32 httpPort	get_value:crates/bnet-server/src/main.rs:75	rust_exact_key	-
+LoginREST.TicketDuration	bnetserver:server/bnetserver/bnetserver.conf.dist:80	bnetserver=3600	Int:server/bnetserver/REST/LoginRESTService.cpp:134	Int=3600		get_value:crates/bnet-server/src/main.rs:79	rust_exact_key	-
+LogsDir	worldserver:server/worldserver/worldserver.conf.dist:88|bnetserver:server/bnetserver/bnetserver.conf.dist:42	worldserver=""|bnetserver=""	String:common/Logging/Log.cpp:401|String:server/game/Server/Protocol/PacketLog.cpp:84	String=""|String=""	std::string logsDir		missing_in_rust	-
+MailDeliveryDelay	worldserver:server/worldserver/worldserver.conf.dist:1257	worldserver=3600	Int:server/game/World/World.cpp:1169	Int=HOUR	CONFIG_MAIL_DELIVERY_DELAY		missing_in_rust	-
+MapUpdate.Threads	worldserver:server/worldserver/worldserver.conf.dist:516	worldserver=1	Int:server/game/World/World.cpp:1583	Int=1	CONFIG_NUMTHREADS		missing_in_rust	-
+MapUpdateInterval	worldserver:server/worldserver/worldserver.conf.dist:385	worldserver=10	Int:server/game/World/World.cpp:831	Int=10	CONFIG_INTERVAL_MAPUPDATE		missing_in_rust	-
+MaxCoreStuckTime	worldserver:server/worldserver/worldserver.conf.dist:500	worldserver=60	Int:server/worldserver/Main.cpp:406|Int:server/worldserver/Main.cpp:525	Int=60|Int=60	int coreStuckTime		missing_in_rust	-
+MaxGroupXPDistance	worldserver:server/worldserver/worldserver.conf.dist:1214	worldserver=74	Float:server/game/World/World.cpp:864	Float=74.0f	CONFIG_GROUP_XP_DISTANCE		missing_in_rust	-
+MaxOverspeedPings	worldserver:server/worldserver/worldserver.conf.dist:302	worldserver=2	Int:server/game/World/World.cpp:1220	Int=2	CONFIG_MAX_OVERSPEED_PINGS		missing_in_rust	-
+MaxPingTime	worldserver:server/worldserver/worldserver.conf.dist:159|bnetserver:server/bnetserver/bnetserver.conf.dist:49	worldserver=30|bnetserver=30	Int:server/bnetserver/Main.cpp:256|Int:server/game/World/World.cpp:1635	Int=30|Int=30	int32 dbPingInterval|CONFIG_DB_PING_INTERVAL		missing_in_rust	-
+MaxPlayerLevel	worldserver:server/worldserver/worldserver.conf.dist:902	worldserver=80	Int:server/game/World/World.cpp:986|Int:server/game/World/World.cpp:991	Int=DEFAULT_MAX_LEVEL|Int=DEFAULT_MAX_LEVEL	uint32 val|CONFIG_MAX_PLAYER_LEVEL		missing_in_rust	-
+MaxPrimaryTradeSkill	worldserver:server/worldserver/worldserver.conf.dist:1198	worldserver=2	Int:server/game/World/World.cpp:1135	Int=2	CONFIG_MAX_PRIMARY_TRADE_SKILL		missing_in_rust	-
+MaxRecruitAFriendBonusDistance	worldserver:server/worldserver/worldserver.conf.dist:1222	worldserver=100	Float:server/game/World/World.cpp:865	Float=100.0f	CONFIG_MAX_RECRUIT_A_FRIEND_DISTANCE		missing_in_rust	-
+MaxWhoListReturns	worldserver:server/worldserver/worldserver.conf.dist:769	worldserver=50	Int:server/game/World/World.cpp:1563	Int=49	CONFIG_MAX_WHO		missing_in_rust	-
+Metric.ConnectionInfo	worldserver:server/worldserver/worldserver.conf.dist:4364	worldserver="127.0.0.1;8086;worldserver"	String:common/Metric/Metric.cpp:84	String=""	std::string connectionInfo		missing_in_rust	-
+Metric.Enable	worldserver:server/worldserver/worldserver.conf.dist:4348	worldserver=0	Bool:common/Metric/Metric.cpp:56	Bool=false			missing_in_rust	-
+Metric.Interval	worldserver:server/worldserver/worldserver.conf.dist:4356	worldserver=1	Int:common/Metric/Metric.cpp:57	Int=1			missing_in_rust	-
+Metric.OverallStatusInterval	worldserver:server/worldserver/worldserver.conf.dist:4372	worldserver=1	Int:common/Metric/Metric.cpp:64	Int=1			missing_in_rust	-
+MinCharterName	worldserver:server/worldserver/worldserver.conf.dist:738	worldserver=2	Int:server/game/World/World.cpp:928	Int=2	CONFIG_MIN_CHARTER_NAME		missing_in_rust	-
+MinCreatureScaledXPRatio	worldserver:server/worldserver/worldserver.conf.dist:1241	worldserver=0	Int:server/game/World/World.cpp:874	Int=0	CONFIG_MIN_CREATURE_SCALED_XP_RATIO		missing_in_rust	-
+MinDiscoveredScaledXPRatio	worldserver:server/worldserver/worldserver.conf.dist:1250	worldserver=0	Int:server/game/World/World.cpp:881	Int=0	CONFIG_MIN_DISCOVERED_SCALED_XP_RATIO		missing_in_rust	-
+MinDualSpecLevel	worldserver:server/worldserver/worldserver.conf.dist:909	worldserver=30	Int:server/game/World/World.cpp:999	Int=40	CONFIG_MIN_DUALSPEC_LEVEL		missing_in_rust	-
+MinPetName	worldserver:server/worldserver/worldserver.conf.dist:746	worldserver=2	Int:server/game/World/World.cpp:935	Int=2	CONFIG_MIN_PET_NAME		missing_in_rust	-
+MinPetitionSigns	worldserver:server/worldserver/worldserver.conf.dist:1206	worldserver=4	Int:server/game/World/World.cpp:1136	Int=4	CONFIG_MIN_PETITION_SIGNS		missing_in_rust	-
+MinPlayerName	worldserver:server/worldserver/worldserver.conf.dist:730	worldserver=2	Int:server/game/World/World.cpp:921	Int=2	CONFIG_MIN_PLAYER_NAME		missing_in_rust	-
+MinQuestScaledXPRatio	worldserver:server/worldserver/worldserver.conf.dist:1231	worldserver=0	Int:server/game/World/World.cpp:867	Int=0	CONFIG_MIN_QUEST_SCALED_XP_RATIO		missing_in_rust	-
+MinWorldUpdateTime	worldserver:server/worldserver/worldserver.conf.dist:378	worldserver=1	Int:server/worldserver/Main.cpp:521	Int=1			missing_in_rust	-
+MonsterSight	worldserver:server/worldserver/worldserver.conf.dist:1942	worldserver=50.000000	Float:server/game/World/World.cpp:889	Float=50.0f	CONFIG_SIGHT_MONSTER		missing_in_rust	-
+Motd	worldserver:server/worldserver/worldserver.conf.dist:1330	worldserver="Welcome to a Trinity Core server."	String:server/game/World/World.cpp:581	String="Welcome to a Trinity Core Server."	SetMotd(		missing_in_rust	-
+MySQLExecutable	worldserver:server/worldserver/worldserver.conf.dist:232|bnetserver:server/bnetserver/bnetserver.conf.dist:207	worldserver=""|bnetserver=""					missing_in_rust	-
+Network.OutKBuff	worldserver:server/worldserver/worldserver.conf.dist:3177	worldserver=-1	Int:server/game/Server/WorldSocketMgr.cpp:68	Int=-1			missing_in_rust	-
+Network.OutUBuff	worldserver:server/worldserver/worldserver.conf.dist:3185	worldserver=65536	Int:server/game/Server/WorldSocketMgr.cpp:70	Int=65536			missing_in_rust	-
+Network.TcpNodelay	worldserver:server/worldserver/worldserver.conf.dist:3193	worldserver=1	Bool:server/game/Server/WorldSocketMgr.cpp:62	Bool=true			missing_in_rust	-
+Network.Threads	worldserver:server/worldserver/worldserver.conf.dist:3169	worldserver=1	Int:server/worldserver/Main.cpp:372	Int=1	int networkThreads		missing_in_rust	-
+NoGrayAggro.Above	worldserver:server/worldserver/worldserver.conf.dist:3530	worldserver=0	Int:server/game/World/World.cpp:1457	Int=0	CONFIG_NO_GRAY_AGGRO_ABOVE		missing_in_rust	-
+NoGrayAggro.Below	worldserver:server/worldserver/worldserver.conf.dist:3531	worldserver=0	Int:server/game/World/World.cpp:1458	Int=0	CONFIG_NO_GRAY_AGGRO_BELOW		missing_in_rust	-
+NoResetTalentsCost	worldserver:server/worldserver/worldserver.conf.dist:3425	worldserver=0	Bool:server/game/World/World.cpp:1579	Bool=false	CONFIG_NO_RESET_TALENT_COST		missing_in_rust	-
+OffhandCheckAtSpellUnlearn	worldserver:server/worldserver/worldserver.conf.dist:1290	worldserver=1	Bool:server/game/World/World.cpp:1367	Bool=true	CONFIG_OFFHAND_CHECK_AT_SPELL_UNLEARN		missing_in_rust	-
+PacketLogFile	worldserver:server/worldserver/worldserver.conf.dist:583	worldserver=""	String:server/game/Server/Protocol/PacketLog.cpp:90	String=""	std::string logname		missing_in_rust	-
+PacketSpoof.BanDuration	worldserver:server/worldserver/worldserver.conf.dist:4333	worldserver=86400	Int:server/game/World/World.cpp:1676	Int=86400	CONFIG_PACKET_SPOOF_BANDURATION		missing_in_rust	-
+PacketSpoof.BanMode	worldserver:server/worldserver/worldserver.conf.dist:4324	worldserver=0	Int:server/game/World/World.cpp:1672	Int=(uint32)BAN_ACCOUNT	CONFIG_PACKET_SPOOF_BANMODE		missing_in_rust	-
+PacketSpoof.Policy	worldserver:server/worldserver/worldserver.conf.dist:4314	worldserver=1	Int:server/game/World/World.cpp:1671	Int=(uint32)WorldSession::DosProtection::POLICY_KICK	CONFIG_PACKET_SPOOF_POLICY		missing_in_rust	-
+PartyLevelReq	worldserver:server/worldserver/worldserver.conf.dist:2174	worldserver=1	Int:server/game/World/World.cpp:790	Int=1	CONFIG_PARTY_LEVEL_REQ		missing_in_rust	-
+PartyRaidWarnings	worldserver:server/worldserver/worldserver.conf.dist:2210	worldserver=0	Bool:server/game/World/World.cpp:1704	Bool=false	CONFIG_CHAT_PARTY_RAID_WARNINGS		missing_in_rust	-
+PersistentCharacterCleanFlags	worldserver:server/worldserver/worldserver.conf.dist:535	worldserver=0	Int:server/game/World/World.cpp:771	Int=0	CONFIG_PERSISTENT_CHARACTER_CLEAN_FLAGS		missing_in_rust	-
+PidFile	worldserver:server/worldserver/worldserver.conf.dist:574|bnetserver:server/bnetserver/bnetserver.conf.dist:96	worldserver=""|bnetserver=""	String:server/worldserver/Main.cpp:258|String:server/bnetserver/Main.cpp:167	String=""|String=""	std::string pidFile|std::string pidFile		missing_in_rust	-
+PlayerDump.DisallowOverwrite	worldserver:server/worldserver/worldserver.conf.dist:3502	worldserver=1	Bool:server/game/World/World.cpp:1642	Bool=true	CONFIG_PDUMP_NO_OVERWRITE		missing_in_rust	-
+PlayerDump.DisallowPaths	worldserver:server/worldserver/worldserver.conf.dist:3495	worldserver=1	Bool:server/game/World/World.cpp:1641	Bool=true	CONFIG_PDUMP_NO_PATHS		missing_in_rust	-
+PlayerLimit	worldserver:server/worldserver/worldserver.conf.dist:293	worldserver=0	Int:server/scripts/Commands/cs_server.cpp:308|Int:server/game/World/World.cpp:580	Int=100|Int=100	SetPlayerAmountLimit(|SetPlayerAmountLimit(		missing_in_rust	-
+PlayerSave.Stats.MinLevel	worldserver:server/worldserver/worldserver.conf.dist:407	worldserver=0	Int:server/game/World/World.cpp:815	Int=0	CONFIG_MIN_LEVEL_STAT_SAVE		missing_in_rust	-
+PlayerSave.Stats.SaveOnlyOnLogout	worldserver:server/worldserver/worldserver.conf.dist:415	worldserver=1	Bool:server/game/World/World.cpp:813	Bool=true	CONFIG_STATS_SAVE_ONLY_ON_LOGOUT		missing_in_rust	-
+PlayerSaveInterval	worldserver:server/worldserver/worldserver.conf.dist:399	worldserver=90000	Int:server/game/World/World.cpp:811	Int=15 * MINUTE * IN_MILLISECONDS	CONFIG_INTERVAL_SAVE		missing_in_rust	-
+PlayerStart.AllReputation	worldserver:server/worldserver/worldserver.conf.dist:3317	worldserver=0	Bool:server/game/World/World.cpp:1571	Bool=false	CONFIG_START_ALL_REP		missing_in_rust	-
+PlayerStart.AllSpells	worldserver:server/worldserver/worldserver.conf.dist:3352	worldserver=0	Bool:server/game/World/World.cpp:1564	Bool=false	CONFIG_START_ALL_SPELLS		missing_in_rust	-
+PlayerStart.MapsExplored	worldserver:server/worldserver/worldserver.conf.dist:3360	worldserver=0	Bool:server/game/World/World.cpp:1570	Bool=false	CONFIG_START_ALL_EXPLORED		missing_in_rust	-
+PlayerStart.String	worldserver:server/worldserver/worldserver.conf.dist:3467	worldserver=""	String:server/game/World/World.cpp:599	String=""	SetNewCharString(		missing_in_rust	-
+PreserveCustomChannelDuration	worldserver:server/worldserver/worldserver.conf.dist:2202	worldserver=14	Int:server/game/World/World.cpp:795	Int=14	CONFIG_PRESERVE_CUSTOM_CHANNEL_DURATION		missing_in_rust	-
+PreserveCustomChannelInterval	worldserver:server/worldserver/worldserver.conf.dist:2192	worldserver=5	Int:server/game/World/World.cpp:796	Int=5	CONFIG_PRESERVE_CUSTOM_CHANNEL_INTERVAL		missing_in_rust	-
+PreserveCustomChannels	worldserver:server/worldserver/worldserver.conf.dist:2185	worldserver=1	Bool:server/game/World/World.cpp:794	Bool=false	CONFIG_PRESERVE_CUSTOM_CHANNELS		missing_in_rust	-
+PreventRenameCharacterOnCustomization	worldserver:server/worldserver/worldserver.conf.dist:3541	worldserver=0	Bool:server/game/World/World.cpp:1701	Bool=false	CONFIG_PREVENT_RENAME_CUSTOMIZATION		missing_in_rust	-
+PrivateKeyFile	bnetserver:server/bnetserver/bnetserver.conf.dist:113	bnetserver="./bnetserver.key.pem"	String:server/bnetserver/Server/SslContext.cpp:43	String="./bnetserver.key.pem"	std::string privateKeyFile		missing_in_rust	-
+PrivateKeyPassword	bnetserver:server/bnetserver/bnetserver.conf.dist:120	bnetserver=""	String:server/bnetserver/Server/SslContext.cpp:47	String=""			missing_in_rust	-
+ProcessPriority	worldserver:server/worldserver/worldserver.conf.dist:266|bnetserver:server/bnetserver/bnetserver.conf.dist:139	worldserver=0|bnetserver=0	Bool:server/worldserver/Main.cpp:290|Bool:server/bnetserver/Main.cpp:253	Bool=false|Bool=false			missing_in_rust	-
+PvPToken.Enable	worldserver:server/worldserver/worldserver.conf.dist:3392	worldserver=0	Bool:server/game/World/World.cpp:1572	Bool=false	CONFIG_PVP_TOKEN_ENABLE		missing_in_rust	-
+PvPToken.ItemCount	worldserver:server/worldserver/worldserver.conf.dist:3417	worldserver=1	Int:server/game/World/World.cpp:1575	Int=1	CONFIG_PVP_TOKEN_COUNT		missing_in_rust	-
+PvPToken.ItemID	worldserver:server/worldserver/worldserver.conf.dist:3410	worldserver=29434	Int:server/game/World/World.cpp:1574	Int=29434	CONFIG_PVP_TOKEN_ID		missing_in_rust	-
+PvPToken.MapAllowType	worldserver:server/worldserver/worldserver.conf.dist:3402	worldserver=4	Int:server/game/World/World.cpp:1573	Int=4	CONFIG_PVP_TOKEN_MAP_TYPE		missing_in_rust	-
+Pvp.FactionBalance.LevelCheckDiff	worldserver:server/worldserver/worldserver.conf.dist:4400	worldserver=0	Int:server/game/World/World.cpp:1717	Int=0	CONFIG_FACTION_BALANCE_LEVEL_CHECK_DIFF		missing_in_rust	-
+Pvp.FactionBalance.Pct10	worldserver:server/worldserver/worldserver.conf.dist:4415	worldserver=0.7	Float:server/game/World/World.cpp:1719	Float=0.7f	CONFIG_CALL_TO_ARMS_10_PCT		missing_in_rust	-
+Pvp.FactionBalance.Pct20	worldserver:server/worldserver/worldserver.conf.dist:4423	worldserver=0.8	Float:server/game/World/World.cpp:1720	Float=0.8f	CONFIG_CALL_TO_ARMS_20_PCT		missing_in_rust	-
+Pvp.FactionBalance.Pct5	worldserver:server/worldserver/worldserver.conf.dist:4407	worldserver=0.6	Float:server/game/World/World.cpp:1718	Float=0.6f	CONFIG_CALL_TO_ARMS_5_PCT		missing_in_rust	-
+Quests.DailyResetTime	worldserver:server/worldserver/worldserver.conf.dist:1129	worldserver=3	Int:server/game/World/World.cpp:1121	Int=3	CONFIG_DAILY_QUEST_RESET_TIME_HOUR		missing_in_rust	-
+Quests.EnableQuestTracker	worldserver:server/worldserver/worldserver.conf.dist:1076	worldserver=0	Bool:server/game/World/World.cpp:1256	Bool=false	CONFIG_QUEST_ENABLE_QUEST_TRACKER		missing_in_rust	-
+Quests.HighLevelHideDiff	worldserver:server/worldserver/worldserver.conf.dist:1096	worldserver=2	Int:server/game/World/World.cpp:1262	Int=7	CONFIG_QUEST_HIGH_LEVEL_HIDE_DIFF		missing_in_rust	-
+Quests.IgnoreAutoAccept	worldserver:server/worldserver/worldserver.conf.dist:1112	worldserver=0	Bool:server/game/World/World.cpp:1266	Bool=false	CONFIG_QUEST_IGNORE_AUTO_ACCEPT		missing_in_rust	-
+Quests.IgnoreAutoComplete	worldserver:server/worldserver/worldserver.conf.dist:1120	worldserver=0	Bool:server/game/World/World.cpp:1267	Bool=false	CONFIG_QUEST_IGNORE_AUTO_COMPLETE		missing_in_rust	-
+Quests.IgnoreRaid	worldserver:server/worldserver/worldserver.conf.dist:1104	worldserver=0	Bool:server/game/World/World.cpp:1265	Bool=false	CONFIG_QUEST_IGNORE_RAID		missing_in_rust	-
+Quests.LowLevelHideDiff	worldserver:server/worldserver/worldserver.conf.dist:1086	worldserver=5	Int:server/game/World/World.cpp:1259	Int=4	CONFIG_QUEST_LOW_LEVEL_HIDE_DIFF		missing_in_rust	-
+Quests.WeeklyResetWDay	worldserver:server/worldserver/worldserver.conf.dist:1138	worldserver=3	Int:server/game/World/World.cpp:1128	Int=3	CONFIG_WEEKLY_QUEST_RESET_TIME_WDAY		missing_in_rust	-
+Ra.Enable	worldserver:server/worldserver/worldserver.conf.dist:3214	worldserver=0	Bool:server/worldserver/Main.cpp:352	Bool=false			missing_in_rust	-
+Ra.IP	worldserver:server/worldserver/worldserver.conf.dist:3221	worldserver="0.0.0.0"	String:server/worldserver/Main.cpp:613	String="0.0.0.0"	std::string raListener		missing_in_rust	-
+Ra.MinLevel	worldserver:server/worldserver/worldserver.conf.dist:3235	worldserver=3	Int:server/worldserver/RemoteAccess/RASession.cpp:138	Int=SEC_ADMINISTRATOR			missing_in_rust	-
+Ra.Port	worldserver:server/worldserver/worldserver.conf.dist:3228	worldserver=3443	Int:server/worldserver/Main.cpp:612	Int=3443			missing_in_rust	-
+Rate.ArcaneCharges.Loss	worldserver:server/worldserver/worldserver.conf.dist:2446	worldserver=1					missing_in_rust	-
+Rate.Auction.Cut	worldserver:server/worldserver/worldserver.conf.dist:2565	worldserver=1	Float:server/game/World/World.cpp:692	Float=1.0f	RATE_AUCTION_CUT		missing_in_rust	-
+Rate.Auction.Deposit	worldserver:server/worldserver/worldserver.conf.dist:2564	worldserver=1	Float:server/game/World/World.cpp:691	Float=1.0f	RATE_AUCTION_DEPOSIT		missing_in_rust	-
+Rate.Auction.Time	worldserver:server/worldserver/worldserver.conf.dist:2563	worldserver=1	Float:server/game/World/World.cpp:690	Float=1.0f	RATE_AUCTION_TIME		missing_in_rust	-
+Rate.Chi.Loss	worldserver:server/worldserver/worldserver.conf.dist:2444	worldserver=1					missing_in_rust	-
+Rate.ComboPoints.Loss	worldserver:server/worldserver/worldserver.conf.dist:2437	worldserver=1					missing_in_rust	-
+Rate.Corpse.Decay.Looted	worldserver:server/worldserver/worldserver.conf.dist:1820	worldserver=0.5	Float:server/game/World/World.cpp:708	Float=0.5f	RATE_CORPSE_DECAY_LOOTED		missing_in_rust	-
+Rate.Creature.Aggro	worldserver:server/worldserver/worldserver.conf.dist:1748	worldserver=1	Float:server/game/World/World.cpp:685	Float=1.0f	RATE_CREATURE_AGGRO		missing_in_rust	-
+Rate.Creature.Damage.Elite	worldserver:server/worldserver/worldserver.conf.dist:1840	worldserver=1	Float:server/game/World/World.cpp:672	Float=1.0f	RATE_CREATURE_DAMAGE_ELITE		missing_in_rust	-
+Rate.Creature.Damage.MinusMob	worldserver:server/worldserver/worldserver.conf.dist:1845	worldserver=1	Float:server/game/World/World.cpp:677	Float=1.0f	RATE_CREATURE_DAMAGE_MINUSMOB		missing_in_rust	-
+Rate.Creature.Damage.Normal	worldserver:server/worldserver/worldserver.conf.dist:1839	worldserver=1	Float:server/game/World/World.cpp:671	Float=1.0f	RATE_CREATURE_DAMAGE_NORMAL		missing_in_rust	-
+Rate.Creature.Damage.Obsolete	worldserver:server/worldserver/worldserver.conf.dist:1842	worldserver=1	Float:server/game/World/World.cpp:674	Float=1.0f	RATE_CREATURE_DAMAGE_OBSOLETE		missing_in_rust	-
+Rate.Creature.Damage.Rare	worldserver:server/worldserver/worldserver.conf.dist:1843	worldserver=1	Float:server/game/World/World.cpp:675	Float=1.0f	RATE_CREATURE_DAMAGE_RARE		missing_in_rust	-
+Rate.Creature.Damage.RareElite	worldserver:server/worldserver/worldserver.conf.dist:1841	worldserver=1	Float:server/game/World/World.cpp:673	Float=1.0f	RATE_CREATURE_DAMAGE_RAREELITE		missing_in_rust	-
+Rate.Creature.Damage.Trivial	worldserver:server/worldserver/worldserver.conf.dist:1844	worldserver=1	Float:server/game/World/World.cpp:676	Float=1.0f	RATE_CREATURE_DAMAGE_TRIVIAL		missing_in_rust	-
+Rate.Creature.HP.Elite	worldserver:server/worldserver/worldserver.conf.dist:1890	worldserver=1	Float:server/game/World/World.cpp:665	Float=1.0f	RATE_CREATURE_HP_ELITE		missing_in_rust	-
+Rate.Creature.HP.MinusMob	worldserver:server/worldserver/worldserver.conf.dist:1895	worldserver=1	Float:server/game/World/World.cpp:670	Float=1.0f	RATE_CREATURE_HP_MINUSMOB		missing_in_rust	-
+Rate.Creature.HP.Normal	worldserver:server/worldserver/worldserver.conf.dist:1889	worldserver=1	Float:server/game/World/World.cpp:664	Float=1.0f	RATE_CREATURE_HP_NORMAL		missing_in_rust	-
+Rate.Creature.HP.Obsolete	worldserver:server/worldserver/worldserver.conf.dist:1892	worldserver=1	Float:server/game/World/World.cpp:667	Float=1.0f	RATE_CREATURE_HP_OBSOLETE		missing_in_rust	-
+Rate.Creature.HP.Rare	worldserver:server/worldserver/worldserver.conf.dist:1893	worldserver=1	Float:server/game/World/World.cpp:668	Float=1.0f	RATE_CREATURE_HP_RARE		missing_in_rust	-
+Rate.Creature.HP.RareElite	worldserver:server/worldserver/worldserver.conf.dist:1891	worldserver=1	Float:server/game/World/World.cpp:666	Float=1.0f	RATE_CREATURE_HP_RAREELITE		missing_in_rust	-
+Rate.Creature.HP.Trivial	worldserver:server/worldserver/worldserver.conf.dist:1894	worldserver=1	Float:server/game/World/World.cpp:669	Float=1.0f	RATE_CREATURE_HP_TRIVIAL		missing_in_rust	-
+Rate.Creature.SpellDamage.Elite	worldserver:server/worldserver/worldserver.conf.dist:1865	worldserver=1	Float:server/game/World/World.cpp:679	Float=1.0f	RATE_CREATURE_SPELLDAMAGE_ELITE		missing_in_rust	-
+Rate.Creature.SpellDamage.MinusMob	worldserver:server/worldserver/worldserver.conf.dist:1870	worldserver=1	Float:server/game/World/World.cpp:684	Float=1.0f	RATE_CREATURE_SPELLDAMAGE_MINUSMOB		missing_in_rust	-
+Rate.Creature.SpellDamage.Normal	worldserver:server/worldserver/worldserver.conf.dist:1864	worldserver=1	Float:server/game/World/World.cpp:678	Float=1.0f	RATE_CREATURE_SPELLDAMAGE_NORMAL		missing_in_rust	-
+Rate.Creature.SpellDamage.Obsolete	worldserver:server/worldserver/worldserver.conf.dist:1867	worldserver=1	Float:server/game/World/World.cpp:681	Float=1.0f	RATE_CREATURE_SPELLDAMAGE_OBSOLETE		missing_in_rust	-
+Rate.Creature.SpellDamage.Rare	worldserver:server/worldserver/worldserver.conf.dist:1868	worldserver=1	Float:server/game/World/World.cpp:682	Float=1.0f	RATE_CREATURE_SPELLDAMAGE_RARE		missing_in_rust	-
+Rate.Creature.SpellDamage.RareElite	worldserver:server/worldserver/worldserver.conf.dist:1866	worldserver=1	Float:server/game/World/World.cpp:680	Float=1.0f	RATE_CREATURE_SPELLDAMAGE_RAREELITE		missing_in_rust	-
+Rate.Creature.SpellDamage.Trivial	worldserver:server/worldserver/worldserver.conf.dist:1869	worldserver=1	Float:server/game/World/World.cpp:683	Float=1.0f	RATE_CREATURE_SPELLDAMAGE_TRIVIAL		missing_in_rust	-
+Rate.Damage.Fall	worldserver:server/worldserver/worldserver.conf.dist:2551	worldserver=1	Float:server/game/World/World.cpp:689	Float=1.0f	RATE_DAMAGE_FALL		missing_in_rust	-
+Rate.Drop.Item.Artifact	worldserver:server/worldserver/worldserver.conf.dist:2485	worldserver=1	Float:server/game/World/World.cpp:642	Float=1.0f	RATE_DROP_ITEM_ARTIFACT		missing_in_rust	-
+Rate.Drop.Item.Epic	worldserver:server/worldserver/worldserver.conf.dist:2483	worldserver=1	Float:server/game/World/World.cpp:640	Float=1.0f	RATE_DROP_ITEM_EPIC		missing_in_rust	-
+Rate.Drop.Item.Legendary	worldserver:server/worldserver/worldserver.conf.dist:2484	worldserver=1	Float:server/game/World/World.cpp:641	Float=1.0f	RATE_DROP_ITEM_LEGENDARY		missing_in_rust	-
+Rate.Drop.Item.Normal	worldserver:server/worldserver/worldserver.conf.dist:2480	worldserver=1	Float:server/game/World/World.cpp:637	Float=1.0f	RATE_DROP_ITEM_NORMAL		missing_in_rust	-
+Rate.Drop.Item.Poor	worldserver:server/worldserver/worldserver.conf.dist:2479	worldserver=1	Float:server/game/World/World.cpp:636	Float=1.0f	RATE_DROP_ITEM_POOR		missing_in_rust	-
+Rate.Drop.Item.Rare	worldserver:server/worldserver/worldserver.conf.dist:2482	worldserver=1	Float:server/game/World/World.cpp:639	Float=1.0f	RATE_DROP_ITEM_RARE		missing_in_rust	-
+Rate.Drop.Item.Referenced	worldserver:server/worldserver/worldserver.conf.dist:2486	worldserver=1	Float:server/game/World/World.cpp:643	Float=1.0f	RATE_DROP_ITEM_REFERENCED		missing_in_rust	-
+Rate.Drop.Item.ReferencedAmount	worldserver:server/worldserver/worldserver.conf.dist:2494	worldserver=1	Float:server/game/World/World.cpp:644	Float=1.0f	RATE_DROP_ITEM_REFERENCED_AMOUNT		missing_in_rust	-
+Rate.Drop.Item.Uncommon	worldserver:server/worldserver/worldserver.conf.dist:2481	worldserver=1	Float:server/game/World/World.cpp:638	Float=1.0f	RATE_DROP_ITEM_UNCOMMON		missing_in_rust	-
+Rate.Drop.Money	worldserver:server/worldserver/worldserver.conf.dist:2487	worldserver=1	Float:server/game/World/World.cpp:645	Float=1.0f	RATE_DROP_MONEY		missing_in_rust	-
+Rate.Energy	worldserver:server/worldserver/worldserver.conf.dist:2436	worldserver=1					missing_in_rust	-
+Rate.Essence.Loss	worldserver:server/worldserver/worldserver.conf.dist:2449	worldserver=1					missing_in_rust	-
+Rate.Focus	worldserver:server/worldserver/worldserver.conf.dist:2435	worldserver=1					missing_in_rust	-
+Rate.Fury.Loss	worldserver:server/worldserver/worldserver.conf.dist:2447	worldserver=1					missing_in_rust	-
+Rate.Health	worldserver:server/worldserver/worldserver.conf.dist:2431	worldserver=1					missing_in_rust	-
+Rate.HolyPower.Loss	worldserver:server/worldserver/worldserver.conf.dist:2442	worldserver=1					missing_in_rust	-
+Rate.Honor	worldserver:server/worldserver/worldserver.conf.dist:2572	worldserver=1	Float:server/game/World/World.cpp:693	Float=1.0f	RATE_HONOR		missing_in_rust	-
+Rate.Insanity.Loss	worldserver:server/worldserver/worldserver.conf.dist:2445	worldserver=1					missing_in_rust	-
+Rate.InstanceResetTime	worldserver:server/worldserver/worldserver.conf.dist:2624	worldserver=1	Float:server/game/World/World.cpp:694	Float=1.0f	RATE_INSTANCE_RESET_TIME		missing_in_rust	-
+Rate.LunarPower.Loss	worldserver:server/worldserver/worldserver.conf.dist:2441	worldserver=1					missing_in_rust	-
+Rate.Maelstrom.Loss	worldserver:server/worldserver/worldserver.conf.dist:2443	worldserver=1					missing_in_rust	-
+Rate.Mana	worldserver:server/worldserver/worldserver.conf.dist:2432	worldserver=1					missing_in_rust	-
+Rate.MoveSpeed	worldserver:server/worldserver/worldserver.conf.dist:2614	worldserver=1	Float:server/game/World/World.cpp:701	Float=1.0f	RATE_MOVESPEED		missing_in_rust	-
+Rate.Pain.Loss	worldserver:server/worldserver/worldserver.conf.dist:2448	worldserver=1					missing_in_rust	-
+Rate.Quest.Money.Max.Level.Reward	worldserver:server/worldserver/worldserver.conf.dist:2524	worldserver=1	Float:server/game/World/World.cpp:753	Float=1.0f	RATE_MONEY_MAX_LEVEL_QUEST		missing_in_rust	-
+Rate.Quest.Money.Reward	worldserver:server/worldserver/worldserver.conf.dist:2523	worldserver=1	Float:server/game/World/World.cpp:747	Float=1.0f	RATE_MONEY_QUEST		missing_in_rust	-
+Rate.Rage.Gain	worldserver:server/worldserver/worldserver.conf.dist:2433	worldserver=1					missing_in_rust	-
+Rate.Rage.Loss	worldserver:server/worldserver/worldserver.conf.dist:2434	worldserver=1					missing_in_rust	-
+Rate.RepairCost	worldserver:server/worldserver/worldserver.conf.dist:2531	worldserver=1	Float:server/game/World/World.cpp:654	Float=1.0f	RATE_REPAIRCOST		missing_in_rust	-
+Rate.Reputation.Gain	worldserver:server/worldserver/worldserver.conf.dist:2586	worldserver=1	Float:server/game/World/World.cpp:660	Float=1.0f	RATE_REPUTATION_GAIN		missing_in_rust	-
+Rate.Reputation.LowLevel.Kill	worldserver:server/worldserver/worldserver.conf.dist:2593	worldserver=1	Float:server/game/World/World.cpp:661	Float=1.0f	RATE_REPUTATION_LOWLEVEL_KILL		missing_in_rust	-
+Rate.Reputation.LowLevel.Quest	worldserver:server/worldserver/worldserver.conf.dist:2600	worldserver=1	Float:server/game/World/World.cpp:662	Float=1.0f	RATE_REPUTATION_LOWLEVEL_QUEST		missing_in_rust	-
+Rate.Reputation.RecruitAFriendBonus	worldserver:server/worldserver/worldserver.conf.dist:2607	worldserver=0.1	Float:server/game/World/World.cpp:663	Float=0.1f	RATE_REPUTATION_RECRUIT_A_FRIEND_BONUS		missing_in_rust	-
+Rate.Rest.InGame	worldserver:server/worldserver/worldserver.conf.dist:2542	worldserver=1	Float:server/game/World/World.cpp:686	Float=1.0f	RATE_REST_INGAME		missing_in_rust	-
+Rate.Rest.Offline.InTavernOrCity	worldserver:server/worldserver/worldserver.conf.dist:2543	worldserver=1	Float:server/game/World/World.cpp:687	Float=1.0f	RATE_REST_OFFLINE_IN_TAVERN_OR_CITY		missing_in_rust	-
+Rate.Rest.Offline.InWilderness	worldserver:server/worldserver/worldserver.conf.dist:2544	worldserver=1	Float:server/game/World/World.cpp:688	Float=1.0f	RATE_REST_OFFLINE_IN_WILDERNESS		missing_in_rust	-
+Rate.RunicPower.Gain	worldserver:server/worldserver/worldserver.conf.dist:2438	worldserver=1					missing_in_rust	-
+Rate.RunicPower.Loss	worldserver:server/worldserver/worldserver.conf.dist:2439	worldserver=1					missing_in_rust	-
+Rate.Skill.Discovery	worldserver:server/worldserver/worldserver.conf.dist:2456	worldserver=1	Float:server/game/World/World.cpp:635	Float=1.0f	RATE_SKILL_DISCOVERY		missing_in_rust	-
+Rate.SoulShards.Loss	worldserver:server/worldserver/worldserver.conf.dist:2440	worldserver=1					missing_in_rust	-
+Rate.Talent	worldserver:server/worldserver/worldserver.conf.dist:2579	worldserver=1	Float:server/game/World/World.cpp:695	Float=1.0f	RATE_TALENT		missing_in_rust	-
+Rate.XP.BattlegroundKill	worldserver:server/worldserver/worldserver.conf.dist:2515	worldserver=1	Float:server/game/World/World.cpp:647	Float=1.0f	RATE_XP_BG_KILL		missing_in_rust	-
+Rate.XP.Explore	worldserver:server/worldserver/worldserver.conf.dist:2507	worldserver=1	Float:server/game/World/World.cpp:649	Float=1.0f	RATE_XP_EXPLORE		missing_in_rust	-
+Rate.XP.Kill	worldserver:server/worldserver/worldserver.conf.dist:2505	worldserver=1	Float:server/game/World/World.cpp:646	Float=1.0f	RATE_XP_KILL		missing_in_rust	-
+Rate.XP.Quest	worldserver:server/worldserver/worldserver.conf.dist:2506	worldserver=1	Float:server/game/World/World.cpp:648	Float=1.0f	RATE_XP_QUEST		missing_in_rust	-
+RealmID	worldserver:server/worldserver/worldserver.conf.dist:70	worldserver=1	Int:server/worldserver/Main.cpp:655	Int=0		get_value:crates/world-server/src/main.rs:390	rust_exact_key	-
+RealmZone	worldserver:server/worldserver/worldserver.conf.dist:637	worldserver=1	Int:server/game/World/World.cpp:904|Int:server/game/World/World.cpp:909	Int=HARDCODED_DEVELOPMENT_REALM_CATEGORY_ID|Int=HARDCODED_DEVELOPMENT_REALM_CATEGORY_ID	uint32 val|CONFIG_REALM_ZONE		missing_in_rust	-
+RealmsStateUpdateDelay	worldserver:server/worldserver/worldserver.conf.dist:274|bnetserver:server/bnetserver/bnetserver.conf.dist:147	worldserver=10|bnetserver=10	Int:server/worldserver/Main.cpp:306|Int:server/bnetserver/Main.cpp:228	Int=10|Int=10		get_value:crates/bnet-server/src/main.rs:83	rust_exact_key	-
+RecruitAFriend.MaxDifference	worldserver:server/worldserver/worldserver.conf.dist:973	worldserver=4	Int:server/game/World/World.cpp:1109	Int=4	CONFIG_MAX_RECRUIT_A_FRIEND_BONUS_PLAYER_LEVEL_DIFFERENCE		missing_in_rust	-
+RecruitAFriend.MaxLevel	worldserver:server/worldserver/worldserver.conf.dist:965	worldserver=60	Int:server/game/World/World.cpp:1101	Int=85	CONFIG_MAX_RECRUIT_A_FRIEND_BONUS_PLAYER_LEVEL		missing_in_rust	-
+ResetDuelCooldowns	worldserver:server/worldserver/worldserver.conf.dist:3376	worldserver=0	Bool:server/game/World/World.cpp:1568	Bool=false	CONFIG_RESET_DUEL_COOLDOWNS		missing_in_rust	-
+ResetDuelHealthMana	worldserver:server/worldserver/worldserver.conf.dist:3383	worldserver=0	Bool:server/game/World/World.cpp:1569	Bool=false	CONFIG_RESET_DUEL_HEALTH_MANA		missing_in_rust	-
+ResetSchedule.Hour	worldserver:server/worldserver/worldserver.conf.dist:1068	worldserver=8	Int:server/game/World/World.cpp:1118	Int=8	CONFIG_RESET_SCHEDULE_HOUR		missing_in_rust	-
+ResetSchedule.WeekDay	worldserver:server/worldserver/worldserver.conf.dist:1060	worldserver=2	Int:server/game/World/World.cpp:1117	Int=2	CONFIG_RESET_SCHEDULE_WEEK_DAY		missing_in_rust	-
+Respawn.AlertRestartReason	worldserver:server/worldserver/worldserver.conf.dist:2006	worldserver="Urgent Maintenance"	String:server/game/World/World.cpp:1517	String="Urgent Maintenance"			missing_in_rust	-
+Respawn.DynamicEscortNPC	worldserver:server/worldserver/worldserver.conf.dist:2034	worldserver=0	Bool:server/game/World/World.cpp:1483	Bool=false	CONFIG_RESPAWN_DYNAMIC_ESCORTNPC		missing_in_rust	-
+Respawn.DynamicMinimumCreature	worldserver:server/worldserver/worldserver.conf.dist:2050	worldserver=10	Int:server/game/World/World.cpp:1508	Int=10	CONFIG_RESPAWN_DYNAMICMINIMUM_CREATURE		missing_in_rust	-
+Respawn.DynamicMinimumGameObject	worldserver:server/worldserver/worldserver.conf.dist:2066	worldserver=10	Int:server/game/World/World.cpp:1515	Int=10	CONFIG_RESPAWN_DYNAMICMINIMUM_GAMEOBJECT		missing_in_rust	-
+Respawn.DynamicMode	worldserver:server/worldserver/worldserver.conf.dist:2024	worldserver=0	Int:server/game/World/World.cpp:1477	Int=0	CONFIG_RESPAWN_DYNAMICMODE		missing_in_rust	-
+Respawn.DynamicRateCreature	worldserver:server/worldserver/worldserver.conf.dist:2043	worldserver=10	Float:server/game/World/World.cpp:1502	Float=10.0f	CONFIG_RESPAWN_DYNAMICRATE_CREATURE		missing_in_rust	-
+Respawn.DynamicRateGameObject	worldserver:server/worldserver/worldserver.conf.dist:2059	worldserver=10	Float:server/game/World/World.cpp:1509	Float=10.0f	CONFIG_RESPAWN_DYNAMICRATE_GAMEOBJECT		missing_in_rust	-
+Respawn.GuidAlertLevel	worldserver:server/worldserver/worldserver.conf.dist:1998	worldserver=16000000	Int:server/game/World/World.cpp:1490	Int=16000000	CONFIG_RESPAWN_GUIDALERTLEVEL		missing_in_rust	-
+Respawn.GuidWarnLevel	worldserver:server/worldserver/worldserver.conf.dist:1971	worldserver=12000000	Int:server/game/World/World.cpp:1484	Int=12000000	CONFIG_RESPAWN_GUIDWARNLEVEL		missing_in_rust	-
+Respawn.MinCheckIntervalMS	worldserver:server/worldserver/worldserver.conf.dist:1962	worldserver=5000	Int:server/game/World/World.cpp:1476	Int=5000	CONFIG_RESPAWN_MINCHECKINTERVALMS		missing_in_rust	-
+Respawn.RestartQuietTime	worldserver:server/worldserver/worldserver.conf.dist:2014	worldserver=3	Int:server/game/World/World.cpp:1496	Int=3	CONFIG_RESPAWN_RESTARTQUIETTIME		missing_in_rust	-
+Respawn.WarningFrequency	worldserver:server/worldserver/worldserver.conf.dist:1989	worldserver=1800	Int:server/game/World/World.cpp:1518	Int=1800	CONFIG_RESPAWN_GUIDWARNING_FREQUENCY		missing_in_rust	-
+Respawn.WarningMessage	worldserver:server/worldserver/worldserver.conf.dist:1980	worldserver="There will be an unscheduled server restart at 03:00. The server will be available again shortly after."	String:server/game/World/World.cpp:1516	String="There will be an unscheduled server restart at 03:00. The server will be available again shortly after."			missing_in_rust	-
+SOAP.Enabled	worldserver:server/worldserver/worldserver.conf.dist:3243	worldserver=0	Bool:server/worldserver/Main.cpp:357	Bool=false			missing_in_rust	-
+SOAP.IP	worldserver:server/worldserver/worldserver.conf.dist:3250	worldserver="127.0.0.1"	String:server/worldserver/Main.cpp:359	String="127.0.0.1"			missing_in_rust	-
+SOAP.Port	worldserver:server/worldserver/worldserver.conf.dist:3257	worldserver=7878	Int:server/worldserver/Main.cpp:359	Int=7878			missing_in_rust	-
+Server.LoginInfo	worldserver:server/worldserver/worldserver.conf.dist:1338	worldserver=0	Int:server/game/World/World.cpp:602	Int=0	CONFIG_ENABLE_SINFO_LOGIN		missing_in_rust	-
+SessionAddDelay	worldserver:server/worldserver/worldserver.conf.dist:364	worldserver=10000	Int:server/game/World/World.cpp:862	Int=10000	CONFIG_SESSION_ADD_DELAY		missing_in_rust	-
+ShowBanInWorld	worldserver:server/worldserver/worldserver.conf.dist:3460	worldserver=0	Bool:server/game/World/World.cpp:1582	Bool=false	CONFIG_SHOW_BAN_IN_WORLD		missing_in_rust	-
+ShowKickInWorld	worldserver:server/worldserver/worldserver.conf.dist:3443	worldserver=0	Bool:server/game/World/World.cpp:1580	Bool=false	CONFIG_SHOW_KICK_IN_WORLD		missing_in_rust	-
+ShowMuteInWorld	worldserver:server/worldserver/worldserver.conf.dist:3451	worldserver=0	Bool:server/game/World/World.cpp:1581	Bool=false	CONFIG_SHOW_MUTE_IN_WORLD		missing_in_rust	-
+SkillChance.Green	worldserver:server/worldserver/worldserver.conf.dist:2649	worldserver=25	Int:server/game/World/World.cpp:1207	Int=25	CONFIG_SKILL_CHANCE_GREEN		missing_in_rust	-
+SkillChance.Grey	worldserver:server/worldserver/worldserver.conf.dist:2650	worldserver=0	Int:server/game/World/World.cpp:1208	Int=0	CONFIG_SKILL_CHANCE_GREY		missing_in_rust	-
+SkillChance.Milling	worldserver:server/worldserver/worldserver.conf.dist:1281	worldserver=0	Bool:server/game/World/World.cpp:1214	Bool=false	CONFIG_SKILL_MILLING		missing_in_rust	-
+SkillChance.MiningSteps	worldserver:server/worldserver/worldserver.conf.dist:2659	worldserver=0	Int:server/game/World/World.cpp:1210	Int=75	CONFIG_SKILL_CHANCE_MINING_STEPS		missing_in_rust	-
+SkillChance.Orange	worldserver:server/worldserver/worldserver.conf.dist:2647	worldserver=100	Int:server/game/World/World.cpp:1205	Int=100	CONFIG_SKILL_CHANCE_ORANGE		missing_in_rust	-
+SkillChance.Prospecting	worldserver:server/worldserver/worldserver.conf.dist:1273	worldserver=0	Bool:server/game/World/World.cpp:1213	Bool=false	CONFIG_SKILL_PROSPECTING		missing_in_rust	-
+SkillChance.SkinningSteps	worldserver:server/worldserver/worldserver.conf.dist:2660	worldserver=0	Int:server/game/World/World.cpp:1211	Int=75	CONFIG_SKILL_CHANCE_SKINNING_STEPS		missing_in_rust	-
+SkillChance.Yellow	worldserver:server/worldserver/worldserver.conf.dist:2648	worldserver=75	Int:server/game/World/World.cpp:1206	Int=75	CONFIG_SKILL_CHANCE_YELLOW		missing_in_rust	-
+SkillGain.Crafting	worldserver:server/worldserver/worldserver.conf.dist:2633	worldserver=1	Int:server/game/World/World.cpp:1216	Int=1	CONFIG_SKILL_GAIN_CRAFTING		missing_in_rust	-
+SkillGain.Gathering	worldserver:server/worldserver/worldserver.conf.dist:2634	worldserver=1	Int:server/game/World/World.cpp:1218	Int=1	CONFIG_SKILL_GAIN_GATHERING		missing_in_rust	-
+SkipCinematics	worldserver:server/worldserver/worldserver.conf.dist:893	worldserver=0	Int:server/game/World/World.cpp:977	Int=0	CONFIG_SKIP_CINEMATICS		missing_in_rust	-
+SocketTimeOutTime	worldserver:server/worldserver/worldserver.conf.dist:347	worldserver=900000	Int:server/game/World/World.cpp:859	Int=900000	CONFIG_SOCKET_TIMEOUTTIME		missing_in_rust	-
+SocketTimeOutTimeActive	worldserver:server/worldserver/worldserver.conf.dist:356	worldserver=60000	Int:server/game/World/World.cpp:860	Int=60000	CONFIG_SOCKET_TIMEOUTTIME_ACTIVE		missing_in_rust	-
+SourceDirectory	worldserver:server/worldserver/worldserver.conf.dist:221|bnetserver:server/bnetserver/bnetserver.conf.dist:196	worldserver=""|bnetserver=""					missing_in_rust	-
+StartAlliedRacePlayerLevel	worldserver:server/worldserver/worldserver.conf.dist:949	worldserver=10	Int:server/game/World/World.cpp:1055	Int=10	CONFIG_START_ALLIED_RACE_LEVEL		missing_in_rust	-
+StartDeathKnightPlayerLevel	worldserver:server/worldserver/worldserver.conf.dist:925	worldserver=55	Int:server/game/World/World.cpp:1013	Int=55	CONFIG_START_DEATH_KNIGHT_PLAYER_LEVEL		missing_in_rust	-
+StartDemonHunterPlayerLevel	worldserver:server/worldserver/worldserver.conf.dist:933	worldserver=8	Int:server/game/World/World.cpp:1027	Int=8	CONFIG_START_DEMON_HUNTER_PLAYER_LEVEL		missing_in_rust	-
+StartEvokerPlayerLevel	worldserver:server/worldserver/worldserver.conf.dist:941	worldserver=58	Int:server/game/World/World.cpp:1041	Int=58	CONFIG_START_EVOKER_PLAYER_LEVEL		missing_in_rust	-
+StartPlayerLevel	worldserver:server/worldserver/worldserver.conf.dist:917	worldserver=1	Int:server/game/World/World.cpp:1001	Int=1	CONFIG_START_PLAYER_LEVEL		missing_in_rust	-
+StartPlayerMoney	worldserver:server/worldserver/worldserver.conf.dist:957	worldserver=0	Int:server/game/World/World.cpp:1069	Int=0	CONFIG_START_PLAYER_MONEY		missing_in_rust	-
+Stats.Limits.Block	worldserver:server/worldserver/worldserver.conf.dist:2769	worldserver=95.0	Float:server/game/World/World.cpp:1667	Float=95.0f	CONFIG_STATS_LIMITS_BLOCK		missing_in_rust	-
+Stats.Limits.Crit	worldserver:server/worldserver/worldserver.conf.dist:2770	worldserver=95.0	Float:server/game/World/World.cpp:1668	Float=95.0f	CONFIG_STATS_LIMITS_CRIT		missing_in_rust	-
+Stats.Limits.Dodge	worldserver:server/worldserver/worldserver.conf.dist:2767	worldserver=95.0	Float:server/game/World/World.cpp:1665	Float=95.0f	CONFIG_STATS_LIMITS_DODGE		missing_in_rust	-
+Stats.Limits.Enable	worldserver:server/worldserver/worldserver.conf.dist:2760	worldserver=0	Bool:server/game/World/World.cpp:1664	Bool=false	CONFIG_STATS_LIMITS_ENABLE		missing_in_rust	-
+Stats.Limits.Parry	worldserver:server/worldserver/worldserver.conf.dist:2768	worldserver=95.0	Float:server/game/World/World.cpp:1666	Float=95.0f	CONFIG_STATS_LIMITS_PARRY		missing_in_rust	-
+StrictCharterNames	worldserver:server/worldserver/worldserver.conf.dist:665	worldserver=0	Int:server/game/World/World.cpp:918	Int=0	CONFIG_STRICT_CHARTER_NAMES		missing_in_rust	-
+StrictPetNames	worldserver:server/worldserver/worldserver.conf.dist:679	worldserver=0	Int:server/game/World/World.cpp:919	Int=0	CONFIG_STRICT_PET_NAMES		missing_in_rust	-
+StrictPlayerNames	worldserver:server/worldserver/worldserver.conf.dist:651	worldserver=0	Int:server/game/World/World.cpp:917	Int=0	CONFIG_STRICT_PLAYER_NAMES		missing_in_rust	-
+Support.BugsEnabled	worldserver:server/worldserver/worldserver.conf.dist:2343	worldserver=0	Bool:server/game/World/World.cpp:586	Bool=false	CONFIG_SUPPORT_BUGS_ENABLED		missing_in_rust	-
+Support.ComplaintsEnabled	worldserver:server/worldserver/worldserver.conf.dist:2351	worldserver=0	Bool:server/game/World/World.cpp:587	Bool=false	CONFIG_SUPPORT_COMPLAINTS_ENABLED		missing_in_rust	-
+Support.Enabled	worldserver:server/worldserver/worldserver.conf.dist:2327	worldserver=1	Bool:server/game/World/World.cpp:584	Bool=true	CONFIG_SUPPORT_ENABLED		missing_in_rust	-
+Support.SuggestionsEnabled	worldserver:server/worldserver/worldserver.conf.dist:2359	worldserver=0	Bool:server/game/World/World.cpp:588	Bool=false	CONFIG_SUPPORT_SUGGESTIONS_ENABLED		missing_in_rust	-
+Support.TicketsEnabled	worldserver:server/worldserver/worldserver.conf.dist:2335	worldserver=0	Bool:server/game/World/World.cpp:585	Bool=false	CONFIG_SUPPORT_TICKETS_ENABLED		missing_in_rust	-
+TOTPMasterSecret	worldserver:server/worldserver/worldserver.conf.dist:1450|bnetserver:server/bnetserver/bnetserver.conf.dist:279	worldserver=|bnetserver=					missing_in_rust	-
+TalentsInspecting	worldserver:server/worldserver/worldserver.conf.dist:1725	worldserver=1	Int:server/game/World/World.cpp:1293	Int=1	CONFIG_TALENTS_INSPECTING		missing_in_rust	-
+ThreadPool	worldserver:server/worldserver/worldserver.conf.dist:193	worldserver=2	Int:server/worldserver/Main.cpp:278	Int=1	int numThreads		missing_in_rust	-
+ThreatRadius	worldserver:server/worldserver/worldserver.conf.dist:1739	worldserver=60	Float:server/game/World/World.cpp:1314	Float=60.0f	CONFIG_THREAT_RADIUS		missing_in_rust	-
+TolBarad.BattleTimer	worldserver:server/worldserver/worldserver.conf.dist:3005	worldserver=15	Int:server/game/World/World.cpp:1658	Int=15	CONFIG_TOLBARAD_BATTLETIME		missing_in_rust	-
+TolBarad.BonusTime	worldserver:server/worldserver/worldserver.conf.dist:3012	worldserver=5	Int:server/game/World/World.cpp:1659	Int=5	CONFIG_TOLBARAD_BONUSTIME		missing_in_rust	-
+TolBarad.CrashRestartTimer	worldserver:server/worldserver/worldserver.conf.dist:3027	worldserver=10	Int:server/game/World/World.cpp:1661	Int=10	CONFIG_TOLBARAD_RESTART_AFTER_CRASH		missing_in_rust	-
+TolBarad.Enable	worldserver:server/worldserver/worldserver.conf.dist:2977	worldserver=0	Bool:server/game/World/World.cpp:1654	Bool=true	CONFIG_TOLBARAD_ENABLE		missing_in_rust	-
+TolBarad.NoBattleTimer	worldserver:server/worldserver/worldserver.conf.dist:3019	worldserver=150	Int:server/game/World/World.cpp:1660	Int=150	CONFIG_TOLBARAD_NOBATTLETIME		missing_in_rust	-
+TolBarad.PlayerMax	worldserver:server/worldserver/worldserver.conf.dist:2984	worldserver=100	Int:server/game/World/World.cpp:1655	Int=100	CONFIG_TOLBARAD_PLR_MAX		missing_in_rust	-
+TolBarad.PlayerMin	worldserver:server/worldserver/worldserver.conf.dist:2991	worldserver=0	Int:server/game/World/World.cpp:1656	Int=0	CONFIG_TOLBARAD_PLR_MIN		missing_in_rust	-
+TolBarad.PlayerMinLvl	worldserver:server/worldserver/worldserver.conf.dist:2998	worldserver=85	Int:server/game/World/World.cpp:1657	Int=85	CONFIG_TOLBARAD_PLR_MIN_LVL		missing_in_rust	-
+UpdateUptimeInterval	worldserver:server/worldserver/worldserver.conf.dist:475	worldserver=10	Int:server/game/World/World.cpp:1177	Int=10	CONFIG_UPTIME_UPDATE		missing_in_rust	-
+Updates.AllowRehash	worldserver:server/worldserver/worldserver.conf.dist:1505|bnetserver:server/bnetserver/bnetserver.conf.dist:331	worldserver=1|bnetserver=1	Bool:server/database/Updater/DBUpdater.cpp:262	Bool=true			missing_in_rust	-
+Updates.ArchivedRedundancy	worldserver:server/worldserver/worldserver.conf.dist:1496|bnetserver:server/bnetserver/bnetserver.conf.dist:322	worldserver=0|bnetserver=0	Bool:server/database/Updater/DBUpdater.cpp:263	Bool=false			missing_in_rust	-
+Updates.AutoSetup	worldserver:server/worldserver/worldserver.conf.dist:1479|bnetserver:server/bnetserver/bnetserver.conf.dist:305	worldserver=1|bnetserver=1	Bool:server/database/Database/DatabaseLoader.cpp:27	Bool=true	Setup(	get_string_default:crates/bnet-server/src/main.rs:51|get_string_default:crates/world-server/src/main.rs:233	rust_exact_key	-
+Updates.CleanDeadRefMaxCount	worldserver:server/worldserver/worldserver.conf.dist:1517|bnetserver:server/bnetserver/bnetserver.conf.dist:343	worldserver=3|bnetserver=3	Int:server/database/Updater/DBUpdater.cpp:264	Int=3			missing_in_rust	-
+Updates.EnableDatabases	worldserver:server/worldserver/worldserver.conf.dist:1471|bnetserver:server/bnetserver/bnetserver.conf.dist:297	worldserver=15|bnetserver=0	Int:server/scripts/Commands/cs_server.cpp:143|Int:server/database/Database/DatabaseLoader.cpp:28	Int=DatabaseLoader::DATABASE_NONE|Int=defaultUpdateMask	uint32 updateFlags		missing_in_rust	-
+Updates.Redundancy	worldserver:server/worldserver/worldserver.conf.dist:1488|bnetserver:server/bnetserver/bnetserver.conf.dist:314	worldserver=1|bnetserver=1	Bool:server/database/Updater/DBUpdater.cpp:261	Bool=true			missing_in_rust	-
+Updates.SourcePath						get_string_default:crates/bnet-server/src/main.rs:54|get_string_default:crates/world-server/src/main.rs:236	rust_only	-
+UseProcessors	worldserver:server/worldserver/worldserver.conf.dist:256|bnetserver:server/bnetserver/bnetserver.conf.dist:130	worldserver=0|bnetserver=0	Int:server/worldserver/Main.cpp:290|Int:server/bnetserver/Main.cpp:253	Int=0|Int=0			missing_in_rust	-
+Visibility.Distance.Arenas	worldserver:server/worldserver/worldserver.conf.dist:2395	worldserver=533	Float:server/game/World/World.cpp:1432	Float=DEFAULT_VISIBILITY_BGARENAS			missing_in_rust	-
+Visibility.Distance.BG	worldserver:server/worldserver/worldserver.conf.dist:2394	worldserver=533	Float:server/game/World/World.cpp:1419	Float=DEFAULT_VISIBILITY_BGARENAS			missing_in_rust	-
+Visibility.Distance.Continents	worldserver:server/worldserver/worldserver.conf.dist:2392	worldserver=100	Float:server/game/World/World.cpp:1393	Float=DEFAULT_VISIBILITY_DISTANCE			missing_in_rust	-
+Visibility.Distance.Instances	worldserver:server/worldserver/worldserver.conf.dist:2393	worldserver=170	Float:server/game/World/World.cpp:1406	Float=DEFAULT_VISIBILITY_INSTANCE			missing_in_rust	-
+Visibility.GroupMode	worldserver:server/worldserver/worldserver.conf.dist:2375	worldserver=1	Int:server/game/World/World.cpp:1167	Int=1	CONFIG_GROUP_VISIBILITY		missing_in_rust	-
+Visibility.Notify.Period.InArenas	worldserver:server/worldserver/worldserver.conf.dist:2412	worldserver=1000	Int:server/game/World/World.cpp:1447	Int=DEFAULT_VISIBILITY_NOTIFY_PERIOD			missing_in_rust	-
+Visibility.Notify.Period.InBG	worldserver:server/worldserver/worldserver.conf.dist:2411	worldserver=1000	Int:server/game/World/World.cpp:1446	Int=DEFAULT_VISIBILITY_NOTIFY_PERIOD			missing_in_rust	-
+Visibility.Notify.Period.InInstances	worldserver:server/worldserver/worldserver.conf.dist:2410	worldserver=1000	Int:server/game/World/World.cpp:1445	Int=DEFAULT_VISIBILITY_NOTIFY_PERIOD			missing_in_rust	-
+Visibility.Notify.Period.OnContinents	worldserver:server/worldserver/worldserver.conf.dist:2409	worldserver=1000	Int:server/game/World/World.cpp:1444	Int=DEFAULT_VISIBILITY_NOTIFY_PERIOD			missing_in_rust	-
+Warden.BanDuration	worldserver:server/worldserver/worldserver.conf.dist:1653	worldserver=86400	Int:server/game/World/World.cpp:1591	Int=86400	CONFIG_WARDEN_CLIENT_BAN_DURATION		missing_in_rust	-
+Warden.ClientCheckFailAction	worldserver:server/worldserver/worldserver.conf.dist:1644	worldserver=0	Int:server/game/World/World.cpp:1593	Int=0	CONFIG_WARDEN_CLIENT_FAIL_ACTION		missing_in_rust	-
+Warden.ClientCheckHoldOff	worldserver:server/worldserver/worldserver.conf.dist:1633	worldserver=30	Int:server/game/World/World.cpp:1592	Int=30	CONFIG_WARDEN_CLIENT_CHECK_HOLDOFF		missing_in_rust	-
+Warden.ClientResponseDelay	worldserver:server/worldserver/worldserver.conf.dist:1624	worldserver=600	Int:server/game/World/World.cpp:1594	Int=600	CONFIG_WARDEN_CLIENT_RESPONSE_DELAY		missing_in_rust	-
+Warden.Enabled	worldserver:server/worldserver/worldserver.conf.dist:1602	worldserver=0	Bool:server/game/World/World.cpp:1587	Bool=false	CONFIG_WARDEN_ENABLED		missing_in_rust	-
+Warden.NumClientModChecks	worldserver:server/worldserver/worldserver.conf.dist:1616	worldserver=1	Int:server/game/World/World.cpp:1590	Int=1	CONFIG_WARDEN_NUM_CLIENT_MOD_CHECKS		missing_in_rust	-
+Warden.NumInjectionChecks	worldserver:server/worldserver/worldserver.conf.dist:1614	worldserver=9	Int:server/game/World/World.cpp:1588	Int=9	CONFIG_WARDEN_NUM_INJECT_CHECKS		missing_in_rust	-
+Warden.NumLuaSandboxChecks	worldserver:server/worldserver/worldserver.conf.dist:1615	worldserver=1	Int:server/game/World/World.cpp:1589	Int=1	CONFIG_WARDEN_NUM_LUA_CHECKS		missing_in_rust	-
+Wintergrasp.BattleTimer	worldserver:server/worldserver/worldserver.conf.dist:2954	worldserver=30	Int:server/game/World/World.cpp:1649	Int=30	CONFIG_WINTERGRASP_BATTLETIME		missing_in_rust	-
+Wintergrasp.CrashRestartTimer	worldserver:server/worldserver/worldserver.conf.dist:2969	worldserver=10	Int:server/game/World/World.cpp:1651	Int=10	CONFIG_WINTERGRASP_RESTART_AFTER_CRASH		missing_in_rust	-
+Wintergrasp.Enable	worldserver:server/worldserver/worldserver.conf.dist:2926	worldserver=0	Bool:server/game/World/World.cpp:1645	Bool=false	CONFIG_WINTERGRASP_ENABLE		missing_in_rust	-
+Wintergrasp.NoBattleTimer	worldserver:server/worldserver/worldserver.conf.dist:2961	worldserver=150	Int:server/game/World/World.cpp:1650	Int=150	CONFIG_WINTERGRASP_NOBATTLETIME		missing_in_rust	-
+Wintergrasp.PlayerMax	worldserver:server/worldserver/worldserver.conf.dist:2933	worldserver=100	Int:server/game/World/World.cpp:1646	Int=100	CONFIG_WINTERGRASP_PLR_MAX		missing_in_rust	-
+Wintergrasp.PlayerMin	worldserver:server/worldserver/worldserver.conf.dist:2940	worldserver=0	Int:server/game/World/World.cpp:1647	Int=0	CONFIG_WINTERGRASP_PLR_MIN		missing_in_rust	-
+Wintergrasp.PlayerMinLvl	worldserver:server/worldserver/worldserver.conf.dist:2947	worldserver=77	Int:server/game/World/World.cpp:1648	Int=77	CONFIG_WINTERGRASP_PLR_MIN_LVL		missing_in_rust	-
+WorldBossLevelDiff	worldserver:server/worldserver/worldserver.conf.dist:1787	worldserver=3	Int:server/game/World/World.cpp:1254	Int=3	CONFIG_WORLD_BOSS_LEVEL_DIFF		missing_in_rust	-
+WorldDatabase.SynchThreads	worldserver:server/worldserver/worldserver.conf.dist:150	worldserver=1					missing_in_rust	-
+WorldDatabase.WorkerThreads	worldserver:server/worldserver/worldserver.conf.dist:134	worldserver=1					missing_in_rust	-
+WorldDatabaseInfo	worldserver:server/worldserver/worldserver.conf.dist:116	worldserver="127.0.0.1;3306;trinity;trinity;world"					missing_in_rust	Rust usa subclaves WorldDatabaseInfo.Host/Port/Username/Password/Database; C++ usa valor semicolonado WorldDatabaseInfo
+WorldDatabaseInfo.Database						get_string_default:crates/world-server/src/main.rs:205	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+WorldDatabaseInfo.Host						get_string_default:crates/world-server/src/main.rs:200	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+WorldDatabaseInfo.Password						get_string_default:crates/world-server/src/main.rs:203	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+WorldDatabaseInfo.Port						get_value:crates/world-server/src/main.rs:201	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+WorldDatabaseInfo.Username						get_string_default:crates/world-server/src/main.rs:202	rust_only_schema_mismatch	subclave Rust incompatible con la clave C++ semicolonada
+WorldServerPort	worldserver:server/worldserver/worldserver.conf.dist:166	worldserver=8085	Int:server/game/World/World.cpp:844|Int:server/game/World/World.cpp:854	Int=8085|Int=8085	uint32 val|CONFIG_PORT_WORLD	get_value:crates/world-server/src/main.rs:458	rust_exact_key	-
+WrongPass.BanTime	bnetserver:server/bnetserver/bnetserver.conf.dist:164	bnetserver=600	Int:server/bnetserver/REST/LoginRESTService.cpp:353	Int=600	int32 banTime	get_value:crates/bnet-server/src/main.rs:81	rust_exact_key	-
+WrongPass.BanType	bnetserver:server/bnetserver/bnetserver.conf.dist:172	bnetserver=0	Int:server/bnetserver/REST/LoginRESTService.cpp:352	Int=uint16(BanMode::BAN_IP)		get_value:crates/bnet-server/src/main.rs:82	rust_exact_key	-
+WrongPass.Logging	bnetserver:server/bnetserver/bnetserver.conf.dist:180	bnetserver=0	Bool:server/bnetserver/REST/LoginRESTService.cpp:336	Bool=false			missing_in_rust	-
+WrongPass.MaxCount	bnetserver:server/bnetserver/bnetserver.conf.dist:156	bnetserver=0	Int:server/bnetserver/REST/LoginRESTService.cpp:334	Int=0		get_value:crates/bnet-server/src/main.rs:80	rust_exact_key	-
+XP.Boost.Daymask	worldserver:server/worldserver/worldserver.conf.dist:3334	worldserver=0	Int:server/game/World/World.cpp:651	Int=0	CONFIG_XP_BOOST_DAYMASK		missing_in_rust	-
+XP.Boost.Rate	worldserver:server/worldserver/worldserver.conf.dist:3341	worldserver=2.0	Float:server/game/World/World.cpp:652	Float=2.0f	RATE_XP_BOOST		missing_in_rust	-
+mmap.enablePathFinding	worldserver:server/worldserver/worldserver.conf.dist:430	worldserver=1	Bool:server/game/World/World.cpp:1547	Bool=true	CONFIG_ENABLE_MMAPS		missing_in_rust	-
+vmap.enableHeight	worldserver:server/worldserver/worldserver.conf.dist:441	worldserver=1	Bool:server/game/World/World.cpp:1553	Bool=true	bool enableHeight		missing_in_rust	-
+vmap.enableIndoorCheck	worldserver:server/worldserver/worldserver.conf.dist:449	worldserver=1	Bool:server/game/World/World.cpp:1550|Bool:server/game/World/World.cpp:1551	Bool=false|Bool=true	CONFIG_VMAP_INDOOR_CHECK|bool enableIndoor		missing_in_rust	-
+vmap.enableLOS	worldserver:server/worldserver/worldserver.conf.dist:440	worldserver=1	Bool:server/game/World/World.cpp:1552	Bool=true	bool enableLOS		missing_in_rust	-
