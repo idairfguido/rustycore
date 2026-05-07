@@ -3119,6 +3119,24 @@ impl Player {
         Ok(removed)
     }
 
+    pub fn move_item_from_inventory_object(
+        &mut self,
+        bag: u8,
+        slot: u8,
+        item: Option<&mut Item>,
+        bag_object: Option<&mut Bag>,
+    ) -> Result<Option<ObjectGuid>, PlayerStorageError> {
+        let Some(item) = item else {
+            return Ok(None);
+        };
+
+        let removed = self.remove_item_object(bag, slot, Some(&mut *item), bag_object)?;
+        if removed.is_some() {
+            item.set_not_refundable();
+        }
+        Ok(removed)
+    }
+
     pub fn store_bag_item(
         &mut self,
         bag: u8,
@@ -7321,6 +7339,55 @@ mod tests {
         assert_eq!(item.data().contained_in, ObjectGuid::EMPTY);
         assert_eq!(item.container_guid(), ObjectGuid::EMPTY);
         assert_eq!(item.slot(), NULL_SLOT);
+    }
+
+    #[test]
+    fn move_item_from_inventory_object_unlinks_and_clears_refund_like_cpp() {
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let item_guid = ObjectGuid::create_item(1, 516);
+        let mut player = Player::new(None, false);
+        let mut item = Item::default();
+
+        player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(player_guid);
+        item.object_mut().create(item_guid);
+        item.set_owner_guid(player_guid);
+        item.set_contained_in(player_guid);
+        item.set_slot(INVENTORY_SLOT_ITEM_START);
+        item.set_item_flag(ItemFieldFlags::REFUNDABLE);
+        item.set_refund_recipient(player_guid);
+        item.set_paid_money(10);
+        item.set_paid_extended_cost(20);
+        player
+            .store_top_level_item(INVENTORY_SLOT_ITEM_START, item_guid)
+            .unwrap();
+
+        assert_eq!(
+            player
+                .move_item_from_inventory_object(
+                    INVENTORY_SLOT_BAG_0,
+                    INVENTORY_SLOT_ITEM_START,
+                    Some(&mut item),
+                    None,
+                )
+                .unwrap(),
+            Some(item_guid)
+        );
+
+        assert_eq!(
+            player.get_item_by_pos(INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START),
+            None
+        );
+        assert_eq!(item.data().contained_in, ObjectGuid::EMPTY);
+        assert_eq!(item.owner_guid(), player_guid);
+        assert_eq!(item.slot(), NULL_SLOT);
+        assert!(!item.has_item_flag(ItemFieldFlags::REFUNDABLE));
+        assert_eq!(item.refund_recipient(), ObjectGuid::EMPTY);
+        assert_eq!(item.paid_money(), 0);
+        assert_eq!(item.paid_extended_cost(), 0);
     }
 
     #[test]
