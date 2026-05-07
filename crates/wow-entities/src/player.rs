@@ -3,8 +3,9 @@ use std::collections::HashSet;
 use bitflags::bitflags;
 use wow_constants::{
     BagFamilyMask, EnchantmentSlot, Gender, InventoryResult, InventoryType, ItemBondingType,
-    ItemClass, ItemFieldFlags, ItemFieldFlags2, ItemSubClassContainer, ItemSubClassQuiver,
-    ItemSubClassWeapon, ItemSubclassProfession, ItemUpdateState, PowerType, TypeId, TypeMask,
+    ItemClass, ItemEnchantmentType, ItemFieldFlags, ItemFieldFlags2, ItemModType,
+    ItemSubClassContainer, ItemSubClassQuiver, ItemSubClassWeapon, ItemSubclassProfession,
+    ItemUpdateState, PowerType, TypeId, TypeMask, WeaponAttackType,
 };
 use wow_core::ObjectGuid;
 
@@ -1095,6 +1096,72 @@ pub struct ApplyEnchantmentPlan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyEnchantmentEffectKind {
+    Known(ItemEnchantmentType),
+    Unknown(u32),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ApplyEnchantmentEffectRef {
+    pub effect_kind: ApplyEnchantmentEffectKind,
+    pub amount: u32,
+    pub arg: u32,
+}
+
+impl ApplyEnchantmentEffectRef {
+    pub const fn known(effect_type: ItemEnchantmentType, amount: u32, arg: u32) -> Self {
+        Self {
+            effect_kind: ApplyEnchantmentEffectKind::Known(effect_type),
+            amount,
+            arg,
+        }
+    }
+
+    pub const fn unknown(effect_type: u32, amount: u32, arg: u32) -> Self {
+        Self {
+            effect_kind: ApplyEnchantmentEffectKind::Unknown(effect_type),
+            amount,
+            arg,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyEnchantmentEffectAction {
+    Noop,
+    DeferredCombatSpell,
+    DeferredUseSpell,
+    UpdateDamageDoneMods {
+        attack_type: WeaponAttackType,
+        modifier_slot: i16,
+    },
+    CastEquipSpell {
+        spell_id: u32,
+        item_guid: ObjectGuid,
+    },
+    RemoveEquipSpellAura {
+        spell_id: u32,
+        item_guid: ObjectGuid,
+    },
+    ResistanceModifier {
+        resistance: u32,
+        amount: u32,
+        apply: bool,
+    },
+    StatModifier {
+        item_mod: ItemModType,
+        amount: u32,
+        apply: bool,
+    },
+    MissingItemTemplateForAttack {
+        effect_kind: ApplyEnchantmentEffectKind,
+    },
+    Unknown {
+        effect_type: u32,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitanGripPenaltyAction {
     None,
     Cast(u32),
@@ -1147,6 +1214,137 @@ const fn is_socket_enchantment_slot(slot: EnchantmentSlot) -> bool {
             | EnchantmentSlot::EnhancementSocket2
             | EnchantmentSlot::EnhancementSocket3
     )
+}
+
+fn apply_enchantment_effect_action(
+    item: &Item,
+    item_template: Option<&ItemStorageTemplate>,
+    enchantment_slot: EnchantmentSlot,
+    apply: bool,
+    effect: ApplyEnchantmentEffectRef,
+) -> ApplyEnchantmentEffectAction {
+    match effect.effect_kind {
+        ApplyEnchantmentEffectKind::Known(ItemEnchantmentType::None) => {
+            ApplyEnchantmentEffectAction::Noop
+        }
+        ApplyEnchantmentEffectKind::Known(ItemEnchantmentType::CombatSpell) => {
+            ApplyEnchantmentEffectAction::DeferredCombatSpell
+        }
+        ApplyEnchantmentEffectKind::Known(
+            kind @ (ItemEnchantmentType::Damage | ItemEnchantmentType::Totem),
+        ) => {
+            let Some(template) = item_template else {
+                return ApplyEnchantmentEffectAction::MissingItemTemplateForAttack {
+                    effect_kind: ApplyEnchantmentEffectKind::Known(kind),
+                };
+            };
+            let attack_type = get_attack_by_slot(item.slot(), template.inventory_type);
+            if attack_type == WeaponAttackType::Max {
+                ApplyEnchantmentEffectAction::Noop
+            } else {
+                ApplyEnchantmentEffectAction::UpdateDamageDoneMods {
+                    attack_type,
+                    modifier_slot: if apply { -1 } else { enchantment_slot as i16 },
+                }
+            }
+        }
+        ApplyEnchantmentEffectKind::Known(ItemEnchantmentType::EquipSpell) => {
+            if effect.arg == 0 {
+                ApplyEnchantmentEffectAction::Noop
+            } else if apply {
+                ApplyEnchantmentEffectAction::CastEquipSpell {
+                    spell_id: effect.arg,
+                    item_guid: item.object().guid(),
+                }
+            } else {
+                ApplyEnchantmentEffectAction::RemoveEquipSpellAura {
+                    spell_id: effect.arg,
+                    item_guid: item.object().guid(),
+                }
+            }
+        }
+        ApplyEnchantmentEffectKind::Known(ItemEnchantmentType::Resistance) => {
+            ApplyEnchantmentEffectAction::ResistanceModifier {
+                resistance: effect.arg,
+                amount: effect.amount,
+                apply,
+            }
+        }
+        ApplyEnchantmentEffectKind::Known(ItemEnchantmentType::Stat) => {
+            ApplyEnchantmentEffectAction::StatModifier {
+                item_mod: item_mod_type_from_u32(effect.arg),
+                amount: effect.amount,
+                apply,
+            }
+        }
+        ApplyEnchantmentEffectKind::Known(ItemEnchantmentType::UseSpell) => {
+            ApplyEnchantmentEffectAction::DeferredUseSpell
+        }
+        ApplyEnchantmentEffectKind::Known(
+            ItemEnchantmentType::PrismaticSocket
+            | ItemEnchantmentType::ArtifactPowerBonusRankByType
+            | ItemEnchantmentType::ArtifactPowerBonusRankByID
+            | ItemEnchantmentType::BonusListID
+            | ItemEnchantmentType::BonusListCurve
+            | ItemEnchantmentType::ArtifactPowerBonusRankPicker,
+        ) => ApplyEnchantmentEffectAction::Noop,
+        ApplyEnchantmentEffectKind::Unknown(effect_type) => {
+            ApplyEnchantmentEffectAction::Unknown { effect_type }
+        }
+    }
+}
+
+const fn get_attack_by_slot(slot: u8, inventory_type: InventoryType) -> WeaponAttackType {
+    match slot {
+        EQUIPMENT_SLOT_MAINHAND => {
+            if matches!(
+                inventory_type,
+                InventoryType::Ranged | InventoryType::RangedRight
+            ) {
+                WeaponAttackType::RangedAttack
+            } else {
+                WeaponAttackType::BaseAttack
+            }
+        }
+        EQUIPMENT_SLOT_OFFHAND => WeaponAttackType::OffAttack,
+        _ => WeaponAttackType::Max,
+    }
+}
+
+const fn item_mod_type_from_u32(value: u32) -> ItemModType {
+    match value {
+        0 => ItemModType::Mana,
+        1 => ItemModType::Health,
+        3 => ItemModType::Agility,
+        4 => ItemModType::Strength,
+        5 => ItemModType::Intellect,
+        6 => ItemModType::Spirit,
+        7 => ItemModType::Stamina,
+        12 => ItemModType::DefenseSkillRating,
+        13 => ItemModType::DodgeRating,
+        14 => ItemModType::ParryRating,
+        15 => ItemModType::BlockRating,
+        16 => ItemModType::HitMeleeRating,
+        17 => ItemModType::HitRangedRating,
+        18 => ItemModType::HitSpellRating,
+        19 => ItemModType::CritMeleeRating,
+        20 => ItemModType::CritRangedRating,
+        21 => ItemModType::CritSpellRating,
+        30 => ItemModType::HasteSpellRating,
+        31 => ItemModType::HitRating,
+        32 => ItemModType::CritRating,
+        36 => ItemModType::HasteRating,
+        37 => ItemModType::ExpertiseRating,
+        38 => ItemModType::AttackPower,
+        39 => ItemModType::RangedAttackPower,
+        43 => ItemModType::ManaRegeneration,
+        44 => ItemModType::ArmorPenetrationRating,
+        45 => ItemModType::SpellPower,
+        46 => ItemModType::HealthRegen,
+        47 => ItemModType::SpellPenetration,
+        48 => ItemModType::BlockValue,
+        _ => ItemModType::None,
+    }
 }
 
 fn bag_template_by_pos<'a>(
@@ -5633,6 +5831,32 @@ impl Player {
                 duration_action,
             },
         }
+    }
+
+    pub fn apply_enchantment_effect_actions(
+        &self,
+        item: &Item,
+        item_template: Option<&ItemStorageTemplate>,
+        enchantment_slot: EnchantmentSlot,
+        apply: bool,
+        effects: &[ApplyEnchantmentEffectRef],
+    ) -> Vec<ApplyEnchantmentEffectAction> {
+        if item.is_broken() {
+            return Vec::new();
+        }
+
+        effects
+            .iter()
+            .map(|effect| {
+                apply_enchantment_effect_action(
+                    item,
+                    item_template,
+                    enchantment_slot,
+                    apply,
+                    *effect,
+                )
+            })
+            .collect()
     }
 
     pub const fn can_titan_grip(&self) -> bool {
@@ -11874,6 +12098,216 @@ mod tests {
                 update_permanent_visible_item: true,
                 duration_action: None,
             }
+        );
+    }
+
+    #[test]
+    fn apply_enchantment_effect_actions_match_cpp_deferred_noop_and_spell_cases() {
+        let player = Player::new(None, false);
+        let mut item = item_with_guid_entry(12491, 7464);
+        item.set_slot(EQUIPMENT_SLOT_CHEST);
+
+        let effects = [
+            ApplyEnchantmentEffectRef::known(ItemEnchantmentType::None, 0, 0),
+            ApplyEnchantmentEffectRef::known(ItemEnchantmentType::CombatSpell, 0, 0),
+            ApplyEnchantmentEffectRef::known(ItemEnchantmentType::UseSpell, 0, 0),
+            ApplyEnchantmentEffectRef::known(ItemEnchantmentType::EquipSpell, 0, 1234),
+            ApplyEnchantmentEffectRef::known(ItemEnchantmentType::EquipSpell, 0, 0),
+            ApplyEnchantmentEffectRef::known(ItemEnchantmentType::PrismaticSocket, 0, 0),
+            ApplyEnchantmentEffectRef::unknown(99, 0, 0),
+        ];
+
+        assert_eq!(
+            player.apply_enchantment_effect_actions(
+                &item,
+                None,
+                EnchantmentSlot::EnhancementTemporary,
+                true,
+                &effects,
+            ),
+            vec![
+                ApplyEnchantmentEffectAction::Noop,
+                ApplyEnchantmentEffectAction::DeferredCombatSpell,
+                ApplyEnchantmentEffectAction::DeferredUseSpell,
+                ApplyEnchantmentEffectAction::CastEquipSpell {
+                    spell_id: 1234,
+                    item_guid: item.object().guid(),
+                },
+                ApplyEnchantmentEffectAction::Noop,
+                ApplyEnchantmentEffectAction::Noop,
+                ApplyEnchantmentEffectAction::Unknown { effect_type: 99 },
+            ]
+        );
+        assert_eq!(
+            player.apply_enchantment_effect_actions(
+                &item,
+                None,
+                EnchantmentSlot::EnhancementTemporary,
+                false,
+                &[ApplyEnchantmentEffectRef::known(
+                    ItemEnchantmentType::EquipSpell,
+                    0,
+                    1234,
+                )],
+            ),
+            vec![ApplyEnchantmentEffectAction::RemoveEquipSpellAura {
+                spell_id: 1234,
+                item_guid: item.object().guid(),
+            }]
+        );
+    }
+
+    #[test]
+    fn apply_enchantment_effect_actions_match_cpp_damage_and_totem_attack_slot_rules() {
+        let player = Player::new(None, false);
+        let mut item = item_with_guid_entry(12492, 7465);
+        let weapon = ItemStorageTemplate {
+            inventory_type: InventoryType::Weapon,
+            ..ItemStorageTemplate::regular_item(7465, 1)
+        };
+        let ranged = ItemStorageTemplate {
+            inventory_type: InventoryType::RangedRight,
+            ..ItemStorageTemplate::regular_item(7466, 1)
+        };
+
+        item.set_slot(EQUIPMENT_SLOT_MAINHAND);
+        assert_eq!(
+            player.apply_enchantment_effect_actions(
+                &item,
+                Some(&weapon),
+                EnchantmentSlot::EnhancementTemporary,
+                true,
+                &[ApplyEnchantmentEffectRef::known(
+                    ItemEnchantmentType::Damage,
+                    0,
+                    0,
+                )],
+            ),
+            vec![ApplyEnchantmentEffectAction::UpdateDamageDoneMods {
+                attack_type: WeaponAttackType::BaseAttack,
+                modifier_slot: -1,
+            }]
+        );
+        assert_eq!(
+            player.apply_enchantment_effect_actions(
+                &item,
+                Some(&ranged),
+                EnchantmentSlot::EnhancementTemporary,
+                false,
+                &[ApplyEnchantmentEffectRef::known(
+                    ItemEnchantmentType::Totem,
+                    0,
+                    0,
+                )],
+            ),
+            vec![ApplyEnchantmentEffectAction::UpdateDamageDoneMods {
+                attack_type: WeaponAttackType::RangedAttack,
+                modifier_slot: EnchantmentSlot::EnhancementTemporary as i16,
+            }]
+        );
+
+        item.set_slot(EQUIPMENT_SLOT_OFFHAND);
+        assert_eq!(
+            player.apply_enchantment_effect_actions(
+                &item,
+                Some(&weapon),
+                EnchantmentSlot::EnhancementTemporary,
+                true,
+                &[ApplyEnchantmentEffectRef::known(
+                    ItemEnchantmentType::Damage,
+                    0,
+                    0,
+                )],
+            ),
+            vec![ApplyEnchantmentEffectAction::UpdateDamageDoneMods {
+                attack_type: WeaponAttackType::OffAttack,
+                modifier_slot: -1,
+            }]
+        );
+
+        item.set_slot(EQUIPMENT_SLOT_CHEST);
+        assert_eq!(
+            player.apply_enchantment_effect_actions(
+                &item,
+                Some(&weapon),
+                EnchantmentSlot::EnhancementTemporary,
+                true,
+                &[ApplyEnchantmentEffectRef::known(
+                    ItemEnchantmentType::Damage,
+                    0,
+                    0,
+                )],
+            ),
+            vec![ApplyEnchantmentEffectAction::Noop]
+        );
+        assert_eq!(
+            player.apply_enchantment_effect_actions(
+                &item,
+                None,
+                EnchantmentSlot::EnhancementTemporary,
+                true,
+                &[ApplyEnchantmentEffectRef::known(
+                    ItemEnchantmentType::Damage,
+                    0,
+                    0,
+                )],
+            ),
+            vec![ApplyEnchantmentEffectAction::MissingItemTemplateForAttack {
+                effect_kind: ApplyEnchantmentEffectKind::Known(ItemEnchantmentType::Damage),
+            }]
+        );
+    }
+
+    #[test]
+    fn apply_enchantment_effect_actions_match_cpp_stat_resistance_and_broken_skip() {
+        let player = Player::new(None, false);
+        let mut item = item_with_guid_entry(12493, 7467);
+        item.set_slot(EQUIPMENT_SLOT_CHEST);
+        assert_eq!(
+            player.apply_enchantment_effect_actions(
+                &item,
+                None,
+                EnchantmentSlot::EnhancementTemporary,
+                true,
+                &[
+                    ApplyEnchantmentEffectRef::known(ItemEnchantmentType::Resistance, 17, 2),
+                    ApplyEnchantmentEffectRef::known(
+                        ItemEnchantmentType::Stat,
+                        31,
+                        ItemModType::Strength as u32,
+                    ),
+                ],
+            ),
+            vec![
+                ApplyEnchantmentEffectAction::ResistanceModifier {
+                    resistance: 2,
+                    amount: 17,
+                    apply: true,
+                },
+                ApplyEnchantmentEffectAction::StatModifier {
+                    item_mod: ItemModType::Strength,
+                    amount: 31,
+                    apply: true,
+                },
+            ]
+        );
+
+        item.set_max_durability(100);
+        item.set_durability(0);
+        assert!(
+            player
+                .apply_enchantment_effect_actions(
+                    &item,
+                    None,
+                    EnchantmentSlot::EnhancementTemporary,
+                    true,
+                    &[ApplyEnchantmentEffectRef::known(
+                        ItemEnchantmentType::Stat,
+                        31,
+                        ItemModType::Strength as u32,
+                    )],
+                )
+                .is_empty()
         );
     }
 
