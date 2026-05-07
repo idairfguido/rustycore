@@ -475,6 +475,40 @@ pub struct CanTakeMoreSimilarItemsOutcome {
     pub offending_item_id: Option<u32>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct DestroyItemCountItemRef<'a> {
+    pub bag: u8,
+    pub slot: u8,
+    pub item: &'a Item,
+    pub can_unequip_result: InventoryResult,
+}
+
+impl<'a> DestroyItemCountItemRef<'a> {
+    pub const fn new(bag: u8, slot: u8, item: &'a Item) -> Self {
+        Self {
+            bag,
+            slot,
+            item,
+            can_unequip_result: InventoryResult::Ok,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DestroyItemCountAction {
+    pub bag: u8,
+    pub slot: u8,
+    pub removed_count: u32,
+    pub remaining_count: u32,
+    pub destroy_stack: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DestroyItemCountPlan {
+    pub removed_count: u32,
+    pub actions: Vec<DestroyItemCountAction>,
+}
+
 fn item_ref_by_pos<'a>(items: &'a [ItemSlotRef<'a>], bag: u8, slot: u8) -> Option<&'a Item> {
     items
         .iter()
@@ -3253,6 +3287,130 @@ impl Player {
         Ok(())
     }
 
+    pub fn destroy_item_count_by_entry_plan(
+        &self,
+        item_entry: u32,
+        count: u32,
+        unequip_check: bool,
+        inventory_slot_count: u8,
+        items: &[DestroyItemCountItemRef<'_>],
+    ) -> DestroyItemCountPlan {
+        let mut plan = DestroyItemCountPlan {
+            removed_count: 0,
+            actions: Vec::new(),
+        };
+        if count == 0 {
+            return plan;
+        }
+
+        destroy_item_count_scan_top_level_range(
+            &mut plan,
+            items,
+            item_entry,
+            count,
+            INVENTORY_SLOT_ITEM_START,
+            INVENTORY_SLOT_ITEM_START.saturating_add(inventory_slot_count),
+            false,
+            unequip_check,
+        );
+        if plan.removed_count >= count {
+            return plan;
+        }
+
+        destroy_item_count_scan_top_level_range(
+            &mut plan,
+            items,
+            item_entry,
+            count,
+            KEYRING_SLOT_START,
+            KEYRING_SLOT_END,
+            false,
+            unequip_check,
+        );
+        if plan.removed_count >= count {
+            return plan;
+        }
+
+        destroy_item_count_scan_bag_ranges(
+            &mut plan,
+            items,
+            item_entry,
+            count,
+            INVENTORY_SLOT_BAG_START,
+            INVENTORY_SLOT_BAG_END,
+        );
+        if plan.removed_count >= count {
+            return plan;
+        }
+
+        destroy_item_count_scan_top_level_range(
+            &mut plan,
+            items,
+            item_entry,
+            count,
+            EQUIPMENT_SLOT_HEAD,
+            INVENTORY_SLOT_BAG_END,
+            true,
+            unequip_check,
+        );
+        if plan.removed_count >= count {
+            return plan;
+        }
+
+        destroy_item_count_scan_top_level_range(
+            &mut plan,
+            items,
+            item_entry,
+            count,
+            BANK_SLOT_ITEM_START,
+            BANK_SLOT_ITEM_END,
+            false,
+            unequip_check,
+        );
+        if plan.removed_count >= count {
+            return plan;
+        }
+
+        destroy_item_count_scan_bag_ranges(
+            &mut plan,
+            items,
+            item_entry,
+            count,
+            BANK_SLOT_BAG_START,
+            BANK_SLOT_BAG_END,
+        );
+        if plan.removed_count >= count {
+            return plan;
+        }
+
+        destroy_item_count_scan_top_level_range(
+            &mut plan,
+            items,
+            item_entry,
+            count,
+            BANK_SLOT_BAG_START,
+            BANK_SLOT_BAG_END,
+            true,
+            unequip_check,
+        );
+        if plan.removed_count >= count {
+            return plan;
+        }
+
+        destroy_item_count_scan_top_level_range(
+            &mut plan,
+            items,
+            item_entry,
+            count,
+            CHILD_EQUIPMENT_SLOT_START,
+            CHILD_EQUIPMENT_SLOT_END,
+            false,
+            unequip_check,
+        );
+
+        plan
+    }
+
     pub fn store_bag_item(
         &mut self,
         bag: u8,
@@ -3972,6 +4130,116 @@ fn equipped_gem_limit_category_count(
         .iter()
         .filter(|gem| gem.slot != except_slot && gem.limit_category == limit_category)
         .count() as u32
+}
+
+fn destroy_item_count_item_by_pos<'a>(
+    items: &[DestroyItemCountItemRef<'a>],
+    bag: u8,
+    slot: u8,
+) -> Option<DestroyItemCountItemRef<'a>> {
+    items
+        .iter()
+        .find(|item_ref| item_ref.bag == bag && item_ref.slot == slot)
+        .copied()
+}
+
+fn destroy_item_count_consider_item(
+    plan: &mut DestroyItemCountPlan,
+    item_ref: DestroyItemCountItemRef<'_>,
+    item_entry: u32,
+    requested_count: u32,
+    require_unequip_for_full_stack: bool,
+    unequip_check: bool,
+) {
+    if plan.removed_count >= requested_count
+        || item_ref.item.object().entry() != item_entry
+        || item_ref.item.is_in_trade()
+    {
+        return;
+    }
+
+    let needed = requested_count - plan.removed_count;
+    let item_count = item_ref.item.count();
+    if item_count <= needed {
+        if require_unequip_for_full_stack
+            && unequip_check
+            && item_ref.can_unequip_result != InventoryResult::Ok
+        {
+            return;
+        }
+
+        plan.actions.push(DestroyItemCountAction {
+            bag: item_ref.bag,
+            slot: item_ref.slot,
+            removed_count: item_count,
+            remaining_count: 0,
+            destroy_stack: true,
+        });
+        plan.removed_count += item_count;
+    } else {
+        plan.actions.push(DestroyItemCountAction {
+            bag: item_ref.bag,
+            slot: item_ref.slot,
+            removed_count: needed,
+            remaining_count: item_count - needed,
+            destroy_stack: false,
+        });
+        plan.removed_count = requested_count;
+    }
+}
+
+fn destroy_item_count_scan_top_level_range(
+    plan: &mut DestroyItemCountPlan,
+    items: &[DestroyItemCountItemRef<'_>],
+    item_entry: u32,
+    requested_count: u32,
+    start: u8,
+    end: u8,
+    require_unequip_for_full_stack: bool,
+    unequip_check: bool,
+) {
+    for slot in start..end {
+        if let Some(item_ref) = destroy_item_count_item_by_pos(items, INVENTORY_SLOT_BAG_0, slot) {
+            destroy_item_count_consider_item(
+                plan,
+                item_ref,
+                item_entry,
+                requested_count,
+                require_unequip_for_full_stack,
+                unequip_check,
+            );
+            if plan.removed_count >= requested_count {
+                return;
+            }
+        }
+    }
+}
+
+fn destroy_item_count_scan_bag_ranges(
+    plan: &mut DestroyItemCountPlan,
+    items: &[DestroyItemCountItemRef<'_>],
+    item_entry: u32,
+    requested_count: u32,
+    start_bag: u8,
+    end_bag: u8,
+) {
+    for bag in start_bag..end_bag {
+        for slot in 0..MAX_BAG_SIZE as u8 {
+            if let Some(item_ref) = destroy_item_count_item_by_pos(items, bag, slot) {
+                destroy_item_count_consider_item(
+                    plan,
+                    item_ref,
+                    item_entry,
+                    requested_count,
+                    false,
+                    false,
+                );
+                if plan.removed_count >= requested_count {
+                    return;
+                }
+            }
+        }
+    }
 }
 
 fn is_bag_storage_slot(slot: u8) -> bool {
@@ -7709,6 +7977,88 @@ mod tests {
         );
         assert_eq!(item.slot(), NULL_SLOT);
         assert_eq!(item.update_state(), ItemUpdateState::Removed);
+    }
+
+    #[test]
+    fn destroy_item_count_by_entry_plan_matches_cpp_scan_order_and_partial_stop() {
+        let player = Player::new(None, false);
+        let mut inventory = Item::default();
+        let mut bag_item = Item::default();
+        let mut bank = Item::default();
+
+        inventory.object_mut().set_entry(900);
+        inventory.set_count(2);
+        bag_item.object_mut().set_entry(900);
+        bag_item.set_count(3);
+        bank.object_mut().set_entry(900);
+        bank.set_count(5);
+
+        let items = [
+            DestroyItemCountItemRef::new(INVENTORY_SLOT_BAG_0, BANK_SLOT_ITEM_START, &bank),
+            DestroyItemCountItemRef::new(INVENTORY_SLOT_BAG_START, 4, &bag_item),
+            DestroyItemCountItemRef::new(
+                INVENTORY_SLOT_BAG_0,
+                INVENTORY_SLOT_ITEM_START,
+                &inventory,
+            ),
+        ];
+
+        let plan = player.destroy_item_count_by_entry_plan(900, 4, false, 16, &items);
+
+        assert_eq!(plan.removed_count, 4);
+        assert_eq!(
+            plan.actions,
+            vec![
+                DestroyItemCountAction {
+                    bag: INVENTORY_SLOT_BAG_0,
+                    slot: INVENTORY_SLOT_ITEM_START,
+                    removed_count: 2,
+                    remaining_count: 0,
+                    destroy_stack: true,
+                },
+                DestroyItemCountAction {
+                    bag: INVENTORY_SLOT_BAG_START,
+                    slot: 4,
+                    removed_count: 2,
+                    remaining_count: 1,
+                    destroy_stack: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn destroy_item_count_by_entry_plan_matches_cpp_unequip_check_for_full_equipment_stack() {
+        let player = Player::new(None, false);
+        let mut equipped = Item::default();
+        let mut bank = Item::default();
+
+        equipped.object_mut().set_entry(901);
+        equipped.set_count(1);
+        bank.object_mut().set_entry(901);
+        bank.set_count(1);
+
+        let mut blocked_equipped =
+            DestroyItemCountItemRef::new(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_MAINHAND, &equipped);
+        blocked_equipped.can_unequip_result = InventoryResult::CantEquipEver;
+        let items = [
+            blocked_equipped,
+            DestroyItemCountItemRef::new(INVENTORY_SLOT_BAG_0, BANK_SLOT_ITEM_START, &bank),
+        ];
+
+        let plan = player.destroy_item_count_by_entry_plan(901, 1, true, 16, &items);
+
+        assert_eq!(plan.removed_count, 1);
+        assert_eq!(
+            plan.actions,
+            vec![DestroyItemCountAction {
+                bag: INVENTORY_SLOT_BAG_0,
+                slot: BANK_SLOT_ITEM_START,
+                removed_count: 1,
+                remaining_count: 0,
+                destroy_stack: true,
+            }]
+        );
     }
 
     #[test]
