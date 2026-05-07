@@ -238,6 +238,13 @@ impl ItemStorageTemplate {
             is_bound_account_wide: false,
         }
     }
+
+    pub const fn can_change_equip_state_in_combat(&self) -> bool {
+        matches!(
+            self.inventory_type,
+            InventoryType::Relic | InventoryType::Shield | InventoryType::Holdable
+        ) || matches!(self.class_id, ItemClass::Weapon | ItemClass::Projectile)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1507,6 +1514,44 @@ mod tests {
         assert!(item_can_go_into_bag(&bullet, &ammo_pouch));
         assert!(!item_can_go_into_bag(&arrow, &ammo_pouch));
         assert!(!item_can_go_into_bag(&misc, &misc));
+    }
+
+    #[test]
+    fn can_change_equip_state_in_combat_matches_cpp_template_helper() {
+        let shield = ItemStorageTemplate {
+            inventory_type: InventoryType::Shield,
+            ..ItemStorageTemplate::regular_item(1, 1)
+        };
+        let holdable = ItemStorageTemplate {
+            inventory_type: InventoryType::Holdable,
+            ..ItemStorageTemplate::regular_item(2, 1)
+        };
+        let relic = ItemStorageTemplate {
+            inventory_type: InventoryType::Relic,
+            ..ItemStorageTemplate::regular_item(3, 1)
+        };
+        let weapon = ItemStorageTemplate {
+            class_id: ItemClass::Weapon,
+            inventory_type: InventoryType::Head,
+            ..ItemStorageTemplate::regular_item(4, 1)
+        };
+        let projectile = ItemStorageTemplate {
+            class_id: ItemClass::Projectile,
+            inventory_type: InventoryType::NonEquip,
+            ..ItemStorageTemplate::regular_item(5, 1)
+        };
+        let armor = ItemStorageTemplate {
+            class_id: ItemClass::Armor,
+            inventory_type: InventoryType::Chest,
+            ..ItemStorageTemplate::regular_item(6, 1)
+        };
+
+        assert!(shield.can_change_equip_state_in_combat());
+        assert!(holdable.can_change_equip_state_in_combat());
+        assert!(relic.can_change_equip_state_in_combat());
+        assert!(weapon.can_change_equip_state_in_combat());
+        assert!(projectile.can_change_equip_state_in_combat());
+        assert!(!armor.can_change_equip_state_in_combat());
     }
 
     #[test]
