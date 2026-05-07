@@ -14,6 +14,169 @@ use crate::{ClientPacket, PacketError, ServerPacket, WorldPacket};
 
 pub use wow_constants::InventoryResult;
 
+// ── Shared item packet structures ──────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ItemBonuses {
+    pub context: u8,
+    pub bonus_list_ids: Vec<i32>,
+}
+
+impl ItemBonuses {
+    pub fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_uint8(self.context);
+        pkt.write_uint32(self.bonus_list_ids.len() as u32);
+        for bonus_id in &self.bonus_list_ids {
+            pkt.write_uint32(*bonus_id as u32);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemMod {
+    pub value: i32,
+    pub modifier_type: u8,
+}
+
+impl ItemMod {
+    pub const fn new(value: i32, modifier_type: u8) -> Self {
+        Self {
+            value,
+            modifier_type,
+        }
+    }
+
+    pub fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_int32(self.value);
+        pkt.write_uint8(self.modifier_type);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ItemModList {
+    pub values: Vec<ItemMod>,
+}
+
+impl ItemModList {
+    pub fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_bits(self.values.len() as u32, 6);
+        pkt.flush_bits();
+        for item_mod in &self.values {
+            item_mod.write(pkt);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ItemInstance {
+    pub item_id: i32,
+    pub random_properties_seed: i32,
+    pub random_properties_id: i32,
+    pub item_bonus: Option<ItemBonuses>,
+    pub modifications: ItemModList,
+}
+
+impl ItemInstance {
+    pub fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_int32(self.item_id);
+        pkt.write_int32(self.random_properties_seed);
+        pkt.write_int32(self.random_properties_id);
+        pkt.write_bit(self.item_bonus.is_some());
+        pkt.flush_bits();
+        self.modifications.write(pkt);
+        if let Some(item_bonus) = &self.item_bonus {
+            item_bonus.write(pkt);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ItemPushResultDisplayType {
+    Hidden = 0,
+    Normal = 1,
+    EncounterLoot = 2,
+}
+
+impl Default for ItemPushResultDisplayType {
+    fn default() -> Self {
+        Self::Hidden
+    }
+}
+
+/// SMSG_ITEM_PUSH_RESULT.
+pub struct ItemPushResult {
+    pub player_guid: ObjectGuid,
+    pub slot: u8,
+    pub slot_in_bag: i32,
+    pub item: ItemInstance,
+    pub quest_log_item_id: i32,
+    pub quantity: i32,
+    pub quantity_in_inventory: i32,
+    pub dungeon_encounter_id: i32,
+    pub battle_pet_species_id: i32,
+    pub battle_pet_breed_id: i32,
+    pub battle_pet_breed_quality: u32,
+    pub battle_pet_level: i32,
+    pub item_guid: ObjectGuid,
+    pub pushed: bool,
+    pub display_text: ItemPushResultDisplayType,
+    pub created: bool,
+    pub is_bonus_roll: bool,
+    pub is_encounter_loot: bool,
+}
+
+impl Default for ItemPushResult {
+    fn default() -> Self {
+        Self {
+            player_guid: ObjectGuid::EMPTY,
+            slot: 0,
+            slot_in_bag: 0,
+            item: ItemInstance::default(),
+            quest_log_item_id: 0,
+            quantity: 0,
+            quantity_in_inventory: 0,
+            dungeon_encounter_id: 0,
+            battle_pet_species_id: 0,
+            battle_pet_breed_id: 0,
+            battle_pet_breed_quality: 0,
+            battle_pet_level: 0,
+            item_guid: ObjectGuid::EMPTY,
+            pushed: false,
+            display_text: ItemPushResultDisplayType::Hidden,
+            created: false,
+            is_bonus_roll: false,
+            is_encounter_loot: false,
+        }
+    }
+}
+
+impl ServerPacket for ItemPushResult {
+    const OPCODE: ServerOpcodes = ServerOpcodes::ItemPushResult;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_packed_guid(&self.player_guid);
+        pkt.write_uint8(self.slot);
+        pkt.write_int32(self.slot_in_bag);
+        pkt.write_int32(self.quest_log_item_id);
+        pkt.write_int32(self.quantity);
+        pkt.write_int32(self.quantity_in_inventory);
+        pkt.write_int32(self.dungeon_encounter_id);
+        pkt.write_int32(self.battle_pet_species_id);
+        pkt.write_int32(self.battle_pet_breed_id);
+        pkt.write_uint32(self.battle_pet_breed_quality);
+        pkt.write_int32(self.battle_pet_level);
+        pkt.write_packed_guid(&self.item_guid);
+        pkt.write_bit(self.pushed);
+        pkt.write_bit(self.created);
+        pkt.write_bits(self.display_text as u32, 3);
+        pkt.write_bit(self.is_bonus_roll);
+        pkt.write_bit(self.is_encounter_loot);
+        pkt.flush_bits();
+        self.item.write(pkt);
+    }
+}
+
 // ── InvUpdate (bit-packed item position list) ──────────────────────
 
 /// Shared structure for client inventory packets.
@@ -398,6 +561,121 @@ mod tests {
         assert_eq!(destroy.count, 1);
         assert_eq!(destroy.container_id, 255);
         assert_eq!(destroy.slot_num, 35);
+    }
+
+    #[test]
+    fn item_instance_writes_cpp_field_order() {
+        let instance = ItemInstance {
+            item_id: 0x1122_3344,
+            random_properties_seed: -2,
+            random_properties_id: 3,
+            item_bonus: None,
+            modifications: ItemModList::default(),
+        };
+        let mut pkt = WorldPacket::new_empty();
+        instance.write(&mut pkt);
+
+        assert_eq!(
+            pkt.data(),
+            &[
+                0x44, 0x33, 0x22, 0x11,
+                0xFE, 0xFF, 0xFF, 0xFF,
+                0x03, 0x00, 0x00, 0x00,
+                0x00,
+                0x00,
+            ]
+        );
+    }
+
+    #[test]
+    fn item_instance_writes_modifications_before_bonus_like_cpp() {
+        let instance = ItemInstance {
+            item_id: 10,
+            random_properties_seed: 20,
+            random_properties_id: -30,
+            item_bonus: Some(ItemBonuses {
+                context: 4,
+                bonus_list_ids: vec![100, 200],
+            }),
+            modifications: ItemModList {
+                values: vec![ItemMod::new(-5, 3), ItemMod::new(7, 4)],
+            },
+        };
+        let mut pkt = WorldPacket::new_empty();
+        instance.write(&mut pkt);
+
+        assert_eq!(
+            pkt.data(),
+            &[
+                10, 0, 0, 0,
+                20, 0, 0, 0,
+                0xE2, 0xFF, 0xFF, 0xFF,
+                0x80,
+                0x08,
+                0xFB, 0xFF, 0xFF, 0xFF, 3,
+                7, 0, 0, 0, 4,
+                4,
+                2, 0, 0, 0,
+                100, 0, 0, 0,
+                200, 0, 0, 0,
+            ]
+        );
+    }
+
+    #[test]
+    fn item_push_result_writes_cpp_order_and_bits() {
+        let packet = ItemPushResult {
+            player_guid: ObjectGuid::new(0, 0x0102),
+            slot: 4,
+            slot_in_bag: -1,
+            item: ItemInstance {
+                item_id: 9001,
+                random_properties_seed: 12,
+                random_properties_id: -77,
+                item_bonus: None,
+                modifications: ItemModList::default(),
+            },
+            quest_log_item_id: 777,
+            quantity: 3,
+            quantity_in_inventory: 9,
+            dungeon_encounter_id: 615,
+            battle_pet_species_id: 123,
+            battle_pet_breed_id: 188,
+            battle_pet_breed_quality: 26,
+            battle_pet_level: 25,
+            item_guid: ObjectGuid::new(0, 0x0506),
+            pushed: true,
+            display_text: ItemPushResultDisplayType::EncounterLoot,
+            created: false,
+            is_bonus_roll: false,
+            is_encounter_loot: true,
+        };
+        let mut pkt = WorldPacket::new_empty();
+        packet.write(&mut pkt);
+
+        assert_eq!(
+            pkt.data(),
+            &[
+                0x03, 0x00, 0x02, 0x01,
+                4,
+                0xFF, 0xFF, 0xFF, 0xFF,
+                0x09, 0x03, 0x00, 0x00,
+                3, 0, 0, 0,
+                9, 0, 0, 0,
+                0x67, 0x02, 0x00, 0x00,
+                123, 0, 0, 0,
+                188, 0, 0, 0,
+                26, 0, 0, 0,
+                25, 0, 0, 0,
+                0x03, 0x00, 0x06, 0x05,
+                0x92,
+                0x29, 0x23, 0x00, 0x00,
+                12, 0, 0, 0,
+                0xB3, 0xFF, 0xFF, 0xFF,
+                0x00,
+                0x00,
+            ]
+        );
     }
 
     #[test]
