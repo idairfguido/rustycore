@@ -35,8 +35,14 @@
   Rust targets: `crates/wow-map/src/manager.rs`, `crates/wow-map/src/lib.rs`.
   Acceptance: ordered `(map_id, instance_id)` map store; find/range iteration; delay clamps; serial update/delayed-update order; destroy/unload and reusable instance id allocator semantics; instance/player statistics and scheduled script counter.
 
+- [x] **#NEXT.L3.MAPS.010** Port `MapUpdater` API and deterministic fallback path.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapUpdater.h`, `MapUpdater.cpp`, `MapManager.cpp`.
+  Rust targets: `crates/wow-map/src/manager.rs`, `crates/wow-map/src/lib.rs`.
+  Acceptance: `activate`, `deactivate`, `activated`, `schedule_update` and `wait` mirror the C++ control-flow contract; activated `MapManager::update` schedules maps through `MapUpdater` and waits before delayed cleanup; current Rust execution remains inline/deterministic until a safe worker-pool ownership model exists.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.L3.MAPS.006** Bind grid unload actions to real entity lifecycle once canonical entities exist.
 - [ ] **#NEXT.L3.MAPS.008** Bind `MapManager::CreateMap(uint32, Player*)` to real Player/Group/InstanceLock/Battleground/DB2 models.
 - [ ] **#NEXT.L3.MAPS.009** Replace legacy `wow-world/src/map_manager.rs` only after the new `wow-map` skeleton owns grid lifecycle.
+- [ ] **#NEXT.L3.MAPS.011** Replace `MapUpdater` inline fallback with a real worker pool once map ownership can safely match C++ parallel requests.

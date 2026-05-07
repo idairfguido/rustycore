@@ -260,6 +260,7 @@ pub struct MapManager {
     maps: BTreeMap<MapKey, ManagedMap>,
     timer: IntervalTimer,
     instance_ids: InstanceIdAllocator,
+    updater: MapUpdater,
     scheduled_scripts: usize,
 }
 
@@ -276,6 +277,7 @@ impl MapManager {
             maps: BTreeMap::new(),
             timer: IntervalTimer::new(MIN_MAP_UPDATE_DELAY_MS),
             instance_ids: InstanceIdAllocator::new(),
+            updater: MapUpdater::default(),
             scheduled_scripts: 0,
         };
         manager.set_grid_cleanup_delay(grid_cleanup_delay_ms);
@@ -369,7 +371,15 @@ impl MapManager {
                 continue;
             }
 
-            map.update(current);
+            if self.updater.activated() {
+                self.updater.schedule_update(map, current);
+            } else {
+                map.update(current);
+            }
+        }
+
+        if self.updater.activated() {
+            self.updater.wait();
         }
 
         for key in destroyed {
@@ -455,6 +465,14 @@ impl MapManager {
         self.instance_ids.next_instance_id()
     }
 
+    pub fn map_updater(&self) -> &MapUpdater {
+        &self.updater
+    }
+
+    pub fn map_updater_mut(&mut self) -> &mut MapUpdater {
+        &mut self.updater
+    }
+
     pub fn increase_scheduled_scripts_count(&mut self) {
         self.scheduled_scripts += 1;
     }
@@ -469,6 +487,53 @@ impl MapManager {
 
     pub const fn is_script_scheduled(&self) -> bool {
         self.scheduled_scripts > 0
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MapUpdater {
+    worker_threads: usize,
+    pending_requests: usize,
+    scheduled_updates: usize,
+    wait_calls: usize,
+}
+
+impl MapUpdater {
+    pub fn activate(&mut self, num_threads: usize) {
+        self.worker_threads = self.worker_threads.saturating_add(num_threads);
+    }
+
+    pub fn deactivate(&mut self) {
+        self.wait();
+        self.worker_threads = 0;
+    }
+
+    pub const fn activated(&self) -> bool {
+        self.worker_threads > 0
+    }
+
+    pub fn schedule_update(&mut self, map: &mut ManagedMap, diff_ms: u32) {
+        self.pending_requests += 1;
+        self.scheduled_updates += 1;
+        map.update(diff_ms);
+        self.update_finished();
+    }
+
+    pub fn wait(&mut self) {
+        self.wait_calls += 1;
+        debug_assert_eq!(self.pending_requests, 0);
+    }
+
+    pub const fn scheduled_updates(&self) -> usize {
+        self.scheduled_updates
+    }
+
+    pub const fn wait_calls(&self) -> usize {
+        self.wait_calls
+    }
+
+    fn update_finished(&mut self) {
+        self.pending_requests = self.pending_requests.saturating_sub(1);
     }
 }
 
@@ -596,5 +661,23 @@ mod tests {
         assert!(manager.is_script_scheduled());
         manager.decrease_scheduled_script_count_by(2);
         assert!(!manager.is_script_scheduled());
+    }
+
+    #[test]
+    fn activated_map_updater_uses_schedule_and_wait_path() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        manager.map_updater_mut().activate(2);
+
+        manager.update(1);
+
+        let map = manager.find_map(1, 0).unwrap();
+        assert_eq!(map.update_calls(), &[1]);
+        assert_eq!(manager.map_updater().scheduled_updates(), 1);
+        assert_eq!(manager.map_updater().wait_calls(), 1);
+        assert!(manager.map_updater().activated());
+
+        manager.map_updater_mut().deactivate();
+        assert!(!manager.map_updater().activated());
     }
 }

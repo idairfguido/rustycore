@@ -27,7 +27,7 @@ pub use grid_unload::{
 };
 pub use manager::{
     InstanceIdAllocator, MIN_GRID_DELAY_MS, MIN_MAP_UPDATE_DELAY_MS, ManagedMap, ManagedMapKind,
-    MapManager,
+    MapManager, MapUpdater,
 };
 pub use map::{
     ActiveObjectKind, GridLifecycle, Map, NoopGridLifecycle, NoopTerrainGridLoader,
