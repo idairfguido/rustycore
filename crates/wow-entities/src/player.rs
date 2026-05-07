@@ -1267,6 +1267,81 @@ pub enum ApplyEnchantmentBaseMod {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SkillEnchantmentTemplateRef {
+    pub enchantment_id: i32,
+    pub required_skill_id: u16,
+    pub required_skill_rank: u16,
+}
+
+impl SkillEnchantmentTemplateRef {
+    pub const fn new(
+        enchantment_id: i32,
+        required_skill_id: u16,
+        required_skill_rank: u16,
+    ) -> Self {
+        Self {
+            enchantment_id,
+            required_skill_id,
+            required_skill_rank,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SkillEnchantmentItemRef {
+    pub item_guid: ObjectGuid,
+    pub inventory_slot: u8,
+    pub enchantment_ids: [i32; MAX_ENCHANTMENT_SLOT],
+    pub socket_colors: [u32; 3],
+}
+
+impl SkillEnchantmentItemRef {
+    pub const fn new(
+        item_guid: ObjectGuid,
+        inventory_slot: u8,
+        enchantment_ids: [i32; MAX_ENCHANTMENT_SLOT],
+        socket_colors: [u32; 3],
+    ) -> Self {
+        Self {
+            item_guid,
+            inventory_slot,
+            enchantment_ids,
+            socket_colors,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpdateSkillEnchantmentReason {
+    EnchantmentRequiredSkill,
+    PrismaticRequiredSkill,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpdateSkillEnchantmentAction {
+    Apply {
+        item_guid: ObjectGuid,
+        inventory_slot: u8,
+        enchantment_slot: EnchantmentSlot,
+        enchantment_id: i32,
+        reason: UpdateSkillEnchantmentReason,
+    },
+    Remove {
+        item_guid: ObjectGuid,
+        inventory_slot: u8,
+        enchantment_slot: EnchantmentSlot,
+        enchantment_id: i32,
+        reason: UpdateSkillEnchantmentReason,
+    },
+    MissingEnchantmentTemplateAbort {
+        item_guid: ObjectGuid,
+        inventory_slot: u8,
+        enchantment_slot: EnchantmentSlot,
+        enchantment_id: i32,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitanGripPenaltyAction {
     None,
     Cast(u32),
@@ -1636,6 +1711,48 @@ fn rating_actions(
             apply,
         })
         .collect()
+}
+
+fn skill_enchantment_transition(
+    curr_value: u16,
+    new_value: u16,
+    required_skill_rank: u16,
+) -> Option<bool> {
+    if curr_value < required_skill_rank && new_value >= required_skill_rank {
+        Some(true)
+    } else if new_value < required_skill_rank && curr_value >= required_skill_rank {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+fn push_update_skill_enchantment_action(
+    actions: &mut Vec<UpdateSkillEnchantmentAction>,
+    item: SkillEnchantmentItemRef,
+    enchantment_slot: EnchantmentSlot,
+    enchantment_id: i32,
+    reason: UpdateSkillEnchantmentReason,
+    apply: bool,
+) {
+    let action = if apply {
+        UpdateSkillEnchantmentAction::Apply {
+            item_guid: item.item_guid,
+            inventory_slot: item.inventory_slot,
+            enchantment_slot,
+            enchantment_id,
+            reason,
+        }
+    } else {
+        UpdateSkillEnchantmentAction::Remove {
+            item_guid: item.item_guid,
+            inventory_slot: item.inventory_slot,
+            enchantment_slot,
+            enchantment_id,
+            reason,
+        }
+    };
+    actions.push(action);
 }
 
 const fn get_attack_by_slot(slot: u8, inventory_type: InventoryType) -> WeaponAttackType {
@@ -6224,6 +6341,99 @@ impl Player {
                 )
             })
             .collect()
+    }
+
+    pub fn update_skill_enchantments_plan(
+        &self,
+        skill_id: u16,
+        curr_value: u16,
+        new_value: u16,
+        items: &[SkillEnchantmentItemRef],
+        enchantments: &[SkillEnchantmentTemplateRef],
+    ) -> Vec<UpdateSkillEnchantmentAction> {
+        let mut actions = Vec::new();
+
+        for inventory_slot in 0..INVENTORY_SLOT_BAG_END {
+            let Some(item) = items
+                .iter()
+                .find(|item| item.inventory_slot == inventory_slot)
+                .copied()
+            else {
+                continue;
+            };
+
+            for (slot_index, enchantment_slot) in ENCHANTMENT_DURATION_SLOTS.iter().enumerate() {
+                let enchantment_id = item.enchantment_ids[slot_index];
+                if enchantment_id == 0 {
+                    continue;
+                }
+
+                let Some(enchantment) = enchantments
+                    .iter()
+                    .find(|enchantment| enchantment.enchantment_id == enchantment_id)
+                else {
+                    actions.push(
+                        UpdateSkillEnchantmentAction::MissingEnchantmentTemplateAbort {
+                            item_guid: item.item_guid,
+                            inventory_slot: item.inventory_slot,
+                            enchantment_slot: *enchantment_slot,
+                            enchantment_id,
+                        },
+                    );
+                    return actions;
+                };
+
+                if enchantment.required_skill_id == skill_id {
+                    if let Some(apply) = skill_enchantment_transition(
+                        curr_value,
+                        new_value,
+                        enchantment.required_skill_rank,
+                    ) {
+                        push_update_skill_enchantment_action(
+                            &mut actions,
+                            item,
+                            *enchantment_slot,
+                            enchantment_id,
+                            UpdateSkillEnchantmentReason::EnchantmentRequiredSkill,
+                            apply,
+                        );
+                    }
+                }
+
+                if is_socket_enchantment_slot(*enchantment_slot)
+                    && item.socket_colors[slot_index - EnchantmentSlot::EnhancementSocket as usize]
+                        == 0
+                {
+                    let prismatic_enchantment_id =
+                        item.enchantment_ids[EnchantmentSlot::EnhancementSocketPrismatic as usize];
+                    let Some(prismatic_enchantment) = enchantments
+                        .iter()
+                        .find(|enchantment| enchantment.enchantment_id == prismatic_enchantment_id)
+                    else {
+                        continue;
+                    };
+
+                    if prismatic_enchantment.required_skill_id == skill_id {
+                        if let Some(apply) = skill_enchantment_transition(
+                            curr_value,
+                            new_value,
+                            prismatic_enchantment.required_skill_rank,
+                        ) {
+                            push_update_skill_enchantment_action(
+                                &mut actions,
+                                item,
+                                *enchantment_slot,
+                                enchantment_id,
+                                UpdateSkillEnchantmentReason::PrismaticRequiredSkill,
+                                apply,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        actions
     }
 
     pub const fn can_titan_grip(&self) -> bool {
@@ -12882,6 +13092,139 @@ mod tests {
                 },
                 ApplyEnchantmentEffectAction::UpdateStatBuffMod(Stats::Strength),
             ]
+        );
+    }
+
+    #[test]
+    fn update_skill_enchantments_plan_matches_cpp_order_and_thresholds() {
+        let player = Player::new(None, false);
+        let mut later_enchantments = [0; MAX_ENCHANTMENT_SLOT];
+        later_enchantments[EnchantmentSlot::EnhancementSocket as usize] = 300;
+        later_enchantments[EnchantmentSlot::EnhancementSocketPrismatic as usize] = 400;
+        let later = SkillEnchantmentItemRef::new(
+            ObjectGuid::create_item(1, 30),
+            2,
+            later_enchantments,
+            [0, 1, 1],
+        );
+
+        let mut first_enchantments = [0; MAX_ENCHANTMENT_SLOT];
+        first_enchantments[EnchantmentSlot::EnhancementPermanent as usize] = 100;
+        let first = SkillEnchantmentItemRef::new(
+            ObjectGuid::create_item(1, 10),
+            1,
+            first_enchantments,
+            [1, 1, 1],
+        );
+
+        let enchantments = [
+            SkillEnchantmentTemplateRef::new(100, 164, 75),
+            SkillEnchantmentTemplateRef::new(300, 164, 75),
+            SkillEnchantmentTemplateRef::new(400, 164, 75),
+        ];
+
+        assert_eq!(
+            player.update_skill_enchantments_plan(164, 74, 75, &[later, first], &enchantments),
+            vec![
+                UpdateSkillEnchantmentAction::Apply {
+                    item_guid: first.item_guid,
+                    inventory_slot: 1,
+                    enchantment_slot: EnchantmentSlot::EnhancementPermanent,
+                    enchantment_id: 100,
+                    reason: UpdateSkillEnchantmentReason::EnchantmentRequiredSkill,
+                },
+                UpdateSkillEnchantmentAction::Apply {
+                    item_guid: later.item_guid,
+                    inventory_slot: 2,
+                    enchantment_slot: EnchantmentSlot::EnhancementSocket,
+                    enchantment_id: 300,
+                    reason: UpdateSkillEnchantmentReason::EnchantmentRequiredSkill,
+                },
+                UpdateSkillEnchantmentAction::Apply {
+                    item_guid: later.item_guid,
+                    inventory_slot: 2,
+                    enchantment_slot: EnchantmentSlot::EnhancementSocket,
+                    enchantment_id: 300,
+                    reason: UpdateSkillEnchantmentReason::PrismaticRequiredSkill,
+                },
+                UpdateSkillEnchantmentAction::Apply {
+                    item_guid: later.item_guid,
+                    inventory_slot: 2,
+                    enchantment_slot: EnchantmentSlot::EnhancementSocketPrismatic,
+                    enchantment_id: 400,
+                    reason: UpdateSkillEnchantmentReason::EnchantmentRequiredSkill,
+                },
+            ]
+        );
+
+        assert_eq!(
+            player.update_skill_enchantments_plan(164, 75, 74, &[first], &enchantments),
+            vec![UpdateSkillEnchantmentAction::Remove {
+                item_guid: first.item_guid,
+                inventory_slot: 1,
+                enchantment_slot: EnchantmentSlot::EnhancementPermanent,
+                enchantment_id: 100,
+                reason: UpdateSkillEnchantmentReason::EnchantmentRequiredSkill,
+            }]
+        );
+    }
+
+    #[test]
+    fn update_skill_enchantments_plan_matches_cpp_missing_template_edges() {
+        let player = Player::new(None, false);
+        let mut enchantment_ids = [0; MAX_ENCHANTMENT_SLOT];
+        enchantment_ids[EnchantmentSlot::EnhancementPermanent as usize] = 100;
+        enchantment_ids[EnchantmentSlot::EnhancementTemporary as usize] = 999;
+        let item = SkillEnchantmentItemRef::new(
+            ObjectGuid::create_item(1, 40),
+            0,
+            enchantment_ids,
+            [1, 1, 1],
+        );
+
+        assert_eq!(
+            player.update_skill_enchantments_plan(
+                164,
+                74,
+                75,
+                &[item],
+                &[SkillEnchantmentTemplateRef::new(100, 164, 75)],
+            ),
+            vec![
+                UpdateSkillEnchantmentAction::Apply {
+                    item_guid: item.item_guid,
+                    inventory_slot: 0,
+                    enchantment_slot: EnchantmentSlot::EnhancementPermanent,
+                    enchantment_id: 100,
+                    reason: UpdateSkillEnchantmentReason::EnchantmentRequiredSkill,
+                },
+                UpdateSkillEnchantmentAction::MissingEnchantmentTemplateAbort {
+                    item_guid: item.item_guid,
+                    inventory_slot: 0,
+                    enchantment_slot: EnchantmentSlot::EnhancementTemporary,
+                    enchantment_id: 999,
+                },
+            ]
+        );
+
+        let mut socket_enchantments = [0; MAX_ENCHANTMENT_SLOT];
+        socket_enchantments[EnchantmentSlot::EnhancementSocket as usize] = 300;
+        let socket_item = SkillEnchantmentItemRef::new(
+            ObjectGuid::create_item(1, 41),
+            0,
+            socket_enchantments,
+            [0, 1, 1],
+        );
+        assert!(
+            player
+                .update_skill_enchantments_plan(
+                    164,
+                    74,
+                    75,
+                    &[socket_item],
+                    &[SkillEnchantmentTemplateRef::new(300, 755, 100)],
+                )
+                .is_empty()
         );
     }
 
