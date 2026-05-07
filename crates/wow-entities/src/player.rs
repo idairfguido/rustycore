@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use bitflags::bitflags;
 use wow_constants::{
     BagFamilyMask, EnchantmentSlot, Gender, InventoryResult, InventoryType, ItemBondingType,
-    ItemClass, ItemEnchantmentType, ItemFieldFlags, ItemFieldFlags2, ItemModType,
+    ItemClass, ItemEnchantmentType, ItemFieldFlags, ItemFieldFlags2, ItemModType, ItemModifier,
     ItemSubClassContainer, ItemSubClassQuiver, ItemSubClassWeapon, ItemSubclassProfession,
     ItemUpdateState, PowerType, Stats, TypeId, TypeMask, WeaponAttackType,
 };
@@ -1339,6 +1339,80 @@ pub enum UpdateSkillEnchantmentAction {
         enchantment_slot: EnchantmentSlot,
         enchantment_id: i32,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SendNewItemTemplateRef {
+    pub quest_log_item_id: u32,
+    pub dont_report_loot_log_to_party: bool,
+}
+
+impl SendNewItemTemplateRef {
+    pub const fn new(quest_log_item_id: u32, dont_report_loot_log_to_party: bool) -> Self {
+        Self {
+            quest_log_item_id,
+            dont_report_loot_log_to_party,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SendNewItemArgs {
+    pub quantity: u32,
+    pub pushed: bool,
+    pub created: bool,
+    pub broadcast: bool,
+    pub dungeon_encounter_id: u32,
+    pub player_in_group: bool,
+    pub quantity_in_inventory: u32,
+}
+
+impl SendNewItemArgs {
+    pub const fn new(quantity: u32, pushed: bool, created: bool) -> Self {
+        Self {
+            quantity,
+            pushed,
+            created,
+            broadcast: false,
+            dungeon_encounter_id: 0,
+            player_in_group: false,
+            quantity_in_inventory: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendNewItemDisplayText {
+    Normal,
+    EncounterLoot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendNewItemDelivery {
+    Direct,
+    GroupBroadcast,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SendNewItemPlan {
+    pub player_guid: ObjectGuid,
+    pub item_guid: ObjectGuid,
+    pub item_entry: u32,
+    pub slot: u8,
+    pub slot_in_bag: i16,
+    pub quest_log_item_id: u32,
+    pub quantity: u32,
+    pub quantity_in_inventory: u32,
+    pub battle_pet_species_id: u32,
+    pub battle_pet_breed_id: u32,
+    pub battle_pet_breed_quality: u8,
+    pub battle_pet_level: u32,
+    pub pushed: bool,
+    pub created: bool,
+    pub display_text: SendNewItemDisplayText,
+    pub dungeon_encounter_id: u32,
+    pub is_encounter_loot: bool,
+    pub delivery: SendNewItemDelivery,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -6434,6 +6508,52 @@ impl Player {
         }
 
         actions
+    }
+
+    pub fn send_new_item_plan(
+        &self,
+        item: Option<&Item>,
+        template: SendNewItemTemplateRef,
+        args: SendNewItemArgs,
+    ) -> Option<SendNewItemPlan> {
+        let item = item?;
+        let battle_pet_breed_data = item.get_modifier(ItemModifier::BattlePetBreedData);
+        let is_encounter_loot = args.dungeon_encounter_id != 0;
+        let delivery =
+            if args.broadcast && args.player_in_group && !template.dont_report_loot_log_to_party {
+                SendNewItemDelivery::GroupBroadcast
+            } else {
+                SendNewItemDelivery::Direct
+            };
+
+        Some(SendNewItemPlan {
+            player_guid: self.guid(),
+            item_guid: item.object().guid(),
+            item_entry: item.object().entry(),
+            slot: item.bag_slot(),
+            slot_in_bag: if item.count() == args.quantity {
+                i16::from(item.slot())
+            } else {
+                -1
+            },
+            quest_log_item_id: template.quest_log_item_id,
+            quantity: args.quantity,
+            quantity_in_inventory: args.quantity_in_inventory,
+            battle_pet_species_id: item.get_modifier(ItemModifier::BattlePetSpeciesId),
+            battle_pet_breed_id: battle_pet_breed_data & 0x00FF_FFFF,
+            battle_pet_breed_quality: ((battle_pet_breed_data >> 24) & 0xFF) as u8,
+            battle_pet_level: item.get_modifier(ItemModifier::BattlePetLevel),
+            pushed: args.pushed,
+            created: args.created,
+            display_text: if is_encounter_loot {
+                SendNewItemDisplayText::EncounterLoot
+            } else {
+                SendNewItemDisplayText::Normal
+            },
+            dungeon_encounter_id: args.dungeon_encounter_id,
+            is_encounter_loot,
+            delivery,
+        })
     }
 
     pub const fn can_titan_grip(&self) -> bool {
@@ -13225,6 +13345,88 @@ mod tests {
                     &[SkillEnchantmentTemplateRef::new(300, 755, 100)],
                 )
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn send_new_item_plan_matches_cpp_packet_fields_and_delivery() {
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let mut player = Player::new(None, false);
+        player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(player_guid);
+
+        let mut item = item_with_guid_entry(12510, 9001);
+        item.set_count(3);
+        item.set_slot(7);
+        item.set_container_guid_and_slot(ObjectGuid::create_item(1, 700), 4);
+        item.set_modifier(ItemModifier::BattlePetSpeciesId, 123);
+        item.set_modifier(ItemModifier::BattlePetBreedData, 0x1A00_00BC);
+        item.set_modifier(ItemModifier::BattlePetLevel, 25);
+
+        let mut args = SendNewItemArgs::new(3, true, false);
+        args.quantity_in_inventory = 9;
+        assert_eq!(
+            player.send_new_item_plan(Some(&item), SendNewItemTemplateRef::new(777, false), args,),
+            Some(SendNewItemPlan {
+                player_guid,
+                item_guid: item.object().guid(),
+                item_entry: 9001,
+                slot: 4,
+                slot_in_bag: 7,
+                quest_log_item_id: 777,
+                quantity: 3,
+                quantity_in_inventory: 9,
+                battle_pet_species_id: 123,
+                battle_pet_breed_id: 0xBC,
+                battle_pet_breed_quality: 0x1A,
+                battle_pet_level: 25,
+                pushed: true,
+                created: false,
+                display_text: SendNewItemDisplayText::Normal,
+                dungeon_encounter_id: 0,
+                is_encounter_loot: false,
+                delivery: SendNewItemDelivery::Direct,
+            })
+        );
+
+        let mut encounter_args = SendNewItemArgs::new(1, false, true);
+        encounter_args.broadcast = true;
+        encounter_args.player_in_group = true;
+        encounter_args.dungeon_encounter_id = 615;
+        encounter_args.quantity_in_inventory = 10;
+        assert_eq!(
+            player
+                .send_new_item_plan(
+                    Some(&item),
+                    SendNewItemTemplateRef::new(0, false),
+                    encounter_args,
+                )
+                .unwrap()
+                .delivery,
+            SendNewItemDelivery::GroupBroadcast
+        );
+        let encounter = player
+            .send_new_item_plan(
+                Some(&item),
+                SendNewItemTemplateRef::new(0, true),
+                encounter_args,
+            )
+            .unwrap();
+        assert_eq!(encounter.slot_in_bag, -1);
+        assert_eq!(
+            encounter.display_text,
+            SendNewItemDisplayText::EncounterLoot
+        );
+        assert!(encounter.is_encounter_loot);
+        assert_eq!(encounter.dungeon_encounter_id, 615);
+        assert_eq!(encounter.delivery, SendNewItemDelivery::Direct);
+
+        assert_eq!(
+            player.send_new_item_plan(None, SendNewItemTemplateRef::new(0, false), args),
+            None
         );
     }
 
