@@ -58,6 +58,17 @@ impl Default for MovementBlock {
     }
 }
 
+// ── ObjectData VALUES delta ─────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ObjectDataValuesUpdate {
+    pub changed_object_type_mask: u32,
+    pub object_data_mask: u32,
+    pub entry_id: i32,
+    pub dynamic_flags: u32,
+    pub scale: f32,
+}
+
 // ── ItemCreateData ──────────────────────────────────────────────────
 
 /// Data needed to build an Item CREATE_OBJECT block for the client.
@@ -1444,6 +1455,11 @@ pub enum UpdateBlock {
         health: i64,
         max_health: i64,
     },
+    /// Generic ObjectData VALUES update.
+    ObjectValuesUpdate {
+        guid: ObjectGuid,
+        data: ObjectDataValuesUpdate,
+    },
     /// Out-of-range destroy (removes object from client view without full destroy).
     DestroyOutOfRange {
         guid: ObjectGuid,
@@ -1684,6 +1700,24 @@ impl UpdateObject {
         }
     }
 
+    /// Create a VALUES update for the base `UF::ObjectData` section.
+    ///
+    /// The mask follows TrinityCore `UF::ObjectData`: bit 0 is the parent bit,
+    /// bits 1/2/3 are EntryID/DynamicFlags/Scale.
+    pub fn object_values_update(
+        guid: ObjectGuid,
+        map_id: u16,
+        data: ObjectDataValuesUpdate,
+    ) -> Self {
+        Self {
+            map_id,
+            num_updates: 1,
+            destroy_guids: Vec::new(),
+            out_of_range_guids: Vec::new(),
+            blocks: vec![UpdateBlock::ObjectValuesUpdate { guid, data }],
+        }
+    }
+
     /// Create an UpdateObject with item CREATE blocks.
     ///
     /// Each item gets its own block. Sent BEFORE the player CREATE packet
@@ -1814,6 +1848,9 @@ impl ServerPacket for UpdateObject {
                 }
                 UpdateBlock::CreatureHealthUpdate { guid, health, max_health } => {
                     write_creature_health_update_block(&mut blocks_buf, guid, *health, *max_health);
+                }
+                UpdateBlock::ObjectValuesUpdate { guid, data } => {
+                    write_object_values_update_block(&mut blocks_buf, guid, *data);
                 }
                 UpdateBlock::DestroyOutOfRange { .. } => {
                     // Handled via destroy_guids / out_of_range_guids, not as a block.
@@ -2297,6 +2334,46 @@ fn write_player_values_update_block(
     buf.write_bytes(&val_data);
 }
 
+/// Write a VALUES update block containing only the base `UF::ObjectData` delta.
+///
+/// C++ refs:
+/// - `Object::PrepareValuesUpdateBuffer`
+/// - `Unit/GameObject/...::BuildValuesUpdate`
+/// - `UF::ObjectData::WriteUpdate`
+fn write_object_values_update_block(
+    buf: &mut WorldPacket,
+    guid: &ObjectGuid,
+    data: ObjectDataValuesUpdate,
+) {
+    buf.write_uint8(UpdateType::Values as u8);
+    buf.write_packed_guid(guid);
+
+    let mut val_buf = WorldPacket::new_empty();
+    val_buf.write_uint32(data.changed_object_type_mask);
+
+    if data.changed_object_type_mask & 1 != 0 {
+        let mask = data.object_data_mask & 0x0F;
+        val_buf.write_bits(mask, 4);
+        val_buf.flush_bits();
+
+        if mask & 0x01 != 0 {
+            if mask & 0x02 != 0 {
+                val_buf.write_int32(data.entry_id);
+            }
+            if mask & 0x04 != 0 {
+                val_buf.write_uint32(data.dynamic_flags);
+            }
+            if mask & 0x08 != 0 {
+                val_buf.write_float(data.scale);
+            }
+        }
+    }
+
+    let val_data = val_buf.into_data();
+    buf.write_uint32(val_data.len() as u32);
+    buf.write_bytes(&val_data);
+}
+
 /// UnitData VALUES update: VirtualItems[3] and/or stat fields.
 ///
 /// C# UnitData.WriteUpdate format:
@@ -2671,7 +2748,6 @@ fn write_active_player_data_values_update(
 /// [u8]  UpdateType = 0 (Values)
 /// [PackedGuid] creature GUID
 /// [u32] data_size
-///   [u8]  flags = 0x00 (not owner)
 ///   [u32] ChangedObjectTypeMask = 1<<5 (TypeId::Unit)
 ///   UnitData block masks (8 words): only block 0 is non-zero = 0x61 (bits 0|5|6)
 ///   block 0 values: Health (i64), MaxHealth (i64)
@@ -2686,9 +2762,6 @@ fn write_creature_health_update_block(
     buf.write_packed_guid(guid);
 
     let mut val_buf = WorldPacket::new_empty();
-
-    // UpdateFieldFlag: 0x00 (not the owner)
-    val_buf.write_uint8(0x00);
 
     // ChangedObjectTypeMask: TypeId::Unit = 5 → bit 5 = 32
     val_buf.write_uint32(1 << 5);
@@ -2834,6 +2907,49 @@ mod tests {
         let bytes = pkt.to_bytes();
         // Should contain destroy + oor data
         assert!(bytes.len() > 20);
+    }
+
+    #[test]
+    fn object_values_update_block_matches_cpp_objectdata_delta_shape() {
+        let mut block = WorldPacket::new_empty();
+        write_object_values_update_block(
+            &mut block,
+            &ObjectGuid::EMPTY,
+            ObjectDataValuesUpdate {
+                changed_object_type_mask: 1,
+                object_data_mask: 0b1011,
+                entry_id: 42,
+                dynamic_flags: 0x80,
+                scale: 2.0,
+            },
+        );
+
+        let bytes = block.into_data();
+        assert_eq!(bytes[0], UpdateType::Values as u8);
+        assert_eq!(&bytes[1..3], &[0, 0]);
+        assert_eq!(u32::from_le_bytes(bytes[3..7].try_into().unwrap()), 13);
+        assert_eq!(u32::from_le_bytes(bytes[7..11].try_into().unwrap()), 1);
+        assert_eq!(bytes[11], 0b1011_0000);
+        assert_eq!(i32::from_le_bytes(bytes[12..16].try_into().unwrap()), 42);
+        assert_eq!(f32::from_le_bytes(bytes[16..20].try_into().unwrap()), 2.0);
+        assert_eq!(bytes.len(), 20);
+    }
+
+    #[test]
+    fn creature_health_values_update_has_no_create_flags_byte_like_cpp() {
+        let mut block = WorldPacket::new_empty();
+        write_creature_health_update_block(&mut block, &ObjectGuid::EMPTY, 7, 11);
+
+        let bytes = block.into_data();
+        assert_eq!(bytes[0], UpdateType::Values as u8);
+        assert_eq!(&bytes[1..3], &[0, 0]);
+        assert_eq!(u32::from_le_bytes(bytes[3..7].try_into().unwrap()), 25);
+        assert_eq!(u32::from_le_bytes(bytes[7..11].try_into().unwrap()), 1 << 5);
+        assert_eq!(bytes[11], 0x01);
+        assert_eq!(&bytes[12..16], &[0, 0, 0, 0x61]);
+        assert_eq!(i64::from_le_bytes(bytes[16..24].try_into().unwrap()), 7);
+        assert_eq!(i64::from_le_bytes(bytes[24..32].try_into().unwrap()), 11);
+        assert_eq!(bytes.len(), 32);
     }
 
     #[test]

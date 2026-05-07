@@ -2,6 +2,12 @@ use bitflags::bitflags;
 use wow_constants::{TypeId, TypeMask};
 use wow_core::ObjectGuid;
 
+use crate::update_fields::{
+    OBJECT_DATA_BITS, OBJECT_DATA_DYNAMIC_FLAGS_BIT, OBJECT_DATA_ENTRY_ID_BIT,
+    OBJECT_DATA_PARENT_BIT, OBJECT_DATA_SCALE_BIT, ObjectDataUpdate, ObjectDataValues,
+    TYPEID_OBJECT, UpdateMask, ValuesUpdate,
+};
+
 bitflags! {
     /// Rust representation of TrinityCore `CreateObjectBits`.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -147,6 +153,57 @@ impl EntityObject {
 
     pub const fn changed_fields(&self) -> ObjectChangedFields {
         self.changed_fields
+    }
+
+    pub fn object_data_values(&self) -> ObjectDataValues {
+        ObjectDataValues {
+            entry_id: self.entry as i32,
+            dynamic_flags: self.dynamic_flags,
+            scale: self.scale,
+        }
+    }
+
+    pub fn object_data_changes_mask(&self) -> UpdateMask {
+        let mut mask = UpdateMask::new(OBJECT_DATA_BITS);
+        if !self.changed_fields.is_empty() {
+            mask.set(OBJECT_DATA_PARENT_BIT);
+        }
+        if self.changed_fields.contains(ObjectChangedFields::ENTRY_ID) {
+            mask.set(OBJECT_DATA_ENTRY_ID_BIT);
+        }
+        if self
+            .changed_fields
+            .contains(ObjectChangedFields::DYNAMIC_FLAGS)
+        {
+            mask.set(OBJECT_DATA_DYNAMIC_FLAGS_BIT);
+        }
+        if self.changed_fields.contains(ObjectChangedFields::SCALE) {
+            mask.set(OBJECT_DATA_SCALE_BIT);
+        }
+        mask
+    }
+
+    pub fn changed_object_type_mask(&self) -> u32 {
+        if self.changed_fields.is_empty() {
+            0
+        } else {
+            1 << TYPEID_OBJECT
+        }
+    }
+
+    pub fn values_update(&self) -> ValuesUpdate {
+        let changed_object_type_mask = self.changed_object_type_mask();
+        if changed_object_type_mask == 0 {
+            return ValuesUpdate::empty();
+        }
+
+        ValuesUpdate {
+            changed_object_type_mask,
+            object_data: Some(ObjectDataUpdate {
+                mask: self.object_data_changes_mask(),
+                values: self.object_data_values(),
+            }),
+        }
     }
 
     pub const fn map_id(&self) -> Option<u32> {
@@ -374,6 +431,33 @@ mod tests {
 
         object.replace_all_dynamic_flags(0x80);
         assert_eq!(object.dynamic_flags(), 0x80);
+    }
+
+    #[test]
+    fn object_data_update_mask_uses_cpp_object_data_bits() {
+        let mut object = EntityObject::default();
+        object.add_to_world();
+
+        object.set_entry(42);
+        object.set_dynamic_flag(0x04);
+        object.set_scale(2.0);
+
+        let mask = object.object_data_changes_mask();
+        assert_eq!(mask.get_block(0), 0b1111);
+        assert!(mask.is_set(OBJECT_DATA_PARENT_BIT));
+        assert!(mask.is_set(OBJECT_DATA_ENTRY_ID_BIT));
+        assert!(mask.is_set(OBJECT_DATA_DYNAMIC_FLAGS_BIT));
+        assert!(mask.is_set(OBJECT_DATA_SCALE_BIT));
+        assert_eq!(object.changed_object_type_mask(), 1 << TYPEID_OBJECT);
+
+        let update = object.values_update();
+        assert!(update.has_data());
+        assert_eq!(update.changed_object_type_mask, 1);
+        let object_data = update.object_data.unwrap();
+        assert_eq!(object_data.mask.get_block(0), 0b1111);
+        assert_eq!(object_data.values.entry_id, 42);
+        assert_eq!(object_data.values.dynamic_flags, 0x04);
+        assert_eq!(object_data.values.scale, 2.0);
     }
 
     #[test]
