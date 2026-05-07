@@ -3903,6 +3903,41 @@ impl Player {
         removed
     }
 
+    pub fn remove_item_from_buyback_slot_object(
+        &mut self,
+        slot: u8,
+        item: Option<&mut Item>,
+        delete_item: bool,
+    ) -> Result<Option<ObjectGuid>, PlayerStorageError> {
+        if !is_buyback_slot(slot) {
+            return Ok(None);
+        }
+
+        let stored_guid = self.inventory.items[slot as usize];
+        let mut item = item;
+        if let (Some(expected), Some(actual_item)) = (stored_guid, item.as_deref()) {
+            let actual = actual_item.object().guid();
+            if expected != actual {
+                return Err(PlayerStorageError::MismatchedItemGuid {
+                    slot,
+                    expected,
+                    actual,
+                });
+            }
+        }
+
+        if stored_guid.is_some() {
+            if let Some(item) = item.as_deref_mut() {
+                item.object_mut().remove_from_world();
+                if delete_item {
+                    item.set_state(ItemUpdateState::Removed);
+                }
+            }
+        }
+
+        Ok(self.remove_item_from_buyback_slot(slot))
+    }
+
     pub fn add_item_to_buyback_slot(&mut self, guid: ObjectGuid, price: u32, timestamp: i64) -> u8 {
         let mut slot = self.inventory.current_buyback_slot;
         if self.inventory.items[slot as usize].is_some() {
@@ -9356,5 +9391,62 @@ mod tests {
         );
         assert_eq!(player.active_data().buyback_price[0], 0);
         assert_eq!(player.active_data().buyback_timestamp[0], 0);
+    }
+
+    #[test]
+    fn remove_item_from_buyback_slot_object_matches_cpp_item_side_effects() {
+        let mut player = Player::new(None, false);
+        let mut item = item_with_guid_entry(1010, 6948);
+        item.force_state(ItemUpdateState::Unchanged);
+        item.object_mut().add_to_world();
+
+        let slot = player.add_item_to_buyback_slot(item.object().guid(), 123, 456);
+        assert_eq!(
+            player
+                .remove_item_from_buyback_slot_object(slot, Some(&mut item), true)
+                .unwrap(),
+            Some(item.object().guid())
+        );
+
+        assert!(!item.object().is_in_world());
+        assert_eq!(item.update_state(), ItemUpdateState::Removed);
+        assert_eq!(player.get_item_from_buyback_slot(slot), None);
+        assert_eq!(
+            player.active_data().inv_slots[slot as usize],
+            ObjectGuid::EMPTY
+        );
+        assert_eq!(player.active_data().buyback_price[0], 0);
+        assert_eq!(player.active_data().buyback_timestamp[0], 0);
+
+        let mut keep_state_item = item_with_guid_entry(1011, 6949);
+        keep_state_item.force_state(ItemUpdateState::Unchanged);
+        keep_state_item.object_mut().add_to_world();
+        let keep_slot = player.add_item_to_buyback_slot(keep_state_item.object().guid(), 200, 500);
+
+        player
+            .remove_item_from_buyback_slot_object(keep_slot, Some(&mut keep_state_item), false)
+            .unwrap();
+        assert!(!keep_state_item.object().is_in_world());
+        assert_eq!(keep_state_item.update_state(), ItemUpdateState::Unchanged);
+    }
+
+    #[test]
+    fn remove_item_from_buyback_slot_object_rejects_mismatched_item_ref() {
+        let mut player = Player::new(None, false);
+        let expected = ObjectGuid::create_item(1, 1020);
+        let mut actual = item_with_guid_entry(1021, 6948);
+
+        let slot = player.add_item_to_buyback_slot(expected, 123, 456);
+        assert_eq!(
+            player.remove_item_from_buyback_slot_object(slot, Some(&mut actual), true),
+            Err(PlayerStorageError::MismatchedItemGuid {
+                slot,
+                expected,
+                actual: actual.object().guid(),
+            })
+        );
+        assert_eq!(player.get_item_from_buyback_slot(slot), Some(expected));
+        assert_eq!(player.active_data().buyback_price[0], 123);
+        assert_eq!(player.active_data().buyback_timestamp[0], 456);
     }
 }
