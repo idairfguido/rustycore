@@ -106,6 +106,7 @@ pub enum PlayerStorageError {
         expected: ObjectGuid,
         actual: ObjectGuid,
     },
+    SplitItemLootGenerated,
     InvalidSplitCount {
         available: u32,
         requested: u32,
@@ -114,6 +115,7 @@ pub enum PlayerStorageError {
         available: u32,
         requested: u32,
     },
+    SplitItemInTrade,
     TopLevelBuybackHiddenFromGetItemByPos(u8),
 }
 
@@ -681,7 +683,7 @@ impl Player {
         new_guid: ObjectGuid,
         count: u32,
     ) -> Result<Item, PlayerStorageError> {
-        validate_split_count(source, count)?;
+        validate_split_source(source, count)?;
 
         let cloned = self.store_cloned_item_object(slot, source, new_guid, count)?;
         source.set_count(source.count() - count);
@@ -831,7 +833,7 @@ impl Player {
         new_guid: ObjectGuid,
         count: u32,
     ) -> Result<Item, PlayerStorageError> {
-        validate_split_count(source, count)?;
+        validate_split_source(source, count)?;
 
         let cloned =
             self.store_cloned_bag_item_object(bag_slot, bag, item_slot, source, new_guid, count)?;
@@ -1309,7 +1311,11 @@ fn is_buyback_slot(slot: u8) -> bool {
     (BUYBACK_SLOT_START..BUYBACK_SLOT_END).contains(&slot)
 }
 
-fn validate_split_count(source: &Item, count: u32) -> Result<(), PlayerStorageError> {
+fn validate_split_source(source: &Item, count: u32) -> Result<(), PlayerStorageError> {
+    if source.loot_generated() {
+        return Err(PlayerStorageError::SplitItemLootGenerated);
+    }
+
     let available = source.count();
     if count == 0 || available == count {
         return Err(PlayerStorageError::InvalidSplitCount {
@@ -1323,6 +1329,10 @@ fn validate_split_count(source: &Item, count: u32) -> Result<(), PlayerStorageEr
             available,
             requested: count,
         });
+    }
+
+    if source.is_in_trade() {
+        return Err(PlayerStorageError::SplitItemInTrade);
     }
 
     Ok(())
@@ -2215,6 +2225,51 @@ mod tests {
                 available: 8,
                 requested: 9,
             })
+        );
+        assert_eq!(source.count(), 8);
+        assert_eq!(source.update_state(), ItemUpdateState::New);
+    }
+
+    #[test]
+    fn split_item_rejects_loot_and_trade_states_in_cpp_order() {
+        let mut player = Player::new(None, false);
+        let mut source = Item::default();
+        source.object_mut().create(ObjectGuid::create_item(1, 884));
+        source.set_count(8);
+        source.set_loot_generated(true);
+        source.set_in_trade(true);
+
+        assert_eq!(
+            player.split_item_to_empty_top_level_object(
+                INVENTORY_SLOT_ITEM_START,
+                &mut source,
+                ObjectGuid::create_item(1, 885),
+                8,
+            ),
+            Err(PlayerStorageError::SplitItemLootGenerated)
+        );
+
+        source.set_loot_generated(false);
+        assert_eq!(
+            player.split_item_to_empty_top_level_object(
+                INVENTORY_SLOT_ITEM_START,
+                &mut source,
+                ObjectGuid::create_item(1, 886),
+                8,
+            ),
+            Err(PlayerStorageError::InvalidSplitCount {
+                available: 8,
+                requested: 8,
+            })
+        );
+        assert_eq!(
+            player.split_item_to_empty_top_level_object(
+                INVENTORY_SLOT_ITEM_START,
+                &mut source,
+                ObjectGuid::create_item(1, 887),
+                3,
+            ),
+            Err(PlayerStorageError::SplitItemInTrade)
         );
         assert_eq!(source.count(), 8);
         assert_eq!(source.update_state(), ItemUpdateState::New);
