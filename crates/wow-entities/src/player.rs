@@ -374,6 +374,34 @@ pub struct CanUseItemArgs<'a> {
     pub proto_is_heirloom: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct EquippedGemRef {
+    pub slot: u8,
+    pub entry: u32,
+    pub limit_category: u32,
+}
+
+impl EquippedGemRef {
+    pub const fn new(slot: u8, entry: u32, limit_category: u32) -> Self {
+        Self {
+            slot,
+            entry,
+            limit_category,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CanEquipUniqueItemTemplateArgs<'a> {
+    pub proto: Option<&'a ItemStorageTemplate>,
+    pub except_slot: u8,
+    pub limit_count: u32,
+    pub unique_equippable: bool,
+    pub limit_category: Option<&'a ItemLimitCategoryTemplate>,
+    pub equipped_items: &'a [ItemStorageRef<'a>],
+    pub equipped_gems: &'a [EquippedGemRef],
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CanStoreItemOutcome {
     pub result: InventoryResult,
@@ -2270,6 +2298,54 @@ impl Player {
         InventoryResult::Ok
     }
 
+    pub fn can_equip_unique_item_template(
+        &self,
+        args: CanEquipUniqueItemTemplateArgs<'_>,
+    ) -> InventoryResult {
+        let Some(proto) = args.proto else {
+            return InventoryResult::ItemNotFound;
+        };
+
+        if args.unique_equippable
+            && (has_equipped_item_entry(args.equipped_items, proto.entry, args.except_slot)
+                || has_equipped_gem_entry(args.equipped_gems, proto.entry, args.except_slot))
+        {
+            return InventoryResult::ItemUniqueEquippable;
+        }
+
+        if proto.item_limit_category != 0 {
+            let Some(limit_category) = args.limit_category else {
+                return InventoryResult::NotEquippable;
+            };
+            let limit_quantity = u32::from(limit_category.quantity);
+
+            if args.limit_count > limit_quantity {
+                return InventoryResult::ItemMaxLimitCategoryEquippedExceededIs;
+            }
+
+            let required_count = limit_quantity.saturating_sub(args.limit_count) + 1;
+            if equipped_item_limit_category_count(
+                args.equipped_items,
+                proto.item_limit_category,
+                args.except_slot,
+            ) >= required_count
+            {
+                return InventoryResult::ItemMaxLimitCategoryEquippedExceededIs;
+            }
+
+            if equipped_gem_limit_category_count(
+                args.equipped_gems,
+                proto.item_limit_category,
+                args.except_slot,
+            ) >= required_count
+            {
+                return InventoryResult::ItemMaxCountEquippedSocketed;
+            }
+        }
+
+        InventoryResult::Ok
+    }
+
     pub fn can_bank_item(
         &self,
         dest: &mut Vec<ItemPosCount>,
@@ -3485,6 +3561,53 @@ fn paired_unique_ignore_slot(slot: u8) -> Option<u8> {
     }
 }
 
+fn has_equipped_item_entry(
+    equipped_items: &[ItemStorageRef<'_>],
+    entry: u32,
+    except_slot: u8,
+) -> bool {
+    equipped_items.iter().any(|stored| {
+        stored.bag == INVENTORY_SLOT_BAG_0
+            && stored.slot != except_slot
+            && stored.item.object().entry() == entry
+    })
+}
+
+fn has_equipped_gem_entry(equipped_gems: &[EquippedGemRef], entry: u32, except_slot: u8) -> bool {
+    equipped_gems
+        .iter()
+        .any(|gem| gem.slot != except_slot && gem.entry == entry)
+}
+
+fn equipped_item_limit_category_count(
+    equipped_items: &[ItemStorageRef<'_>],
+    limit_category: u32,
+    except_slot: u8,
+) -> u32 {
+    equipped_items
+        .iter()
+        .filter(|stored| {
+            stored.bag == INVENTORY_SLOT_BAG_0
+                && stored.slot != except_slot
+                && stored
+                    .template
+                    .is_some_and(|template| template.item_limit_category == limit_category)
+        })
+        .map(|stored| stored.item.count())
+        .sum()
+}
+
+fn equipped_gem_limit_category_count(
+    equipped_gems: &[EquippedGemRef],
+    limit_category: u32,
+    except_slot: u8,
+) -> u32 {
+    equipped_gems
+        .iter()
+        .filter(|gem| gem.slot != except_slot && gem.limit_category == limit_category)
+        .count() as u32
+}
+
 fn is_bag_storage_slot(slot: u8) -> bool {
     (INVENTORY_SLOT_BAG_START..INVENTORY_SLOT_BAG_END).contains(&slot)
         || (BANK_SLOT_BAG_START..BANK_SLOT_BAG_END).contains(&slot)
@@ -3739,6 +3862,20 @@ mod tests {
             has_item_skill: false,
             player_class: CLASS_WARRIOR,
             proto_is_heirloom: false,
+        }
+    }
+
+    fn can_equip_unique_template_args<'a>(
+        proto: Option<&'a ItemStorageTemplate>,
+    ) -> CanEquipUniqueItemTemplateArgs<'a> {
+        CanEquipUniqueItemTemplateArgs {
+            proto,
+            except_slot: NULL_SLOT,
+            limit_count: 1,
+            unique_equippable: false,
+            limit_category: None,
+            equipped_items: &[],
+            equipped_gems: &[],
         }
     }
 
@@ -4623,6 +4760,106 @@ mod tests {
         paladin_plate.proto_is_heirloom = true;
         paladin_plate.player_class = CLASS_PALADIN;
         assert_eq!(player.can_use_item(paladin_plate), InventoryResult::Ok);
+    }
+
+    #[test]
+    fn can_equip_unique_item_template_matches_cpp_unique_entry_guards() {
+        let player = Player::new(None, false);
+        let proto = ItemStorageTemplate::regular_item(700, 1);
+        assert_eq!(
+            player.can_equip_unique_item_template(can_equip_unique_template_args(None)),
+            InventoryResult::ItemNotFound
+        );
+
+        let mut equipped = Item::default();
+        equipped.object_mut().set_entry(700);
+        equipped.set_count(1);
+        let equipped_items = [ItemStorageRef::new(
+            INVENTORY_SLOT_BAG_0,
+            EQUIPMENT_SLOT_FINGER1,
+            &equipped,
+            Some(&proto),
+        )];
+
+        let mut args = can_equip_unique_template_args(Some(&proto));
+        args.unique_equippable = true;
+        args.equipped_items = &equipped_items;
+        assert_eq!(
+            player.can_equip_unique_item_template(args),
+            InventoryResult::ItemUniqueEquippable
+        );
+
+        args.except_slot = EQUIPMENT_SLOT_FINGER1;
+        assert_eq!(
+            player.can_equip_unique_item_template(args),
+            InventoryResult::Ok
+        );
+
+        let equipped_gems = [EquippedGemRef::new(EQUIPMENT_SLOT_CHEST, 700, 0)];
+        args.equipped_items = &[];
+        args.equipped_gems = &equipped_gems;
+        args.except_slot = NULL_SLOT;
+        assert_eq!(
+            player.can_equip_unique_item_template(args),
+            InventoryResult::ItemUniqueEquippable
+        );
+    }
+
+    #[test]
+    fn can_equip_unique_item_template_matches_cpp_limit_category_guards() {
+        let player = Player::new(None, false);
+        let proto = ItemStorageTemplate {
+            item_limit_category: 10,
+            ..ItemStorageTemplate::regular_item(701, 1)
+        };
+        let limit = ItemLimitCategoryTemplate {
+            id: 10,
+            quantity: 2,
+            flags: ITEM_LIMIT_CATEGORY_MODE_EQUIP,
+        };
+        let mut equipped = Item::default();
+        equipped.object_mut().set_entry(702);
+        equipped.set_count(1);
+        let equipped_items = [ItemStorageRef::new(
+            INVENTORY_SLOT_BAG_0,
+            EQUIPMENT_SLOT_TRINKET1,
+            &equipped,
+            Some(&proto),
+        )];
+        let equipped_gems = [EquippedGemRef::new(EQUIPMENT_SLOT_CHEST, 703, 10)];
+
+        let mut args = can_equip_unique_template_args(Some(&proto));
+        assert_eq!(
+            player.can_equip_unique_item_template(args),
+            InventoryResult::NotEquippable
+        );
+
+        args.limit_category = Some(&limit);
+        args.limit_count = 3;
+        assert_eq!(
+            player.can_equip_unique_item_template(args),
+            InventoryResult::ItemMaxLimitCategoryEquippedExceededIs
+        );
+
+        args.limit_count = 2;
+        args.equipped_items = &equipped_items;
+        assert_eq!(
+            player.can_equip_unique_item_template(args),
+            InventoryResult::ItemMaxLimitCategoryEquippedExceededIs
+        );
+
+        args.equipped_items = &[];
+        args.equipped_gems = &equipped_gems;
+        assert_eq!(
+            player.can_equip_unique_item_template(args),
+            InventoryResult::ItemMaxCountEquippedSocketed
+        );
+
+        args.except_slot = EQUIPMENT_SLOT_CHEST;
+        assert_eq!(
+            player.can_equip_unique_item_template(args),
+            InventoryResult::Ok
+        );
     }
 
     #[test]
