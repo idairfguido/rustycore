@@ -500,7 +500,7 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
 
 ### Inmediato (R6 — L0 config parity)
 
-- [ ] **#NEXT.L0.CONFIG.001** Ejecutar `docs/migration/inventory/r6-next-miniphase.md`: nombres canonicos `worldserver.conf`/`bnetserver.conf`, parsing semicolonado `*DatabaseInfo`, overlays `.conf.d`, override `TC_*`, y consumo de startup world/bnet contra C++.
+- [x] **#NEXT.L0.CONFIG.001** Ejecutar `docs/migration/inventory/r6-next-miniphase.md`: nombres canonicos `worldserver.conf`/`bnetserver.conf`, parsing semicolonado `*DatabaseInfo`, overlays `.conf.d`, override `TC_*`, y consumo de startup world/bnet contra C++. Cerrado en código; queda pendiente la retirada del fallback legacy `#NEXT.L0.CONFIG.REMOVE_LEGACY_DB_SUBKEYS`.
 
 ### Inmediato (Fase 0 — Maps rewrite)
 

@@ -14,7 +14,7 @@
 //! 1. `populate()` — if DB has 0 tables, apply base SQL via mysql CLI
 //! 2. `update()`   — scan `updates_include` paths, apply new/changed SQL files
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use sha1::{Digest, Sha1};
 use sqlx::MySqlPool;
 use std::collections::HashMap;
@@ -31,18 +31,25 @@ pub struct DbUpdater {
     pool: MySqlPool,
     /// Raw connection params (for mysql CLI when executing large SQL files).
     host: String,
-    port: u16,
+    port_or_socket: String,
     user: String,
     pass: String,
     db: String,
 }
 
 impl DbUpdater {
-    pub fn new(pool: MySqlPool, host: &str, port: u16, user: &str, pass: &str, db: &str) -> Self {
+    pub fn new(
+        pool: MySqlPool,
+        host: &str,
+        port_or_socket: &str,
+        user: &str,
+        pass: &str,
+        db: &str,
+    ) -> Self {
         Self {
             pool,
             host: host.to_string(),
-            port,
+            port_or_socket: port_or_socket.to_string(),
             user: user.to_string(),
             pass: pass.to_string(),
             db: db.to_string(),
@@ -117,11 +124,7 @@ impl DbUpdater {
         let mut updated = 0u32;
 
         for (path, state) in &available {
-            let name = path
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .to_string();
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
 
             let content = match fs::read_to_string(path) {
                 Ok(c) => c.replace("\r\n", "\n").replace('\r', "\n"),
@@ -141,19 +144,13 @@ impl DbUpdater {
                         .find_map(|(n, h)| if h == &hash { Some(n) } else { None })
                     {
                         info!("Renaming update '{}' → '{}'", old_name, name);
-                        sqlx::query(
-                            "UPDATE `updates` SET `name` = ? WHERE `name` = ?",
-                        )
-                        .bind(&name)
-                        .bind(old_name)
-                        .execute(&self.pool)
-                        .await?;
+                        sqlx::query("UPDATE `updates` SET `name` = ? WHERE `name` = ?")
+                            .bind(&name)
+                            .bind(old_name)
+                            .execute(&self.pool)
+                            .await?;
                     } else {
-                        info!(
-                            "Applying '{}' [{}]...",
-                            name,
-                            &hash[..7]
-                        );
+                        info!("Applying '{}' [{}]...", name, &hash[..7]);
                         let t = Instant::now();
                         self.apply_sql_file(path, &content).await?;
                         let ms = t.elapsed().as_millis() as u32;
@@ -214,17 +211,30 @@ impl DbUpdater {
     fn apply_file_cli(&self, path: &str) -> Result<()> {
         let mut cmd = Command::new("mysql");
         cmd.arg(format!("-h{}", self.host))
-            .arg(format!("-P{}", self.port))
-            .arg(format!("-u{}", self.user))
-            .arg("--default-character-set=utf8")
-            .arg("--max-allowed-packet=1073741824")
-            .arg("-e")
-            .arg(format!("SOURCE {};", path))
-            .arg(&self.db);
+            .arg(format!("-u{}", self.user));
 
         if !self.pass.is_empty() {
             cmd.arg(format!("-p{}", self.pass));
         }
+
+        if self
+            .port_or_socket
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_digit())
+        {
+            cmd.arg(format!("-P{}", self.port_or_socket));
+        } else {
+            cmd.arg("-P0")
+                .arg("--protocol=SOCKET")
+                .arg(format!("-S{}", self.port_or_socket));
+        }
+
+        cmd.arg("--default-character-set=utf8")
+            .arg("--max-allowed-packet=1073741824")
+            .arg("-e")
+            .arg(format!("SOURCE {};", path))
+            .arg(&self.db);
 
         let out = cmd.output()?;
         if !out.status.success() {
@@ -241,17 +251,14 @@ impl DbUpdater {
             if stmt.is_empty() {
                 continue;
             }
-            sqlx::query(stmt)
-                .execute(&self.pool)
-                .await
-                .map_err(|e| {
-                    anyhow::anyhow!(
-                        "SQL error in '{}': {}\nStatement: {}",
-                        path.display(),
-                        e,
-                        &stmt[..stmt.len().min(120)]
-                    )
-                })?;
+            sqlx::query(stmt).execute(&self.pool).await.map_err(|e| {
+                anyhow::anyhow!(
+                    "SQL error in '{}': {}\nStatement: {}",
+                    path.display(),
+                    e,
+                    &stmt[..stmt.len().min(120)]
+                )
+            })?;
         }
         Ok(())
     }
@@ -294,10 +301,9 @@ impl DbUpdater {
     }
 
     async fn read_applied_files(&self) -> Result<HashMap<String, String>> {
-        let rows: Vec<(String, String)> =
-            sqlx::query_as("SELECT `name`, `hash` FROM `updates`")
-                .fetch_all(&self.pool)
-                .await?;
+        let rows: Vec<(String, String)> = sqlx::query_as("SELECT `name`, `hash` FROM `updates`")
+            .fetch_all(&self.pool)
+            .await?;
         Ok(rows.into_iter().collect())
     }
 }
@@ -326,10 +332,14 @@ fn split_sql(content: &str) -> Vec<&str> {
         match bytes[i] {
             // Line comment: -- or #
             b'-' if i + 1 < len && bytes[i + 1] == b'-' => {
-                while i < len && bytes[i] != b'\n' { i += 1; }
+                while i < len && bytes[i] != b'\n' {
+                    i += 1;
+                }
             }
             b'#' => {
-                while i < len && bytes[i] != b'\n' { i += 1; }
+                while i < len && bytes[i] != b'\n' {
+                    i += 1;
+                }
             }
             // Block comment /* ... */
             b'/' if i + 1 < len && bytes[i + 1] == b'*' => {
@@ -363,7 +373,9 @@ fn split_sql(content: &str) -> Vec<&str> {
                 i += 1;
                 start = i;
             }
-            _ => { i += 1; }
+            _ => {
+                i += 1;
+            }
         }
     }
 

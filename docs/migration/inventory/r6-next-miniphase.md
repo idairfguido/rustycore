@@ -32,27 +32,27 @@ These references must be open beside the Rust patch when implementation starts:
 
 ## Implementation Tasks
 
-- [ ] **#NEXT.L0.CONFIG.001.a** Align default config filenames and command-line/default search with C++ lowercase names.
+- [x] **#NEXT.L0.CONFIG.001.a** Align default config filenames and command-line/default search with C++ lowercase names.
   C++ refs: `worldserver/Main.cpp:74`, `worldserver/Main.cpp:141`, `bnetserver/Main.cpp:60`, `bnetserver/Main.cpp:97`.
   Rust target: `crates/world-server/src/main.rs`, `crates/bnet-server/src/main.rs`, `crates/wow-config/src/lib.rs`.
   Acceptance: Linux case-sensitive test proves `worldserver.conf`/`bnetserver.conf` are canonical. Uppercase Rust names, if kept, are logged as temporary legacy fallback only.
 
-- [ ] **#NEXT.L0.CONFIG.001.b** Implement canonical semicolon `*DatabaseInfo` parsing.
+- [x] **#NEXT.L0.CONFIG.001.b** Implement canonical semicolon `*DatabaseInfo` parsing.
   C++ refs: `database/Database/DatabaseLoader.cpp:39`, `worldserver/worldserver.conf.dist:91`, `bnetserver/bnetserver.conf.dist:233`.
   Rust target: `crates/wow-config/src/lib.rs`, `crates/wow-database/src/database.rs`.
-  Acceptance: unit/golden tests parse host, numeric port, username, password, database, and optional `ssl` from C++ default strings.
+  Acceptance: unit/golden tests parse host, port-or-socket, username, password, database, and optional `ssl` from C++ default strings and Unix socket examples.
 
-- [ ] **#NEXT.L0.CONFIG.001.c** Implement additional `.conf.d` overlay loading.
+- [x] **#NEXT.L0.CONFIG.001.c** Implement additional `.conf.d` overlay loading.
   C++ refs: `Configuration/Config.cpp:160`, `Configuration/Config.cpp:174`, `worldserver/Main.cpp:212`, `bnetserver/Main.cpp:129`.
   Rust target: `crates/wow-config/src/lib.rs`.
   Acceptance: tests cover recursive `.conf` loading, non-`.conf` ignore, override behavior, loaded-file reporting, and error reporting.
 
-- [ ] **#NEXT.L0.CONFIG.001.d** Implement `TC_*` env override parity for scalar keys.
+- [x] **#NEXT.L0.CONFIG.001.d** Implement `TC_*` env override parity for scalar keys.
   C++ refs: `Configuration/Config.cpp:125`, `Configuration/Config.cpp:200`, `Configuration/Config.cpp:232`.
   Rust target: `crates/wow-config/src/lib.rs`.
   Acceptance: tests cover dotted-key transform, override-after-directory-load order, and no invented non-`TC_*` namespace.
 
-- [ ] **#NEXT.L0.CONFIG.001.e** Switch `world-server` and `bnet-server` startup to canonical config consumption.
+- [x] **#NEXT.L0.CONFIG.001.e** Switch `world-server` and `bnet-server` startup to canonical config consumption.
   C++ refs: `worldserver/Main.cpp:202`, `bnetserver/Main.cpp:119`, `database/Database/DatabaseLoader.cpp:39`.
   Rust target: `crates/world-server/src/main.rs`, `crates/bnet-server/src/main.rs`.
   Acceptance: both binaries can be configured using C++-style lowercase filenames and semicolon DB settings without `*.Host`/`*.Port` subkeys.
@@ -60,6 +60,10 @@ These references must be open beside the Rust patch when implementation starts:
 ## Tests Required Before Code Is Accepted
 
 - `cargo test -p wow-config`
+- `cargo test -p wow-database`
+- `cargo test -p world-server world_config_resolution_prefers_lowercase_cpp_name`
+- `cargo test -p bnet-server bnet_config_resolution_prefers_lowercase_cpp_name`
+- `cargo check -p wow-database -p world-server -p bnet-server`
 - Unit tests in `wow-config` for quoted values, comments, case-insensitive lookup parity already present, semicolon DB info, `.conf.d` overlays, and `TC_*` env override.
 - Startup config-resolution tests for `world-server` and `bnet-server` using temp config dirs.
 - Golden tests using the C++ default DB strings from `worldserver.conf.dist` and `bnetserver.conf.dist`.

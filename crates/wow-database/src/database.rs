@@ -5,8 +5,8 @@ use crate::params::PreparedStatement;
 use crate::result::SqlResult;
 use crate::statements::StatementDef;
 use crate::transaction::{SqlTransaction, bind_param};
-use sqlx::mysql::MySqlPoolOptions;
 use sqlx::MySqlPool;
+use sqlx::mysql::MySqlPoolOptions;
 use std::marker::PhantomData;
 
 /// A type-safe database connection wrapping a [`MySqlPool`].
@@ -169,10 +169,67 @@ impl<S: StatementDef> std::fmt::Debug for Database<S> {
     }
 }
 
-/// Build a MySQL connection string from config key-value parts.
+/// Build a MySQL connection string from TrinityCore `*DatabaseInfo` parts.
 ///
-/// Reads `{prefix}DatabaseInfo` from the loaded configuration, which should
-/// contain a value like `"host;port;username;password;database"`.
-pub fn build_connection_string(host: &str, port: u16, user: &str, password: &str, database: &str) -> String {
-    format!("mysql://{user}:{password}@{host}:{port}/{database}")
+/// The second field is `port_or_socket` in C++, so numeric values become the
+/// URL port and non-numeric values are passed as a unix socket query parameter.
+pub fn build_connection_string(
+    host: &str,
+    port_or_socket: &str,
+    user: &str,
+    password: &str,
+    database: &str,
+) -> String {
+    if port_or_socket
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_digit())
+    {
+        return format!("mysql://{user}:{password}@{host}:{port_or_socket}/{database}");
+    }
+
+    format!(
+        "mysql://{user}:{password}@localhost/{database}?socket={}",
+        percent_encode_query(port_or_socket)
+    )
+}
+
+fn percent_encode_query(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                encoded.push(char::from(byte));
+            }
+            other => encoded.push_str(&format!("%{other:02X}")),
+        }
+    }
+    encoded
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_connection_string;
+
+    #[test]
+    fn build_connection_string_uses_numeric_port() {
+        assert_eq!(
+            build_connection_string("127.0.0.1", "3306", "trinity", "trinity", "auth"),
+            "mysql://trinity:trinity@127.0.0.1:3306/auth"
+        );
+    }
+
+    #[test]
+    fn build_connection_string_uses_socket_for_non_numeric_port_or_socket() {
+        assert_eq!(
+            build_connection_string(
+                ".",
+                "/var/run/mysqld/mysqld.sock",
+                "trinity",
+                "trinity",
+                "world",
+            ),
+            "mysql://trinity:trinity@localhost/world?socket=/var/run/mysqld/mysqld.sock"
+        );
+    }
 }

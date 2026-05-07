@@ -16,15 +16,24 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use tracing::info;
+use wow_config::{DatabaseInfo, LoadReport};
 use wow_core::{ObjectGuidGenerator, guid::HighGuid};
 use wow_database::{
-    CharStatements, CharacterDatabase, HotfixDatabase, LoginDatabase, LoginStatements, WorldDatabase,
-    build_connection_string,
+    CharStatements, CharacterDatabase, HotfixDatabase, LoginDatabase, LoginStatements,
+    WorldDatabase, build_connection_string,
 };
-use wow_network::{GroupRegistry, PendingInvites, PlayerRegistry, SessionResources};
 use wow_network::session_mgr::SessionManager;
 use wow_network::world_socket::{AccountInfo, AccountLookup};
+use wow_network::{GroupRegistry, PendingInvites, PlayerRegistry, SessionResources};
 use wow_world::{MapManager, SharedMapManager, WorldSession};
+
+const WORLD_CONFIG_CANDIDATES: &[&str] = &[
+    "worldserver.conf",
+    "worldserver.conf.dist",
+    "WorldServer.conf",
+    "WorldServer.conf.dist",
+];
+const WORLD_CONFIG_DIR: &str = "worldserver.conf.d";
 
 // ── Account lookup implementation ────────────────────────────────
 
@@ -68,7 +77,9 @@ impl AccountLookup for DbAccountLookup {
             // 13: bab ban expr          (is_banned_bnet)
             // 14: ab ban expr           (is_banned_account)
             // 15: r.id                  (recruiter)
-            let mut stmt = self.login_db.prepare(LoginStatements::SEL_ACCOUNT_INFO_BY_NAME);
+            let mut stmt = self
+                .login_db
+                .prepare(LoginStatements::SEL_ACCOUNT_INFO_BY_NAME);
             stmt.set_i32(0, i32::from(realm_id));
             stmt.set_string(1, &ticket);
 
@@ -88,16 +99,15 @@ impl AccountLookup for DbAccountLookup {
             let account_id: u32 = result.read(0);
             // session_key_bnet is varbinary(64) — read as raw bytes, then hex-encode
             let session_key_raw: Vec<u8> = result.try_read(1).unwrap_or_default();
-            let session_key_hex: String = session_key_raw
-                .iter()
-                .map(|b| format!("{b:02X}"))
-                .collect();
+            let session_key_hex: String =
+                session_key_raw.iter().map(|b| format!("{b:02X}")).collect();
             let last_ip: String = result.try_read(2).unwrap_or_default();
             let is_locked: u8 = result.try_read(3).unwrap_or(0);
             let lock_country: String = result.try_read(4).unwrap_or_default();
             let expansion: u8 = result.try_read(5).unwrap_or(2);
             let _mutetime: i64 = result.try_read(6).unwrap_or(0);
-            let locale_raw: String = result.try_read::<u8>(7)
+            let locale_raw: String = result
+                .try_read::<u8>(7)
                 .map(|v| v.to_string())
                 .unwrap_or_else(|| result.try_read::<String>(7).unwrap_or_default());
             let recruiter: u32 = result.try_read(8).unwrap_or(0);
@@ -140,7 +150,7 @@ impl AccountLookup for DbAccountLookup {
                 is_banned_bnet: is_banned_bnet != 0,
                 is_banned_account: is_banned_account != 0,
                 win64_auth_seed: self.win64_auth_seed,
-                client_address: None, // Set by accept loop after auth
+                client_address: None,            // Set by accept loop after auth
                 derived_session_key: Vec::new(), // Set by accept loop after auth
             })
         })
@@ -161,19 +171,21 @@ async fn main() -> Result<()> {
 
     info!("RustyCore World Server starting...");
 
-    // Load configuration
-    let _loaded = wow_config::load_config("WorldServer.conf")
-        .or_else(|_| wow_config::load_config("WorldServer.conf.dist"))
-        .context("Failed to load WorldServer.conf")?;
+    load_world_config()?;
 
     // Connect to login database (needed for session key validation)
-    let db_host = wow_config::get_string_default("LoginDatabaseInfo.Host", "127.0.0.1");
-    let db_port: u16 = wow_config::get_value("LoginDatabaseInfo.Port").unwrap_or(3306);
-    let db_user = wow_config::get_string_default("LoginDatabaseInfo.Username", "root");
-    let db_pass = wow_config::get_string_default("LoginDatabaseInfo.Password", "");
-    let db_name = wow_config::get_string_default("LoginDatabaseInfo.Database", "auth");
+    let login_info = wow_config::get_database_info_default(
+        "Login",
+        DatabaseInfo::new("127.0.0.1", 3306, "trinity", "trinity", "auth"),
+    );
 
-    let conn_str = build_connection_string(&db_host, db_port, &db_user, &db_pass, &db_name);
+    let conn_str = build_connection_string(
+        &login_info.host,
+        &login_info.port_or_socket,
+        &login_info.username,
+        &login_info.password,
+        &login_info.database,
+    );
     let login_db = LoginDatabase::open(&conn_str)
         .await
         .context("Failed to connect to login database")?;
@@ -181,15 +193,18 @@ async fn main() -> Result<()> {
     info!("Connected to login database");
 
     // Connect to character database
-    let char_host = wow_config::get_string_default("CharacterDatabaseInfo.Host", &db_host);
-    let char_port: u16 = wow_config::get_value("CharacterDatabaseInfo.Port").unwrap_or(db_port);
-    let char_user = wow_config::get_string_default("CharacterDatabaseInfo.Username", &db_user);
-    let char_pass = wow_config::get_string_default("CharacterDatabaseInfo.Password", &db_pass);
-    let char_db_name =
-        wow_config::get_string_default("CharacterDatabaseInfo.Database", "characters");
+    let char_info = wow_config::get_database_info_default(
+        "Character",
+        DatabaseInfo::new("127.0.0.1", 3306, "trinity", "trinity", "characters"),
+    );
 
-    let char_conn_str =
-        build_connection_string(&char_host, char_port, &char_user, &char_pass, &char_db_name);
+    let char_conn_str = build_connection_string(
+        &char_info.host,
+        &char_info.port_or_socket,
+        &char_info.username,
+        &char_info.password,
+        &char_info.database,
+    );
     let char_db = CharacterDatabase::open(&char_conn_str)
         .await
         .context("Failed to connect to character database")?;
@@ -197,15 +212,18 @@ async fn main() -> Result<()> {
     info!("Connected to character database");
 
     // Connect to world database
-    let world_host = wow_config::get_string_default("WorldDatabaseInfo.Host", &db_host);
-    let world_port: u16 = wow_config::get_value("WorldDatabaseInfo.Port").unwrap_or(db_port);
-    let world_user = wow_config::get_string_default("WorldDatabaseInfo.Username", &db_user);
-    let world_pass = wow_config::get_string_default("WorldDatabaseInfo.Password", &db_pass);
-    let world_db_name =
-        wow_config::get_string_default("WorldDatabaseInfo.Database", "world");
+    let world_info = wow_config::get_database_info_default(
+        "World",
+        DatabaseInfo::new("127.0.0.1", 3306, "trinity", "trinity", "world"),
+    );
 
-    let world_conn_str =
-        build_connection_string(&world_host, world_port, &world_user, &world_pass, &world_db_name);
+    let world_conn_str = build_connection_string(
+        &world_info.host,
+        &world_info.port_or_socket,
+        &world_info.username,
+        &world_info.password,
+        &world_info.database,
+    );
     let world_db = WorldDatabase::open(&world_conn_str)
         .await
         .context("Failed to connect to world database")?;
@@ -214,15 +232,18 @@ async fn main() -> Result<()> {
     let world_db = Arc::new(world_db);
 
     // Connect to hotfix database
-    let hotfix_host = wow_config::get_string_default("HotfixDatabaseInfo.Host", &db_host);
-    let hotfix_port: u16 = wow_config::get_value("HotfixDatabaseInfo.Port").unwrap_or(db_port);
-    let hotfix_user = wow_config::get_string_default("HotfixDatabaseInfo.Username", &db_user);
-    let hotfix_pass = wow_config::get_string_default("HotfixDatabaseInfo.Password", &db_pass);
-    let hotfix_db_name =
-        wow_config::get_string_default("HotfixDatabaseInfo.Database", "hotfixes");
+    let hotfix_info = wow_config::get_database_info_default(
+        "Hotfix",
+        DatabaseInfo::new("127.0.0.1", 3306, "trinity", "trinity", "hotfixes"),
+    );
 
-    let hotfix_conn_str =
-        build_connection_string(&hotfix_host, hotfix_port, &hotfix_user, &hotfix_pass, &hotfix_db_name);
+    let hotfix_conn_str = build_connection_string(
+        &hotfix_info.host,
+        &hotfix_info.port_or_socket,
+        &hotfix_info.username,
+        &hotfix_info.password,
+        &hotfix_info.database,
+    );
     let hotfix_db = HotfixDatabase::open(&hotfix_conn_str)
         .await
         .context("Failed to connect to hotfix database")?;
@@ -236,9 +257,17 @@ async fn main() -> Result<()> {
         let src = wow_config::get_string_default("Updates.SourcePath", ".");
 
         let auth_up = DbUpdater::new(
-            login_db.pool().clone(), &db_host, db_port, &db_user, &db_pass, &db_name,
+            login_db.pool().clone(),
+            &login_info.host,
+            &login_info.port_or_socket,
+            &login_info.username,
+            &login_info.password,
+            &login_info.database,
         );
-        if let Err(e) = auth_up.populate(&format!("{src}/sql/base/auth_database.sql")).await {
+        if let Err(e) = auth_up
+            .populate(&format!("{src}/sql/base/auth_database.sql"))
+            .await
+        {
             tracing::warn!("Auth populate skipped: {e}");
         }
         if let Err(e) = auth_up.update(&src).await {
@@ -246,9 +275,17 @@ async fn main() -> Result<()> {
         }
 
         let char_up = DbUpdater::new(
-            char_db.pool().clone(), &char_host, char_port, &char_user, &char_pass, &char_db_name,
+            char_db.pool().clone(),
+            &char_info.host,
+            &char_info.port_or_socket,
+            &char_info.username,
+            &char_info.password,
+            &char_info.database,
         );
-        if let Err(e) = char_up.populate(&format!("{src}/sql/base/characters_database.sql")).await {
+        if let Err(e) = char_up
+            .populate(&format!("{src}/sql/base/characters_database.sql"))
+            .await
+        {
             tracing::warn!("Characters populate skipped: {e}");
         }
         if let Err(e) = char_up.update(&src).await {
@@ -257,14 +294,24 @@ async fn main() -> Result<()> {
 
         // world + hotfixes: only update (base SQL is the full TDB, downloaded separately)
         let world_up = DbUpdater::new(
-            world_db.pool().clone(), &world_host, world_port, &world_user, &world_pass, &world_db_name,
+            world_db.pool().clone(),
+            &world_info.host,
+            &world_info.port_or_socket,
+            &world_info.username,
+            &world_info.password,
+            &world_info.database,
         );
         if let Err(e) = world_up.update(&src).await {
             tracing::warn!("World update error: {e}");
         }
 
         let hotfix_up = DbUpdater::new(
-            hotfix_db.pool().clone(), &hotfix_host, hotfix_port, &hotfix_user, &hotfix_pass, &hotfix_db_name,
+            hotfix_db.pool().clone(),
+            &hotfix_info.host,
+            &hotfix_info.port_or_socket,
+            &hotfix_info.username,
+            &hotfix_info.password,
+            &hotfix_info.database,
         );
         if let Err(e) = hotfix_up.update(&src).await {
             tracing::warn!("Hotfix update error: {e}");
@@ -301,7 +348,7 @@ async fn main() -> Result<()> {
     let locale = locale_id_to_name(&locale_raw);
     let item_store = Arc::new(
         wow_data::ItemStore::load(&data_dir, &locale)
-            .context("Failed to load Item.db2 — check DataDir and DBC.Locale config")?
+            .context("Failed to load Item.db2 — check DataDir and DBC.Locale config")?,
     );
     info!("Loaded {} items from Item.db2", item_store.len());
 
@@ -309,54 +356,63 @@ async fn main() -> Result<()> {
     let player_stats = Arc::new(
         wow_data::PlayerStatsStore::load(&world_db)
             .await
-            .context("Failed to load player_levelstats")?
+            .context("Failed to load player_levelstats")?,
     );
     info!("Loaded {} player level stat entries", player_stats.len());
 
     // Load item stat modifiers from ItemSparse.db2 (gear bonuses: STR, AGI, STA, etc.)
     let item_stats_store = Arc::new(
         wow_data::ItemStatsStore::load(&data_dir, &locale)
-            .context("Failed to load ItemSparse.db2 — check DataDir and DBC.Locale config")?
+            .context("Failed to load ItemSparse.db2 — check DataDir and DBC.Locale config")?,
     );
-    info!("Loaded {} items with stat modifiers from ItemSparse.db2", item_stats_store.len());
+    info!(
+        "Loaded {} items with stat modifiers from ItemSparse.db2",
+        item_stats_store.len()
+    );
 
     // Build hotfix blob cache — pre-loads raw DB2 record bytes for DBReply
-    let hotfix_blob_cache = Arc::new(
-        wow_data::build_hotfix_blob_cache(&data_dir, &locale)
-    );
+    let hotfix_blob_cache = Arc::new(wow_data::build_hotfix_blob_cache(&data_dir, &locale));
 
     // Diagnostic: check if known problem items exist in cache
     for item_id in [58256i32, 58274, 58257] {
         let has = hotfix_blob_cache.get(0x919BE54E, item_id); // ItemSparse table hash
-        info!("HotfixBlobCache check: ItemSparse record {} → {}", item_id,
-            if let Some(b) = has { format!("FOUND ({} bytes)", b.len()) } else { "NOT FOUND".into() }
+        info!(
+            "HotfixBlobCache check: ItemSparse record {} → {}",
+            item_id,
+            if let Some(b) = has {
+                format!("FOUND ({} bytes)", b.len())
+            } else {
+                "NOT FOUND".into()
+            }
         );
     }
 
     // Load SkillLineAbility.db2 + SkillRaceClassInfo.db2 for auto-learned spells
     let skill_store = Arc::new(
         wow_data::SkillStore::load(&data_dir, &locale)
-            .context("Failed to load SkillLineAbility/SkillRaceClassInfo DB2 files")?
+            .context("Failed to load SkillLineAbility/SkillRaceClassInfo DB2 files")?,
     );
 
     // Load spell metadata (cast time, cooldown, effects, etc.) — Phase 2
     let spell_store = Arc::new(
         wow_data::SpellStore::load(&hotfix_db)
             .await
-            .context("Failed to load SpellStore")?
+            .context("Failed to load SpellStore")?,
     );
     info!("Loaded {} spells from SpellStore", spell_store.len());
 
     // Load area trigger store (collision detection + teleportation)
     let area_trigger_store = Arc::new(
-        wow_data::load_area_triggers(&world_db).await
-            .context("Failed to load area triggers")?
+        wow_data::load_area_triggers(&world_db)
+            .await
+            .context("Failed to load area triggers")?,
     );
 
     // Load quest store (templates + objectives + NPC relations)
     let quest_store = Arc::new(
-        wow_data::quest::load_quests(&world_db).await
-            .context("Failed to load quest store")?
+        wow_data::quest::load_quests(&world_db)
+            .await
+            .context("Failed to load quest store")?,
     );
 
     // Load player_xp_for_level table
@@ -367,10 +423,14 @@ async fn main() -> Result<()> {
         if let Ok(result) = world_db.query(&stmt).await {
             let mut r = result;
             loop {
-                let lvl: u8  = r.try_read::<u8>(0).unwrap_or(0);
-                let xp: u32  = r.try_read::<u32>(1).unwrap_or(0);
-                if (lvl as usize) < table.len() { table[lvl as usize] = xp; }
-                if !r.next_row() { break; }
+                let lvl: u8 = r.try_read::<u8>(0).unwrap_or(0);
+                let xp: u32 = r.try_read::<u32>(1).unwrap_or(0);
+                if (lvl as usize) < table.len() {
+                    table[lvl as usize] = xp;
+                }
+                if !r.next_row() {
+                    break;
+                }
             }
         }
         Arc::new(table)
@@ -379,11 +439,10 @@ async fn main() -> Result<()> {
     // Load QuestXP.db2 for accurate XP rewards
     let dbc_path = format!("{}/dbc/{}", data_dir, locale);
     let quest_xp_store = Arc::new(
-        wow_data::quest_xp::QuestXpStore::load(&dbc_path)
-            .unwrap_or_else(|e| {
-                tracing::warn!("QuestXP.db2 not loaded ({e}), using fallback XP table");
-                wow_data::quest_xp::QuestXpStore::default()
-            })
+        wow_data::quest_xp::QuestXpStore::load(&dbc_path).unwrap_or_else(|e| {
+            tracing::warn!("QuestXP.db2 not loaded ({e}), using fallback XP table");
+            wow_data::quest_xp::QuestXpStore::default()
+        }),
     );
 
     // Get realm ID and load build-specific auth seed
@@ -456,8 +515,7 @@ async fn main() -> Result<()> {
     // Network configuration
     let bind_ip = wow_config::get_string_default("BindIP", "0.0.0.0");
     let world_port: u16 = wow_config::get_value("WorldServerPort").unwrap_or(8085);
-    let instance_port: u16 = wow_config::get_value("InstanceServerPort")
-        .unwrap_or(world_port + 1);
+    let instance_port: u16 = wow_config::get_value("InstanceServerPort").unwrap_or(world_port + 1);
 
     let realm_addr: SocketAddr = format!("{bind_ip}:{world_port}")
         .parse()
@@ -525,12 +583,27 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn load_world_config() -> Result<LoadReport> {
+    load_world_config_from(WORLD_CONFIG_CANDIDATES, WORLD_CONFIG_DIR)
+}
+
+fn load_world_config_from(config_candidates: &[&str], config_dir: &str) -> Result<LoadReport> {
+    let loaded_config = wow_config::load_config_with_fallbacks(config_candidates, config_dir)
+        .context("Failed to load worldserver.conf")?;
+
+    if loaded_config.candidate_index > 1 {
+        tracing::warn!(
+            config = %loaded_config.initial_file,
+            "Using legacy Rust config filename; prefer worldserver.conf"
+        );
+    }
+
+    Ok(loaded_config)
+}
+
 /// Load the realm's gamebuild from `realmlist` and the corresponding
 /// Win64AuthSeed from `build_info`. Both are in the login database.
-async fn load_realm_auth_seed(
-    login_db: &LoginDatabase,
-    realm_id: u16,
-) -> Result<(u32, [u8; 16])> {
+async fn load_realm_auth_seed(login_db: &LoginDatabase, realm_id: u16) -> Result<(u32, [u8; 16])> {
     // Query realmlist for the gamebuild
     let result = login_db
         .direct_query(&format!(
@@ -621,7 +694,7 @@ async fn create_session(
         account.security,
         active_expansion,
         account_expansion, // AccountExpansionLevel: raw from DB, like C#
-        54261, // build
+        54261,             // build
         session_key_raw,
         account.locale.clone(),
         pkt_rx,
@@ -814,5 +887,49 @@ fn locale_id_to_name(raw: &str) -> String {
         "10" => "ptBR".into(),
         "11" => "itIT".into(),
         other => other.into(), // already a name like "esES"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::load_world_config_from;
+    use std::env;
+    use std::fs;
+    use std::path::PathBuf;
+
+    #[test]
+    fn world_config_resolution_prefers_lowercase_cpp_name() {
+        let root = unique_temp_dir("world_config_resolution");
+        let lower = root.join("worldserver.conf");
+        let legacy = root.join("WorldServer.conf");
+
+        fs::write(&lower, "WorldServerPort = 8085\n").expect("write lower failed");
+        fs::write(&legacy, "WorldServerPort = 9000\n").expect("write legacy failed");
+
+        let report = load_world_config_from(
+            &[
+                lower.to_str().expect("utf8 path"),
+                legacy.to_str().expect("utf8 path"),
+            ],
+            root.join("worldserver.conf.d").to_str().expect("utf8 path"),
+        )
+        .expect("config should load");
+
+        assert_eq!(report.candidate_index, 0);
+        assert_eq!(wow_config::get_value::<u16>("WorldServerPort"), Some(8085));
+
+        fs::remove_dir_all(root).expect("cleanup failed");
+    }
+
+    fn unique_temp_dir(name: &str) -> PathBuf {
+        let mut path = env::temp_dir();
+        path.push(format!(
+            "rustycore_world_server_{name}_{}",
+            std::process::id()
+        ));
+
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).expect("temp dir failed");
+        path
     }
 }

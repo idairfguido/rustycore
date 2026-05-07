@@ -12,9 +12,18 @@ use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
+use wow_config::{DatabaseInfo, LoadReport};
 use wow_database::{LoginDatabase, LoginStatements, build_connection_string};
 
 use crate::state::AppState;
+
+const BNET_CONFIG_CANDIDATES: &[&str] = &[
+    "bnetserver.conf",
+    "bnetserver.conf.dist",
+    "BNetServer.conf",
+    "BNetServer.conf.dist",
+];
+const BNET_CONFIG_DIR: &str = "bnetserver.conf.d";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -28,19 +37,21 @@ async fn main() -> Result<()> {
 
     tracing::info!("RustyCore BNet Server starting...");
 
-    // Load configuration
-    let _loaded = wow_config::load_config("BNetServer.conf")
-        .or_else(|_| wow_config::load_config("BNetServer.conf.dist"))
-        .context("Failed to load BNetServer.conf")?;
+    load_bnet_config()?;
 
     // Database connection
-    let db_host = wow_config::get_string_default("LoginDatabaseInfo.Host", "127.0.0.1");
-    let db_port: u16 = wow_config::get_value("LoginDatabaseInfo.Port").unwrap_or(3306);
-    let db_user = wow_config::get_string_default("LoginDatabaseInfo.Username", "root");
-    let db_pass = wow_config::get_string_default("LoginDatabaseInfo.Password", "");
-    let db_name = wow_config::get_string_default("LoginDatabaseInfo.Database", "auth");
+    let login_info = wow_config::get_database_info_default(
+        "Login",
+        DatabaseInfo::new("127.0.0.1", 3306, "trinity", "trinity", "auth"),
+    );
 
-    let conn_str = build_connection_string(&db_host, db_port, &db_user, &db_pass, &db_name);
+    let conn_str = build_connection_string(
+        &login_info.host,
+        &login_info.port_or_socket,
+        &login_info.username,
+        &login_info.password,
+        &login_info.database,
+    );
     let login_db = LoginDatabase::open(&conn_str)
         .await
         .context("Failed to connect to login database")?;
@@ -53,9 +64,17 @@ async fn main() -> Result<()> {
         use wow_database::updater::DbUpdater;
         let src = wow_config::get_string_default("Updates.SourcePath", ".");
         let auth_up = DbUpdater::new(
-            login_db.pool().clone(), &db_host, db_port, &db_user, &db_pass, &db_name,
+            login_db.pool().clone(),
+            &login_info.host,
+            &login_info.port_or_socket,
+            &login_info.username,
+            &login_info.password,
+            &login_info.database,
         );
-        if let Err(e) = auth_up.populate(&format!("{src}/sql/base/auth_database.sql")).await {
+        if let Err(e) = auth_up
+            .populate(&format!("{src}/sql/base/auth_database.sql"))
+            .await
+        {
             tracing::warn!("Auth populate skipped: {e}");
         }
         if let Err(e) = auth_up.update(&src).await {
@@ -66,8 +85,8 @@ async fn main() -> Result<()> {
 
     // Load TLS certificates — separate configs for REST (HTTPS) and RPC (binary)
     let cert_file = wow_config::get_string_default("CertificatesFile", "./BNetServer.pfx");
-    let (rest_tls_acceptor, rpc_tls_acceptor) = load_tls_acceptors(&cert_file)
-        .context("Failed to load TLS certificates")?;
+    let (rest_tls_acceptor, rpc_tls_acceptor) =
+        load_tls_acceptors(&cert_file).context("Failed to load TLS certificates")?;
     tracing::info!("TLS certificates loaded");
 
     // Build shared state
@@ -163,6 +182,24 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn load_bnet_config() -> Result<LoadReport> {
+    load_bnet_config_from(BNET_CONFIG_CANDIDATES, BNET_CONFIG_DIR)
+}
+
+fn load_bnet_config_from(config_candidates: &[&str], config_dir: &str) -> Result<LoadReport> {
+    let loaded_config = wow_config::load_config_with_fallbacks(config_candidates, config_dir)
+        .context("Failed to load bnetserver.conf")?;
+
+    if loaded_config.candidate_index > 1 {
+        tracing::warn!(
+            config = %loaded_config.initial_file,
+            "Using legacy Rust config filename; prefer bnetserver.conf"
+        );
+    }
+
+    Ok(loaded_config)
+}
+
 /// Load TLS certificates and create two acceptors:
 /// - REST acceptor: with ALPN for HTTP/1.1 (HTTPS)
 /// - RPC acceptor: without ALPN (raw binary protocol)
@@ -194,14 +231,17 @@ fn load_tls_acceptors(_cert_config: &str) -> Result<(TlsAcceptor, TlsAcceptor)> 
     }
 
     // Load private key
-    let key_file = std::fs::File::open(key_path)
-        .with_context(|| format!("Failed to open {key_path}"))?;
+    let key_file =
+        std::fs::File::open(key_path).with_context(|| format!("Failed to open {key_path}"))?;
     let mut key_reader = BufReader::new(key_file);
     let key: PrivateKeyDer<'static> = rustls_pemfile::private_key(&mut key_reader)
         .context("Failed to parse private key")?
         .ok_or_else(|| anyhow::anyhow!("No private key found in {key_path}"))?;
 
-    tracing::info!("Loaded {} certificate(s) from {cert_file_path}", certs.len());
+    tracing::info!(
+        "Loaded {} certificate(s) from {cert_file_path}",
+        certs.len()
+    );
 
     // REST config — TLS 1.2 only, NO ALPN (matching C# SslStream which doesn't set ALPN)
     // (WoW 3.4.3 client expects TLS 1.2; matching C# SslProtocols.Tls12)
@@ -232,14 +272,62 @@ fn start_ban_expiry_timer(state: Arc<AppState>, interval_secs: u64) {
             if let Err(e) = state.login_db.execute(&stmt).await {
                 tracing::warn!("Failed to delete expired IP bans: {e}");
             }
-            let stmt = state.login_db.prepare(LoginStatements::UPD_EXPIRED_ACCOUNT_BANS);
+            let stmt = state
+                .login_db
+                .prepare(LoginStatements::UPD_EXPIRED_ACCOUNT_BANS);
             if let Err(e) = state.login_db.execute(&stmt).await {
                 tracing::warn!("Failed to update expired account bans: {e}");
             }
-            let stmt = state.login_db.prepare(LoginStatements::DEL_BNET_EXPIRED_ACCOUNT_BANNED);
+            let stmt = state
+                .login_db
+                .prepare(LoginStatements::DEL_BNET_EXPIRED_ACCOUNT_BANNED);
             if let Err(e) = state.login_db.execute(&stmt).await {
                 tracing::warn!("Failed to delete expired BNet account bans: {e}");
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::load_bnet_config_from;
+    use std::env;
+    use std::fs;
+    use std::path::PathBuf;
+
+    #[test]
+    fn bnet_config_resolution_prefers_lowercase_cpp_name() {
+        let root = unique_temp_dir("bnet_config_resolution");
+        let lower = root.join("bnetserver.conf");
+        let legacy = root.join("BNetServer.conf");
+
+        fs::write(&lower, "BattlenetPort = 1119\n").expect("write lower failed");
+        fs::write(&legacy, "BattlenetPort = 2222\n").expect("write legacy failed");
+
+        let report = load_bnet_config_from(
+            &[
+                lower.to_str().expect("utf8 path"),
+                legacy.to_str().expect("utf8 path"),
+            ],
+            root.join("bnetserver.conf.d").to_str().expect("utf8 path"),
+        )
+        .expect("config should load");
+
+        assert_eq!(report.candidate_index, 0);
+        assert_eq!(wow_config::get_value::<u16>("BattlenetPort"), Some(1119));
+
+        fs::remove_dir_all(root).expect("cleanup failed");
+    }
+
+    fn unique_temp_dir(name: &str) -> PathBuf {
+        let mut path = env::temp_dir();
+        path.push(format!(
+            "rustycore_bnet_server_{name}_{}",
+            std::process::id()
+        ));
+
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).expect("temp dir failed");
+        path
+    }
 }
