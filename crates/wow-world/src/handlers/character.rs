@@ -16,7 +16,9 @@ use wow_core::guid::HighGuid;
 use wow_core::{ObjectGuid, Position};
 use wow_crypto::rsa_sign::rsa_sign_connect_to;
 use wow_database::{CharStatements, LoginStatements, SqlTransaction, WorldDatabase, WorldStatements};
-use wow_entities::{INVENTORY_SLOT_BAG_0, MAX_BAG_SIZE, NULL_BAG, NULL_SLOT};
+use wow_entities::{
+    INVENTORY_SLOT_BAG_0, MAX_BAG_SIZE, NULL_BAG, NULL_SLOT, is_equipment_pos, is_inventory_pos,
+};
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::packets::auth::{
     ConnectTo, ConnectToAddress, ConnectToFailed, ConnectToKey, ConnectToSerial, ResumeComms,
@@ -609,6 +611,22 @@ fn vendor_buy_extended_cost_block_result(
     }
 
     Some(InventoryResult::VendorMissingTurnins)
+}
+
+fn vendor_buy_direct_store_block_result(
+    bag: u8,
+    slot: u8,
+    _quantity: u32,
+) -> Option<InventoryResult> {
+    if (bag == NULL_BAG && slot == NULL_SLOT) || is_inventory_pos(bag, slot) {
+        return None;
+    }
+
+    if is_equipment_pos(bag, slot) {
+        return Some(InventoryResult::NotEquippable);
+    }
+
+    Some(InventoryResult::WrongSlot)
 }
 
 fn vendor_buy_direct_inventory_destination(
@@ -3450,6 +3468,14 @@ impl WorldSession {
             self.send_equip_error(result, None, None, 0, 0);
             return;
         }
+        if let Some(result) = vendor_buy_direct_store_block_result(
+            store_bag,
+            store_slot,
+            quantity,
+        ) {
+            self.send_equip_error(result, None, None, 0, 0);
+            return;
+        }
 
         let (quantity, buy_price): (u32, u64) = vendor_buy_quantity_and_price(
             vendor_item.buy_price,
@@ -4882,6 +4908,26 @@ mod tests {
         assert_eq!(
             vendor_buy_extended_cost_block_result(12, 5, 10),
             Some(InventoryResult::VendorMissingTurnins)
+        );
+    }
+
+    #[test]
+    fn vendor_buy_direct_store_preflight_matches_cpp_store_branch() {
+        assert_eq!(
+            vendor_buy_direct_store_block_result(NULL_BAG, NULL_SLOT, 1),
+            None
+        );
+        assert_eq!(
+            vendor_buy_direct_store_block_result(INVENTORY_SLOT_BAG_0, 35, 1),
+            None
+        );
+        assert_eq!(
+            vendor_buy_direct_store_block_result(NULL_BAG, 35, 1),
+            Some(InventoryResult::WrongSlot)
+        );
+        assert_eq!(
+            vendor_buy_direct_store_block_result(INVENTORY_SLOT_BAG_0, 0, 1),
+            Some(InventoryResult::NotEquippable)
         );
     }
 
