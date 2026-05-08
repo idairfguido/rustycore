@@ -13,8 +13,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use anyhow::{Context, Result, ensure};
-use tracing::{debug, info};
+use anyhow::{Context, Result};
+use tracing::info;
+use wow_constants::ItemFlags;
 
 use crate::wdc4::Wdc4Reader;
 
@@ -155,6 +156,7 @@ impl ItemStatEntry {
 /// In-memory store of item stat modifiers from ItemSparse.db2.
 pub struct ItemStatsStore {
     stats: HashMap<u32, ItemStatEntry>,
+    flags: HashMap<u32, [u32; 4]>,
 }
 
 /// Known field byte sizes for ItemSparse.db2 (from field_meta).
@@ -250,6 +252,7 @@ impl ItemStatsStore {
 
         let layout = field_layout();
         let mut stats = HashMap::new();
+        let mut flags = HashMap::with_capacity(reader.total_count());
         let mut loaded = 0u32;
 
         for (id, idx) in reader.iter_records() {
@@ -264,11 +267,15 @@ impl ItemStatsStore {
             let mut pos = 0usize;
 
             // Field offsets for the stat fields we care about
+            let mut flags_offset: usize = 0;
             let mut resistances_offset: usize = 0;
             let mut stat_amount_offset: usize = 0;
             let mut stat_type_offset: usize = 0;
 
             for (fi, &(byte_size, is_string)) in layout.iter().enumerate() {
+                if fi == 23 {
+                    flags_offset = pos;
+                }
                 if fi == 51 {
                     resistances_offset = pos;
                 }
@@ -295,6 +302,20 @@ impl ItemStatsStore {
             // Extract stat data from the computed offsets
             if stat_amount_offset + 20 > record.len() || stat_type_offset + 10 > record.len() {
                 continue;
+            }
+
+            if flags_offset + 16 <= record.len() {
+                let mut raw_flags = [0u32; 4];
+                for (flag_index, flag) in raw_flags.iter_mut().enumerate() {
+                    let offset = flags_offset + flag_index * 4;
+                    *flag = u32::from_le_bytes([
+                        record[offset],
+                        record[offset + 1],
+                        record[offset + 2],
+                        record[offset + 3],
+                    ]);
+                }
+                flags.insert(id, raw_flags);
             }
 
             // Extract physical armor from Resistances[0] (field 51, first i16)
@@ -333,12 +354,23 @@ impl ItemStatsStore {
         }
 
         info!("Loaded {} items with stat modifiers from {}", loaded, path.display());
-        Ok(Self { stats })
+        Ok(Self { stats, flags })
     }
 
     /// Look up stat modifiers for an item.
     pub fn get(&self, item_id: u32) -> Option<&ItemStatEntry> {
         self.stats.get(&item_id)
+    }
+
+    /// Return C++ `ItemSparseEntry::Flags[0..4]` for an item.
+    pub fn raw_flags(&self, item_id: u32) -> Option<[u32; 4]> {
+        self.flags.get(&item_id).copied()
+    }
+
+    /// Return C++ `ItemSparseEntry::Flags[0]` as `ItemFlags`.
+    pub fn item_flags(&self, item_id: u32) -> Option<ItemFlags> {
+        self.raw_flags(item_id)
+            .map(|flags| ItemFlags::from_bits_retain(u64::from(flags[0])))
     }
 
     /// Number of items with stats.
@@ -388,6 +420,30 @@ mod tests {
         };
         assert_eq!(entry.attack_power_bonus(), 120);
         assert_eq!(entry.health_bonus(), 0);
+    }
+
+    #[test]
+    fn item_sparse_flags_are_exposed_like_cpp_extended_data() {
+        let store = ItemStatsStore {
+            stats: HashMap::new(),
+            flags: HashMap::from([(
+                1,
+                [
+                    ItemFlags::IS_BOUND_TO_ACCOUNT.bits() as u32,
+                    0x20000,
+                    0x400,
+                    0,
+                ],
+            )]),
+        };
+
+        assert_eq!(store.raw_flags(1), Some([0x0800_0000, 0x20000, 0x400, 0]));
+        assert!(
+            store
+                .item_flags(1)
+                .is_some_and(|flags| flags.contains(ItemFlags::IS_BOUND_TO_ACCOUNT))
+        );
+        assert_eq!(store.item_flags(2), None);
     }
 
     #[test]
