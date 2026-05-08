@@ -1956,6 +1956,9 @@ impl WorldSession {
         // Persist played time to DB before marking offline
         self.save_played_time().await;
 
+        // Trinity clears buyback slots before SaveToDB; persisted buyback items must not survive logout.
+        self.clear_buyback_on_logout().await;
+
         // Mark character offline in DB
         self.mark_character_offline().await;
 
@@ -2050,6 +2053,51 @@ impl WorldSession {
         if let Err(e) = char_db.execute(&stmt).await {
             warn!("Failed to mark character offline: {e}");
         }
+    }
+
+    async fn clear_buyback_on_logout(&mut self) {
+        let guid = match self.player_guid() {
+            Some(g) => g,
+            None => return,
+        };
+        if self.buyback_items.is_empty() {
+            self.buyback_price = [0; BUYBACK_SLOT_COUNT];
+            self.buyback_timestamp = [0; BUYBACK_SLOT_COUNT];
+            self.current_buyback_slot = BUYBACK_SLOT_START;
+            return;
+        }
+
+        let char_db = match self.char_db() {
+            Some(db) => Arc::clone(db),
+            None => return,
+        };
+
+        let mut tx = SqlTransaction::new();
+        for item in self.buyback_items.values() {
+            let mut del_inv = char_db.prepare(CharStatements::DEL_CHAR_INVENTORY_ITEM);
+            del_inv.set_u64(0, guid.counter() as u64);
+            del_inv.set_u64(1, item.db_guid);
+            tx.append(del_inv);
+
+            let mut del_item = char_db.prepare(CharStatements::DEL_ITEM_INSTANCE);
+            del_item.set_u64(0, item.db_guid);
+            tx.append(del_item);
+        }
+
+        if let Err(e) = char_db.commit_transaction(tx).await {
+            warn!("Failed to clear buyback items on logout for guid {}: {e}", guid.counter());
+            return;
+        }
+
+        let removed_guids: Vec<_> = self.buyback_items.values().map(|item| item.guid).collect();
+        for item_guid in removed_guids {
+            self.remove_inventory_item_object(item_guid);
+        }
+        self.buyback_items.clear();
+        self.buyback_price = [0; BUYBACK_SLOT_COUNT];
+        self.buyback_timestamp = [0; BUYBACK_SLOT_COUNT];
+        self.current_buyback_slot = BUYBACK_SLOT_START;
+        self.sync_object_accessor_player();
     }
 
     /// Handle ConnectToFailed — client couldn't connect to instance port.
