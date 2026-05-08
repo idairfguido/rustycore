@@ -19,10 +19,12 @@
 //!
 //! Reference: C# Game/Handlers/SpellHandler.cs, Game/Spells/Spell.cs
 
+use std::sync::Arc;
+
 use rand::Rng;
 use tracing::{debug, info, warn};
 
-use wow_database::WorldStatements;
+use wow_database::{CharStatements, SqlTransaction, WorldStatements};
 use wow_constants::{ClientOpcodes, InventoryResult, ItemFlags};
 use wow_entities::INVENTORY_SLOT_BAG_0;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
@@ -330,17 +332,27 @@ impl WorldSession {
         }
 
         if !self.loot_table.contains_key(&item.guid) {
-            let (min_money, max_money) = self
-                .load_item_template_addon_money_loot_like_cpp(item.entry_id)
-                .await;
-            let coins =
-                generate_money_loot_like_cpp(min_money, max_money, &mut rand::thread_rng());
+            let stored_money = self.load_stored_item_money_like_cpp(item.guid).await;
+            let coins = match stored_money {
+                Some(money) => money,
+                None => {
+                    let (min_money, max_money) = self
+                        .load_item_template_addon_money_loot_like_cpp(item.entry_id)
+                        .await;
+                    generate_money_loot_like_cpp(min_money, max_money, &mut rand::thread_rng())
+                }
+            };
             self.loot_table.insert(item.guid, CreatureLoot {
                 loot_guid: item.guid,
                 coins,
                 items: Vec::new(),
                 looted_by_player: false,
             });
+
+            if stored_money.is_none() && coins > 0 {
+                self.save_new_stored_item_money_like_cpp(item.guid, coins)
+                    .await;
+            }
         }
 
         if let Some(item_object) = self.inventory_item_objects.get_mut(&item.guid) {
@@ -404,6 +416,52 @@ impl WorldSession {
                 );
                 (0, 0)
             }
+        }
+    }
+
+    async fn load_stored_item_money_like_cpp(&self, item_guid: wow_core::ObjectGuid) -> Option<u32> {
+        let char_db = self.char_db().map(Arc::clone)?;
+
+        let mut stmt = char_db.prepare(CharStatements::SEL_ITEMCONTAINER_MONEY);
+        stmt.set_u64(0, item_guid.counter() as u64);
+
+        match char_db.query(&stmt).await {
+            Ok(result) if !result.is_empty() => result.try_read::<u32>(0),
+            Ok(_) => None,
+            Err(err) => {
+                warn!(
+                    item_guid = item_guid.counter(),
+                    error = %err,
+                    "failed to load stored item loot money"
+                );
+                None
+            }
+        }
+    }
+
+    async fn save_new_stored_item_money_like_cpp(&self, item_guid: wow_core::ObjectGuid, money: u32) {
+        let Some(char_db) = self.char_db().map(Arc::clone) else {
+            return;
+        };
+
+        let mut tx = SqlTransaction::new();
+
+        let mut del_money = char_db.prepare(CharStatements::DEL_ITEMCONTAINER_MONEY);
+        del_money.set_u64(0, item_guid.counter() as u64);
+        tx.append(del_money);
+
+        let mut ins_money = char_db.prepare(CharStatements::INS_ITEMCONTAINER_MONEY);
+        ins_money.set_u64(0, item_guid.counter() as u64);
+        ins_money.set_u32(1, money);
+        tx.append(ins_money);
+
+        if let Err(err) = char_db.commit_transaction(tx).await {
+            warn!(
+                item_guid = item_guid.counter(),
+                money,
+                error = %err,
+                "failed to save stored item loot money"
+            );
         }
     }
 
