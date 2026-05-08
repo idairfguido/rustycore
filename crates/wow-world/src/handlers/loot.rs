@@ -128,6 +128,7 @@ impl WorldSession {
             acquired: true,
             ae_looting: false,
         };
+        self.set_active_loot_guid(req.unit);
         self.send_packet(&response);
     }
 
@@ -190,6 +191,7 @@ impl WorldSession {
 
         // Remove loot entry from memory.
         self.loot_table.remove(&req.unit);
+        self.clear_active_loot_guid_if(req.unit);
 
         let player_guid = match self.player_guid { Some(g) => g, None => return };
 

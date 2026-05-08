@@ -347,6 +347,8 @@ pub struct WorldSession {
     // ── Loot ──────────────────────────────────────────────────────
     /// Active loot windows keyed by creature GUID.
     pub(crate) loot_table: std::collections::HashMap<wow_core::ObjectGuid, wow_packet::packets::loot::CreatureLoot>,
+    /// Mirrors C++ PlayerData::LootTargetGUID for guards that compare active loot by GUID.
+    pub(crate) active_loot_guid: wow_core::ObjectGuid,
 
     // ── Dynamic visibility tracking ───────────────────────────────
     /// GUIDs of all creatures currently visible to this client.
@@ -610,6 +612,7 @@ impl WorldSession {
             last_spell_cast_time: None,
             last_spell_cast_time_per_spell: HashMap::new(),
             loot_table: std::collections::HashMap::new(),
+            active_loot_guid: ObjectGuid::EMPTY,
             visible_creatures: std::collections::HashSet::new(),
             visible_gameobjects: std::collections::HashSet::new(),
             last_visibility_pos: None,
@@ -1208,6 +1211,20 @@ impl WorldSession {
         self.inventory_item_objects
             .values()
             .any(|item| item.container_guid() == item_guid)
+    }
+
+    pub(crate) fn set_active_loot_guid(&mut self, guid: ObjectGuid) {
+        self.active_loot_guid = guid;
+    }
+
+    pub(crate) fn clear_active_loot_guid_if(&mut self, guid: ObjectGuid) {
+        if self.active_loot_guid == guid {
+            self.active_loot_guid = ObjectGuid::EMPTY;
+        }
+    }
+
+    pub(crate) fn is_active_loot_guid(&self, guid: ObjectGuid) -> bool {
+        !guid.is_empty() && self.active_loot_guid == guid
     }
 
     pub fn plan_store_new_direct_inventory_item(
@@ -4809,6 +4826,23 @@ mod tests {
             ),
             InventoryResult::DestroyNonemptyBag
         );
+    }
+
+    #[test]
+    fn active_loot_guid_tracks_cpp_loot_target_guid_comparisons() {
+        let (mut session, _, _) = make_session();
+        let loot_guid = ObjectGuid::create_item(1, 700);
+        let other_guid = ObjectGuid::create_item(1, 701);
+
+        assert!(!session.is_active_loot_guid(loot_guid));
+        session.set_active_loot_guid(loot_guid);
+        assert!(session.is_active_loot_guid(loot_guid));
+        assert!(!session.is_active_loot_guid(other_guid));
+
+        session.clear_active_loot_guid_if(other_guid);
+        assert!(session.is_active_loot_guid(loot_guid));
+        session.clear_active_loot_guid_if(loot_guid);
+        assert!(!session.is_active_loot_guid(loot_guid));
     }
 
     #[test]

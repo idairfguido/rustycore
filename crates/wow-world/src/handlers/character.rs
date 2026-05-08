@@ -2001,6 +2001,7 @@ impl WorldSession {
         self.current_buyback_slot = BUYBACK_SLOT_START;
         self.inventory_item_objects.clear();
         self.player_currencies.clear();
+        self.set_active_loot_guid(ObjectGuid::EMPTY);
 
         // ── Restore realm socket as primary ──────────────────────────
         // After ConnectTo, send_tx/packet_rx point to the instance socket.
@@ -5374,7 +5375,8 @@ impl WorldSession {
             );
             return;
         }
-        if item_is_currently_looted_like_cpp(&runtime_item) {
+        if self.is_active_loot_guid(item.guid) || item_is_currently_looted_like_cpp(&runtime_item)
+        {
             self.send_sell_error(
                 SellResult::CantSellItem,
                 Some(sell.vendor_guid),
@@ -5651,7 +5653,9 @@ impl WorldSession {
             return;
         };
 
-        if item_is_currently_looted_like_cpp(&refund_item) {
+        if self.is_active_loot_guid(refund.item_guid)
+            || item_is_currently_looted_like_cpp(&refund_item)
+        {
             return;
         }
         if !refund_item.is_refundable() {
@@ -7151,6 +7155,7 @@ impl WorldSession {
         // Clear creature/loot state for fresh login.
         self.creatures.clear();
         self.loot_table.clear();
+        self.set_active_loot_guid(ObjectGuid::EMPTY);
         self.combat_target = None;
         self.in_combat = false;
 
