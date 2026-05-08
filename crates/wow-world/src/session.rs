@@ -33,7 +33,8 @@ use wow_database::{
 use wow_entities::{
     ApplyEnchantmentEffectRef, ApplyEnchantmentRandomSuffixRef, ApplyEnchantmentTemplateRef,
     CanStoreItemArgs, INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0, Item, ItemCreateInfo,
-    ItemPosCount, ItemSlotRef, ItemStorageRef, ItemStorageTemplate, NULL_BAG, NULL_SLOT,
+    ItemPosCount, ItemSlotRef, ItemStorageRef, ItemStorageTemplate, BUYBACK_SLOT_COUNT,
+    BUYBACK_SLOT_END, BUYBACK_SLOT_START, NULL_BAG, NULL_SLOT,
     ObjectAccessor, PLAYER_SLOT_END, Player, PlayerEnchantTimeUpdate, PlayerInventoryStorage,
     PlayerItemTimeUpdate, SendNewItemDelivery, SendNewItemDisplayText, SendNewItemPlan,
     WorldObject, MAX_ITEM_SPELLS,
@@ -249,6 +250,12 @@ pub struct WorldSession {
 
     /// In-memory inventory: slot → (item ObjectGuid, entry_id, db_guid).
     pub(crate) inventory_items: HashMap<u8, InventoryItem>,
+
+    /// In-memory buyback slots, kept separate from normal inventory like C++ `GetItemByGuid`.
+    pub(crate) buyback_items: HashMap<u8, InventoryItem>,
+    pub(crate) buyback_price: [u32; BUYBACK_SLOT_COUNT],
+    pub(crate) buyback_timestamp: [i64; BUYBACK_SLOT_COUNT],
+    pub(crate) current_buyback_slot: u8,
 
     /// C++ `_currencyStorage`, keyed by CurrencyTypes.db2 ID.
     pub(crate) player_currencies: HashMap<u32, PlayerCurrency>,
@@ -571,6 +578,10 @@ impl WorldSession {
             pending_creature_spawn: None,
             respawn_queue: Vec::new(),
             inventory_items: HashMap::new(),
+            buyback_items: HashMap::new(),
+            buyback_price: [0; BUYBACK_SLOT_COUNT],
+            buyback_timestamp: [0; BUYBACK_SLOT_COUNT],
+            current_buyback_slot: BUYBACK_SLOT_START,
             player_currencies: HashMap::new(),
             inventory_item_objects: HashMap::new(),
             current_map_id: 0,
@@ -1111,6 +1122,41 @@ impl WorldSession {
         }
     }
 
+    pub(crate) fn is_buyback_slot(slot: u8) -> bool {
+        (BUYBACK_SLOT_START..BUYBACK_SLOT_END).contains(&slot)
+    }
+
+    pub(crate) fn select_buyback_slot_cpp(&self) -> u8 {
+        let mut slot = self.current_buyback_slot;
+        if self.buyback_items.contains_key(&slot) {
+            let mut oldest_slot = BUYBACK_SLOT_START;
+            let mut oldest_time = self.buyback_timestamp[0];
+
+            for candidate in BUYBACK_SLOT_START + 1..BUYBACK_SLOT_END {
+                let candidate_index = (candidate - BUYBACK_SLOT_START) as usize;
+                if !self.buyback_items.contains_key(&candidate) {
+                    oldest_slot = candidate;
+                    break;
+                }
+                let candidate_time = self.buyback_timestamp[candidate_index];
+                if oldest_time > candidate_time {
+                    oldest_time = candidate_time;
+                    oldest_slot = candidate;
+                }
+            }
+
+            slot = oldest_slot;
+        }
+
+        slot
+    }
+
+    pub(crate) fn advance_buyback_slot_cpp(&mut self) {
+        if self.current_buyback_slot < BUYBACK_SLOT_END - 1 {
+            self.current_buyback_slot += 1;
+        }
+    }
+
     fn direct_inventory_player_snapshot(&self) -> Option<Player> {
         let player_guid = self.player_guid?;
         let mut player = Player::new(None, false);
@@ -1122,7 +1168,7 @@ impl WorldSession {
         player.set_inventory_slot_count(INVENTORY_DEFAULT_SIZE);
 
         for (&slot, item) in &self.inventory_items {
-            if (slot as usize) < PLAYER_SLOT_END {
+            if (slot as usize) < PLAYER_SLOT_END && !Self::is_buyback_slot(slot) {
                 let _ = player.store_top_level_item(slot, item.guid);
             }
         }
@@ -1148,7 +1194,10 @@ impl WorldSession {
         let player = self.direct_inventory_player_snapshot()?;
         let proto = self.item_storage_template(entry_id);
         let mut template_cache = HashMap::new();
-        for item in self.inventory_items.values() {
+        for (&slot, item) in &self.inventory_items {
+            if Self::is_buyback_slot(slot) {
+                continue;
+            }
             if let Some(template) = self.item_storage_template(item.entry_id) {
                 template_cache.insert(item.entry_id, template);
             }
@@ -1157,6 +1206,9 @@ impl WorldSession {
         let mut slot_items = Vec::new();
         let mut stored_items = Vec::new();
         for (&slot, inventory_item) in &self.inventory_items {
+            if Self::is_buyback_slot(slot) {
+                continue;
+            }
             let Some(item) = self.inventory_item_objects.get(&inventory_item.guid) else {
                 continue;
             };

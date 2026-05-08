@@ -22,8 +22,9 @@ use wow_database::{
     WorldStatements,
 };
 use wow_entities::{
-    INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_START, MAX_BAG_SIZE,
-    NULL_BAG, NULL_SLOT, is_equipment_pos, is_inventory_pos,
+    BUYBACK_SLOT_COUNT, BUYBACK_SLOT_START, INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0,
+    INVENTORY_SLOT_ITEM_START, MAX_BAG_SIZE, NULL_BAG, NULL_SLOT, is_equipment_pos,
+    is_inventory_pos,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::packets::auth::{
@@ -992,6 +993,37 @@ fn destroy_item_count_action(current_count: u32, requested_count: u32) -> Destro
     DestroyItemCountAction::FullStack
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SellItemAmountAction {
+    Invalid,
+    FullStack { amount: u32 },
+    PartialStack { amount: u32, remaining: u32 },
+}
+
+fn sell_item_amount_action(current_count: u32, requested_amount: i32) -> SellItemAmountAction {
+    let amount = if requested_amount == 0 {
+        current_count
+    } else {
+        let Ok(amount) = u32::try_from(requested_amount) else {
+            return SellItemAmountAction::Invalid;
+        };
+        amount
+    };
+
+    if amount == 0 || amount > current_count {
+        return SellItemAmountAction::Invalid;
+    }
+
+    if amount < current_count {
+        SellItemAmountAction::PartialStack {
+            amount,
+            remaining: current_count - amount,
+        }
+    } else {
+        SellItemAmountAction::FullStack { amount }
+    }
+}
+
 fn append_item_refund_clear_statements(
     char_db: &CharacterDatabase,
     tx: &mut SqlTransaction,
@@ -1931,6 +1963,10 @@ impl WorldSession {
 
         // Clear inventory state
         self.inventory_items.clear();
+        self.buyback_items.clear();
+        self.buyback_price = [0; BUYBACK_SLOT_COUNT];
+        self.buyback_timestamp = [0; BUYBACK_SLOT_COUNT];
+        self.current_buyback_slot = BUYBACK_SLOT_START;
         self.inventory_item_objects.clear();
         self.player_currencies.clear();
 
@@ -2177,12 +2213,17 @@ impl WorldSession {
                                         None
                                     }
                                 });
-                            self.inventory_items.insert(slot, InventoryItem {
+                            let inventory_item = InventoryItem {
                                 guid: item_guid,
                                 entry_id: item_entry,
                                 db_guid: item_db_guid,
                                 inventory_type,
-                            });
+                            };
+                            if WorldSession::is_buyback_slot(slot) {
+                                self.buyback_items.insert(slot, inventory_item);
+                            } else {
+                                self.inventory_items.insert(slot, inventory_item);
+                            }
                             let mut item_object = self.make_inventory_item_object(
                                 item_guid,
                                 item_entry,
@@ -5009,6 +5050,31 @@ impl WorldSession {
             None => return,
         };
 
+        let Some(runtime_item) = self.inventory_item_objects.get(&item.guid).cloned() else {
+            self.send_sell_error(
+                SellResult::CantFindItem,
+                Some(sell.vendor_guid),
+                sell.item_guid,
+            );
+            return;
+        };
+        let sell_amount = match sell_item_amount_action(runtime_item.count(), sell.amount) {
+            SellItemAmountAction::Invalid => {
+                self.send_sell_error(
+                    SellResult::CantSellItem,
+                    Some(sell.vendor_guid),
+                    sell.item_guid,
+                );
+                return;
+            }
+            action => action,
+        };
+        let sold_count = match sell_amount {
+            SellItemAmountAction::FullStack { amount }
+            | SellItemAmountAction::PartialStack { amount, .. } => amount,
+            SellItemAmountAction::Invalid => unreachable!(),
+        };
+
         // ── Get sell price from item_sparse directly ──
         let sell_price: u64 = {
             let world_db = match self.world_db() {
@@ -5022,49 +5088,195 @@ impl WorldSession {
                 _ => 0,
             }
         };
-
-        // ── DB: delete character_inventory + item_instance ──
-        let mut del_inv = char_db.prepare(CharStatements::DEL_CHAR_INVENTORY_ITEM);
-        del_inv.set_u64(0, player_guid.counter() as u64);
-        del_inv.set_u64(1, item.db_guid);
-        if let Err(e) = char_db.execute(&del_inv).await {
-            warn!("SellItem: delete character_inventory failed: {e}");
+        if sell_price == 0 {
+            self.send_sell_error(
+                SellResult::CantSellItem,
+                Some(sell.vendor_guid),
+                sell.item_guid,
+            );
+            return;
         }
 
-        let mut del_item = char_db.prepare(CharStatements::DEL_ITEM_INSTANCE);
-        del_item.set_u64(0, item.db_guid);
-        if let Err(e) = char_db.execute(&del_item).await {
-            warn!("SellItem: delete item_instance failed: {e}");
+        let money = sell_price.saturating_mul(u64::from(sold_count));
+        let new_gold = self.player_gold.saturating_add(money);
+        let buyback_slot = self.select_buyback_slot_cpp();
+        let buyback_index = (buyback_slot - BUYBACK_SLOT_START) as usize;
+        let old_buyback = self.buyback_items.get(&buyback_slot).cloned();
+        let buyback_price = sell_price
+            .saturating_mul(u64::from(sold_count))
+            .min(u64::from(u32::MAX)) as u32;
+        let buyback_timestamp = self
+            .login_time
+            .map(|login_time| login_time.elapsed().as_secs())
+            .unwrap_or(0)
+            .saturating_add(30 * 3600)
+            .min(u64::from(u32::MAX)) as i64;
+
+        let mut tx = SqlTransaction::new();
+        if let Some(old_buyback) = &old_buyback {
+            let mut del_old_inv = char_db.prepare(CharStatements::DEL_CHAR_INVENTORY_ITEM);
+            del_old_inv.set_u64(0, player_guid.counter() as u64);
+            del_old_inv.set_u64(1, old_buyback.db_guid);
+            tx.append(del_old_inv);
+
+            let mut del_old_item = char_db.prepare(CharStatements::DEL_ITEM_INSTANCE);
+            del_old_item.set_u64(0, old_buyback.db_guid);
+            tx.append(del_old_item);
+        }
+
+        let mut new_buyback_stack = None;
+        match sell_amount {
+            SellItemAmountAction::FullStack { .. } => {
+                let mut upd_slot = char_db.prepare(CharStatements::UPD_CHAR_INVENTORY_SLOT);
+                upd_slot.set_u8(0, buyback_slot);
+                upd_slot.set_u64(1, player_guid.counter() as u64);
+                upd_slot.set_u64(2, item.db_guid);
+                tx.append(upd_slot);
+            }
+            SellItemAmountAction::PartialStack { remaining, amount } => {
+                let mut upd_count = char_db.prepare(CharStatements::UPD_ITEM_INSTANCE_COUNT);
+                upd_count.set_u32(0, remaining);
+                upd_count.set_u64(1, item.db_guid);
+                tx.append(upd_count);
+
+                let max_guid_stmt = char_db.prepare(CharStatements::SEL_MAX_ITEM_GUID);
+                let new_db_guid = match char_db.query(&max_guid_stmt).await {
+                    Ok(r) => r.try_read::<u64>(0).unwrap_or(0) + 1,
+                    Err(_) => 1,
+                };
+                let new_item_guid = ObjectGuid::create_item(self.realm_id(), new_db_guid as i64);
+
+                let mut ins_item = char_db.prepare(CharStatements::INS_ITEM_INSTANCE);
+                ins_item.set_u64(0, new_db_guid);
+                ins_item.set_u32(1, item.entry_id);
+                ins_item.set_u64(2, player_guid.counter() as u64);
+                ins_item.set_u32(3, amount);
+                ins_item.set_u32(4, runtime_item.data().durability);
+                tx.append(ins_item);
+
+                let mut ins_inv = char_db.prepare(CharStatements::INS_CHAR_INVENTORY);
+                ins_inv.set_u64(0, player_guid.counter() as u64);
+                ins_inv.set_u8(1, buyback_slot);
+                ins_inv.set_u64(2, new_db_guid);
+                tx.append(ins_inv);
+
+                new_buyback_stack = Some((new_db_guid, new_item_guid, amount, remaining));
+            }
+            SellItemAmountAction::Invalid => unreachable!(),
         }
 
         // ── Add gold + save to DB ──
-        self.player_gold = self.player_gold.saturating_add(sell_price);
         let mut upd_money = char_db.prepare(CharStatements::UPD_CHAR_MONEY);
-        upd_money.set_u64(0, self.player_gold);
+        upd_money.set_u64(0, new_gold);
         upd_money.set_u64(1, player_guid.counter() as u64);
-        if let Err(e) = char_db.execute(&upd_money).await {
-            warn!("SellItem: update money failed: {e}");
+        tx.append(upd_money);
+
+        if let Err(e) = char_db.commit_transaction(tx).await {
+            warn!("SellItem: transaction failed: {e}");
+            self.send_sell_error(
+                SellResult::CantSellItem,
+                Some(sell.vendor_guid),
+                sell.item_guid,
+            );
+            return;
         }
 
-        // ── Remove from in-memory inventory ──
-        self.inventory_items.remove(&slot);
-        self.remove_inventory_item_object(item.guid);
+        self.player_gold = new_gold;
+        if let Some(old_buyback) = old_buyback {
+            self.buyback_items.remove(&buyback_slot);
+            self.remove_inventory_item_object(old_buyback.guid);
+        }
+        self.buyback_price[buyback_index] = buyback_price;
+        self.buyback_timestamp[buyback_index] = buyback_timestamp;
+        self.advance_buyback_slot_cpp();
+
+        let mut created_buyback_item = None;
+        let mut stack_update = None;
+        if let Some((new_db_guid, new_item_guid, amount, remaining)) = new_buyback_stack {
+            if let Some(item_object) = self.inventory_item_objects.get_mut(&item.guid) {
+                item_object.set_count(remaining);
+            }
+            stack_update = Some((item.guid, remaining));
+            self.buyback_items.insert(
+                buyback_slot,
+                InventoryItem {
+                    guid: new_item_guid,
+                    entry_id: item.entry_id,
+                    db_guid: new_db_guid,
+                    inventory_type: item.inventory_type,
+                },
+            );
+            let context = <ItemContext as num_traits::FromPrimitive>::from_i32(
+                runtime_item.data().context,
+            )
+            .unwrap_or(ItemContext::None);
+            let item_object = self.make_inventory_item_object(
+                new_item_guid,
+                item.entry_id,
+                player_guid,
+                amount,
+                runtime_item.data().durability,
+                context,
+                buyback_slot,
+            );
+            self.insert_inventory_item_object(item_object);
+            created_buyback_item = Some((new_item_guid, amount, runtime_item.data().durability));
+        } else {
+            self.inventory_items.remove(&slot);
+            self.buyback_items.insert(
+                buyback_slot,
+                InventoryItem {
+                    guid: item.guid,
+                    entry_id: item.entry_id,
+                    db_guid: item.db_guid,
+                    inventory_type: item.inventory_type,
+                },
+            );
+            self.set_inventory_item_object_slot(item.guid, buyback_slot);
+        }
         self.sync_object_accessor_player();
 
         info!(
-            "SellItem: player {:?} sold item {} from slot {} for {} copper (total: {})",
-            player_guid, item.entry_id, slot, sell_price, self.player_gold
+            "SellItem: player {:?} sold {}x item {} from slot {} for {} copper (total: {})",
+            player_guid, sold_count, item.entry_id, slot, money, self.player_gold
         );
 
-        // ── Send SellResponse success ──
-        self.send_packet(&SellResponse::success(sell.vendor_guid, sell.item_guid));
+        if let Some((item_guid, stack_count, durability)) = created_buyback_item {
+            self.send_packet(&UpdateObject::create_items(
+                vec![ItemCreateData {
+                    item_guid,
+                    entry_id: item.entry_id as i32,
+                    owner_guid: player_guid,
+                    contained_in: player_guid,
+                    stack_count,
+                    durability,
+                    max_durability: self.item_template_max_durability(item.entry_id).max(durability),
+                }],
+                map_id,
+            ));
+        }
+        if let Some((item_guid, new_count)) = stack_update {
+            self.send_packet(&UpdateObject::item_stack_count_update(
+                item_guid, map_id, new_count,
+            ));
+        }
 
-        // ── Send VALUES update: clear inv slot + coinage ──
-        self.send_packet(&UpdateObject::player_money_update(
+        let mut inv_slot_changes = Vec::new();
+        if matches!(sell_amount, SellItemAmountAction::FullStack { .. }) {
+            inv_slot_changes.push((slot, ObjectGuid::EMPTY));
+        }
+        let buyback_guid = self
+            .buyback_items
+            .get(&buyback_slot)
+            .map(|item| item.guid)
+            .unwrap_or(ObjectGuid::EMPTY);
+        inv_slot_changes.push((buyback_slot, buyback_guid));
+        self.send_packet(&UpdateObject::player_values_buyback_update(
             player_guid,
             map_id,
-            self.player_gold,
-            Some((slot, ObjectGuid::EMPTY)),
+            inv_slot_changes,
+            vec![(buyback_slot, buyback_price, buyback_timestamp)],
+            Some(self.player_gold),
         ));
     }
 
@@ -7222,6 +7434,27 @@ mod tests {
             destroy_item_count_action(5, 2),
             DestroyItemCountAction::PartialStack { new_count: 3 }
         );
+    }
+
+    #[test]
+    fn sell_item_amount_action_matches_cpp_amount_branch() {
+        assert_eq!(
+            sell_item_amount_action(5, 0),
+            SellItemAmountAction::FullStack { amount: 5 }
+        );
+        assert_eq!(
+            sell_item_amount_action(5, 5),
+            SellItemAmountAction::FullStack { amount: 5 }
+        );
+        assert_eq!(
+            sell_item_amount_action(5, 2),
+            SellItemAmountAction::PartialStack {
+                amount: 2,
+                remaining: 3,
+            }
+        );
+        assert_eq!(sell_item_amount_action(5, 6), SellItemAmountAction::Invalid);
+        assert_eq!(sell_item_amount_action(5, -1), SellItemAmountAction::Invalid);
     }
 
     #[test]

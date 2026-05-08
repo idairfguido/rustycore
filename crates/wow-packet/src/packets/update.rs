@@ -1448,6 +1448,8 @@ pub enum UpdateBlock {
         guid: ObjectGuid,
         /// Changed InvSlots: (slot_index 0-140, new ObjectGuid or EMPTY).
         inv_slot_changes: Vec<(u8, ObjectGuid)>,
+        /// Changed BuybackPrice/BuybackTimestamp rows: (buyback slot 94-105, price, timestamp).
+        buyback_changes: Vec<(u8, u32, i64)>,
         /// Changed VisibleItems in PlayerData: (slot 0-18, item_id, appearance_mod, visual).
         visible_item_changes: Vec<(u8, i32, u16, u16)>,
         /// Changed VirtualItems in UnitData: (index 0-2 for MH/OH/Ranged, item_id, app, visual).
@@ -1653,10 +1655,36 @@ impl UpdateObject {
             blocks: vec![UpdateBlock::PlayerValuesUpdate {
                 guid,
                 inv_slot_changes,
+                buyback_changes: Vec::new(),
                 visible_item_changes,
                 virtual_item_changes,
                 stat_changes: None,
                 coinage_change: None,
+            }],
+        }
+    }
+
+    /// Create a player VALUES update for changed inventory and buyback fields.
+    pub fn player_values_buyback_update(
+        guid: ObjectGuid,
+        map_id: u16,
+        inv_slot_changes: Vec<(u8, ObjectGuid)>,
+        buyback_changes: Vec<(u8, u32, i64)>,
+        coinage: Option<u64>,
+    ) -> Self {
+        Self {
+            map_id,
+            num_updates: 1,
+            destroy_guids: Vec::new(),
+            out_of_range_guids: Vec::new(),
+            blocks: vec![UpdateBlock::PlayerValuesUpdate {
+                guid,
+                inv_slot_changes,
+                buyback_changes,
+                visible_item_changes: Vec::new(),
+                virtual_item_changes: Vec::new(),
+                stat_changes: None,
+                coinage_change: coinage,
             }],
         }
     }
@@ -1678,6 +1706,7 @@ impl UpdateObject {
             blocks: vec![UpdateBlock::PlayerValuesUpdate {
                 guid,
                 inv_slot_changes: inv_slot_change.map(|c| vec![c]).unwrap_or_default(),
+                buyback_changes: Vec::new(),
                 visible_item_changes: Vec::new(),
                 virtual_item_changes: Vec::new(),
                 stat_changes: None,
@@ -1700,6 +1729,7 @@ impl UpdateObject {
             blocks: vec![UpdateBlock::PlayerValuesUpdate {
                 guid,
                 inv_slot_changes: Vec::new(),
+                buyback_changes: Vec::new(),
                 visible_item_changes: Vec::new(),
                 virtual_item_changes: Vec::new(),
                 stat_changes: Some(changes),
@@ -1853,6 +1883,7 @@ impl ServerPacket for UpdateObject {
                 UpdateBlock::PlayerValuesUpdate {
                     guid,
                     inv_slot_changes,
+                    buyback_changes,
                     visible_item_changes,
                     virtual_item_changes,
                     stat_changes,
@@ -1862,6 +1893,7 @@ impl ServerPacket for UpdateObject {
                         &mut blocks_buf,
                         guid,
                         inv_slot_changes,
+                        buyback_changes,
                         visible_item_changes,
                         virtual_item_changes,
                         stat_changes.as_ref(),
@@ -2329,6 +2361,7 @@ fn write_player_values_update_block(
     buf: &mut WorldPacket,
     guid: &ObjectGuid,
     inv_slot_changes: &[(u8, ObjectGuid)],
+    buyback_changes: &[(u8, u32, i64)],
     visible_item_changes: &[(u8, i32, u16, u16)],
     virtual_item_changes: &[(u8, i32, u16, u16)],
     stat_changes: Option<&PlayerStatChanges>,
@@ -2353,7 +2386,10 @@ fn write_player_values_update_block(
     let has_unit = !virtual_item_changes.is_empty() || stat_changes.is_some();
     let has_player = !visible_item_changes.is_empty();
     let has_active_player =
-        !inv_slot_changes.is_empty() || stat_changes.is_some() || coinage_change.is_some();
+        !inv_slot_changes.is_empty()
+            || !buyback_changes.is_empty()
+            || stat_changes.is_some()
+            || coinage_change.is_some();
 
     let mut type_mask: u32 = 0;
     if has_unit { type_mask |= 1 << 5; }           // TypeId::Unit = 5
@@ -2371,7 +2407,7 @@ fn write_player_values_update_block(
     }
     if has_active_player {
         write_active_player_data_values_update(
-            &mut val_buf, inv_slot_changes, stat_changes, coinage_change,
+            &mut val_buf, inv_slot_changes, buyback_changes, stat_changes, coinage_change,
         );
     }
 
@@ -2632,6 +2668,7 @@ fn write_player_data_values_update(
 fn write_active_player_data_values_update(
     buf: &mut WorldPacket,
     inv_slot_changes: &[(u8, ObjectGuid)],
+    buyback_changes: &[(u8, u32, i64)],
     stat_changes: Option<&PlayerStatChanges>,
     coinage_change: Option<u64>,
 ) {
@@ -2652,6 +2689,24 @@ fn write_active_player_data_values_update(
             let bit_in_block = bit % 32;
             if block_idx < 48 {
                 blocks[block_idx] |= 1 << bit_in_block;
+            }
+        }
+    }
+
+    // BuybackPrice[12]: parent bit 549, price bits 550-561, timestamp bits 562-573.
+    if !buyback_changes.is_empty() {
+        blocks[17] |= 1 << 5;
+        for &(slot, _, _) in buyback_changes {
+            if !(94..106).contains(&slot) {
+                continue;
+            }
+            let index = u32::from(slot - 94);
+            for bit in [550 + index, 562 + index] {
+                let block_idx = (bit / 32) as usize;
+                let bit_in_block = bit % 32;
+                if block_idx < 48 {
+                    blocks[block_idx] |= 1 << bit_in_block;
+                }
             }
         }
     }
@@ -2772,6 +2827,13 @@ fn write_active_player_data_values_update(
             }
             // ModDamageDoneNeg[i] bits 284-290: NOT set → skip
             // ModDamageDonePercent[i] bits 291-297: NOT set → skip
+        }
+    }
+
+    for slot in 94..106u8 {
+        if let Some(&(_, price, timestamp)) = buyback_changes.iter().find(|&&(s, _, _)| s == slot) {
+            buf.write_uint32(price);
+            buf.write_int64(timestamp);
         }
     }
 
@@ -3032,6 +3094,25 @@ mod tests {
         assert_eq!(i64::from_le_bytes(bytes[16..24].try_into().unwrap()), 7);
         assert_eq!(i64::from_le_bytes(bytes[24..32].try_into().unwrap()), 11);
         assert_eq!(bytes.len(), 32);
+    }
+
+    #[test]
+    fn buyback_values_update_interleaves_price_and_timestamp_like_cpp() {
+        let mut values = WorldPacket::new_empty();
+        write_active_player_data_values_update(
+            &mut values,
+            &[],
+            &[(94, 123, 456), (95, 789, 101112)],
+            None,
+            None,
+        );
+
+        let bytes = values.into_data();
+        let tail = &bytes[bytes.len() - 24..];
+        assert_eq!(u32::from_le_bytes(tail[0..4].try_into().unwrap()), 123);
+        assert_eq!(i64::from_le_bytes(tail[4..12].try_into().unwrap()), 456);
+        assert_eq!(u32::from_le_bytes(tail[12..16].try_into().unwrap()), 789);
+        assert_eq!(i64::from_le_bytes(tail[16..24].try_into().unwrap()), 101112);
     }
 
     #[test]
