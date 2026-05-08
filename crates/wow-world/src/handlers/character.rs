@@ -3992,7 +3992,7 @@ impl WorldSession {
                 self.item_extended_cost_store().map(|store| store.as_ref()),
                 self.currency_types_store().map(|store| store.as_ref()),
                 |currency_id, amount| self.has_currency(currency_id, amount),
-                false,
+                true,
                 vendor_item.extended_cost,
                 vendor_item.max_count,
                 quantity,
@@ -4004,6 +4004,85 @@ impl WorldSession {
                     self.send_buy_error(result, Some(buy.vendor_guid), buy.item_id as u32);
                 }
                 Some(VendorExtendedCostBlock::Silent) | None => {}
+            }
+
+            let extended_cost_currency_costs = vendor_buy_extended_cost_currency_costs(
+                self.item_extended_cost_store().map(|store| store.as_ref()),
+                vendor_item.extended_cost,
+                vendor_item.max_count,
+                quantity,
+            );
+            let char_db = match self.char_db() {
+                Some(db) => Arc::clone(db),
+                None => return,
+            };
+            let currency_snapshot = self.player_currencies.clone();
+            let currency_gain = match self.add_currency_vendor(buy.item_id as u32, quantity) {
+                Ok(delta) => delta,
+                Err(()) => {
+                    self.player_currencies = currency_snapshot;
+                    self.send_equip_error(InventoryResult::VendorMissingTurnins, None, None, 0, 0);
+                    return;
+                }
+            };
+            for &(currency_id, amount) in &extended_cost_currency_costs {
+                if i32::try_from(amount).is_err() || !self.remove_currency(currency_id, amount) {
+                    self.player_currencies = currency_snapshot;
+                    self.send_equip_error(
+                        InventoryResult::VendorMissingTurnins,
+                        None,
+                        None,
+                        0,
+                        0,
+                    );
+                    return;
+                }
+            }
+
+            let mut tx = SqlTransaction::new();
+            self.append_player_currency_save_statements(&mut tx, player_guid.counter() as u64);
+            if let Err(e) = char_db.commit_transaction(tx).await {
+                self.player_currencies = currency_snapshot;
+                warn!("BuyItem: currency vendor transaction failed: {e}");
+                self.send_buy_error(
+                    BuyResult::CantFindItem,
+                    Some(buy.vendor_guid),
+                    buy.item_id as u32,
+                );
+                return;
+            }
+
+            if let Some(delta) = currency_gain {
+                let (Some(quantity), Some(amount)) = (
+                    i32::try_from(delta.quantity).ok(),
+                    i32::try_from(delta.amount).ok(),
+                ) else {
+                    return;
+                };
+                let mut packet =
+                    SetCurrency::vendor_gain(delta.currency_id as i32, quantity, amount);
+                packet.weekly_quantity =
+                    delta.weekly_quantity.and_then(|value| i32::try_from(value).ok());
+                packet.max_quantity =
+                    delta.max_quantity.and_then(|value| i32::try_from(value).ok());
+                packet.total_earned =
+                    delta.total_earned.and_then(|value| i32::try_from(value).ok());
+                packet.suppress_chat_log = delta.suppress_chat_log;
+                self.send_packet(&packet);
+            }
+            for &(currency_id, amount) in &extended_cost_currency_costs {
+                let Some(quantity) = i32::try_from(self.player_currency_quantity(currency_id)).ok()
+                else {
+                    continue;
+                };
+                let Some(amount) = i32::try_from(amount).ok() else {
+                    continue;
+                };
+                self.send_packet(&SetCurrency::vendor_loss(
+                    currency_id as i32,
+                    quantity,
+                    amount,
+                ));
             }
             return;
         }

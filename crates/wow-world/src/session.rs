@@ -18,9 +18,11 @@ use wow_constants::{
     ItemClass, ItemContext, ItemEnchantmentType, ItemFlags, ItemFlags2, SellResult, TypeId,
     TypeMask,
 };
+use wow_constants::item::{CurrencyTypes, CurrencyTypesFlags};
+use wow_constants::unit::Team;
 use wow_core::{ObjectGuid, ObjectGuidGenerator};
 use wow_data::{
-    AreaTriggerStore, CurrencyTypesStore, HotfixBlobCache, ItemAppearanceStore,
+    AreaTriggerStore, CurrencyTypesEntry, CurrencyTypesStore, HotfixBlobCache, ItemAppearanceStore,
     ItemExtendedCostStore, ItemModifiedAppearanceStore, ItemRandomSuffixStore, ItemStatsStore,
     ItemStore, PlayerStatsStore, SkillStore, SpellItemEnchantmentStore, SpellStore,
 };
@@ -415,6 +417,36 @@ pub(crate) struct PlayerCurrency {
     pub flags: u8,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PlayerCurrencyDelta {
+    pub currency_id: u32,
+    pub quantity: u32,
+    pub amount: u32,
+    pub weekly_quantity: Option<u32>,
+    pub max_quantity: Option<u32>,
+    pub total_earned: Option<u32>,
+    pub suppress_chat_log: bool,
+}
+
+fn player_team_for_race_cpp(race: u8) -> Team {
+    match race {
+        2 | 5 | 6 | 8 | 9 | 10 | 26 | 27 | 28 | 31 | 35 | 36 | 70 => Team::Horde,
+        _ => Team::Alliance,
+    }
+}
+
+fn currency_max_quantity_cpp(entry: &CurrencyTypesEntry, currency: &PlayerCurrency) -> u32 {
+    if !entry.has_max_quantity(false, false) {
+        return 0;
+    }
+
+    let mut max_quantity = entry.max_qty;
+    if entry.flags.contains(CurrencyTypesFlags::DYNAMIC_MAXIMUM) {
+        max_quantity = max_quantity.saturating_add(currency.increased_cap_quantity);
+    }
+    max_quantity
+}
+
 /// An aura applied to the player.
 #[derive(Debug, Clone)]
 pub struct AuraApplication {
@@ -675,6 +707,94 @@ impl WorldSession {
     /// C++ `Player::HasCurrency`.
     pub(crate) fn has_currency(&self, currency_id: u32, amount: u32) -> bool {
         self.player_currency_quantity(currency_id) >= amount
+    }
+
+    /// C++ `Player::AddCurrency(..., CurrencyGainSource::Vendor)` without aura gain bonuses.
+    pub(crate) fn add_currency_vendor(
+        &mut self,
+        currency_id: u32,
+        amount: u32,
+    ) -> Result<Option<PlayerCurrencyDelta>, ()> {
+        if amount == 0 {
+            return Ok(None);
+        }
+
+        let Some(entry) = self
+            .currency_types_store
+            .as_ref()
+            .and_then(|store| store.get(currency_id))
+            .copied()
+        else {
+            return Err(());
+        };
+
+        let player_team = player_team_for_race_cpp(self.player_race);
+        if (entry.is_alliance() && player_team != Team::Alliance)
+            || (entry.is_horde() && player_team != Team::Horde)
+        {
+            return Err(());
+        }
+
+        if entry.award_condition_id != 0
+            || entry.faction_id != 0
+            || currency_id == CurrencyTypes::Azerite as u32
+        {
+            return Err(());
+        }
+
+        let currency = self
+            .player_currencies
+            .entry(currency_id)
+            .or_insert(PlayerCurrency {
+                state: PlayerCurrencyState::New,
+                quantity: 0,
+                weekly_quantity: 0,
+                tracked_quantity: 0,
+                increased_cap_quantity: 0,
+                earned_quantity: 0,
+                flags: 0,
+            });
+
+        let weekly_cap = entry.max_earnable_per_week;
+        let mut applied = amount;
+        if weekly_cap != 0 && currency.weekly_quantity.saturating_add(applied) > weekly_cap {
+            applied = weekly_cap.saturating_sub(currency.weekly_quantity);
+        }
+
+        let max_quantity = currency_max_quantity_cpp(&entry, currency);
+        if max_quantity != 0 && currency.quantity.saturating_add(applied) > max_quantity {
+            applied = max_quantity.saturating_sub(currency.quantity);
+        }
+
+        if applied == 0 {
+            return Ok(None);
+        }
+
+        if currency.state != PlayerCurrencyState::New {
+            currency.state = PlayerCurrencyState::Changed;
+        }
+        currency.quantity = currency.quantity.saturating_add(applied);
+        if weekly_cap != 0 {
+            currency.weekly_quantity = currency.weekly_quantity.saturating_add(applied);
+        }
+        if entry.is_tracking_quantity() {
+            currency.tracked_quantity = currency.tracked_quantity.saturating_add(applied);
+        }
+        if entry.has_total_earned() {
+            currency.earned_quantity = currency.earned_quantity.saturating_add(applied);
+        }
+
+        let scaler = entry.scaler().max(1) as u32;
+        Ok(Some(PlayerCurrencyDelta {
+            currency_id,
+            quantity: currency.quantity,
+            amount: applied,
+            weekly_quantity: ((currency.weekly_quantity / scaler) > 0)
+                .then_some(currency.weekly_quantity),
+            max_quantity: (max_quantity != 0).then_some(max_quantity),
+            total_earned: entry.has_total_earned().then_some(currency.earned_quantity),
+            suppress_chat_log: entry.is_suppressing_chat_log(false),
+        }))
     }
 
     /// C++ `Player::RemoveCurrency` underflow guard for vendor costs.
@@ -3971,6 +4091,54 @@ mod tests {
             flags: wow_constants::CurrencyTypesFlags::empty(),
             flags_b: wow_constants::CurrencyTypesFlagsB::empty(),
         }
+    }
+
+    #[test]
+    fn player_currency_vendor_add_caps_and_marks_state_like_cpp() {
+        let (mut session, _, _) = make_session();
+        session.player_race = 1;
+        session.set_currency_types_store(Arc::new(wow_data::CurrencyTypesStore::from_entries([
+            wow_data::CurrencyTypesEntry {
+                max_qty: 150,
+                max_earnable_per_week: 120,
+                flags: wow_constants::CurrencyTypesFlags::TRACK_QUANTITY,
+                flags_b: wow_constants::CurrencyTypesFlagsB::USE_TOTAL_EARNED_FOR_EARNED,
+                ..currency_entry(395)
+            },
+            currency_entry(396),
+        ])));
+        session.player_currencies.insert(
+            395,
+            PlayerCurrency {
+                state: PlayerCurrencyState::Unchanged,
+                quantity: 90,
+                weekly_quantity: 95,
+                tracked_quantity: 4,
+                increased_cap_quantity: 0,
+                earned_quantity: 7,
+                flags: 0,
+            },
+        );
+
+        let delta = session.add_currency_vendor(395, 70).unwrap().unwrap();
+        assert_eq!(delta.currency_id, 395);
+        assert_eq!(delta.amount, 25);
+        assert_eq!(delta.quantity, 115);
+        assert_eq!(delta.weekly_quantity, Some(120));
+        assert_eq!(delta.max_quantity, Some(150));
+        assert_eq!(delta.total_earned, Some(32));
+        assert_eq!(session.player_currency_quantity(395), 115);
+        assert_eq!(
+            session.player_currencies.get(&395).map(|currency| currency.state),
+            Some(PlayerCurrencyState::Changed)
+        );
+
+        let delta = session.add_currency_vendor(396, 3).unwrap().unwrap();
+        assert_eq!(delta.quantity, 3);
+        assert_eq!(
+            session.player_currencies.get(&396).map(|currency| currency.state),
+            Some(PlayerCurrencyState::New)
+        );
     }
 
     #[test]
