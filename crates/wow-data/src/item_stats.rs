@@ -61,6 +61,36 @@ pub struct ItemStatEntry {
     pub armor: i32,
 }
 
+/// C++ `ItemSparseEntry` fields needed to build entity storage templates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemSparseTemplateEntry {
+    pub flags: [u32; 4],
+    pub bag_family: u32,
+    pub stackable: i32,
+    pub max_count: i32,
+    pub sell_price: u32,
+    pub max_durability: u32,
+    pub limit_category: u16,
+    pub bonding: u8,
+    pub container_slots: u8,
+    pub inventory_type: i8,
+}
+
+impl ItemSparseTemplateEntry {
+    /// C++ `ItemTemplate::GetMaxStackSize`.
+    pub fn max_stack_size(&self) -> u32 {
+        if self.stackable == i32::MAX || self.stackable <= 0 {
+            0x7FFF_FFFE
+        } else {
+            self.stackable as u32
+        }
+    }
+
+    pub fn item_flags(&self) -> ItemFlags {
+        ItemFlags::from_bits_retain(u64::from(self.flags[0]))
+    }
+}
+
 impl ItemStatEntry {
     /// Sum base stat bonuses: [STR, AGI, STA, INT, SPI].
     pub fn base_stat_bonuses(&self) -> [i32; 5] {
@@ -157,6 +187,7 @@ impl ItemStatEntry {
 pub struct ItemStatsStore {
     stats: HashMap<u32, ItemStatEntry>,
     flags: HashMap<u32, [u32; 4]>,
+    sparse_templates: HashMap<u32, ItemSparseTemplateEntry>,
 }
 
 /// Known field byte sizes for ItemSparse.db2 (from field_meta).
@@ -247,6 +278,22 @@ impl ItemStatsStore {
         Self {
             stats: stats.into_iter().collect(),
             flags: flags.into_iter().collect(),
+            sparse_templates: HashMap::new(),
+        }
+    }
+
+    pub fn from_sparse_templates(
+        sparse_templates: impl IntoIterator<Item = (u32, ItemSparseTemplateEntry)>,
+    ) -> Self {
+        let sparse_templates: HashMap<_, _> = sparse_templates.into_iter().collect();
+        let flags = sparse_templates
+            .iter()
+            .map(|(&id, template)| (id, template.flags))
+            .collect();
+        Self {
+            stats: HashMap::new(),
+            flags,
+            sparse_templates,
         }
     }
 
@@ -263,6 +310,7 @@ impl ItemStatsStore {
         let layout = field_layout();
         let mut stats = HashMap::new();
         let mut flags = HashMap::with_capacity(reader.total_count());
+        let mut sparse_templates = HashMap::with_capacity(reader.total_count());
         let mut loaded = 0u32;
 
         for (id, idx) in reader.iter_records() {
@@ -277,14 +325,41 @@ impl ItemStatsStore {
             let mut pos = 0usize;
 
             // Field offsets for the stat fields we care about
+            let mut bag_family_offset: usize = 0;
+            let mut stackable_offset: usize = 0;
+            let mut max_count_offset: usize = 0;
+            let mut sell_price_offset: usize = 0;
             let mut flags_offset: usize = 0;
+            let mut max_durability_offset: usize = 0;
+            let mut limit_category_offset: usize = 0;
             let mut resistances_offset: usize = 0;
             let mut stat_amount_offset: usize = 0;
+            let mut bonding_offset: usize = 0;
             let mut stat_type_offset: usize = 0;
+            let mut container_slots_offset: usize = 0;
+            let mut inventory_type_offset: usize = 0;
 
             for (fi, &(byte_size, is_string)) in layout.iter().enumerate() {
+                if fi == 9 {
+                    bag_family_offset = pos;
+                }
+                if fi == 14 {
+                    stackable_offset = pos;
+                }
+                if fi == 15 {
+                    max_count_offset = pos;
+                }
+                if fi == 18 {
+                    sell_price_offset = pos;
+                }
                 if fi == 23 {
                     flags_offset = pos;
+                }
+                if fi == 28 {
+                    max_durability_offset = pos;
+                }
+                if fi == 32 {
+                    limit_category_offset = pos;
                 }
                 if fi == 51 {
                     resistances_offset = pos;
@@ -292,8 +367,17 @@ impl ItemStatsStore {
                 if fi == 53 {
                     stat_amount_offset = pos;
                 }
+                if fi == 63 {
+                    bonding_offset = pos;
+                }
                 if fi == 65 {
                     stat_type_offset = pos;
+                }
+                if fi == 66 {
+                    container_slots_offset = pos;
+                }
+                if fi == 69 {
+                    inventory_type_offset = pos;
                 }
 
                 if is_string {
@@ -314,8 +398,8 @@ impl ItemStatsStore {
                 continue;
             }
 
+            let mut raw_flags = [0u32; 4];
             if flags_offset + 16 <= record.len() {
-                let mut raw_flags = [0u32; 4];
                 for (flag_index, flag) in raw_flags.iter_mut().enumerate() {
                     let offset = flags_offset + flag_index * 4;
                     *flag = u32::from_le_bytes([
@@ -326,6 +410,34 @@ impl ItemStatsStore {
                     ]);
                 }
                 flags.insert(id, raw_flags);
+            }
+
+            if bag_family_offset + 4 <= record.len()
+                && stackable_offset + 4 <= record.len()
+                && max_count_offset + 4 <= record.len()
+                && sell_price_offset + 4 <= record.len()
+                && flags_offset + 16 <= record.len()
+                && max_durability_offset + 4 <= record.len()
+                && limit_category_offset + 2 <= record.len()
+                && bonding_offset < record.len()
+                && container_slots_offset < record.len()
+                && inventory_type_offset < record.len()
+            {
+                sparse_templates.insert(
+                    id,
+                    ItemSparseTemplateEntry {
+                        flags: raw_flags,
+                        bag_family: read_u32(record, bag_family_offset),
+                        stackable: read_i32(record, stackable_offset),
+                        max_count: read_i32(record, max_count_offset),
+                        sell_price: read_u32(record, sell_price_offset),
+                        max_durability: read_u32(record, max_durability_offset),
+                        limit_category: read_u16(record, limit_category_offset),
+                        bonding: record[bonding_offset],
+                        container_slots: record[container_slots_offset],
+                        inventory_type: record[inventory_type_offset] as i8,
+                    },
+                );
             }
 
             // Extract physical armor from Resistances[0] (field 51, first i16)
@@ -364,7 +476,11 @@ impl ItemStatsStore {
         }
 
         info!("Loaded {} items with stat modifiers from {}", loaded, path.display());
-        Ok(Self { stats, flags })
+        Ok(Self {
+            stats,
+            flags,
+            sparse_templates,
+        })
     }
 
     /// Look up stat modifiers for an item.
@@ -383,6 +499,11 @@ impl ItemStatsStore {
             .map(|flags| ItemFlags::from_bits_retain(u64::from(flags[0])))
     }
 
+    /// Return the C++ `ItemSparseEntry` subset needed by `ItemTemplate` helpers.
+    pub fn sparse_template(&self, item_id: u32) -> Option<&ItemSparseTemplateEntry> {
+        self.sparse_templates.get(&item_id)
+    }
+
     /// Number of items with stats.
     pub fn len(&self) -> usize {
         self.stats.len()
@@ -392,6 +513,28 @@ impl ItemStatsStore {
     pub fn is_empty(&self) -> bool {
         self.stats.is_empty()
     }
+}
+
+fn read_u32(record: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes([
+        record[offset],
+        record[offset + 1],
+        record[offset + 2],
+        record[offset + 3],
+    ])
+}
+
+fn read_i32(record: &[u8], offset: usize) -> i32 {
+    i32::from_le_bytes([
+        record[offset],
+        record[offset + 1],
+        record[offset + 2],
+        record[offset + 3],
+    ])
+}
+
+fn read_u16(record: &[u8], offset: usize) -> u16 {
+    u16::from_le_bytes([record[offset], record[offset + 1]])
 }
 
 #[cfg(test)]
@@ -454,6 +597,38 @@ mod tests {
                 .is_some_and(|flags| flags.contains(ItemFlags::IS_BOUND_TO_ACCOUNT))
         );
         assert_eq!(store.item_flags(2), None);
+    }
+
+    #[test]
+    fn item_sparse_template_entry_matches_cpp_template_helpers() {
+        let template = ItemSparseTemplateEntry {
+            flags: [ItemFlags::IS_BOUND_TO_ACCOUNT.bits() as u32, 0, 0, 0],
+            bag_family: 0x20,
+            stackable: 20,
+            max_count: 5,
+            sell_price: 123,
+            max_durability: 77,
+            limit_category: 9,
+            bonding: 2,
+            container_slots: 16,
+            inventory_type: 18,
+        };
+        let store = ItemStatsStore::from_sparse_templates([(1, template)]);
+
+        let loaded = store.sparse_template(1).unwrap();
+        assert_eq!(loaded.max_stack_size(), 20);
+        assert_eq!(loaded.max_count, 5);
+        assert_eq!(loaded.sell_price, 123);
+        assert_eq!(loaded.container_slots, 16);
+        assert_eq!(loaded.inventory_type, 18);
+        assert!(loaded.item_flags().contains(ItemFlags::IS_BOUND_TO_ACCOUNT));
+        assert_eq!(store.raw_flags(1), Some(template.flags));
+
+        let unlimited = ItemSparseTemplateEntry {
+            stackable: 0,
+            ..template
+        };
+        assert_eq!(unlimited.max_stack_size(), 0x7FFF_FFFE);
     }
 
     #[test]
