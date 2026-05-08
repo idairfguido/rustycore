@@ -6597,7 +6597,7 @@ impl WorldSession {
     /// Recalculate all stats from base + gear and send a VALUES update to the client.
     ///
     /// Called after equip/desequip changes to gear slots (0-18).
-    fn send_stat_update(&self) {
+    pub(crate) fn send_stat_update(&self) {
         let player_guid = match self.player_guid {
             Some(g) => g,
             None => return,

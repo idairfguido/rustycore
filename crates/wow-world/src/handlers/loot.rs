@@ -7,18 +7,22 @@
 //!
 //! Reference: C# Game/Handlers/LootHandler.cs
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tracing::{debug, info, warn};
 
 use wow_constants::ClientOpcodes;
 use wow_core::ObjectGuid;
+use wow_database::{CharStatements, SqlTransaction};
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
+use wow_packet::packets::item::ItemExpirePurchaseRefund;
 use wow_packet::packets::loot::{
-    CreatureLoot, LootEntry, LootItemData, LootItemPkt, LootRelease, LootRemoved, LootResponse,
-    LootUnit, SLootRelease,
+    CreatureLoot, LootItemData, LootItemPkt, LootRelease, LootRemoved, LootResponse, LootUnit,
+    SLootRelease,
 };
-use wow_packet::{ClientPacket, ServerPacket};
+use wow_packet::packets::update::UpdateObject;
+use wow_packet::ClientPacket;
 
 use crate::session::WorldSession;
 
@@ -202,6 +206,11 @@ impl WorldSession {
         };
         self.send_packet(&release);
 
+        if req.unit.is_item() && fully_looted {
+            self.destroy_fully_looted_direct_item(req.unit).await;
+            return;
+        }
+
         // Start corpse despawn timer if fully looted.
         // C# uses `RateCorpseDecayLooted` config × `m_corpseDelay` (default 60s).
         // We use a simple 30s fixed decay.
@@ -220,6 +229,80 @@ impl WorldSession {
         }
 
         let _ = player_guid;
+    }
+
+    async fn destroy_fully_looted_direct_item(&mut self, item_guid: ObjectGuid) {
+        let player_guid = match self.player_guid {
+            Some(guid) => guid,
+            None => return,
+        };
+        let Some((slot, item)) = self
+            .inventory_items
+            .iter()
+            .find(|(_, item)| item.guid == item_guid)
+            .map(|(&slot, item)| (slot, item.clone()))
+        else {
+            return;
+        };
+
+        let runtime_item = self.inventory_item_objects.get(&item.guid).cloned();
+        let char_db = match self.char_db() {
+            Some(db) => Arc::clone(db),
+            None => return,
+        };
+
+        let mut tx = SqlTransaction::new();
+        let should_expire_refund = runtime_item
+            .as_ref()
+            .is_some_and(|item_object| item_object.is_refundable());
+        if should_expire_refund {
+            let mut del_refund = char_db.prepare(CharStatements::DEL_ITEM_REFUND_INSTANCE);
+            del_refund.set_u64(0, item.db_guid);
+            tx.append(del_refund);
+        }
+
+        let mut del_inv = char_db.prepare(CharStatements::DEL_CHAR_INVENTORY_ITEM);
+        del_inv.set_u64(0, player_guid.counter() as u64);
+        del_inv.set_u64(1, item.db_guid);
+        tx.append(del_inv);
+
+        let mut del_item = char_db.prepare(CharStatements::DEL_ITEM_INSTANCE);
+        del_item.set_u64(0, item.db_guid);
+        tx.append(del_item);
+
+        if let Err(e) = char_db.commit_transaction(tx).await {
+            warn!("LootRelease: delete fully looted item failed: {e}");
+            return;
+        }
+
+        self.inventory_items.remove(&slot);
+        self.remove_inventory_item_object(item.guid);
+        self.sync_object_accessor_player();
+
+        if should_expire_refund {
+            self.send_packet(&ItemExpirePurchaseRefund { item_guid: item.guid });
+        }
+
+        let mut visible_item_changes = Vec::new();
+        let mut virtual_item_changes = Vec::new();
+        if (slot as usize) < 19 {
+            visible_item_changes.push((slot, 0i32, 0u16, 0u16));
+        }
+        if slot >= 15 && slot <= 17 {
+            virtual_item_changes.push((slot - 15, 0i32, 0u16, 0u16));
+        }
+
+        self.send_packet(&UpdateObject::player_values_update(
+            player_guid,
+            self.current_map_id,
+            vec![(slot, ObjectGuid::EMPTY)],
+            visible_item_changes,
+            virtual_item_changes,
+        ));
+
+        if slot < 19 {
+            self.send_stat_update();
+        }
     }
 }
 

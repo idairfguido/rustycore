@@ -24,6 +24,7 @@ use tracing::{debug, info, warn};
 use wow_constants::{ClientOpcodes, InventoryResult, ItemFlags};
 use wow_entities::INVENTORY_SLOT_BAG_0;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
+use wow_packet::packets::loot::{CreatureLoot, LootItemData, LootResponse};
 use wow_packet::packets::spell::{
     CastFailed, CastSpellRequest, OpenItem, SpellCastVisual, SpellStartPkt, SpellTargetData,
 };
@@ -326,12 +327,51 @@ impl WorldSession {
             return;
         }
 
-        warn!(
-            item = ?item.guid,
-            entry = item.entry_id,
-            "CMSG_OPEN_ITEM item loot generation/storage not ported yet"
-        );
-        self.send_equip_error(InventoryResult::ClientLockedOut, Some(item.guid), None, 0, 0);
+        if !self.loot_table.contains_key(&item.guid) {
+            self.loot_table.insert(item.guid, CreatureLoot {
+                loot_guid: item.guid,
+                coins: 0,
+                items: Vec::new(),
+                looted_by_player: false,
+            });
+        }
+
+        if let Some(item_object) = self.inventory_item_objects.get_mut(&item.guid) {
+            item_object.set_loot_generated(true);
+        }
+
+        let Some(loot) = self.loot_table.get(&item.guid) else {
+            self.send_equip_error(InventoryResult::ClientLockedOut, Some(item.guid), None, 0, 0);
+            return;
+        };
+
+        let items: Vec<LootItemData> = loot
+            .items
+            .iter()
+            .filter(|entry| !entry.taken)
+            .map(|entry| LootItemData {
+                loot_list_id: entry.loot_list_id,
+                ui_type: 0,
+                quantity: entry.quantity,
+                item_id: entry.item_id as i32,
+                item_context: 0,
+                bonus_list_ids: vec![],
+                can_loot: true,
+            })
+            .collect();
+
+        self.send_packet(&LootResponse {
+            owner: item.guid,
+            loot_obj: loot.loot_guid,
+            failure_reason: 0,
+            acquire_reason: 0,
+            loot_method: 0,
+            threshold: 2,
+            coins: loot.coins,
+            items,
+            acquired: true,
+            ae_looting: false,
+        });
     }
 
     /// Handle `CMSG_CANCEL_CAST` — player cancels an in-progress cast.
