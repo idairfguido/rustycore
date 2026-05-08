@@ -25,7 +25,7 @@ use rand::Rng;
 use tracing::{debug, info, warn};
 
 use wow_database::{CharStatements, SqlTransaction, WorldStatements};
-use wow_constants::{ClientOpcodes, InventoryResult, ItemFlags};
+use wow_constants::{BagFamilyMask, ClientOpcodes, InventoryResult, ItemFlags};
 use wow_entities::INVENTORY_SLOT_BAG_0;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::packets::loot::{CreatureLoot, LootEntry, LootItemData, LootResponse};
@@ -731,9 +731,15 @@ impl WorldSession {
         tx.append(del_items);
 
         for item in items {
-            let Some(flags) = self.item_template_flags(item.item_id) else {
+            let template = self.item_storage_template(item.item_id);
+            if !stored_loot_item_should_persist_like_cpp(
+                template.is_some(),
+                template.map(|t| t.bag_family).unwrap_or(BagFamilyMask::NONE),
+            ) {
                 continue;
-            };
+            }
+
+            let flags = template.map(|t| t.flags).unwrap_or(ItemFlags::empty());
 
             let mut ins_item = char_db.prepare(CharStatements::INS_ITEMCONTAINER_ITEMS);
             ins_item.set_u64(0, item_guid.counter() as u64);
@@ -771,6 +777,13 @@ impl WorldSession {
     pub async fn handle_cancel_channelling(&mut self, _pkt: wow_packet::WorldPacket) {
         // TODO: Phase 3 — implement cancel channelling
     }
+}
+
+fn stored_loot_item_should_persist_like_cpp(template_exists: bool, bag_family: BagFamilyMask) -> bool {
+    if !template_exists {
+        return false;
+    }
+    !bag_family.contains(BagFamilyMask::CURRENCY_TOKENS)
 }
 
 fn generate_money_loot_like_cpp<R: Rng + ?Sized>(
@@ -1002,6 +1015,8 @@ fn add_loot_template_row_item_like_cpp<F>(
 mod tests {
     use rand::{rngs::StdRng, SeedableRng};
 
+    use wow_constants::BagFamilyMask;
+
     use super::generate_money_loot_like_cpp;
     use super::{
         add_loot_item_stacks_like_cpp, loot_template_plain_row_can_roll_like_cpp,
@@ -1009,6 +1024,7 @@ mod tests {
         loot_template_reference_row_can_roll_like_cpp,
         roll_group_loot_row_like_cpp, LootTemplateRow,
         stored_item_row_can_load_like_cpp_representable,
+        stored_loot_item_should_persist_like_cpp,
     };
 
     #[test]
@@ -1138,6 +1154,33 @@ mod tests {
         ));
         assert!(!stored_item_row_can_load_like_cpp_representable(
             25, 2, 7, false, false, 12, 0, 0, true
+        ));
+    }
+
+    #[test]
+    fn stored_loot_item_persistence_skips_missing_template_and_currency_tokens_like_cpp() {
+        // template missing -> no persist
+        assert!(!stored_loot_item_should_persist_like_cpp(
+            false,
+            BagFamilyMask::NONE
+        ));
+
+        // normal template -> persist
+        assert!(stored_loot_item_should_persist_like_cpp(
+            true,
+            BagFamilyMask::NONE
+        ));
+
+        // currency token -> no persist (C++ ItemTemplate::IsCurrencyToken)
+        assert!(!stored_loot_item_should_persist_like_cpp(
+            true,
+            BagFamilyMask::CURRENCY_TOKENS
+        ));
+
+        // currency token combined with other families still no persist
+        assert!(!stored_loot_item_should_persist_like_cpp(
+            true,
+            BagFamilyMask::CURRENCY_TOKENS | BagFamilyMask::HERBS
         ));
     }
 }
