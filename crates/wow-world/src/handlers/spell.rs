@@ -439,18 +439,68 @@ impl WorldSession {
         let rows = self
             .load_loot_template_rows_like_cpp(LootTemplateTable::Item, item_entry)
             .await;
-        frames.push(LootTemplateFrame { rows, index: 0 });
+        frames.push(LootTemplateFrame {
+            rows,
+            index: 0,
+            group_id: 0,
+            groups_enqueued: false,
+        });
 
         let mut processed_frames = 0u32;
-        while let Some(frame) = frames.last_mut() {
+        while let Some(mut frame) = frames.pop() {
+            if frame.group_id != 0 {
+                let mut rng = rand::thread_rng();
+                if let Some(row) = roll_group_loot_row_like_cpp(
+                    &frame.rows,
+                    frame.group_id,
+                    |item_id| self.item_storage_template(item_id).is_some(),
+                    &mut rng,
+                ) {
+                    add_loot_template_row_item_like_cpp(&mut loot_items, &row, |item_id| {
+                        self.item_storage_template(item_id)
+                            .map(|template| template.max_stack_size)
+                            .unwrap_or(1)
+                    });
+                }
+                continue;
+            }
+
             if frame.index >= frame.rows.len() {
-                frames.pop();
+                if !frame.groups_enqueued {
+                    frame.groups_enqueued = true;
+                    let mut groups: Vec<u8> = frame
+                        .rows
+                        .iter()
+                        .filter(|row| row.reference == 0 && row.group_id != 0)
+                        .map(|row| row.group_id)
+                        .collect();
+                    groups.sort_unstable();
+                    groups.dedup();
+
+                    if !groups.is_empty() {
+                        let rows = frame.rows.clone();
+                        frames.push(frame);
+                        for group_id in groups.into_iter().rev() {
+                            frames.push(LootTemplateFrame {
+                                rows: rows.clone(),
+                                index: 0,
+                                group_id,
+                                groups_enqueued: true,
+                            });
+                        }
+                    }
+                }
                 continue;
             }
             let row = frame.rows[frame.index].clone();
             frame.index += 1;
+            frames.push(frame);
 
             if row.loot_mode & LOOT_MODE_DEFAULT_LIKE_CPP == 0 {
+                continue;
+            }
+
+            if row.group_id != 0 && row.reference == 0 {
                 continue;
             }
 
@@ -475,6 +525,8 @@ impl WorldSession {
                     frames.push(LootTemplateFrame {
                         rows: reference_rows.clone(),
                         index: 0,
+                        group_id: row.group_id,
+                        groups_enqueued: false,
                     });
                 }
                 processed_frames = processed_frames.saturating_add(1);
@@ -503,18 +555,11 @@ impl WorldSession {
             if row.chance < 100.0 && rng.gen_range(0.0f32..100.0f32) >= row.chance {
                 continue;
             }
-            let rolled_count = rng.gen_range(u32::from(row.min_count)..=u32::from(row.max_count));
-            let max_stack_size = self
-                .item_storage_template(row.item_id)
-                .map(|template| template.max_stack_size)
-                .unwrap_or(1)
-                .max(1);
-            add_loot_item_stacks_like_cpp(
-                &mut loot_items,
-                row.item_id,
-                rolled_count,
-                max_stack_size,
-            );
+            add_loot_template_row_item_like_cpp(&mut loot_items, &row, |item_id| {
+                self.item_storage_template(item_id)
+                    .map(|template| template.max_stack_size)
+                    .unwrap_or(1)
+            });
         }
 
         loot_items
@@ -561,7 +606,7 @@ impl WorldSession {
                 chance: result.try_read::<f32>(2).unwrap_or(0.0),
                 needs_quest: result.try_read::<bool>(3).unwrap_or(false),
                 loot_mode: result.try_read::<u16>(4).unwrap_or(0),
-                _group_id: result.try_read::<u8>(5).unwrap_or(0),
+                group_id: result.try_read::<u8>(5).unwrap_or(0),
                 min_count: result.try_read::<u8>(6).unwrap_or(0),
                 max_count: result.try_read::<u8>(7).unwrap_or(0),
             });
@@ -784,6 +829,83 @@ fn loot_template_reference_row_can_roll_like_cpp(
         && loot_mode & LOOT_MODE_DEFAULT_LIKE_CPP != 0
 }
 
+fn loot_template_group_row_can_roll_like_cpp(
+    item_id: u32,
+    chance: f32,
+    needs_quest: bool,
+    loot_mode: u16,
+    min_count: u8,
+    max_count: u8,
+    item_exists: bool,
+) -> bool {
+    if item_id == 0 || !item_exists || min_count == 0 || max_count < min_count || needs_quest {
+        return false;
+    }
+
+    if chance != 0.0 && chance < 0.000001 {
+        return false;
+    }
+
+    loot_mode & LOOT_MODE_DEFAULT_LIKE_CPP != 0
+}
+
+fn roll_group_loot_row_like_cpp<R, F>(
+    rows: &[LootTemplateRow],
+    group_id: u8,
+    item_exists: F,
+    rng: &mut R,
+) -> Option<LootTemplateRow>
+where
+    R: Rng + ?Sized,
+    F: Fn(u32) -> bool,
+{
+    let possible: Vec<&LootTemplateRow> = rows
+        .iter()
+        .filter(|row| {
+            row.group_id == group_id
+                && row.reference == 0
+                && loot_template_group_row_can_roll_like_cpp(
+                    row.item_id,
+                    row.chance,
+                    row.needs_quest,
+                    row.loot_mode,
+                    row.min_count,
+                    row.max_count,
+                    item_exists(row.item_id),
+                )
+        })
+        .collect();
+
+    let explicitly_chanced: Vec<&LootTemplateRow> = possible
+        .iter()
+        .copied()
+        .filter(|row| row.chance != 0.0)
+        .collect();
+    if !explicitly_chanced.is_empty() {
+        let mut roll = rng.gen_range(0.0f32..100.0f32);
+        for row in explicitly_chanced {
+            if row.chance >= 100.0 {
+                return Some((*row).clone());
+            }
+            roll -= row.chance;
+            if roll < 0.0 {
+                return Some((*row).clone());
+            }
+        }
+    }
+
+    let equal_chanced: Vec<&LootTemplateRow> = possible
+        .iter()
+        .copied()
+        .filter(|row| row.chance == 0.0)
+        .collect();
+    if equal_chanced.is_empty() {
+        None
+    } else {
+        Some((*equal_chanced[rng.gen_range(0..equal_chanced.len())]).clone())
+    }
+}
+
 fn stored_item_row_can_load_like_cpp_representable(
     item_id: u32,
     count: u32,
@@ -813,7 +935,7 @@ struct LootTemplateRow {
     chance: f32,
     needs_quest: bool,
     loot_mode: u16,
-    _group_id: u8,
+    group_id: u8,
     min_count: u8,
     max_count: u8,
 }
@@ -822,6 +944,8 @@ struct LootTemplateRow {
 struct LootTemplateFrame {
     rows: Vec<LootTemplateRow>,
     index: usize,
+    group_id: u8,
+    groups_enqueued: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -857,6 +981,23 @@ fn add_loot_item_stacks_like_cpp(
     }
 }
 
+fn add_loot_template_row_item_like_cpp<F>(
+    loot_items: &mut Vec<LootEntry>,
+    row: &LootTemplateRow,
+    max_stack_size: F,
+) where
+    F: Fn(u32) -> u32,
+{
+    let mut rng = rand::thread_rng();
+    let rolled_count = rng.gen_range(u32::from(row.min_count)..=u32::from(row.max_count));
+    add_loot_item_stacks_like_cpp(
+        loot_items,
+        row.item_id,
+        rolled_count,
+        max_stack_size(row.item_id).max(1),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use rand::{rngs::StdRng, SeedableRng};
@@ -864,7 +1005,9 @@ mod tests {
     use super::generate_money_loot_like_cpp;
     use super::{
         add_loot_item_stacks_like_cpp, loot_template_plain_row_can_roll_like_cpp,
+        loot_template_group_row_can_roll_like_cpp,
         loot_template_reference_row_can_roll_like_cpp,
+        roll_group_loot_row_like_cpp, LootTemplateRow,
         stored_item_row_can_load_like_cpp_representable,
     };
 
@@ -936,6 +1079,50 @@ mod tests {
         assert!(!loot_template_reference_row_can_roll_like_cpp(10, 0.0, 1, 1));
         assert!(!loot_template_reference_row_can_roll_like_cpp(10, 100.0, 0, 1));
         assert!(!loot_template_reference_row_can_roll_like_cpp(10, 100.0, 1, 0));
+    }
+
+    #[test]
+    fn grouped_loot_template_roll_matches_cpp_explicit_then_equal_order() {
+        assert!(loot_template_group_row_can_roll_like_cpp(
+            25, 0.0, false, 1, 1, 1, true
+        ));
+        assert!(!loot_template_group_row_can_roll_like_cpp(
+            25, 0.0000001, false, 1, 1, 1, true
+        ));
+
+        let rows = vec![
+            LootTemplateRow {
+                item_id: 25,
+                reference: 0,
+                chance: 100.0,
+                needs_quest: false,
+                loot_mode: 1,
+                group_id: 1,
+                min_count: 1,
+                max_count: 1,
+            },
+            LootTemplateRow {
+                item_id: 26,
+                reference: 0,
+                chance: 0.0,
+                needs_quest: false,
+                loot_mode: 1,
+                group_id: 1,
+                min_count: 1,
+                max_count: 1,
+            },
+        ];
+        let mut rng = StdRng::seed_from_u64(0xBEEF);
+        let selected = roll_group_loot_row_like_cpp(&rows, 1, |_| true, &mut rng).unwrap();
+        assert_eq!(selected.item_id, 25);
+
+        let equal_rows = vec![
+            LootTemplateRow { chance: 0.0, item_id: 25, ..rows[0].clone() },
+            LootTemplateRow { chance: 0.0, item_id: 26, ..rows[1].clone() },
+        ];
+        let mut rng = StdRng::seed_from_u64(0xBEEF);
+        let selected = roll_group_loot_row_like_cpp(&equal_rows, 1, |_| true, &mut rng).unwrap();
+        assert!([25, 26].contains(&selected.item_id));
     }
 
     #[test]

@@ -377,11 +377,11 @@ impl StatementDef for WorldStatements {
             ),
             Self::SEL_ITEM_LOOT_TEMPLATE_ROWS => concat!(
                 "SELECT Item, Reference, Chance, QuestRequired, LootMode, GroupId, MinCount, MaxCount ",
-                "FROM item_loot_template WHERE Entry = ? AND GroupId = 0",
+                "FROM item_loot_template WHERE Entry = ?",
             ),
             Self::SEL_REFERENCE_LOOT_TEMPLATE_ROWS => concat!(
                 "SELECT Item, Reference, Chance, QuestRequired, LootMode, GroupId, MinCount, MaxCount ",
-                "FROM reference_loot_template WHERE Entry = ? AND GroupId = 0",
+                "FROM reference_loot_template WHERE Entry = ?",
             ),
             Self::SEL_AREA_TRIGGER_TELEPORT => {
                 "SELECT at.ID, wsl.MapID, wsl.LocX, wsl.LocY, wsl.LocZ, wsl.Facing FROM areatrigger_teleport at LEFT JOIN world_safe_locs wsl ON at.PortLocID = wsl.ID"
