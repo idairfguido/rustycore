@@ -4,7 +4,7 @@ use wow_constants::{TypeId, TypeMask};
 use wow_core::ObjectGuid;
 use wow_core::guid::HighGuid;
 
-use crate::{PlayerInventoryStorage, WorldObject};
+use crate::{Item, PlayerInventoryStorage, WorldObject};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AccessorObjectKind {
@@ -56,6 +56,7 @@ pub struct AccessorPlayer {
     normalized_name: String,
     object: WorldObject,
     inventory: PlayerInventoryStorage,
+    items: HashMap<ObjectGuid, Item>,
 }
 
 impl AccessorPlayer {
@@ -67,6 +68,15 @@ impl AccessorPlayer {
         name: impl AsRef<str>,
         object: WorldObject,
         inventory: PlayerInventoryStorage,
+    ) -> Result<Self, ObjectAccessorError> {
+        Self::new_with_inventory_and_items(name, object, inventory, [])
+    }
+
+    pub fn new_with_inventory_and_items(
+        name: impl AsRef<str>,
+        object: WorldObject,
+        inventory: PlayerInventoryStorage,
+        items: impl IntoIterator<Item = Item>,
     ) -> Result<Self, ObjectAccessorError> {
         if !object.guid().is_player() {
             return Err(ObjectAccessorError::WrongGuidKind {
@@ -82,6 +92,10 @@ impl AccessorPlayer {
             normalized_name,
             object,
             inventory,
+            items: items
+                .into_iter()
+                .map(|item| (item.object().guid(), item))
+                .collect(),
         })
     }
 
@@ -100,12 +114,28 @@ impl AccessorPlayer {
     pub fn inventory_mut(&mut self) -> &mut PlayerInventoryStorage {
         &mut self.inventory
     }
+
+    pub fn item(&self, guid: ObjectGuid) -> Option<&Item> {
+        self.items.get(&guid)
+    }
+
+    pub fn item_mut(&mut self, guid: ObjectGuid) -> Option<&mut Item> {
+        self.items.get_mut(&guid)
+    }
+
+    pub fn insert_item(&mut self, item: Item) -> Option<Item> {
+        self.items.insert(item.object().guid(), item)
+    }
+
+    pub fn remove_item(&mut self, guid: ObjectGuid) -> Option<Item> {
+        self.items.remove(&guid)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AccessorObjectRef<'a> {
     WorldObject(&'a WorldObject),
-    Item(ObjectGuid),
+    Item(&'a Item),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -168,7 +198,17 @@ impl ObjectAccessor {
         object: WorldObject,
         inventory: PlayerInventoryStorage,
     ) -> Result<(), ObjectAccessorError> {
-        let player = AccessorPlayer::new_with_inventory(name, object, inventory)?;
+        self.add_player_with_inventory_and_items(name, object, inventory, [])
+    }
+
+    pub fn add_player_with_inventory_and_items(
+        &mut self,
+        name: impl AsRef<str>,
+        object: WorldObject,
+        inventory: PlayerInventoryStorage,
+        items: impl IntoIterator<Item = Item>,
+    ) -> Result<(), ObjectAccessorError> {
+        let player = AccessorPlayer::new_with_inventory_and_items(name, object, inventory, items)?;
         let guid = player.object.guid();
 
         if let Some(previous) = self.players.insert(guid, player.clone()) {
@@ -187,6 +227,36 @@ impl ObjectAccessor {
         self.players
             .get_mut(&guid)
             .map(AccessorPlayer::inventory_mut)
+    }
+
+    pub fn player_item(&self, player_guid: ObjectGuid, item_guid: ObjectGuid) -> Option<&Item> {
+        self.players.get(&player_guid)?.item(item_guid)
+    }
+
+    pub fn player_item_mut(
+        &mut self,
+        player_guid: ObjectGuid,
+        item_guid: ObjectGuid,
+    ) -> Option<&mut Item> {
+        self.players.get_mut(&player_guid)?.item_mut(item_guid)
+    }
+
+    pub fn insert_player_item(
+        &mut self,
+        player_guid: ObjectGuid,
+        item: Item,
+    ) -> Option<Option<Item>> {
+        self.players
+            .get_mut(&player_guid)
+            .map(|player| player.insert_item(item))
+    }
+
+    pub fn remove_player_item(
+        &mut self,
+        player_guid: ObjectGuid,
+        item_guid: ObjectGuid,
+    ) -> Option<Item> {
+        self.players.get_mut(&player_guid)?.remove_item(item_guid)
     }
 
     pub fn remove_player(&mut self, guid: ObjectGuid) -> Option<AccessorPlayer> {
@@ -298,15 +368,13 @@ impl ObjectAccessor {
         type_mask: TypeMask,
     ) -> Option<AccessorObjectRef<'_>> {
         if guid.high_type() == HighGuid::Item {
-            return (type_mask.contains(TypeMask::ITEM)
-                && context.object().type_id() == TypeId::Player)
-                .then(|| {
-                    self.players
-                        .get(&context.guid())?
-                        .inventory()
-                        .get_item_by_guid_everywhere(guid)
-                })?
-                .map(AccessorObjectRef::Item);
+            if !type_mask.contains(TypeMask::ITEM) || context.object().type_id() != TypeId::Player {
+                return None;
+            }
+
+            let player = self.players.get(&context.guid())?;
+            let item_guid = player.inventory().get_item_by_guid_everywhere(guid)?;
+            return player.item(item_guid).map(AccessorObjectRef::Item);
         }
 
         match AccessorObjectKind::from_guid(guid)? {
@@ -540,6 +608,13 @@ mod tests {
         object
     }
 
+    fn item(guid: ObjectGuid, entry: u32) -> Item {
+        let mut item = Item::default();
+        item.object_mut().create(guid);
+        item.object_mut().set_entry(entry);
+        item
+    }
+
     fn convert_type_id(type_id: wow_core::guid::TypeId) -> TypeId {
         match type_id {
             wow_core::guid::TypeId::Object => TypeId::Object,
@@ -671,15 +746,20 @@ mod tests {
         let item_guid = ObjectGuid::create_item(1, 77);
         let mut inventory = PlayerInventoryStorage::default();
         inventory.items[0] = Some(item_guid);
+        let item = item(item_guid, 6948);
 
         accessor
-            .add_player_with_inventory("valeera", context.clone(), inventory)
+            .add_player_with_inventory_and_items("valeera", context.clone(), inventory, [item])
             .unwrap();
 
-        assert_eq!(
-            accessor.get_object_ref_by_type_mask(&context, item_guid, TypeMask::ITEM),
-            Some(AccessorObjectRef::Item(item_guid))
-        );
+        let found = accessor.get_object_ref_by_type_mask(&context, item_guid, TypeMask::ITEM);
+        match found {
+            Some(AccessorObjectRef::Item(item)) => {
+                assert_eq!(item.object().guid(), item_guid);
+                assert_eq!(item.object().entry(), 6948);
+            }
+            other => panic!("expected item ref, got {other:?}"),
+        }
         assert!(
             accessor
                 .get_object_by_type_mask(&context, item_guid, TypeMask::ITEM)
@@ -698,6 +778,25 @@ mod tests {
                 .is_none()
         );
         assert!(accessor.player_inventory_mut(player_guid).is_some());
+    }
+
+    #[test]
+    fn type_mask_item_requires_registered_item_object_like_cpp_item_pointer() {
+        let mut accessor = ObjectAccessor::default();
+        let context = world_object(HighGuid::Player, 530, 1, true);
+        let item_guid = ObjectGuid::create_item(1, 77);
+        let mut inventory = PlayerInventoryStorage::default();
+        inventory.items[0] = Some(item_guid);
+
+        accessor
+            .add_player_with_inventory("valeera", context.clone(), inventory)
+            .unwrap();
+
+        assert!(
+            accessor
+                .get_object_ref_by_type_mask(&context, item_guid, TypeMask::ITEM)
+                .is_none()
+        );
     }
 
     #[test]
