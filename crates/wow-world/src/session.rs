@@ -699,6 +699,13 @@ impl WorldSession {
         })
     }
 
+    /// Resolve C++ `ItemTemplate::GetInventoryType()` for equipment-slot mapping.
+    pub fn item_template_inventory_type(&self, item_id: u32) -> Option<u8> {
+        self.item_storage_template(item_id)
+            .map(|template| template.inventory_type as u8)
+            .filter(|&inventory_type| inventory_type != InventoryType::NonEquip as u8)
+    }
+
     /// Set the item random suffix store for this session.
     pub fn set_item_random_suffix_store(&mut self, store: Arc<ItemRandomSuffixStore>) {
         self.item_random_suffix_store = Some(store);
@@ -3764,6 +3771,7 @@ mod tests {
         assert_eq!(template.sell_price, 99);
         assert!(template.is_crafting_reagent);
         assert!(template.is_bound_account_wide());
+        assert_eq!(session.item_template_inventory_type(100), Some(InventoryType::Bag as u8));
         assert_eq!(session.item_storage_template(101), None);
     }
 

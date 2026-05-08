@@ -1402,10 +1402,15 @@ impl WorldSession {
                                 owner_guid: guid,
                                 contained_in: guid,
                             });
-                            // Look up inventory_type from Item.db2 store
-                            let inventory_type = self.item_store()
-                                .and_then(|store| store.inventory_type(item_entry))
-                                .or_else(|| if slot < 19 { slot_to_inventory_type(slot) } else { None });
+                            let inventory_type = self
+                                .item_template_inventory_type(item_entry)
+                                .or_else(|| {
+                                    if slot < 19 {
+                                        slot_to_inventory_type(slot)
+                                    } else {
+                                        None
+                                    }
+                                });
                             self.inventory_items.insert(slot, InventoryItem {
                                 guid: item_guid,
                                 entry_id: item_entry,
@@ -1427,7 +1432,7 @@ impl WorldSession {
                 }
             }
 
-            // inventory_type is now loaded from Item.db2 store for all items.
+            // inventory_type is now loaded from the canonical ItemTemplate bridge.
             // No SQL cache needed.
         }
 
@@ -3336,7 +3341,7 @@ impl WorldSession {
 
         // ── Update in-memory inventory ──
         let item_guid = ObjectGuid::create_item(realm_id, next_item_guid as i64);
-        let inv_type = self.item_store().and_then(|s| s.inventory_type(buy.item_id as u32));
+        let inv_type = self.item_template_inventory_type(buy.item_id as u32);
         self.inventory_items.insert(slot, crate::session::InventoryItem {
             guid: item_guid,
             entry_id: buy.item_id as u32,
@@ -3674,8 +3679,7 @@ impl WorldSession {
                 }
             }
         } else {
-            // In backpack → find target equipment slot using inventory_type.
-            // inventory_type is loaded from Item.db2 via item_store.
+            // In backpack → find target equipment slot using ItemTemplate::GetInventoryType().
             let inv_type = match src_item.inventory_type {
                 Some(t) => t,
                 None => {
