@@ -559,6 +559,15 @@ fn parse_equipment_cache(cache: &str) -> [VisualItemInfo; 34] {
     equipment
 }
 
+fn vendor_buy_price_for_count(buy_price: u64, buy_count: u32, quantity: u32) -> u64 {
+    if buy_price == 0 || quantity == 0 {
+        return 0;
+    }
+
+    let buy_count = buy_count.max(1) as f64;
+    ((buy_price as f64 / buy_count) * quantity as f64) as u64
+}
+
 // ── Handler implementations ─────────────────────────────────────────
 
 impl WorldSession {
@@ -3278,7 +3287,8 @@ impl WorldSession {
             return;
         } else {
             let raw: u64 = price_result.try_read::<u64>(0).unwrap_or(0);
-            raw * quantity as u64
+            let buy_count: u32 = price_result.try_read::<u32>(3).unwrap_or(1);
+            vendor_buy_price_for_count(raw, buy_count, quantity)
         };
 
         let max_durability: u32 = if price_result.is_empty() { 0 } else {
@@ -4658,6 +4668,14 @@ mod tests {
             assert_eq!(slot.display_id, 0);
             assert_eq!(slot.inv_type, 0);
         }
+    }
+
+    #[test]
+    fn vendor_buy_price_uses_cpp_buy_count_unit_price() {
+        assert_eq!(vendor_buy_price_for_count(500, 5, 1), 100);
+        assert_eq!(vendor_buy_price_for_count(500, 5, 3), 300);
+        assert_eq!(vendor_buy_price_for_count(500, 0, 2), 1000);
+        assert_eq!(vendor_buy_price_for_count(0, 5, 3), 0);
     }
 
     #[test]

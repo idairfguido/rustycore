@@ -111,7 +111,7 @@ pub enum WorldStatements {
     SEL_BROADCAST_TEXT_LOCALE,
     /// Localized creature name/subname/title by entry and locale.
     SEL_CREATURE_TEMPLATE_LOCALE,
-    /// Buy price + sell price + durability for a specific item in a vendor's list.
+    /// Buy price + sell price + durability + vendor stack count for a specific item in a vendor's list.
     /// Args: npc_vendor.entry (u32), npc_vendor.item (u32).
     SEL_VENDOR_ITEM_PRICE,
     /// Sell price for any item directly from item_sparse (no vendor check).
@@ -346,7 +346,7 @@ impl StatementDef for WorldStatements {
             }
             Self::SEL_VENDOR_ITEM_PRICE => concat!(
                 "SELECT COALESCE(isp.BuyPrice, 0), COALESCE(isp.SellPrice, 0), ",
-                "COALESCE(isp.MaxDurability, 0) ",
+                "COALESCE(isp.MaxDurability, 0), COALESCE(isp.VendorStackCount, 1) ",
                 "FROM npc_vendor nv ",
                 "LEFT JOIN hotfixes.item_sparse isp ON nv.item = isp.ID ",
                 "WHERE nv.entry = ? AND nv.item = ? LIMIT 1",
