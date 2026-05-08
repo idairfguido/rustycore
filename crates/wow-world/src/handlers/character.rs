@@ -657,6 +657,14 @@ fn vendor_buy_stock_refill_count(
     }
 }
 
+fn vendor_list_should_skip_sold_out(
+    max_count: i32,
+    current_count: u32,
+    is_game_master: bool,
+) -> bool {
+    max_count > 0 && current_count == 0 && !is_game_master
+}
+
 fn vendor_buy_direct_inventory_destination(
     player_guid: ObjectGuid,
     buy: &BuyItem,
@@ -3452,6 +3460,10 @@ impl WorldSession {
                         incr_time,
                         stack_count.max(1) as u32,
                     );
+                    if vendor_list_should_skip_sold_out(maxcount, current_count, self.security > 0) {
+                        if !result.next_row() { break; }
+                        continue;
+                    }
                     items.push(VendorItem {
                         muid: slot,
                         item_id,
@@ -5124,6 +5136,14 @@ mod tests {
             5
         );
         assert!(!session.vendor_item_counts.contains_key(&(vendor_guid, 700)));
+    }
+
+    #[test]
+    fn vendor_list_sold_out_filter_matches_cpp_gm_branch() {
+        assert!(vendor_list_should_skip_sold_out(5, 0, false));
+        assert!(!vendor_list_should_skip_sold_out(5, 0, true));
+        assert!(!vendor_list_should_skip_sold_out(5, 1, false));
+        assert!(!vendor_list_should_skip_sold_out(0, 0, false));
     }
 
     #[test]
