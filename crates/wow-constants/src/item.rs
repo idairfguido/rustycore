@@ -38,6 +38,56 @@ bitflags! {
 }
 
 bitflags! {
+    /// C++ `CurrencyTypesFlags`.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct CurrencyTypesFlags: u32 {
+        const TRADABLE = 0x00000001;
+        const APPEARS_IN_LOOT_WINDOW = 0x00000002;
+        const COMPUTED_WEEKLY_MAXIMUM = 0x00000004;
+        const SCALER_100 = 0x00000008;
+        const NO_LOW_LEVEL_DROP = 0x00000010;
+        const IGNORE_MAX_QTY_ON_LOAD = 0x00000020;
+        const LOG_ON_WORLD_CHANGE = 0x00000040;
+        const TRACK_QUANTITY = 0x00000080;
+        const RESET_TRACKED_QUANTITY = 0x00000100;
+        const UPDATE_VERSION_IGNORE_MAX = 0x00000200;
+        const SUPPRESS_CHAT_MESSAGE_ON_VERSION_CHANGE = 0x00000400;
+        const SINGLE_DROP_IN_LOOT = 0x00000800;
+        const HAS_WEEKLY_CATCHUP = 0x00001000;
+        const DO_NOT_COMPRESS_CHAT = 0x00002000;
+        const DO_NOT_LOG_ACQUISITION_TO_BI = 0x00004000;
+        const NO_RAID_DROP = 0x00008000;
+        const NOT_PERSISTENT = 0x00010000;
+        const DEPRECATED = 0x00020000;
+        const DYNAMIC_MAXIMUM = 0x00040000;
+        const SUPPRESS_CHAT_MESSAGES = 0x00080000;
+        const DO_NOT_TOAST = 0x00100000;
+        const DESTROY_EXTRA_ON_LOOT = 0x00200000;
+        const DONT_SHOW_TOTAL_IN_TOOLTIP = 0x00400000;
+        const DONT_COALESCE_IN_LOOT_WINDOW = 0x00800000;
+        const ACCOUNT_WIDE = 0x01000000;
+        const ALLOW_OVERFLOW_MAILER = 0x02000000;
+        const HIDE_AS_REWARD = 0x04000000;
+        const HAS_WARMODE_BONUS = 0x08000000;
+        const IS_ALLIANCE_ONLY = 0x10000000;
+        const IS_HORDE_ONLY = 0x20000000;
+        const LIMIT_WARMODE_BONUS_ONCE_PER_TOOLTIP = 0x40000000;
+        const DEPRECATED_CURRENCY_FLAG = 0x80000000;
+    }
+}
+
+bitflags! {
+    /// C++ `CurrencyTypesFlagsB`.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct CurrencyTypesFlagsB: u32 {
+        const USE_TOTAL_EARNED_FOR_EARNED = 0x01;
+        const SHOW_QUEST_XP_GAIN_IN_TOOLTIP = 0x02;
+        const NO_NOTIFICATION_MAIL_ON_OFFLINE_PROGRESS = 0x04;
+        const BATTLENET_VIRTUAL_CURRENCY = 0x08;
+    }
+}
+
+bitflags! {
     /// Item extended cost flags.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct ItemExtendedCostFlags: u32 {

@@ -20,8 +20,9 @@ use wow_constants::{
 };
 use wow_core::{ObjectGuid, ObjectGuidGenerator};
 use wow_data::{
-    AreaTriggerStore, HotfixBlobCache, ItemAppearanceStore, ItemModifiedAppearanceStore,
-    ItemRandomSuffixStore, ItemStatsStore, ItemStore, PlayerStatsStore, SkillStore,
+    AreaTriggerStore, CurrencyTypesStore, HotfixBlobCache, ItemAppearanceStore,
+    ItemModifiedAppearanceStore, ItemRandomSuffixStore, ItemStatsStore, ItemStore,
+    PlayerStatsStore, SkillStore,
     SpellItemEnchantmentStore, SpellStore,
 };
 use wow_database::{CharacterDatabase, LoginDatabase, WorldDatabase};
@@ -122,6 +123,9 @@ pub struct WorldSession {
 
     // World database (for creature templates, spawns, etc.)
     world_db: Option<Arc<WorldDatabase>>,
+
+    // Currency types store (CurrencyTypes.db2 data)
+    currency_types_store: Option<Arc<CurrencyTypesStore>>,
 
     // Item store (Item.db2 BasicData — class/subclass)
     item_store: Option<Arc<ItemStore>>,
@@ -463,6 +467,7 @@ impl WorldSession {
             char_db: None,
             login_db: None,
             world_db: None,
+            currency_types_store: None,
             item_store: None,
             item_appearance_store: None,
             item_modified_appearance_store: None,
@@ -596,6 +601,16 @@ impl WorldSession {
     /// Get the world database reference.
     pub fn world_db(&self) -> Option<&Arc<WorldDatabase>> {
         self.world_db.as_ref()
+    }
+
+    /// Set the currency types store for this session.
+    pub fn set_currency_types_store(&mut self, store: Arc<CurrencyTypesStore>) {
+        self.currency_types_store = Some(store);
+    }
+
+    /// Get the currency types store reference.
+    pub fn currency_types_store(&self) -> Option<&Arc<CurrencyTypesStore>> {
+        self.currency_types_store.as_ref()
     }
 
     /// Set the item store for this session.

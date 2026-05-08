@@ -6,6 +6,7 @@
 //! Game data file readers (DB2/WDC4).
 
 pub mod wdc4;
+pub mod currency;
 pub mod item;
 pub mod item_appearance;
 pub mod item_modified_appearance;
@@ -20,6 +21,7 @@ pub mod spell_item_enchantment;
 pub mod quest;
 pub mod quest_xp;
 
+pub use currency::{CurrencyTypesEntry, CurrencyTypesStore};
 pub use item::{ItemRecord, ItemStore};
 pub use item_appearance::{ItemAppearanceEntry, ItemAppearanceStore};
 pub use item_modified_appearance::{ItemModifiedAppearanceEntry, ItemModifiedAppearanceStore};

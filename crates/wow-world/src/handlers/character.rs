@@ -10,12 +10,13 @@ use std::sync::Arc;
 use rand::Rng;
 use tracing::{debug, info, trace, warn};
 use wow_constants::{
-    ClientOpcodes, CurrencyTypes, InventoryResult, ItemBondingType, ItemContext, ItemFlags,
-    ItemFlags2, ItemUpdateState, ItemVendorType, Team,
+    ClientOpcodes, InventoryResult, ItemBondingType, ItemContext, ItemFlags, ItemFlags2,
+    ItemUpdateState, ItemVendorType, Team,
 };
 use wow_core::guid::HighGuid;
 use wow_core::{ObjectGuid, Position};
 use wow_crypto::rsa_sign::rsa_sign_connect_to;
+use wow_data::CurrencyTypesStore;
 use wow_database::{CharStatements, LoginStatements, SqlTransaction, WorldDatabase, WorldStatements};
 use wow_entities::{
     INVENTORY_SLOT_BAG_0, MAX_BAG_SIZE, NULL_BAG, NULL_SLOT, is_equipment_pos, is_inventory_pos,
@@ -612,16 +613,23 @@ fn vendor_list_reaches_cpp_item_limit(count: usize) -> bool {
     count >= MAX_VENDOR_ITEMS_CPP
 }
 
-fn vendor_list_should_skip_currency_row(item_id: i32, extended_cost: i32) -> bool {
+fn vendor_list_should_skip_currency_row(
+    currency_store: Option<&CurrencyTypesStore>,
+    item_id: i32,
+    extended_cost: i32,
+) -> bool {
     if extended_cost == 0 {
         return true;
     }
 
-    !vendor_currency_type_is_known(item_id as u32)
+    !vendor_currency_type_is_known(currency_store, item_id as u32)
 }
 
-fn vendor_currency_type_is_known(currency_id: u32) -> bool {
-    <CurrencyTypes as num_traits::FromPrimitive>::from_u32(currency_id).is_some()
+fn vendor_currency_type_is_known(
+    currency_store: Option<&CurrencyTypesStore>,
+    currency_id: u32,
+) -> bool {
+    currency_store.is_some_and(|store| store.has_record(currency_id))
 }
 
 fn vendor_buy_currency_quantity_block_result(
@@ -967,7 +975,10 @@ impl WorldSession {
                         .item_store()
                         .map_or(true, |store| store.get(item_id as u32).is_some());
                     let currency_known = item_type == ItemVendorType::Currency as i32
-                        && vendor_currency_type_is_known(item_id as u32);
+                        && vendor_currency_type_is_known(
+                            self.currency_types_store().map(|store| store.as_ref()),
+                            item_id as u32,
+                        );
                     if (item_known || currency_known) && current_slot == vendor_slot {
                         let row_item_id = item_id as u32;
                         if row_item_id != expected_item_id {
@@ -3620,7 +3631,11 @@ impl WorldSession {
                     let muid = raw_slot.saturating_add(1);
                     raw_slot = raw_slot.saturating_add(1);
                     if item_type == ItemVendorType::Currency as i32 {
-                        if vendor_list_should_skip_currency_row(item_id, extended_cost) {
+                        if vendor_list_should_skip_currency_row(
+                            self.currency_types_store().map(|store| store.as_ref()),
+                            item_id,
+                            extended_cost,
+                        ) {
                             if !result.next_row() { break; }
                             continue;
                         }
@@ -3779,7 +3794,10 @@ impl WorldSession {
         };
 
         if buy.item_type == ItemVendorType::Currency as i32 {
-            if !vendor_currency_type_is_known(buy.item_id as u32) {
+            if !vendor_currency_type_is_known(
+                self.currency_types_store().map(|store| store.as_ref()),
+                buy.item_id as u32,
+            ) {
                 self.send_buy_error(BuyResult::CantFindItem, None, buy.item_id as u32);
                 return;
             }
@@ -5402,15 +5420,32 @@ mod tests {
 
     #[test]
     fn vendor_list_currency_rows_match_cpp_basic_guards() {
+        let store = CurrencyTypesStore::from_entries([wow_data::CurrencyTypesEntry {
+            id: 395,
+            category_id: 0,
+            inventory_icon_file_id: 0,
+            spell_weight: 0,
+            spell_category: 0,
+            max_qty: 0,
+            max_earnable_per_week: 0,
+            quality: 0,
+            faction_id: 0,
+            award_condition_id: 0,
+            flags: wow_constants::CurrencyTypesFlags::empty(),
+            flags_b: wow_constants::CurrencyTypesFlagsB::empty(),
+        }]);
         assert!(vendor_list_should_skip_currency_row(
-            CurrencyTypes::JusticePoints as i32,
+            Some(&store),
+            395,
             0,
         ));
         assert!(!vendor_list_should_skip_currency_row(
-            CurrencyTypes::JusticePoints as i32,
+            Some(&store),
+            395,
             10,
         ));
-        assert!(vendor_list_should_skip_currency_row(999_999, 10));
+        assert!(vendor_list_should_skip_currency_row(Some(&store), 999_999, 10));
+        assert!(vendor_list_should_skip_currency_row(None, 395, 10));
     }
 
     #[test]
