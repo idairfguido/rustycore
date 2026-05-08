@@ -10,7 +10,7 @@ use std::sync::Arc;
 use rand::Rng;
 use tracing::{debug, info, trace, warn};
 use wow_constants::{
-    ClientOpcodes, InventoryResult, ItemContext, ItemUpdateState, ItemVendorType,
+    ClientOpcodes, InventoryResult, ItemContext, ItemFlags, ItemUpdateState, ItemVendorType,
 };
 use wow_core::guid::HighGuid;
 use wow_core::{ObjectGuid, Position};
@@ -663,6 +663,16 @@ fn vendor_list_should_skip_sold_out(
     is_game_master: bool,
 ) -> bool {
     max_count > 0 && current_count == 0 && !is_game_master
+}
+
+fn vendor_list_item_refundable(
+    item_flags: Option<ItemFlags>,
+    max_stack_size: Option<u32>,
+    extended_cost: i32,
+) -> bool {
+    extended_cost > 0
+        && max_stack_size == Some(1)
+        && item_flags.is_some_and(|flags| flags.contains(ItemFlags::ITEM_PURCHASE_RECORD))
 }
 
 fn vendor_buy_direct_inventory_destination(
@@ -3460,10 +3470,20 @@ impl WorldSession {
                         incr_time,
                         stack_count.max(1) as u32,
                     );
-                    if vendor_list_should_skip_sold_out(maxcount, current_count, self.security > 0) {
+                    if vendor_list_should_skip_sold_out(
+                        maxcount,
+                        current_count,
+                        self.security > 0,
+                    ) {
                         if !result.next_row() { break; }
                         continue;
                     }
+                    let template = self.item_storage_template(item_id as u32);
+                    let refundable = vendor_list_item_refundable(
+                        template.as_ref().map(|template| template.flags),
+                        template.as_ref().map(|template| template.max_stack_size),
+                        extended_cost,
+                    );
                     items.push(VendorItem {
                         muid: slot,
                         item_id,
@@ -3476,7 +3496,7 @@ impl WorldSession {
                         player_condition_failed: 0,
                         locked: false,
                         do_not_filter,
-                        refundable: false,
+                        refundable,
                     });
                     slot += 1;
                 } else if item_id < 0 {
@@ -5144,6 +5164,26 @@ mod tests {
         assert!(!vendor_list_should_skip_sold_out(5, 0, true));
         assert!(!vendor_list_should_skip_sold_out(5, 1, false));
         assert!(!vendor_list_should_skip_sold_out(0, 0, false));
+    }
+
+    #[test]
+    fn vendor_list_refundable_flag_matches_cpp_template_guard() {
+        assert!(vendor_list_item_refundable(
+            Some(ItemFlags::ITEM_PURCHASE_RECORD),
+            Some(1),
+            42
+        ));
+        assert!(!vendor_list_item_refundable(
+            Some(ItemFlags::ITEM_PURCHASE_RECORD),
+            Some(2),
+            42
+        ));
+        assert!(!vendor_list_item_refundable(
+            Some(ItemFlags::ITEM_PURCHASE_RECORD),
+            Some(1),
+            0
+        ));
+        assert!(!vendor_list_item_refundable(None, Some(1), 42));
     }
 
     #[test]
