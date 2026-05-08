@@ -39,6 +39,13 @@ pub struct ItemStore {
 }
 
 impl ItemStore {
+    /// Build an item store from already parsed records.
+    pub fn from_records(records: impl IntoIterator<Item = ItemRecord>) -> Self {
+        Self {
+            items: records.into_iter().map(|record| (record.id, record)).collect(),
+        }
+    }
+
     /// Load Item.db2 from `{data_dir}/dbc/{locale}/Item.db2`.
     pub fn load(data_dir: &str, locale: &str) -> Result<Self> {
         let path = Path::new(data_dir)

@@ -24,7 +24,7 @@ pub use item::{ItemRecord, ItemStore};
 pub use item_appearance::{ItemAppearanceEntry, ItemAppearanceStore};
 pub use item_modified_appearance::{ItemModifiedAppearanceEntry, ItemModifiedAppearanceStore};
 pub use item_random_suffix::{ItemRandomSuffixEntry, ItemRandomSuffixStore};
-pub use item_stats::{ItemStatEntry, ItemStatsStore};
+pub use item_stats::{ItemSparseTemplateEntry, ItemStatEntry, ItemStatsStore};
 pub use hotfix_cache::{HotfixBlobCache, build_hotfix_blob_cache};
 pub use player_stats::{PlayerLevelStats, PlayerStatsStore};
 pub use skill::{SkillInfoEntry, SkillStore};

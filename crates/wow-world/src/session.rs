@@ -13,7 +13,8 @@ use std::time::Instant;
 use tracing::{debug, info, trace, warn};
 
 use wow_constants::{
-    BuyResult, ClientOpcodes, InventoryResult, ItemEnchantmentType, ItemFlags, SellResult,
+    BagFamilyMask, BuyResult, ClientOpcodes, InventoryResult, InventoryType, ItemBondingType,
+    ItemClass, ItemEnchantmentType, ItemFlags, ItemFlags2, SellResult,
 };
 use wow_core::{ObjectGuid, ObjectGuidGenerator};
 use wow_data::{
@@ -24,8 +25,8 @@ use wow_data::{
 use wow_database::{CharacterDatabase, LoginDatabase, WorldDatabase};
 use wow_entities::{
     ApplyEnchantmentEffectRef, ApplyEnchantmentRandomSuffixRef, ApplyEnchantmentTemplateRef,
-    PlayerEnchantTimeUpdate, PlayerItemTimeUpdate, SendNewItemDelivery, SendNewItemDisplayText,
-    SendNewItemPlan,
+    ItemStorageTemplate, PlayerEnchantTimeUpdate, PlayerItemTimeUpdate, SendNewItemDelivery,
+    SendNewItemDisplayText, SendNewItemPlan,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus, build_dispatch_table};
 use wow_network::session_mgr::{InstanceLink, SessionManager};
@@ -670,6 +671,32 @@ impl WorldSession {
     pub fn is_item_bound_account_wide(&self, item_id: u32) -> bool {
         self.item_template_flags(item_id)
             .is_some_and(|flags| flags.contains(ItemFlags::IS_BOUND_TO_ACCOUNT))
+    }
+
+    /// Resolve the C++ `ItemTemplate` subset used by storage validation.
+    pub fn item_storage_template(&self, item_id: u32) -> Option<ItemStorageTemplate> {
+        let basic = self.item_store.as_ref()?.get(item_id)?;
+        let sparse = self.item_stats_store.as_ref()?.sparse_template(item_id)?;
+        let class_id = <ItemClass as num_traits::FromPrimitive>::from_u8(basic.class_id)?;
+        let inventory_type =
+            <InventoryType as num_traits::FromPrimitive>::from_i8(sparse.inventory_type)?;
+        let bonding = <ItemBondingType as num_traits::FromPrimitive>::from_u8(sparse.bonding)?;
+
+        Some(ItemStorageTemplate {
+            entry: item_id,
+            class_id,
+            subclass_id: u32::from(basic.subclass_id),
+            inventory_type,
+            bonding,
+            bag_family: BagFamilyMask::from_bits_retain(sparse.bag_family),
+            max_stack_size: sparse.max_stack_size(),
+            max_count: sparse.max_count,
+            item_limit_category: u32::from(sparse.limit_category),
+            container_slots: sparse.container_slots,
+            sell_price: sparse.sell_price,
+            is_crafting_reagent: (sparse.flags[1] & ItemFlags2::UsedInATradeskill as u32) != 0,
+            flags: sparse.item_flags(),
+        })
     }
 
     /// Set the item random suffix store for this session.
@@ -3392,12 +3419,16 @@ fn default_available_classes() -> Vec<wow_packet::packets::auth::RaceClassAvaila
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wow_constants::{EnchantmentSlot, ItemFlags, SpellItemEnchantmentFlags};
+    use wow_constants::{
+        BagFamilyMask, EnchantmentSlot, InventoryType, ItemBondingType, ItemClass, ItemFlags,
+        ItemFlags2, SpellItemEnchantmentFlags,
+    };
     use wow_core::Position;
     use wow_data::{
         ItemAppearanceEntry, ItemAppearanceStore, ItemModifiedAppearanceEntry,
-        ItemModifiedAppearanceStore, ItemRandomSuffixEntry, ItemRandomSuffixStore,
-        ItemStatsStore, SpellItemEnchantmentEntry, SpellItemEnchantmentStore,
+        ItemModifiedAppearanceStore, ItemRandomSuffixEntry, ItemRandomSuffixStore, ItemRecord,
+        ItemSparseTemplateEntry, ItemStatsStore, ItemStore, SpellItemEnchantmentEntry,
+        SpellItemEnchantmentStore,
     };
     use wow_entities::{SendNewItemInstancePlan, SendNewItemModifier};
     use wow_network::{GroupInfo, PlayerBroadcastInfo};
@@ -3684,6 +3715,56 @@ mod tests {
         assert!(session.is_item_bound_account_wide(100));
         assert!(!session.is_item_bound_account_wide(101));
         assert_eq!(session.item_template_flags(102), None);
+    }
+
+    #[test]
+    fn item_storage_template_combines_basic_and_sparse_data_like_cpp() {
+        let (mut session, _, _) = make_session();
+        session.set_item_store(Arc::new(ItemStore::from_records([ItemRecord {
+            id: 100,
+            class_id: ItemClass::Container as u8,
+            subclass_id: 0,
+            material: 0,
+            inventory_type: InventoryType::Weapon as i8,
+            sheathe_type: 0,
+        }])));
+        session.set_item_stats_store(Arc::new(ItemStatsStore::from_sparse_templates([(
+            100,
+            ItemSparseTemplateEntry {
+                flags: [
+                    ItemFlags::IS_BOUND_TO_ACCOUNT.bits() as u32,
+                    ItemFlags2::UsedInATradeskill as u32,
+                    0,
+                    0,
+                ],
+                bag_family: BagFamilyMask::HERBS.bits(),
+                stackable: i32::MAX,
+                max_count: 3,
+                sell_price: 99,
+                max_durability: 88,
+                limit_category: 44,
+                bonding: ItemBondingType::OnEquip as u8,
+                container_slots: 16,
+                inventory_type: InventoryType::Bag as i8,
+            },
+        )])));
+
+        let template = session.item_storage_template(100).unwrap();
+
+        assert_eq!(template.entry, 100);
+        assert_eq!(template.class_id, ItemClass::Container);
+        assert_eq!(template.subclass_id, 0);
+        assert_eq!(template.inventory_type, InventoryType::Bag);
+        assert_eq!(template.bonding, ItemBondingType::OnEquip);
+        assert_eq!(template.bag_family, BagFamilyMask::HERBS);
+        assert_eq!(template.max_stack_size, 0x7FFF_FFFE);
+        assert_eq!(template.max_count, 3);
+        assert_eq!(template.item_limit_category, 44);
+        assert_eq!(template.container_slots, 16);
+        assert_eq!(template.sell_price, 99);
+        assert!(template.is_crafting_reagent);
+        assert!(template.is_bound_account_wide());
+        assert_eq!(session.item_storage_template(101), None);
     }
 
     #[test]
