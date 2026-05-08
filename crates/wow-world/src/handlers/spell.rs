@@ -38,6 +38,7 @@ use crate::session::WorldSession;
 
 const LOOT_MODE_DEFAULT_LIKE_CPP: u16 = 1;
 const MAX_NR_LOOT_ITEMS_LIKE_CPP: usize = 18;
+const MAX_LOOT_REFERENCE_FRAMES_LIKE_CPP: u32 = 64;
 
 // ── Handler registrations ─────────────────────────────────────────
 
@@ -348,7 +349,7 @@ impl WorldSession {
                     generate_money_loot_like_cpp(min_money, max_money, &mut rand::thread_rng())
                 };
                 let items = self
-                    .generate_plain_item_loot_template_entries_like_cpp(item.entry_id)
+                    .generate_item_loot_template_entries_like_cpp(item.entry_id)
                     .await;
                 (coins, items)
             };
@@ -429,74 +430,148 @@ impl WorldSession {
         }
     }
 
-    async fn generate_plain_item_loot_template_entries_like_cpp(
+    async fn generate_item_loot_template_entries_like_cpp(
         &self,
         item_entry: u32,
     ) -> Vec<LootEntry> {
+        let mut loot_items = Vec::new();
+        let mut frames = Vec::new();
+        let rows = self
+            .load_loot_template_rows_like_cpp(LootTemplateTable::Item, item_entry)
+            .await;
+        frames.push(LootTemplateFrame { rows, index: 0 });
+
+        let mut processed_frames = 0u32;
+        while let Some(frame) = frames.last_mut() {
+            if frame.index >= frame.rows.len() {
+                frames.pop();
+                continue;
+            }
+            let row = frame.rows[frame.index].clone();
+            frame.index += 1;
+
+            if row.loot_mode & LOOT_MODE_DEFAULT_LIKE_CPP == 0 {
+                continue;
+            }
+
+            let mut rng = rand::thread_rng();
+            if row.reference > 0 {
+                if !loot_template_reference_row_can_roll_like_cpp(
+                    row.reference,
+                    row.chance,
+                    row.loot_mode,
+                    row.min_count,
+                ) {
+                    continue;
+                }
+                if row.chance < 100.0 && rng.gen_range(0.0f32..100.0f32) >= row.chance {
+                    continue;
+                }
+
+                let reference_rows = self
+                    .load_loot_template_rows_like_cpp(LootTemplateTable::Reference, row.reference)
+                    .await;
+                for _ in 0..row.max_count {
+                    frames.push(LootTemplateFrame {
+                        rows: reference_rows.clone(),
+                        index: 0,
+                    });
+                }
+                processed_frames = processed_frames.saturating_add(1);
+                if processed_frames > MAX_LOOT_REFERENCE_FRAMES_LIKE_CPP {
+                    warn!(
+                        item_entry,
+                        reference = row.reference,
+                        "stopped item loot reference processing after safety cap"
+                    );
+                    break;
+                }
+                continue;
+            }
+
+            if !loot_template_plain_row_can_roll_like_cpp(
+                row.item_id,
+                row.chance,
+                row.needs_quest,
+                row.loot_mode,
+                row.min_count,
+                row.max_count,
+                self.item_storage_template(row.item_id).is_some(),
+            ) {
+                continue;
+            }
+            if row.chance < 100.0 && rng.gen_range(0.0f32..100.0f32) >= row.chance {
+                continue;
+            }
+            let rolled_count = rng.gen_range(u32::from(row.min_count)..=u32::from(row.max_count));
+            let max_stack_size = self
+                .item_storage_template(row.item_id)
+                .map(|template| template.max_stack_size)
+                .unwrap_or(1)
+                .max(1);
+            add_loot_item_stacks_like_cpp(
+                &mut loot_items,
+                row.item_id,
+                rolled_count,
+                max_stack_size,
+            );
+        }
+
+        loot_items
+    }
+
+    async fn load_loot_template_rows_like_cpp(
+        &self,
+        table: LootTemplateTable,
+        entry: u32,
+    ) -> Vec<LootTemplateRow> {
         let Some(world_db) = self.world_db() else {
             return Vec::new();
         };
 
-        let mut stmt = world_db.prepare(WorldStatements::SEL_ITEM_LOOT_TEMPLATE_PLAIN);
-        stmt.set_u32(0, item_entry);
+        let statement = match table {
+            LootTemplateTable::Item => WorldStatements::SEL_ITEM_LOOT_TEMPLATE_ROWS,
+            LootTemplateTable::Reference => WorldStatements::SEL_REFERENCE_LOOT_TEMPLATE_ROWS,
+        };
+        let mut stmt = world_db.prepare(statement);
+        stmt.set_u32(0, entry);
 
         let mut result = match world_db.query(&stmt).await {
             Ok(result) => result,
             Err(err) => {
                 warn!(
-                    item_entry,
+                    entry,
+                    table = table.name(),
                     error = %err,
-                    "failed to load item_loot_template rows"
+                    "failed to load loot template rows"
                 );
                 return Vec::new();
             }
         };
 
-        let mut loot_items = Vec::new();
+        let mut rows = Vec::new();
         if result.is_empty() {
-            return loot_items;
+            return rows;
         }
 
         loop {
-            let loot_item_id = result.try_read::<u32>(0).unwrap_or(0);
-            let chance = result.try_read::<f32>(1).unwrap_or(0.0);
-            let needs_quest = result.try_read::<bool>(2).unwrap_or(false);
-            let loot_mode = result.try_read::<u16>(3).unwrap_or(0);
-            let min_count = result.try_read::<u8>(4).unwrap_or(0);
-            let max_count = result.try_read::<u8>(5).unwrap_or(0);
-
-            if loot_template_plain_row_can_roll_like_cpp(
-                loot_item_id,
-                chance,
-                needs_quest,
-                loot_mode,
-                min_count,
-                max_count,
-                self.item_storage_template(loot_item_id).is_some(),
-            ) {
-                let mut rng = rand::thread_rng();
-                if chance >= 100.0 || rng.gen_range(0.0f32..100.0f32) < chance {
-                    let rolled_count = rng.gen_range(u32::from(min_count)..=u32::from(max_count));
-                    let max_stack_size = self
-                        .item_storage_template(loot_item_id)
-                        .map(|template| template.max_stack_size)
-                        .unwrap_or(1)
-                        .max(1);
-                    add_loot_item_stacks_like_cpp(
-                        &mut loot_items,
-                        loot_item_id,
-                        rolled_count,
-                        max_stack_size,
-                    );
-                }
-            }
+            rows.push(LootTemplateRow {
+                item_id: result.try_read::<u32>(0).unwrap_or(0),
+                reference: result.try_read::<u32>(1).unwrap_or(0),
+                chance: result.try_read::<f32>(2).unwrap_or(0.0),
+                needs_quest: result.try_read::<bool>(3).unwrap_or(false),
+                loot_mode: result.try_read::<u16>(4).unwrap_or(0),
+                _group_id: result.try_read::<u8>(5).unwrap_or(0),
+                min_count: result.try_read::<u8>(6).unwrap_or(0),
+                max_count: result.try_read::<u8>(7).unwrap_or(0),
+            });
 
             if !result.next_row() {
                 break;
             }
         }
 
-        loot_items
+        rows
     }
 
     async fn load_stored_item_money_like_cpp(&self, item_guid: wow_core::ObjectGuid) -> Option<u32> {
@@ -697,6 +772,18 @@ fn loot_template_plain_row_can_roll_like_cpp(
     loot_mode & LOOT_MODE_DEFAULT_LIKE_CPP != 0
 }
 
+fn loot_template_reference_row_can_roll_like_cpp(
+    reference: u32,
+    chance: f32,
+    loot_mode: u16,
+    min_count: u8,
+) -> bool {
+    reference != 0
+        && min_count != 0
+        && chance != 0.0
+        && loot_mode & LOOT_MODE_DEFAULT_LIKE_CPP != 0
+}
+
 fn stored_item_row_can_load_like_cpp_representable(
     item_id: u32,
     count: u32,
@@ -717,6 +804,39 @@ fn stored_item_row_can_load_like_cpp_representable(
         && random_properties_id == 0
         && random_properties_seed == 0
         && context == 0
+}
+
+#[derive(Debug, Clone)]
+struct LootTemplateRow {
+    item_id: u32,
+    reference: u32,
+    chance: f32,
+    needs_quest: bool,
+    loot_mode: u16,
+    _group_id: u8,
+    min_count: u8,
+    max_count: u8,
+}
+
+#[derive(Debug)]
+struct LootTemplateFrame {
+    rows: Vec<LootTemplateRow>,
+    index: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum LootTemplateTable {
+    Item,
+    Reference,
+}
+
+impl LootTemplateTable {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Item => "item_loot_template",
+            Self::Reference => "reference_loot_template",
+        }
+    }
 }
 
 fn add_loot_item_stacks_like_cpp(
@@ -744,6 +864,7 @@ mod tests {
     use super::generate_money_loot_like_cpp;
     use super::{
         add_loot_item_stacks_like_cpp, loot_template_plain_row_can_roll_like_cpp,
+        loot_template_reference_row_can_roll_like_cpp,
         stored_item_row_can_load_like_cpp_representable,
     };
 
@@ -805,6 +926,16 @@ mod tests {
         add_loot_item_stacks_like_cpp(&mut capped, 25, 100, 1);
         assert_eq!(capped.len(), 18);
         assert_eq!(capped[17].loot_list_id, 17);
+    }
+
+    #[test]
+    fn reference_loot_template_validation_matches_cpp_basic_guards() {
+        assert!(loot_template_reference_row_can_roll_like_cpp(10, 100.0, 1, 1));
+        assert!(loot_template_reference_row_can_roll_like_cpp(10, 0.0000001, 1, 1));
+        assert!(!loot_template_reference_row_can_roll_like_cpp(0, 100.0, 1, 1));
+        assert!(!loot_template_reference_row_can_roll_like_cpp(10, 0.0, 1, 1));
+        assert!(!loot_template_reference_row_can_roll_like_cpp(10, 100.0, 0, 1));
+        assert!(!loot_template_reference_row_can_roll_like_cpp(10, 100.0, 1, 0));
     }
 
     #[test]

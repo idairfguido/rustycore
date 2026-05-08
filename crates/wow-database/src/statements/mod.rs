@@ -97,12 +97,24 @@ mod tests {
             1
         );
         assert!(
-            WorldStatements::SEL_ITEM_LOOT_TEMPLATE_PLAIN
+            WorldStatements::SEL_ITEM_LOOT_TEMPLATE_ROWS
                 .sql()
                 .contains("item_loot_template")
         );
         assert_eq!(
-            WorldStatements::SEL_ITEM_LOOT_TEMPLATE_PLAIN
+            WorldStatements::SEL_ITEM_LOOT_TEMPLATE_ROWS
+                .sql()
+                .matches('?')
+                .count(),
+            1
+        );
+        assert!(
+            WorldStatements::SEL_REFERENCE_LOOT_TEMPLATE_ROWS
+                .sql()
+                .contains("reference_loot_template")
+        );
+        assert_eq!(
+            WorldStatements::SEL_REFERENCE_LOOT_TEMPLATE_ROWS
                 .sql()
                 .matches('?')
                 .count(),
