@@ -142,6 +142,9 @@ pub enum CharStatements {
     /// DELETE FROM item_loot_money WHERE container_id = ?
     DEL_ITEMCONTAINER_MONEY,
 
+    /// DELETE FROM item_loot_items WHERE container_id = ? AND item_id = ? AND item_count = ? AND item_index = ?
+    DEL_ITEMCONTAINER_ITEM,
+
     /// SELECT money FROM item_loot_money WHERE container_id = ?
     SEL_ITEMCONTAINER_MONEY,
 
@@ -301,6 +304,9 @@ impl StatementDef for CharStatements {
             Self::DEL_ITEMCONTAINER_MONEY => {
                 "DELETE FROM item_loot_money WHERE container_id = ?"
             }
+            Self::DEL_ITEMCONTAINER_ITEM => {
+                "DELETE FROM item_loot_items WHERE container_id = ? AND item_id = ? AND item_count = ? AND item_index = ?"
+            }
             Self::SEL_ITEMCONTAINER_MONEY => {
                 "SELECT money FROM item_loot_money WHERE container_id = ? LIMIT 1"
             }
@@ -392,6 +398,7 @@ mod tests {
         assert_eq!(CharStatements::SEL_ITEM_REFUNDS.sql().matches('?').count(), 2);
         assert_eq!(CharStatements::DEL_ITEM_REFUND_INSTANCE.sql().matches('?').count(), 1);
         assert_eq!(CharStatements::DEL_ITEMCONTAINER_MONEY.sql().matches('?').count(), 1);
+        assert_eq!(CharStatements::DEL_ITEMCONTAINER_ITEM.sql().matches('?').count(), 4);
         assert_eq!(CharStatements::SEL_ITEMCONTAINER_MONEY.sql().matches('?').count(), 1);
         assert_eq!(CharStatements::INS_ITEMCONTAINER_MONEY.sql().matches('?').count(), 2);
         assert_eq!(CharStatements::INS_ITEM_REFUND_INSTANCE.sql().matches('?').count(), 4);
