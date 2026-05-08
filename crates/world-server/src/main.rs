@@ -359,6 +359,16 @@ async fn main() -> Result<()> {
         currency_types_store.len()
     );
 
+    let item_extended_cost_store = Arc::new(
+        wow_data::ItemExtendedCostStore::load(&data_dir, &locale).context(
+            "Failed to load ItemExtendedCost.db2 — check DataDir and DBC.Locale config",
+        )?,
+    );
+    info!(
+        "Loaded {} item extended costs from ItemExtendedCost.db2",
+        item_extended_cost_store.len()
+    );
+
     let item_store = Arc::new(
         wow_data::ItemStore::load(&data_dir, &locale)
             .context("Failed to load Item.db2 — check DataDir and DBC.Locale config")?,
@@ -572,6 +582,7 @@ async fn main() -> Result<()> {
         world_db: Some(Arc::clone(&world_db)),
         guid_generator: Some(Arc::clone(&guid_generator)),
         currency_types_store: Some(Arc::clone(&currency_types_store)),
+        item_extended_cost_store: Some(Arc::clone(&item_extended_cost_store)),
         item_store: Some(Arc::clone(&item_store)),
         item_appearance_store: Some(Arc::clone(&item_appearance_store)),
         item_modified_appearance_store: Some(Arc::clone(&item_modified_appearance_store)),
@@ -902,6 +913,9 @@ async fn create_session(
     }
     if let Some(ref store) = resources.currency_types_store {
         session.set_currency_types_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.item_extended_cost_store {
+        session.set_item_extended_cost_store(Arc::clone(store));
     }
     if let Some(ref store) = resources.item_store {
         session.set_item_store(Arc::clone(store));

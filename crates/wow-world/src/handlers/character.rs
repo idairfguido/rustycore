@@ -16,7 +16,7 @@ use wow_constants::{
 use wow_core::guid::HighGuid;
 use wow_core::{ObjectGuid, Position};
 use wow_crypto::rsa_sign::rsa_sign_connect_to;
-use wow_data::CurrencyTypesStore;
+use wow_data::{CurrencyTypesStore, ItemExtendedCostStore};
 use wow_database::{CharStatements, LoginStatements, SqlTransaction, WorldDatabase, WorldStatements};
 use wow_entities::{
     INVENTORY_SLOT_BAG_0, MAX_BAG_SIZE, NULL_BAG, NULL_SLOT, is_equipment_pos, is_inventory_pos,
@@ -682,20 +682,55 @@ fn vendor_buy_required_reputation_block_result(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VendorExtendedCostBlock {
+    Equip(InventoryResult),
+    Buy(BuyResult),
+    Silent,
+}
+
 fn vendor_buy_extended_cost_block_result(
+    extended_cost_store: Option<&ItemExtendedCostStore>,
+    currency_store: Option<&CurrencyTypesStore>,
     extended_cost: u32,
     buy_count: u32,
     quantity: u32,
-) -> Option<InventoryResult> {
+) -> Option<VendorExtendedCostBlock> {
     if extended_cost == 0 {
         return None;
     }
 
     if quantity % buy_count.max(1) != 0 {
-        return Some(InventoryResult::CantBuyQuantity);
+        return Some(VendorExtendedCostBlock::Equip(InventoryResult::CantBuyQuantity));
     }
 
-    Some(InventoryResult::VendorMissingTurnins)
+    let Some(extended_cost_entry) =
+        extended_cost_store.and_then(|store| store.get(extended_cost))
+    else {
+        return Some(VendorExtendedCostBlock::Silent);
+    };
+
+    if extended_cost_entry
+        .currency_id
+        .iter()
+        .copied()
+        .filter(|currency_id| *currency_id != 0)
+        .any(|currency_id| !vendor_currency_type_is_known(currency_store, u32::from(currency_id)))
+    {
+        return Some(VendorExtendedCostBlock::Buy(BuyResult::CantFindItem));
+    }
+
+    if extended_cost_entry.required_arena_rating != 0 {
+        return Some(VendorExtendedCostBlock::Equip(InventoryResult::CantEquipRank));
+    }
+
+    if extended_cost_entry.min_faction_id != 0 {
+        return Some(VendorExtendedCostBlock::Buy(BuyResult::ReputationRequire));
+    }
+
+    Some(VendorExtendedCostBlock::Equip(
+        InventoryResult::VendorMissingTurnins,
+    ))
 }
 
 fn vendor_buy_direct_store_block_result(
@@ -3835,7 +3870,21 @@ impl WorldSession {
                 return;
             }
 
-            self.send_equip_error(InventoryResult::VendorMissingTurnins, None, None, 0, 0);
+            match vendor_buy_extended_cost_block_result(
+                self.item_extended_cost_store().map(|store| store.as_ref()),
+                self.currency_types_store().map(|store| store.as_ref()),
+                vendor_item.extended_cost,
+                vendor_item.max_count,
+                quantity,
+            ) {
+                Some(VendorExtendedCostBlock::Equip(result)) => {
+                    self.send_equip_error(result, None, None, 0, 0);
+                }
+                Some(VendorExtendedCostBlock::Buy(result)) => {
+                    self.send_buy_error(result, Some(buy.vendor_guid), buy.item_id as u32);
+                }
+                Some(VendorExtendedCostBlock::Silent) | None => {}
+            }
             return;
         }
 
@@ -3946,11 +3995,21 @@ impl WorldSession {
             return;
         }
         if let Some(result) = vendor_buy_extended_cost_block_result(
+            self.item_extended_cost_store().map(|store| store.as_ref()),
+            self.currency_types_store().map(|store| store.as_ref()),
             vendor_item.extended_cost,
             vendor_item.buy_count,
             quantity,
         ) {
-            self.send_equip_error(result, None, None, 0, 0);
+            match result {
+                VendorExtendedCostBlock::Equip(result) => {
+                    self.send_equip_error(result, None, None, 0, 0);
+                }
+                VendorExtendedCostBlock::Buy(result) => {
+                    self.send_buy_error(result, Some(buy.vendor_guid), buy.item_id as u32);
+                }
+                VendorExtendedCostBlock::Silent => {}
+            }
             return;
         }
         if let Some(result) = vendor_buy_direct_store_block_result(
@@ -5483,14 +5542,74 @@ mod tests {
 
     #[test]
     fn vendor_buy_extended_cost_fails_closed_like_cpp_preflight() {
-        assert_eq!(vendor_buy_extended_cost_block_result(0, 5, 3), None);
+        let currency_store = CurrencyTypesStore::from_entries([wow_data::CurrencyTypesEntry {
+            id: 395,
+            category_id: 0,
+            inventory_icon_file_id: 0,
+            spell_weight: 0,
+            spell_category: 0,
+            max_qty: 0,
+            max_earnable_per_week: 0,
+            quality: 0,
+            faction_id: 0,
+            award_condition_id: 0,
+            flags: wow_constants::CurrencyTypesFlags::empty(),
+            flags_b: wow_constants::CurrencyTypesFlagsB::empty(),
+        }]);
+        let extended_cost_store =
+            ItemExtendedCostStore::from_entries([wow_data::ItemExtendedCostEntry {
+                id: 12,
+                required_arena_rating: 0,
+                arena_bracket: 0,
+                flags: wow_constants::ItemExtendedCostFlags::empty(),
+                min_faction_id: 0,
+                min_reputation: 0,
+                required_achievement: 0,
+                item_id: [0; wow_data::MAX_ITEM_EXT_COST_ITEMS],
+                item_count: [0; wow_data::MAX_ITEM_EXT_COST_ITEMS],
+                currency_id: [395, 0, 0, 0, 0],
+                currency_count: [10, 0, 0, 0, 0],
+            }]);
+
         assert_eq!(
-            vendor_buy_extended_cost_block_result(12, 5, 3),
-            Some(InventoryResult::CantBuyQuantity)
+            vendor_buy_extended_cost_block_result(None, None, 0, 5, 3),
+            None
         );
         assert_eq!(
-            vendor_buy_extended_cost_block_result(12, 5, 10),
-            Some(InventoryResult::VendorMissingTurnins)
+            vendor_buy_extended_cost_block_result(
+                Some(&extended_cost_store),
+                Some(&currency_store),
+                12,
+                5,
+                3
+            ),
+            Some(VendorExtendedCostBlock::Equip(InventoryResult::CantBuyQuantity))
+        );
+        assert_eq!(
+            vendor_buy_extended_cost_block_result(
+                Some(&extended_cost_store),
+                Some(&currency_store),
+                12,
+                5,
+                10
+            ),
+            Some(VendorExtendedCostBlock::Equip(
+                InventoryResult::VendorMissingTurnins
+            ))
+        );
+        assert_eq!(
+            vendor_buy_extended_cost_block_result(Some(&extended_cost_store), None, 12, 5, 10),
+            Some(VendorExtendedCostBlock::Buy(BuyResult::CantFindItem))
+        );
+        assert_eq!(
+            vendor_buy_extended_cost_block_result(
+                Some(&extended_cost_store),
+                Some(&currency_store),
+                99,
+                5,
+                10
+            ),
+            Some(VendorExtendedCostBlock::Silent)
         );
     }
 

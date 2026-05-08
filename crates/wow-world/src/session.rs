@@ -20,7 +20,7 @@ use wow_constants::{
 };
 use wow_core::{ObjectGuid, ObjectGuidGenerator};
 use wow_data::{
-    AreaTriggerStore, CurrencyTypesStore, HotfixBlobCache, ItemAppearanceStore,
+    AreaTriggerStore, CurrencyTypesStore, HotfixBlobCache, ItemExtendedCostStore, ItemAppearanceStore,
     ItemModifiedAppearanceStore, ItemRandomSuffixStore, ItemStatsStore, ItemStore,
     PlayerStatsStore, SkillStore,
     SpellItemEnchantmentStore, SpellStore,
@@ -126,6 +126,9 @@ pub struct WorldSession {
 
     // Currency types store (CurrencyTypes.db2 data)
     currency_types_store: Option<Arc<CurrencyTypesStore>>,
+
+    // Item extended cost store (ItemExtendedCost.db2 data)
+    item_extended_cost_store: Option<Arc<ItemExtendedCostStore>>,
 
     // Item store (Item.db2 BasicData — class/subclass)
     item_store: Option<Arc<ItemStore>>,
@@ -468,6 +471,7 @@ impl WorldSession {
             login_db: None,
             world_db: None,
             currency_types_store: None,
+            item_extended_cost_store: None,
             item_store: None,
             item_appearance_store: None,
             item_modified_appearance_store: None,
@@ -611,6 +615,16 @@ impl WorldSession {
     /// Get the currency types store reference.
     pub fn currency_types_store(&self) -> Option<&Arc<CurrencyTypesStore>> {
         self.currency_types_store.as_ref()
+    }
+
+    /// Set the item extended cost store for this session.
+    pub fn set_item_extended_cost_store(&mut self, store: Arc<ItemExtendedCostStore>) {
+        self.item_extended_cost_store = Some(store);
+    }
+
+    /// Get the item extended cost store reference.
+    pub fn item_extended_cost_store(&self) -> Option<&Arc<ItemExtendedCostStore>> {
+        self.item_extended_cost_store.as_ref()
     }
 
     /// Set the item store for this session.

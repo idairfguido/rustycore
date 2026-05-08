@@ -8,6 +8,7 @@
 pub mod wdc4;
 pub mod currency;
 pub mod item;
+pub mod item_extended_cost;
 pub mod item_appearance;
 pub mod item_modified_appearance;
 pub mod item_random_suffix;
@@ -23,6 +24,10 @@ pub mod quest_xp;
 
 pub use currency::{CurrencyTypesEntry, CurrencyTypesStore};
 pub use item::{ItemRecord, ItemStore};
+pub use item_extended_cost::{
+    ItemExtendedCostEntry, ItemExtendedCostStore, MAX_ITEM_EXT_COST_CURRENCIES,
+    MAX_ITEM_EXT_COST_ITEMS,
+};
 pub use item_appearance::{ItemAppearanceEntry, ItemAppearanceStore};
 pub use item_modified_appearance::{ItemModifiedAppearanceEntry, ItemModifiedAppearanceStore};
 pub use item_random_suffix::{ItemRandomSuffixEntry, ItemRandomSuffixStore};
