@@ -9,7 +9,9 @@ use std::sync::Arc;
 
 use rand::Rng;
 use tracing::{debug, info, trace, warn};
-use wow_constants::{ClientOpcodes, InventoryResult, ItemContext, ItemUpdateState};
+use wow_constants::{
+    ClientOpcodes, InventoryResult, ItemContext, ItemUpdateState, ItemVendorType,
+};
 use wow_core::guid::HighGuid;
 use wow_core::{ObjectGuid, Position};
 use wow_crypto::rsa_sign::rsa_sign_connect_to;
@@ -561,6 +563,15 @@ fn parse_equipment_cache(cache: &str) -> [VisualItemInfo; 34] {
 
 const MAX_MONEY_AMOUNT: u64 = 99_999_999_999;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct VendorBuyItem {
+    item_type: i32,
+    max_count: u32,
+    buy_price: u64,
+    max_durability: u32,
+    buy_count: u32,
+}
+
 fn vendor_buy_quantity_and_price(buy_price: u64, buy_count: u32, quantity: u32) -> (u32, u64) {
     if buy_price == 0 || quantity == 0 {
         return (quantity, 0);
@@ -576,6 +587,11 @@ fn vendor_buy_quantity_and_price(buy_price: u64, buy_count: u32, quantity: u32) 
 
 fn vendor_buy_packet_quantity_to_cpp_count(quantity: i32) -> u32 {
     u32::from((quantity as u8).max(1))
+}
+
+fn vendor_buy_muid_to_cpp_slot(muid: i32) -> Option<u32> {
+    let muid = muid as u32;
+    if muid > 0 { Some(muid - 1) } else { None }
 }
 
 fn vendor_buy_direct_inventory_destination(
@@ -599,6 +615,76 @@ fn vendor_buy_direct_inventory_destination(
 // ── Handler implementations ─────────────────────────────────────────
 
 impl WorldSession {
+    async fn resolve_vendor_buy_item_by_visible_slot(
+        &self,
+        world_db: &WorldDatabase,
+        root_entry: u32,
+        vendor_slot: u32,
+        expected_item_id: u32,
+    ) -> Option<VendorBuyItem> {
+        let mut visible_slot = 0u32;
+        let mut expanded = std::collections::HashSet::<u32>::new();
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(root_entry);
+
+        while let Some(vendor_entry) = queue.pop_front() {
+            if !expanded.insert(vendor_entry) {
+                continue;
+            }
+
+            let mut stmt = world_db.prepare(WorldStatements::SEL_VENDOR_ITEMS);
+            stmt.set_u32(0, vendor_entry);
+            let mut result = match world_db.query(&stmt).await {
+                Ok(result) => result,
+                Err(e) => {
+                    warn!("BuyItem: vendor item query failed for entry {vendor_entry}: {e}");
+                    continue;
+                }
+            };
+
+            loop {
+                let item_id: i32 = result.try_read(0).unwrap_or(0);
+                if item_id > 0 {
+                    let item_known = self
+                        .item_store()
+                        .map_or(true, |store| store.get(item_id as u32).is_some());
+                    if item_known {
+                        if visible_slot == vendor_slot {
+                            let row_item_id = item_id as u32;
+                            if row_item_id != expected_item_id {
+                                return None;
+                            }
+
+                            return Some(VendorBuyItem {
+                                item_type: result
+                                    .try_read::<u8>(3)
+                                    .unwrap_or(ItemVendorType::Item as u8)
+                                    as i32,
+                                max_count: result.try_read::<u32>(1).unwrap_or(0),
+                                buy_price: result
+                                    .try_read::<i64>(5)
+                                    .map(|v| v as u64)
+                                    .or_else(|| result.try_read::<u64>(5))
+                                    .unwrap_or(0),
+                                max_durability: result.try_read::<u32>(7).unwrap_or(0),
+                                buy_count: result.try_read::<u32>(8).unwrap_or(1),
+                            });
+                        }
+                        visible_slot = visible_slot.saturating_add(1);
+                    }
+                } else if item_id < 0 {
+                    queue.push_back((-item_id) as u32);
+                }
+
+                if !result.next_row() {
+                    break;
+                }
+            }
+        }
+
+        None
+    }
+
     /// Handle CMSG_ENUM_CHARACTERS — list characters for this account.
     pub async fn handle_enum_characters(&mut self) {
         let char_db = match self.char_db() {
@@ -3261,6 +3347,14 @@ impl WorldSession {
         let player_guid = match self.player_guid { Some(g) => g, None => return };
         let realm_id = self.realm_id();
         let map_id = self.current_map_id;
+        let vendor_slot = match vendor_buy_muid_to_cpp_slot(buy.muid) {
+            Some(slot) => slot,
+            None => return,
+        };
+        if buy.item_type != ItemVendorType::Item as i32 {
+            warn!("BuyItem: unsupported item type {}", buy.item_type);
+            return;
+        }
 
         // ── Validate: player alive ──
         let quantity = vendor_buy_packet_quantity_to_cpp_count(buy.quantity);
@@ -3299,14 +3393,21 @@ impl WorldSession {
             None => return,
         };
 
-        // ── Query buy price from npc_vendor + item_sparse ──
-        let mut price_stmt = world_db.prepare(WorldStatements::SEL_VENDOR_ITEM_PRICE);
-        price_stmt.set_u32(0, vendor_entry);
-        price_stmt.set_u32(1, buy.item_id as u32);
-        let price_result = match world_db.query(&price_stmt).await {
-            Ok(r) => r,
-            Err(e) => {
-                warn!("BuyItem: price query failed: {e}");
+        let vendor_item = match self
+            .resolve_vendor_buy_item_by_visible_slot(
+                world_db.as_ref(),
+                vendor_entry,
+                vendor_slot,
+                buy.item_id as u32,
+            )
+            .await
+        {
+            Some(item) if item.item_type == ItemVendorType::Item as i32 => item,
+            _ => {
+                warn!(
+                    "BuyItem: vendor slot {} item {} not found for vendor {}",
+                    vendor_slot, buy.item_id, vendor_entry
+                );
                 self.send_buy_error(
                     BuyResult::CantFindItem,
                     Some(buy.vendor_guid),
@@ -3315,24 +3416,21 @@ impl WorldSession {
                 return;
             }
         };
-
-        let (quantity, buy_price): (u32, u64) = if price_result.is_empty() {
-            warn!("BuyItem: item {} not found in vendor {}", buy.item_id, vendor_entry);
+        if vendor_item.max_count != 0 && vendor_item.max_count < quantity {
             self.send_buy_error(
-                BuyResult::CantFindItem,
+                BuyResult::ItemAlreadySold,
                 Some(buy.vendor_guid),
                 buy.muid as u32,
             );
             return;
-        } else {
-            let raw: u64 = price_result.try_read::<u64>(0).unwrap_or(0);
-            let buy_count: u32 = price_result.try_read::<u32>(3).unwrap_or(1);
-            vendor_buy_quantity_and_price(raw, buy_count, quantity)
-        };
+        }
 
-        let max_durability: u32 = if price_result.is_empty() { 0 } else {
-            price_result.try_read::<u32>(2).unwrap_or(0)
-        };
+        let (quantity, buy_price): (u32, u64) = vendor_buy_quantity_and_price(
+            vendor_item.buy_price,
+            vendor_item.buy_count,
+            quantity,
+        );
+        let max_durability = vendor_item.max_durability;
 
         // ── Check gold ──
         if self.player_gold < buy_price {
@@ -4738,6 +4836,14 @@ mod tests {
         assert_eq!(vendor_buy_packet_quantity_to_cpp_count(1), 1);
         assert_eq!(vendor_buy_packet_quantity_to_cpp_count(256), 1);
         assert_eq!(vendor_buy_packet_quantity_to_cpp_count(-1), 255);
+    }
+
+    #[test]
+    fn vendor_buy_muid_uses_cpp_one_based_uint32_slot_conversion() {
+        assert_eq!(vendor_buy_muid_to_cpp_slot(0), None);
+        assert_eq!(vendor_buy_muid_to_cpp_slot(1), Some(0));
+        assert_eq!(vendor_buy_muid_to_cpp_slot(2), Some(1));
+        assert_eq!(vendor_buy_muid_to_cpp_slot(-1), Some(u32::MAX - 1));
     }
 
     #[test]
