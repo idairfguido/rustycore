@@ -572,6 +572,7 @@ struct VendorBuyItem {
     item_type: i32,
     max_count: u32,
     incr_time: u32,
+    player_condition_id: u32,
     extended_cost: u32,
     buy_price: u64,
     max_durability: u32,
@@ -604,6 +605,18 @@ fn vendor_buy_packet_quantity_to_cpp_count(quantity: i32) -> u32 {
 fn vendor_buy_muid_to_cpp_slot(muid: i32) -> Option<u32> {
     let muid = muid as u32;
     if muid > 0 { Some(muid - 1) } else { None }
+}
+
+fn vendor_list_player_condition_failed_id(player_condition_id: u32) -> i32 {
+    player_condition_id as i32
+}
+
+fn vendor_buy_player_condition_block_result(player_condition_id: u32) -> Option<InventoryResult> {
+    if player_condition_id == 0 {
+        None
+    } else {
+        Some(InventoryResult::ItemLocked)
+    }
 }
 
 fn vendor_buy_extended_cost_block_result(
@@ -858,14 +871,14 @@ impl WorldSession {
         new_count
     }
 
-    async fn resolve_vendor_buy_item_by_visible_slot(
+    async fn resolve_vendor_buy_item_by_cpp_slot(
         &self,
         world_db: &WorldDatabase,
         root_entry: u32,
         vendor_slot: u32,
         expected_item_id: u32,
     ) -> Option<VendorBuyItem> {
-        let mut visible_slot = 0u32;
+        let mut raw_slot = 0u32;
         let mut expanded = std::collections::HashSet::<u32>::new();
         let mut queue = std::collections::VecDeque::new();
         queue.push_back(root_entry);
@@ -888,35 +901,35 @@ impl WorldSession {
             loop {
                 let item_id: i32 = result.try_read(0).unwrap_or(0);
                 if item_id > 0 {
+                    let current_slot = raw_slot;
+                    raw_slot = raw_slot.saturating_add(1);
                     let item_known = self
                         .item_store()
                         .map_or(true, |store| store.get(item_id as u32).is_some());
-                    if item_known {
-                        if visible_slot == vendor_slot {
-                            let row_item_id = item_id as u32;
-                            if row_item_id != expected_item_id {
-                                return None;
-                            }
-
-                            return Some(VendorBuyItem {
-                                item_id: row_item_id,
-                                item_type: result
-                                    .try_read::<u8>(3)
-                                    .unwrap_or(ItemVendorType::Item as u8)
-                                    as i32,
-                                max_count: result.try_read::<u32>(1).unwrap_or(0),
-                                incr_time: result.try_read::<u32>(10).unwrap_or(0),
-                                extended_cost: result.try_read::<u32>(2).unwrap_or(0),
-                                buy_price: result
-                                    .try_read::<i64>(5)
-                                    .map(|v| v as u64)
-                                    .or_else(|| result.try_read::<u64>(5))
-                                    .unwrap_or(0),
-                                max_durability: result.try_read::<u32>(7).unwrap_or(0),
-                                buy_count: result.try_read::<u32>(8).unwrap_or(1),
-                            });
+                    if item_known && current_slot == vendor_slot {
+                        let row_item_id = item_id as u32;
+                        if row_item_id != expected_item_id {
+                            return None;
                         }
-                        visible_slot = visible_slot.saturating_add(1);
+
+                        return Some(VendorBuyItem {
+                            item_id: row_item_id,
+                            item_type: result
+                                .try_read::<u8>(3)
+                                .unwrap_or(ItemVendorType::Item as u8)
+                                as i32,
+                            max_count: result.try_read::<u32>(1).unwrap_or(0),
+                            incr_time: result.try_read::<u32>(10).unwrap_or(0),
+                            player_condition_id: result.try_read::<u32>(11).unwrap_or(0),
+                            extended_cost: result.try_read::<u32>(2).unwrap_or(0),
+                            buy_price: result
+                                .try_read::<i64>(5)
+                                .map(|v| v as u64)
+                                .or_else(|| result.try_read::<u64>(5))
+                                .unwrap_or(0),
+                            max_durability: result.try_read::<u32>(7).unwrap_or(0),
+                            buy_count: result.try_read::<u32>(8).unwrap_or(1),
+                        });
                     }
                 } else if item_id < 0 {
                     queue.push_back((-item_id) as u32);
@@ -3488,7 +3501,7 @@ impl WorldSession {
 
         // Load all items: direct rows + expand reference vendors (npc_vendor.item < 0).
         let mut items = Vec::new();
-        let mut slot = 1i32;
+        let mut raw_slot = 0i32;
         let mut expanded = std::collections::HashSet::<u32>::new();
         let mut queue = std::collections::VecDeque::new();
         queue.push_back(entry);
@@ -3528,6 +3541,7 @@ impl WorldSession {
                     .unwrap_or(1);
                 let do_not_filter: bool = result.try_read::<u8>(9).map(|v| v != 0).unwrap_or(false);
                 let incr_time: u32 = result.try_read::<u32>(10).unwrap_or(0);
+                let player_condition_id: u32 = result.try_read::<u32>(11).unwrap_or(0);
 
                 // Solo enviar items con ID válido; 0 o negativo el cliente lo muestra como ? y nombre vacío
                 // Además filtrar items que no existen en Item.db2 — igual que C#:
@@ -3535,6 +3549,8 @@ impl WorldSession {
                 //   → "non-existed item, ignore"
                 // Items 58260, 58274, etc. no están en Item.db2 de este cliente → se omiten.
                 if item_id > 0 {
+                    let muid = raw_slot.saturating_add(1);
+                    raw_slot = raw_slot.saturating_add(1);
                     let item_known = self.item_store()
                         .map_or(true, |s| s.get(item_id as u32).is_some());
                     if !item_known {
@@ -3587,7 +3603,7 @@ impl WorldSession {
                         extended_cost,
                     );
                     items.push(VendorItem {
-                        muid: slot,
+                        muid,
                         item_id,
                         item_type,
                         quantity: if maxcount == 0 { -1 } else { current_count as i32 },
@@ -3595,12 +3611,13 @@ impl WorldSession {
                         durability,
                         stack_count: stack_count.max(1),
                         extended_cost,
-                        player_condition_failed: 0,
+                        player_condition_failed: vendor_list_player_condition_failed_id(
+                            player_condition_id,
+                        ),
                         locked: false,
                         do_not_filter,
                         refundable,
                     });
-                    slot += 1;
                 } else if item_id < 0 {
                     let ref_entry = (-item_id) as u32;
                     queue.push_back(ref_entry);
@@ -3682,7 +3699,7 @@ impl WorldSession {
         };
 
         let vendor_item = match self
-            .resolve_vendor_buy_item_by_visible_slot(
+            .resolve_vendor_buy_item_by_cpp_slot(
                 world_db.as_ref(),
                 vendor_entry,
                 vendor_slot,
@@ -3721,6 +3738,12 @@ impl WorldSession {
                 }
                 VendorBuyTemplateBlock::Silent => {}
             }
+            return;
+        }
+        if let Some(result) =
+            vendor_buy_player_condition_block_result(vendor_item.player_condition_id)
+        {
+            self.send_equip_error(result, None, None, 0, 0);
             return;
         }
         let vendor_current_count = self.vendor_item_current_count(
@@ -5186,6 +5209,17 @@ mod tests {
         assert_eq!(vendor_buy_muid_to_cpp_slot(1), Some(0));
         assert_eq!(vendor_buy_muid_to_cpp_slot(2), Some(1));
         assert_eq!(vendor_buy_muid_to_cpp_slot(-1), Some(u32::MAX - 1));
+    }
+
+    #[test]
+    fn vendor_player_condition_fail_closed_until_condition_mgr_exists() {
+        assert_eq!(vendor_list_player_condition_failed_id(0), 0);
+        assert_eq!(vendor_list_player_condition_failed_id(42), 42);
+        assert_eq!(vendor_buy_player_condition_block_result(0), None);
+        assert_eq!(
+            vendor_buy_player_condition_block_result(42),
+            Some(InventoryResult::ItemLocked)
+        );
     }
 
     #[test]
