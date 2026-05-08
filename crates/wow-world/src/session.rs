@@ -14,7 +14,7 @@ use tracing::{debug, info, trace, warn};
 
 use wow_constants::{
     BagFamilyMask, BuyResult, ClientOpcodes, InventoryResult, InventoryType, ItemBondingType,
-    ItemClass, ItemEnchantmentType, ItemFlags, ItemFlags2, SellResult,
+    ItemClass, ItemContext, ItemEnchantmentType, ItemFlags, ItemFlags2, SellResult,
 };
 use wow_core::{ObjectGuid, ObjectGuidGenerator};
 use wow_data::{
@@ -25,8 +25,8 @@ use wow_data::{
 use wow_database::{CharacterDatabase, LoginDatabase, WorldDatabase};
 use wow_entities::{
     ApplyEnchantmentEffectRef, ApplyEnchantmentRandomSuffixRef, ApplyEnchantmentTemplateRef,
-    ItemStorageTemplate, PlayerEnchantTimeUpdate, PlayerItemTimeUpdate, SendNewItemDelivery,
-    SendNewItemDisplayText, SendNewItemPlan,
+    Item, ItemCreateInfo, ItemStorageTemplate, MAX_ITEM_SPELLS, PlayerEnchantTimeUpdate,
+    PlayerItemTimeUpdate, SendNewItemDelivery, SendNewItemDisplayText, SendNewItemPlan,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus, build_dispatch_table};
 use wow_network::session_mgr::{InstanceLink, SessionManager};
@@ -224,6 +224,8 @@ pub struct WorldSession {
 
     /// In-memory inventory: slot → (item ObjectGuid, entry_id, db_guid).
     pub(crate) inventory_items: HashMap<u8, InventoryItem>,
+    /// In-memory item objects keyed by item GUID, mirroring C++ `Player::m_items` ownership.
+    pub(crate) inventory_item_objects: HashMap<ObjectGuid, Item>,
 
     /// Current map ID for VALUES update packets.
     pub(crate) current_map_id: u16,
@@ -477,6 +479,7 @@ impl WorldSession {
             pending_creature_spawn: None,
             respawn_queue: Vec::new(),
             inventory_items: HashMap::new(),
+            inventory_item_objects: HashMap::new(),
             current_map_id: 0,
             player_race: 0,
             player_class: 0,
@@ -704,6 +707,56 @@ impl WorldSession {
         self.item_storage_template(item_id)
             .map(|template| template.inventory_type as u8)
             .filter(|&inventory_type| inventory_type != InventoryType::NonEquip as u8)
+    }
+
+    fn item_template_max_durability(&self, item_id: u32) -> u32 {
+        self.item_stats_store
+            .as_ref()
+            .and_then(|store| store.sparse_template(item_id))
+            .map(|template| template.max_durability)
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn make_inventory_item_object(
+        &self,
+        item_guid: ObjectGuid,
+        entry_id: u32,
+        owner_guid: ObjectGuid,
+        count: u32,
+        durability: u32,
+        context: ItemContext,
+        slot: u8,
+    ) -> Item {
+        let max_durability = self.item_template_max_durability(entry_id).max(durability);
+        let mut item = Item::new(i64::from(self.total_played_time));
+        item.initialize_created_state(ItemCreateInfo {
+            guid: item_guid,
+            item_id: entry_id,
+            context,
+            owner: Some(owner_guid),
+            max_durability,
+            expiration: 0,
+            spell_charges: [0; MAX_ITEM_SPELLS],
+        });
+        item.set_count(count.max(1));
+        item.set_durability(durability);
+        item.set_slot(slot);
+        item.set_container_guid(ObjectGuid::EMPTY);
+        item
+    }
+
+    pub(crate) fn insert_inventory_item_object(&mut self, item: Item) -> Option<Item> {
+        self.inventory_item_objects.insert(item.object().guid(), item)
+    }
+
+    pub(crate) fn remove_inventory_item_object(&mut self, item_guid: ObjectGuid) -> Option<Item> {
+        self.inventory_item_objects.remove(&item_guid)
+    }
+
+    pub(crate) fn set_inventory_item_object_slot(&mut self, item_guid: ObjectGuid, slot: u8) {
+        if let Some(item) = self.inventory_item_objects.get_mut(&item_guid) {
+            item.set_slot(slot);
+        }
     }
 
     /// Set the item random suffix store for this session.
@@ -3427,8 +3480,8 @@ fn default_available_classes() -> Vec<wow_packet::packets::auth::RaceClassAvaila
 mod tests {
     use super::*;
     use wow_constants::{
-        BagFamilyMask, EnchantmentSlot, InventoryType, ItemBondingType, ItemClass, ItemFlags,
-        ItemFlags2, SpellItemEnchantmentFlags,
+        BagFamilyMask, EnchantmentSlot, InventoryType, ItemBondingType, ItemClass, ItemContext,
+        ItemFlags, ItemFlags2, ItemUpdateState, SpellItemEnchantmentFlags,
     };
     use wow_core::Position;
     use wow_data::{
@@ -3773,6 +3826,57 @@ mod tests {
         assert!(template.is_bound_account_wide());
         assert_eq!(session.item_template_inventory_type(100), Some(InventoryType::Bag as u8));
         assert_eq!(session.item_storage_template(101), None);
+    }
+
+    #[test]
+    fn inventory_item_object_uses_template_durability_and_runtime_fields() {
+        let (mut session, _, _) = make_session();
+        let owner_guid = ObjectGuid::create_player(1, 42);
+        let item_guid = ObjectGuid::create_item(1, 900);
+        session.total_played_time = 123;
+        session.set_item_stats_store(Arc::new(ItemStatsStore::from_sparse_templates([(
+            700,
+            ItemSparseTemplateEntry {
+                flags: [0, 0, 0, 0],
+                bag_family: 0,
+                stackable: 1,
+                max_count: 0,
+                sell_price: 0,
+                max_durability: 55,
+                limit_category: 0,
+                bonding: 0,
+                container_slots: 0,
+                inventory_type: 0,
+            },
+        )])));
+
+        let mut item = session.make_inventory_item_object(
+            item_guid,
+            700,
+            owner_guid,
+            3,
+            44,
+            ItemContext::Vendor,
+            35,
+        );
+        item.set_state(ItemUpdateState::Unchanged);
+        session.insert_inventory_item_object(item);
+
+        let stored = session.inventory_item_objects.get(&item_guid).unwrap();
+        assert_eq!(stored.object().entry(), 700);
+        assert_eq!(stored.data().owner, owner_guid);
+        assert_eq!(stored.data().contained_in, owner_guid);
+        assert_eq!(stored.data().stack_count, 3);
+        assert_eq!(stored.data().max_durability, 55);
+        assert_eq!(stored.data().durability, 44);
+        assert_eq!(stored.data().context, ItemContext::Vendor as i32);
+        assert_eq!(stored.slot(), 35);
+        assert_eq!(stored.update_state(), ItemUpdateState::Unchanged);
+
+        session.set_inventory_item_object_slot(item_guid, 36);
+        assert_eq!(session.inventory_item_objects.get(&item_guid).unwrap().slot(), 36);
+        assert!(session.remove_inventory_item_object(item_guid).is_some());
+        assert!(!session.inventory_item_objects.contains_key(&item_guid));
     }
 
     #[test]

@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use rand::Rng;
 use tracing::{debug, info, trace, warn};
-use wow_constants::ClientOpcodes;
+use wow_constants::{ClientOpcodes, ItemContext, ItemUpdateState};
 use wow_core::guid::HighGuid;
 use wow_core::{ObjectGuid, Position};
 use wow_crypto::rsa_sign::rsa_sign_connect_to;
@@ -1384,6 +1384,7 @@ impl WorldSession {
         let mut item_creates: Vec<wow_packet::packets::update::ItemCreateData> = Vec::new();
         let realm_id = self.realm_id();
         self.inventory_items.clear();
+        self.inventory_item_objects.clear();
         {
             let mut eq_stmt = char_db.prepare(CharStatements::SEL_CHAR_EQUIPMENT);
             eq_stmt.set_u64(0, guid.counter() as u64);
@@ -1393,6 +1394,12 @@ impl WorldSession {
                         let slot: u8 = eq_result.read(0);
                         let item_entry: u32 = eq_result.try_read(1).unwrap_or(0);
                         let item_db_guid: u64 = eq_result.try_read(2).unwrap_or(0);
+                        let item_count: u32 = eq_result.try_read(3).unwrap_or(1);
+                        let item_durability: u32 = eq_result.try_read(4).unwrap_or(0);
+                        let item_context = eq_result
+                            .try_read::<u8>(5)
+                            .and_then(<ItemContext as num_traits::FromPrimitive>::from_u8)
+                            .unwrap_or(ItemContext::None);
                         if item_entry > 0 && (slot as usize) < 141 {
                             let item_guid = ObjectGuid::create_item(realm_id, item_db_guid as i64);
                             inv_slots[slot as usize] = item_guid;
@@ -1417,6 +1424,17 @@ impl WorldSession {
                                 db_guid: item_db_guid,
                                 inventory_type,
                             });
+                            let mut item_object = self.make_inventory_item_object(
+                                item_guid,
+                                item_entry,
+                                guid,
+                                item_count,
+                                item_durability,
+                                item_context,
+                                slot,
+                            );
+                            item_object.set_state(ItemUpdateState::Unchanged);
+                            self.insert_inventory_item_object(item_object);
                             // Slots 0-18 also populate VisibleItems for character model
                             if (slot as usize) < 19 {
                                 visible_items[slot as usize] = (item_entry as i32, 0, 0);
@@ -3348,6 +3366,16 @@ impl WorldSession {
             db_guid: next_item_guid,
             inventory_type: inv_type,
         });
+        let item_object = self.make_inventory_item_object(
+            item_guid,
+            buy.item_id as u32,
+            player_guid,
+            quantity,
+            max_durability,
+            ItemContext::Vendor,
+            slot,
+        );
+        self.insert_inventory_item_object(item_object);
 
         info!(
             "BuyItem: player {:?} bought item {} at slot {} for {} copper (remaining: {})",
@@ -3462,6 +3490,7 @@ impl WorldSession {
 
         // ── Remove from in-memory inventory ──
         self.inventory_items.remove(&slot);
+        self.remove_inventory_item_object(item.guid);
 
         info!(
             "SellItem: player {:?} sold item {} from slot {} for {} copper (total: {})",
@@ -3558,11 +3587,13 @@ impl WorldSession {
         // Perform the swap in memory
         if let Some(ref item) = src_item {
             self.inventory_items.insert(dst, item.clone());
+            self.set_inventory_item_object_slot(item.guid, dst);
         } else {
             self.inventory_items.remove(&dst);
         }
         if let Some(ref item) = dst_item {
             self.inventory_items.insert(src, item.clone());
+            self.set_inventory_item_object_slot(item.guid, src);
         } else {
             self.inventory_items.remove(&src);
         }
@@ -3828,6 +3859,7 @@ impl WorldSession {
                 return;
             }
         };
+        self.remove_inventory_item_object(item.guid);
 
         // Delete from DB
         let char_db = match self.char_db() {

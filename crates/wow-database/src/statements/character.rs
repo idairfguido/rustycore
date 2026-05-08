@@ -53,10 +53,10 @@ pub enum CharStatements {
     /// SELECT MAX(guid) FROM characters
     SEL_MAX_GUID,
 
-    /// SELECT ci.slot, ii.itemEntry, ci.item
+    /// SELECT ci.slot, ii.itemEntry, ci.item, ii.count, ii.durability, ii.context
     /// FROM character_inventory ci
     /// JOIN item_instance ii ON ci.item = ii.guid
-    /// WHERE ci.guid = ? AND ci.bag = 0 AND ci.slot < 19
+    /// WHERE ci.guid = ? AND ci.bag = 0
     SEL_CHAR_EQUIPMENT,
 
     /// UPDATE character_inventory SET slot = ? WHERE guid = ? AND item = ?
@@ -160,7 +160,7 @@ impl StatementDef for CharStatements {
                 "SELECT MAX(guid) FROM characters"
             }
             Self::SEL_CHAR_EQUIPMENT => {
-                "SELECT ci.slot, ii.itemEntry, ci.item \
+                "SELECT ci.slot, ii.itemEntry, ci.item, ii.count, ii.durability, ii.context \
                  FROM character_inventory ci \
                  JOIN item_instance ii ON ci.item = ii.guid \
                  WHERE ci.guid = ? AND ci.bag = 0"
