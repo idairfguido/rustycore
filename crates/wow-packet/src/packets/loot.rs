@@ -76,6 +76,23 @@ impl ClientPacket for LootRelease {
     }
 }
 
+// ── LootMoney (CMSG_LOOT_MONEY) ─────────────────────────────────
+
+/// Client requests the money from the current loot view.
+#[derive(Debug, Clone)]
+pub struct LootMoney {
+    pub is_soft_interact: bool,
+}
+
+impl ClientPacket for LootMoney {
+    const OPCODE: ClientOpcodes = ClientOpcodes::LootMoney;
+
+    fn read(pkt: &mut WorldPacket) -> Result<Self, PacketError> {
+        let is_soft_interact = pkt.has_bit()?;
+        Ok(Self { is_soft_interact })
+    }
+}
+
 // ── LootItemData ─────────────────────────────────────────────────
 
 /// One item entry in a loot window.
@@ -190,6 +207,27 @@ impl ServerPacket for SLootRelease {
     }
 }
 
+// ── LootMoneyNotify (SMSG_LOOT_MONEY_NOTIFY) ─────────────────────
+
+/// Server notifies the client that money was looted.
+#[derive(Debug, Clone)]
+pub struct LootMoneyNotify {
+    pub money: u64,
+    pub money_mod: u64,
+    pub sole_looter: bool,
+}
+
+impl ServerPacket for LootMoneyNotify {
+    const OPCODE: ServerOpcodes = ServerOpcodes::LootMoneyNotify;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_uint64(self.money);
+        pkt.write_uint64(self.money_mod);
+        pkt.write_bit(self.sole_looter);
+        pkt.flush_bits();
+    }
+}
+
 // ── In-memory loot tracking ──────────────────────────────────────
 
 /// Server-side loot state for one dead creature.
@@ -207,4 +245,39 @@ pub struct LootEntry {
     pub item_id: u32,
     pub quantity: u32,
     pub taken: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{ClientPacket, ServerPacket};
+
+    use super::{LootMoney, LootMoneyNotify};
+    use crate::world_packet::WorldPacket;
+
+    #[test]
+    fn loot_money_reads_cpp_soft_interact_bit() {
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_bit(true);
+        pkt.flush_bits();
+        pkt.reset_read();
+
+        let parsed = LootMoney::read(&mut pkt).expect("loot money packet should parse");
+        assert!(parsed.is_soft_interact);
+    }
+
+    #[test]
+    fn loot_money_notify_writes_cpp_money_money_mod_and_sole_looter() {
+        let notify = LootMoneyNotify {
+            money: 123,
+            money_mod: 7,
+            sole_looter: true,
+        };
+        let mut pkt = WorldPacket::new_empty();
+        notify.write(&mut pkt);
+        pkt.reset_read();
+
+        assert_eq!(pkt.read_uint64().unwrap(), 123);
+        assert_eq!(pkt.read_uint64().unwrap(), 7);
+        assert!(pkt.read_bit().unwrap());
+    }
 }

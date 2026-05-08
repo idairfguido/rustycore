@@ -2618,6 +2618,9 @@ impl WorldSession {
             ClientOpcodes::LootItem => {
                 self.handle_loot_item(pkt).await;
             }
+            ClientOpcodes::LootMoney => {
+                self.handle_loot_money(pkt).await;
+            }
             ClientOpcodes::LootRelease => {
                 self.handle_loot_release(pkt).await;
             }

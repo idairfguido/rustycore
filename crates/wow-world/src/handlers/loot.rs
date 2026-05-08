@@ -18,8 +18,8 @@ use wow_database::{CharStatements, SqlTransaction};
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::packets::item::ItemExpirePurchaseRefund;
 use wow_packet::packets::loot::{
-    CreatureLoot, LootItemData, LootItemPkt, LootRelease, LootRemoved, LootResponse, LootUnit,
-    SLootRelease,
+    CreatureLoot, LootItemData, LootItemPkt, LootMoney, LootMoneyNotify, LootRelease, LootRemoved,
+    LootResponse, LootUnit, SLootRelease,
 };
 use wow_packet::packets::update::UpdateObject;
 use wow_packet::ClientPacket;
@@ -43,6 +43,15 @@ inventory::submit! {
         status: SessionStatus::LoggedIn,
         processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_loot_item",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::LootMoney,
+        status: SessionStatus::LoggedIn,
+        processing: PacketProcessing::ThreadUnsafe,
+        handler_name: "handle_loot_money",
     }
 }
 
@@ -171,6 +180,80 @@ impl WorldSession {
         }
     }
 
+    /// CMSG_LOOT_MONEY — player takes money from the current loot view.
+    pub async fn handle_loot_money(&mut self, mut pkt: wow_packet::WorldPacket) {
+        let req = match LootMoney::read(&mut pkt) {
+            Ok(r) => r,
+            Err(e) => {
+                warn!("Bad LootMoney: {e}");
+                return;
+            }
+        };
+
+        let player_guid = match self.player_guid {
+            Some(guid) => guid,
+            None => return,
+        };
+
+        debug!(
+            account = self.account_id,
+            is_soft_interact = req.is_soft_interact,
+            "CMSG_LOOT_MONEY"
+        );
+
+        let mut money_by_loot: Vec<(ObjectGuid, u32)> = Vec::new();
+        let mut item_release: Vec<ObjectGuid> = Vec::new();
+
+        for (loot_guid, loot) in self.loot_table.iter_mut() {
+            if loot.coins == 0 {
+                continue;
+            }
+
+            let money = loot.coins;
+            loot.coins = 0;
+            money_by_loot.push((*loot_guid, money));
+
+            if loot_guid.is_item() && loot_is_looted_like_cpp(loot) {
+                item_release.push(*loot_guid);
+            }
+        }
+
+        if money_by_loot.is_empty() {
+            return;
+        }
+
+        let total_money = money_by_loot
+            .iter()
+            .fold(0u64, |total, (_, money)| total.saturating_add(u64::from(*money)));
+        self.player_gold = self.player_gold.saturating_add(total_money);
+        self.save_player_gold().await;
+
+        for (_, money) in &money_by_loot {
+            self.send_packet(&LootMoneyNotify {
+                money: u64::from(*money),
+                money_mod: 0,
+                sole_looter: true,
+            });
+        }
+
+        for (loot_guid, _) in &money_by_loot {
+            if loot_guid.is_item() {
+                self.delete_stored_item_money_like_cpp(*loot_guid).await;
+            }
+        }
+
+        for loot_guid in item_release {
+            self.loot_table.remove(&loot_guid);
+            self.send_packet(&SLootRelease {
+                unit: loot_guid,
+                loot_obj: loot_guid,
+            });
+            self.destroy_fully_looted_direct_item(loot_guid).await;
+        }
+
+        let _ = player_guid;
+    }
+
     /// CMSG_LOOT_RELEASE — player closes the loot window.
     ///
     /// C# ref: `LootHandler.DoLootRelease` (creature branch):
@@ -190,12 +273,8 @@ impl WorldSession {
         // C# ref: `loot.IsLooted()` → no more non-taken items.
         let fully_looted = self.loot_table
             .get(&req.unit)
-            .map(|loot| loot.items.iter().all(|e| e.taken))
+            .map(loot_is_looted_like_cpp)
             .unwrap_or(true); // If no entry at all, treat as fully looted.
-
-        // Remove loot entry from memory.
-        self.loot_table.remove(&req.unit);
-        self.clear_active_loot_guid_if(req.unit);
 
         let player_guid = match self.player_guid { Some(g) => g, None => return };
 
@@ -205,6 +284,15 @@ impl WorldSession {
             loot_obj: req.unit,
         };
         self.send_packet(&release);
+
+        if req.unit.is_item() && !fully_looted {
+            self.clear_active_loot_guid_if(req.unit);
+            return;
+        }
+
+        // Remove loot entry from memory once the represented loot is consumed.
+        self.loot_table.remove(&req.unit);
+        self.clear_active_loot_guid_if(req.unit);
 
         if req.unit.is_item() && fully_looted {
             self.destroy_fully_looted_direct_item(req.unit).await;
@@ -229,6 +317,22 @@ impl WorldSession {
         }
 
         let _ = player_guid;
+    }
+
+    async fn delete_stored_item_money_like_cpp(&self, item_guid: ObjectGuid) {
+        let Some(char_db) = self.char_db().map(Arc::clone) else {
+            return;
+        };
+
+        let mut stmt = char_db.prepare(CharStatements::DEL_ITEMCONTAINER_MONEY);
+        stmt.set_u64(0, item_guid.counter() as u64);
+        if let Err(e) = char_db.execute(&stmt).await {
+            warn!(
+                item_guid = item_guid.counter(),
+                error = %e,
+                "failed to delete stored item loot money"
+            );
+        }
     }
 
     async fn destroy_fully_looted_direct_item(&mut self, item_guid: ObjectGuid) {
@@ -328,5 +432,39 @@ fn generate_creature_loot(creature_guid: ObjectGuid, level: u8, _entry: u32) -> 
         coins,
         items,
         looted_by_player: false,
+    }
+}
+
+fn loot_is_looted_like_cpp(loot: &CreatureLoot) -> bool {
+    loot.coins == 0 && loot.items.iter().all(|entry| entry.taken)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::loot_is_looted_like_cpp;
+    use wow_core::ObjectGuid;
+    use wow_packet::packets::loot::{CreatureLoot, LootEntry};
+
+    #[test]
+    fn loot_is_looted_requires_no_money_and_no_unlooted_items_like_cpp() {
+        let mut loot = CreatureLoot {
+            loot_guid: ObjectGuid::EMPTY,
+            coins: 1,
+            items: vec![],
+            looted_by_player: false,
+        };
+        assert!(!loot_is_looted_like_cpp(&loot));
+
+        loot.coins = 0;
+        loot.items.push(LootEntry {
+            loot_list_id: 0,
+            item_id: 25,
+            quantity: 1,
+            taken: false,
+        });
+        assert!(!loot_is_looted_like_cpp(&loot));
+
+        loot.items[0].taken = true;
+        assert!(loot_is_looted_like_cpp(&loot));
     }
 }
