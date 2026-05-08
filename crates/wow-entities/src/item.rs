@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use wow_constants::{
     BagFamilyMask, EnchantmentSlot, InventoryResult, InventoryType, ItemBondingType, ItemClass,
-    ItemContext, ItemFieldFlags, ItemFieldFlags2, ItemModifier, ItemSubClassContainer,
+    ItemContext, ItemFieldFlags, ItemFieldFlags2, ItemFlags, ItemModifier, ItemSubClassContainer,
     ItemSubClassQuiver, ItemUpdateState, TypeId, TypeMask,
 };
 use wow_core::ObjectGuid;
@@ -222,7 +222,7 @@ pub struct ItemStorageTemplate {
     pub container_slots: u8,
     pub sell_price: u32,
     pub is_crafting_reagent: bool,
-    pub is_bound_account_wide: bool,
+    pub flags: ItemFlags,
 }
 
 impl ItemStorageTemplate {
@@ -240,8 +240,12 @@ impl ItemStorageTemplate {
             container_slots: 0,
             sell_price: 0,
             is_crafting_reagent: false,
-            is_bound_account_wide: false,
+            flags: ItemFlags::empty(),
         }
+    }
+
+    pub fn is_bound_account_wide(&self) -> bool {
+        self.flags.contains(ItemFlags::IS_BOUND_TO_ACCOUNT)
     }
 
     pub const fn can_change_equip_state_in_combat(&self) -> bool {
@@ -788,7 +792,7 @@ impl Item {
             return false;
         }
 
-        if template.is_bound_account_wide {
+        if template.is_bound_account_wide() {
             return false;
         }
 
@@ -1496,7 +1500,7 @@ mod tests {
         assert!(item.is_binded_not_with_using_allowed_guids(player_guid, &template));
 
         let account_bound_template = ItemStorageTemplate {
-            is_bound_account_wide: true,
+            flags: ItemFlags::IS_BOUND_TO_ACCOUNT,
             ..template
         };
         assert!(!item.is_binded_not_with(player_guid, &account_bound_template, false));
