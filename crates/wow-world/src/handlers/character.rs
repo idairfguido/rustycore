@@ -1033,6 +1033,15 @@ fn sell_item_amount_action(current_count: u32, requested_amount: i32) -> SellIte
     }
 }
 
+fn item_spell_charges_db_string(charges: &[i32]) -> String {
+    let mut out = String::new();
+    for charge in charges {
+        out.push_str(&charge.to_string());
+        out.push(' ');
+    }
+    out
+}
+
 fn append_item_refund_clear_statements(
     char_db: &CharacterDatabase,
     tx: &mut SqlTransaction,
@@ -5435,13 +5444,26 @@ impl WorldSession {
                     Err(_) => 1,
                 };
                 let new_item_guid = ObjectGuid::create_item(self.realm_id(), new_db_guid as i64);
+                let cloned_item =
+                    runtime_item.clone_item_for_store(new_item_guid, Some(player_guid), amount);
+                let cloned_data = cloned_item.data();
+                let charges = item_spell_charges_db_string(&cloned_data.spell_charges);
 
-                let mut ins_item = char_db.prepare(CharStatements::INS_ITEM_INSTANCE);
+                let mut ins_item = char_db.prepare(CharStatements::INS_ITEM_INSTANCE_CLONE);
                 ins_item.set_u64(0, new_db_guid);
                 ins_item.set_u32(1, item.entry_id);
                 ins_item.set_u64(2, player_guid.counter() as u64);
-                ins_item.set_u32(3, amount);
-                ins_item.set_u32(4, runtime_item.data().durability);
+                ins_item.set_u64(3, cloned_data.creator.counter() as u64);
+                ins_item.set_u64(4, cloned_data.gift_creator.counter() as u64);
+                ins_item.set_u32(5, cloned_item.count());
+                ins_item.set_u32(6, cloned_data.expiration);
+                ins_item.set_string(7, charges);
+                ins_item.set_u32(8, cloned_data.dynamic_flags);
+                ins_item.set_u32(9, cloned_data.durability);
+                ins_item.set_u32(10, cloned_data.create_played_time);
+                ins_item.set_i32(11, cloned_data.random_properties_id);
+                ins_item.set_i32(12, cloned_data.property_seed);
+                ins_item.set_u8(13, u8::try_from(cloned_data.context).unwrap_or(0));
                 tx.append(ins_item);
 
                 let mut ins_inv = char_db.prepare(CharStatements::INS_CHAR_INVENTORY);
@@ -5450,7 +5472,7 @@ impl WorldSession {
                 ins_inv.set_u64(2, new_db_guid);
                 tx.append(ins_inv);
 
-                new_buyback_stack = Some((new_db_guid, new_item_guid, amount, remaining));
+                new_buyback_stack = Some((new_db_guid, cloned_item, remaining));
             }
             SellItemAmountAction::Invalid => unreachable!(),
         }
@@ -5482,7 +5504,11 @@ impl WorldSession {
 
         let mut created_buyback_item = None;
         let mut stack_update = None;
-        if let Some((new_db_guid, new_item_guid, amount, remaining)) = new_buyback_stack {
+        if let Some((new_db_guid, cloned_item, remaining)) = new_buyback_stack {
+            let new_item_guid = cloned_item.object().guid();
+            let stack_count = cloned_item.count();
+            let durability = cloned_item.data().durability;
+            let max_durability = cloned_item.data().max_durability;
             if let Some(item_object) = self.inventory_item_objects.get_mut(&item.guid) {
                 item_object.set_count(remaining);
             }
@@ -5496,21 +5522,9 @@ impl WorldSession {
                     inventory_type: item.inventory_type,
                 },
             );
-            let context = <ItemContext as num_traits::FromPrimitive>::from_i32(
-                runtime_item.data().context,
-            )
-            .unwrap_or(ItemContext::None);
-            let item_object = self.make_inventory_item_object(
-                new_item_guid,
-                item.entry_id,
-                player_guid,
-                amount,
-                runtime_item.data().durability,
-                context,
-                buyback_slot,
-            );
-            self.insert_inventory_item_object(item_object);
-            created_buyback_item = Some((new_item_guid, amount, runtime_item.data().durability));
+            self.insert_inventory_item_object(cloned_item);
+            self.set_inventory_item_object_slot(new_item_guid, buyback_slot);
+            created_buyback_item = Some((new_item_guid, stack_count, durability, max_durability));
         } else {
             self.inventory_items.remove(&slot);
             self.buyback_items.insert(
@@ -5531,7 +5545,7 @@ impl WorldSession {
             player_guid, sold_count, item.entry_id, slot, money, self.player_gold
         );
 
-        if let Some((item_guid, stack_count, durability)) = created_buyback_item {
+        if let Some((item_guid, stack_count, durability, max_durability)) = created_buyback_item {
             self.send_packet(&UpdateObject::create_items(
                 vec![ItemCreateData {
                     item_guid,
@@ -5540,7 +5554,7 @@ impl WorldSession {
                     contained_in: player_guid,
                     stack_count,
                     durability,
-                    max_durability: self.item_template_max_durability(item.entry_id).max(durability),
+                    max_durability,
                 }],
                 map_id,
             ));

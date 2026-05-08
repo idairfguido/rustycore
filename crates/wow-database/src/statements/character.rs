@@ -117,6 +117,9 @@ pub enum CharStatements {
     /// VALUES (?, ?, ?, ?, ?, '', '')
     INS_ITEM_INSTANCE,
 
+    /// INSERT INTO item_instance with the C++ Item::CloneItem persisted field subset.
+    INS_ITEM_INSTANCE_CLONE,
+
     /// UPDATE item_instance SET count = ? WHERE guid = ?
     UPD_ITEM_INSTANCE_COUNT,
 
@@ -260,6 +263,13 @@ impl StatementDef for CharStatements {
                   randomPropertiesSeed, context) \
                  VALUES (?, ?, ?, 0, 0, ?, ?, '', '', 0, 0, 0, 0)"
             }
+            Self::INS_ITEM_INSTANCE_CLONE => {
+                "INSERT INTO item_instance \
+                 (guid, itemEntry, owner_guid, creatorGuid, giftCreatorGuid, count, \
+                  duration, charges, flags, durability, playedTime, randomPropertiesId, \
+                  randomPropertiesSeed, context) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            }
             Self::UPD_ITEM_INSTANCE_COUNT => {
                 "UPDATE item_instance SET count = ? WHERE guid = ?"
             }
@@ -359,6 +369,7 @@ mod tests {
         assert_eq!(CharStatements::UPD_PLAYER_CURRENCY.sql().matches('?').count(), 8);
         assert_eq!(CharStatements::REP_PLAYER_CURRENCY.sql().matches('?').count(), 8);
         assert_eq!(CharStatements::SEL_CHAR_EQUIPMENT.sql().matches('?').count(), 1);
+        assert_eq!(CharStatements::INS_ITEM_INSTANCE_CLONE.sql().matches('?').count(), 14);
         assert_eq!(CharStatements::UPD_ITEM_INSTANCE_FLAGS.sql().matches('?').count(), 2);
         assert_eq!(CharStatements::SEL_ITEM_REFUNDS.sql().matches('?').count(), 2);
         assert_eq!(CharStatements::DEL_ITEM_REFUND_INSTANCE.sql().matches('?').count(), 1);
