@@ -26,7 +26,6 @@ use tracing::{debug, info, warn};
 
 use wow_database::{CharStatements, SqlTransaction, WorldStatements};
 use wow_constants::{BagFamilyMask, ClientOpcodes, InventoryResult, ItemFlags};
-use wow_entities::INVENTORY_SLOT_BAG_0;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::packets::loot::{CreatureLoot, LootEntry, LootItemData, LootResponse};
 use wow_packet::packets::spell::{
@@ -315,12 +314,7 @@ impl WorldSession {
             "CMSG_OPEN_ITEM"
         );
 
-        if open.slot != INVENTORY_SLOT_BAG_0 {
-            self.send_equip_error(InventoryResult::InternalBagError, None, None, 0, 0);
-            return;
-        }
-
-        let Some(item) = self.inventory_items.get(&open.pack_slot).cloned() else {
+        let Some(item) = self.get_inventory_item_by_pos(open.slot, open.pack_slot) else {
             self.send_equip_error(InventoryResult::ItemNotFound, None, None, 0, 0);
             return;
         };

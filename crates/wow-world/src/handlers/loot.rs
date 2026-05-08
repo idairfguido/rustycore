@@ -690,16 +690,17 @@ impl WorldSession {
             Some(guid) => guid,
             None => return,
         };
-        let Some((slot, item)) = self
-            .inventory_items
-            .iter()
-            .find(|(_, item)| item.guid == item_guid)
-            .map(|(&slot, item)| (slot, item.clone()))
-        else {
+
+        let runtime_item = self.inventory_item_objects.get(&item_guid).cloned();
+        let (bag, slot) = match runtime_item.as_ref() {
+            Some(item) => (item.bag_slot(), item.slot()),
+            None => return,
+        };
+
+        let Some(item) = self.get_inventory_item_by_pos(bag, slot) else {
             return;
         };
 
-        let runtime_item = self.inventory_item_objects.get(&item.guid).cloned();
         let char_db = match self.char_db() {
             Some(db) => Arc::clone(db),
             None => return,
@@ -729,33 +730,34 @@ impl WorldSession {
             return;
         }
 
-        self.inventory_items.remove(&slot);
-        self.remove_inventory_item_object(item.guid);
-        self.sync_object_accessor_player();
+        self.remove_fully_looted_runtime_item(bag, slot, item.guid);
 
         if should_expire_refund {
             self.send_packet(&ItemExpirePurchaseRefund { item_guid: item.guid });
         }
 
-        let mut visible_item_changes = Vec::new();
-        let mut virtual_item_changes = Vec::new();
-        if (slot as usize) < 19 {
-            visible_item_changes.push((slot, 0i32, 0u16, 0u16));
-        }
-        if slot >= 15 && slot <= 17 {
-            virtual_item_changes.push((slot - 15, 0i32, 0u16, 0u16));
-        }
+        // Player-values update and stat refresh only apply to top-level slots.
+        if bag == INVENTORY_SLOT_BAG_0 {
+            let mut visible_item_changes = Vec::new();
+            let mut virtual_item_changes = Vec::new();
+            if (slot as usize) < 19 {
+                visible_item_changes.push((slot, 0i32, 0u16, 0u16));
+            }
+            if slot >= 15 && slot <= 17 {
+                virtual_item_changes.push((slot - 15, 0i32, 0u16, 0u16));
+            }
 
-        self.send_packet(&UpdateObject::player_values_update(
-            player_guid,
-            self.current_map_id,
-            vec![(slot, ObjectGuid::EMPTY)],
-            visible_item_changes,
-            virtual_item_changes,
-        ));
+            self.send_packet(&UpdateObject::player_values_update(
+                player_guid,
+                self.current_map_id,
+                vec![(slot, ObjectGuid::EMPTY)],
+                visible_item_changes,
+                virtual_item_changes,
+            ));
 
-        if slot < 19 {
-            self.send_stat_update();
+            if slot < 19 {
+                self.send_stat_update();
+            }
         }
     }
 }

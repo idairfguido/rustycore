@@ -136,6 +136,15 @@ pub enum CharStatements {
     /// WHERE item_guid = ? AND player_guid = ? LIMIT 1
     SEL_ITEM_REFUNDS,
 
+    /// SELECT bag_ci.slot, ci.slot, ii.itemEntry, ci.item, ii.count, ii.durability, ii.context,
+    /// ii.flags, ii.playedTime, ir.paidMoney, ir.paidExtendedCost
+    /// FROM character_inventory ci
+    /// JOIN character_inventory bag_ci ON bag_ci.guid = ci.guid AND bag_ci.item = ci.bag
+    /// JOIN item_instance ii ON ci.item = ii.guid
+    /// LEFT JOIN item_refund_instance ir ON ir.item_guid = ci.item AND ir.player_guid = ci.guid
+    /// WHERE ci.guid = ? AND bag_ci.bag = 0 AND bag_ci.slot >= 30 AND bag_ci.slot < 34
+    SEL_CHAR_BAG_CONTENTS,
+
     /// DELETE FROM item_refund_instance WHERE item_guid = ?
     DEL_ITEM_REFUND_INSTANCE,
 
@@ -303,6 +312,17 @@ impl StatementDef for CharStatements {
             Self::DEL_ITEM_INSTANCE => {
                 "DELETE FROM item_instance WHERE guid = ?"
             }
+            Self::SEL_CHAR_BAG_CONTENTS => {
+                "SELECT bag_ci.slot, ci.slot, ii.itemEntry, ci.item, ii.count, ii.durability, ii.context, \
+                 ii.flags, ii.playedTime, ir.paidMoney, ir.paidExtendedCost \
+                 FROM character_inventory ci \
+                 JOIN character_inventory bag_ci \
+                   ON bag_ci.guid = ci.guid AND bag_ci.item = ci.bag \
+                 JOIN item_instance ii ON ci.item = ii.guid \
+                 LEFT JOIN item_refund_instance ir \
+                   ON ir.item_guid = ci.item AND ir.player_guid = ci.guid \
+                 WHERE ci.guid = ? AND bag_ci.bag = 0 AND bag_ci.slot >= 30 AND bag_ci.slot < 34"
+            }
             Self::SEL_ITEM_REFUNDS => {
                 "SELECT paidMoney, paidExtendedCost \
                  FROM item_refund_instance WHERE item_guid = ? AND player_guid = ? LIMIT 1"
@@ -417,6 +437,7 @@ mod tests {
         assert_eq!(CharStatements::INS_ITEM_INSTANCE_CLONE.sql().matches('?').count(), 14);
         assert_eq!(CharStatements::UPD_ITEM_INSTANCE_FLAGS.sql().matches('?').count(), 2);
         assert_eq!(CharStatements::SEL_ITEM_REFUNDS.sql().matches('?').count(), 2);
+        assert_eq!(CharStatements::SEL_CHAR_BAG_CONTENTS.sql().matches('?').count(), 1);
         assert_eq!(CharStatements::DEL_ITEM_REFUND_INSTANCE.sql().matches('?').count(), 1);
         assert_eq!(CharStatements::DEL_ITEMCONTAINER_MONEY.sql().matches('?').count(), 1);
         assert_eq!(CharStatements::DEL_ITEMCONTAINER_ITEMS.sql().matches('?').count(), 1);

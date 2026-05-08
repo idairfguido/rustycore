@@ -560,6 +560,11 @@
   Rust targets: `crates/wow-world/src/handlers/character.rs`.
   Acceptance: direct vendor buy price calculation uses C++ `MAX_MONEY_AMOUNT = 99999999999` and clamps the requested quantity before planning storage, charging money and sending `BuySucceeded.QuantityBought` when `BuyPrice / BuyCount * quantity` would exceed that cap. Reputation discounts, aura price modifiers and extended costs remain tracked under #NEXT.R8.ENTITIES.013.
 
+- [x] **#NEXT.R8.ENTITIES.183** Open HAS_LOOT items inside represented carried bags like C++.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/SpellHandler.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Item/Container/Bag.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Loot/LootItemStorage.cpp`.
+  Rust targets: `crates/wow-database/src/statements/character.rs`, `crates/wow-world/src/handlers/character.rs`, `crates/wow-world/src/handlers/spell.rs`, `crates/wow-world/src/handlers/loot.rs`, `crates/wow-world/src/session.rs`.
+  Acceptance: `CMSG_OPEN_ITEM` resolves `(bag, slot)` through the Rust equivalent of `Player::GetItemByPos`: `bag == INVENTORY_SLOT_BAG_0` keeps top-level direct inventory with buyback excluded, represented carried bag slots resolve nested runtime items, login loads child rows by joining `character_inventory.bag` to the represented top-level bag item GUID, invalid/missing represented bags are skipped instead of producing `ObjectGuid::EMPTY` containers, nested positions preserve `bag_slot == top-level bag slot` and `slot == inner slot`, and fully looted release removes the nested item without deleting the container bag. Bank/reagent bags, lock/key checks, wrapped gifts, random properties/context, quest/condition/rate loot branches, scripts and collection appearance side effects remain under #NEXT.R8.ENTITIES.013.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.R8.ENTITIES.003** Bind `wow-map` grid unload actions to real entity methods once Creature/GameObject/Corpse exist.

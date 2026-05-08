@@ -32,8 +32,9 @@ use wow_database::{
 };
 use wow_entities::{
     ApplyEnchantmentEffectRef, ApplyEnchantmentRandomSuffixRef, ApplyEnchantmentTemplateRef,
-    CanStoreItemArgs, CanUnequipItemArgs, INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0, Item,
-    ItemCreateInfo, ItemPosCount, ItemSlotRef, ItemStorageRef, ItemStorageTemplate,
+    CanStoreItemArgs, CanUnequipItemArgs, INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0,
+    INVENTORY_SLOT_BAG_END, INVENTORY_SLOT_BAG_START, Item, ItemCreateInfo, ItemPosCount,
+    ItemSlotRef, ItemStorageRef, ItemStorageTemplate,
     BUYBACK_SLOT_COUNT, BUYBACK_SLOT_END, BUYBACK_SLOT_START, NULL_BAG, NULL_SLOT,
     ObjectAccessor, PLAYER_SLOT_END, Player, PlayerEnchantTimeUpdate, PlayerInventoryStorage,
     PlayerItemTimeUpdate, SendNewItemDelivery, SendNewItemDisplayText, SendNewItemPlan,
@@ -1127,6 +1128,55 @@ impl WorldSession {
 
     pub(crate) fn is_buyback_slot(slot: u8) -> bool {
         (BUYBACK_SLOT_START..BUYBACK_SLOT_END).contains(&slot)
+    }
+
+    /// Remove a fully-looted runtime item after its DB rows were deleted.
+    pub(crate) fn remove_fully_looted_runtime_item(
+        &mut self,
+        bag: u8,
+        slot: u8,
+        item_guid: ObjectGuid,
+    ) {
+        if bag == INVENTORY_SLOT_BAG_0
+            && self
+                .inventory_items
+                .get(&slot)
+                .is_some_and(|item| item.guid == item_guid)
+        {
+            self.inventory_items.remove(&slot);
+        }
+        self.remove_inventory_item_object(item_guid);
+        self.sync_object_accessor_player();
+    }
+
+    /// Resolve an inventory item by (bag, slot) following C++ Player::GetItemByPos.
+    ///
+    /// - `bag == INVENTORY_SLOT_BAG_0`  → top-level direct inventory (buyback excluded).
+    /// - `bag` in carried bag range      → search nested runtime items inside the bag.
+    pub(crate) fn get_inventory_item_by_pos(&self, bag: u8, slot: u8) -> Option<InventoryItem> {
+        if bag == INVENTORY_SLOT_BAG_0 {
+            if Self::is_buyback_slot(slot) {
+                return None;
+            }
+            self.inventory_items.get(&slot).cloned()
+        } else if (INVENTORY_SLOT_BAG_START..INVENTORY_SLOT_BAG_END).contains(&bag) {
+            let bag_item = self.inventory_items.get(&bag)?;
+            let bag_guid = bag_item.guid;
+            let nested = self
+                .inventory_item_objects
+                .values()
+                .find(|item| item.container_guid() == bag_guid && item.slot() == slot)?;
+            let guid = nested.object().guid();
+            let entry_id = nested.object().entry();
+            Some(InventoryItem {
+                guid,
+                entry_id,
+                db_guid: guid.counter() as u64,
+                inventory_type: self.item_template_inventory_type(entry_id),
+            })
+        } else {
+            None
+        }
     }
 
     pub(crate) fn select_buyback_slot_cpp(&self) -> u8 {
@@ -4111,7 +4161,7 @@ mod tests {
     use super::*;
     use wow_constants::{
         BagFamilyMask, EnchantmentSlot, InventoryResult, InventoryType, ItemBondingType,
-        ItemClass, ItemContext, ItemFlags, ItemFlags2, ItemUpdateState,
+        ItemClass, ItemContext, ItemFlags, ItemFlags2, ItemUpdateState, ServerOpcodes,
         SpellItemEnchantmentFlags,
     };
     use wow_core::Position;
@@ -4697,6 +4747,208 @@ mod tests {
         assert!(template.is_bound_account_wide());
         assert_eq!(session.item_template_inventory_type(100), Some(InventoryType::Bag as u8));
         assert_eq!(session.item_storage_template(101), None);
+    }
+
+    fn insert_open_item_bag_with_child(
+        session: &mut WorldSession,
+        player_guid: ObjectGuid,
+        bag_slot: u8,
+        inner_slot: u8,
+    ) -> (ObjectGuid, ObjectGuid) {
+        let bag_guid = ObjectGuid::create_item(1, 1001);
+        session.inventory_items.insert(bag_slot, InventoryItem {
+            guid: bag_guid,
+            entry_id: 101,
+            db_guid: 1001,
+            inventory_type: Some(InventoryType::Bag as u8),
+        });
+        let bag_item = session.make_inventory_item_object(
+            bag_guid, 101, player_guid, 1, 0, ItemContext::None, bag_slot,
+        );
+        session.insert_inventory_item_object(bag_item);
+
+        let child_guid = ObjectGuid::create_item(1, 1002);
+        let mut child = session.make_inventory_item_object(
+            child_guid, 700, player_guid, 1, 0, ItemContext::None, inner_slot,
+        );
+        child.set_container_guid_and_slot(bag_guid, bag_slot);
+        session.insert_inventory_item_object(child);
+
+        (bag_guid, child_guid)
+    }
+
+    fn install_open_item_has_loot_template(session: &mut WorldSession, entry: u32) {
+        session.set_item_stats_store(Arc::new(ItemStatsStore::from_sparse_templates([(
+            entry,
+            ItemSparseTemplateEntry {
+                flags: [ItemFlags::HAS_LOOT.bits() as u32, 0, 0, 0],
+                bag_family: 0,
+                stackable: 1,
+                max_count: 0,
+                required_reputation_rank: 0,
+                sell_price: 0,
+                max_durability: 0,
+                limit_category: 0,
+                required_reputation_faction: 0,
+                allowable_class: -1,
+                bonding: ItemBondingType::None as u8,
+                container_slots: 0,
+                inventory_type: InventoryType::NonEquip as i8,
+            },
+        )])));
+    }
+
+    #[test]
+    fn open_item_get_inventory_item_by_pos_resolves_top_level_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        session.set_player_guid(Some(player_guid));
+
+        let top_guid = ObjectGuid::create_item(1, 900);
+        session.inventory_items.insert(23, InventoryItem {
+            guid: top_guid,
+            entry_id: 700,
+            db_guid: 900,
+            inventory_type: None,
+        });
+        let top_item = session.make_inventory_item_object(
+            top_guid, 700, player_guid, 1, 0, ItemContext::None, 23,
+        );
+        session.insert_inventory_item_object(top_item);
+
+        assert_eq!(
+            session.get_inventory_item_by_pos(INVENTORY_SLOT_BAG_0, 23).map(|i| i.guid),
+            Some(top_guid)
+        );
+    }
+
+    #[test]
+    fn open_item_get_inventory_item_by_pos_excludes_buyback_top_level_like_cpp() {
+        let (mut session, _, _) = make_session();
+        session.buyback_items.insert(BUYBACK_SLOT_START, InventoryItem {
+            guid: ObjectGuid::create_item(1, 901),
+            entry_id: 701,
+            db_guid: 901,
+            inventory_type: None,
+        });
+
+        assert!(
+            session
+                .get_inventory_item_by_pos(INVENTORY_SLOT_BAG_0, BUYBACK_SLOT_START)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn open_item_get_inventory_item_by_pos_resolves_nested_carried_bag_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        session.set_player_guid(Some(player_guid));
+        let (_, child_guid) = insert_open_item_bag_with_child(
+            &mut session,
+            player_guid,
+            INVENTORY_SLOT_BAG_START,
+            5,
+        );
+
+        assert_eq!(
+            session.get_inventory_item_by_pos(INVENTORY_SLOT_BAG_START, 5).map(|i| i.guid),
+            Some(child_guid)
+        );
+    }
+
+    #[test]
+    fn open_item_get_inventory_item_by_pos_missing_bag_or_empty_slot_is_missing() {
+        let (mut session, _, _) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        session.set_player_guid(Some(player_guid));
+        insert_open_item_bag_with_child(&mut session, player_guid, INVENTORY_SLOT_BAG_START, 5);
+
+        assert!(
+            session
+                .get_inventory_item_by_pos(INVENTORY_SLOT_BAG_START + 1, 0)
+                .is_none()
+        );
+        assert!(
+            session
+                .get_inventory_item_by_pos(INVENTORY_SLOT_BAG_START, 3)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn open_item_nested_item_preserves_top_level_bag_slot_and_inner_slot() {
+        let (mut session, _, _) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        session.set_player_guid(Some(player_guid));
+        let (bag_guid, child_guid) = insert_open_item_bag_with_child(
+            &mut session,
+            player_guid,
+            INVENTORY_SLOT_BAG_START,
+            5,
+        );
+
+        let child = session.inventory_item_objects.get(&child_guid).unwrap();
+        assert_eq!(child.container_guid(), bag_guid);
+        assert_eq!(child.bag_slot(), INVENTORY_SLOT_BAG_START);
+        assert_eq!(child.slot(), 5);
+        assert_eq!(child.position(), u16::from(INVENTORY_SLOT_BAG_START) << 8 | 5);
+    }
+
+    #[tokio::test]
+    async fn open_item_nested_has_loot_opens_without_internal_bag_error() {
+        let (mut session, _, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        session.set_player_guid(Some(player_guid));
+        install_open_item_has_loot_template(&mut session, 700);
+        let (_, child_guid) = insert_open_item_bag_with_child(
+            &mut session,
+            player_guid,
+            INVENTORY_SLOT_BAG_START,
+            5,
+        );
+
+        session
+            .handle_open_item(WorldPacket::from_bytes(&[INVENTORY_SLOT_BAG_START, 5]))
+            .await;
+
+        let sent = send_rx.try_recv().unwrap();
+        let opcode = u16::from_le_bytes([sent[0], sent[1]]);
+        assert_eq!(opcode, ServerOpcodes::LootResponse as u16);
+        assert_ne!(opcode, ServerOpcodes::InventoryChangeFailure as u16);
+        assert!(session.loot_table.contains_key(&child_guid));
+        assert!(
+            session
+                .inventory_item_objects
+                .get(&child_guid)
+                .is_some_and(|item| item.loot_generated())
+        );
+    }
+
+    #[test]
+    fn open_item_release_destroy_nested_item_leaves_container_in_place() {
+        let (mut session, _, _) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        session.set_player_guid(Some(player_guid));
+        let (bag_guid, child_guid) = insert_open_item_bag_with_child(
+            &mut session,
+            player_guid,
+            INVENTORY_SLOT_BAG_START,
+            5,
+        );
+        let child = session.inventory_item_objects.get(&child_guid).unwrap();
+        let child_bag = child.bag_slot();
+        let child_slot = child.slot();
+
+        let inv = session.get_inventory_item_by_pos(child_bag, child_slot);
+        assert!(inv.is_some());
+        assert_eq!(inv.unwrap().guid, child_guid);
+
+        session.remove_fully_looted_runtime_item(child_bag, child_slot, child_guid);
+        assert!(session.get_inventory_item_by_pos(child_bag, child_slot).is_none());
+        assert!(!session.inventory_item_objects.contains_key(&child_guid));
+        assert!(session.inventory_items.contains_key(&INVENTORY_SLOT_BAG_START));
+        assert_eq!(session.inventory_items[&INVENTORY_SLOT_BAG_START].guid, bag_guid);
     }
 
     #[test]

@@ -23,7 +23,8 @@ use wow_database::{
 };
 use wow_entities::{
     BUYBACK_SLOT_COUNT, BUYBACK_SLOT_START, INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0,
-    INVENTORY_SLOT_ITEM_START, MAX_BAG_SIZE, NULL_BAG, NULL_SLOT, is_equipment_pos,
+    INVENTORY_SLOT_BAG_END, INVENTORY_SLOT_BAG_START, INVENTORY_SLOT_ITEM_START, MAX_BAG_SIZE,
+    NULL_BAG, NULL_SLOT, is_equipment_pos,
     is_inventory_pos,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
@@ -2346,6 +2347,76 @@ impl WorldSession {
                         "Failed to clean expired/missing item refund metadata for {:?}: {}",
                         guid, e
                     );
+                }
+            }
+
+            // ── Load carried bag contents (nested items) ──
+            // C++ `Player::_LoadInventory` loads child rows after their top-level
+            // bag rows. `character_inventory.bag` stores the bag item GUID, so the
+            // query joins back to the carried bag row and returns its top-level slot.
+            {
+                let mut bag_stmt = char_db.prepare(CharStatements::SEL_CHAR_BAG_CONTENTS);
+                bag_stmt.set_u64(0, guid.counter() as u64);
+                match char_db.query(&bag_stmt).await {
+                    Ok(mut bag_result) => {
+                        if !bag_result.is_empty() {
+                            loop {
+                                let bag_slot: u8 = bag_result.read(0);
+                                let inner_slot: u8 = bag_result.read(1);
+                                let item_entry: u32 = bag_result.try_read(2).unwrap_or(0);
+                                let item_db_guid: u64 = bag_result.try_read(3).unwrap_or(0);
+                                let item_count: u32 = bag_result.try_read(4).unwrap_or(1);
+                                let item_durability: u32 = bag_result.try_read(5).unwrap_or(0);
+                                let item_context = bag_result
+                                    .try_read::<u8>(6)
+                                    .and_then(<ItemContext as num_traits::FromPrimitive>::from_u8)
+                                    .unwrap_or(ItemContext::None);
+                                let item_flags = bag_result.try_read::<u32>(7).unwrap_or(0);
+                                let item_played_time = bag_result.try_read::<u32>(8).unwrap_or(0);
+                                if item_entry > 0
+                                    && (INVENTORY_SLOT_BAG_START..INVENTORY_SLOT_BAG_END).contains(&bag_slot)
+                                {
+                                    if let Some(bag_item_guid) = self
+                                        .inventory_items
+                                        .get(&bag_slot)
+                                        .map(|bag_item| bag_item.guid)
+                                    {
+                                        let item_guid = ObjectGuid::create_item(realm_id, item_db_guid as i64);
+                                        let mut item_object = self.make_inventory_item_object(
+                                            item_guid,
+                                            item_entry,
+                                            guid,
+                                            item_count,
+                                            item_durability,
+                                            item_context,
+                                            inner_slot,
+                                        );
+                                        item_object.set_create_played_time(item_played_time);
+                                        item_object.replace_all_item_flags(ItemFieldFlags::from_bits_retain(
+                                            item_flags,
+                                        ));
+                                        item_object.set_container_guid_and_slot(bag_item_guid, bag_slot);
+                                        item_object.set_state(ItemUpdateState::Unchanged);
+                                        self.insert_inventory_item_object(item_object);
+                                    } else {
+                                        warn!(
+                                            "Skipping bag content {:?}/{} for {:?}: missing represented carried bag slot {}",
+                                            ObjectGuid::create_item(realm_id, item_db_guid as i64),
+                                            inner_slot,
+                                            guid,
+                                            bag_slot
+                                        );
+                                    }
+                                }
+                                if !bag_result.next_row() {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to load bag contents for {:?}: {}", guid, e);
+                    }
                 }
             }
 
