@@ -68,9 +68,11 @@ pub struct ItemSparseTemplateEntry {
     pub bag_family: u32,
     pub stackable: i32,
     pub max_count: i32,
+    pub required_reputation_rank: i32,
     pub sell_price: u32,
     pub max_durability: u32,
     pub limit_category: u16,
+    pub required_reputation_faction: u16,
     pub allowable_class: i16,
     pub bonding: u8,
     pub container_slots: u8,
@@ -329,10 +331,12 @@ impl ItemStatsStore {
             let mut bag_family_offset: usize = 0;
             let mut stackable_offset: usize = 0;
             let mut max_count_offset: usize = 0;
+            let mut required_reputation_rank_offset: usize = 0;
             let mut sell_price_offset: usize = 0;
             let mut flags_offset: usize = 0;
             let mut max_durability_offset: usize = 0;
             let mut limit_category_offset: usize = 0;
+            let mut required_reputation_faction_offset: usize = 0;
             let mut allowable_class_offset: usize = 0;
             let mut resistances_offset: usize = 0;
             let mut stat_amount_offset: usize = 0;
@@ -351,6 +355,9 @@ impl ItemStatsStore {
                 if fi == 15 {
                     max_count_offset = pos;
                 }
+                if fi == 16 {
+                    required_reputation_rank_offset = pos;
+                }
                 if fi == 18 {
                     sell_price_offset = pos;
                 }
@@ -362,6 +369,9 @@ impl ItemStatsStore {
                 }
                 if fi == 32 {
                     limit_category_offset = pos;
+                }
+                if fi == 42 {
+                    required_reputation_faction_offset = pos;
                 }
                 if fi == 48 {
                     allowable_class_offset = pos;
@@ -420,10 +430,12 @@ impl ItemStatsStore {
             if bag_family_offset + 4 <= record.len()
                 && stackable_offset + 4 <= record.len()
                 && max_count_offset + 4 <= record.len()
+                && required_reputation_rank_offset + 4 <= record.len()
                 && sell_price_offset + 4 <= record.len()
                 && flags_offset + 16 <= record.len()
                 && max_durability_offset + 4 <= record.len()
                 && limit_category_offset + 2 <= record.len()
+                && required_reputation_faction_offset + 2 <= record.len()
                 && allowable_class_offset + 2 <= record.len()
                 && bonding_offset < record.len()
                 && container_slots_offset < record.len()
@@ -436,9 +448,17 @@ impl ItemStatsStore {
                         bag_family: read_u32(record, bag_family_offset),
                         stackable: read_i32(record, stackable_offset),
                         max_count: read_i32(record, max_count_offset),
+                        required_reputation_rank: read_i32(
+                            record,
+                            required_reputation_rank_offset,
+                        ),
                         sell_price: read_u32(record, sell_price_offset),
                         max_durability: read_u32(record, max_durability_offset),
                         limit_category: read_u16(record, limit_category_offset),
+                        required_reputation_faction: read_u16(
+                            record,
+                            required_reputation_faction_offset,
+                        ),
                         allowable_class: read_i16(record, allowable_class_offset),
                         bonding: record[bonding_offset],
                         container_slots: record[container_slots_offset],
@@ -617,9 +637,11 @@ mod tests {
             bag_family: 0x20,
             stackable: 20,
             max_count: 5,
+            required_reputation_rank: 0,
             sell_price: 123,
             max_durability: 77,
             limit_category: 9,
+            required_reputation_faction: 0,
             allowable_class: -1,
             bonding: 2,
             container_slots: 16,
@@ -630,6 +652,8 @@ mod tests {
         let loaded = store.sparse_template(1).unwrap();
         assert_eq!(loaded.max_stack_size(), 20);
         assert_eq!(loaded.max_count, 5);
+        assert_eq!(loaded.required_reputation_rank, 0);
+        assert_eq!(loaded.required_reputation_faction, 0);
         assert_eq!(loaded.sell_price, 123);
         assert_eq!(loaded.container_slots, 16);
         assert_eq!(loaded.inventory_type, 18);

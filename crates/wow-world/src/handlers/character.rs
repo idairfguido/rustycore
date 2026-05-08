@@ -628,6 +628,20 @@ fn vendor_conditions_block_result(has_vendor_conditions: bool) -> Option<BuyResu
     }
 }
 
+fn vendor_buy_required_reputation_block_result(
+    required_reputation_faction: Option<u16>,
+    required_reputation_rank: Option<i32>,
+    player_reputation_rank: i32,
+) -> Option<BuyResult> {
+    if required_reputation_faction.unwrap_or(0) != 0
+        && player_reputation_rank < required_reputation_rank.unwrap_or(0)
+    {
+        Some(BuyResult::ReputationRequire)
+    } else {
+        None
+    }
+}
+
 fn vendor_buy_extended_cost_block_result(
     extended_cost: u32,
     buy_count: u32,
@@ -3747,10 +3761,17 @@ impl WorldSession {
         let sparse_template = self
             .item_stats_store()
             .and_then(|store| store.sparse_template(buy.item_id as u32));
+        let allowable_class = sparse_template.map(|template| template.allowable_class);
+        let bonding = sparse_template.map(|template| template.bonding);
+        let flags2 = sparse_template.map(|template| template.flags[1]);
+        let required_reputation_faction =
+            sparse_template.map(|template| template.required_reputation_faction);
+        let required_reputation_rank =
+            sparse_template.map(|template| template.required_reputation_rank);
         if let Some(block) = vendor_buy_template_block_result(
-            sparse_template.map(|template| template.allowable_class),
-            sparse_template.map(|template| template.bonding),
-            sparse_template.map(|template| template.flags[1]),
+            allowable_class,
+            bonding,
+            flags2,
             self.player_class,
             self.player_race,
             self.security > 0,
@@ -3786,6 +3807,14 @@ impl WorldSession {
                 Some(buy.vendor_guid),
                 buy.muid as u32,
             );
+            return;
+        }
+        if let Some(result) = vendor_buy_required_reputation_block_result(
+            required_reputation_faction,
+            required_reputation_rank,
+            -1,
+        ) {
+            self.send_buy_error(result, Some(buy.vendor_guid), buy.item_id as u32);
             return;
         }
         if let Some(result) = vendor_buy_extended_cost_block_result(
@@ -5255,6 +5284,19 @@ mod tests {
         assert_eq!(
             vendor_conditions_block_result(true),
             Some(BuyResult::CantFindItem)
+        );
+    }
+
+    #[test]
+    fn vendor_required_reputation_fails_closed_until_reputation_mgr_exists() {
+        assert_eq!(vendor_buy_required_reputation_block_result(None, None, -1), None);
+        assert_eq!(
+            vendor_buy_required_reputation_block_result(Some(72), Some(5), -1),
+            Some(BuyResult::ReputationRequire)
+        );
+        assert_eq!(
+            vendor_buy_required_reputation_block_result(Some(72), Some(5), 5),
+            None
         );
     }
 
