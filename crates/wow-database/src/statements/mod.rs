@@ -96,6 +96,18 @@ mod tests {
                 .count(),
             1
         );
+        assert!(
+            WorldStatements::SEL_ITEM_LOOT_TEMPLATE_PLAIN
+                .sql()
+                .contains("item_loot_template")
+        );
+        assert_eq!(
+            WorldStatements::SEL_ITEM_LOOT_TEMPLATE_PLAIN
+                .sql()
+                .matches('?')
+                .count(),
+            1
+        );
     }
 
     #[test]

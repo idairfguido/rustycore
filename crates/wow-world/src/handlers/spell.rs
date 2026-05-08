@@ -28,13 +28,16 @@ use wow_database::{CharStatements, SqlTransaction, WorldStatements};
 use wow_constants::{ClientOpcodes, InventoryResult, ItemFlags};
 use wow_entities::INVENTORY_SLOT_BAG_0;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
-use wow_packet::packets::loot::{CreatureLoot, LootItemData, LootResponse};
+use wow_packet::packets::loot::{CreatureLoot, LootEntry, LootItemData, LootResponse};
 use wow_packet::packets::spell::{
     CastFailed, CastSpellRequest, OpenItem, SpellCastVisual, SpellStartPkt, SpellTargetData,
 };
 use wow_packet::ClientPacket;
 
 use crate::session::WorldSession;
+
+const LOOT_MODE_DEFAULT_LIKE_CPP: u16 = 1;
+const MAX_NR_LOOT_ITEMS_LIKE_CPP: usize = 18;
 
 // ── Handler registrations ─────────────────────────────────────────
 
@@ -342,10 +345,16 @@ impl WorldSession {
                     generate_money_loot_like_cpp(min_money, max_money, &mut rand::thread_rng())
                 }
             };
+            let items = if stored_money.is_some() {
+                Vec::new()
+            } else {
+                self.generate_plain_item_loot_template_entries_like_cpp(item.entry_id)
+                    .await
+            };
             self.loot_table.insert(item.guid, CreatureLoot {
                 loot_guid: item.guid,
                 coins,
-                items: Vec::new(),
+                items,
                 looted_by_player: false,
             });
 
@@ -417,6 +426,76 @@ impl WorldSession {
                 (0, 0)
             }
         }
+    }
+
+    async fn generate_plain_item_loot_template_entries_like_cpp(
+        &self,
+        item_entry: u32,
+    ) -> Vec<LootEntry> {
+        let Some(world_db) = self.world_db() else {
+            return Vec::new();
+        };
+
+        let mut stmt = world_db.prepare(WorldStatements::SEL_ITEM_LOOT_TEMPLATE_PLAIN);
+        stmt.set_u32(0, item_entry);
+
+        let mut result = match world_db.query(&stmt).await {
+            Ok(result) => result,
+            Err(err) => {
+                warn!(
+                    item_entry,
+                    error = %err,
+                    "failed to load item_loot_template rows"
+                );
+                return Vec::new();
+            }
+        };
+
+        let mut loot_items = Vec::new();
+        if result.is_empty() {
+            return loot_items;
+        }
+
+        loop {
+            let loot_item_id = result.try_read::<u32>(0).unwrap_or(0);
+            let chance = result.try_read::<f32>(1).unwrap_or(0.0);
+            let needs_quest = result.try_read::<bool>(2).unwrap_or(false);
+            let loot_mode = result.try_read::<u16>(3).unwrap_or(0);
+            let min_count = result.try_read::<u8>(4).unwrap_or(0);
+            let max_count = result.try_read::<u8>(5).unwrap_or(0);
+
+            if loot_template_plain_row_can_roll_like_cpp(
+                loot_item_id,
+                chance,
+                needs_quest,
+                loot_mode,
+                min_count,
+                max_count,
+                self.item_storage_template(loot_item_id).is_some(),
+            ) {
+                let mut rng = rand::thread_rng();
+                if chance >= 100.0 || rng.gen_range(0.0f32..100.0f32) < chance {
+                    let rolled_count = rng.gen_range(u32::from(min_count)..=u32::from(max_count));
+                    let max_stack_size = self
+                        .item_storage_template(loot_item_id)
+                        .map(|template| template.max_stack_size)
+                        .unwrap_or(1)
+                        .max(1);
+                    add_loot_item_stacks_like_cpp(
+                        &mut loot_items,
+                        loot_item_id,
+                        rolled_count,
+                        max_stack_size,
+                    );
+                }
+            }
+
+            if !result.next_row() {
+                break;
+            }
+        }
+
+        loot_items
     }
 
     async fn load_stored_item_money_like_cpp(&self, item_guid: wow_core::ObjectGuid) -> Option<u32> {
@@ -496,11 +575,54 @@ fn generate_money_loot_like_cpp<R: Rng + ?Sized>(
     rng.gen_range((min_amount >> 8)..=(max_amount >> 8)) << 8
 }
 
+fn loot_template_plain_row_can_roll_like_cpp(
+    item_id: u32,
+    chance: f32,
+    needs_quest: bool,
+    loot_mode: u16,
+    min_count: u8,
+    max_count: u8,
+    item_exists: bool,
+) -> bool {
+    if item_id == 0 || !item_exists || min_count == 0 || max_count < min_count {
+        return false;
+    }
+
+    if needs_quest {
+        return false;
+    }
+
+    if chance == 0.0 || (chance != 0.0 && chance < 0.000001) {
+        return false;
+    }
+
+    loot_mode & LOOT_MODE_DEFAULT_LIKE_CPP != 0
+}
+
+fn add_loot_item_stacks_like_cpp(
+    loot_items: &mut Vec<LootEntry>,
+    item_id: u32,
+    mut count: u32,
+    max_stack_size: u32,
+) {
+    while count > 0 && loot_items.len() < MAX_NR_LOOT_ITEMS_LIKE_CPP {
+        let quantity = count.min(max_stack_size);
+        loot_items.push(LootEntry {
+            loot_list_id: loot_items.len() as u8,
+            item_id,
+            quantity,
+            taken: false,
+        });
+        count = count.saturating_sub(max_stack_size);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use rand::{rngs::StdRng, SeedableRng};
 
     use super::generate_money_loot_like_cpp;
+    use super::{add_loot_item_stacks_like_cpp, loot_template_plain_row_can_roll_like_cpp};
 
     #[test]
     fn item_money_loot_generation_matches_cpp_boundary_branches() {
@@ -516,5 +638,49 @@ mod tests {
         let wide_range = generate_money_loot_like_cpp(1_000, 100_000, &mut rng);
         assert_eq!(wide_range & 0xFF, 0);
         assert!((((1_000 >> 8) << 8)..=((100_000 >> 8) << 8)).contains(&wide_range));
+    }
+
+    #[test]
+    fn plain_item_loot_template_validation_matches_cpp_basic_guards() {
+        assert!(loot_template_plain_row_can_roll_like_cpp(
+            25, 100.0, false, 1, 1, 3, true
+        ));
+        assert!(!loot_template_plain_row_can_roll_like_cpp(
+            0, 100.0, false, 1, 1, 3, true
+        ));
+        assert!(!loot_template_plain_row_can_roll_like_cpp(
+            25, 0.0, false, 1, 1, 3, true
+        ));
+        assert!(!loot_template_plain_row_can_roll_like_cpp(
+            25, 100.0, true, 1, 1, 3, true
+        ));
+        assert!(!loot_template_plain_row_can_roll_like_cpp(
+            25, 100.0, false, 0, 1, 3, true
+        ));
+        assert!(!loot_template_plain_row_can_roll_like_cpp(
+            25, 100.0, false, 1, 0, 3, true
+        ));
+        assert!(!loot_template_plain_row_can_roll_like_cpp(
+            25, 100.0, false, 1, 4, 3, true
+        ));
+        assert!(!loot_template_plain_row_can_roll_like_cpp(
+            25, 100.0, false, 1, 1, 3, false
+        ));
+    }
+
+    #[test]
+    fn add_loot_item_stacks_caps_like_cpp_max_nr_loot_items() {
+        let mut loot_items = Vec::new();
+        add_loot_item_stacks_like_cpp(&mut loot_items, 25, 45, 20);
+        assert_eq!(loot_items.len(), 3);
+        assert_eq!(loot_items[0].quantity, 20);
+        assert_eq!(loot_items[1].quantity, 20);
+        assert_eq!(loot_items[2].quantity, 5);
+        assert_eq!(loot_items[2].loot_list_id, 2);
+
+        let mut capped = Vec::new();
+        add_loot_item_stacks_like_cpp(&mut capped, 25, 100, 1);
+        assert_eq!(capped.len(), 18);
+        assert_eq!(capped[17].loot_list_id, 17);
     }
 }

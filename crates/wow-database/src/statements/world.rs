@@ -120,6 +120,9 @@ pub enum WorldStatements {
     /// Min/max money loot bounds for an item from item_template_addon.
     /// Args: item ID (u32).
     SEL_ITEM_TEMPLATE_ADDON_MONEY_LOOT,
+    /// Plain non-reference, non-group item_loot_template rows for an item.
+    /// Args: item ID (u32).
+    SEL_ITEM_LOOT_TEMPLATE_PLAIN,
     /// Load all area trigger teleport destinations.
     SEL_AREA_TRIGGER_TELEPORT,
     // Quest system
@@ -368,6 +371,10 @@ impl StatementDef for WorldStatements {
                 "SELECT LEAST(COALESCE(MinMoneyLoot, 0), COALESCE(MaxMoneyLoot, 0)), ",
                 "GREATEST(COALESCE(MinMoneyLoot, 0), COALESCE(MaxMoneyLoot, 0)) ",
                 "FROM item_template_addon WHERE Id = ? LIMIT 1",
+            ),
+            Self::SEL_ITEM_LOOT_TEMPLATE_PLAIN => concat!(
+                "SELECT Item, Chance, QuestRequired, LootMode, MinCount, MaxCount ",
+                "FROM item_loot_template WHERE Entry = ? AND Reference = 0 AND GroupId = 0",
             ),
             Self::SEL_AREA_TRIGGER_TELEPORT => {
                 "SELECT at.ID, wsl.MapID, wsl.LocX, wsl.LocY, wsl.LocZ, wsl.Facing FROM areatrigger_teleport at LEFT JOIN world_safe_locs wsl ON at.PortLocID = wsl.ID"
