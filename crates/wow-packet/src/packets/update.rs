@@ -80,6 +80,9 @@ pub struct ItemCreateData {
     pub entry_id: i32,
     pub owner_guid: ObjectGuid,
     pub contained_in: ObjectGuid,
+    pub stack_count: u32,
+    pub durability: u32,
+    pub max_durability: u32,
 }
 
 // ── PlayerStatChanges ──────────────────────────────────────────────
@@ -1435,6 +1438,11 @@ pub enum UpdateBlock {
         guid: ObjectGuid,
         create_data: ItemCreateData,
     },
+    /// VALUES update for an item: currently only StackCount is needed by direct inventory stores.
+    ItemValuesUpdate {
+        guid: ObjectGuid,
+        stack_count: u32,
+    },
     /// VALUES update for a player: only changed InvSlots, VisibleItems, VirtualItems.
     PlayerValuesUpdate {
         guid: ObjectGuid,
@@ -1743,6 +1751,17 @@ impl UpdateObject {
             blocks,
         }
     }
+
+    /// Create an item VALUES update for changed stack count.
+    pub fn item_stack_count_update(guid: ObjectGuid, map_id: u16, stack_count: u32) -> Self {
+        Self {
+            map_id,
+            num_updates: 1,
+            destroy_guids: Vec::new(),
+            out_of_range_guids: Vec::new(),
+            blocks: vec![UpdateBlock::ItemValuesUpdate { guid, stack_count }],
+        }
+    }
 }
 
 impl ServerPacket for UpdateObject {
@@ -1827,6 +1846,9 @@ impl ServerPacket for UpdateObject {
                         guid,
                         create_data,
                     );
+                }
+                UpdateBlock::ItemValuesUpdate { guid, stack_count } => {
+                    write_item_values_update_block(&mut blocks_buf, guid, *stack_count);
                 }
                 UpdateBlock::PlayerValuesUpdate {
                     guid,
@@ -2204,7 +2226,7 @@ fn write_item_create_block(
     write_empty_guid(&mut val_buf);       // GiftCreator
 
     // Owner conditional block 1
-    val_buf.write_int32(1);               // StackCount
+    val_buf.write_int32(data.stack_count as i32); // StackCount
     val_buf.write_int32(0);               // Expiration
     for _ in 0..5 {
         val_buf.write_int32(0);           // SpellCharges[5]
@@ -2227,8 +2249,8 @@ fn write_item_create_block(
     val_buf.write_int32(0);
 
     // Owner conditional block 2
-    val_buf.write_int32(0);               // Durability
-    val_buf.write_int32(0);               // MaxDurability
+    val_buf.write_int32(data.durability as i32);  // Durability
+    val_buf.write_int32(data.max_durability as i32); // MaxDurability
 
     // CreatePlayedTime, Context, CreateTime
     val_buf.write_int32(0);
@@ -2264,6 +2286,31 @@ fn write_item_create_block(
 }
 
 // ── VALUES update (UpdateType::Values) ─────────────────────────────
+
+/// Write an ItemData VALUES update containing StackCount only.
+///
+/// C++ refs:
+/// - `Item::SetCount`
+/// - `Object::BuildValuesUpdate`
+/// - `UF::ItemData::WriteUpdate`
+fn write_item_values_update_block(buf: &mut WorldPacket, guid: &ObjectGuid, stack_count: u32) {
+    buf.write_uint8(UpdateType::Values as u8);
+    buf.write_packed_guid(guid);
+
+    let mut val_buf = WorldPacket::new_empty();
+    val_buf.write_uint32(1 << 1); // TypeId::Item
+
+    // ItemData has 43 bits: two 32-bit field blocks and a 2-bit blocks mask.
+    // Parent bit 0 and StackCount bit 7 are set for a count-only update.
+    val_buf.write_bits(0x01, 2);
+    val_buf.write_bits((1 << 0) | (1 << 7), 32);
+    val_buf.flush_bits();
+    val_buf.write_int32(stack_count as i32);
+
+    let val_data = val_buf.into_data();
+    buf.write_uint32(val_data.len() as u32);
+    buf.write_bytes(&val_data);
+}
 
 /// Write a player VALUES update block.
 ///
@@ -2856,6 +2903,41 @@ mod tests {
         };
         let bytes = pkt.to_bytes();
         assert!(bytes.len() > 10);
+    }
+
+    #[test]
+    fn item_create_serializes_runtime_count_and_durability() {
+        let item_guid = ObjectGuid::create_item(1, 900);
+        let owner_guid = ObjectGuid::create_player(1, 42);
+        let pkt = UpdateObject::create_items(
+            vec![ItemCreateData {
+                item_guid,
+                entry_id: 700,
+                owner_guid,
+                contained_in: owner_guid,
+                stack_count: 7,
+                durability: 12,
+                max_durability: 20,
+            }],
+            0,
+        );
+
+        let bytes = pkt.to_bytes();
+
+        assert!(bytes.windows(4).any(|window| window == 7i32.to_le_bytes()));
+        assert!(bytes.windows(4).any(|window| window == 12i32.to_le_bytes()));
+        assert!(bytes.windows(4).any(|window| window == 20i32.to_le_bytes()));
+    }
+
+    #[test]
+    fn item_stack_count_update_serializes_item_values_delta() {
+        let item_guid = ObjectGuid::create_item(1, 900);
+        let pkt = UpdateObject::item_stack_count_update(item_guid, 0, 19);
+
+        let bytes = pkt.to_bytes();
+
+        assert!(bytes.len() > 20);
+        assert!(bytes.windows(4).any(|window| window == 19i32.to_le_bytes()));
     }
 
     #[test]

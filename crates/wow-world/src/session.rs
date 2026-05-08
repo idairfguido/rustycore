@@ -724,7 +724,7 @@ impl WorldSession {
             .filter(|&inventory_type| inventory_type != InventoryType::NonEquip as u8)
     }
 
-    fn item_template_max_durability(&self, item_id: u32) -> u32 {
+    pub fn item_template_max_durability(&self, item_id: u32) -> u32 {
         self.item_stats_store
             .as_ref()
             .and_then(|store| store.sparse_template(item_id))

@@ -9,11 +9,12 @@ use std::sync::Arc;
 
 use rand::Rng;
 use tracing::{debug, info, trace, warn};
-use wow_constants::{ClientOpcodes, ItemContext, ItemUpdateState};
+use wow_constants::{ClientOpcodes, InventoryResult, ItemContext, ItemUpdateState};
 use wow_core::guid::HighGuid;
 use wow_core::{ObjectGuid, Position};
 use wow_crypto::rsa_sign::rsa_sign_connect_to;
-use wow_database::{CharStatements, LoginStatements, WorldDatabase, WorldStatements};
+use wow_database::{CharStatements, LoginStatements, SqlTransaction, WorldDatabase, WorldStatements};
+use wow_entities::INVENTORY_SLOT_BAG_0;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::packets::auth::{
     ConnectTo, ConnectToAddress, ConnectToFailed, ConnectToKey, ConnectToSerial, ResumeComms,
@@ -1403,6 +1404,9 @@ impl WorldSession {
                             .and_then(<ItemContext as num_traits::FromPrimitive>::from_u8)
                             .unwrap_or(ItemContext::None);
                         if item_entry > 0 && (slot as usize) < 141 {
+                            let item_max_durability = self
+                                .item_template_max_durability(item_entry)
+                                .max(item_durability);
                             let item_guid = ObjectGuid::create_item(realm_id, item_db_guid as i64);
                             inv_slots[slot as usize] = item_guid;
                             item_creates.push(wow_packet::packets::update::ItemCreateData {
@@ -1410,6 +1414,9 @@ impl WorldSession {
                                 entry_id: item_entry as i32,
                                 owner_guid: guid,
                                 contained_in: guid,
+                                stack_count: item_count,
+                                durability: item_durability,
+                                max_durability: item_max_durability,
                             });
                             let inventory_type = self
                                 .item_template_inventory_type(item_entry)
@@ -3288,101 +3295,142 @@ impl WorldSession {
             return;
         }
 
-        // ── Find free backpack slot (ItemStart=35 to ItemEnd-1=58) ──
-        const BACKPACK_START: u8 = 35;
-        const BACKPACK_END: u8 = 59;
-        let free_slot = (BACKPACK_START..BACKPACK_END)
-            .find(|&s| !self.inventory_items.contains_key(&s));
-        let slot = match free_slot {
-            Some(s) => s,
+        let (store_result, store_dest, _) = match self
+            .plan_store_new_direct_inventory_item(buy.item_id as u32, quantity)
+        {
+            Some(plan) => plan,
             None => {
                 self.send_buy_error(
-                    BuyResult::CantCarryMore,
+                    BuyResult::CantFindItem,
                     Some(buy.vendor_guid),
                     buy.muid as u32,
                 );
                 return;
             }
         };
+        if store_result != InventoryResult::Ok {
+            self.send_equip_error(store_result, None, None, 0, 0);
+            return;
+        }
 
-        // ── Allocate item GUID ──
-        let mut max_guid_stmt = char_db.prepare(CharStatements::SEL_MAX_ITEM_GUID);
-        let next_item_guid: u64 = match char_db.query(&max_guid_stmt).await {
-            Ok(r) => r.try_read::<u64>(0).unwrap_or(0) + 1,
-            Err(_) => 1,
+        let needs_new_items = store_dest.iter().any(|dest| {
+            let slot = (dest.pos & 0x00FF) as u8;
+            !self.inventory_items.contains_key(&slot)
+        });
+        let mut next_item_guid = if needs_new_items {
+            let max_guid_stmt = char_db.prepare(CharStatements::SEL_MAX_ITEM_GUID);
+            match char_db.query(&max_guid_stmt).await {
+                Ok(r) => r.try_read::<u64>(0).unwrap_or(0) + 1,
+                Err(_) => 1,
+            }
+        } else {
+            0
         };
 
-        // ── DB: insert item_instance ──
-        // Columns: guid, itemEntry, owner_guid, count, durability
-        let mut ins_item = char_db.prepare(CharStatements::INS_ITEM_INSTANCE);
-        ins_item.set_u64(0, next_item_guid);
-        ins_item.set_u32(1, buy.item_id as u32);
-        ins_item.set_u64(2, player_guid.counter() as u64);
-        ins_item.set_u32(3, quantity);
-        ins_item.set_u32(4, max_durability);
-        if let Err(e) = char_db.execute(&ins_item).await {
-            warn!("BuyItem: insert item_instance failed: {e}");
-            self.send_buy_error(
-                BuyResult::CantFindItem,
-                Some(buy.vendor_guid),
-                buy.muid as u32,
-            );
-            return;
-        }
-
-        // ── DB: insert character_inventory ──
-        // Columns: guid (player), bag (0=main), slot, item (item guid)
-        let mut ins_inv = char_db.prepare(CharStatements::INS_CHAR_INVENTORY);
-        ins_inv.set_u64(0, player_guid.counter() as u64);
-        ins_inv.set_u8(1, slot);
-        ins_inv.set_u64(2, next_item_guid);
-        if let Err(e) = char_db.execute(&ins_inv).await {
-            warn!("BuyItem: insert character_inventory failed: {e}");
-            // Roll back item_instance
-            let mut del = char_db.prepare(CharStatements::DEL_ITEM_INSTANCE);
-            del.set_u64(0, next_item_guid);
-            let _ = char_db.execute(&del).await;
-            self.send_buy_error(
-                BuyResult::CantFindItem,
-                Some(buy.vendor_guid),
-                buy.muid as u32,
-            );
-            return;
-        }
-
-        // ── Deduct gold + save to DB ──
-        self.player_gold -= buy_price;
+        let mut tx = SqlTransaction::new();
+        let new_gold = self.player_gold.saturating_sub(buy_price);
         let mut upd_money = char_db.prepare(CharStatements::UPD_CHAR_MONEY);
-        upd_money.set_u64(0, self.player_gold);
+        upd_money.set_u64(0, new_gold);
         upd_money.set_u64(1, player_guid.counter() as u64);
-        if let Err(e) = char_db.execute(&upd_money).await {
-            warn!("BuyItem: update money failed: {e}");
+        tx.append(upd_money);
+
+        let mut existing_updates = Vec::new();
+        let mut new_stacks = Vec::new();
+        for dest in &store_dest {
+            let bag = (dest.pos >> 8) as u8;
+            let slot = (dest.pos & 0x00FF) as u8;
+            if bag != u8::from(INVENTORY_SLOT_BAG_0) {
+                warn!("BuyItem: direct inventory plan produced unsupported bag {}", bag);
+                self.send_equip_error(InventoryResult::WrongBagType, None, None, 0, 0);
+                return;
+            }
+
+            if let Some(inv_item) = self.inventory_items.get(&slot) {
+                let Some(existing_item) = self.inventory_item_objects.get(&inv_item.guid) else {
+                    warn!("BuyItem: missing runtime item object for slot {}", slot);
+                    self.send_buy_error(
+                        BuyResult::CantFindItem,
+                        Some(buy.vendor_guid),
+                        buy.muid as u32,
+                    );
+                    return;
+                };
+                let new_count = existing_item.count().saturating_add(dest.count);
+                let mut upd_count = char_db.prepare(CharStatements::UPD_ITEM_INSTANCE_COUNT);
+                upd_count.set_u32(0, new_count);
+                upd_count.set_u64(1, inv_item.db_guid);
+                tx.append(upd_count);
+                existing_updates.push((slot, inv_item.guid, new_count));
+            } else {
+                let db_guid = next_item_guid;
+                next_item_guid += 1;
+                let item_guid = ObjectGuid::create_item(realm_id, db_guid as i64);
+
+                let mut ins_item = char_db.prepare(CharStatements::INS_ITEM_INSTANCE);
+                ins_item.set_u64(0, db_guid);
+                ins_item.set_u32(1, buy.item_id as u32);
+                ins_item.set_u64(2, player_guid.counter() as u64);
+                ins_item.set_u32(3, dest.count);
+                ins_item.set_u32(4, max_durability);
+                tx.append(ins_item);
+
+                let mut ins_inv = char_db.prepare(CharStatements::INS_CHAR_INVENTORY);
+                ins_inv.set_u64(0, player_guid.counter() as u64);
+                ins_inv.set_u8(1, slot);
+                ins_inv.set_u64(2, db_guid);
+                tx.append(ins_inv);
+
+                new_stacks.push((slot, db_guid, item_guid, dest.count));
+            }
         }
 
-        // ── Update in-memory inventory ──
-        let item_guid = ObjectGuid::create_item(realm_id, next_item_guid as i64);
+        if let Err(e) = char_db.commit_transaction(tx).await {
+            warn!("BuyItem: store transaction failed: {e}");
+            self.send_buy_error(
+                BuyResult::CantFindItem,
+                Some(buy.vendor_guid),
+                buy.muid as u32,
+            );
+            return;
+        }
+
+        self.player_gold = new_gold;
+
+        for &(_, item_guid, new_count) in &existing_updates {
+            if let Some(item) = self.inventory_item_objects.get_mut(&item_guid) {
+                item.set_count(new_count);
+            }
+        }
+
         let inv_type = self.item_template_inventory_type(buy.item_id as u32);
-        self.inventory_items.insert(slot, crate::session::InventoryItem {
-            guid: item_guid,
-            entry_id: buy.item_id as u32,
-            db_guid: next_item_guid,
-            inventory_type: inv_type,
-        });
-        let item_object = self.make_inventory_item_object(
-            item_guid,
-            buy.item_id as u32,
-            player_guid,
-            quantity,
-            max_durability,
-            ItemContext::Vendor,
-            slot,
-        );
-        self.insert_inventory_item_object(item_object);
+        for &(slot, db_guid, item_guid, stack_count) in &new_stacks {
+            self.inventory_items.insert(slot, crate::session::InventoryItem {
+                guid: item_guid,
+                entry_id: buy.item_id as u32,
+                db_guid,
+                inventory_type: inv_type,
+            });
+            let item_object = self.make_inventory_item_object(
+                item_guid,
+                buy.item_id as u32,
+                player_guid,
+                stack_count,
+                max_durability,
+                ItemContext::Vendor,
+                slot,
+            );
+            self.insert_inventory_item_object(item_object);
+        }
         self.sync_object_accessor_player();
 
+        let changed_slots: Vec<_> = new_stacks
+            .iter()
+            .map(|&(slot, _, item_guid, _)| (slot, item_guid))
+            .collect();
+
         info!(
-            "BuyItem: player {:?} bought item {} at slot {} for {} copper (remaining: {})",
-            player_guid, buy.item_id, slot, buy_price, self.player_gold
+            "BuyItem: player {:?} bought item {} across {} destination(s) for {} copper (remaining: {})",
+            player_guid, buy.item_id, store_dest.len(), buy_price, self.player_gold
         );
 
         // ── Send BuySucceeded ──
@@ -3390,25 +3438,47 @@ impl WorldSession {
             vendor_guid: buy.vendor_guid,
             muid: buy.muid,
             new_quantity: -1, // unlimited stock
-            quantity_bought: buy.quantity,
+            quantity_bought: quantity as i32,
         });
 
-        // ── Send UpdateObject: new item CREATE block ──
-        let item_create = ItemCreateData {
-            item_guid,
-            entry_id: buy.item_id,
-            owner_guid: player_guid,
-            contained_in: ObjectGuid::EMPTY,
-        };
-        self.send_packet(&UpdateObject::create_items(vec![item_create], map_id));
+        if !new_stacks.is_empty() {
+            let item_creates = new_stacks
+                .iter()
+                .map(|&(_, _, item_guid, stack_count)| ItemCreateData {
+                    item_guid,
+                    entry_id: buy.item_id,
+                    owner_guid: player_guid,
+                    contained_in: player_guid,
+                    stack_count,
+                    durability: max_durability,
+                    max_durability,
+                })
+                .collect();
+            self.send_packet(&UpdateObject::create_items(item_creates, map_id));
+        }
 
-        // ── Send VALUES update: inv slot + coinage ──
+        for &(_, item_guid, new_count) in &existing_updates {
+            self.send_packet(&UpdateObject::item_stack_count_update(
+                item_guid, map_id, new_count,
+            ));
+        }
+
+        // ── Send VALUES update: new inv slots + coinage ──
         self.send_packet(&UpdateObject::player_money_update(
             player_guid,
             map_id,
             self.player_gold,
-            Some((slot, item_guid)),
+            None,
         ));
+        if !changed_slots.is_empty() {
+            self.send_packet(&UpdateObject::player_values_update(
+                player_guid,
+                map_id,
+                changed_slots,
+                Vec::new(),
+                Vec::new(),
+            ));
+        }
     }
 
     /// Handle CMSG_SELL_ITEM — player sells an item to a vendor.

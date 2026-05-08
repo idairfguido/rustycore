@@ -100,6 +100,9 @@ pub enum CharStatements {
     /// VALUES (?, ?, ?, ?, ?, '', '')
     INS_ITEM_INSTANCE,
 
+    /// UPDATE item_instance SET count = ? WHERE guid = ?
+    UPD_ITEM_INSTANCE_COUNT,
+
     /// INSERT INTO character_inventory (guid, bag, slot, item) VALUES (?, 0, ?, ?)
     INS_CHAR_INVENTORY,
 
@@ -206,6 +209,9 @@ impl StatementDef for CharStatements {
                   durability, enchantments, charges, flags, randomPropertiesId, \
                   randomPropertiesSeed, context) \
                  VALUES (?, ?, ?, 0, 0, ?, ?, '', '', 0, 0, 0, 0)"
+            }
+            Self::UPD_ITEM_INSTANCE_COUNT => {
+                "UPDATE item_instance SET count = ? WHERE guid = ?"
             }
             Self::INS_CHAR_INVENTORY => {
                 "INSERT INTO character_inventory (guid, bag, slot, item) VALUES (?, 0, ?, ?)"
