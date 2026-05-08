@@ -567,6 +567,7 @@ const MAX_MONEY_AMOUNT: u64 = 99_999_999_999;
 struct VendorBuyItem {
     item_type: i32,
     max_count: u32,
+    extended_cost: u32,
     buy_price: u64,
     max_durability: u32,
     buy_count: u32,
@@ -592,6 +593,22 @@ fn vendor_buy_packet_quantity_to_cpp_count(quantity: i32) -> u32 {
 fn vendor_buy_muid_to_cpp_slot(muid: i32) -> Option<u32> {
     let muid = muid as u32;
     if muid > 0 { Some(muid - 1) } else { None }
+}
+
+fn vendor_buy_extended_cost_block_result(
+    extended_cost: u32,
+    buy_count: u32,
+    quantity: u32,
+) -> Option<InventoryResult> {
+    if extended_cost == 0 {
+        return None;
+    }
+
+    if quantity % buy_count.max(1) != 0 {
+        return Some(InventoryResult::CantBuyQuantity);
+    }
+
+    Some(InventoryResult::VendorMissingTurnins)
 }
 
 fn vendor_buy_direct_inventory_destination(
@@ -661,6 +678,7 @@ impl WorldSession {
                                     .unwrap_or(ItemVendorType::Item as u8)
                                     as i32,
                                 max_count: result.try_read::<u32>(1).unwrap_or(0),
+                                extended_cost: result.try_read::<u32>(2).unwrap_or(0),
                                 buy_price: result
                                     .try_read::<i64>(5)
                                     .map(|v| v as u64)
@@ -3424,6 +3442,14 @@ impl WorldSession {
             );
             return;
         }
+        if let Some(result) = vendor_buy_extended_cost_block_result(
+            vendor_item.extended_cost,
+            vendor_item.buy_count,
+            quantity,
+        ) {
+            self.send_equip_error(result, None, None, 0, 0);
+            return;
+        }
 
         let (quantity, buy_price): (u32, u64) = vendor_buy_quantity_and_price(
             vendor_item.buy_price,
@@ -4844,6 +4870,19 @@ mod tests {
         assert_eq!(vendor_buy_muid_to_cpp_slot(1), Some(0));
         assert_eq!(vendor_buy_muid_to_cpp_slot(2), Some(1));
         assert_eq!(vendor_buy_muid_to_cpp_slot(-1), Some(u32::MAX - 1));
+    }
+
+    #[test]
+    fn vendor_buy_extended_cost_fails_closed_like_cpp_preflight() {
+        assert_eq!(vendor_buy_extended_cost_block_result(0, 5, 3), None);
+        assert_eq!(
+            vendor_buy_extended_cost_block_result(12, 5, 3),
+            Some(InventoryResult::CantBuyQuantity)
+        );
+        assert_eq!(
+            vendor_buy_extended_cost_block_result(12, 5, 10),
+            Some(InventoryResult::VendorMissingTurnins)
+        );
     }
 
     #[test]
