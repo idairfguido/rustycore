@@ -689,9 +689,25 @@ enum VendorExtendedCostBlock {
     Silent,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExtendedCostItemTurninChange {
+    Update {
+        slot: u8,
+        item_guid: ObjectGuid,
+        db_guid: u64,
+        new_count: u32,
+    },
+    Delete {
+        slot: u8,
+        item_guid: ObjectGuid,
+        db_guid: u64,
+    },
+}
+
 fn vendor_buy_extended_cost_block_result(
     extended_cost_store: Option<&ItemExtendedCostStore>,
     currency_store: Option<&CurrencyTypesStore>,
+    has_item_count: impl Fn(u32, u32) -> bool,
     has_currency: impl Fn(u32, u32) -> bool,
     allow_currency_only_success: bool,
     extended_cost: u32,
@@ -713,10 +729,27 @@ fn vendor_buy_extended_cost_block_result(
     };
     let stacks = quantity / buy_count.max(1);
 
-    if extended_cost_entry.has_item_turnins() {
-        return Some(VendorExtendedCostBlock::Equip(
-            InventoryResult::VendorMissingTurnins,
-        ));
+    for (item_id, item_count) in extended_cost_entry
+        .item_id
+        .iter()
+        .copied()
+        .zip(extended_cost_entry.item_count.iter().copied())
+    {
+        if item_id == 0 {
+            continue;
+        }
+
+        let Ok(item_id) = u32::try_from(item_id) else {
+            return Some(VendorExtendedCostBlock::Equip(
+                InventoryResult::VendorMissingTurnins,
+            ));
+        };
+        let amount = u32::from(item_count).wrapping_mul(stacks);
+        if !has_item_count(item_id, amount) {
+            return Some(VendorExtendedCostBlock::Equip(
+                InventoryResult::VendorMissingTurnins,
+            ));
+        }
     }
 
     for (i, currency_id) in extended_cost_entry.currency_id.iter().copied().enumerate() {
@@ -762,6 +795,36 @@ fn vendor_buy_extended_cost_block_result(
             InventoryResult::VendorMissingTurnins,
         ))
     }
+}
+
+fn vendor_buy_extended_cost_item_costs(
+    extended_cost_store: Option<&ItemExtendedCostStore>,
+    extended_cost: u32,
+    buy_count: u32,
+    quantity: u32,
+) -> Vec<(u32, u32)> {
+    if extended_cost == 0 {
+        return Vec::new();
+    }
+    let Some(extended_cost_entry) =
+        extended_cost_store.and_then(|store| store.get(extended_cost))
+    else {
+        return Vec::new();
+    };
+    let stacks = quantity / buy_count.max(1);
+    extended_cost_entry
+        .item_id
+        .iter()
+        .copied()
+        .zip(extended_cost_entry.item_count.iter().copied())
+        .filter(|(item_id, _)| *item_id > 0)
+        .map(|(item_id, count)| {
+            (
+                u32::try_from(item_id).unwrap_or(0),
+                u32::from(count).wrapping_mul(stacks),
+            )
+        })
+        .collect()
 }
 
 fn vendor_buy_extended_cost_currency_costs(
@@ -3909,6 +3972,186 @@ impl WorldSession {
         self.send_packet(&VendorInventory { vendor_guid, reason: 0, items });
     }
 
+    fn has_item_count_direct_inventory(&self, item_entry: u32, count: u32) -> bool {
+        if count == 0 {
+            return true;
+        }
+
+        let mut current_count = 0_u32;
+        let mut slots: Vec<_> = self.inventory_items.iter().collect();
+        slots.sort_by_key(|&(slot, _)| {
+            let slot = *slot;
+            if slot >= 19 {
+                u16::from(slot)
+            } else {
+                1000 + u16::from(slot)
+            }
+        });
+
+        for (_, inventory_item) in slots {
+            if inventory_item.entry_id != item_entry {
+                continue;
+            }
+            let Some(item) = self.inventory_item_objects.get(&inventory_item.guid) else {
+                continue;
+            };
+            if item.is_in_trade() {
+                continue;
+            }
+            current_count = current_count.saturating_add(item.count());
+            if current_count >= count {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn plan_destroy_item_count_direct_inventory(
+        &self,
+        item_entry: u32,
+        count: u32,
+    ) -> Option<Vec<ExtendedCostItemTurninChange>> {
+        if count == 0 {
+            return Some(Vec::new());
+        }
+
+        let mut remaining = count;
+        let mut changes = Vec::new();
+        let mut slots: Vec<_> = self.inventory_items.iter().collect();
+        slots.sort_by_key(|&(slot, _)| {
+            let slot = *slot;
+            if slot >= 19 {
+                u16::from(slot)
+            } else {
+                1000 + u16::from(slot)
+            }
+        });
+
+        for (&slot, inventory_item) in slots {
+            if inventory_item.entry_id != item_entry {
+                continue;
+            }
+            let Some(item) = self.inventory_item_objects.get(&inventory_item.guid) else {
+                continue;
+            };
+            if item.is_in_trade() {
+                continue;
+            }
+
+            let item_count = item.count();
+            if item_count <= remaining {
+                remaining -= item_count;
+                changes.push(ExtendedCostItemTurninChange::Delete {
+                    slot,
+                    item_guid: inventory_item.guid,
+                    db_guid: inventory_item.db_guid,
+                });
+            } else {
+                changes.push(ExtendedCostItemTurninChange::Update {
+                    slot,
+                    item_guid: inventory_item.guid,
+                    db_guid: inventory_item.db_guid,
+                    new_count: item_count - remaining,
+                });
+                remaining = 0;
+            }
+
+            if remaining == 0 {
+                return Some(changes);
+            }
+        }
+
+        None
+    }
+
+    fn append_item_turnin_statements(
+        char_db: &wow_database::CharacterDatabase,
+        tx: &mut SqlTransaction,
+        player_guid: ObjectGuid,
+        changes: &[ExtendedCostItemTurninChange],
+    ) {
+        for change in changes {
+            match *change {
+                ExtendedCostItemTurninChange::Update {
+                    db_guid, new_count, ..
+                } => {
+                    let mut stmt = char_db.prepare(CharStatements::UPD_ITEM_INSTANCE_COUNT);
+                    stmt.set_u32(0, new_count);
+                    stmt.set_u64(1, db_guid);
+                    tx.append(stmt);
+                }
+                ExtendedCostItemTurninChange::Delete { db_guid, .. } => {
+                    let mut del_inv = char_db.prepare(CharStatements::DEL_CHAR_INVENTORY_ITEM);
+                    del_inv.set_u64(0, player_guid.counter() as u64);
+                    del_inv.set_u64(1, db_guid);
+                    tx.append(del_inv);
+
+                    let mut del_item = char_db.prepare(CharStatements::DEL_ITEM_INSTANCE);
+                    del_item.set_u64(0, db_guid);
+                    tx.append(del_item);
+                }
+            }
+        }
+    }
+
+    fn apply_item_turnin_changes(
+        &mut self,
+        player_guid: ObjectGuid,
+        map_id: u16,
+        changes: &[ExtendedCostItemTurninChange],
+    ) {
+        let mut cleared_slots = Vec::new();
+        let mut visible_item_changes = Vec::new();
+        let mut virtual_item_changes = Vec::new();
+        let mut send_stat_update = false;
+
+        for change in changes {
+            match *change {
+                ExtendedCostItemTurninChange::Update {
+                    item_guid,
+                    new_count,
+                    ..
+                } => {
+                    if let Some(item) = self.inventory_item_objects.get_mut(&item_guid) {
+                        item.set_count(new_count);
+                    }
+                    self.send_packet(&UpdateObject::item_stack_count_update(
+                        item_guid, map_id, new_count,
+                    ));
+                }
+                ExtendedCostItemTurninChange::Delete {
+                    slot, item_guid, ..
+                } => {
+                    self.inventory_items.remove(&slot);
+                    self.remove_inventory_item_object(item_guid);
+                    cleared_slots.push((slot, ObjectGuid::EMPTY));
+                    if (slot as usize) < 19 {
+                        visible_item_changes.push((slot, 0i32, 0u16, 0u16));
+                        send_stat_update = true;
+                    }
+                    if (15..=17).contains(&slot) {
+                        virtual_item_changes.push((slot - 15, 0i32, 0u16, 0u16));
+                    }
+                }
+            }
+        }
+
+        if !cleared_slots.is_empty() {
+            self.sync_object_accessor_player();
+            self.send_packet(&UpdateObject::player_values_update(
+                player_guid,
+                map_id,
+                cleared_slots,
+                visible_item_changes,
+                virtual_item_changes,
+            ));
+        }
+        if send_stat_update {
+            self.send_stat_update();
+        }
+    }
+
     /// Handle CMSG_BUY_ITEM — player buys an item from a vendor.
     ///
     /// C# ref: `ItemHandler.HandleBuyItem` → `Player.BuyItemFromVendorSlot`.
@@ -3991,6 +4234,7 @@ impl WorldSession {
             match vendor_buy_extended_cost_block_result(
                 self.item_extended_cost_store().map(|store| store.as_ref()),
                 self.currency_types_store().map(|store| store.as_ref()),
+                |item_id, amount| self.has_item_count_direct_inventory(item_id, amount),
                 |currency_id, amount| self.has_currency(currency_id, amount),
                 true,
                 vendor_item.extended_cost,
@@ -4006,6 +4250,12 @@ impl WorldSession {
                 Some(VendorExtendedCostBlock::Silent) | None => {}
             }
 
+            let extended_cost_item_costs = vendor_buy_extended_cost_item_costs(
+                self.item_extended_cost_store().map(|store| store.as_ref()),
+                vendor_item.extended_cost,
+                vendor_item.max_count,
+                quantity,
+            );
             let extended_cost_currency_costs = vendor_buy_extended_cost_currency_costs(
                 self.item_extended_cost_store().map(|store| store.as_ref()),
                 vendor_item.extended_cost,
@@ -4016,6 +4266,22 @@ impl WorldSession {
                 Some(db) => Arc::clone(db),
                 None => return,
             };
+            let mut item_turnin_changes = Vec::new();
+            for &(item_id, amount) in &extended_cost_item_costs {
+                let Some(mut changes) =
+                    self.plan_destroy_item_count_direct_inventory(item_id, amount)
+                else {
+                    self.send_equip_error(
+                        InventoryResult::VendorMissingTurnins,
+                        None,
+                        None,
+                        0,
+                        0,
+                    );
+                    return;
+                };
+                item_turnin_changes.append(&mut changes);
+            }
             let currency_snapshot = self.player_currencies.clone();
             let currency_gain = match self.add_currency_vendor(buy.item_id as u32, quantity) {
                 Ok(delta) => delta,
@@ -4040,6 +4306,12 @@ impl WorldSession {
             }
 
             let mut tx = SqlTransaction::new();
+            Self::append_item_turnin_statements(
+                char_db.as_ref(),
+                &mut tx,
+                player_guid,
+                &item_turnin_changes,
+            );
             self.append_player_currency_save_statements(&mut tx, player_guid.counter() as u64);
             if let Err(e) = char_db.commit_transaction(tx).await {
                 self.player_currencies = currency_snapshot;
@@ -4070,6 +4342,7 @@ impl WorldSession {
                 packet.suppress_chat_log = delta.suppress_chat_log;
                 self.send_packet(&packet);
             }
+            self.apply_item_turnin_changes(player_guid, map_id, &item_turnin_changes);
             for &(currency_id, amount) in &extended_cost_currency_costs {
                 let Some(quantity) = i32::try_from(self.player_currency_quantity(currency_id)).ok()
                 else {
@@ -4196,6 +4469,7 @@ impl WorldSession {
         if let Some(result) = vendor_buy_extended_cost_block_result(
             self.item_extended_cost_store().map(|store| store.as_ref()),
             self.currency_types_store().map(|store| store.as_ref()),
+            |item_id, amount| self.has_item_count_direct_inventory(item_id, amount),
             |currency_id, amount| self.has_currency(currency_id, amount),
             true,
             vendor_item.extended_cost,
@@ -4213,6 +4487,12 @@ impl WorldSession {
             }
             return;
         }
+        let extended_cost_item_costs = vendor_buy_extended_cost_item_costs(
+            self.item_extended_cost_store().map(|store| store.as_ref()),
+            vendor_item.extended_cost,
+            vendor_item.buy_count,
+            quantity,
+        );
         let extended_cost_currency_costs = vendor_buy_extended_cost_currency_costs(
             self.item_extended_cost_store().map(|store| store.as_ref()),
             vendor_item.extended_cost,
@@ -4339,6 +4619,28 @@ impl WorldSession {
             }
         }
 
+        let mut item_turnin_changes = Vec::new();
+        for &(item_id, amount) in &extended_cost_item_costs {
+            let Some(mut changes) = self.plan_destroy_item_count_direct_inventory(item_id, amount)
+            else {
+                self.send_equip_error(
+                    InventoryResult::VendorMissingTurnins,
+                    None,
+                    None,
+                    0,
+                    0,
+                );
+                return;
+            };
+            item_turnin_changes.append(&mut changes);
+        }
+        Self::append_item_turnin_statements(
+            char_db.as_ref(),
+            &mut tx,
+            player_guid,
+            &item_turnin_changes,
+        );
+
         let currency_snapshot = self.player_currencies.clone();
         for &(currency_id, amount) in &extended_cost_currency_costs {
             if i32::try_from(amount).is_err() || !self.remove_currency(currency_id, amount) {
@@ -4367,6 +4669,7 @@ impl WorldSession {
         }
 
         self.player_gold = new_gold;
+        self.apply_item_turnin_changes(player_guid, map_id, &item_turnin_changes);
         for &(currency_id, amount) in &extended_cost_currency_costs {
             let Some(quantity) = i32::try_from(self.player_currency_quantity(currency_id)).ok()
             else {
@@ -5807,16 +6110,26 @@ mod tests {
                 item_count: [0; wow_data::MAX_ITEM_EXT_COST_ITEMS],
                 currency_id: [395, 0, 0, 0, 0],
                 currency_count: [10, 0, 0, 0, 0],
-            }]);
+        }]);
 
         assert_eq!(
-            vendor_buy_extended_cost_block_result(None, None, |_, _| false, false, 0, 5, 3),
+            vendor_buy_extended_cost_block_result(
+                None,
+                None,
+                |_, _| false,
+                |_, _| false,
+                false,
+                0,
+                5,
+                3
+            ),
             None
         );
         assert_eq!(
             vendor_buy_extended_cost_block_result(
                 Some(&extended_cost_store),
                 Some(&currency_store),
+                |_, _| false,
                 |_, _| false,
                 false,
                 12,
@@ -5829,6 +6142,7 @@ mod tests {
             vendor_buy_extended_cost_block_result(
                 Some(&extended_cost_store),
                 Some(&currency_store),
+                |_, _| true,
                 |currency_id, amount| currency_id == 395 && amount >= 20,
                 false,
                 12,
@@ -5843,6 +6157,7 @@ mod tests {
             vendor_buy_extended_cost_block_result(
                 Some(&extended_cost_store),
                 Some(&currency_store),
+                |_, _| true,
                 |currency_id, amount| currency_id == 395 && amount >= 20,
                 true,
                 12,
@@ -5855,11 +6170,58 @@ mod tests {
             vendor_buy_extended_cost_currency_costs(Some(&extended_cost_store), 12, 5, 10),
             vec![(395, 20)]
         );
+        let item_turnin_store =
+            ItemExtendedCostStore::from_entries([wow_data::ItemExtendedCostEntry {
+                id: 13,
+                required_arena_rating: 0,
+                arena_bracket: 0,
+                flags: wow_constants::ItemExtendedCostFlags::empty(),
+                min_faction_id: 0,
+                min_reputation: 0,
+                required_achievement: 0,
+                item_id: [700, 0, 0, 0, 0],
+                item_count: [3, 0, 0, 0, 0],
+                currency_id: [0; wow_data::MAX_ITEM_EXT_COST_CURRENCIES],
+                currency_count: [0; wow_data::MAX_ITEM_EXT_COST_CURRENCIES],
+            }]);
+        assert_eq!(
+            vendor_buy_extended_cost_block_result(
+                Some(&item_turnin_store),
+                Some(&currency_store),
+                |item_id, amount| item_id == 700 && amount == 6,
+                |_, _| true,
+                true,
+                13,
+                5,
+                10
+            ),
+            None
+        );
+        assert_eq!(
+            vendor_buy_extended_cost_block_result(
+                Some(&item_turnin_store),
+                Some(&currency_store),
+                |_, _| false,
+                |_, _| true,
+                true,
+                13,
+                5,
+                10
+            ),
+            Some(VendorExtendedCostBlock::Equip(
+                InventoryResult::VendorMissingTurnins
+            ))
+        );
+        assert_eq!(
+            vendor_buy_extended_cost_item_costs(Some(&item_turnin_store), 13, 5, 10),
+            vec![(700, 6)]
+        );
         let checked_currency_amount = std::cell::Cell::new(false);
         assert_eq!(
             vendor_buy_extended_cost_block_result(
                 Some(&extended_cost_store),
                 Some(&currency_store),
+                |_, _| true,
                 |currency_id, amount| {
                     checked_currency_amount.set(true);
                     assert_eq!(currency_id, 395);
@@ -5881,6 +6243,7 @@ mod tests {
                 Some(&extended_cost_store),
                 None,
                 |_, _| true,
+                |_, _| true,
                 true,
                 12,
                 5,
@@ -5892,6 +6255,7 @@ mod tests {
             vendor_buy_extended_cost_block_result(
                 Some(&extended_cost_store),
                 Some(&currency_store),
+                |_, _| true,
                 |_, _| true,
                 true,
                 99,
@@ -5935,6 +6299,68 @@ mod tests {
         assert_eq!(
             vendor_buy_stock_refill_count(2, 9, 10, 5, 20),
             (2, false)
+        );
+    }
+
+    #[test]
+    fn extended_cost_item_turnin_plan_matches_cpp_destroy_order() {
+        let (_pkt_tx, pkt_rx) = flume::bounded::<wow_packet::WorldPacket>(8);
+        let (send_tx, _send_rx) = flume::bounded::<Vec<u8>>(8);
+        let mut session = WorldSession::new(
+            1,
+            "TestAccount".into(),
+            0,
+            2,
+            9,
+            54261,
+            vec![0u8; 40],
+            "esES".into(),
+            pkt_rx,
+            send_tx,
+        );
+        let player_guid = ObjectGuid::create_player(1, 1);
+        session.player_guid = Some(player_guid);
+
+        for (slot, db_guid, count) in [(35, 10_u64, 4_u32), (36, 11_u64, 5_u32)] {
+            let item_guid = ObjectGuid::create_item(1, db_guid as i64);
+            session.inventory_items.insert(
+                slot,
+                InventoryItem {
+                    guid: item_guid,
+                    entry_id: 700,
+                    db_guid,
+                    inventory_type: None,
+                },
+            );
+            let item = session.make_inventory_item_object(
+                item_guid,
+                700,
+                player_guid,
+                count,
+                0,
+                ItemContext::Vendor,
+                slot,
+            );
+            session.insert_inventory_item_object(item);
+        }
+
+        assert!(session.has_item_count_direct_inventory(700, 9));
+        assert!(!session.has_item_count_direct_inventory(700, 10));
+        assert_eq!(
+            session.plan_destroy_item_count_direct_inventory(700, 6),
+            Some(vec![
+                ExtendedCostItemTurninChange::Delete {
+                    slot: 35,
+                    item_guid: ObjectGuid::create_item(1, 10),
+                    db_guid: 10,
+                },
+                ExtendedCostItemTurninChange::Update {
+                    slot: 36,
+                    item_guid: ObjectGuid::create_item(1, 11),
+                    db_guid: 11,
+                    new_count: 3,
+                },
+            ])
         );
     }
 
