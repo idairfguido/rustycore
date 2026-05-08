@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use wow_constants::{
     BagFamilyMask, EnchantmentSlot, InventoryResult, InventoryType, ItemBondingType, ItemClass,
     ItemContext, ItemFieldFlags, ItemFieldFlags2, ItemModifier, ItemSubClassContainer,
@@ -344,6 +346,7 @@ pub struct Item {
     refund_recipient: ObjectGuid,
     paid_money: u64,
     paid_extended_cost: u32,
+    soulbound_trade_allowed_guids: HashSet<ObjectGuid>,
     text: String,
 }
 
@@ -371,6 +374,7 @@ impl Item {
             refund_recipient: ObjectGuid::EMPTY,
             paid_money: 0,
             paid_extended_cost: 0,
+            soulbound_trade_allowed_guids: HashSet::new(),
             text: String::new(),
         }
     }
@@ -749,6 +753,23 @@ impl Item {
         self.has_item_flag(ItemFieldFlags::BOP_TRADEABLE)
     }
 
+    pub fn soulbound_trade_allowed_guids(&self) -> &HashSet<ObjectGuid> {
+        &self.soulbound_trade_allowed_guids
+    }
+
+    pub fn is_soulbound_trade_allowed_for(&self, player_guid: ObjectGuid) -> bool {
+        self.soulbound_trade_allowed_guids.contains(&player_guid)
+    }
+
+    pub fn set_soulbound_tradeable<I>(&mut self, allowed_looters: I)
+    where
+        I: IntoIterator<Item = ObjectGuid>,
+    {
+        self.set_item_flag(ItemFieldFlags::BOP_TRADEABLE);
+        self.soulbound_trade_allowed_guids.clear();
+        self.soulbound_trade_allowed_guids.extend(allowed_looters);
+    }
+
     pub fn is_binded_not_with(
         &self,
         player_guid: ObjectGuid,
@@ -774,8 +795,23 @@ impl Item {
         true
     }
 
-    pub fn clear_soulbound_tradeable(&mut self) {
+    pub fn is_binded_not_with_using_allowed_guids(
+        &self,
+        player_guid: ObjectGuid,
+        template: &ItemStorageTemplate,
+    ) -> bool {
+        self.is_binded_not_with(
+            player_guid,
+            template,
+            self.is_soulbound_trade_allowed_for(player_guid),
+        )
+    }
+
+    pub fn clear_soulbound_tradeable(&mut self) -> bool {
         self.remove_item_flag(ItemFieldFlags::BOP_TRADEABLE);
+        let had_allowed_guids = !self.soulbound_trade_allowed_guids.is_empty();
+        self.soulbound_trade_allowed_guids.clear();
+        had_allowed_guids
     }
 
     pub fn played_time(&self, now_secs: i64) -> u32 {
@@ -1335,6 +1371,7 @@ mod tests {
         source.set_item_flag(
             ItemFieldFlags::SOULBOUND | ItemFieldFlags::REFUNDABLE | ItemFieldFlags::BOP_TRADEABLE,
         );
+        source.set_soulbound_tradeable([ObjectGuid::create_player(1, 45)]);
         source.set_bonding(ItemBondingType::Quest);
 
         let clone = source.clone_item_for_store(ObjectGuid::create_item(1, 101), Some(owner), 2);
@@ -1354,6 +1391,7 @@ mod tests {
         assert!(clone.is_soul_bound());
         assert!(!clone.is_refundable());
         assert!(!clone.is_bop_tradeable());
+        assert!(clone.soulbound_trade_allowed_guids().is_empty());
         assert_eq!(clone.bonding(), ItemBondingType::Quest);
         assert_eq!(clone.update_state(), ItemUpdateState::New);
     }
@@ -1397,6 +1435,28 @@ mod tests {
     }
 
     #[test]
+    fn soulbound_trade_allowed_guids_match_cpp_set_and_clear() {
+        let allowed = ObjectGuid::create_player(1, 42);
+        let other = ObjectGuid::create_player(1, 43);
+        let mut item = Item::default();
+
+        item.set_soulbound_tradeable([allowed]);
+        assert!(item.is_bop_tradeable());
+        assert!(item.is_soulbound_trade_allowed_for(allowed));
+        assert!(!item.is_soulbound_trade_allowed_for(other));
+        assert_eq!(item.soulbound_trade_allowed_guids().len(), 1);
+
+        assert!(item.clear_soulbound_tradeable());
+        assert!(!item.is_bop_tradeable());
+        assert!(item.soulbound_trade_allowed_guids().is_empty());
+
+        item.set_soulbound_tradeable(std::iter::empty());
+        assert!(item.is_bop_tradeable());
+        assert!(!item.clear_soulbound_tradeable());
+        assert!(!item.is_bop_tradeable());
+    }
+
+    #[test]
     fn played_time_and_bop_trade_expiry_match_cpp_thresholds() {
         let mut item = Item::new(1_000);
         item.set_create_played_time(100);
@@ -1428,6 +1488,12 @@ mod tests {
         item.set_item_flag(ItemFieldFlags::BOP_TRADEABLE);
         assert!(!item.is_binded_not_with(player_guid, &template, true));
         assert!(item.is_binded_not_with(player_guid, &template, false));
+
+        item.set_soulbound_tradeable([player_guid]);
+        assert!(!item.is_binded_not_with_using_allowed_guids(player_guid, &template));
+
+        item.set_soulbound_tradeable([ObjectGuid::create_player(1, 44)]);
+        assert!(item.is_binded_not_with_using_allowed_guids(player_guid, &template));
 
         let account_bound_template = ItemStorageTemplate {
             is_bound_account_wide: true,
