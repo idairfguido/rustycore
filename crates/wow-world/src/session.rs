@@ -27,9 +27,11 @@ use wow_data::{
 use wow_database::{CharacterDatabase, LoginDatabase, WorldDatabase};
 use wow_entities::{
     ApplyEnchantmentEffectRef, ApplyEnchantmentRandomSuffixRef, ApplyEnchantmentTemplateRef,
-    Item, ItemCreateInfo, ItemStorageTemplate, ObjectAccessor, PLAYER_SLOT_END,
-    PlayerEnchantTimeUpdate, PlayerInventoryStorage, PlayerItemTimeUpdate, SendNewItemDelivery,
-    SendNewItemDisplayText, SendNewItemPlan, WorldObject, MAX_ITEM_SPELLS,
+    CanStoreItemArgs, INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0, Item, ItemCreateInfo,
+    ItemPosCount, ItemSlotRef, ItemStorageRef, ItemStorageTemplate, NULL_BAG, NULL_SLOT,
+    ObjectAccessor, PLAYER_SLOT_END, Player, PlayerEnchantTimeUpdate, PlayerInventoryStorage,
+    PlayerItemTimeUpdate, SendNewItemDelivery, SendNewItemDisplayText, SendNewItemPlan,
+    WorldObject, MAX_ITEM_SPELLS,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus, build_dispatch_table};
 use wow_network::session_mgr::{InstanceLink, SessionManager};
@@ -770,6 +772,74 @@ impl WorldSession {
         if let Some(item) = self.inventory_item_objects.get_mut(&item_guid) {
             item.set_slot(slot);
         }
+    }
+
+    fn direct_inventory_player_snapshot(&self) -> Option<Player> {
+        let player_guid = self.player_guid?;
+        let mut player = Player::new(None, false);
+        player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(player_guid);
+        player.set_inventory_slot_count(INVENTORY_DEFAULT_SIZE);
+
+        for (&slot, item) in &self.inventory_items {
+            if (slot as usize) < PLAYER_SLOT_END {
+                let _ = player.store_top_level_item(slot, item.guid);
+            }
+        }
+
+        Some(player)
+    }
+
+    pub fn plan_store_new_direct_inventory_item(
+        &self,
+        entry_id: u32,
+        count: u32,
+    ) -> Option<(InventoryResult, Vec<ItemPosCount>, Option<u32>)> {
+        let player = self.direct_inventory_player_snapshot()?;
+        let proto = self.item_storage_template(entry_id);
+        let mut template_cache = HashMap::new();
+        for item in self.inventory_items.values() {
+            if let Some(template) = self.item_storage_template(item.entry_id) {
+                template_cache.insert(item.entry_id, template);
+            }
+        }
+
+        let mut slot_items = Vec::new();
+        let mut stored_items = Vec::new();
+        for (&slot, inventory_item) in &self.inventory_items {
+            let Some(item) = self.inventory_item_objects.get(&inventory_item.guid) else {
+                continue;
+            };
+            slot_items.push(ItemSlotRef::new(INVENTORY_SLOT_BAG_0, slot, item));
+            stored_items.push(ItemStorageRef::new(
+                INVENTORY_SLOT_BAG_0,
+                slot,
+                item,
+                template_cache.get(&inventory_item.entry_id),
+            ));
+        }
+
+        let mut dest = Vec::new();
+        let outcome = player.can_store_item(&mut dest, CanStoreItemArgs {
+            bag: NULL_BAG,
+            slot: NULL_SLOT,
+            entry: entry_id,
+            count,
+            proto: proto.as_ref(),
+            source_item: None,
+            source_is_not_empty_bag: false,
+            source_bop_trade_allowed_for_player: false,
+            swap: false,
+            limit_category: None,
+            slot_items: &slot_items,
+            stored_items: &stored_items,
+            bag_templates: &[],
+        });
+
+        Some((outcome.result, dest, outcome.no_space_count))
     }
 
     /// Set the item random suffix store for this session.
@@ -3572,8 +3642,9 @@ fn default_available_classes() -> Vec<wow_packet::packets::auth::RaceClassAvaila
 mod tests {
     use super::*;
     use wow_constants::{
-        BagFamilyMask, EnchantmentSlot, InventoryType, ItemBondingType, ItemClass, ItemContext,
-        ItemFlags, ItemFlags2, ItemUpdateState, SpellItemEnchantmentFlags,
+        BagFamilyMask, EnchantmentSlot, InventoryResult, InventoryType, ItemBondingType,
+        ItemClass, ItemContext, ItemFlags, ItemFlags2, ItemUpdateState,
+        SpellItemEnchantmentFlags,
     };
     use wow_core::Position;
     use wow_data::{
@@ -4034,6 +4105,70 @@ mod tests {
         assert!(accessor.find_connected_player(player_guid).is_none());
         assert!(session.inventory_items.is_empty());
         assert!(session.inventory_item_objects.is_empty());
+    }
+
+    #[test]
+    fn direct_inventory_store_plan_uses_cpp_can_store_merge_then_empty_order() {
+        let (mut session, _, _) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let item_guid = ObjectGuid::create_item(1, 900);
+        session.set_player_guid(Some(player_guid));
+        session.set_item_store(Arc::new(ItemStore::from_records([ItemRecord {
+            id: 700,
+            class_id: ItemClass::Consumable as u8,
+            subclass_id: 0,
+            material: 0,
+            inventory_type: InventoryType::NonEquip as i8,
+            sheathe_type: 0,
+        }])));
+        session.set_item_stats_store(Arc::new(ItemStatsStore::from_sparse_templates([(
+            700,
+            ItemSparseTemplateEntry {
+                flags: [0, 0, 0, 0],
+                bag_family: 0,
+                stackable: 20,
+                max_count: 0,
+                sell_price: 0,
+                max_durability: 0,
+                limit_category: 0,
+                bonding: ItemBondingType::None as u8,
+                container_slots: 0,
+                inventory_type: InventoryType::NonEquip as i8,
+            },
+        )])));
+
+        session.inventory_items.insert(35, InventoryItem {
+            guid: item_guid,
+            entry_id: 700,
+            db_guid: 900,
+            inventory_type: None,
+        });
+        let item = session.make_inventory_item_object(
+            item_guid,
+            700,
+            player_guid,
+            18,
+            0,
+            ItemContext::None,
+            35,
+        );
+        session.insert_inventory_item_object(item);
+
+        let (result, dest, no_space) = session
+            .plan_store_new_direct_inventory_item(700, 5)
+            .expect("player snapshot should exist");
+
+        assert_eq!(result, InventoryResult::Ok);
+        assert_eq!(no_space, None);
+        assert_eq!(dest.len(), 2);
+        assert_eq!(
+            dest[0],
+            ItemPosCount::new((u16::from(INVENTORY_SLOT_BAG_0) << 8) | 35, 2)
+        );
+        assert_eq!(
+            dest[1],
+            ItemPosCount::new((u16::from(INVENTORY_SLOT_BAG_0) << 8) | 36, 3)
+        );
     }
 
     #[test]
