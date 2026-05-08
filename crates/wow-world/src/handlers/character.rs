@@ -303,6 +303,15 @@ inventory::submit! {
 
 inventory::submit! {
     PacketHandlerEntry {
+        opcode: ClientOpcodes::BuyBackItem,
+        status: SessionStatus::LoggedIn,
+        processing: PacketProcessing::ThreadUnsafe,
+        handler_name: "handle_buy_back_item",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
         opcode: ClientOpcodes::SellItem,
         status: SessionStatus::LoggedIn,
         processing: PacketProcessing::ThreadUnsafe,
@@ -4997,6 +5006,239 @@ impl WorldSession {
                 Vec::new(),
             ));
         }
+    }
+
+    /// Handle CMSG_BUY_BACK_ITEM — player buys back an item from a vendor.
+    ///
+    /// C++ ref: `WorldSession::HandleBuybackItem`.
+    pub async fn handle_buy_back_item(&mut self, buyback: BuyBackItem) {
+        use wow_packet::packets::update::UpdateObject;
+
+        debug!(
+            "BuyBackItem: slot={} from vendor {:?}",
+            buyback.slot, buyback.vendor_guid
+        );
+
+        let player_guid = match self.player_guid { Some(g) => g, None => return };
+        let map_id = self.current_map_id;
+        if !self.creatures.contains_key(&buyback.vendor_guid) {
+            self.send_sell_error(
+                SellResult::CantFindVendor,
+                None,
+                ObjectGuid::EMPTY,
+            );
+            return;
+        }
+
+        let Ok(buyback_slot) = u8::try_from(buyback.slot) else {
+            self.send_buy_error(
+                BuyResult::CantFindItem,
+                Some(buyback.vendor_guid),
+                0,
+            );
+            return;
+        };
+        if !WorldSession::is_buyback_slot(buyback_slot) {
+            self.send_buy_error(
+                BuyResult::CantFindItem,
+                Some(buyback.vendor_guid),
+                0,
+            );
+            return;
+        }
+
+        let buyback_item = match self.buyback_items.get(&buyback_slot).cloned() {
+            Some(item) => item,
+            None => {
+                self.send_buy_error(
+                    BuyResult::CantFindItem,
+                    Some(buyback.vendor_guid),
+                    0,
+                );
+                return;
+            }
+        };
+        let Some(runtime_item) = self.inventory_item_objects.get(&buyback_item.guid).cloned()
+        else {
+            self.send_buy_error(
+                BuyResult::CantFindItem,
+                Some(buyback.vendor_guid),
+                0,
+            );
+            return;
+        };
+
+        let buyback_index = (buyback_slot - BUYBACK_SLOT_START) as usize;
+        let price = u64::from(self.buyback_price[buyback_index]);
+        if self.player_gold < price {
+            self.send_buy_error(
+                BuyResult::NotEnoughtMoney,
+                Some(buyback.vendor_guid),
+                buyback_item.entry_id,
+            );
+            return;
+        }
+
+        let (store_result, store_dest, _) = match self.plan_store_new_direct_inventory_item_at(
+            buyback_item.entry_id,
+            runtime_item.count(),
+            NULL_BAG,
+            NULL_SLOT,
+        ) {
+            Some(plan) => plan,
+            None => {
+                self.send_buy_error(
+                    BuyResult::CantFindItem,
+                    Some(buyback.vendor_guid),
+                    0,
+                );
+                return;
+            }
+        };
+        if store_result != InventoryResult::Ok {
+            self.send_equip_error(store_result, Some(buyback_item.guid), None, 0, 0);
+            return;
+        }
+
+        let char_db = match self.char_db() {
+            Some(db) => Arc::clone(db),
+            None => return,
+        };
+        let mut tx = SqlTransaction::new();
+        let new_gold = self.player_gold.saturating_sub(price);
+        let mut upd_money = char_db.prepare(CharStatements::UPD_CHAR_MONEY);
+        upd_money.set_u64(0, new_gold);
+        upd_money.set_u64(1, player_guid.counter() as u64);
+        tx.append(upd_money);
+
+        let mut existing_updates = Vec::new();
+        let mut moved_slot = None;
+        let mut moved_count = 0u32;
+        for dest in &store_dest {
+            let bag = (dest.pos >> 8) as u8;
+            let slot = (dest.pos & 0x00FF) as u8;
+            if bag != u8::from(INVENTORY_SLOT_BAG_0) {
+                self.send_equip_error(InventoryResult::WrongBagType, Some(buyback_item.guid), None, 0, 0);
+                return;
+            }
+
+            if let Some(inv_item) = self.inventory_items.get(&slot) {
+                let Some(existing_item) = self.inventory_item_objects.get(&inv_item.guid) else {
+                    self.send_buy_error(
+                        BuyResult::CantFindItem,
+                        Some(buyback.vendor_guid),
+                        0,
+                    );
+                    return;
+                };
+                let new_count = existing_item.count().saturating_add(dest.count);
+                let mut upd_count = char_db.prepare(CharStatements::UPD_ITEM_INSTANCE_COUNT);
+                upd_count.set_u32(0, new_count);
+                upd_count.set_u64(1, inv_item.db_guid);
+                tx.append(upd_count);
+                existing_updates.push((slot, inv_item.guid, new_count));
+            } else {
+                if moved_slot.is_some() {
+                    self.send_equip_error(
+                        InventoryResult::NoSlotAvailable,
+                        Some(buyback_item.guid),
+                        None,
+                        0,
+                        0,
+                    );
+                    return;
+                }
+                let mut upd_slot = char_db.prepare(CharStatements::UPD_CHAR_INVENTORY_SLOT);
+                upd_slot.set_u8(0, slot);
+                upd_slot.set_u64(1, player_guid.counter() as u64);
+                upd_slot.set_u64(2, buyback_item.db_guid);
+                tx.append(upd_slot);
+                if runtime_item.count() != dest.count {
+                    let mut upd_count = char_db.prepare(CharStatements::UPD_ITEM_INSTANCE_COUNT);
+                    upd_count.set_u32(0, dest.count);
+                    upd_count.set_u64(1, buyback_item.db_guid);
+                    tx.append(upd_count);
+                }
+                moved_slot = Some(slot);
+                moved_count = dest.count;
+            }
+        }
+
+        if moved_slot.is_none() {
+            let mut del_inv = char_db.prepare(CharStatements::DEL_CHAR_INVENTORY_ITEM);
+            del_inv.set_u64(0, player_guid.counter() as u64);
+            del_inv.set_u64(1, buyback_item.db_guid);
+            tx.append(del_inv);
+
+            let mut del_item = char_db.prepare(CharStatements::DEL_ITEM_INSTANCE);
+            del_item.set_u64(0, buyback_item.db_guid);
+            tx.append(del_item);
+        }
+
+        if let Err(e) = char_db.commit_transaction(tx).await {
+            warn!("BuyBackItem: transaction failed: {e}");
+            self.send_buy_error(
+                BuyResult::CantFindItem,
+                Some(buyback.vendor_guid),
+                0,
+            );
+            return;
+        }
+
+        self.player_gold = new_gold;
+        self.buyback_items.remove(&buyback_slot);
+        self.buyback_price[buyback_index] = 0;
+        self.buyback_timestamp[buyback_index] = 0;
+        if self.buyback_items.contains_key(&self.current_buyback_slot) {
+            self.current_buyback_slot = buyback_slot;
+        }
+
+        for &(_, item_guid, new_count) in &existing_updates {
+            if let Some(item) = self.inventory_item_objects.get_mut(&item_guid) {
+                item.set_count(new_count);
+            }
+        }
+
+        let mut inv_slot_changes = vec![(buyback_slot, ObjectGuid::EMPTY)];
+        if let Some(slot) = moved_slot {
+            self.inventory_items.insert(
+                slot,
+                InventoryItem {
+                    guid: buyback_item.guid,
+                    entry_id: buyback_item.entry_id,
+                    db_guid: buyback_item.db_guid,
+                    inventory_type: buyback_item.inventory_type,
+                },
+            );
+            self.set_inventory_item_object_slot(buyback_item.guid, slot);
+            if let Some(item_object) = self.inventory_item_objects.get_mut(&buyback_item.guid) {
+                item_object.set_count(moved_count);
+            }
+            inv_slot_changes.push((slot, buyback_item.guid));
+        } else {
+            self.remove_inventory_item_object(buyback_item.guid);
+        }
+        self.sync_object_accessor_player();
+
+        for &(_, item_guid, new_count) in &existing_updates {
+            self.send_packet(&UpdateObject::item_stack_count_update(
+                item_guid, map_id, new_count,
+            ));
+        }
+        if moved_slot.is_some() && moved_count != runtime_item.count() {
+            self.send_packet(&UpdateObject::item_stack_count_update(
+                buyback_item.guid,
+                map_id,
+                moved_count,
+            ));
+        }
+        self.send_packet(&UpdateObject::player_values_buyback_update(
+            player_guid,
+            map_id,
+            inv_slot_changes,
+            vec![(buyback_slot, 0, 0)],
+            Some(self.player_gold),
+        ));
     }
 
     /// Handle CMSG_SELL_ITEM — player sells an item to a vendor.

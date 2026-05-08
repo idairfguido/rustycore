@@ -1905,6 +1905,24 @@ impl ClientPacket for BuyItem {
     }
 }
 
+/// CMSG_BUY_BACK_ITEM — client buys back an item from a vendor buyback slot.
+/// C++: WorldPackets::Item::BuyBackItem
+#[derive(Debug)]
+pub struct BuyBackItem {
+    pub vendor_guid: ObjectGuid,
+    pub slot: u32,
+}
+
+impl ClientPacket for BuyBackItem {
+    const OPCODE: wow_constants::ClientOpcodes = wow_constants::ClientOpcodes::BuyBackItem;
+
+    fn read(pkt: &mut crate::WorldPacket) -> Result<Self, PacketError> {
+        let vendor_guid = pkt.read_packed_guid()?;
+        let slot = pkt.read_uint32()?;
+        Ok(Self { vendor_guid, slot })
+    }
+}
+
 /// SMSG_BUY_SUCCEEDED — item bought successfully.
 /// C#: BuySucceeded
 pub struct BuySucceeded {
@@ -2784,6 +2802,29 @@ mod tests {
         let bytes = pkt.to_bytes();
 
         assert_eq!(bytes[bytes.len() - 1], BuyResult::DistanceTooFar as u8);
+    }
+
+    #[test]
+    fn buy_back_item_reads_cpp_guid_and_slot() {
+        let vendor_guid = ObjectGuid::create_world_object(
+            wow_core::guid::HighGuid::Creature,
+            0,
+            1,
+            0,
+            1,
+            123,
+            456,
+        );
+        let mut writer = WorldPacket::new_server(ServerOpcodes::DbReply);
+        writer.write_packed_guid(&vendor_guid);
+        writer.write_uint32(94);
+
+        let mut reader = WorldPacket::from_bytes(writer.data());
+        reader.skip_opcode();
+        let pkt = BuyBackItem::read(&mut reader).unwrap();
+
+        assert_eq!(pkt.vendor_guid, vendor_guid);
+        assert_eq!(pkt.slot, 94);
     }
 
     #[test]

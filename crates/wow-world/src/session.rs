@@ -2434,6 +2434,12 @@ impl WorldSession {
                     Err(e) => warn!("Failed to read BuyItem: {e}"),
                 }
             }
+            ClientOpcodes::BuyBackItem => {
+                match wow_packet::packets::misc::BuyBackItem::read(&mut pkt) {
+                    Ok(buyback) => self.handle_buy_back_item(buyback).await,
+                    Err(e) => warn!("Failed to read BuyBackItem: {e}"),
+                }
+            }
             ClientOpcodes::SellItem => {
                 match wow_packet::packets::misc::SellItem::read(&mut pkt) {
                     Ok(sell) => self.handle_sell_item(sell).await,
