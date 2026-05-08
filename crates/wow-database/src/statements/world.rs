@@ -20,9 +20,9 @@ pub enum WorldStatements {
     INS_GAME_TELE,
     DEL_GAME_TELE,
     INS_NPC_VENDOR,
-    DEL_NPC_VENDOR,
-    SEL_NPC_VENDOR_REF,
-    SEL_VENDOR_ITEMS,
+            DEL_NPC_VENDOR,
+            SEL_NPC_VENDOR_REF,
+            SEL_VENDOR_ITEMS,
     UPD_CREATURE_MOVEMENT_TYPE,
     UPD_CREATURE_FACTION,
     UPD_CREATURE_NPCFLAG,
@@ -157,12 +157,18 @@ impl StatementDef for WorldStatements {
             Self::SEL_NPC_VENDOR_REF => "SELECT item, maxcount, incrtime, ExtendedCost, type, BonusListIDs, PlayerConditionID, IgnoreFiltering FROM npc_vendor WHERE entry = ? ORDER BY slot ASC",
             // Cols: 0=item, 1=maxcount, 2=ExtendedCost, 3=type, 4=slot,
             //       5=BuyPrice, 6=SellPrice, 7=MaxDurability, 8=VendorStackCount,
-            //       9=IgnoreFiltering, 10=incrtime, 11=PlayerConditionID
+            //       9=IgnoreFiltering, 10=incrtime, 11=PlayerConditionID,
+            //       12=HasVendorConditions. Param 0 is root creature entry for
+            //       CONDITION_SOURCE_TYPE_NPC_VENDOR; param 1 is the expanded
+            //       npc_vendor entry being read.
             Self::SEL_VENDOR_ITEMS => concat!(
                 "SELECT nv.item, nv.maxcount, nv.ExtendedCost, nv.type, nv.slot, ",
                 "COALESCE(isp.BuyPrice, 0), COALESCE(isp.SellPrice, 0), ",
                 "COALESCE(isp.MaxDurability, 0), COALESCE(isp.VendorStackCount, 1), ",
-                "nv.IgnoreFiltering, nv.incrtime, nv.PlayerConditionID ",
+                "nv.IgnoreFiltering, nv.incrtime, nv.PlayerConditionID, ",
+                "EXISTS(SELECT 1 FROM conditions c ",
+                "WHERE c.SourceTypeOrReferenceId = 23 AND c.SourceGroup = ? ",
+                "AND c.SourceEntry = nv.item AND c.SourceId = 0) ",
                 "FROM npc_vendor nv ",
                 "LEFT JOIN hotfixes.item_sparse isp ON nv.item = isp.ID ",
                 "WHERE nv.entry = ? ORDER BY nv.slot ASC"

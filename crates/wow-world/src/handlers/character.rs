@@ -573,6 +573,7 @@ struct VendorBuyItem {
     max_count: u32,
     incr_time: u32,
     player_condition_id: u32,
+    has_vendor_conditions: bool,
     extended_cost: u32,
     buy_price: u64,
     max_durability: u32,
@@ -616,6 +617,14 @@ fn vendor_buy_player_condition_block_result(player_condition_id: u32) -> Option<
         None
     } else {
         Some(InventoryResult::ItemLocked)
+    }
+}
+
+fn vendor_conditions_block_result(has_vendor_conditions: bool) -> Option<BuyResult> {
+    if has_vendor_conditions {
+        Some(BuyResult::CantFindItem)
+    } else {
+        None
     }
 }
 
@@ -889,7 +898,8 @@ impl WorldSession {
             }
 
             let mut stmt = world_db.prepare(WorldStatements::SEL_VENDOR_ITEMS);
-            stmt.set_u32(0, vendor_entry);
+            stmt.set_u32(0, root_entry);
+            stmt.set_u32(1, vendor_entry);
             let mut result = match world_db.query(&stmt).await {
                 Ok(result) => result,
                 Err(e) => {
@@ -921,6 +931,10 @@ impl WorldSession {
                             max_count: result.try_read::<u32>(1).unwrap_or(0),
                             incr_time: result.try_read::<u32>(10).unwrap_or(0),
                             player_condition_id: result.try_read::<u32>(11).unwrap_or(0),
+                            has_vendor_conditions: result
+                                .try_read::<u8>(12)
+                                .map(|value| value != 0)
+                                .unwrap_or(false),
                             extended_cost: result.try_read::<u32>(2).unwrap_or(0),
                             buy_price: result
                                 .try_read::<i64>(5)
@@ -3511,7 +3525,8 @@ impl WorldSession {
                 continue; // already expanded (avoid cycles)
             }
             let mut stmt = world_db.prepare(WorldStatements::SEL_VENDOR_ITEMS);
-            stmt.set_u32(0, vendor_entry);
+            stmt.set_u32(0, entry);
+            stmt.set_u32(1, vendor_entry);
 
             let mut result = match tokio::time::timeout(
                 std::time::Duration::from_secs(5),
@@ -3542,6 +3557,10 @@ impl WorldSession {
                 let do_not_filter: bool = result.try_read::<u8>(9).map(|v| v != 0).unwrap_or(false);
                 let incr_time: u32 = result.try_read::<u32>(10).unwrap_or(0);
                 let player_condition_id: u32 = result.try_read::<u32>(11).unwrap_or(0);
+                let has_vendor_conditions: bool = result
+                    .try_read::<u8>(12)
+                    .map(|value| value != 0)
+                    .unwrap_or(false);
 
                 // Solo enviar items con ID válido; 0 o negativo el cliente lo muestra como ? y nombre vacío
                 // Además filtrar items que no existen en Item.db2 — igual que C#:
@@ -3594,6 +3613,10 @@ impl WorldSession {
                         player_team_for_race_cpp(self.player_race),
                         self.security > 0,
                     ) {
+                        if !result.next_row() { break; }
+                        continue;
+                    }
+                    if has_vendor_conditions {
                         if !result.next_row() { break; }
                         continue;
                     }
@@ -3738,6 +3761,10 @@ impl WorldSession {
                 }
                 VendorBuyTemplateBlock::Silent => {}
             }
+            return;
+        }
+        if let Some(result) = vendor_conditions_block_result(vendor_item.has_vendor_conditions) {
+            self.send_buy_error(result, Some(buy.vendor_guid), buy.item_id as u32);
             return;
         }
         if let Some(result) =
@@ -5219,6 +5246,15 @@ mod tests {
         assert_eq!(
             vendor_buy_player_condition_block_result(42),
             Some(InventoryResult::ItemLocked)
+        );
+    }
+
+    #[test]
+    fn vendor_condition_presence_fails_closed_until_condition_mgr_exists() {
+        assert_eq!(vendor_conditions_block_result(false), None);
+        assert_eq!(
+            vendor_conditions_block_result(true),
+            Some(BuyResult::CantFindItem)
         );
     }
 
