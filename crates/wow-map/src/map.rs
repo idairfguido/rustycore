@@ -4,7 +4,7 @@
 //! - `game/Maps/Map.h`
 //! - `game/Maps/Map.cpp`
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::cell::Cell;
 use crate::coords::{
@@ -15,6 +15,10 @@ use crate::grid::{GridStateKind, MapGridHost, NGrid, update_grid_state};
 use crate::object_grid_loader::{GridSpawnLoadFilter, ObjectGridLoader};
 use crate::personal_phase::{MultiPersonalPhaseTracker, PhaseShift};
 use crate::spawn::Difficulty;
+use wow_core::ObjectGuid;
+use wow_entities::{
+    AccessorObjectKind, MapObjectRecord, ObjectAccessorError, ObjectAccessorMapSource, WorldObject,
+};
 
 const GRID_SLOT_COUNT: usize = (MAX_NUMBER_OF_GRIDS * MAX_NUMBER_OF_GRIDS) as usize;
 
@@ -70,6 +74,7 @@ pub struct Map<Terrain = NoopTerrainGridLoader, Lifecycle = NoopGridLifecycle> {
     active_cells: HashSet<CellCoord>,
     personal_phase_tracker: MultiPersonalPhaseTracker,
     grid_state_unloaded: bool,
+    map_objects: HashMap<ObjectGuid, MapObjectRecord>,
 }
 
 impl Map<NoopTerrainGridLoader, NoopGridLifecycle> {
@@ -118,6 +123,7 @@ where
             active_cells: HashSet::new(),
             personal_phase_tracker: MultiPersonalPhaseTracker::default(),
             grid_state_unloaded: false,
+            map_objects: HashMap::new(),
         }
     }
 
@@ -155,6 +161,104 @@ where
 
     pub fn personal_phase_tracker(&self) -> &MultiPersonalPhaseTracker {
         &self.personal_phase_tracker
+    }
+
+    pub fn map_object_count(&self) -> usize {
+        self.map_objects.len()
+    }
+
+    pub fn insert_map_object(
+        &mut self,
+        kind: AccessorObjectKind,
+        object: WorldObject,
+    ) -> Result<Option<MapObjectRecord>, MapObjectStoreError> {
+        let record = MapObjectRecord::new(kind, object)?;
+        self.insert_map_object_record(record)
+    }
+
+    pub fn insert_map_object_record(
+        &mut self,
+        record: MapObjectRecord,
+    ) -> Result<Option<MapObjectRecord>, MapObjectStoreError> {
+        self.validate_map_object(record.object())?;
+        Ok(self.map_objects.insert(record.object().guid(), record))
+    }
+
+    pub fn remove_map_object(&mut self, guid: ObjectGuid) -> Option<MapObjectRecord> {
+        self.map_objects.remove(&guid)
+    }
+
+    pub fn map_object_record(&self, guid: ObjectGuid) -> Option<&MapObjectRecord> {
+        self.map_objects.get(&guid)
+    }
+
+    pub fn map_object(&self, guid: ObjectGuid) -> Option<&WorldObject> {
+        self.map_object_record(guid).map(MapObjectRecord::object)
+    }
+
+    pub fn map_object_by_kind(
+        &self,
+        guid: ObjectGuid,
+        allowed: &[AccessorObjectKind],
+    ) -> Option<&WorldObject> {
+        let record = self.map_object_record(guid)?;
+        allowed.contains(&record.kind()).then_some(record.object())
+    }
+
+    pub fn get_creature(&self, guid: ObjectGuid) -> Option<&WorldObject> {
+        self.map_object_by_kind(guid, &[AccessorObjectKind::Creature])
+    }
+
+    pub fn get_pet(&self, guid: ObjectGuid) -> Option<&WorldObject> {
+        self.map_object_by_kind(guid, &[AccessorObjectKind::Pet])
+    }
+
+    pub fn get_game_object(&self, guid: ObjectGuid) -> Option<&WorldObject> {
+        self.map_object_by_kind(
+            guid,
+            &[
+                AccessorObjectKind::GameObject,
+                AccessorObjectKind::Transport,
+            ],
+        )
+    }
+
+    pub fn get_transport(&self, guid: ObjectGuid) -> Option<&WorldObject> {
+        self.map_object_by_kind(guid, &[AccessorObjectKind::Transport])
+    }
+
+    pub fn get_dynamic_object(&self, guid: ObjectGuid) -> Option<&WorldObject> {
+        self.map_object_by_kind(guid, &[AccessorObjectKind::DynamicObject])
+    }
+
+    pub fn get_area_trigger(&self, guid: ObjectGuid) -> Option<&WorldObject> {
+        self.map_object_by_kind(guid, &[AccessorObjectKind::AreaTrigger])
+    }
+
+    pub fn get_corpse(&self, guid: ObjectGuid) -> Option<&WorldObject> {
+        self.map_object_by_kind(guid, &[AccessorObjectKind::Corpse])
+    }
+
+    pub fn get_scene_object(&self, guid: ObjectGuid) -> Option<&WorldObject> {
+        self.map_object_by_kind(guid, &[AccessorObjectKind::SceneObject])
+    }
+
+    pub fn get_conversation(&self, guid: ObjectGuid) -> Option<&WorldObject> {
+        self.map_object_by_kind(guid, &[AccessorObjectKind::Conversation])
+    }
+
+    fn validate_map_object(&self, object: &WorldObject) -> Result<(), MapObjectStoreError> {
+        if object.map_id() == self.map_id && object.instance_id() == self.instance_id {
+            return Ok(());
+        }
+
+        Err(MapObjectStoreError::WrongMap {
+            guid: object.guid(),
+            expected_map_id: self.map_id,
+            expected_instance_id: self.instance_id,
+            actual_map_id: object.map_id(),
+            actual_instance_id: object.instance_id(),
+        })
     }
 
     pub fn mark_active_cell(&mut self, cell: CellCoord) {
@@ -339,6 +443,42 @@ where
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapObjectStoreError {
+    InvalidRecord(ObjectAccessorError),
+    WrongMap {
+        guid: ObjectGuid,
+        expected_map_id: u32,
+        expected_instance_id: u32,
+        actual_map_id: u32,
+        actual_instance_id: u32,
+    },
+}
+
+impl From<ObjectAccessorError> for MapObjectStoreError {
+    fn from(error: ObjectAccessorError) -> Self {
+        Self::InvalidRecord(error)
+    }
+}
+
+impl<Terrain, Lifecycle> ObjectAccessorMapSource for Map<Terrain, Lifecycle>
+where
+    Terrain: TerrainGridLoader,
+    Lifecycle: GridLifecycle,
+{
+    fn map_id(&self) -> u32 {
+        self.map_id
+    }
+
+    fn instance_id(&self) -> u32 {
+        self.instance_id
+    }
+
+    fn map_object_record(&self, guid: ObjectGuid) -> Option<&MapObjectRecord> {
+        self.map_objects.get(&guid)
+    }
+}
+
 impl<Terrain, Lifecycle> MapGridHost for Map<Terrain, Lifecycle>
 where
     Terrain: TerrainGridLoader,
@@ -442,7 +582,9 @@ pub const fn total_cell_count() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wow_core::ObjectGuid;
+    use wow_constants::{TypeId, TypeMask};
+    use wow_core::{ObjectGuid, Position, guid::HighGuid};
+    use wow_entities::{AccessorObjectRef, ObjectAccessor};
 
     #[derive(Debug, Default)]
     struct RecordingTerrain {
@@ -504,6 +646,58 @@ mod tests {
         )
     }
 
+    fn guid(high: HighGuid, counter: i64) -> ObjectGuid {
+        if high == HighGuid::Player {
+            ObjectGuid::create_global(high, 0, counter)
+        } else if high == HighGuid::Transport {
+            ObjectGuid::create_transport(high, counter)
+        } else {
+            ObjectGuid::create_world_object(high, 0, 1, 571, 7, 100, counter)
+        }
+    }
+
+    fn world_object(high: HighGuid, map_id: u32, instance_id: u32, in_world: bool) -> WorldObject {
+        let type_id = guid(high, 1).type_id();
+        let type_mask = match type_id {
+            wow_core::guid::TypeId::Player => TypeMask::PLAYER,
+            wow_core::guid::TypeId::Unit => TypeMask::UNIT,
+            wow_core::guid::TypeId::GameObject => TypeMask::GAME_OBJECT,
+            wow_core::guid::TypeId::DynamicObject => TypeMask::DYNAMIC_OBJECT,
+            wow_core::guid::TypeId::Corpse => TypeMask::CORPSE,
+            wow_core::guid::TypeId::AreaTrigger => TypeMask::AREA_TRIGGER,
+            wow_core::guid::TypeId::SceneObject => TypeMask::SCENE_OBJECT,
+            wow_core::guid::TypeId::Conversation => TypeMask::CONVERSATION,
+            _ => TypeMask::OBJECT,
+        };
+        let mut object = WorldObject::new(false, convert_type_id(type_id), type_mask);
+        object.object_mut().create(guid(high, 1));
+        object.set_map(map_id, instance_id).unwrap();
+        object.relocate(Position::xyz(1.0, 2.0, 3.0));
+        if in_world {
+            object.object_mut().add_to_world();
+        }
+        object
+    }
+
+    fn convert_type_id(type_id: wow_core::guid::TypeId) -> TypeId {
+        match type_id {
+            wow_core::guid::TypeId::Object => TypeId::Object,
+            wow_core::guid::TypeId::Item => TypeId::Item,
+            wow_core::guid::TypeId::Container => TypeId::Container,
+            wow_core::guid::TypeId::AzeriteEmpoweredItem => TypeId::AzeriteEmpoweredItem,
+            wow_core::guid::TypeId::AzeriteItem => TypeId::AzeriteItem,
+            wow_core::guid::TypeId::Unit => TypeId::Unit,
+            wow_core::guid::TypeId::Player => TypeId::Player,
+            wow_core::guid::TypeId::ActivePlayer => TypeId::ActivePlayer,
+            wow_core::guid::TypeId::GameObject => TypeId::GameObject,
+            wow_core::guid::TypeId::DynamicObject => TypeId::DynamicObject,
+            wow_core::guid::TypeId::Corpse => TypeId::Corpse,
+            wow_core::guid::TypeId::AreaTrigger => TypeId::AreaTrigger,
+            wow_core::guid::TypeId::SceneObject => TypeId::SceneObject,
+            wow_core::guid::TypeId::Conversation => TypeId::Conversation,
+        }
+    }
+
     #[test]
     fn map_constructor_starts_with_empty_grid_slots_like_cpp_pointer_array() {
         let map = test_map();
@@ -516,6 +710,105 @@ mod tests {
         assert_eq!(map.visibility_range(), 100.0);
         assert_eq!(map.grids.len(), GRID_SLOT_COUNT);
         assert!(map.grids.iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn map_object_store_inserts_finds_typed_objects_and_removes_by_guid() {
+        let mut map = test_map();
+        let creature = world_object(HighGuid::Creature, 571, 7, true);
+        let gameobject = world_object(HighGuid::GameObject, 571, 7, true);
+        let creature_guid = creature.guid();
+        let gameobject_guid = gameobject.guid();
+
+        assert!(
+            map.insert_map_object(AccessorObjectKind::Creature, creature)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            map.insert_map_object(AccessorObjectKind::GameObject, gameobject)
+                .unwrap()
+                .is_none()
+        );
+
+        assert_eq!(map.map_object_count(), 2);
+        assert_eq!(
+            map.get_creature(creature_guid).unwrap().guid(),
+            creature_guid
+        );
+        assert_eq!(
+            map.get_game_object(gameobject_guid).unwrap().guid(),
+            gameobject_guid
+        );
+        assert!(map.get_game_object(creature_guid).is_none());
+
+        assert_eq!(
+            map.remove_map_object(creature_guid)
+                .unwrap()
+                .object()
+                .guid(),
+            creature_guid
+        );
+        assert!(map.get_creature(creature_guid).is_none());
+        assert_eq!(map.map_object_count(), 1);
+    }
+
+    #[test]
+    fn map_object_store_rejects_records_from_other_map_or_instance() {
+        let mut map = test_map();
+        let other_map_creature = world_object(HighGuid::Creature, 530, 7, true);
+        let other_instance_creature = world_object(HighGuid::Creature, 571, 8, true);
+
+        assert!(matches!(
+            map.insert_map_object(AccessorObjectKind::Creature, other_map_creature),
+            Err(MapObjectStoreError::WrongMap {
+                expected_map_id: 571,
+                expected_instance_id: 7,
+                actual_map_id: 530,
+                actual_instance_id: 7,
+                ..
+            })
+        ));
+        assert!(matches!(
+            map.insert_map_object(AccessorObjectKind::Creature, other_instance_creature),
+            Err(MapObjectStoreError::WrongMap {
+                expected_map_id: 571,
+                expected_instance_id: 7,
+                actual_map_id: 571,
+                actual_instance_id: 8,
+                ..
+            })
+        ));
+        assert_eq!(map.map_object_count(), 0);
+    }
+
+    #[test]
+    fn object_accessor_can_consult_map_owned_object_store() {
+        let accessor = ObjectAccessor::default();
+        let mut map = test_map();
+        let context = world_object(HighGuid::Player, 571, 7, true);
+        let creature = world_object(HighGuid::Creature, 571, 7, true);
+        let creature_guid = creature.guid();
+
+        map.insert_map_object(AccessorObjectKind::Creature, creature)
+            .unwrap();
+
+        assert_eq!(
+            accessor
+                .get_world_object_from_map_source(&context, &map, creature_guid)
+                .unwrap()
+                .guid(),
+            creature_guid
+        );
+        assert!(matches!(
+            accessor.get_object_ref_by_type_mask_from_map_source(
+                &context,
+                &map,
+                creature_guid,
+                TypeMask::UNIT
+            ),
+            Some(AccessorObjectRef::WorldObject(object)) if object.guid() == creature_guid
+        ));
     }
 
     #[test]

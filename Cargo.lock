@@ -3137,6 +3137,7 @@ dependencies = [
  "bumpalo",
  "parking_lot",
  "smallvec",
+ "wow-constants",
  "wow-core",
  "wow-ecs",
  "wow-entities",

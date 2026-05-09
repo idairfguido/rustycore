@@ -112,7 +112,8 @@ pub use item::{
 pub use object::{CreateObjectFlags, EntityObject, EntityObjectState, ObjectChangedFields};
 pub use object_accessor::{
     AccessorObjectKind, AccessorObjectRef, AccessorPlayer, MapObjectRecord, ObjectAccessor,
-    ObjectAccessorError, normalize_player_name,
+    ObjectAccessorError, ObjectAccessorMapSource, PlayerSaveError, PlayerSaveSink,
+    normalize_player_name,
 };
 pub use pet::{
     ActiveState, HAPPINESS_LEVEL_SIZE, MAX_ACTIVE_PETS, MAX_PET_STABLES,

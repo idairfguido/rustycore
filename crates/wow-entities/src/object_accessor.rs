@@ -142,6 +142,35 @@ pub enum AccessorObjectRef<'a> {
     Item(&'a Item),
 }
 
+pub trait PlayerSaveSink {
+    type Error;
+
+    fn save_player(&mut self, player: &AccessorPlayer) -> Result<(), Self::Error>;
+}
+
+impl<F, E> PlayerSaveSink for F
+where
+    F: FnMut(&AccessorPlayer) -> Result<(), E>,
+{
+    type Error = E;
+
+    fn save_player(&mut self, player: &AccessorPlayer) -> Result<(), Self::Error> {
+        self(player)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayerSaveError<E> {
+    pub guid: ObjectGuid,
+    pub source: E,
+}
+
+pub trait ObjectAccessorMapSource {
+    fn map_id(&self) -> u32;
+    fn instance_id(&self) -> u32;
+    fn map_object_record(&self, guid: ObjectGuid) -> Option<&MapObjectRecord>;
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapObjectRecord {
     kind: AccessorObjectKind,
@@ -305,6 +334,24 @@ impl ObjectAccessor {
         self.players.iter()
     }
 
+    pub fn save_all_players_with<F, E>(&self, mut save: F) -> Result<usize, PlayerSaveError<E>>
+    where
+        F: FnMut(&AccessorPlayer) -> Result<(), E>,
+    {
+        let mut saved = 0;
+        for player in self.players.values() {
+            save(player).map_err(|source| PlayerSaveError {
+                guid: player.object().guid(),
+                source,
+            })?;
+            saved += 1;
+        }
+        Ok(saved)
+    }
+
+    /// Legacy/test-only convenience mirroring the previous bridge helper.
+    /// Use `save_all_players_with` when representing Trinity's real
+    /// `ObjectAccessor::SaveAllPlayers()` behavior.
     pub fn save_all_players_count(&self) -> usize {
         self.players.len()
     }
@@ -376,13 +423,7 @@ impl ObjectAccessor {
         type_mask: TypeMask,
     ) -> Option<AccessorObjectRef<'_>> {
         if guid.high_type() == HighGuid::Item {
-            if !type_mask.contains(TypeMask::ITEM) || context.object().type_id() != TypeId::Player {
-                return None;
-            }
-
-            let player = self.players.get(&context.guid())?;
-            let item_guid = player.inventory().get_item_by_guid_everywhere(guid)?;
-            return player.item(item_guid).map(AccessorObjectRef::Item);
+            return self.get_item_ref_for_player_context(context, guid, type_mask);
         }
 
         match AccessorObjectKind::from_guid(guid)? {
@@ -413,6 +454,150 @@ impl ObjectAccessor {
                 .map(AccessorObjectRef::WorldObject),
             AccessorObjectKind::Conversation if type_mask.contains(TypeMask::CONVERSATION) => self
                 .get_conversation(context, guid)
+                .map(AccessorObjectRef::WorldObject),
+            AccessorObjectKind::Corpse => None,
+            _ => None,
+        }
+    }
+
+    pub fn get_world_object_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a WorldObject>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        match AccessorObjectKind::from_guid(guid)? {
+            AccessorObjectKind::Player => self.get_player(context, guid),
+            AccessorObjectKind::Creature => self.get_map_object_from_source(
+                context,
+                source,
+                guid,
+                &[AccessorObjectKind::Creature],
+            ),
+            AccessorObjectKind::Pet => {
+                self.get_map_object_from_source(context, source, guid, &[AccessorObjectKind::Pet])
+            }
+            AccessorObjectKind::GameObject | AccessorObjectKind::Transport => self
+                .get_map_object_from_source(
+                    context,
+                    source,
+                    guid,
+                    &[
+                        AccessorObjectKind::GameObject,
+                        AccessorObjectKind::Transport,
+                    ],
+                ),
+            AccessorObjectKind::DynamicObject => self.get_map_object_from_source(
+                context,
+                source,
+                guid,
+                &[AccessorObjectKind::DynamicObject],
+            ),
+            AccessorObjectKind::AreaTrigger => self.get_map_object_from_source(
+                context,
+                source,
+                guid,
+                &[AccessorObjectKind::AreaTrigger],
+            ),
+            AccessorObjectKind::Corpse => self.get_map_object_from_source(
+                context,
+                source,
+                guid,
+                &[AccessorObjectKind::Corpse],
+            ),
+            AccessorObjectKind::SceneObject => self.get_map_object_from_source(
+                context,
+                source,
+                guid,
+                &[AccessorObjectKind::SceneObject],
+            ),
+            AccessorObjectKind::Conversation => self.get_map_object_from_source(
+                context,
+                source,
+                guid,
+                &[AccessorObjectKind::Conversation],
+            ),
+        }
+    }
+
+    pub fn get_object_ref_by_type_mask_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+        type_mask: TypeMask,
+    ) -> Option<AccessorObjectRef<'a>>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        if guid.high_type() == HighGuid::Item {
+            return self.get_item_ref_for_player_context(context, guid, type_mask);
+        }
+
+        match AccessorObjectKind::from_guid(guid)? {
+            AccessorObjectKind::Player if type_mask.contains(TypeMask::PLAYER) => self
+                .get_player(context, guid)
+                .map(AccessorObjectRef::WorldObject),
+            AccessorObjectKind::GameObject | AccessorObjectKind::Transport
+                if type_mask.contains(TypeMask::GAME_OBJECT) =>
+            {
+                self.get_map_object_from_source(
+                    context,
+                    source,
+                    guid,
+                    &[
+                        AccessorObjectKind::GameObject,
+                        AccessorObjectKind::Transport,
+                    ],
+                )
+                .map(AccessorObjectRef::WorldObject)
+            }
+            AccessorObjectKind::Creature | AccessorObjectKind::Pet
+                if type_mask.contains(TypeMask::UNIT) =>
+            {
+                self.get_map_object_from_source(
+                    context,
+                    source,
+                    guid,
+                    &[AccessorObjectKind::Creature, AccessorObjectKind::Pet],
+                )
+                .map(AccessorObjectRef::WorldObject)
+            }
+            AccessorObjectKind::DynamicObject if type_mask.contains(TypeMask::DYNAMIC_OBJECT) => {
+                self.get_map_object_from_source(
+                    context,
+                    source,
+                    guid,
+                    &[AccessorObjectKind::DynamicObject],
+                )
+                .map(AccessorObjectRef::WorldObject)
+            }
+            AccessorObjectKind::AreaTrigger if type_mask.contains(TypeMask::AREA_TRIGGER) => self
+                .get_map_object_from_source(
+                    context,
+                    source,
+                    guid,
+                    &[AccessorObjectKind::AreaTrigger],
+                )
+                .map(AccessorObjectRef::WorldObject),
+            AccessorObjectKind::SceneObject if type_mask.contains(TypeMask::SCENE_OBJECT) => self
+                .get_map_object_from_source(
+                    context,
+                    source,
+                    guid,
+                    &[AccessorObjectKind::SceneObject],
+                )
+                .map(AccessorObjectRef::WorldObject),
+            AccessorObjectKind::Conversation if type_mask.contains(TypeMask::CONVERSATION) => self
+                .get_map_object_from_source(
+                    context,
+                    source,
+                    guid,
+                    &[AccessorObjectKind::Conversation],
+                )
                 .map(AccessorObjectRef::WorldObject),
             AccessorObjectKind::Corpse => None,
             _ => None,
@@ -522,6 +707,46 @@ impl ObjectAccessor {
             .get(&MapKey::from_world_object(context))?
             .get(&guid)?;
         allowed.contains(&record.kind).then_some(record.object())
+    }
+
+    fn get_map_object_from_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+        allowed: &[AccessorObjectKind],
+    ) -> Option<&'a WorldObject>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        if !context.has_current_map()
+            || context.map_id() != source.map_id()
+            || context.instance_id() != source.instance_id()
+        {
+            return None;
+        }
+
+        let record = source.map_object_record(guid)?;
+        if !allowed.contains(&record.kind()) || !same_map(context, record.object()) {
+            return None;
+        }
+
+        Some(record.object())
+    }
+
+    fn get_item_ref_for_player_context(
+        &self,
+        context: &WorldObject,
+        guid: ObjectGuid,
+        type_mask: TypeMask,
+    ) -> Option<AccessorObjectRef<'_>> {
+        if !type_mask.contains(TypeMask::ITEM) || context.object().type_id() != TypeId::Player {
+            return None;
+        }
+
+        let player = self.players.get(&context.guid())?;
+        let item_guid = player.inventory().get_item_by_guid_everywhere(guid)?;
+        player.item(item_guid).map(AccessorObjectRef::Item)
     }
 }
 
@@ -666,6 +891,144 @@ mod tests {
         accessor.add_player("jaina", in_world).unwrap();
         assert!(accessor.find_player(player_guid).is_some());
         assert_eq!(accessor.save_all_players_count(), 1);
+    }
+
+    #[test]
+    fn save_all_players_with_invokes_sink_once_per_registered_player() {
+        let mut accessor = ObjectAccessor::default();
+        let player_a = world_object(HighGuid::Player, 1, 0, true);
+        let guid_a = player_a.guid();
+        let mut player_b = world_object(HighGuid::Player, 1, 0, true);
+        player_b
+            .object_mut()
+            .create(ObjectGuid::create_global(HighGuid::Player, 0, 2));
+        let guid_b = player_b.guid();
+
+        accessor.add_player("jaina", player_a).unwrap();
+        accessor.add_player("thrall", player_b).unwrap();
+
+        let mut saved = Vec::new();
+        let count = accessor
+            .save_all_players_with(|player| {
+                saved.push(player.object().guid());
+                Ok::<(), ()>(())
+            })
+            .unwrap();
+
+        assert_eq!(count, 2);
+        assert!(saved.contains(&guid_a));
+        assert!(saved.contains(&guid_b));
+        assert_eq!(saved.len(), 2);
+    }
+
+    #[test]
+    fn save_all_players_with_propagates_error_with_player_guid() {
+        let mut accessor = ObjectAccessor::default();
+        let player = world_object(HighGuid::Player, 1, 0, true);
+        let guid = player.guid();
+        accessor.add_player("jaina", player).unwrap();
+
+        let error = accessor
+            .save_all_players_with(|_| Err::<(), _>("db unavailable"))
+            .unwrap_err();
+
+        assert_eq!(error.guid, guid);
+        assert_eq!(error.source, "db unavailable");
+    }
+
+    #[test]
+    fn save_all_players_with_does_not_break_name_or_bridge_map_state() {
+        let mut accessor = ObjectAccessor::default();
+        let context = world_object(HighGuid::Player, 530, 1, true);
+        let player_guid = context.guid();
+        let creature = world_object(HighGuid::Creature, 530, 1, true);
+        let creature_guid = creature.guid();
+
+        accessor.add_player("valeera", context.clone()).unwrap();
+        accessor
+            .insert_map_object(AccessorObjectKind::Creature, creature)
+            .unwrap();
+
+        let saved = accessor
+            .save_all_players_with(|_| Ok::<(), ()>(()))
+            .unwrap();
+
+        assert_eq!(saved, 1);
+        assert_eq!(
+            accessor
+                .find_connected_player_by_name("VALEERA")
+                .unwrap()
+                .guid(),
+            player_guid
+        );
+        assert_eq!(
+            accessor
+                .get_creature(&context, creature_guid)
+                .unwrap()
+                .guid(),
+            creature_guid
+        );
+    }
+
+    #[derive(Default)]
+    struct TestMapSource {
+        map_id: u32,
+        instance_id: u32,
+        records: std::collections::HashMap<ObjectGuid, MapObjectRecord>,
+    }
+
+    impl ObjectAccessorMapSource for TestMapSource {
+        fn map_id(&self) -> u32 {
+            self.map_id
+        }
+
+        fn instance_id(&self) -> u32 {
+            self.instance_id
+        }
+
+        fn map_object_record(&self, guid: ObjectGuid) -> Option<&MapObjectRecord> {
+            self.records.get(&guid)
+        }
+    }
+
+    #[test]
+    fn map_source_lookup_reads_canonical_source_without_bridge_storage() {
+        let accessor = ObjectAccessor::default();
+        let context = world_object(HighGuid::Player, 530, 1, true);
+        let creature = world_object(HighGuid::Creature, 530, 1, true);
+        let creature_guid = creature.guid();
+        let record = MapObjectRecord::new(AccessorObjectKind::Creature, creature).unwrap();
+        let mut source = TestMapSource {
+            map_id: 530,
+            instance_id: 1,
+            records: std::collections::HashMap::new(),
+        };
+        source.records.insert(creature_guid, record);
+
+        assert!(accessor.get_creature(&context, creature_guid).is_none());
+        assert_eq!(
+            accessor
+                .get_world_object_from_map_source(&context, &source, creature_guid)
+                .unwrap()
+                .guid(),
+            creature_guid
+        );
+        assert!(matches!(
+            accessor.get_object_ref_by_type_mask_from_map_source(
+                &context,
+                &source,
+                creature_guid,
+                TypeMask::UNIT
+            ),
+            Some(AccessorObjectRef::WorldObject(object)) if object.guid() == creature_guid
+        ));
+
+        source.instance_id = 2;
+        assert!(
+            accessor
+                .get_world_object_from_map_source(&context, &source, creature_guid)
+                .is_none()
+        );
     }
 
     #[test]

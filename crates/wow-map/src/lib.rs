@@ -31,8 +31,9 @@ pub use manager::{
     MapManager, MapUpdater,
 };
 pub use map::{
-    ActiveObjectKind, GridLifecycle, Map, NoopGridLifecycle, NoopTerrainGridLoader,
-    TerrainGridLoader, cell_from_grid_center, cell_from_world, is_grid_id_loaded,
+    ActiveObjectKind, GridLifecycle, Map, MapObjectStoreError, NoopGridLifecycle,
+    NoopTerrainGridLoader, TerrainGridLoader, cell_from_grid_center, cell_from_world,
+    is_grid_id_loaded,
 };
 pub use object_grid_loader::{
     CorpseCellStore, CorpseGridObject, GridSpawnLoadFilter, LoadAllGridSpawns,
