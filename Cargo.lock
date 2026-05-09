@@ -3070,6 +3070,7 @@ dependencies = [
  "wow-constants",
  "wow-core",
  "wow-database",
+ "wow-entities",
 ]
 
 [[package]]

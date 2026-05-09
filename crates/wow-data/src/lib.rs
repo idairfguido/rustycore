@@ -15,6 +15,7 @@ pub mod item_random_suffix;
 pub mod item_stats;
 pub mod hotfix_cache;
 pub mod player_stats;
+pub mod player_power;
 pub mod skill;
 pub mod area_trigger;
 pub mod spell;
@@ -34,6 +35,9 @@ pub use item_random_suffix::{ItemRandomSuffixEntry, ItemRandomSuffixStore};
 pub use item_stats::{ItemSparseTemplateEntry, ItemStatEntry, ItemStatsStore};
 pub use hotfix_cache::{HotfixBlobCache, build_hotfix_blob_cache};
 pub use player_stats::{PlayerLevelStats, PlayerStatsStore};
+pub use player_power::{
+    ClassPowerIndexRecord, Db2PlayerPowerIndexResolver, PlayerClassPowerIndexStore,
+};
 pub use skill::{SkillInfoEntry, SkillStore};
 pub use area_trigger::{
     AreaTriggerTeleport, AreaTriggerData, AreaTriggerStore, TriggerShape, load_area_triggers,

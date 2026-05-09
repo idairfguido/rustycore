@@ -9,5 +9,6 @@ license.workspace = true
 wow-core = { workspace = true }
 wow-constants = { workspace = true }
 wow-database = { workspace = true }
+wow-entities = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }

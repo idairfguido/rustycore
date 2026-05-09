@@ -7,7 +7,7 @@ use wow_constants::{
     ItemSubClassContainer, ItemSubClassQuiver, ItemSubClassWeapon, ItemSubclassProfession,
     ItemUpdateState, PowerType, Stats, TypeId, TypeMask, WeaponAttackType,
 };
-use wow_core::ObjectGuid;
+use wow_core::{ObjectGuid, Position};
 
 use crate::{
     Bag, EQUIPMENT_SLOT_BACK, EQUIPMENT_SLOT_BODY, EQUIPMENT_SLOT_CHEST, EQUIPMENT_SLOT_END,
@@ -41,6 +41,233 @@ pub const NULL_BAG: u8 = 0;
 
 pub trait PlayerPowerIndexResolver {
     fn power_index_by_class(&self, power: PowerType, class_id: u8) -> Option<usize>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlayerLifecyclePower {
+    pub power: PowerType,
+    pub current: i32,
+    pub max: i32,
+}
+
+impl PlayerLifecyclePower {
+    pub const fn new(power: PowerType, current: i32, max: i32) -> Self {
+        Self {
+            power,
+            current,
+            max,
+        }
+    }
+}
+
+/// Represented subset of TrinityCore `Player::Create` input.
+///
+/// Appearance validation, player-info starter spells/items/actions, skills, inventory item
+/// creation and threat/combat subsystem startup remain deferred until their canonical systems are
+/// ported. This record only carries fields currently owned by `wow-entities`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerCreateLifecycleRecord {
+    pub guid: ObjectGuid,
+    pub name: String,
+    pub race: u8,
+    pub class_id: u8,
+    pub gender: Gender,
+    pub level: u8,
+    pub xp: i32,
+    pub money: u64,
+    pub inventory_slot_count: u8,
+    pub bank_bag_slot_count: u8,
+    pub map_id: u32,
+    pub position: Position,
+    pub max_health: u64,
+    pub health: u64,
+    pub powers: Vec<PlayerLifecyclePower>,
+    pub display_power: PowerType,
+    pub faction_template: Option<u32>,
+    pub display_id: Option<u32>,
+    pub player_flags: u32,
+    pub player_flags_ex: u32,
+    pub extra_flags: u32,
+    pub create_time: Option<u64>,
+    pub create_mode: Option<u8>,
+    pub played_time_total: u32,
+    pub played_time_level: u32,
+    pub active_talent_group: Option<u8>,
+}
+
+/// Represented subset of TrinityCore `Player::LoadFromDB` base `characters` row.
+///
+/// Ownership/coordinate validation and subsystem loads (spells, items, quests, guild, auras,
+/// action buttons, reputation, currencies, achievements) are deliberately not faked here; callers
+/// should layer those bridges when the relevant systems exist.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerDbLoadLifecycleRecord {
+    pub guid: ObjectGuid,
+    pub account_id: u32,
+    pub name: String,
+    pub race: u8,
+    pub class_id: u8,
+    pub gender: Gender,
+    pub level: u8,
+    pub xp: i32,
+    pub money: u64,
+    pub inventory_slot_count: u8,
+    pub bank_bag_slot_count: u8,
+    pub map_id: u32,
+    pub position: Position,
+    pub max_health: u64,
+    pub health: u64,
+    pub powers: Vec<PlayerLifecyclePower>,
+    pub display_power: PowerType,
+    pub faction_template: Option<u32>,
+    pub display_id: Option<u32>,
+    pub player_flags: u32,
+    pub player_flags_ex: u32,
+    pub extra_flags: u32,
+    pub create_time: Option<u64>,
+    pub create_mode: Option<u8>,
+    pub played_time_total: u32,
+    pub played_time_level: u32,
+    pub active_talent_group: Option<u8>,
+    pub zone_id: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct PlayerLifecycleBase {
+    guid: ObjectGuid,
+    name: String,
+    race: u8,
+    class_id: u8,
+    gender: Gender,
+    level: u8,
+    xp: i32,
+    money: u64,
+    inventory_slot_count: u8,
+    bank_bag_slot_count: u8,
+    map_id: u32,
+    position: Position,
+    max_health: u64,
+    health: u64,
+    powers: Vec<PlayerLifecyclePower>,
+    display_power: PowerType,
+    faction_template: Option<u32>,
+    display_id: Option<u32>,
+    player_flags: u32,
+    player_flags_ex: u32,
+    extra_flags: u32,
+    metadata: PlayerLifecycleMetadata,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PlayerLifecycleMetadata {
+    pub account_id: Option<u32>,
+    pub create_time: Option<u64>,
+    pub create_mode: Option<u8>,
+    pub played_time_total: u32,
+    pub played_time_level: u32,
+    pub active_talent_group: Option<u8>,
+    pub zone_id: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayerLoginLifecycleStep {
+    LoadFromDb,
+    LoadAccountData,
+    SendTutorialData,
+    SendFeatureSystemStatus,
+    SendTimeZoneInformation,
+    SendMotd,
+    SendPvpSeasonInfo,
+    SendInitialPacketsBeforeAddToMap,
+    PlayFirstLoginCinematic,
+    AddPlayerToMap,
+    RegisterObjectAccessor,
+    RestoreGuildAndAuras,
+    SendInitialPacketsAfterAddToMap,
+    BootstrapVisibility,
+    SendZoneWorldStates,
+    SendCompactUnitFrameProfiles,
+    ApplyLoginAuraEffects,
+    SendMovementCompoundState,
+    MarkOnline,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayerLoginLifecyclePlan {
+    steps: Vec<PlayerLoginLifecycleStep>,
+}
+
+impl PlayerLoginLifecyclePlan {
+    pub fn trinity_handle_player_login() -> Self {
+        Self {
+            steps: vec![
+                PlayerLoginLifecycleStep::LoadFromDb,
+                PlayerLoginLifecycleStep::LoadAccountData,
+                PlayerLoginLifecycleStep::SendTutorialData,
+                PlayerLoginLifecycleStep::SendFeatureSystemStatus,
+                PlayerLoginLifecycleStep::SendTimeZoneInformation,
+                PlayerLoginLifecycleStep::SendMotd,
+                PlayerLoginLifecycleStep::SendPvpSeasonInfo,
+                PlayerLoginLifecycleStep::SendInitialPacketsBeforeAddToMap,
+                PlayerLoginLifecycleStep::PlayFirstLoginCinematic,
+                PlayerLoginLifecycleStep::AddPlayerToMap,
+                PlayerLoginLifecycleStep::RegisterObjectAccessor,
+                PlayerLoginLifecycleStep::RestoreGuildAndAuras,
+                PlayerLoginLifecycleStep::SendInitialPacketsAfterAddToMap,
+                PlayerLoginLifecycleStep::BootstrapVisibility,
+                PlayerLoginLifecycleStep::SendZoneWorldStates,
+                PlayerLoginLifecycleStep::SendCompactUnitFrameProfiles,
+                PlayerLoginLifecycleStep::ApplyLoginAuraEffects,
+                PlayerLoginLifecycleStep::SendMovementCompoundState,
+                PlayerLoginLifecycleStep::MarkOnline,
+            ],
+        }
+    }
+
+    pub fn steps(&self) -> &[PlayerLoginLifecycleStep] {
+        &self.steps
+    }
+
+    pub fn position_of(&self, step: PlayerLoginLifecycleStep) -> Option<usize> {
+        self.steps.iter().position(|candidate| *candidate == step)
+    }
+
+    pub fn occurs_before(
+        &self,
+        before: PlayerLoginLifecycleStep,
+        after: PlayerLoginLifecycleStep,
+    ) -> bool {
+        match (self.position_of(before), self.position_of(after)) {
+            (Some(before_index), Some(after_index)) => before_index < after_index,
+            _ => false,
+        }
+    }
+}
+
+impl Default for PlayerLoginLifecyclePlan {
+    fn default() -> Self {
+        Self::trinity_handle_player_login()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PlayerWorldInsertionState {
+    pub added_to_map: bool,
+    pub object_accessor_registered: bool,
+    pub visibility_bootstrapped: bool,
+    pub worldstates_sent: bool,
+}
+
+impl PlayerWorldInsertionState {
+    pub fn from_completed_steps(steps: &[PlayerLoginLifecycleStep]) -> Self {
+        Self {
+            added_to_map: steps.contains(&PlayerLoginLifecycleStep::AddPlayerToMap),
+            object_accessor_registered: steps
+                .contains(&PlayerLoginLifecycleStep::RegisterObjectAccessor),
+            visibility_bootstrapped: steps.contains(&PlayerLoginLifecycleStep::BootstrapVisibility),
+            worldstates_sent: steps.contains(&PlayerLoginLifecycleStep::SendZoneWorldStates),
+        }
+    }
 }
 
 fn representable_power_types() -> [PowerType; MAX_POWERS] {
@@ -2206,6 +2433,7 @@ pub struct Player {
     soulbound_tradeable_items: HashSet<ObjectGuid>,
     item_durations: Vec<ObjectGuid>,
     enchant_durations: Vec<PlayerEnchantDuration>,
+    lifecycle_metadata: PlayerLifecycleMetadata,
 }
 
 impl Player {
@@ -2239,7 +2467,160 @@ impl Player {
             soulbound_tradeable_items: HashSet::new(),
             item_durations: Vec::new(),
             enchant_durations: Vec::new(),
+            lifecycle_metadata: PlayerLifecycleMetadata::default(),
         }
+    }
+
+    pub fn create_from_lifecycle(
+        session_id: Option<u64>,
+        can_filter_whispers: bool,
+        record: PlayerCreateLifecycleRecord,
+        resolver: &impl PlayerPowerIndexResolver,
+    ) -> Self {
+        let mut player = Self::new(session_id, can_filter_whispers);
+        player.apply_create_lifecycle(record, resolver);
+        player
+    }
+
+    pub fn load_from_db_lifecycle(
+        session_id: Option<u64>,
+        can_filter_whispers: bool,
+        record: PlayerDbLoadLifecycleRecord,
+        resolver: &impl PlayerPowerIndexResolver,
+    ) -> Self {
+        let mut player = Self::new(session_id, can_filter_whispers);
+        player.apply_db_load_lifecycle(record, resolver);
+        player
+    }
+
+    pub fn apply_create_lifecycle(
+        &mut self,
+        record: PlayerCreateLifecycleRecord,
+        resolver: &impl PlayerPowerIndexResolver,
+    ) {
+        let metadata = PlayerLifecycleMetadata {
+            account_id: None,
+            create_time: record.create_time,
+            create_mode: record.create_mode,
+            played_time_total: record.played_time_total,
+            played_time_level: record.played_time_level,
+            active_talent_group: record.active_talent_group,
+            zone_id: None,
+        };
+
+        self.apply_lifecycle_base(
+            PlayerLifecycleBase {
+                guid: record.guid,
+                name: record.name,
+                race: record.race,
+                class_id: record.class_id,
+                gender: record.gender,
+                level: record.level,
+                xp: record.xp,
+                money: record.money,
+                inventory_slot_count: record.inventory_slot_count,
+                bank_bag_slot_count: record.bank_bag_slot_count,
+                map_id: record.map_id,
+                position: record.position,
+                max_health: record.max_health,
+                health: record.health,
+                powers: record.powers,
+                display_power: record.display_power,
+                faction_template: record.faction_template,
+                display_id: record.display_id,
+                player_flags: record.player_flags,
+                player_flags_ex: record.player_flags_ex,
+                extra_flags: record.extra_flags,
+                metadata,
+            },
+            resolver,
+        );
+    }
+
+    pub fn apply_db_load_lifecycle(
+        &mut self,
+        record: PlayerDbLoadLifecycleRecord,
+        resolver: &impl PlayerPowerIndexResolver,
+    ) {
+        let metadata = PlayerLifecycleMetadata {
+            account_id: Some(record.account_id),
+            create_time: record.create_time,
+            create_mode: record.create_mode,
+            played_time_total: record.played_time_total,
+            played_time_level: record.played_time_level,
+            active_talent_group: record.active_talent_group,
+            zone_id: record.zone_id,
+        };
+
+        self.apply_lifecycle_base(
+            PlayerLifecycleBase {
+                guid: record.guid,
+                name: record.name,
+                race: record.race,
+                class_id: record.class_id,
+                gender: record.gender,
+                level: record.level,
+                xp: record.xp,
+                money: record.money,
+                inventory_slot_count: record.inventory_slot_count,
+                bank_bag_slot_count: record.bank_bag_slot_count,
+                map_id: record.map_id,
+                position: record.position,
+                max_health: record.max_health,
+                health: record.health,
+                powers: record.powers,
+                display_power: record.display_power,
+                faction_template: record.faction_template,
+                display_id: record.display_id,
+                player_flags: record.player_flags,
+                player_flags_ex: record.player_flags_ex,
+                extra_flags: record.extra_flags,
+                metadata,
+            },
+            resolver,
+        );
+    }
+
+    fn apply_lifecycle_base(
+        &mut self,
+        record: PlayerLifecycleBase,
+        resolver: &impl PlayerPowerIndexResolver,
+    ) {
+        self.unit.world_mut().object_mut().create(record.guid);
+        self.unit.world_mut().object_mut().set_scale(1.0);
+        self.unit.world_mut().set_name(record.name);
+        self.unit
+            .world_mut()
+            .world_relocate(record.map_id, record.position);
+
+        self.set_race_class_gender(record.race, record.class_id, record.gender);
+        self.unit.set_level(record.level);
+        self.set_inventory_slot_count(record.inventory_slot_count);
+        self.set_bank_bag_slot_count(record.bank_bag_slot_count);
+        self.set_xp(record.xp);
+        self.set_money(record.money);
+        self.replace_all_player_flags(record.player_flags);
+        self.replace_all_player_flags_ex(record.player_flags_ex);
+        self.extra_flags = record.extra_flags;
+        self.lifecycle_metadata = record.metadata;
+
+        self.unit.set_display_power(record.display_power);
+        if let Some(faction_template) = record.faction_template {
+            self.unit.set_faction(faction_template);
+        }
+        if let Some(display_id) = record.display_id {
+            self.unit.set_display_id(display_id, true);
+        }
+
+        self.configure_power_indices_for_class(resolver);
+        self.unit.set_max_health(record.max_health);
+        self.unit.set_health(record.health);
+        for power in record.powers {
+            self.unit.set_max_power(power.power, power.max);
+            self.unit.set_power(power.power, power.current);
+        }
+
+        self.clear_data_changes();
     }
 
     pub const fn unit(&self) -> &Unit {
@@ -2320,6 +2701,10 @@ impl Player {
 
     pub const fn extra_flags(&self) -> u32 {
         self.extra_flags
+    }
+
+    pub const fn lifecycle_metadata(&self) -> PlayerLifecycleMetadata {
+        self.lifecycle_metadata
     }
 
     pub fn player_data_changes_mask(&self) -> &UpdateMask {
@@ -6711,6 +7096,14 @@ impl Player {
         self.unit.get_power_index(power)
     }
 
+    pub fn get_power(&self, power: PowerType) -> i32 {
+        self.unit.get_power(power)
+    }
+
+    pub fn get_max_power(&self, power: PowerType) -> i32 {
+        self.unit.get_max_power(power)
+    }
+
     pub fn configure_power_indices_for_class(&mut self, resolver: &impl PlayerPowerIndexResolver) {
         let class_id = self.unit.data().class_id;
         for power in representable_power_types() {
@@ -7406,6 +7799,200 @@ mod tests {
         assert!(!player.unit().unit_data_changes_mask().is_any_set());
         assert!(!player.player_data_changes_mask().is_any_set());
         assert!(!player.active_player_data_changes_mask().is_any_set());
+    }
+
+    fn lifecycle_create_record() -> PlayerCreateLifecycleRecord {
+        PlayerCreateLifecycleRecord {
+            guid: ObjectGuid::create_player(1, 42),
+            name: "Lifecycle".to_string(),
+            race: 1,
+            class_id: CLASS_PALADIN,
+            gender: Gender::Female,
+            level: 12,
+            xp: 345,
+            money: 678,
+            inventory_slot_count: INVENTORY_DEFAULT_SIZE,
+            bank_bag_slot_count: 2,
+            map_id: 571,
+            position: Position::new(1.0, 2.0, 3.0, 4.0),
+            max_health: 1000,
+            health: 750,
+            powers: vec![
+                PlayerLifecyclePower::new(PowerType::Mana, 400, 900),
+                PlayerLifecyclePower::new(PowerType::Energy, 40, 100),
+                PlayerLifecyclePower::new(PowerType::Focus, 99, 100),
+            ],
+            display_power: PowerType::Mana,
+            faction_template: Some(35),
+            display_id: Some(1234),
+            player_flags: 0x10,
+            player_flags_ex: 0x20,
+            extra_flags: 0x40,
+            create_time: Some(1_700_000_000),
+            create_mode: Some(0),
+            played_time_total: 11,
+            played_time_level: 7,
+            active_talent_group: Some(0),
+        }
+    }
+
+    fn assert_player_lifecycle_is_clean(player: &Player) {
+        assert_eq!(player.unit().changed_object_type_mask(), 0);
+        assert!(!player.unit().unit_data_changes_mask().is_any_set());
+        assert!(!player.player_data_changes_mask().is_any_set());
+        assert!(!player.active_player_data_changes_mask().is_any_set());
+    }
+
+    #[test]
+    fn player_lifecycle_create_initializes_representable_state_as_clean_baseline() {
+        let record = lifecycle_create_record();
+        let player =
+            Player::create_from_lifecycle(Some(9), true, record.clone(), &StubPowerResolver);
+
+        assert_eq!(player.guid(), record.guid);
+        assert_eq!(player.session_id(), Some(9));
+        assert_eq!(player.unit().world().name(), "Lifecycle");
+        assert_eq!(player.unit().world().map_id(), record.map_id);
+        assert_eq!(player.unit().world().position(), record.position);
+        assert_eq!(player.unit().world().object().scale(), 1.0);
+        assert_eq!(player.unit().data().race, record.race);
+        assert_eq!(player.unit().data().class_id, record.class_id);
+        assert_eq!(player.unit().data().player_class_id, record.class_id);
+        assert_eq!(player.unit().data().sex, Gender::Female as u8);
+        assert_eq!(player.unit().data().level, i32::from(record.level));
+        assert_eq!(player.unit().data().faction_template, 35);
+        assert_eq!(player.unit().data().display_id, 1234);
+        assert_eq!(player.unit().data().native_display_id, 1234);
+        assert_eq!(player.unit().data().display_power, PowerType::Mana as u8);
+        assert_eq!(player.unit().data().max_health, record.max_health);
+        assert_eq!(player.unit().data().health, record.health);
+        assert_eq!(player.active_data().xp, record.xp);
+        assert_eq!(player.active_data().coinage, record.money);
+        assert_eq!(
+            player.active_data().num_backpack_slots,
+            record.inventory_slot_count
+        );
+        assert_eq!(player.data().num_bank_slots, record.bank_bag_slot_count);
+        assert_eq!(player.data().player_flags, record.player_flags);
+        assert_eq!(player.data().player_flags_ex, record.player_flags_ex);
+        assert_eq!(player.extra_flags(), record.extra_flags);
+        assert_eq!(player.get_power_index(PowerType::Mana), Some(0));
+        assert_eq!(player.get_power(PowerType::Mana), 400);
+        assert_eq!(player.get_max_power(PowerType::Mana), 900);
+        assert_eq!(player.get_power_index(PowerType::Energy), Some(3));
+        assert_eq!(player.get_power(PowerType::Energy), 40);
+        assert_eq!(player.get_power_index(PowerType::Focus), None);
+        assert_eq!(player.get_power(PowerType::Focus), 0);
+        assert_eq!(
+            player.lifecycle_metadata(),
+            PlayerLifecycleMetadata {
+                account_id: None,
+                create_time: record.create_time,
+                create_mode: record.create_mode,
+                played_time_total: record.played_time_total,
+                played_time_level: record.played_time_level,
+                active_talent_group: record.active_talent_group,
+                zone_id: None,
+            }
+        );
+        assert_player_lifecycle_is_clean(&player);
+    }
+
+    #[test]
+    fn player_lifecycle_load_from_db_initializes_loaded_state_as_clean_baseline() {
+        let create = lifecycle_create_record();
+        let record = PlayerDbLoadLifecycleRecord {
+            guid: create.guid,
+            account_id: 77,
+            name: create.name,
+            race: create.race,
+            class_id: create.class_id,
+            gender: create.gender,
+            level: create.level,
+            xp: create.xp,
+            money: create.money,
+            inventory_slot_count: create.inventory_slot_count,
+            bank_bag_slot_count: create.bank_bag_slot_count,
+            map_id: create.map_id,
+            position: create.position,
+            max_health: create.max_health,
+            health: create.health,
+            powers: create.powers,
+            display_power: create.display_power,
+            faction_template: create.faction_template,
+            display_id: create.display_id,
+            player_flags: create.player_flags,
+            player_flags_ex: create.player_flags_ex,
+            extra_flags: create.extra_flags,
+            create_time: create.create_time,
+            create_mode: create.create_mode,
+            played_time_total: 123,
+            played_time_level: 45,
+            active_talent_group: Some(1),
+            zone_id: Some(67),
+        };
+
+        let player = Player::load_from_db_lifecycle(None, false, record, &StubPowerResolver);
+
+        assert_eq!(player.lifecycle_metadata().account_id, Some(77));
+        assert_eq!(player.lifecycle_metadata().zone_id, Some(67));
+        assert_eq!(player.lifecycle_metadata().played_time_total, 123);
+        assert_eq!(player.lifecycle_metadata().played_time_level, 45);
+        assert_eq!(player.lifecycle_metadata().active_talent_group, Some(1));
+        assert_eq!(player.get_power(PowerType::Mana), 400);
+        assert_player_lifecycle_is_clean(&player);
+    }
+
+    #[test]
+    fn player_lifecycle_login_plan_keeps_trinity_phase_ordering() {
+        let plan = PlayerLoginLifecyclePlan::trinity_handle_player_login();
+
+        assert!(plan.occurs_before(
+            PlayerLoginLifecycleStep::LoadFromDb,
+            PlayerLoginLifecycleStep::SendInitialPacketsBeforeAddToMap,
+        ));
+        assert!(plan.occurs_before(
+            PlayerLoginLifecycleStep::SendInitialPacketsBeforeAddToMap,
+            PlayerLoginLifecycleStep::AddPlayerToMap,
+        ));
+        assert!(plan.occurs_before(
+            PlayerLoginLifecycleStep::AddPlayerToMap,
+            PlayerLoginLifecycleStep::SendInitialPacketsAfterAddToMap,
+        ));
+        assert!(plan.occurs_before(
+            PlayerLoginLifecycleStep::SendInitialPacketsAfterAddToMap,
+            PlayerLoginLifecycleStep::BootstrapVisibility,
+        ));
+        assert!(plan.occurs_before(
+            PlayerLoginLifecycleStep::AddPlayerToMap,
+            PlayerLoginLifecycleStep::SendZoneWorldStates,
+        ));
+        assert!(plan.occurs_before(
+            PlayerLoginLifecycleStep::SendMovementCompoundState,
+            PlayerLoginLifecycleStep::MarkOnline,
+        ));
+    }
+
+    #[test]
+    fn player_lifecycle_world_insertion_state_marks_visibility_after_add() {
+        let plan = PlayerLoginLifecyclePlan::trinity_handle_player_login();
+        let add_index = plan
+            .position_of(PlayerLoginLifecycleStep::AddPlayerToMap)
+            .unwrap();
+        let after_index = plan
+            .position_of(PlayerLoginLifecycleStep::SendInitialPacketsAfterAddToMap)
+            .unwrap();
+        let add_only = PlayerWorldInsertionState::from_completed_steps(&plan.steps()[..=add_index]);
+        let after_add =
+            PlayerWorldInsertionState::from_completed_steps(&plan.steps()[..=after_index + 2]);
+
+        assert!(add_only.added_to_map);
+        assert!(!add_only.visibility_bootstrapped);
+        assert!(!add_only.worldstates_sent);
+        assert!(after_add.added_to_map);
+        assert!(after_add.object_accessor_registered);
+        assert!(after_add.visibility_bootstrapped);
+        assert!(after_add.worldstates_sent);
     }
 
     fn can_bank_args<'a>(
