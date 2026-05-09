@@ -5132,17 +5132,50 @@ mod tests {
             .unwrap();
 
         let item = session.inventory_item_objects.get(&item_guid).unwrap();
-        assert_eq!(durability, 40);
+        assert_eq!(durability, 55);
         assert_eq!(item.object().entry(), 200);
         assert_eq!(item.data().gift_creator, ObjectGuid::EMPTY);
         assert_eq!(item.item_flags_bits(), ItemFieldFlags::SOULBOUND.bits());
         assert_eq!(item.data().max_durability, 40);
-        assert_eq!(item.data().durability, 40);
+        assert_eq!(item.data().durability, 55);
         assert_eq!(item.update_state(), ItemUpdateState::Changed);
         assert!(!item.is_wrapped());
         let inventory_item = session.inventory_items.get(&23).unwrap();
         assert_eq!(inventory_item.entry_id, 200);
         assert_eq!(inventory_item.inventory_type, Some(InventoryType::Weapon as u8));
+    }
+
+    #[tokio::test]
+    async fn open_item_wrapped_locked_template_returns_item_locked_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let item_guid = ObjectGuid::create_item(1, 905);
+        session.set_player_guid(Some(player_guid));
+        install_open_item_template_with_flags(&mut session, 700, ItemFlags::empty(), 123);
+        insert_open_item_top_level(&mut session, player_guid, 23, item_guid, 700, false);
+        {
+            let item = session.inventory_item_objects.get_mut(&item_guid).unwrap();
+            item.set_item_flag(ItemFieldFlags::WRAPPED);
+            item.set_durability(17);
+            item.force_state(ItemUpdateState::Unchanged);
+        }
+
+        session
+            .handle_open_item(WorldPacket::from_bytes(&[INVENTORY_SLOT_BAG_0, 23]))
+            .await;
+
+        let sent = send_rx.try_recv().unwrap();
+        assert_eq!(
+            sent,
+            InventoryChangeFailure::new(InventoryResult::ItemLocked, item_guid, ObjectGuid::EMPTY)
+                .to_bytes()
+        );
+        assert!(!session.loot_table.contains_key(&item_guid));
+        let item = session.inventory_item_objects.get(&item_guid).unwrap();
+        assert_eq!(item.object().entry(), 700);
+        assert_eq!(item.data().durability, 17);
+        assert_eq!(item.update_state(), ItemUpdateState::Unchanged);
+        assert!(item.is_wrapped());
     }
 
     #[tokio::test]

@@ -338,11 +338,6 @@ impl WorldSession {
             return;
         }
 
-        if is_wrapped {
-            self.open_wrapped_gift_like_cpp(open.slot, open.pack_slot, item.guid).await;
-            return;
-        }
-
         let lock_id = self.item_template_lock_id(item.entry_id).unwrap_or(0);
         let item_is_locked = self
             .inventory_item_objects
@@ -350,6 +345,11 @@ impl WorldSession {
             .map_or(true, |item_object| item_object.is_locked());
         if lock_id != 0 && item_is_locked {
             self.send_equip_error(InventoryResult::ItemLocked, Some(item.guid), None, 0, 0);
+            return;
+        }
+
+        if is_wrapped {
+            self.open_wrapped_gift_like_cpp(open.slot, open.pack_slot, item.guid).await;
             return;
         }
 
@@ -905,18 +905,12 @@ fn apply_wrapped_gift_transform_like_cpp(
     flags: u32,
     max_durability: u32,
 ) -> u32 {
-    let old_durability = item.data().durability;
-    let durability = if old_durability == 0 {
-        max_durability
-    } else {
-        old_durability.min(max_durability)
-    };
+    let durability = item.data().durability;
 
     item.set_gift_creator(ObjectGuid::EMPTY);
     item.object_mut().set_entry(entry);
     item.replace_all_item_flags(ItemFieldFlags::from_bits_retain(flags));
     item.set_max_durability(max_durability);
-    item.set_durability(durability);
     item.set_state(ItemUpdateState::Changed);
     durability
 }
@@ -1198,12 +1192,44 @@ mod tests {
             20,
         );
 
-        assert_eq!(durability, 20);
+        assert_eq!(durability, 25);
         assert_eq!(item.object().entry(), 200);
         assert_eq!(item.data().gift_creator, ObjectGuid::EMPTY);
         assert_eq!(item.item_flags_bits(), ItemFieldFlags::SOULBOUND.bits());
         assert_eq!(item.data().max_durability, 20);
-        assert_eq!(item.data().durability, 20);
+        assert_eq!(item.data().durability, 25);
+        assert_eq!(item.update_state(), ItemUpdateState::Changed);
+        assert!(!item.is_wrapped());
+    }
+
+    #[test]
+    fn open_item_wrapped_gift_with_zero_durability_stays_zero_like_cpp() {
+        let item_guid = ObjectGuid::create_item(1, 901);
+        let owner_guid = ObjectGuid::create_player(1, 42);
+        let mut item = Item::new(0);
+        item.initialize_created_state(ItemCreateInfo {
+            guid: item_guid,
+            item_id: 100,
+            context: ItemContext::None,
+            owner: Some(owner_guid),
+            max_durability: 30,
+            expiration: 0,
+            spell_charges: [0; MAX_ITEM_SPELLS],
+        });
+        item.force_state(ItemUpdateState::Unchanged);
+        item.replace_all_item_flags(ItemFieldFlags::WRAPPED);
+        item.set_durability(0);
+
+        let durability = apply_wrapped_gift_transform_like_cpp(
+            &mut item,
+            200,
+            ItemFieldFlags::SOULBOUND.bits(),
+            20,
+        );
+
+        assert_eq!(durability, 0);
+        assert_eq!(item.data().max_durability, 20);
+        assert_eq!(item.data().durability, 0);
         assert_eq!(item.update_state(), ItemUpdateState::Changed);
         assert!(!item.is_wrapped());
     }
