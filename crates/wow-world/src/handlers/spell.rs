@@ -402,7 +402,7 @@ impl WorldSession {
                 ui_type: 0,
                 quantity: entry.quantity,
                 item_id: entry.item_id as i32,
-                item_context: 0,
+                item_context: entry.item_context,
                 bonus_list_ids: vec![],
                 can_loot: true,
             })
@@ -805,6 +805,9 @@ impl WorldSession {
                     loot_list_id: item_index as u8,
                     item_id,
                     quantity: count,
+                    random_properties_id,
+                    random_properties_seed,
+                    item_context: context,
                     taken: false,
                 });
             }
@@ -866,9 +869,9 @@ impl WorldSession {
             ins_item.set_bool(7, false);
             ins_item.set_bool(8, false);
             ins_item.set_bool(9, false);
-            ins_item.set_i32(10, 0);
-            ins_item.set_i32(11, 0);
-            ins_item.set_u8(12, 0);
+            ins_item.set_i32(10, item.random_properties_id);
+            ins_item.set_i32(11, item.random_properties_seed);
+            ins_item.set_u8(12, item.item_context);
             tx.append(ins_item);
         }
 
@@ -1061,9 +1064,9 @@ fn stored_item_row_can_load_like_cpp_representable(
     item_index: u32,
     blocked: bool,
     needs_quest: bool,
-    random_properties_id: i32,
-    random_properties_seed: i32,
-    context: u8,
+    _random_properties_id: i32,
+    _random_properties_seed: i32,
+    _context: u8,
     item_exists: bool,
 ) -> bool {
     item_id != 0
@@ -1072,9 +1075,6 @@ fn stored_item_row_can_load_like_cpp_representable(
         && item_index <= u32::from(u8::MAX)
         && !blocked
         && !needs_quest
-        && random_properties_id == 0
-        && random_properties_seed == 0
-        && context == 0
 }
 
 #[derive(Debug, Clone)]
@@ -1124,6 +1124,9 @@ fn add_loot_item_stacks_like_cpp(
             loot_list_id: loot_items.len() as u8,
             item_id,
             quantity,
+            random_properties_id: 0,
+            random_properties_seed: 0,
+            item_context: 0,
             taken: false,
         });
         count = count.saturating_sub(max_stack_size);
@@ -1154,6 +1157,7 @@ mod tests {
     use wow_constants::{BagFamilyMask, ItemContext, ItemFieldFlags, ItemUpdateState};
     use wow_core::ObjectGuid;
     use wow_entities::{Item, ItemCreateInfo, MAX_ITEM_SPELLS};
+    use wow_packet::packets::loot::LootEntry;
 
     use super::generate_money_loot_like_cpp;
     use super::{
@@ -1287,6 +1291,9 @@ mod tests {
         assert_eq!(loot_items[1].quantity, 20);
         assert_eq!(loot_items[2].quantity, 5);
         assert_eq!(loot_items[2].loot_list_id, 2);
+        assert_eq!(loot_items[2].random_properties_id, 0);
+        assert_eq!(loot_items[2].random_properties_seed, 0);
+        assert_eq!(loot_items[2].item_context, 0);
 
         let mut capped = Vec::new();
         add_loot_item_stacks_like_cpp(&mut capped, 25, 100, 1);
@@ -1349,18 +1356,38 @@ mod tests {
     }
 
     #[test]
-    fn stored_item_row_loader_keeps_only_currently_representable_rows() {
+    fn open_item_stored_loot_preserves_random_properties_and_context_like_cpp() {
         assert!(stored_item_row_can_load_like_cpp_representable(
-            25, 2, 7, false, false, 0, 0, 0, true
+            25, 2, 7, false, false, -77, 456, 2, true
         ));
+
+        let entry = LootEntry {
+            loot_list_id: 7,
+            item_id: 25,
+            quantity: 2,
+            random_properties_id: -77,
+            random_properties_seed: 456,
+            item_context: 2,
+            taken: false,
+        };
+        let response_item = wow_packet::packets::loot::LootItemData {
+            loot_list_id: entry.loot_list_id,
+            ui_type: 0,
+            quantity: entry.quantity,
+            item_id: entry.item_id as i32,
+            item_context: entry.item_context,
+            bonus_list_ids: vec![],
+            can_loot: true,
+        };
+        assert_eq!(entry.random_properties_id, -77);
+        assert_eq!(entry.random_properties_seed, 456);
+        assert_eq!(response_item.item_context, 2);
+
         assert!(!stored_item_row_can_load_like_cpp_representable(
             25, 2, 256, false, false, 0, 0, 0, true
         ));
         assert!(!stored_item_row_can_load_like_cpp_representable(
             25, 2, 7, true, false, 0, 0, 0, true
-        ));
-        assert!(!stored_item_row_can_load_like_cpp_representable(
-            25, 2, 7, false, false, 12, 0, 0, true
         ));
     }
 

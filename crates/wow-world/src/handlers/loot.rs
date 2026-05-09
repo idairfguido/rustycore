@@ -16,14 +16,17 @@ use wow_constants::{ClientOpcodes, InventoryResult, ItemContext};
 use wow_core::ObjectGuid;
 use wow_database::{CharStatements, SqlTransaction};
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
-use wow_entities::INVENTORY_SLOT_BAG_0;
+use wow_entities::{
+    INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_END,
+    INVENTORY_SLOT_ITEM_START, Item, ItemPosCount, make_item_pos,
+};
 use wow_packet::packets::item::{
     ItemExpirePurchaseRefund, ItemInstance, ItemModList, ItemPushResult,
     ItemPushResultDisplayType,
 };
 use wow_packet::packets::loot::{
-    CreatureLoot, LootItemData, LootItemPkt, LootMoney, LootMoneyNotify, LootRelease, LootRemoved,
-    LootResponse, LootUnit, SLootRelease,
+    CreatureLoot, LootEntry, LootItemData, LootItemPkt, LootMoney, LootMoneyNotify, LootRelease,
+    LootRemoved, LootResponse, LootUnit, SLootRelease,
 };
 use wow_packet::packets::update::{ItemCreateData, UpdateObject};
 use wow_packet::ClientPacket;
@@ -127,7 +130,7 @@ impl WorldSession {
                 ui_type: 0,
                 quantity: e.quantity,
                 item_id: e.item_id as i32,
-                item_context: 0,
+                item_context: e.item_context,
                 bonus_list_ids: vec![],
                 can_loot: true,
             })
@@ -177,7 +180,7 @@ impl WorldSession {
             };
 
             if !self
-                .store_direct_loot_item_like_cpp(entry.item_id, entry.quantity)
+                .store_direct_loot_item_like_cpp(&entry)
                 .await
             {
                 continue;
@@ -424,14 +427,16 @@ impl WorldSession {
         }
     }
 
-    async fn store_direct_loot_item_like_cpp(&mut self, item_id: u32, count: u32) -> bool {
+    async fn store_direct_loot_item_like_cpp(&mut self, loot_entry: &LootEntry) -> bool {
+        let item_id = loot_entry.item_id;
+        let count = loot_entry.quantity;
         let Some(player_guid) = self.player_guid else {
             return false;
         };
         let Some(char_db) = self.char_db().map(Arc::clone) else {
             return false;
         };
-        let Some((store_result, store_dest, _)) =
+        let Some((store_result, mut store_dest, _)) =
             self.plan_store_new_direct_inventory_item(item_id, count)
         else {
             self.send_equip_error(InventoryResult::ItemNotFound, None, None, 0, 0);
@@ -440,6 +445,24 @@ impl WorldSession {
         if store_result != InventoryResult::Ok {
             self.send_equip_error(store_result, None, None, 0, 0);
             return false;
+        }
+
+        if store_dest.iter().any(|dest| {
+            let bag = (dest.pos >> 8) as u8;
+            let slot = (dest.pos & 0x00FF) as u8;
+            bag == u8::from(INVENTORY_SLOT_BAG_0)
+                && self.inventory_items.get(&slot).is_some_and(|existing| {
+                    self.inventory_item_objects
+                        .get(&existing.guid)
+                        .is_some_and(|item| !loot_entry_can_stack_with_item(loot_entry, item))
+                })
+        }) {
+            let Some(compatible_dest) = self.plan_direct_loot_item_preserving_random_context(loot_entry)
+            else {
+                self.send_equip_error(InventoryResult::InvFull, None, None, 0, 0);
+                return false;
+            };
+            store_dest = compatible_dest;
         }
 
         let mut planned_existing_counts = Vec::<(u8, ObjectGuid, u64, u32, u32)>::new();
@@ -470,7 +493,10 @@ impl WorldSession {
                     .map(|(_, _, _, new_count, _)| *new_count)
                     .unwrap_or_else(|| existing_object.count());
                 let new_count = base_count.saturating_add(dest.count);
-                if existing.entry_id != item_id || new_count > max_stack {
+                if existing.entry_id != item_id
+                    || new_count > max_stack
+                    || !loot_entry_can_stack_with_item(loot_entry, existing_object)
+                {
                     self.send_equip_error(InventoryResult::InvFull, None, None, 0, 0);
                     return false;
                 }
@@ -496,7 +522,12 @@ impl WorldSession {
                 .iter_mut()
                 .find(|stack| stack.slot == slot)
             {
-                if stack.entry_id == item_id && stack.count.saturating_add(dest.count) <= max_stack {
+                if stack.entry_id == item_id
+                    && stack.random_properties_id == loot_entry.random_properties_id
+                    && stack.random_properties_seed == loot_entry.random_properties_seed
+                    && stack.item_context == loot_entry.item_context
+                    && stack.count.saturating_add(dest.count) <= max_stack
+                {
                     stack.count = stack.count.saturating_add(dest.count);
                     continue;
                 }
@@ -509,6 +540,9 @@ impl WorldSession {
                 entry_id: item_id,
                 count: dest.count,
                 max_durability: self.item_template_max_durability(item_id),
+                random_properties_id: loot_entry.random_properties_id,
+                random_properties_seed: loot_entry.random_properties_seed,
+                item_context: loot_entry.item_context,
             });
         }
 
@@ -534,12 +568,15 @@ impl WorldSession {
                 next_item_guid += 1;
                 let item_guid = ObjectGuid::create_item(realm_id, db_guid as i64);
 
-                let mut ins_item = char_db.prepare(CharStatements::INS_ITEM_INSTANCE);
+                let mut ins_item = char_db.prepare(CharStatements::INS_ITEM_INSTANCE_WITH_RANDOM_CONTEXT);
                 ins_item.set_u64(0, db_guid);
                 ins_item.set_u32(1, stack.entry_id);
                 ins_item.set_u64(2, player_guid.counter() as u64);
                 ins_item.set_u32(3, stack.count);
                 ins_item.set_u32(4, stack.max_durability);
+                ins_item.set_i32(5, stack.random_properties_id);
+                ins_item.set_i32(6, stack.random_properties_seed);
+                ins_item.set_u8(7, stack.item_context);
                 tx.append(ins_item);
 
                 let mut ins_inv = char_db.prepare(CharStatements::INS_CHAR_INVENTORY);
@@ -574,15 +611,21 @@ impl WorldSession {
                     inventory_type: self.item_template_inventory_type(stack.entry_id),
                 },
             );
-            let item_object = self.make_inventory_item_object(
+            let mut item_object = self.make_inventory_item_object(
                 *item_guid,
                 stack.entry_id,
                 player_guid,
                 stack.count,
                 stack.max_durability,
-                ItemContext::None,
+                loot_item_context(stack.item_context),
                 stack.slot,
             );
+            if stack.random_properties_id != 0 {
+                item_object.set_random_properties_id(stack.random_properties_id);
+            }
+            if stack.random_properties_seed != 0 {
+                item_object.set_property_seed(stack.random_properties_seed);
+            }
             self.insert_inventory_item_object(item_object);
         }
         self.sync_object_accessor_player();
@@ -611,7 +654,7 @@ impl WorldSession {
             self.send_loot_item_push_result(
                 player_guid,
                 item_guid,
-                item_id,
+                loot_entry,
                 slot,
                 added_count,
                 new_count,
@@ -623,7 +666,7 @@ impl WorldSession {
             self.send_loot_item_push_result(
                 player_guid,
                 *item_guid,
-                stack.entry_id,
+                loot_entry,
                 stack.slot,
                 stack.count,
                 stack.count,
@@ -647,11 +690,72 @@ impl WorldSession {
         true
     }
 
+    fn plan_direct_loot_item_preserving_random_context(
+        &self,
+        loot_entry: &LootEntry,
+    ) -> Option<Vec<ItemPosCount>> {
+        let max_stack = self
+            .item_storage_template(loot_entry.item_id)
+            .map(|template| template.max_stack_size)
+            .unwrap_or(1)
+            .max(1);
+        let mut remaining = loot_entry.quantity;
+        let mut dest = Vec::new();
+
+        let mut existing_slots: Vec<u8> = self.inventory_items.keys().copied().collect();
+        existing_slots.sort_unstable();
+        for slot in existing_slots {
+            if remaining == 0 {
+                break;
+            }
+            let Some(existing) = self.inventory_items.get(&slot) else {
+                continue;
+            };
+            let Some(existing_object) = self.inventory_item_objects.get(&existing.guid) else {
+                continue;
+            };
+            if existing.entry_id != loot_entry.item_id
+                || !loot_entry_can_stack_with_item(loot_entry, existing_object)
+                || existing_object.count() >= max_stack
+            {
+                continue;
+            }
+            let can_add = max_stack.saturating_sub(existing_object.count()).min(remaining);
+            if can_add > 0 {
+                dest.push(ItemPosCount::new(
+                    make_item_pos(INVENTORY_SLOT_BAG_0, slot),
+                    can_add,
+                ));
+                remaining = remaining.saturating_sub(can_add);
+            }
+        }
+
+        let backpack_end = INVENTORY_SLOT_ITEM_START
+            .saturating_add(INVENTORY_DEFAULT_SIZE)
+            .min(INVENTORY_SLOT_ITEM_END);
+        for slot in INVENTORY_SLOT_ITEM_START..backpack_end {
+            if remaining == 0 {
+                break;
+            }
+            if self.inventory_items.contains_key(&slot) {
+                continue;
+            }
+            let quantity = max_stack.min(remaining);
+            dest.push(ItemPosCount::new(
+                make_item_pos(INVENTORY_SLOT_BAG_0, slot),
+                quantity,
+            ));
+            remaining = remaining.saturating_sub(quantity);
+        }
+
+        (remaining == 0).then_some(dest)
+    }
+
     fn send_loot_item_push_result(
         &self,
         player_guid: ObjectGuid,
         item_guid: ObjectGuid,
-        item_id: u32,
+        loot_entry: &LootEntry,
         slot: u8,
         quantity: u32,
         quantity_in_inventory: u32,
@@ -662,9 +766,9 @@ impl WorldSession {
             slot: u8::from(INVENTORY_SLOT_BAG_0),
             slot_in_bag: i32::from(slot),
             item: ItemInstance {
-                item_id: item_id as i32,
-                random_properties_seed: 0,
-                random_properties_id: 0,
+                item_id: loot_entry.item_id as i32,
+                random_properties_seed: loot_entry.random_properties_seed,
+                random_properties_id: loot_entry.random_properties_id,
                 item_bonus: None,
                 modifications: ItemModList { values: Vec::new() },
             },
@@ -791,19 +895,99 @@ fn loot_is_looted_like_cpp(loot: &CreatureLoot) -> bool {
     loot.coins == 0 && loot.items.iter().all(|entry| entry.taken)
 }
 
+fn loot_item_context(context: u8) -> ItemContext {
+    <ItemContext as num_traits::FromPrimitive>::from_u8(context).unwrap_or(ItemContext::None)
+}
+
+fn loot_entry_can_stack_with_item(loot_entry: &LootEntry, item: &Item) -> bool {
+    let data = item.data();
+    data.random_properties_id == loot_entry.random_properties_id
+        && data.property_seed == loot_entry.random_properties_seed
+        && u8::try_from(data.context).unwrap_or(0) == loot_entry.item_context
+}
+
 #[derive(Debug, Clone)]
 struct PlannedLootNewStack {
     slot: u8,
     entry_id: u32,
     count: u32,
     max_durability: u32,
+    random_properties_id: i32,
+    random_properties_seed: i32,
+    item_context: u8,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::loot_is_looted_like_cpp;
+    use super::{loot_entry_can_stack_with_item, loot_is_looted_like_cpp, loot_item_context};
+    use wow_constants::ItemContext;
     use wow_core::ObjectGuid;
+    use wow_database::{CharStatements, StatementDef};
+    use wow_entities::{Item, ItemCreateInfo, MAX_ITEM_SPELLS};
     use wow_packet::packets::loot::{CreatureLoot, LootEntry};
+
+    #[test]
+    fn loot_item_random_context_runtime_and_persistence_fields_match_entry() {
+        let sql = CharStatements::INS_ITEM_INSTANCE_WITH_RANDOM_CONTEXT.sql();
+        assert!(sql.contains("randomPropertiesId"));
+        assert!(sql.contains("randomPropertiesSeed"));
+        assert!(sql.contains("context"));
+
+        let item_guid = ObjectGuid::create_item(1, 902);
+        let owner_guid = ObjectGuid::create_player(1, 42);
+        let mut item = Item::new(0);
+        item.initialize_created_state(ItemCreateInfo {
+            guid: item_guid,
+            item_id: 25,
+            context: loot_item_context(2),
+            owner: Some(owner_guid),
+            max_durability: 0,
+            expiration: 0,
+            spell_charges: [0; MAX_ITEM_SPELLS],
+        });
+        item.set_random_properties_id(-77);
+        item.set_property_seed(456);
+
+        let data = item.data();
+        assert_eq!(data.random_properties_id, -77);
+        assert_eq!(data.property_seed, 456);
+        assert_eq!(u8::try_from(data.context).unwrap_or(0), 2);
+    }
+
+    #[test]
+    fn loot_item_random_context_stack_compatibility_matches_entry() {
+        let item_guid = ObjectGuid::create_item(1, 901);
+        let owner_guid = ObjectGuid::create_player(1, 42);
+        let mut item = Item::new(0);
+        item.initialize_created_state(ItemCreateInfo {
+            guid: item_guid,
+            item_id: 25,
+            context: ItemContext::DungeonHeroic,
+            owner: Some(owner_guid),
+            max_durability: 0,
+            expiration: 0,
+            spell_charges: [0; MAX_ITEM_SPELLS],
+        });
+        item.set_random_properties_id(-77);
+        item.set_property_seed(456);
+
+        let matching = LootEntry {
+            loot_list_id: 0,
+            item_id: 25,
+            quantity: 1,
+            random_properties_id: -77,
+            random_properties_seed: 456,
+            item_context: 2,
+            taken: false,
+        };
+        assert!(loot_entry_can_stack_with_item(&matching, &item));
+
+        let different_random = LootEntry {
+            random_properties_id: -78,
+            ..matching.clone()
+        };
+        assert!(!loot_entry_can_stack_with_item(&different_random, &item));
+    }
 
     #[test]
     fn loot_is_looted_requires_no_money_and_no_unlooted_items_like_cpp() {
@@ -820,6 +1004,9 @@ mod tests {
             loot_list_id: 0,
             item_id: 25,
             quantity: 1,
+            random_properties_id: 0,
+            random_properties_seed: 0,
+            item_context: 0,
             taken: false,
         });
         assert!(!loot_is_looted_like_cpp(&loot));

@@ -580,6 +580,11 @@
   Rust targets: `crates/wow-database/src/statements/character.rs`, `crates/wow-world/src/handlers/spell.rs`, `crates/wow-world/src/session.rs`.
   Acceptance: `CMSG_OPEN_ITEM` now opens represented wrapped gifts like Trinity: wrapped runtime items pass the open gate even without `HAS_LOOT`, never generate item loot, load `character_gifts(entry, flags)`, revalidate the same still-wrapped runtime item, clear `giftCreatorGuid`, replace entry/flags/durability fields, update top-level inventory metadata when applicable, persist the `item_instance` gift transformation and delete `character_gifts` transactionally when the character DB is available. Full `Lock.db2`/`sLockStore` key lookup, random/context preservation, quest/condition/rate loot branches, scripts and collection appearance side effects remain under #NEXT.R8.ENTITIES.013.
 
+- [x] **#NEXT.R8.ENTITIES.187** Preserve open-item loot random properties and context like C++.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Loot/Loot.h`, `Loot.cpp`, `LootItemStorage.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp`.
+  Rust targets: `crates/wow-packet/src/packets/loot.rs`, `crates/wow-world/src/handlers/spell.rs`, `crates/wow-world/src/handlers/loot.rs`, `crates/wow-database/src/statements/character.rs`.
+  Acceptance: `CMSG_OPEN_ITEM` preserves represented stored `item_loot_items.random_properties_id`, `random_properties_seed` and `context` in `LootEntry`; `LootResponse.item_context` uses the stored context; saving stored loot writes the same metadata; `CMSG_LOOT_ITEM` persists and creates direct loot items with that random/context data, and existing stacks are used only when their random/context metadata is compatible. Full `Lock.db2`/`sLockStore` key lookup, quest/condition/rate loot branches, scripts/collection appearance side effects, and full random-property generation for newly generated loot remain pending.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.R8.ENTITIES.003** Bind `wow-map` grid unload actions to real entity methods once Creature/GameObject/Corpse exist.

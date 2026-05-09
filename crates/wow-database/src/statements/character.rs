@@ -117,6 +117,9 @@ pub enum CharStatements {
     /// VALUES (?, ?, ?, ?, ?, '', '')
     INS_ITEM_INSTANCE,
 
+    /// INSERT INTO item_instance preserving generated loot random property/context metadata.
+    INS_ITEM_INSTANCE_WITH_RANDOM_CONTEXT,
+
     /// INSERT INTO item_instance with the C++ Item::CloneItem persisted field subset.
     INS_ITEM_INSTANCE_CLONE,
 
@@ -302,6 +305,13 @@ impl StatementDef for CharStatements {
                   randomPropertiesSeed, context) \
                  VALUES (?, ?, ?, 0, 0, ?, ?, '', '', 0, 0, 0, 0)"
             }
+            Self::INS_ITEM_INSTANCE_WITH_RANDOM_CONTEXT => {
+                "INSERT INTO item_instance \
+                 (guid, itemEntry, owner_guid, creatorGuid, giftCreatorGuid, count, \
+                  durability, enchantments, charges, flags, randomPropertiesId, \
+                  randomPropertiesSeed, context) \
+                 VALUES (?, ?, ?, 0, 0, ?, ?, '', '', 0, ?, ?, ?)"
+            }
             Self::INS_ITEM_INSTANCE_CLONE => {
                 "INSERT INTO item_instance \
                  (guid, itemEntry, owner_guid, creatorGuid, giftCreatorGuid, count, \
@@ -454,6 +464,7 @@ mod tests {
         assert_eq!(CharStatements::UPD_PLAYER_CURRENCY.sql().matches('?').count(), 8);
         assert_eq!(CharStatements::REP_PLAYER_CURRENCY.sql().matches('?').count(), 8);
         assert_eq!(CharStatements::SEL_CHAR_EQUIPMENT.sql().matches('?').count(), 1);
+        assert_eq!(CharStatements::INS_ITEM_INSTANCE_WITH_RANDOM_CONTEXT.sql().matches('?').count(), 8);
         assert_eq!(CharStatements::INS_ITEM_INSTANCE_CLONE.sql().matches('?').count(), 14);
         assert_eq!(CharStatements::UPD_ITEM_INSTANCE_FLAGS.sql().matches('?').count(), 2);
         assert_eq!(CharStatements::SEL_CHARACTER_GIFT_BY_ITEM.sql().matches('?').count(), 1);

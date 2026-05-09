@@ -244,6 +244,9 @@ pub struct LootEntry {
     pub loot_list_id: u8,
     pub item_id: u32,
     pub quantity: u32,
+    pub random_properties_id: i32,
+    pub random_properties_seed: i32,
+    pub item_context: u8,
     pub taken: bool,
 }
 
