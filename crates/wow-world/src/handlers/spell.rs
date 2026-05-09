@@ -333,7 +333,7 @@ impl WorldSession {
         let item_is_locked = self
             .inventory_item_objects
             .get(&item.guid)
-            .is_some_and(|item_object| item_object.is_locked());
+            .map_or(true, |item_object| item_object.is_locked());
         if lock_id != 0 && item_is_locked {
             self.send_equip_error(InventoryResult::ItemLocked, Some(item.guid), None, 0, 0);
             return;

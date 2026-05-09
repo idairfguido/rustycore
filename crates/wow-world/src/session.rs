@@ -5096,6 +5096,34 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn open_item_missing_runtime_object_fails_closed_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let item_guid = ObjectGuid::create_item(1, 902);
+        session.set_player_guid(Some(player_guid));
+        install_open_item_has_loot_template_with_lock(&mut session, 700, 123);
+        session.inventory_items.insert(23, InventoryItem {
+            guid: item_guid,
+            entry_id: 700,
+            db_guid: item_guid.counter() as u64,
+            inventory_type: None,
+        });
+        assert!(!session.inventory_item_objects.contains_key(&item_guid));
+
+        session
+            .handle_open_item(WorldPacket::from_bytes(&[INVENTORY_SLOT_BAG_0, 23]))
+            .await;
+
+        let sent = send_rx.try_recv().unwrap();
+        assert_eq!(
+            sent,
+            InventoryChangeFailure::new(InventoryResult::ItemLocked, item_guid, ObjectGuid::EMPTY)
+                .to_bytes()
+        );
+        assert!(!session.loot_table.contains_key(&item_guid));
+    }
+
     fn assert_open_item_release_destroy_nested_item_leaves_container_in_place(bag_slot: u8) {
         let (mut session, _, _) = make_session();
         let player_guid = ObjectGuid::create_player(1, 42);
