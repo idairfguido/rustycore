@@ -207,7 +207,11 @@ pub use update_fields::{
     ObjectDataValues, PLAYER_DATA_BITS, SCENE_OBJECT_DATA_BITS, TYPEID_ACTIVE_PLAYER,
     TYPEID_AREA_TRIGGER, TYPEID_CONTAINER, TYPEID_CONVERSATION, TYPEID_CORPSE,
     TYPEID_DYNAMIC_OBJECT, TYPEID_GAME_OBJECT, TYPEID_ITEM, TYPEID_OBJECT, TYPEID_PLAYER,
-    TYPEID_SCENE_OBJECT, TYPEID_UNIT, UNIT_DATA_BITS, UpdateMask, ValuesUpdate,
+    TYPEID_SCENE_OBJECT, TYPEID_UNIT, UNIT_DATA_BITS, UpdateFieldDescriptor,
+    UpdateFieldDescriptorKind, UpdateFieldSectionKind, UpdateFieldSectionMetadata,
+    UpdateFieldSectionUpdate, UpdateFieldVisibilityFlags, UpdateMask, ValuesUpdate,
+    ValuesUpdateSections, allowed_mask_for_visibility, base_allowed_mask_for_section,
+    extra_allowed_mask_for_visibility, filter_disallowed_fields,
 };
 pub use vehicle::{
     MAX_VEHICLE_SEATS, PassengerInfo, Vehicle, VehicleAccessory, VehicleExitParameter, VehicleFlag,
