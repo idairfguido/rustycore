@@ -2,9 +2,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info, warn};
+use wow_constants::WeaponAttackType;
 use wow_core::{ObjectGuid, Position};
-use wow_ai::CreatureState;
+use wow_entities::{Creature, CreatureAiState};
 use wow_packet::packets::update::CreatureCreateData;
 
 /// Size of a grid cell in yards (64x64 yards like TrinityCore).
@@ -50,37 +51,11 @@ impl GridCoord {
 /// A creature stored in the global map system.
 #[derive(Debug, Clone)]
 pub struct WorldCreature {
-    pub guid: ObjectGuid,
-    pub entry: u32,
-    pub level: u8,
-    pub is_alive: bool,
-    pub current_hp: u32,
-    pub max_hp: u32,
-    pub position: Position,
-    pub home_pos: Position,
-    pub state: CreatureState,
-    pub move_target: Option<Position>,
-    pub corpse_despawn_at: Option<Instant>,
-    pub npc_flags: u32,
-    pub unit_flags: u32,
-    pub aggro_radius: f32,
-    pub min_dmg: u32,
-    pub max_dmg: u32,
+    /// Canonical creature entity. Runtime/AI ownership lives here.
+    pub creature: Creature,
+    /// Packet-create bridge retained for update-object construction.
     pub create_data: CreatureCreateData,
-    // Additional fields migrated from CreatureAI
-    pub display_id: u32,
-    pub faction: u32,
-    pub respawn_time_secs: u64,
-    pub move_start: Instant,
-    pub move_duration_ms: u32,
-    pub spline_id: u32,
-    pub wander_timer: Instant,
-    pub wander_delay_ms: u64,
-    pub combat_target: Option<ObjectGuid>,
-    pub last_swing: Instant,
-    pub swing_timer_ms: u64,
-    pub wander_radius: f32,
-    pub death_time: Option<Instant>,
+    clock_started_at: Instant,
 }
 
 impl WorldCreature {
@@ -98,207 +73,320 @@ impl WorldCreature {
         npc_flags: u32,
         unit_flags: u32,
     ) -> Self {
-        let now = Instant::now();
         let (min_dmg, max_dmg) = if min_dmg == 0 {
             let base = (level as u32) * 3 + 5;
             (base, base + base / 2)
         } else {
             (min_dmg, max_dmg)
         };
-        Self {
+
+        let mut creature = Creature::new(false);
+        creature.unit_mut().world_mut().object_mut().create(guid);
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .set_entry(entry);
+        let _ = creature.unit_mut().world_mut().set_map(0, 0);
+        creature.set_ai_position(pos);
+        creature.set_ai_home_position(pos);
+        creature.unit_mut().set_level(level);
+        creature.unit_mut().set_max_health(u64::from(hp));
+        creature.unit_mut().set_health(u64::from(hp));
+        creature.set_display_id(display_id, true, None);
+        creature.set_faction(faction);
+        creature.unit_mut().set_weapon_damage(
+            WeaponAttackType::BaseAttack,
+            min_dmg as f32,
+            max_dmg as f32,
+        );
+        {
+            let ai = creature.ai_ownership_mut();
+            ai.aggro_radius = aggro_radius;
+            ai.wander_radius = 5.0;
+            ai.respawn_time_secs = 30;
+            ai.npc_flags = npc_flags;
+            ai.unit_flags = unit_flags;
+            ai.display_id = display_id;
+            ai.faction = faction;
+            ai.min_damage = min_dmg;
+            ai.max_damage = max_dmg;
+        }
+
+        let create_data = CreatureCreateData {
             guid,
             entry,
-            home_pos: pos.clone(),
-            position: pos.clone(),
-            move_target: None,
-            move_start: now,
-            move_duration_ms: 0,
-            spline_id: 1,
-            state: CreatureState::Idle,
-            wander_timer: now,
-            wander_delay_ms: 8_000,
-            current_hp: hp,
-            max_hp: hp,
-            level,
-            min_dmg,
-            max_dmg,
-            combat_target: None,
-            last_swing: now,
-            swing_timer_ms: 2_000,
-            aggro_radius,
-            wander_radius: 5.0,
-            is_alive: true,
-            death_time: None,
-            respawn_time_secs: 30,
-            corpse_despawn_at: None,
-            npc_flags,
-            unit_flags,
             display_id,
-            faction,
-            create_data: CreatureCreateData {
-                guid,
-                entry,
-                display_id,
-                native_display_id: display_id,
-                health: hp as i64,
-                max_health: hp as i64,
-                level,
-                faction_template: faction as i32,
-                npc_flags: npc_flags as u64,
-                unit_flags,
-                unit_flags2: 0,
-                unit_flags3: 0,
-                scale: 1.0,
-                unit_class: 1,
-                base_attack_time: 2000,
-                ranged_attack_time: 0,
-                zone_id: 0,
-                speed_walk_rate: 1.0,
-                speed_run_rate: 1.14286,
-            },
+            native_display_id: display_id,
+            health: hp as i64,
+            max_health: hp as i64,
+            level,
+            faction_template: faction as i32,
+            npc_flags: npc_flags as u64,
+            unit_flags,
+            unit_flags2: 0,
+            unit_flags3: 0,
+            scale: 1.0,
+            unit_class: 1,
+            base_attack_time: 2000,
+            ranged_attack_time: 0,
+            zone_id: 0,
+            speed_walk_rate: 1.0,
+            speed_run_rate: 1.14286,
+        };
+
+        Self::from_canonical(creature, create_data)
+    }
+
+    pub fn from_canonical(creature: Creature, create_data: CreatureCreateData) -> Self {
+        Self {
+            creature,
+            create_data,
+            clock_started_at: Instant::now(),
         }
+    }
+
+    fn now_ms(&self) -> u64 {
+        self.clock_started_at
+            .elapsed()
+            .as_millis()
+            .min(u128::from(u64::MAX)) as u64
+    }
+
+    pub fn guid(&self) -> ObjectGuid {
+        self.creature.ai_guid()
+    }
+
+    pub fn entry(&self) -> u32 {
+        self.creature.ai_entry()
+    }
+
+    pub fn position(&self) -> Position {
+        self.creature.ai_position()
+    }
+
+    pub fn home_position(&self) -> Position {
+        self.creature.ai_home_position()
+    }
+
+    pub fn is_alive(&self) -> bool {
+        self.creature.ai_is_alive()
+    }
+
+    pub fn current_hp(&self) -> u32 {
+        self.creature.ai_current_health().min(u64::from(u32::MAX)) as u32
+    }
+
+    pub fn max_hp(&self) -> u32 {
+        self.creature.ai_max_health().min(u64::from(u32::MAX)) as u32
+    }
+
+    pub fn level(&self) -> u8 {
+        self.creature.ai_level()
+    }
+
+    pub fn npc_flags(&self) -> u32 {
+        self.creature.ai_ownership().npc_flags
+    }
+
+    pub fn unit_flags(&self) -> u32 {
+        self.creature.ai_ownership().unit_flags
+    }
+
+    pub fn display_id(&self) -> u32 {
+        self.creature.ai_ownership().display_id
+    }
+
+    pub fn faction(&self) -> u32 {
+        self.creature.ai_ownership().faction
+    }
+
+    pub fn min_dmg(&self) -> u32 {
+        self.creature.ai_ownership().min_damage
+    }
+
+    pub fn max_dmg(&self) -> u32 {
+        self.creature.ai_ownership().max_damage
+    }
+
+    pub fn state(&self) -> CreatureAiState {
+        self.creature.ai_state()
+    }
+
+    pub fn move_target(&self) -> Option<Position> {
+        self.creature.ai_ownership().move_target
+    }
+
+    pub fn spline_id(&self) -> u32 {
+        self.creature.ai_ownership().spline_id
+    }
+
+    pub fn corpse_despawn_at(&self) -> Option<Instant> {
+        self.creature
+            .ai_ownership()
+            .corpse_despawn_at_ms
+            .map(|ms| self.clock_started_at + Duration::from_millis(ms))
+    }
+
+    pub fn set_corpse_despawn_at(&mut self, when: Option<Instant>) {
+        let now_ms = self.now_ms();
+        let at_ms = when.map(|instant| {
+            if instant <= self.clock_started_at {
+                0
+            } else if instant <= Instant::now() {
+                now_ms
+            } else {
+                now_ms.saturating_add(
+                    instant
+                        .duration_since(Instant::now())
+                        .as_millis()
+                        .min(u128::from(u64::MAX)) as u64,
+                )
+            }
+        });
+        self.creature.set_ai_corpse_despawn_at(at_ms);
     }
 
     pub fn enter_combat(&mut self, attacker: ObjectGuid) {
-        self.state = CreatureState::InCombat;
-        self.combat_target = Some(attacker);
-        self.move_target = None;
-        debug!("Creature {:?} entered combat with {:?}", self.guid, attacker);
+        self.creature.enter_ai_combat(attacker);
+        debug!(
+            "Creature {:?} entered combat with {:?}",
+            self.guid(),
+            attacker
+        );
     }
 
     pub fn reset_combat(&mut self) {
-        self.state = CreatureState::Returning;
-        self.combat_target = None;
-        self.current_hp = self.max_hp;
-        self.move_target = Some(self.home_pos.clone());
+        self.creature.reset_ai_combat(self.now_ms());
     }
 
     pub fn take_damage(&mut self, damage: u32) -> bool {
-        if !self.is_alive { return false; }
-        self.current_hp = self.current_hp.saturating_sub(damage);
-        if self.current_hp == 0 {
-            self.die();
-            return true;
-        }
-        false
+        self.creature.take_ai_damage(damage, self.now_ms())
     }
 
     pub fn die(&mut self) {
-        self.is_alive = false;
-        self.state = CreatureState::Dead;
-        self.combat_target = None;
-        self.death_time = Some(Instant::now());
+        self.creature.mark_ai_dead(self.now_ms());
     }
 
     pub fn can_wander(&self) -> bool {
-        self.npc_flags == 0 || (self.npc_flags & 0x80) == 0
+        self.creature.can_ai_wander()
     }
 
     pub fn try_aggro(&mut self, player_guid: ObjectGuid, player_pos: &Position) -> bool {
-        if !self.is_alive || self.state == CreatureState::InCombat {
-            return false;
-        }
-        let dist = self.position.distance(player_pos);
-        if dist <= self.aggro_radius {
-            self.enter_combat(player_guid);
-            return true;
-        }
-        false
+        self.creature.try_ai_aggro(player_guid, player_pos)
     }
 
     pub fn should_respawn(&self) -> bool {
-        if let Some(dt) = self.death_time {
-            dt.elapsed().as_secs() >= self.respawn_time_secs
-        } else {
-            false
-        }
+        self.creature.should_ai_respawn(self.now_ms())
     }
 
     pub fn respawn(&mut self) {
-        self.current_hp = self.max_hp;
-        self.is_alive = true;
-        self.state = CreatureState::Idle;
-        self.position = self.home_pos.clone();
-        self.move_target = None;
-        self.death_time = None;
-        self.spline_id += 1;
-        self.wander_timer = Instant::now();
+        self.creature.respawn_ai(self.now_ms());
     }
 
     pub fn movement_finished(&self) -> bool {
-        if self.move_target.is_none() { return true; }
-        self.move_start.elapsed().as_millis() as u32 >= self.move_duration_ms
+        self.creature
+            .ai_ownership()
+            .move_target
+            .map(|_| {
+                self.now_ms()
+                    .saturating_sub(self.creature.ai_ownership().move_start_ms)
+                    >= u64::from(self.creature.ai_ownership().move_duration_ms)
+            })
+            .unwrap_or(true)
     }
 
     pub fn interpolated_position(&self) -> Position {
-        let Some(ref dst) = self.move_target else { return self.position.clone(); };
-        let elapsed = self.move_start.elapsed().as_millis() as f32;
-        let total = self.move_duration_ms as f32;
-        if total <= 0.0 { return dst.clone(); }
+        let Some(dst) = self.creature.ai_ownership().move_target else {
+            return self.position();
+        };
+        let elapsed =
+            self.now_ms()
+                .saturating_sub(self.creature.ai_ownership().move_start_ms) as f32;
+        let total = self.creature.ai_ownership().move_duration_ms as f32;
+        if total <= 0.0 {
+            return dst;
+        }
+        let src = self.position();
         let t = (elapsed / total).min(1.0);
         Position::new(
-            self.position.x + (dst.x - self.position.x) * t,
-            self.position.y + (dst.y - self.position.y) * t,
-            self.position.z + (dst.z - self.position.z) * t,
+            src.x + (dst.x - src.x) * t,
+            src.y + (dst.y - src.y) * t,
+            src.z + (dst.z - src.z) * t,
             dst.orientation,
         )
     }
 
     pub fn begin_move(&mut self, dst: Position) {
-        let dist = self.position.distance(&dst);
+        let dist = self.position().distance(&dst);
         let walk_speed = 2.5f32;
         let duration_ms = ((dist / walk_speed) * 1000.0) as u32;
-        self.move_target = Some(dst);
-        self.move_start = Instant::now();
-        self.move_duration_ms = duration_ms.max(500);
-        self.spline_id += 1;
+        let now_ms = self.now_ms();
+        let ai = self.creature.ai_ownership_mut();
+        ai.move_target = Some(dst);
+        ai.move_start_ms = now_ms;
+        ai.move_duration_ms = duration_ms.max(500);
+        ai.spline_id = ai.spline_id.saturating_add(1);
     }
 
     pub fn finish_move(&mut self) {
-        if let Some(dst) = self.move_target.take() {
-            self.position = dst;
+        if let Some(dst) = self.creature.ai_ownership_mut().move_target.take() {
+            self.creature.set_ai_position(dst);
         }
-        self.move_duration_ms = 0;
+        self.creature.ai_ownership_mut().move_duration_ms = 0;
     }
 
     pub fn can_swing(&self) -> bool {
-        self.is_alive
-            && self.state == CreatureState::InCombat
-            && self.last_swing.elapsed().as_millis() as u64 >= self.swing_timer_ms
+        self.is_alive()
+            && self.state() == CreatureAiState::InCombat
+            && self
+                .now_ms()
+                .saturating_sub(self.creature.ai_ownership().last_swing_ms)
+                >= self.creature.ai_ownership().swing_timer_ms
     }
 
     pub fn record_swing(&mut self) {
-        self.last_swing = Instant::now();
+        self.creature.ai_ownership_mut().last_swing_ms = self.now_ms();
     }
 
     pub fn roll_damage(&self) -> u32 {
-        if self.min_dmg >= self.max_dmg { return self.min_dmg; }
-        let range = self.max_dmg - self.min_dmg;
-        let seed = self.last_swing.elapsed().subsec_nanos();
-        self.min_dmg + (seed % (range + 1))
+        let min_dmg = self.min_dmg();
+        let max_dmg = self.max_dmg();
+        if min_dmg >= max_dmg {
+            return min_dmg;
+        }
+        let range = max_dmg - min_dmg;
+        let seed = (self.now_ms() as u32).wrapping_add(self.spline_id());
+        min_dmg + (seed % (range + 1))
     }
 
     pub fn should_wander(&self) -> bool {
-        self.is_alive
-            && self.state == CreatureState::Idle
+        self.is_alive()
+            && self.state() == CreatureAiState::Idle
             && self.can_wander()
-            && self.wander_timer.elapsed().as_millis() as u64 >= self.wander_delay_ms
+            && self
+                .now_ms()
+                .saturating_sub(self.creature.ai_ownership().move_start_ms)
+                >= self.creature.ai_ownership().wander_delay_ms
     }
 
     pub fn pick_wander_destination(&mut self) -> Position {
-        let seed = self.wander_timer.elapsed().subsec_nanos() as f32;
+        let seed = self.now_ms() as f32;
         let angle = (seed * 0.001) % (2.0 * std::f32::consts::PI);
-        let dist = (seed * 0.0001) % self.wander_radius + 1.0;
-        let x = self.home_pos.x + angle.cos() * dist;
-        let y = self.home_pos.y + angle.sin() * dist;
+        let radius = self.creature.ai_ownership().wander_radius.max(1.0);
+        let dist = (seed * 0.0001) % radius + 1.0;
+        let home = self.home_position();
+        let x = home.x + angle.cos() * dist;
+        let y = home.y + angle.sin() * dist;
         let o = angle + std::f32::consts::PI;
-        Position::new(x, y, self.home_pos.z, o)
+        Position::new(x, y, home.z, o)
     }
 
     pub fn reset_wander_timer(&mut self) {
-        self.wander_timer = Instant::now();
-        let seed = self.wander_timer.elapsed().subsec_nanos() as u64;
-        self.wander_delay_ms = 5_000 + (seed % 10_000);
+        let now_ms = self.now_ms();
+        let ai = self.creature.ai_ownership_mut();
+        ai.move_start_ms = now_ms;
+        ai.wander_delay_ms = 5_000 + (now_ms % 10_000);
     }
 }
 
@@ -324,11 +412,15 @@ impl Grid {
     }
 
     pub fn add_creature(&mut self, creature: WorldCreature) -> bool {
-        if self.creatures.contains_key(&creature.guid) {
-            warn!("Creature {:?} already exists in grid {:?}", creature.guid, self.coord);
+        if self.creatures.contains_key(&creature.guid()) {
+            warn!(
+                "Creature {:?} already exists in grid {:?}",
+                creature.guid(),
+                self.coord
+            );
             return false;
         }
-        self.creatures.insert(creature.guid, creature);
+        self.creatures.insert(creature.guid(), creature);
         true
     }
 
@@ -390,7 +482,10 @@ impl MapInstance {
         if !self.grids.contains_key(&coord) {
             let grid = Grid::new(x, y);
             self.grids.insert(coord, grid);
-            debug!("Created new grid ({}, {}) for map {} instance {}", x, y, self.map_id, self.instance_id);
+            debug!(
+                "Created new grid ({}, {}) for map {} instance {}",
+                x, y, self.map_id, self.instance_id
+            );
         }
         self.grids.get_mut(&coord).unwrap()
     }
@@ -423,7 +518,12 @@ impl MapInstance {
         self.get_grid(x, y)?.get_creature(guid)
     }
 
-    pub fn get_creature_mut(&mut self, x: i16, y: i16, guid: ObjectGuid) -> Option<&mut WorldCreature> {
+    pub fn get_creature_mut(
+        &mut self,
+        x: i16,
+        y: i16,
+        guid: ObjectGuid,
+    ) -> Option<&mut WorldCreature> {
         self.get_grid_mut(x, y)?.get_creature_mut(guid)
     }
 
@@ -436,7 +536,10 @@ impl MapInstance {
             .collect();
 
         for coord in to_remove {
-            info!("Unloading grid {:?} from map {} (timeout)", coord, self.map_id);
+            info!(
+                "Unloading grid {:?} from map {} (timeout)",
+                coord, self.map_id
+            );
             self.grids.remove(&coord);
         }
     }
@@ -468,7 +571,10 @@ impl MapManager {
         if !self.maps.contains_key(&key) {
             let instance = MapInstance::new(map_id, instance_id);
             self.maps.insert(key, instance);
-            info!("Created new map instance: map_id={}, instance_id={}", map_id, instance_id);
+            info!(
+                "Created new map instance: map_id={}, instance_id={}",
+                map_id, instance_id
+            );
         }
         self.maps.get_mut(&key).unwrap()
     }
@@ -487,19 +593,47 @@ impl MapManager {
         self.get_map(map_id, instance_id)?.get_grid(x, y)
     }
 
-    pub fn get_grid_mut(&mut self, map_id: u16, instance_id: u32, x: i16, y: i16) -> Option<&mut Grid> {
+    pub fn get_grid_mut(
+        &mut self,
+        map_id: u16,
+        instance_id: u32,
+        x: i16,
+        y: i16,
+    ) -> Option<&mut Grid> {
         self.get_map_mut(map_id, instance_id)?.get_grid_mut(x, y)
     }
 
-    pub fn get_or_create_grid(&mut self, map_id: u16, instance_id: u32, x: i16, y: i16) -> &mut Grid {
-        self.get_or_create_map(map_id, instance_id).get_or_create_grid(x, y)
+    pub fn get_or_create_grid(
+        &mut self,
+        map_id: u16,
+        instance_id: u32,
+        x: i16,
+        y: i16,
+    ) -> &mut Grid {
+        self.get_or_create_map(map_id, instance_id)
+            .get_or_create_grid(x, y)
     }
 
-    pub fn add_creature(&mut self, map_id: u16, instance_id: u32, x: i16, y: i16, creature: WorldCreature) -> bool {
-        self.get_or_create_map(map_id, instance_id).add_creature(x, y, creature)
+    pub fn add_creature(
+        &mut self,
+        map_id: u16,
+        instance_id: u32,
+        x: i16,
+        y: i16,
+        creature: WorldCreature,
+    ) -> bool {
+        self.get_or_create_map(map_id, instance_id)
+            .add_creature(x, y, creature)
     }
 
-    pub fn remove_creature(&mut self, map_id: u16, instance_id: u32, x: i16, y: i16, guid: ObjectGuid) -> bool {
+    pub fn remove_creature(
+        &mut self,
+        map_id: u16,
+        instance_id: u32,
+        x: i16,
+        y: i16,
+        guid: ObjectGuid,
+    ) -> bool {
         if let Some(map) = self.get_map_mut(map_id, instance_id) {
             map.remove_creature(x, y, guid)
         } else {
@@ -507,35 +641,124 @@ impl MapManager {
         }
     }
 
-    pub fn get_creature(&self, map_id: u16, instance_id: u32, x: i16, y: i16, guid: ObjectGuid) -> Option<&WorldCreature> {
+    pub fn get_creature(
+        &self,
+        map_id: u16,
+        instance_id: u32,
+        x: i16,
+        y: i16,
+        guid: ObjectGuid,
+    ) -> Option<&WorldCreature> {
         self.get_map(map_id, instance_id)?.get_creature(x, y, guid)
     }
 
-    pub fn get_creature_mut(&mut self, map_id: u16, instance_id: u32, x: i16, y: i16, guid: ObjectGuid) -> Option<&mut WorldCreature> {
-        self.get_map_mut(map_id, instance_id)?.get_creature_mut(x, y, guid)
+    pub fn get_creature_mut(
+        &mut self,
+        map_id: u16,
+        instance_id: u32,
+        x: i16,
+        y: i16,
+        guid: ObjectGuid,
+    ) -> Option<&mut WorldCreature> {
+        self.get_map_mut(map_id, instance_id)?
+            .get_creature_mut(x, y, guid)
     }
 
-    pub fn with_creature_mut<F, R>(&mut self, map_id: u16, instance_id: u32, x: i16, y: i16, guid: ObjectGuid, f: F) -> Option<R>
+    pub fn find_creature(
+        &self,
+        map_id: u16,
+        instance_id: u32,
+        guid: ObjectGuid,
+    ) -> Option<&WorldCreature> {
+        let map = self.get_map(map_id, instance_id)?;
+        map.grids.values().find_map(|grid| grid.get_creature(guid))
+    }
+
+    pub fn find_creature_mut(
+        &mut self,
+        map_id: u16,
+        instance_id: u32,
+        guid: ObjectGuid,
+    ) -> Option<&mut WorldCreature> {
+        let map = self.get_map_mut(map_id, instance_id)?;
+        map.grids
+            .values_mut()
+            .find_map(|grid| grid.get_creature_mut(guid))
+    }
+
+    pub fn remove_creature_any(
+        &mut self,
+        map_id: u16,
+        instance_id: u32,
+        guid: ObjectGuid,
+    ) -> Option<WorldCreature> {
+        let map = self.get_map_mut(map_id, instance_id)?;
+        map.grids
+            .values_mut()
+            .find_map(|grid| grid.creatures.remove(&guid))
+    }
+
+    pub fn with_creature_mut<F, R>(
+        &mut self,
+        map_id: u16,
+        instance_id: u32,
+        x: i16,
+        y: i16,
+        guid: ObjectGuid,
+        f: F,
+    ) -> Option<R>
     where
         F: FnOnce(&mut WorldCreature) -> R,
     {
-        self.get_map_mut(map_id, instance_id)?.get_grid_mut(x, y)?.get_creature_mut(guid).map(f)
+        self.get_map_mut(map_id, instance_id)?
+            .get_grid_mut(x, y)?
+            .get_creature_mut(guid)
+            .map(f)
     }
 
-    pub fn player_enter_grid(&mut self, map_id: u16, instance_id: u32, x: i16, y: i16, player_guid: ObjectGuid, _pos: Position) {
+    pub fn player_enter_grid(
+        &mut self,
+        map_id: u16,
+        instance_id: u32,
+        x: i16,
+        y: i16,
+        player_guid: ObjectGuid,
+        _pos: Position,
+    ) {
         let grid = self.get_or_create_grid(map_id, instance_id, x, y);
         grid.player_enter(player_guid);
-        debug!("Player {:?} entered grid ({}, {}) in map {}", player_guid, x, y, map_id);
+        debug!(
+            "Player {:?} entered grid ({}, {}) in map {}",
+            player_guid, x, y, map_id
+        );
     }
 
-    pub fn player_leave_grid(&mut self, map_id: u16, instance_id: u32, x: i16, y: i16, player_guid: ObjectGuid) {
+    pub fn player_leave_grid(
+        &mut self,
+        map_id: u16,
+        instance_id: u32,
+        x: i16,
+        y: i16,
+        player_guid: ObjectGuid,
+    ) {
         if let Some(grid) = self.get_grid_mut(map_id, instance_id, x, y) {
             grid.player_leave(player_guid);
-            debug!("Player {:?} left grid ({}, {}) in map {}", player_guid, x, y, map_id);
+            debug!(
+                "Player {:?} left grid ({}, {}) in map {}",
+                player_guid, x, y, map_id
+            );
         }
     }
 
-    pub fn player_move(&mut self, map_id: u16, instance_id: u32, from: (i16, i16), to: (i16, i16), player_guid: ObjectGuid, pos: Position) {
+    pub fn player_move(
+        &mut self,
+        map_id: u16,
+        instance_id: u32,
+        from: (i16, i16),
+        to: (i16, i16),
+        player_guid: ObjectGuid,
+        pos: Position,
+    ) {
         let (from_x, from_y) = from;
         let (to_x, to_y) = to;
 
@@ -546,7 +769,14 @@ impl MapManager {
         self.player_enter_grid(map_id, instance_id, to_x, to_y, player_guid, pos);
     }
 
-    pub fn get_visible_creatures(&self, map_id: u16, instance_id: u32, x: f32, y: f32, _z: f32) -> Vec<WorldCreature> {
+    pub fn get_visible_creatures(
+        &self,
+        map_id: u16,
+        instance_id: u32,
+        x: f32,
+        y: f32,
+        _z: f32,
+    ) -> Vec<WorldCreature> {
         let center_x = world_to_grid_x(x);
         let center_y = world_to_grid_y(y);
 
@@ -561,7 +791,8 @@ impl MapManager {
                 if let Some(grid) = self.get_grid(map_id, instance_id, grid_x, grid_y) {
                     for creature in grid.creatures.values() {
                         // Optional: Check actual distance for precise visibility
-                        let dist = Position::distance(&Position::new(x, y, _z, 0.0), &creature.position);
+                        let dist =
+                            Position::distance(&Position::new(x, y, _z, 0.0), &creature.position());
                         if dist <= VISIBILITY_RADIUS {
                             creatures.push(creature.clone());
                         }
@@ -573,7 +804,14 @@ impl MapManager {
         creatures
     }
 
-    pub fn unload_distant_grids(&mut self, map_id: u16, instance_id: u32, center_x: i16, center_y: i16, range: i16) {
+    pub fn unload_distant_grids(
+        &mut self,
+        map_id: u16,
+        instance_id: u32,
+        center_x: i16,
+        center_y: i16,
+        range: i16,
+    ) {
         if let Some(map) = self.get_map_mut(map_id, instance_id) {
             let to_remove: Vec<GridCoord> = map
                 .grids
@@ -669,7 +907,7 @@ mod tests {
     #[test]
     fn test_world_to_grid_coords() {
         let (x, y) = world_to_grid_coords(100.0, -50.0);
-        assert_eq!(x, 1);  // 100 / 64 = 1.56 -> floor = 1
+        assert_eq!(x, 1); // 100 / 64 = 1.56 -> floor = 1
         assert_eq!(y, -1); // -50 / 64 = -0.78 -> floor = -1
     }
 
@@ -687,8 +925,18 @@ mod tests {
         let mut grid = Grid::new(0, 0);
         let guid = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 1, 12345);
         let creature = WorldCreature::new(
-            guid, 1, Position::new(10.0, 10.0, 0.0, 0.0),
-            50, 1, 5, 10, 20.0, 0, 35, 0, 0,
+            guid,
+            1,
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            50,
+            1,
+            5,
+            10,
+            20.0,
+            0,
+            35,
+            0,
+            0,
         );
 
         assert!(grid.add_creature(creature.clone()));
@@ -705,8 +953,18 @@ mod tests {
         let mut grid = Grid::new(0, 0);
         let guid = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 1, 12345);
         let creature = WorldCreature::new(
-            guid, 1, Position::new(10.0, 10.0, 0.0, 0.0),
-            50, 1, 5, 10, 20.0, 0, 35, 0, 0,
+            guid,
+            1,
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            50,
+            1,
+            5,
+            10,
+            20.0,
+            0,
+            35,
+            0,
+            0,
         );
 
         assert!(grid.add_creature(creature.clone()));
@@ -754,8 +1012,18 @@ mod tests {
         let mut manager = MapManager::new();
         let guid = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 1, 12345);
         let creature = WorldCreature::new(
-            guid, 1, Position::new(10.0, 10.0, 0.0, 0.0),
-            50, 1, 5, 10, 20.0, 0, 35, 0, 0,
+            guid,
+            1,
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            50,
+            1,
+            5,
+            10,
+            20.0,
+            0,
+            35,
+            0,
+            0,
         );
 
         assert!(manager.add_creature(0, 0, 0, 0, creature));
@@ -763,20 +1031,68 @@ mod tests {
     }
 
     #[test]
+    fn map_manager_uses_canonical_creature_guid_position_and_runtime() {
+        let mut manager = MapManager::new();
+        let guid = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 1, 12345);
+        let creature = WorldCreature::new(
+            guid,
+            1,
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            50,
+            2,
+            5,
+            10,
+            20.0,
+            100,
+            14,
+            0,
+            0,
+        );
+
+        assert!(manager.add_creature(0, 0, 0, 0, creature));
+        let stored = manager
+            .find_creature(0, 0, guid)
+            .expect("canonical creature stored");
+        assert_eq!(stored.guid(), guid);
+        assert_eq!(stored.position(), Position::new(10.0, 10.0, 0.0, 0.0));
+        assert_eq!(stored.current_hp(), 50);
+
+        manager
+            .find_creature_mut(0, 0, guid)
+            .expect("canonical creature mutable")
+            .take_damage(25);
+        let stored = manager
+            .find_creature(0, 0, guid)
+            .expect("canonical creature stored");
+        assert_eq!(stored.current_hp(), 25);
+        assert_eq!(stored.creature.unit().data().health, 25);
+    }
+
+    #[test]
     fn test_visible_creatures() {
         let mut manager = MapManager::new();
         let guid = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 1, 12345);
         let creature = WorldCreature::new(
-            guid, 1, Position::new(10.0, 10.0, 0.0, 0.0),
-            50, 1, 5, 10, 20.0, 0, 35, 0, 0,
+            guid,
+            1,
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            50,
+            1,
+            5,
+            10,
+            20.0,
+            0,
+            35,
+            0,
+            0,
         );
 
         manager.add_creature(0, 0, 0, 0, creature);
-        
+
         // Should find creature at (10, 10)
         let visible = manager.get_visible_creatures(0, 0, 10.0, 10.0, 0.0);
         assert!(!visible.is_empty());
-        assert_eq!(visible[0].guid, guid);
+        assert_eq!(visible[0].guid(), guid);
 
         // Should not find creature far away
         let visible = manager.get_visible_creatures(0, 0, 1000.0, 1000.0, 0.0);

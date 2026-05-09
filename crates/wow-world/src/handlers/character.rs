@@ -35,7 +35,6 @@ use wow_packet::packets::character::*;
 use wow_packet::packets::item::*;
 use wow_packet::packets::misc::*;
 use wow_packet::packets::update::*;
-use wow_ai::CreatureAI;
 
 // ── Handler registration ────────────────────────────────────────────
 
@@ -2918,28 +2917,24 @@ impl WorldSession {
                 speed_run_rate: speed_run,
             };
 
-            blocks.push(UpdateObject::create_creature_block(create_data, &creature_pos));
+            blocks.push(UpdateObject::create_creature_block(
+                create_data.clone(),
+                &creature_pos,
+            ));
 
-            // Register in server-side AI tracker for movement/combat.
-            // Estimate aggro radius from faction: neutral=0, hostile=10-20.
+            // Register through canonical map state when available; the legacy
+            // per-session AI object remains a compatibility facade/cache.
             let aggro_radius = if faction == 35 { 0.0 } else { 15.0 };
             let min_dmg = (min_level as u32).saturating_sub(1) * 3 + 5;
             let max_dmg = min_dmg + min_dmg / 2;
-            let ai = CreatureAI::new(
-                guid,
-                entry,
+            self.register_world_creature(
+                map_id,
                 creature_pos,
-                health as u32,
-                min_level,
+                create_data.clone(),
                 min_dmg,
                 max_dmg,
                 aggro_radius,
-                display_id,
-                faction as u32,
-                npc_flags as u32,
-                unit_flags,
             );
-            self.creatures.insert(guid, ai);
 
             if !result.next_row() {
                 break;
@@ -3086,18 +3081,23 @@ impl WorldSession {
                         speed_walk_rate: speed_walk,
                         speed_run_rate: speed_run,
                     };
-                    new_creature_blocks.push(UpdateObject::create_creature_block(create_data, &creature_pos));
+                    new_creature_blocks.push(UpdateObject::create_creature_block(
+                        create_data.clone(),
+                        &creature_pos,
+                    ));
 
                     // Register in AI tracker
                     let aggro_radius = if faction == 35 { 0.0 } else { 15.0 };
                     let min_dmg = (min_level as u32).saturating_sub(1) * 3 + 5;
                     let max_dmg = min_dmg + min_dmg / 2;
-                    let ai = CreatureAI::new(
-                        guid, entry, creature_pos, health as u32, min_level,
-                        min_dmg, max_dmg, aggro_radius, display_id,
-                        faction as u32, npc_flags as u32, unit_flags,
+                    self.register_world_creature(
+                        map_id,
+                        creature_pos,
+                        create_data,
+                        min_dmg,
+                        max_dmg,
+                        aggro_radius,
                     );
-                    self.creatures.insert(guid, ai);
                 }
 
                 if !cr.next_row() { break; }

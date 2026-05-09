@@ -643,6 +643,125 @@ impl WorldSession {
     }
 
     /// Set the realm ID for GUID creation.
+    /// Register a creature through canonical map state when available, keeping
+    /// the legacy per-session AI facade as a compatibility cache.
+    pub(crate) fn register_world_creature(
+        &mut self,
+        map_id: u16,
+        position: wow_core::Position,
+        create_data: wow_packet::packets::update::CreatureCreateData,
+        min_dmg: u32,
+        max_dmg: u32,
+        aggro_radius: f32,
+    ) {
+        let guid = create_data.guid;
+        let entry = create_data.entry;
+        let hp = create_data.health.max(1) as u32;
+        let level = create_data.level;
+        let display_id = create_data.display_id;
+        let faction = create_data.faction_template.max(0) as u32;
+        let npc_flags = create_data.npc_flags as u32;
+        let unit_flags = create_data.unit_flags;
+
+        if let Some(manager) = &self.map_manager {
+            let (grid_x, grid_y) = crate::map_manager::world_to_grid_coords(position.x, position.y);
+            let mut manager = manager
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if manager.find_creature(map_id, 0, guid).is_none() {
+                let world_creature = crate::map_manager::WorldCreature::from_canonical(
+                    {
+                        let mut creature = wow_entities::Creature::new(false);
+                        creature.unit_mut().world_mut().object_mut().create(guid);
+                        creature
+                            .unit_mut()
+                            .world_mut()
+                            .object_mut()
+                            .set_entry(entry);
+                        let _ = creature.unit_mut().world_mut().set_map(map_id as u32, 0);
+                        creature.unit_mut().world_mut().relocate(position);
+                        creature.unit_mut().set_level(level);
+                        creature.unit_mut().set_max_health(u64::from(hp));
+                        creature.unit_mut().set_health(u64::from(hp));
+                        creature
+                            .set_ai_identity_runtime(display_id, faction, npc_flags, unit_flags);
+                        creature.configure_ai_runtime(position, aggro_radius, 5.0, 30);
+                        creature.ai_ownership_mut().min_damage = min_dmg;
+                        creature.ai_ownership_mut().max_damage = max_dmg;
+                        creature
+                    },
+                    create_data.clone(),
+                );
+                manager.add_creature(map_id, 0, grid_x, grid_y, world_creature);
+            }
+        }
+
+        self.creatures.insert(
+            guid,
+            wow_ai::CreatureAI::new(
+                guid,
+                entry,
+                position,
+                hp,
+                level,
+                min_dmg,
+                max_dmg,
+                aggro_radius,
+                display_id,
+                faction,
+                npc_flags,
+                unit_flags,
+            ),
+        );
+    }
+
+    pub(crate) fn remove_world_creature(&mut self, guid: ObjectGuid) -> Option<wow_ai::CreatureAI> {
+        if let Some(manager) = &self.map_manager {
+            let mut manager = manager
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let _ = manager.remove_creature_any(self.current_map_id, 0, guid);
+        }
+        self.creatures.remove(&guid)
+    }
+
+    pub(crate) fn sync_legacy_creature_to_map(&mut self, guid: ObjectGuid) {
+        let (Some(manager), Some(legacy)) = (&self.map_manager, self.creatures.get(&guid)) else {
+            return;
+        };
+        let mut manager = manager
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(world_creature) = manager.find_creature_mut(self.current_map_id, 0, guid) else {
+            return;
+        };
+        world_creature.creature.set_ai_position(legacy.current_pos);
+        world_creature
+            .creature
+            .unit_mut()
+            .set_max_health(u64::from(legacy.max_hp));
+        world_creature
+            .creature
+            .unit_mut()
+            .set_health(u64::from(legacy.hp));
+        world_creature.creature.ai_ownership_mut().state = match legacy.state {
+            wow_ai::CreatureState::Idle => wow_entities::CreatureAiState::Idle,
+            wow_ai::CreatureState::WalkingRandom => wow_entities::CreatureAiState::WalkingRandom,
+            wow_ai::CreatureState::WalkingWaypoint => {
+                wow_entities::CreatureAiState::WalkingWaypoint
+            }
+            wow_ai::CreatureState::InCombat => wow_entities::CreatureAiState::InCombat,
+            wow_ai::CreatureState::Dead => wow_entities::CreatureAiState::Dead,
+            wow_ai::CreatureState::Returning => wow_entities::CreatureAiState::Returning,
+        };
+        world_creature.creature.ai_ownership_mut().move_target = legacy.move_target;
+        world_creature.creature.ai_ownership_mut().combat_target = legacy.combat_target;
+        world_creature.set_corpse_despawn_at(legacy.corpse_despawn_at);
+        if !legacy.is_alive {
+            world_creature.creature.mark_ai_dead(0);
+        }
+    }
+
     pub fn set_realm_id(&mut self, realm_id: u16) {
         self.realm_id = realm_id;
     }
@@ -3462,7 +3581,7 @@ impl WorldSession {
             let map_id = self.current_map_id;
             for g in &despawn_guids {
                 // Before removing, save data needed for respawn.
-                if let Some(c) = self.creatures.remove(g) {
+                if let Some(c) = self.remove_world_creature(*g) {
                     // C# ref: AllLootRemovedFromCorpse → m_respawnTime = corpseRemoveTime + respawnDelay
                     let respawn_at = now + std::time::Duration::from_secs(c.respawn_time_secs);
                     // Build CreatureCreateData from saved AI fields (with sensible defaults
@@ -3535,38 +3654,28 @@ impl WorldSession {
 
             let guid = r.create_data.guid;
             let entry = r.create_data.entry;
-            let display_id = r.create_data.display_id;
-            let faction = r.create_data.faction_template as u32;
-
             tracing::info!(
                 "Creature respawned: {:?} (entry {}) at {:?}",
                 guid, entry, r.home_pos
             );
 
             // Send CREATE block to client.
-            let block = UpdateObject::create_creature_block(r.create_data, &r.home_pos);
+            let block = UpdateObject::create_creature_block(r.create_data.clone(), &r.home_pos);
             let pkt = UpdateObject::create_creatures(vec![block], r.map_id);
             if let Err(e) = self.send_tx.send(pkt.to_bytes()) {
                 tracing::warn!("Failed to send respawn packet: {e}");
             }
 
-            // Recreate the creature AI at home position, fully alive.
-            let ai = wow_ai::CreatureAI::new(
-                guid,
-                entry,
+            // Recreate canonical map state when available, keeping legacy AI
+            // as a compatibility cache for the remaining session tick paths.
+            self.register_world_creature(
+                r.map_id,
                 r.home_pos,
-                r.max_hp,
-                r.level,
+                r.create_data.clone(),
                 r.min_dmg,
                 r.max_dmg,
                 r.aggro_radius,
-                display_id,
-                faction,
-                r.npc_flags,
-                r.unit_flags,
             );
-
-            self.creatures.insert(guid, ai);
             self.visible_creatures.insert(guid);
         }
         // ──────────────────────────────────────────────────────────────────
@@ -3707,7 +3816,11 @@ impl WorldSession {
             (dmg, level, died, true)
         };
 
-        if !was_alive { return; }
+        self.sync_legacy_creature_to_map(combat_target);
+
+        if !was_alive {
+            return;
+        }
 
         let over_damage = if now_dead { 0i32 } else { -1i32 };
 
@@ -3937,7 +4050,11 @@ impl WorldSession {
         }
 
         if let Some(guid) = aggro_guid {
-            let start = AttackStart { attacker: guid, victim: player_guid };
+            self.sync_legacy_creature_to_map(guid);
+            let start = AttackStart {
+                attacker: guid,
+                victim: player_guid,
+            };
             let _ = self.send_tx.send(start.to_bytes());
             self.combat_target = Some(guid);
             self.in_combat = true;

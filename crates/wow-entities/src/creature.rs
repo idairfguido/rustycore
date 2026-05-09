@@ -27,6 +27,78 @@ pub enum MovementGeneratorType {
     Idle = 0,
 }
 
+/// Canonical creature AI state owned by `wow-entities`.
+///
+/// This mirrors the small legacy runtime state machine used by the world tick
+/// without depending on `wow-ai` or `wow-world`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreatureAiState {
+    Idle,
+    WalkingRandom,
+    WalkingWaypoint,
+    InCombat,
+    Dead,
+    Returning,
+}
+
+/// Canonical AI/runtime ownership state for a creature.
+///
+/// Time fields are abstract monotonic milliseconds supplied by the caller. The
+/// entity layer intentionally does not store `Instant` so it remains reusable by
+/// world, tests, persistence and packet bridges.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CreatureAiOwnershipState {
+    pub state: CreatureAiState,
+    pub home_position: Position,
+    pub move_target: Option<Position>,
+    pub move_start_ms: u64,
+    pub move_duration_ms: u32,
+    pub spline_id: u32,
+    pub wander_delay_ms: u64,
+    pub combat_target: Option<ObjectGuid>,
+    pub last_swing_ms: u64,
+    pub swing_timer_ms: u64,
+    pub aggro_radius: f32,
+    pub wander_radius: f32,
+    pub death_time_ms: Option<u64>,
+    pub respawn_time_secs: u64,
+    pub corpse_despawn_at_ms: Option<u64>,
+    pub display_id: u32,
+    pub faction: u32,
+    pub npc_flags: u32,
+    pub unit_flags: u32,
+    pub min_damage: u32,
+    pub max_damage: u32,
+}
+
+impl Default for CreatureAiOwnershipState {
+    fn default() -> Self {
+        Self {
+            state: CreatureAiState::Idle,
+            home_position: Position::ZERO,
+            move_target: None,
+            move_start_ms: 0,
+            move_duration_ms: 0,
+            spline_id: 1,
+            wander_delay_ms: 8_000,
+            combat_target: None,
+            last_swing_ms: 0,
+            swing_timer_ms: 2_000,
+            aggro_radius: DEFAULT_MONSTER_SIGHT_DISTANCE,
+            wander_radius: 5.0,
+            death_time_ms: None,
+            respawn_time_secs: u64::from(DEFAULT_RESPAWN_DELAY_SECS),
+            corpse_despawn_at_ms: None,
+            display_id: 0,
+            faction: 0,
+            npc_flags: 0,
+            unit_flags: 0,
+            min_damage: BASE_MINDAMAGE as u32,
+            max_damage: BASE_MAXDAMAGE as u32,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CreatureModelDimensions {
     pub bounding_radius: f32,
@@ -501,6 +573,7 @@ pub struct Creature {
     grid_unload_respawn_relocation_requested: bool,
     lifecycle_metadata: CreatureLifecycleMetadata,
     runtime_state: CreatureRuntimeState,
+    ai_ownership: CreatureAiOwnershipState,
     tap_list: Vec<ObjectGuid>,
 }
 
@@ -555,6 +628,7 @@ impl Creature {
             grid_unload_respawn_relocation_requested: false,
             lifecycle_metadata: CreatureLifecycleMetadata::default(),
             runtime_state: CreatureRuntimeState::default(),
+            ai_ownership: CreatureAiOwnershipState::default(),
             tap_list: Vec::new(),
         }
     }
@@ -631,6 +705,22 @@ impl Creature {
             record.stats.min_damage,
             record.stats.max_damage,
         );
+        self.ai_ownership.home_position = home_position;
+        self.ai_ownership.move_target = None;
+        self.ai_ownership.move_start_ms = 0;
+        self.ai_ownership.move_duration_ms = 0;
+        self.ai_ownership.state = CreatureAiState::Idle;
+        self.ai_ownership.death_time_ms = None;
+        self.ai_ownership.corpse_despawn_at_ms = None;
+        self.ai_ownership.respawn_time_secs = spawn
+            .map(|spawn| u64::from(spawn.respawn_delay))
+            .unwrap_or(u64::from(DEFAULT_RESPAWN_DELAY_SECS));
+        self.ai_ownership.wander_radius = spawn.map(|spawn| spawn.wander_distance).unwrap_or(0.0);
+        self.ai_ownership.aggro_radius = DEFAULT_MONSTER_SIGHT_DISTANCE;
+        self.ai_ownership.display_id = record.selected_display_id;
+        self.ai_ownership.faction = template.faction;
+        self.ai_ownership.min_damage = record.stats.min_damage.max(0.0) as u32;
+        self.ai_ownership.max_damage = record.stats.max_damage.max(0.0) as u32;
 
         self.lifecycle_metadata = CreatureLifecycleMetadata {
             template_entry: template.entry,
@@ -724,6 +814,10 @@ impl Creature {
             .world_mut()
             .set_map(spawn.map_id, spawn.instance_id);
         self.unit.world_mut().relocate(spawn.position);
+        self.ai_ownership.home_position = spawn.home_position;
+        self.ai_ownership.move_target = None;
+        self.ai_ownership.respawn_time_secs = u64::from(spawn.respawn_delay);
+        self.ai_ownership.wander_radius = spawn.wander_distance;
     }
 
     pub const fn lifecycle_metadata(&self) -> &CreatureLifecycleMetadata {
@@ -741,6 +835,240 @@ impl Creature {
 
     pub fn unit_mut(&mut self) -> &mut Unit {
         &mut self.unit
+    }
+
+    pub const fn ai_ownership(&self) -> &CreatureAiOwnershipState {
+        &self.ai_ownership
+    }
+
+    pub fn ai_ownership_mut(&mut self) -> &mut CreatureAiOwnershipState {
+        &mut self.ai_ownership
+    }
+
+    pub const fn ai_state(&self) -> CreatureAiState {
+        self.ai_ownership.state
+    }
+
+    pub fn set_ai_state(&mut self, state: CreatureAiState) {
+        self.ai_ownership.state = state;
+    }
+
+    pub const fn ai_home_position(&self) -> Position {
+        self.ai_ownership.home_position
+    }
+
+    pub fn set_ai_home_position(&mut self, position: Position) {
+        self.ai_ownership.home_position = position;
+    }
+
+    pub const fn ai_position(&self) -> Position {
+        self.unit.world().position()
+    }
+
+    pub fn set_ai_position(&mut self, position: Position) {
+        self.unit.world_mut().relocate(position);
+    }
+
+    pub const fn ai_guid(&self) -> ObjectGuid {
+        self.unit.world().object().guid()
+    }
+
+    pub const fn ai_entry(&self) -> u32 {
+        self.unit.world().object().entry()
+    }
+
+    pub const fn guid(&self) -> ObjectGuid {
+        self.ai_guid()
+    }
+
+    pub const fn entry(&self) -> u32 {
+        self.ai_entry()
+    }
+
+    pub fn ai_level(&self) -> u8 {
+        self.unit.data().level.clamp(0, u8::MAX as i32) as u8
+    }
+
+    pub const fn ai_current_health(&self) -> u64 {
+        self.unit.data().health
+    }
+
+    pub const fn ai_max_health(&self) -> u64 {
+        self.unit.data().max_health
+    }
+
+    pub fn ai_is_alive(&self) -> bool {
+        self.unit.is_alive()
+            && self.ai_current_health() > 0
+            && self.ai_ownership.state != CreatureAiState::Dead
+    }
+
+    pub fn enter_ai_combat(&mut self, attacker: ObjectGuid) {
+        self.ai_ownership.state = CreatureAiState::InCombat;
+        self.ai_ownership.combat_target = Some(attacker);
+        self.ai_ownership.move_target = None;
+        self.unit.set_attacking(Some(attacker));
+    }
+
+    pub fn reset_ai_combat(&mut self, now_ms: u64) {
+        self.ai_ownership.state = CreatureAiState::Returning;
+        self.ai_ownership.combat_target = None;
+        self.ai_ownership.move_target = Some(self.ai_ownership.home_position);
+        self.ai_ownership.move_start_ms = now_ms;
+        self.ai_ownership.death_time_ms = None;
+        self.ai_ownership.corpse_despawn_at_ms = None;
+        self.unit.set_attacking(None);
+        let max_health = self.unit.data().max_health;
+        self.unit.set_death_state(DeathState::Alive);
+        self.unit.set_health(max_health);
+    }
+
+    /// Apply damage and return `true` when this call killed the creature.
+    pub fn take_ai_damage(&mut self, damage: u32, now_ms: u64) -> bool {
+        if !self.ai_is_alive() {
+            return false;
+        }
+
+        let remaining = self.ai_current_health().saturating_sub(u64::from(damage));
+        self.unit.set_health(remaining);
+        self.last_damaged_time = now_ms.min(i64::MAX as u64) as i64;
+        if remaining == 0 {
+            self.mark_ai_dead(now_ms);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn mark_ai_dead(&mut self, now_ms: u64) {
+        self.ai_ownership.state = CreatureAiState::Dead;
+        self.ai_ownership.combat_target = None;
+        self.ai_ownership.move_target = None;
+        self.ai_ownership.death_time_ms = Some(now_ms);
+        self.unit.set_attacking(None);
+        self.unit.set_death_state(DeathState::Corpse);
+        self.unit.set_health(0);
+    }
+
+    pub fn respawn_ai(&mut self, now_ms: u64) {
+        self.ai_ownership.state = CreatureAiState::Idle;
+        self.ai_ownership.combat_target = None;
+        self.ai_ownership.move_target = None;
+        self.ai_ownership.move_start_ms = now_ms;
+        self.ai_ownership.last_swing_ms = now_ms;
+        self.ai_ownership.death_time_ms = None;
+        self.ai_ownership.corpse_despawn_at_ms = None;
+        self.ai_ownership.spline_id = self.ai_ownership.spline_id.saturating_add(1);
+        self.unit.set_death_state(DeathState::Alive);
+        self.unit.set_health(self.unit.data().max_health);
+        self.unit
+            .world_mut()
+            .relocate(self.ai_ownership.home_position);
+        self.unit.set_attacking(None);
+    }
+
+    pub fn can_ai_wander(&self) -> bool {
+        self.ai_ownership.npc_flags == 0 || (self.ai_ownership.npc_flags & 0x80) == 0
+    }
+
+    pub fn try_ai_aggro(&mut self, player_guid: ObjectGuid, player_pos: &Position) -> bool {
+        if !self.ai_is_alive() || self.ai_ownership.state == CreatureAiState::InCombat {
+            return false;
+        }
+
+        if self.ai_position().distance(player_pos) <= self.ai_ownership.aggro_radius {
+            self.enter_ai_combat(player_guid);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn should_ai_respawn(&self, now_ms: u64) -> bool {
+        self.ai_ownership
+            .death_time_ms
+            .map(|death_ms| {
+                now_ms
+                    >= death_ms
+                        .saturating_add(self.ai_ownership.respawn_time_secs.saturating_mul(1_000))
+            })
+            .unwrap_or(false)
+    }
+
+    pub fn set_ai_corpse_despawn_at(&mut self, corpse_despawn_at_ms: Option<u64>) {
+        self.ai_ownership.corpse_despawn_at_ms = corpse_despawn_at_ms;
+    }
+
+    pub fn set_ai_identity_runtime(
+        &mut self,
+        display_id: u32,
+        faction: u32,
+        npc_flags: u32,
+        unit_flags: u32,
+    ) {
+        self.ai_ownership.display_id = display_id;
+        self.ai_ownership.faction = faction;
+        self.ai_ownership.npc_flags = npc_flags;
+        self.ai_ownership.unit_flags = unit_flags;
+        self.set_display_id(display_id, true, None);
+        self.set_faction(faction);
+    }
+
+    pub fn configure_ai_runtime(
+        &mut self,
+        home_position: Position,
+        aggro_radius: f32,
+        wander_radius: f32,
+        respawn_time_secs: u64,
+    ) {
+        self.ai_ownership.home_position = home_position;
+        self.ai_ownership.aggro_radius = aggro_radius;
+        self.ai_ownership.wander_radius = wander_radius;
+        self.ai_ownership.respawn_time_secs = respawn_time_secs;
+    }
+
+    pub fn begin_ai_move(&mut self, dst: Position, now_ms: u64) {
+        let dist = self.ai_position().distance(&dst);
+        let duration_ms = ((dist / 2.5) * 1000.0) as u32;
+        self.ai_ownership.move_target = Some(dst);
+        self.ai_ownership.move_start_ms = now_ms;
+        self.ai_ownership.move_duration_ms = duration_ms.max(500);
+        self.ai_ownership.spline_id = self.ai_ownership.spline_id.saturating_add(1);
+    }
+
+    pub fn finish_ai_move(&mut self) {
+        if let Some(dst) = self.ai_ownership.move_target.take() {
+            self.unit.world_mut().relocate(dst);
+        }
+        self.ai_ownership.move_duration_ms = 0;
+    }
+
+    pub fn ai_movement_finished(&self, now_ms: u64) -> bool {
+        self.ai_ownership.move_target.is_none()
+            || now_ms.saturating_sub(self.ai_ownership.move_start_ms)
+                >= u64::from(self.ai_ownership.move_duration_ms)
+    }
+
+    // Small compatibility aliases for callers that need canonical values without
+    // reaching through Unit/WorldObject internals.
+    pub fn level(&self) -> u8 {
+        self.ai_level()
+    }
+
+    pub const fn current_health(&self) -> u64 {
+        self.ai_current_health()
+    }
+
+    pub const fn max_health(&self) -> u64 {
+        self.ai_max_health()
+    }
+
+    pub fn is_alive(&self) -> bool {
+        self.ai_is_alive()
+    }
+
+    pub const fn position(&self) -> Position {
+        self.ai_position()
     }
 
     pub const fn player_damage_req(&self) -> u32 {
@@ -1004,6 +1332,7 @@ impl Creature {
         set_native: bool,
         model: Option<CreatureModelDimensions>,
     ) {
+        self.ai_ownership.display_id = display_id;
         self.unit.set_display_id(display_id, set_native);
 
         if let Some(model) = model {
@@ -1014,6 +1343,7 @@ impl Creature {
     }
 
     pub fn set_faction(&mut self, faction: u32) {
+        self.ai_ownership.faction = faction;
         self.unit.set_faction(faction);
     }
 
@@ -1558,6 +1888,128 @@ mod tests {
         assert_eq!(creature.cleanup_before_delete_count(), 0);
         assert!(!creature.grid_unload_delete_requested());
         assert!(!creature.grid_unload_respawn_relocation_requested());
+    }
+
+    #[test]
+    fn creature_ai_ownership_derives_identity_health_and_position() {
+        let mut creature = Creature::new(false);
+        let guid = ObjectGuid::create_world_object(
+            wow_core::guid::HighGuid::Creature,
+            0,
+            1,
+            0,
+            0,
+            1,
+            12345,
+        );
+        let position = Position::new(1.0, 2.0, 3.0, 4.0);
+
+        creature.unit_mut().world_mut().object_mut().create(guid);
+        creature.unit_mut().world_mut().object_mut().set_entry(987);
+        creature.unit_mut().world_mut().relocate(position);
+        creature.unit_mut().set_level(22);
+        creature.unit_mut().set_max_health(40);
+        creature.unit_mut().set_health(35);
+        creature.set_ai_home_position(position);
+
+        assert_eq!(creature.ai_guid(), guid);
+        assert_eq!(creature.ai_entry(), 987);
+        assert_eq!(creature.ai_level(), 22);
+        assert_eq!(creature.ai_current_health(), 35);
+        assert_eq!(creature.ai_max_health(), 40);
+        assert_eq!(creature.ai_position(), position);
+        assert_eq!(creature.ai_home_position(), position);
+    }
+
+    #[test]
+    fn creature_ai_ownership_enter_and_reset_combat() {
+        let mut creature = Creature::new(false);
+        let home = Position::new(10.0, 20.0, 30.0, 1.0);
+        let attacker = ObjectGuid::create_player(1, 7);
+        creature.unit_mut().set_max_health(80);
+        creature.unit_mut().set_health(35);
+        creature.set_ai_home_position(home);
+
+        creature.enter_ai_combat(attacker);
+        assert_eq!(creature.ai_state(), CreatureAiState::InCombat);
+        assert_eq!(creature.ai_ownership().combat_target, Some(attacker));
+        assert_eq!(creature.unit().attacking(), Some(attacker));
+
+        creature.reset_ai_combat(55);
+        assert_eq!(creature.ai_state(), CreatureAiState::Returning);
+        assert_eq!(creature.ai_ownership().combat_target, None);
+        assert_eq!(creature.unit().attacking(), None);
+        assert_eq!(creature.ai_current_health(), 80);
+        assert_eq!(creature.ai_ownership().move_target, Some(home));
+        assert_eq!(creature.ai_ownership().move_start_ms, 55);
+    }
+
+    #[test]
+    fn creature_ai_ownership_damage_and_death_syncs_unit_state() {
+        let mut creature = Creature::new(false);
+        creature.unit_mut().set_max_health(40);
+        creature.unit_mut().set_health(40);
+        creature.ai_ownership_mut().respawn_time_secs = 30;
+
+        assert_eq!(creature.current_health(), 40);
+        assert_eq!(creature.ai_state(), CreatureAiState::Idle);
+        assert!(!creature.take_ai_damage(15, 10));
+        assert_eq!(creature.current_health(), 25);
+
+        assert!(creature.take_ai_damage(100, 20));
+        assert_eq!(creature.current_health(), 0);
+        assert_eq!(creature.unit().death_state(), DeathState::Corpse);
+        assert_eq!(creature.ai_state(), CreatureAiState::Dead);
+        assert_eq!(creature.ai_ownership().death_time_ms, Some(20));
+        assert!(!creature.should_ai_respawn(29_999));
+        assert!(creature.should_ai_respawn(30_020));
+    }
+
+    #[test]
+    fn creature_ai_ownership_respawn_aggro_and_corpse_timer() {
+        let mut creature = Creature::new(false);
+        let home = Position::new(10.0, 20.0, 30.0, 1.0);
+        let attacker = ObjectGuid::create_player(1, 7);
+        creature.unit_mut().set_max_health(80);
+        creature.unit_mut().set_health(80);
+        creature.set_ai_home_position(home);
+        creature.set_ai_position(Position::new(11.0, 20.0, 30.0, 1.0));
+        creature.ai_ownership_mut().aggro_radius = 5.0;
+
+        assert!(!creature.try_ai_aggro(attacker, &Position::new(30.0, 20.0, 30.0, 0.0)));
+        assert!(creature.try_ai_aggro(attacker, &Position::new(12.0, 20.0, 30.0, 0.0)));
+        assert_eq!(creature.ai_state(), CreatureAiState::InCombat);
+
+        creature.mark_ai_dead(100);
+        creature.set_ai_corpse_despawn_at(Some(130));
+        assert_eq!(creature.ai_ownership().corpse_despawn_at_ms, Some(130));
+        creature.respawn_ai(200);
+        assert!(creature.is_alive());
+        assert_eq!(creature.current_health(), 80);
+        assert_eq!(creature.position(), home);
+        assert_eq!(creature.ai_state(), CreatureAiState::Idle);
+        assert_eq!(creature.ai_ownership().combat_target, None);
+        assert_eq!(creature.ai_ownership().corpse_despawn_at_ms, None);
+    }
+
+    #[test]
+    fn creature_ai_ownership_wander_and_packet_metadata_are_canonical() {
+        let mut creature = Creature::new(false);
+        assert!(creature.can_ai_wander());
+        creature.ai_ownership_mut().npc_flags = 0x80;
+        assert!(!creature.can_ai_wander());
+
+        creature.set_display_id(1234, true, None);
+        creature.set_faction(35);
+        creature.ai_ownership_mut().unit_flags = 0x20;
+        creature.ai_ownership_mut().min_damage = 5;
+        creature.ai_ownership_mut().max_damage = 9;
+
+        assert_eq!(creature.ai_ownership().display_id, 1234);
+        assert_eq!(creature.ai_ownership().faction, 35);
+        assert_eq!(creature.ai_ownership().unit_flags, 0x20);
+        assert_eq!(creature.ai_ownership().min_damage, 5);
+        assert_eq!(creature.ai_ownership().max_damage, 9);
     }
 
     #[test]
