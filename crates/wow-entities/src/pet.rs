@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use wow_constants::PowerType;
 use wow_core::ObjectGuid;
 
 use crate::{
@@ -191,6 +192,10 @@ impl Pet {
 
     pub fn creature_mut(&mut self) -> &mut Creature {
         &mut self.creature
+    }
+
+    pub fn get_power_index(&self, power: PowerType) -> Option<usize> {
+        self.creature.get_power_index(power)
     }
 
     pub const fn unit_type_mask(&self) -> u32 {
@@ -524,6 +529,19 @@ mod tests {
 
         let hunter = Pet::new(owner_guid(), PetType::Hunter);
         assert!((hunter.unit_type_mask() & UNIT_MASK_HUNTER_PET) != 0);
+    }
+
+    #[test]
+    fn pet_power_index_delegates_to_creature_bridge() {
+        let mut pet = Pet::new(owner_guid(), PetType::Hunter);
+
+        assert_eq!(pet.get_power_index(PowerType::Mana), Some(0));
+        assert_eq!(pet.get_power_index(PowerType::ComboPoints), Some(2));
+        assert_eq!(pet.get_power_index(PowerType::Energy), None);
+
+        pet.creature_mut().set_power_type(PowerType::Focus);
+        assert_eq!(pet.get_power_index(PowerType::Focus), Some(0));
+        assert_eq!(pet.get_power_index(PowerType::Mana), None);
     }
 
     #[test]

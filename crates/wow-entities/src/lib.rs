@@ -21,6 +21,7 @@ mod scene_object;
 mod totem;
 mod transport;
 mod unit;
+mod unit_subsystems;
 mod update_fields;
 mod vehicle;
 mod world_object;
@@ -150,18 +151,18 @@ pub use player::{
     PLAYER_DATA_NUM_BANK_SLOTS_BIT, PLAYER_DATA_PARENT_BIT, PLAYER_DATA_VISIBLE_ITEMS_FIRST_BIT,
     PLAYER_DATA_VISIBLE_ITEMS_PARENT_BIT, PLAYER_SLOT_END, Player, PlayerBagStorage,
     PlayerDataUpdate, PlayerDataValues, PlayerEnchantDuration, PlayerEnchantDurationItemRef,
-    PlayerEnchantTimeUpdate, PlayerInventoryStorage, PlayerItemTimeUpdate, PlayerStorageError,
-    PlayerValuesUpdate, REAGENT_BAG_SLOT_END, REAGENT_BAG_SLOT_START, RemoveArenaEnchantmentAction,
-    SKILL_MAIL, SKILL_PLATE_MAIL, SendNewItemArgs, SendNewItemDelivery, SendNewItemDisplayText,
-    SendNewItemInstancePlan, SendNewItemModifier, SendNewItemPlan, SendNewItemTemplateRef,
-    SkillEnchantmentItemRef, SkillEnchantmentTemplateRef, SocketedGemUniqueRef,
-    SoulboundTradeableItemRef, SwapBagItemMove, SwapBagItemRef, SwapBagRef,
-    SwapItemBagExchangePlan, SwapItemBagExchangeResult, SwapItemEmptyDestinationPlan,
-    SwapItemEmptyDestinationResult, SwapItemErrorItemOrder, SwapItemMergeFillPlan,
-    SwapItemMergeFillResult, SwapItemMissingPhase, SwapItemOrchestrationPlan,
-    SwapItemOrchestrationResult, SwapItemPreflightItem, SwapItemPreflightPlan,
-    SwapItemPreflightResult, SwapItemRealSwapExecutionPlan, SwapItemRealSwapTarget,
-    SwapItemRealSwapValidationPlan, SwapItemRealSwapValidationResult,
+    PlayerEnchantTimeUpdate, PlayerInventoryStorage, PlayerItemTimeUpdate,
+    PlayerPowerIndexResolver, PlayerStorageError, PlayerValuesUpdate, REAGENT_BAG_SLOT_END,
+    REAGENT_BAG_SLOT_START, RemoveArenaEnchantmentAction, SKILL_MAIL, SKILL_PLATE_MAIL,
+    SendNewItemArgs, SendNewItemDelivery, SendNewItemDisplayText, SendNewItemInstancePlan,
+    SendNewItemModifier, SendNewItemPlan, SendNewItemTemplateRef, SkillEnchantmentItemRef,
+    SkillEnchantmentTemplateRef, SocketedGemUniqueRef, SoulboundTradeableItemRef, SwapBagItemMove,
+    SwapBagItemRef, SwapBagRef, SwapItemBagExchangePlan, SwapItemBagExchangeResult,
+    SwapItemEmptyDestinationPlan, SwapItemEmptyDestinationResult, SwapItemErrorItemOrder,
+    SwapItemMergeFillPlan, SwapItemMergeFillResult, SwapItemMissingPhase,
+    SwapItemOrchestrationPlan, SwapItemOrchestrationResult, SwapItemPreflightItem,
+    SwapItemPreflightPlan, SwapItemPreflightResult, SwapItemRealSwapExecutionPlan,
+    SwapItemRealSwapTarget, SwapItemRealSwapValidationPlan, SwapItemRealSwapValidationResult,
     SwapItemRealSwapValidationSubject, TEAM_ALLIANCE_ID, TEAM_HORDE_ID, TEAM_OTHER,
     TitanGripPenaltyAction, UpdateEnchantTimeAction, UpdateItemDurationAction,
     UpdateSkillEnchantmentAction, UpdateSkillEnchantmentReason, VisibleItemValues, is_bag_pos,
@@ -198,6 +199,12 @@ pub use unit::{
     UNIT_DATA_PLAYER_CLASS_ID_BIT, UNIT_DATA_POWER_FIRST_BIT, UNIT_DATA_POWER_PARENT_BIT,
     UNIT_DATA_RACE_BIT, UNIT_DATA_SEX_BIT, UNIT_DATA_TARGET_BIT, Unit, UnitDataUpdate,
     UnitDataValues, UnitValuesUpdate,
+};
+pub use unit_subsystems::{
+    AiSubsystem, AppliedAuraRef, AuraRef, AuraSubsystem, CURRENT_FIRST_NON_MELEE_SPELL,
+    CURRENT_MAX_SPELL, CombatSubsystem, ControlSubsystem, CurrentSpellRef, CurrentSpellSlot,
+    MotionSubsystem, MoveSplineState, MovementGeneratorKind, OwnedAuraRef, SpellChargeState,
+    SpellCooldown, SpellHistory, SpellSubsystem, UnitSubsystems, VehicleKitState, VehicleSubsystem,
 };
 pub use update_fields::{
     ACTIVE_PLAYER_DATA_BITS, AREA_TRIGGER_DATA_BITS, CONTAINER_DATA_BITS, CONVERSATION_DATA_BITS,

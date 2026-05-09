@@ -15,13 +15,13 @@ use crate::{
     EQUIPMENT_SLOT_HEAD, EQUIPMENT_SLOT_LEGS, EQUIPMENT_SLOT_MAINHAND, EQUIPMENT_SLOT_NECK,
     EQUIPMENT_SLOT_OFFHAND, EQUIPMENT_SLOT_SHOULDERS, EQUIPMENT_SLOT_TABARD,
     EQUIPMENT_SLOT_TRINKET1, EQUIPMENT_SLOT_TRINKET2, EQUIPMENT_SLOT_WAIST, EQUIPMENT_SLOT_WRISTS,
-    INVENTORY_SLOT_BAG_0, Item, ItemStorageTemplate, MAX_BAG_SIZE, MAX_ENCHANTMENT_SLOT, NULL_SLOT,
-    ObjectDataUpdate, PROFESSION_SLOT_COOKING_GEAR1, PROFESSION_SLOT_COOKING_TOOL,
-    PROFESSION_SLOT_END, PROFESSION_SLOT_FISHING_TOOL, PROFESSION_SLOT_MAX_COUNT,
-    PROFESSION_SLOT_PROFESSION1_GEAR1, PROFESSION_SLOT_PROFESSION1_GEAR2,
-    PROFESSION_SLOT_PROFESSION1_TOOL, PROFESSION_SLOT_PROFESSION2_GEAR1,
-    PROFESSION_SLOT_PROFESSION2_GEAR2, PROFESSION_SLOT_START, Unit, UnitDataUpdate, UpdateMask,
-    item_can_go_into_bag,
+    INVENTORY_SLOT_BAG_0, Item, ItemStorageTemplate, MAX_BAG_SIZE, MAX_ENCHANTMENT_SLOT,
+    MAX_POWERS, MAX_POWERS_PER_CLASS, NULL_SLOT, ObjectDataUpdate, PROFESSION_SLOT_COOKING_GEAR1,
+    PROFESSION_SLOT_COOKING_TOOL, PROFESSION_SLOT_END, PROFESSION_SLOT_FISHING_TOOL,
+    PROFESSION_SLOT_MAX_COUNT, PROFESSION_SLOT_PROFESSION1_GEAR1,
+    PROFESSION_SLOT_PROFESSION1_GEAR2, PROFESSION_SLOT_PROFESSION1_TOOL,
+    PROFESSION_SLOT_PROFESSION2_GEAR1, PROFESSION_SLOT_PROFESSION2_GEAR2, PROFESSION_SLOT_START,
+    Unit, UnitDataUpdate, UpdateMask, item_can_go_into_bag,
     update_fields::{
         ACTIVE_PLAYER_DATA_BITS, PLAYER_DATA_BITS, TYPEID_ACTIVE_PLAYER, TYPEID_PLAYER,
     },
@@ -38,6 +38,41 @@ pub const CLASS_SHAMAN: u8 = 7;
 pub const SKILL_PLATE_MAIL: u32 = 293;
 pub const SKILL_MAIL: u32 = 413;
 pub const NULL_BAG: u8 = 0;
+
+pub trait PlayerPowerIndexResolver {
+    fn power_index_by_class(&self, power: PowerType, class_id: u8) -> Option<usize>;
+}
+
+fn representable_power_types() -> [PowerType; MAX_POWERS] {
+    [
+        PowerType::Mana,
+        PowerType::Rage,
+        PowerType::Focus,
+        PowerType::Energy,
+        PowerType::Happiness,
+        PowerType::Runes,
+        PowerType::RunicPower,
+        PowerType::SoulShards,
+        PowerType::LunarPower,
+        PowerType::HolyPower,
+        PowerType::AlternatePower,
+        PowerType::Maelstrom,
+        PowerType::Chi,
+        PowerType::Insanity,
+        PowerType::ComboPoints,
+        PowerType::DemonicFury,
+        PowerType::ArcaneCharges,
+        PowerType::Fury,
+        PowerType::Pain,
+        PowerType::Essence,
+        PowerType::RuneBlood,
+        PowerType::RuneFrost,
+        PowerType::RuneUnholy,
+        PowerType::AlternateQuest,
+        PowerType::AlternateEncounter,
+        PowerType::AlternateMount,
+    ]
+}
 
 pub const PLAYER_DATA_PARENT_BIT: usize = 0;
 pub const PLAYER_DATA_LOOT_TARGET_GUID_BIT: usize = 6;
@@ -6672,6 +6707,23 @@ impl Player {
         self.unit.set_power_index(power, index);
     }
 
+    pub fn get_power_index(&self, power: PowerType) -> Option<usize> {
+        self.unit.get_power_index(power)
+    }
+
+    pub fn configure_power_indices_for_class(&mut self, resolver: &impl PlayerPowerIndexResolver) {
+        let class_id = self.unit.data().class_id;
+        for power in representable_power_types() {
+            self.unit.set_power_index(power, None);
+        }
+        for power in representable_power_types() {
+            let index = resolver
+                .power_index_by_class(power, class_id)
+                .filter(|index| *index < MAX_POWERS_PER_CLASS);
+            self.unit.set_power_index(power, index);
+        }
+    }
+
     pub fn changed_object_type_mask(&self, include_active_player: bool) -> u32 {
         self.unit.changed_object_type_mask()
             | if self.player_data_changes.is_any_set() {
@@ -7318,6 +7370,42 @@ mod tests {
         item.object_mut().create(ObjectGuid::create_item(1, low));
         item.object_mut().set_entry(entry);
         item
+    }
+
+    struct StubPowerResolver;
+
+    impl PlayerPowerIndexResolver for StubPowerResolver {
+        fn power_index_by_class(&self, power: PowerType, class_id: u8) -> Option<usize> {
+            if class_id != CLASS_PALADIN {
+                return None;
+            }
+            match power {
+                PowerType::Mana => Some(0),
+                PowerType::Energy => Some(3),
+                PowerType::ComboPoints => Some(9),
+                PowerType::AlternateMount => Some(MAX_POWERS_PER_CLASS),
+                _ => None,
+            }
+        }
+    }
+
+    #[test]
+    fn player_power_index_resolver_configures_runtime_mapping_without_update_masks() {
+        let mut player = Player::new(None, false);
+        player.set_race_class_gender(1, CLASS_PALADIN, Gender::Male);
+        player.set_power_index(PowerType::Focus, Some(4));
+        player.clear_data_changes();
+
+        player.configure_power_indices_for_class(&StubPowerResolver);
+
+        assert_eq!(player.get_power_index(PowerType::Mana), Some(0));
+        assert_eq!(player.get_power_index(PowerType::Energy), Some(3));
+        assert_eq!(player.get_power_index(PowerType::ComboPoints), Some(9));
+        assert_eq!(player.get_power_index(PowerType::Focus), None);
+        assert_eq!(player.get_power_index(PowerType::AlternateMount), None);
+        assert!(!player.unit().unit_data_changes_mask().is_any_set());
+        assert!(!player.player_data_changes_mask().is_any_set());
+        assert!(!player.active_player_data_changes_mask().is_any_set());
     }
 
     fn can_bank_args<'a>(

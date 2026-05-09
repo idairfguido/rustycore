@@ -2,7 +2,7 @@ use wow_constants::{DeathState, Gender, PowerType, TypeId, TypeMask, WeaponAttac
 use wow_core::ObjectGuid;
 
 use crate::{
-    ObjectDataUpdate, UpdateMask, WorldObject,
+    ObjectDataUpdate, UnitSubsystems, UpdateMask, WorldObject,
     update_fields::{TYPEID_UNIT, UNIT_DATA_BITS},
 };
 
@@ -120,12 +120,12 @@ pub struct Unit {
     unit_data_changes: UpdateMask,
     death_state: DeathState,
     unit_state: u32,
-    attacking: Option<ObjectGuid>,
     base_attack_speed: [u32; MAX_ATTACK],
     mod_attack_speed_pct: [f32; MAX_ATTACK],
     weapon_damage: [[f32; 2]; MAX_ATTACK],
     speed_rate: [f32; MAX_MOVE_TYPE],
     power_index: [Option<usize>; MAX_POWERS],
+    subsystems: UnitSubsystems,
 }
 
 impl Unit {
@@ -146,12 +146,12 @@ impl Unit {
             unit_data_changes: UpdateMask::new(UNIT_DATA_BITS),
             death_state: DeathState::Alive,
             unit_state: 0,
-            attacking: None,
             base_attack_speed: [0; MAX_ATTACK],
             mod_attack_speed_pct: [1.0; MAX_ATTACK],
             weapon_damage: [[BASE_MINDAMAGE, BASE_MAXDAMAGE]; MAX_ATTACK],
             speed_rate: [1.0; MAX_MOVE_TYPE],
             power_index: [None; MAX_POWERS],
+            subsystems: UnitSubsystems::default(),
         };
         unit.set_power_index(PowerType::Mana, Some(0));
         unit
@@ -206,11 +206,19 @@ impl Unit {
     }
 
     pub const fn attacking(&self) -> Option<ObjectGuid> {
-        self.attacking
+        self.subsystems.combat.attacking_guid
     }
 
     pub fn set_attacking(&mut self, victim: Option<ObjectGuid>) {
-        self.attacking = victim;
+        self.subsystems.combat.set_attacking(victim);
+    }
+
+    pub const fn subsystems(&self) -> &UnitSubsystems {
+        &self.subsystems
+    }
+
+    pub fn subsystems_mut(&mut self) -> &mut UnitSubsystems {
+        &mut self.subsystems
     }
 
     pub const fn base_attack_speed(&self) -> [u32; MAX_ATTACK] {
@@ -492,6 +500,10 @@ fn power_slot(power: PowerType) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        AppliedAuraRef, AuraRef, CurrentSpellRef, CurrentSpellSlot, MovementGeneratorKind,
+        OwnedAuraRef,
+    };
 
     #[test]
     fn unit_constructor_matches_cpp_base_state() {
@@ -515,6 +527,100 @@ mod tests {
         assert_eq!(unit.mod_attack_speed_pct(), [1.0; MAX_ATTACK]);
         assert_eq!(unit.weapon_damage(WeaponAttackType::BaseAttack), [1.0, 2.0]);
         assert_eq!(unit.speed_rate(), [1.0; MAX_MOVE_TYPE]);
+        assert!(unit.subsystems().auras.owned_auras.is_empty());
+        assert!(unit.subsystems().auras.applied_auras.is_empty());
+        assert!(unit.subsystems().spells.current_spells.is_empty());
+        assert!(unit.subsystems().spells.history.cooldowns.is_empty());
+        assert!(unit.subsystems().combat.threat.is_empty());
+        assert!(unit.subsystems().combat.attackers.is_empty());
+        assert_eq!(unit.subsystems().combat.attacking_guid, None);
+        assert!(!unit.subsystems().combat.combat_disallowed);
+        assert_eq!(
+            unit.subsystems().motion.current_generator,
+            MovementGeneratorKind::Idle
+        );
+        assert!(!unit.subsystems().motion.paused);
+        assert!(!unit.subsystems().motion.spline.enabled);
+        assert_eq!(unit.subsystems().control.charmer_guid, None);
+        assert_eq!(unit.subsystems().vehicle.vehicle_guid, None);
+        assert_eq!(unit.subsystems().ai.active_ai, None);
+        assert!(!unit.subsystems().ai.locked);
+        assert!(!unit.unit_data_changes_mask().is_any_set());
+    }
+
+    #[test]
+    fn attacking_uses_combat_subsystem_as_single_source_of_truth() {
+        let mut unit = Unit::new(true);
+        let victim = ObjectGuid::new(1, 10);
+        let other_victim = ObjectGuid::new(1, 11);
+
+        unit.set_attacking(Some(victim));
+        assert_eq!(unit.attacking(), Some(victim));
+        assert_eq!(unit.subsystems().combat.attacking_guid, Some(victim));
+
+        unit.subsystems_mut()
+            .combat
+            .set_attacking(Some(other_victim));
+        assert_eq!(unit.attacking(), Some(other_victim));
+
+        unit.subsystems_mut().combat.clear_attackers();
+        assert_eq!(unit.attacking(), None);
+
+        unit.set_attacking(Some(victim));
+        unit.subsystems_mut().clear_runtime_state();
+        assert_eq!(unit.attacking(), None);
+    }
+
+    #[test]
+    fn unit_subsystem_helpers_do_not_mark_update_fields() {
+        let mut unit = Unit::new(true);
+        let caster = ObjectGuid::new(1, 1);
+        let target = ObjectGuid::new(1, 2);
+
+        unit.clear_unit_data_changes();
+        let owned = OwnedAuraRef::new(17, caster, None);
+        let applied = AppliedAuraRef::new(17, caster, 3, 0x7);
+        unit.subsystems_mut().auras.add_owned(owned);
+        unit.subsystems_mut().auras.add_applied(applied);
+        unit.subsystems_mut()
+            .auras
+            .set_visible(3, AuraRef::new(17, caster));
+        unit.subsystems_mut().spells.set_current_spell(
+            CurrentSpellSlot::Channeled,
+            CurrentSpellRef::new(42, Some(caster), None),
+        );
+        unit.subsystems_mut()
+            .spells
+            .history
+            .set_cooldown(42, 100, 1_500);
+        unit.subsystems_mut().combat.add_threat(target, 2.0);
+        unit.subsystems_mut().motion.start_spline(9, 500);
+        unit.subsystems_mut().control.set_charmer(caster, true);
+        unit.subsystems_mut().vehicle.enter_vehicle(target, Some(0));
+        unit.subsystems_mut().ai.push("TestAI");
+
+        assert!(unit.subsystems().auras.has_owned(owned));
+        assert!(unit.subsystems().auras.has_applied(applied));
+        assert_eq!(
+            unit.subsystems()
+                .spells
+                .current_spell(CurrentSpellSlot::Channeled)
+                .map(|spell| spell.spell_id),
+            Some(42)
+        );
+        assert_eq!(
+            unit.subsystems()
+                .spells
+                .history
+                .cooldown(42)
+                .map(|cooldown| cooldown.duration_ms),
+            Some(1_500)
+        );
+        assert!(unit.subsystems().combat.is_threatened_by(target));
+        assert!(unit.subsystems().motion.spline.enabled);
+        assert!(unit.subsystems().control.is_charmed());
+        assert_eq!(unit.subsystems().vehicle.vehicle_guid, Some(target));
+        assert_eq!(unit.subsystems().ai.active_ai.as_deref(), Some("TestAI"));
         assert!(!unit.unit_data_changes_mask().is_any_set());
     }
 
