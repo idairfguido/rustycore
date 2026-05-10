@@ -3420,9 +3420,10 @@ impl WorldSession {
                         })
                     },
                     |item| self.item_drop_rate_like_cpp(item.item_id),
-                    |context, _looter| {
-                        self.represented_creature_loot_item_allowed_like_cpp(
+                    |context, looter| {
+                        self.represented_creature_loot_item_allowed_for_player_like_cpp(
                             context,
+                            looter,
                             &condition_rows,
                             &condition_references,
                             &addon_metadata,
@@ -3807,12 +3808,33 @@ impl WorldSession {
         condition_references: &HashMap<u32, Vec<LootConditionRowLikeCpp>>,
         addon_metadata: &HashMap<u32, ItemTemplateAddonLootMetadataLikeCpp>,
     ) -> bool {
+        self.represented_creature_loot_item_allowed_for_player_like_cpp(
+            context,
+            self.player_guid.unwrap_or(ObjectGuid::EMPTY),
+            condition_rows,
+            condition_references,
+            addon_metadata,
+        )
+    }
+
+    fn represented_creature_loot_item_allowed_for_player_like_cpp(
+        &self,
+        context: LootStoreItemContext,
+        player_guid: ObjectGuid,
+        condition_rows: &HashMap<LootConditionId, Vec<LootConditionRowLikeCpp>>,
+        condition_references: &HashMap<u32, Vec<LootConditionRowLikeCpp>>,
+        addon_metadata: &HashMap<u32, ItemTemplateAddonLootMetadataLikeCpp>,
+    ) -> bool {
         let Some(template) = self.item_storage_template(context.item.item_id) else {
+            return false;
+        };
+        let Some(player_context) = self.represented_loot_player_context_like_cpp(player_guid)
+        else {
             return false;
         };
 
         let flags2 = self.item_template_flags2_like_cpp(context.item.item_id);
-        if represented_item_faction_flags_block_player_like_cpp(flags2, self.player_race) {
+        if represented_item_faction_flags_block_player_like_cpp(flags2, player_context.race) {
             return false;
         }
 
@@ -3829,7 +3851,12 @@ impl WorldSession {
                 .map(Vec::as_slice)
                 .unwrap_or(&[]),
             condition_references,
-            |condition| self.evaluate_creature_loot_condition_like_cpp_representable(condition),
+            |condition| {
+                self.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                    condition,
+                    player_context,
+                )
+            },
         ) {
             return false;
         }
@@ -3838,11 +3865,60 @@ impl WorldSession {
             .get(&context.item.item_id)
             .copied()
             .unwrap_or_default();
-        self.item_loot_quest_status_allows_like_cpp(
+        self.item_loot_quest_status_allows_for_player_like_cpp(
             context.item.item_id,
             context.item.needs_quest,
             addon,
+            player_context,
         ) && template.max_stack_size != 0
+    }
+
+    fn item_loot_quest_status_allows_for_player_like_cpp(
+        &self,
+        item_id: u32,
+        needs_quest: bool,
+        addon_metadata: ItemTemplateAddonLootMetadataLikeCpp,
+        player_context: RepresentedLootPlayerContext,
+    ) -> bool {
+        if player_context.is_current {
+            return self.item_loot_quest_status_allows_like_cpp(
+                item_id,
+                needs_quest,
+                addon_metadata,
+            );
+        }
+
+        if addon_metadata.ignores_quest_status() {
+            return true;
+        }
+
+        let start_quest_id = self.item_template_start_quest_id(item_id).unwrap_or(0);
+        !needs_quest && start_quest_id == 0
+    }
+
+    fn represented_loot_player_context_like_cpp(
+        &self,
+        player_guid: ObjectGuid,
+    ) -> Option<RepresentedLootPlayerContext> {
+        if Some(player_guid) == self.player_guid {
+            return Some(RepresentedLootPlayerContext {
+                race: self.player_race,
+                class: self.player_class,
+                gender: self.player_gender,
+                level: self.player_level,
+                is_current: true,
+            });
+        }
+
+        let registry = self.player_registry()?;
+        let player = registry.get(&player_guid)?;
+        Some(RepresentedLootPlayerContext {
+            race: player.race,
+            class: player.class,
+            gender: player.sex,
+            level: player.level,
+            is_current: false,
+        })
     }
 
     fn item_template_flags2_like_cpp(&self, item_id: u32) -> Option<u32> {
@@ -3969,13 +4045,17 @@ impl WorldSession {
             .fold(0_u32, |total, item| total.saturating_add(item.count()))
     }
 
-    fn evaluate_creature_loot_condition_like_cpp_representable(
+    fn evaluate_creature_loot_condition_for_player_like_cpp_representable(
         &self,
         condition: &LootConditionRowLikeCpp,
+        player_context: RepresentedLootPlayerContext,
     ) -> Option<bool> {
         match condition.condition_type_or_reference {
             0 => Some(true),
             2 => {
+                if !player_context.is_current {
+                    return None;
+                }
                 if condition.value3 != 0 {
                     return None;
                 }
@@ -3983,53 +4063,90 @@ impl WorldSession {
                     self.direct_inventory_item_count_like_cpp(condition.value1) >= condition.value2,
                 )
             }
-            6 => Some(player_team_for_race_cpp_representable(self.player_race) == condition.value1),
-            8 => Some(self.rewarded_quests.contains(&condition.value1)),
-            9 => Some(
-                self.player_quests
-                    .get(&condition.value1)
-                    .is_some_and(|status| status.status == 1),
+            6 => Some(
+                player_team_for_race_cpp_representable(player_context.race) == condition.value1,
             ),
-            14 => Some(
-                !self.player_quests.contains_key(&condition.value1)
-                    && !self.rewarded_quests.contains(&condition.value1),
-            ),
+            8 => {
+                if !player_context.is_current {
+                    return None;
+                }
+                Some(self.rewarded_quests.contains(&condition.value1))
+            }
+            9 => {
+                if !player_context.is_current {
+                    return None;
+                }
+                Some(
+                    self.player_quests
+                        .get(&condition.value1)
+                        .is_some_and(|status| status.status == 1),
+                )
+            }
+            14 => {
+                if !player_context.is_current {
+                    return None;
+                }
+                Some(
+                    !self.player_quests.contains_key(&condition.value1)
+                        && !self.rewarded_quests.contains(&condition.value1),
+                )
+            }
             15 => Some(
-                player_class_mask_like_cpp(self.player_class)
+                player_class_mask_like_cpp(player_context.class)
                     .is_some_and(|mask| mask & condition.value1 != 0),
             ),
             16 => Some(
-                player_race_mask_like_cpp(self.player_race)
+                player_race_mask_like_cpp(player_context.race)
                     .is_some_and(|mask| mask & condition.value1 != 0),
             ),
-            20 => Some(u32::from(self.player_gender) == condition.value1),
-            25 => i32::try_from(condition.value1)
-                .ok()
-                .map(|spell_id| self.known_spells.contains(&spell_id)),
+            20 => Some(u32::from(player_context.gender) == condition.value1),
+            25 => {
+                if !player_context.is_current {
+                    return None;
+                }
+                i32::try_from(condition.value1)
+                    .ok()
+                    .map(|spell_id| self.known_spells.contains(&spell_id))
+            }
             27 => condition_compare_values_like_cpp(
                 condition.value2,
-                u32::from(self.player_level),
+                u32::from(player_context.level),
                 condition.value1,
             ),
-            28 => Some(
-                self.player_quests
-                    .get(&condition.value1)
-                    .is_some_and(|status| status.status == 2)
-                    && !self.rewarded_quests.contains(&condition.value1),
-            ),
-            47 => Some(
-                player_quest_status_mask_like_cpp(
+            28 => {
+                if !player_context.is_current {
+                    return None;
+                }
+                Some(
                     self.player_quests
                         .get(&condition.value1)
-                        .map(|status| status.status),
-                    self.rewarded_quests.contains(&condition.value1),
-                ) & condition.value2
-                    != 0,
-            ),
-            48 => Some(
-                self.player_quest_objective_progress_like_cpp(condition.value1)
-                    == Some(condition.value3 as i32),
-            ),
+                        .is_some_and(|status| status.status == 2)
+                        && !self.rewarded_quests.contains(&condition.value1),
+                )
+            }
+            47 => {
+                if !player_context.is_current {
+                    return None;
+                }
+                Some(
+                    player_quest_status_mask_like_cpp(
+                        self.player_quests
+                            .get(&condition.value1)
+                            .map(|status| status.status),
+                        self.rewarded_quests.contains(&condition.value1),
+                    ) & condition.value2
+                        != 0,
+                )
+            }
+            48 => {
+                if !player_context.is_current {
+                    return None;
+                }
+                Some(
+                    self.player_quest_objective_progress_like_cpp(condition.value1)
+                        == Some(condition.value3 as i32),
+                )
+            }
             CONDITION_OBJECT_ENTRY_GUID_LIKE_CPP => {
                 Some(condition.value1 == TYPEID_PLAYER_LIKE_CPP)
             }
@@ -4801,6 +4918,15 @@ fn generate_legacy_creature_coin_fallback_like_cpp(creature_guid: ObjectGuid, le
 struct ItemTemplateAddonLootMetadataLikeCpp {
     flags_cu: u32,
     quest_log_item_id: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RepresentedLootPlayerContext {
+    race: u8,
+    class: u8,
+    gender: u8,
+    level: u8,
+    is_current: bool,
 }
 
 impl ItemTemplateAddonLootMetadataLikeCpp {
@@ -5626,7 +5752,7 @@ mod tests {
         LOOT_SLOT_TYPE_ROLL_ONGOING_LIKE_CPP, LootStoreRandomProperties,
         ROLL_ALL_TYPE_NO_DISENCHANT_LIKE_CPP, ROLL_FLAG_TYPE_NEED_LIKE_CPP,
         ROLL_VOTE_GREED_LIKE_CPP, ROLL_VOTE_NEED_LIKE_CPP, ROLL_VOTE_NOT_EMITTED_YET_LIKE_CPP,
-        ROLL_VOTE_NOT_VALID_LIKE_CPP, ROLL_VOTE_PASS_LIKE_CPP,
+        ROLL_VOTE_NOT_VALID_LIKE_CPP, ROLL_VOTE_PASS_LIKE_CPP, RepresentedLootPlayerContext,
         assign_represented_personal_loot_items_like_cpp,
         generated_creature_loot_item_to_entry_like_cpp, loot_is_looted_like_cpp, loot_item_context,
         loot_store_data_can_stack_with_item, loot_type_for_client_like_cpp,
@@ -5636,8 +5762,8 @@ mod tests {
     };
     use crate::session::{RepresentedGameObjectUseEffect, RepresentedLootRollCriteriaEvent};
     use rand::{SeedableRng, rngs::StdRng};
-    use std::sync::Arc;
     use std::time::{Duration, Instant};
+    use std::{collections::HashMap, sync::Arc};
     use wow_ai::CreatureAI;
     use wow_constants::{
         InventoryResult, InventoryType, ItemBondingType, ItemClass, ItemContext, ItemFlags2,
@@ -5657,7 +5783,10 @@ mod tests {
         GO_DYNFLAG_LO_NO_INTERACT, GameObjectLootSource, GatheringNodeUseSource, GoState, Item,
         ItemCreateInfo, LootState, MAX_ITEM_SPELLS,
     };
-    use wow_loot::{GeneratedLootItem, LOOT_SLOT_TYPE_OWNER_LIKE_CPP, LootStoreItem};
+    use wow_loot::{
+        GeneratedLootItem, LOOT_SLOT_TYPE_OWNER_LIKE_CPP, LootConditionRowLikeCpp, LootStoreItem,
+        loot_conditions_allow_player_with_references_like_cpp_representable,
+    };
     use wow_network::{
         GroupInfo, GroupRegistry, LootDropRatesLikeCpp, LootRollVoteCommand, PendingInvites,
         PlayerBroadcastInfo, PlayerRegistry, SessionCommand,
@@ -6238,6 +6367,111 @@ mod tests {
             display_id: 49,
             visible_items: [(0, 0, 0); 19],
         }
+    }
+
+    fn loot_condition(
+        condition_type_or_reference: i32,
+        value1: u32,
+        value2: u32,
+        value3: u32,
+    ) -> LootConditionRowLikeCpp {
+        LootConditionRowLikeCpp {
+            else_group: 0,
+            condition_type_or_reference,
+            condition_target: 0,
+            value1,
+            value2,
+            value3,
+            string_value1: String::new(),
+            negative: false,
+            script_name: String::new(),
+        }
+    }
+
+    #[test]
+    fn represented_personal_loot_remote_context_uses_registry_fields_like_cpp() {
+        let (session, _) = make_session_with_send_capacity(1);
+        let remote_context = RepresentedLootPlayerContext {
+            race: 1,
+            class: 1,
+            gender: 0,
+            level: 80,
+            is_current: false,
+        };
+
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(6, 469, 0, 0),
+                remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(15, 1, 0, 0),
+                remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(16, 1, 0, 0),
+                remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(20, 0, 0, 0),
+                remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(27, 70, 3, 0),
+                remote_context,
+            ),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn represented_personal_loot_remote_stateful_conditions_fail_closed_like_cpp() {
+        let (session, _) = make_session_with_send_capacity(1);
+        let remote_context = RepresentedLootPlayerContext {
+            race: 1,
+            class: 1,
+            gender: 0,
+            level: 80,
+            is_current: false,
+        };
+
+        for condition_type in [2, 8, 9, 14, 25, 28, 47, 48] {
+            assert_eq!(
+                session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                    &loot_condition(condition_type, 1, 1, 0),
+                    remote_context,
+                ),
+                None,
+                "condition type {condition_type} must not be guessed for remote tappers"
+            );
+        }
+
+        let mut negative_remote_quest = loot_condition(9, 1, 0, 0);
+        negative_remote_quest.negative = true;
+        assert!(
+            !loot_conditions_allow_player_with_references_like_cpp_representable(
+                &[negative_remote_quest],
+                &HashMap::new(),
+                |condition| {
+                    session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                        condition,
+                        remote_context,
+                    )
+                },
+            )
+        );
     }
 
     fn install_master_loot_group(
