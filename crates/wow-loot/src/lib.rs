@@ -13,9 +13,21 @@
 use std::collections::{HashMap, HashSet};
 
 use rand::Rng;
+use wow_core::ObjectGuid;
 
 const MIN_NON_ZERO_LOOT_CHANCE_LIKE_CPP: f32 = 0.000001;
 pub const MAX_NR_LOOT_ITEMS_LIKE_CPP: usize = 18;
+pub const LOOT_METHOD_FREE_FOR_ALL_LIKE_CPP: u8 = 0;
+pub const LOOT_METHOD_ROUND_ROBIN_LIKE_CPP: u8 = 1;
+pub const LOOT_METHOD_MASTER_LIKE_CPP: u8 = 2;
+pub const LOOT_METHOD_GROUP_LIKE_CPP: u8 = 3;
+pub const LOOT_METHOD_NEED_BEFORE_GREED_LIKE_CPP: u8 = 4;
+pub const LOOT_METHOD_PERSONAL_LIKE_CPP: u8 = 5;
+pub const LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP: u8 = 0;
+pub const LOOT_SLOT_TYPE_ROLL_ONGOING_LIKE_CPP: u8 = 1;
+pub const LOOT_SLOT_TYPE_LOCKED_LIKE_CPP: u8 = 2;
+pub const LOOT_SLOT_TYPE_MASTER_LIKE_CPP: u8 = 3;
+pub const LOOT_SLOT_TYPE_OWNER_LIKE_CPP: u8 = 4;
 const CONDITION_MAX_LIKE_CPP: i32 = 59;
 const CONDITION_SPAWNMASK_DEPRECATED_LIKE_CPP: i32 = 19;
 const CONDITION_ITEM_LIKE_CPP: i32 = 2;
@@ -253,6 +265,99 @@ pub struct LootStore {
 }
 
 pub type LootStores = HashMap<LootStoreKind, LootStore>;
+
+#[allow(clippy::too_many_arguments)]
+#[must_use]
+pub fn loot_item_ui_type_for_player_like_cpp(
+    player_guid: ObjectGuid,
+    allowed_looters: &[ObjectGuid],
+    is_looted_for_player: bool,
+    free_for_all: bool,
+    player_has_unlooted_ffa_item: bool,
+    needs_quest: bool,
+    follow_loot_rules: bool,
+    loot_method: u8,
+    round_robin_player: ObjectGuid,
+    loot_master_guid: ObjectGuid,
+    is_under_threshold: bool,
+    is_blocked: bool,
+    roll_winner_guid: ObjectGuid,
+) -> Option<u8> {
+    if is_looted_for_player {
+        return None;
+    }
+
+    if !allowed_looters.contains(&player_guid) {
+        return None;
+    }
+
+    if free_for_all {
+        if player_has_unlooted_ffa_item {
+            return Some(if loot_method == LOOT_METHOD_FREE_FOR_ALL_LIKE_CPP {
+                LOOT_SLOT_TYPE_OWNER_LIKE_CPP
+            } else {
+                LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP
+            });
+        }
+        return None;
+    }
+
+    if needs_quest && !follow_loot_rules {
+        return Some(if loot_method == LOOT_METHOD_FREE_FOR_ALL_LIKE_CPP {
+            LOOT_SLOT_TYPE_OWNER_LIKE_CPP
+        } else {
+            LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP
+        });
+    }
+
+    match loot_method {
+        LOOT_METHOD_FREE_FOR_ALL_LIKE_CPP => Some(LOOT_SLOT_TYPE_OWNER_LIKE_CPP),
+        LOOT_METHOD_ROUND_ROBIN_LIKE_CPP => {
+            if !round_robin_player.is_empty() && round_robin_player != player_guid {
+                return None;
+            }
+            Some(LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP)
+        }
+        LOOT_METHOD_MASTER_LIKE_CPP => {
+            if is_under_threshold {
+                if !round_robin_player.is_empty() && round_robin_player != player_guid {
+                    return None;
+                }
+                return Some(LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP);
+            }
+
+            Some(if loot_master_guid == player_guid {
+                LOOT_SLOT_TYPE_MASTER_LIKE_CPP
+            } else {
+                LOOT_SLOT_TYPE_LOCKED_LIKE_CPP
+            })
+        }
+        LOOT_METHOD_GROUP_LIKE_CPP | LOOT_METHOD_NEED_BEFORE_GREED_LIKE_CPP => {
+            if is_under_threshold
+                && !round_robin_player.is_empty()
+                && round_robin_player != player_guid
+            {
+                return None;
+            }
+
+            if is_blocked {
+                return Some(LOOT_SLOT_TYPE_ROLL_ONGOING_LIKE_CPP);
+            }
+
+            if roll_winner_guid.is_empty() {
+                return Some(LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP);
+            }
+
+            if roll_winner_guid == player_guid {
+                return Some(LOOT_SLOT_TYPE_OWNER_LIKE_CPP);
+            }
+
+            None
+        }
+        LOOT_METHOD_PERSONAL_LIKE_CPP => Some(LOOT_SLOT_TYPE_OWNER_LIKE_CPP),
+        _ => None,
+    }
+}
 
 #[must_use]
 pub fn generate_money_loot_with_rate_like_cpp<R: Rng + ?Sized>(
@@ -1501,7 +1606,12 @@ fn append_reference_items_like_cpp(
 #[cfg(test)]
 mod tests {
     use super::{
-        GeneratedLootItem, LootConditionId, LootConditionLinkReport,
+        GeneratedLootItem, LOOT_METHOD_FREE_FOR_ALL_LIKE_CPP, LOOT_METHOD_GROUP_LIKE_CPP,
+        LOOT_METHOD_MASTER_LIKE_CPP, LOOT_METHOD_NEED_BEFORE_GREED_LIKE_CPP,
+        LOOT_METHOD_PERSONAL_LIKE_CPP, LOOT_METHOD_ROUND_ROBIN_LIKE_CPP,
+        LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP, LOOT_SLOT_TYPE_LOCKED_LIKE_CPP,
+        LOOT_SLOT_TYPE_MASTER_LIKE_CPP, LOOT_SLOT_TYPE_OWNER_LIKE_CPP,
+        LOOT_SLOT_TYPE_ROLL_ONGOING_LIKE_CPP, LootConditionId, LootConditionLinkReport,
         LootConditionReferenceUseLikeCpp, LootConditionRowLikeCpp, LootFillError, LootFillOptions,
         LootItemRandomProperties, LootItemTemplateMetadata, LootReferenceCheckReport,
         LootReferenceUse, LootStore, LootStoreItem, LootStoreKind, LootStoreLoadError, LootStores,
@@ -1515,10 +1625,12 @@ mod tests {
         loot_condition_row_normalize_without_external_stores_like_cpp,
         loot_conditions_allow_player_like_cpp_representable,
         loot_conditions_allow_player_with_references_like_cpp_representable,
+        loot_item_ui_type_for_player_like_cpp,
     };
     use rand::SeedableRng;
     use rand::rngs::StdRng;
     use std::collections::HashMap;
+    use wow_core::ObjectGuid;
 
     const DEFAULT_LOOT_MODE: u16 = 0x01;
 
@@ -1541,6 +1653,43 @@ mod tests {
             has_multi_drop_flag: false,
             has_follow_loot_rules_flag: false,
         }
+    }
+
+    fn guid(counter: i64) -> ObjectGuid {
+        ObjectGuid::create_player(1, counter)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn ui_type(
+        player: ObjectGuid,
+        allowed_looters: &[ObjectGuid],
+        is_looted_for_player: bool,
+        free_for_all: bool,
+        player_has_unlooted_ffa_item: bool,
+        needs_quest: bool,
+        follow_loot_rules: bool,
+        loot_method: u8,
+        round_robin_player: ObjectGuid,
+        loot_master_guid: ObjectGuid,
+        is_under_threshold: bool,
+        is_blocked: bool,
+        roll_winner_guid: ObjectGuid,
+    ) -> Option<u8> {
+        loot_item_ui_type_for_player_like_cpp(
+            player,
+            allowed_looters,
+            is_looted_for_player,
+            free_for_all,
+            player_has_unlooted_ffa_item,
+            needs_quest,
+            follow_loot_rules,
+            loot_method,
+            round_robin_player,
+            loot_master_guid,
+            is_under_threshold,
+            is_blocked,
+            roll_winner_guid,
+        )
     }
 
     fn generated_item(item_id: u32, count: u32, loot_list_id: u32) -> GeneratedLootItem {
@@ -2522,5 +2671,344 @@ mod tests {
         let wide_range = generate_money_loot_with_rate_like_cpp(1_000, 100_000, 1.0, &mut rng);
         assert_eq!(wide_range & 0xFF, 0);
         assert!((((1_000 >> 8) << 8)..=((100_000 >> 8) << 8)).contains(&wide_range));
+    }
+
+    #[test]
+    fn loot_item_ui_type_hides_looted_or_disallowed_rows_like_cpp() {
+        let player = guid(42);
+        let other = guid(77);
+
+        assert_eq!(
+            ui_type(
+                player,
+                &[player],
+                true,
+                false,
+                false,
+                false,
+                true,
+                LOOT_METHOD_FREE_FOR_ALL_LIKE_CPP,
+                ObjectGuid::EMPTY,
+                ObjectGuid::EMPTY,
+                false,
+                false,
+                ObjectGuid::EMPTY,
+            ),
+            None
+        );
+        assert_eq!(
+            ui_type(
+                player,
+                &[other],
+                false,
+                false,
+                false,
+                false,
+                true,
+                LOOT_METHOD_FREE_FOR_ALL_LIKE_CPP,
+                ObjectGuid::EMPTY,
+                ObjectGuid::EMPTY,
+                false,
+                false,
+                ObjectGuid::EMPTY,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn loot_item_ui_type_free_for_all_and_quest_paths_match_cpp() {
+        let player = guid(42);
+
+        assert_eq!(
+            ui_type(
+                player,
+                &[player],
+                false,
+                true,
+                true,
+                false,
+                true,
+                LOOT_METHOD_FREE_FOR_ALL_LIKE_CPP,
+                ObjectGuid::EMPTY,
+                ObjectGuid::EMPTY,
+                false,
+                false,
+                ObjectGuid::EMPTY,
+            ),
+            Some(LOOT_SLOT_TYPE_OWNER_LIKE_CPP)
+        );
+        assert_eq!(
+            ui_type(
+                player,
+                &[player],
+                false,
+                true,
+                true,
+                false,
+                true,
+                LOOT_METHOD_GROUP_LIKE_CPP,
+                ObjectGuid::EMPTY,
+                ObjectGuid::EMPTY,
+                false,
+                false,
+                ObjectGuid::EMPTY,
+            ),
+            Some(LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP)
+        );
+        assert_eq!(
+            ui_type(
+                player,
+                &[player],
+                false,
+                true,
+                false,
+                false,
+                true,
+                LOOT_METHOD_FREE_FOR_ALL_LIKE_CPP,
+                ObjectGuid::EMPTY,
+                ObjectGuid::EMPTY,
+                false,
+                false,
+                ObjectGuid::EMPTY,
+            ),
+            None
+        );
+        assert_eq!(
+            ui_type(
+                player,
+                &[player],
+                false,
+                false,
+                false,
+                true,
+                false,
+                LOOT_METHOD_GROUP_LIKE_CPP,
+                ObjectGuid::EMPTY,
+                ObjectGuid::EMPTY,
+                false,
+                false,
+                ObjectGuid::EMPTY,
+            ),
+            Some(LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP)
+        );
+    }
+
+    #[test]
+    fn loot_item_ui_type_round_robin_and_master_loot_match_cpp() {
+        let player = guid(42);
+        let other = guid(77);
+
+        assert_eq!(
+            ui_type(
+                player,
+                &[player],
+                false,
+                false,
+                false,
+                false,
+                true,
+                LOOT_METHOD_ROUND_ROBIN_LIKE_CPP,
+                other,
+                ObjectGuid::EMPTY,
+                false,
+                false,
+                ObjectGuid::EMPTY,
+            ),
+            None
+        );
+        assert_eq!(
+            ui_type(
+                player,
+                &[player],
+                false,
+                false,
+                false,
+                false,
+                true,
+                LOOT_METHOD_ROUND_ROBIN_LIKE_CPP,
+                ObjectGuid::EMPTY,
+                ObjectGuid::EMPTY,
+                false,
+                false,
+                ObjectGuid::EMPTY,
+            ),
+            Some(LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP)
+        );
+        assert_eq!(
+            ui_type(
+                player,
+                &[player],
+                false,
+                false,
+                false,
+                false,
+                true,
+                LOOT_METHOD_MASTER_LIKE_CPP,
+                ObjectGuid::EMPTY,
+                player,
+                false,
+                false,
+                ObjectGuid::EMPTY,
+            ),
+            Some(LOOT_SLOT_TYPE_MASTER_LIKE_CPP)
+        );
+        assert_eq!(
+            ui_type(
+                player,
+                &[player],
+                false,
+                false,
+                false,
+                false,
+                true,
+                LOOT_METHOD_MASTER_LIKE_CPP,
+                ObjectGuid::EMPTY,
+                other,
+                false,
+                false,
+                ObjectGuid::EMPTY,
+            ),
+            Some(LOOT_SLOT_TYPE_LOCKED_LIKE_CPP)
+        );
+        assert_eq!(
+            ui_type(
+                player,
+                &[player],
+                false,
+                false,
+                false,
+                false,
+                true,
+                LOOT_METHOD_MASTER_LIKE_CPP,
+                ObjectGuid::EMPTY,
+                other,
+                true,
+                false,
+                ObjectGuid::EMPTY,
+            ),
+            Some(LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP)
+        );
+    }
+
+    #[test]
+    fn loot_item_ui_type_group_roll_paths_match_cpp() {
+        let player = guid(42);
+        let other = guid(77);
+
+        assert_eq!(
+            ui_type(
+                player,
+                &[player],
+                false,
+                false,
+                false,
+                false,
+                true,
+                LOOT_METHOD_GROUP_LIKE_CPP,
+                other,
+                ObjectGuid::EMPTY,
+                true,
+                false,
+                ObjectGuid::EMPTY,
+            ),
+            None
+        );
+        assert_eq!(
+            ui_type(
+                player,
+                &[player],
+                false,
+                false,
+                false,
+                false,
+                true,
+                LOOT_METHOD_NEED_BEFORE_GREED_LIKE_CPP,
+                ObjectGuid::EMPTY,
+                ObjectGuid::EMPTY,
+                false,
+                true,
+                ObjectGuid::EMPTY,
+            ),
+            Some(LOOT_SLOT_TYPE_ROLL_ONGOING_LIKE_CPP)
+        );
+        assert_eq!(
+            ui_type(
+                player,
+                &[player],
+                false,
+                false,
+                false,
+                false,
+                true,
+                LOOT_METHOD_GROUP_LIKE_CPP,
+                ObjectGuid::EMPTY,
+                ObjectGuid::EMPTY,
+                false,
+                false,
+                ObjectGuid::EMPTY,
+            ),
+            Some(LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP)
+        );
+        assert_eq!(
+            ui_type(
+                player,
+                &[player],
+                false,
+                false,
+                false,
+                false,
+                true,
+                LOOT_METHOD_GROUP_LIKE_CPP,
+                ObjectGuid::EMPTY,
+                ObjectGuid::EMPTY,
+                false,
+                false,
+                player,
+            ),
+            Some(LOOT_SLOT_TYPE_OWNER_LIKE_CPP)
+        );
+        assert_eq!(
+            ui_type(
+                player,
+                &[player],
+                false,
+                false,
+                false,
+                false,
+                true,
+                LOOT_METHOD_GROUP_LIKE_CPP,
+                ObjectGuid::EMPTY,
+                ObjectGuid::EMPTY,
+                false,
+                false,
+                other,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn loot_item_ui_type_personal_loot_matches_cpp() {
+        let player = guid(42);
+
+        assert_eq!(
+            ui_type(
+                player,
+                &[player],
+                false,
+                false,
+                false,
+                false,
+                true,
+                LOOT_METHOD_PERSONAL_LIKE_CPP,
+                ObjectGuid::EMPTY,
+                ObjectGuid::EMPTY,
+                false,
+                false,
+                ObjectGuid::EMPTY,
+            ),
+            Some(LOOT_SLOT_TYPE_OWNER_LIKE_CPP)
+        );
     }
 }

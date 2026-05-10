@@ -1105,6 +1105,11 @@
   Rust targets: `crates/wow-loot/src/lib.rs`, `crates/wow-world/src/handlers/spell.rs`, `crates/wow-world/src/handlers/loot.rs`, docs.
   Acceptance: `wow_loot::generate_money_loot_with_rate_like_cpp` now owns the contrasted C++ branch shape: `maxAmount == 0` returns zero for a fresh Rust loot value, `maxAmount <= minAmount` uses max, small ranges roll inclusive `min..=max`, large ranges roll shifted `min >> 8..=max >> 8` and shift back, and all nonzero branches multiply by `Rate.Drop.Money`. Represented `CMSG_OPEN_ITEM` item money loot now consumes the shared helper instead of a private duplicate, and represented creature corpse money now applies `Rate.Drop.Money` to DB gold bounds instead of ignoring the configured rate. Remaining gaps: full canonical `Loot` ownership/state, money generation stored on canonical `Loot`, and removal of the represented legacy fallback for creatures without DB gold bounds.
 
+- [x] **#NEXT.R8.ENTITIES.292** Port the C++ `LootItem::GetUiTypeForPlayer` decision tree into a shared helper.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Loot/Loot.cpp` (`LootItem::GetUiTypeForPlayer`), `/home/server/woltk-trinity-legacy/src/server/game/Loot/Loot.h` (`LootMethod`, `LootSlotType`).
+  Rust targets: `crates/wow-loot/src/lib.rs`, `crates/wow-world/src/handlers/loot.rs`, docs.
+  Acceptance: `wow_loot::loot_item_ui_type_for_player_like_cpp` now mirrors the C++ slot-visibility/UI decision order for looted rows, `allowedGUIDs`, per-player FFA rows, quest-only rows, free-for-all, round-robin, master-loot, group/need-before-greed rolls and personal loot. Represented `LootResponse` item construction now consumes that helper instead of the previous free-for-all-only visibility/UI shortcut. Remaining gaps: represented `CreatureLoot` still lacks canonical `roundRobinPlayer`, `_lootMaster` and `Loot::GetPlayerFFAItems()` ownership state, so those arguments are bridged from currently available represented fields until canonical `Loot` ownership replaces the session bridge.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.R8.ENTITIES.003** Bind `wow-map` grid unload actions to real entity methods once Creature/GameObject/Corpse exist.

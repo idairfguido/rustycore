@@ -37,6 +37,7 @@ use wow_loot::{
     loot_condition_reference_self_references_like_cpp,
     loot_condition_row_normalize_without_external_stores_like_cpp,
     loot_conditions_allow_player_with_references_like_cpp_representable,
+    loot_item_ui_type_for_player_like_cpp,
 };
 use wow_network::{
     LootRollStoreWinnerCommand, LootRollVoteCommand, MasterLootGiveCommand, MasterLootGiveResult,
@@ -3871,18 +3872,35 @@ fn represented_loot_response_items_like_cpp(
 ) -> Vec<LootItemData> {
     loot.items
         .iter()
-        .filter(|entry| entry.visible_in_represented_free_for_all_view_like_cpp(player_guid))
-        .map(|entry| LootItemData {
-            item_type: 0,
-            ui_type: entry.free_for_all_ui_type_like_cpp(),
-            can_trade_to_tap_list: false,
-            loot: ItemInstance {
-                item_id: entry.item_id as i32,
-                ..ItemInstance::default()
-            },
-            loot_list_id: entry.loot_list_id,
-            quantity: entry.quantity,
-            loot_item_type: 0,
+        .filter_map(|entry| {
+            let ui_type = loot_item_ui_type_for_player_like_cpp(
+                player_guid,
+                &entry.allowed_looters,
+                entry.is_looted_for_player_like_cpp(player_guid),
+                entry.flags.freeforall,
+                entry.flags.freeforall && !entry.ffa_looted_by.contains(&player_guid),
+                entry.flags.needs_quest,
+                entry.flags.follow_loot_rules,
+                loot.loot_method,
+                ObjectGuid::EMPTY,
+                ObjectGuid::EMPTY,
+                entry.flags.under_threshold,
+                entry.flags.blocked,
+                entry.roll_winner,
+            )?;
+
+            Some(LootItemData {
+                item_type: 0,
+                ui_type,
+                can_trade_to_tap_list: false,
+                loot: ItemInstance {
+                    item_id: entry.item_id as i32,
+                    ..ItemInstance::default()
+                },
+                loot_list_id: entry.loot_list_id,
+                quantity: entry.quantity,
+                loot_item_type: 0,
+            })
         })
         .collect()
 }
@@ -4370,13 +4388,14 @@ struct PlannedLootNewStack {
 mod tests {
     use super::{
         ITEM_FLAGS_CU_FOLLOW_LOOT_RULES_LIKE_CPP, ItemTemplateAddonLootMetadataLikeCpp,
-        LOOT_METHOD_GROUP_LIKE_CPP, LOOT_METHOD_MASTER_LIKE_CPP, LootStoreRandomProperties,
-        ROLL_ALL_TYPE_NO_DISENCHANT_LIKE_CPP, ROLL_FLAG_TYPE_NEED_LIKE_CPP,
-        ROLL_VOTE_GREED_LIKE_CPP, ROLL_VOTE_NEED_LIKE_CPP, ROLL_VOTE_NOT_EMITTED_YET_LIKE_CPP,
-        ROLL_VOTE_NOT_VALID_LIKE_CPP, ROLL_VOTE_PASS_LIKE_CPP,
+        LOOT_METHOD_GROUP_LIKE_CPP, LOOT_METHOD_MASTER_LIKE_CPP,
+        LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP, LOOT_SLOT_TYPE_ROLL_ONGOING_LIKE_CPP,
+        LootStoreRandomProperties, ROLL_ALL_TYPE_NO_DISENCHANT_LIKE_CPP,
+        ROLL_FLAG_TYPE_NEED_LIKE_CPP, ROLL_VOTE_GREED_LIKE_CPP, ROLL_VOTE_NEED_LIKE_CPP,
+        ROLL_VOTE_NOT_EMITTED_YET_LIKE_CPP, ROLL_VOTE_NOT_VALID_LIKE_CPP, ROLL_VOTE_PASS_LIKE_CPP,
         generated_creature_loot_item_to_entry_like_cpp, loot_is_looted_like_cpp, loot_item_context,
         loot_store_data_can_stack_with_item, represented_loot_object_guid_like_cpp,
-        select_weighted_random_enchantment_like_cpp,
+        represented_loot_response_items_like_cpp, select_weighted_random_enchantment_like_cpp,
     };
     use crate::session::RepresentedLootRollCriteriaEvent;
     use rand::{SeedableRng, rngs::StdRng};
@@ -4398,7 +4417,7 @@ mod tests {
     };
     use wow_database::{CharStatements, StatementDef};
     use wow_entities::{Item, ItemCreateInfo, MAX_ITEM_SPELLS};
-    use wow_loot::{GeneratedLootItem, LootStoreItem};
+    use wow_loot::{GeneratedLootItem, LOOT_SLOT_TYPE_OWNER_LIKE_CPP, LootStoreItem};
     use wow_network::{
         GroupInfo, GroupRegistry, LootDropRatesLikeCpp, LootRollVoteCommand, PendingInvites,
         PlayerBroadcastInfo, PlayerRegistry, SessionCommand,
@@ -4464,6 +4483,33 @@ mod tests {
         pkt
     }
 
+    fn represented_loot_entry(
+        loot_list_id: u8,
+        item_id: u32,
+        player_guid: ObjectGuid,
+    ) -> LootEntry {
+        LootEntry {
+            loot_list_id,
+            item_id,
+            quantity: 1,
+            random_properties_id: 0,
+            random_properties_seed: 0,
+            item_context: 0,
+            flags: LootEntryFlags {
+                follow_loot_rules: true,
+                freeforall: false,
+                blocked: false,
+                counted: false,
+                under_threshold: false,
+                needs_quest: false,
+            },
+            allowed_looters: vec![player_guid],
+            roll_winner: ObjectGuid::EMPTY,
+            ffa_looted_by: Vec::new(),
+            taken: false,
+        }
+    }
+
     #[test]
     fn creature_generated_loot_entry_uses_item_template_addon_follow_loot_rules_like_cpp() {
         let generated = GeneratedLootItem {
@@ -4501,6 +4547,44 @@ mod tests {
         );
         assert!(follow_entry.flags.follow_loot_rules);
         assert!(follow_entry.flags.needs_quest);
+    }
+
+    #[test]
+    fn represented_loot_response_items_use_cpp_ui_type_decision_tree() {
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let other_guid = ObjectGuid::create_player(1, 77);
+        let loot_guid = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 1, 100);
+
+        let mut rolling_entry = represented_loot_entry(0, 25, player_guid);
+        rolling_entry.flags.blocked = true;
+
+        let mut won_entry = represented_loot_entry(1, 26, player_guid);
+        won_entry.roll_winner = player_guid;
+
+        let mut hidden_entry = represented_loot_entry(2, 27, player_guid);
+        hidden_entry.roll_winner = other_guid;
+
+        let mut allowed_entry = represented_loot_entry(3, 28, player_guid);
+        allowed_entry.flags.under_threshold = true;
+
+        let loot = CreatureLoot {
+            loot_guid,
+            coins: 0,
+            loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
+            allowed_looters: vec![player_guid],
+            items: vec![rolling_entry, won_entry, hidden_entry, allowed_entry],
+            looted_by_player: false,
+        };
+
+        let items = represented_loot_response_items_like_cpp(&loot, player_guid);
+
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].loot_list_id, 0);
+        assert_eq!(items[0].ui_type, LOOT_SLOT_TYPE_ROLL_ONGOING_LIKE_CPP);
+        assert_eq!(items[1].loot_list_id, 1);
+        assert_eq!(items[1].ui_type, LOOT_SLOT_TYPE_OWNER_LIKE_CPP);
+        assert_eq!(items[2].loot_list_id, 3);
+        assert_eq!(items[2].ui_type, LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP);
     }
 
     fn loot_release_packet(object: ObjectGuid) -> WorldPacket {
