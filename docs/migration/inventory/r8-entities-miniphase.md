@@ -1115,6 +1115,11 @@
   Rust targets: `crates/wow-packet/src/packets/loot.rs`, `crates/wow-world/src/handlers/loot.rs`, `crates/wow-world/src/handlers/spell.rs`, `crates/wow-world/src/handlers/character.rs`, `crates/wow-world/src/session.rs`, docs.
   Acceptance: represented `CreatureLoot` now stores `loot_master` and `round_robin_player` alongside `loot_method`. Represented creature loot generation copies the current group loot method and master-looter GUID like C++ `Loot::Loot`, assigns the first represented corpse loot owner as `roundRobinPlayer` like C++ `FillLoot` for group corpse loot, feeds both fields into `LootItem::GetUiTypeForPlayer` parity, includes them in `SMSG_LOOT_LIST` fanout like `NotifyLootList`, and clears/broadcasts round-robin ownership on release like `DoLootRelease`. Remaining gaps: this is still represented/session-backed state, not canonical `Creature::m_loot`/shared `Loot`, and per-player `Loot::GetPlayerFFAItems()` remains pending.
 
+- [x] **#NEXT.R8.ENTITIES.294** Carry represented per-player C++ `Loot::GetPlayerFFAItems()` state.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Loot/Loot.h` (`NotNormalLootItem`, `NotNormalLootItemMap`, `Loot::GetPlayerFFAItems`), `/home/server/woltk-trinity-legacy/src/server/game/Loot/Loot.cpp` (`Loot::FillNotNormalLootFor`, `LootItem::GetUiTypeForPlayer`, `Loot::LootItemInSlot`, `Loot::AutoStore`).
+  Rust targets: `crates/wow-packet/src/packets/loot.rs`, `crates/wow-world/src/handlers/loot.rs`, docs.
+  Acceptance: represented `CreatureLoot` now carries a per-player FFA item list matching C++ `NotNormalLootItem { LootListId, is_looted }`. Opening represented loot fills one FFA row per eligible player instead of treating FFA visibility as global, `LootResponse` and represented `CMSG_LOOT_ITEM` slot lookup consume that per-player row like `GetPlayerFFAItems()`, and FFA pickup marks only that player's row looted while preserving the item for other eligible players. Remaining gaps: this is still a represented/session bridge; canonical shared `Loot`, full `LootItem::AllowedForPlayer`, `_allowedLooters` ownership, `unlootedCount` and cross-session loot views remain pending.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.R8.ENTITIES.003** Bind `wow-map` grid unload actions to real entity methods once Creature/GameObject/Corpse exist.

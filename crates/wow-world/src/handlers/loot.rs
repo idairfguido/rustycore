@@ -53,7 +53,8 @@ use wow_packet::packets::loot::{
     LOOT_ERROR_PLAYER_NOT_FOUND_LIKE_CPP, LOOT_ERROR_TOO_FAR_LIKE_CPP, LootAllPassed, LootEntry,
     LootEntryFlags, LootItemData, LootItemPkt, LootList, LootMoney, LootMoneyNotify, LootRelease,
     LootReleaseAll, LootRemoved, LootResponse, LootRoll, LootRollBroadcast, LootRollWon, LootUnit,
-    MasterLootCandidateList, MasterLootItem, SLootRelease, SetLootSpecialization, StartLootRoll,
+    MasterLootCandidateList, MasterLootItem, NotNormalLootItem, SLootRelease,
+    SetLootSpecialization, StartLootRoll,
 };
 use wow_packet::packets::update::{ItemCreateData, UpdateObject};
 use wow_packet::{ClientPacket, ServerPacket};
@@ -315,7 +316,7 @@ impl WorldSession {
                     .iter()
                     .find(|entry| {
                         entry.loot_list_id == loot_req.loot_list_id
-                            && !entry.is_looted_for_player_like_cpp(player_guid)
+                            && !loot_item_is_looted_for_player_like_cpp(loot, entry, player_guid)
                     })
                     .cloned()
             }) else {
@@ -353,11 +354,17 @@ impl WorldSession {
             }
 
             if let Some(loot) = self.loot_table.get_mut(&owner_guid) {
-                if let Some(entry) = loot.items.iter_mut().find(|entry| {
-                    entry.loot_list_id == loot_req.loot_list_id
-                        && !entry.is_looted_for_player_like_cpp(player_guid)
-                }) {
-                    entry.mark_looted_for_player_like_cpp(player_guid);
+                if let Some(entry) = loot
+                    .items
+                    .iter()
+                    .find(|entry| entry.loot_list_id == loot_req.loot_list_id)
+                    .cloned()
+                {
+                    mark_loot_item_looted_for_player_like_cpp(
+                        loot,
+                        loot_req.loot_list_id,
+                        player_guid,
+                    );
                     taken_items.push((
                         owner_guid,
                         loot_req.object,
@@ -2562,6 +2569,7 @@ impl WorldSession {
             loot_method,
             loot_master,
             round_robin_player,
+            player_ffa_items: Vec::new(),
             allowed_looters: Vec::new(),
             items,
             looted_by_player: false,
@@ -3897,9 +3905,99 @@ fn mark_loot_allowed_for_player_like_cpp(loot: &mut CreatureLoot, player_guid: O
     }
 
     for entry in &mut loot.items {
-        if entry.allowed_looters.is_empty() {
+        if entry.allowed_looters.is_empty() || entry.flags.freeforall {
             entry.add_allowed_looter_like_cpp(player_guid);
         }
+    }
+
+    let mut ffa_items = Vec::new();
+    for entry in &loot.items {
+        if entry.flags.freeforall
+            && entry.has_allowed_looter_like_cpp(player_guid)
+            && !loot_player_has_ffa_item_like_cpp(loot, player_guid, entry.loot_list_id)
+        {
+            ffa_items.push(NotNormalLootItem {
+                loot_list_id: entry.loot_list_id,
+                is_looted: false,
+            });
+        }
+    }
+
+    if !ffa_items.is_empty() {
+        match loot
+            .player_ffa_items
+            .iter_mut()
+            .find(|(player, _)| *player == player_guid)
+        {
+            Some((_, existing)) => existing.extend(ffa_items),
+            None => loot.player_ffa_items.push((player_guid, ffa_items)),
+        }
+    }
+}
+
+fn loot_player_has_ffa_item_like_cpp(
+    loot: &CreatureLoot,
+    player_guid: ObjectGuid,
+    loot_list_id: u8,
+) -> bool {
+    loot.player_ffa_items
+        .iter()
+        .find(|(player, _)| *player == player_guid)
+        .is_some_and(|(_, items)| items.iter().any(|item| item.loot_list_id == loot_list_id))
+}
+
+fn loot_player_has_unlooted_ffa_item_like_cpp(
+    loot: &CreatureLoot,
+    player_guid: ObjectGuid,
+    loot_list_id: u8,
+) -> bool {
+    loot.player_ffa_items
+        .iter()
+        .find(|(player, _)| *player == player_guid)
+        .is_some_and(|(_, items)| {
+            items
+                .iter()
+                .any(|item| item.loot_list_id == loot_list_id && !item.is_looted)
+        })
+}
+
+fn loot_item_is_looted_for_player_like_cpp(
+    loot: &CreatureLoot,
+    entry: &LootEntry,
+    player_guid: ObjectGuid,
+) -> bool {
+    if entry.flags.freeforall {
+        !loot_player_has_unlooted_ffa_item_like_cpp(loot, player_guid, entry.loot_list_id)
+    } else {
+        entry.taken
+    }
+}
+
+fn mark_loot_item_looted_for_player_like_cpp(
+    loot: &mut CreatureLoot,
+    loot_list_id: u8,
+    player_guid: ObjectGuid,
+) {
+    if let Some(entry) = loot
+        .items
+        .iter_mut()
+        .find(|entry| entry.loot_list_id == loot_list_id)
+    {
+        entry.mark_looted_for_player_like_cpp(player_guid);
+        if !entry.flags.freeforall {
+            return;
+        }
+    }
+
+    if let Some((_, items)) = loot
+        .player_ffa_items
+        .iter_mut()
+        .find(|(player, _)| *player == player_guid)
+        && let Some(item) = items
+            .iter_mut()
+            .find(|item| item.loot_list_id == loot_list_id)
+    {
+        item.is_looted = true;
     }
 }
 
@@ -3913,9 +4011,9 @@ fn represented_loot_response_items_like_cpp(
             let ui_type = loot_item_ui_type_for_player_like_cpp(
                 player_guid,
                 &entry.allowed_looters,
-                entry.is_looted_for_player_like_cpp(player_guid),
+                loot_item_is_looted_for_player_like_cpp(loot, entry, player_guid),
                 entry.flags.freeforall,
-                entry.flags.freeforall && !entry.ffa_looted_by.contains(&player_guid),
+                loot_player_has_unlooted_ffa_item_like_cpp(loot, player_guid, entry.loot_list_id),
                 entry.flags.needs_quest,
                 entry.flags.follow_loot_rules,
                 loot.loot_method,
@@ -4236,7 +4334,7 @@ fn loot_has_item_for_all_like_cpp(loot: &CreatureLoot, player_guid: ObjectGuid) 
 
 fn loot_has_item_for_player_like_cpp(loot: &CreatureLoot, player_guid: ObjectGuid) -> bool {
     loot.items.iter().any(|entry| {
-        !entry.is_looted_for_player_like_cpp(player_guid)
+        !loot_item_is_looted_for_player_like_cpp(loot, entry, player_guid)
             && entry.has_allowed_looter_like_cpp(player_guid)
             && (!entry.flags.follow_loot_rules || entry.flags.freeforall)
     })
@@ -4431,7 +4529,8 @@ mod tests {
         ROLL_FLAG_TYPE_NEED_LIKE_CPP, ROLL_VOTE_GREED_LIKE_CPP, ROLL_VOTE_NEED_LIKE_CPP,
         ROLL_VOTE_NOT_EMITTED_YET_LIKE_CPP, ROLL_VOTE_NOT_VALID_LIKE_CPP, ROLL_VOTE_PASS_LIKE_CPP,
         generated_creature_loot_item_to_entry_like_cpp, loot_is_looted_like_cpp, loot_item_context,
-        loot_store_data_can_stack_with_item, represented_loot_object_guid_like_cpp,
+        loot_store_data_can_stack_with_item, mark_loot_allowed_for_player_like_cpp,
+        mark_loot_item_looted_for_player_like_cpp, represented_loot_object_guid_like_cpp,
         represented_loot_response_items_like_cpp, select_weighted_random_enchantment_like_cpp,
     };
     use crate::session::RepresentedLootRollCriteriaEvent;
@@ -4610,6 +4709,7 @@ mod tests {
             loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
             loot_master: ObjectGuid::EMPTY,
             round_robin_player: ObjectGuid::EMPTY,
+            player_ffa_items: Vec::new(),
             allowed_looters: vec![player_guid],
             items: vec![rolling_entry, won_entry, hidden_entry, allowed_entry],
             looted_by_player: false,
@@ -4624,6 +4724,62 @@ mod tests {
         assert_eq!(items[1].ui_type, LOOT_SLOT_TYPE_OWNER_LIKE_CPP);
         assert_eq!(items[2].loot_list_id, 3);
         assert_eq!(items[2].ui_type, LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP);
+    }
+
+    #[test]
+    fn represented_ffa_loot_uses_player_ffa_items_like_cpp() {
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let other_guid = ObjectGuid::create_player(1, 77);
+        let loot_guid = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 1, 101);
+
+        let mut ffa_entry = represented_loot_entry(0, 25, player_guid);
+        ffa_entry.flags.freeforall = true;
+        ffa_entry.allowed_looters.clear();
+
+        let mut loot = CreatureLoot {
+            loot_guid,
+            coins: 0,
+            loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
+            loot_master: ObjectGuid::EMPTY,
+            round_robin_player: ObjectGuid::EMPTY,
+            player_ffa_items: Vec::new(),
+            allowed_looters: Vec::new(),
+            items: vec![ffa_entry],
+            looted_by_player: false,
+        };
+
+        mark_loot_allowed_for_player_like_cpp(&mut loot, player_guid);
+        mark_loot_allowed_for_player_like_cpp(&mut loot, other_guid);
+
+        let player_items = represented_loot_response_items_like_cpp(&loot, player_guid);
+        let other_items = represented_loot_response_items_like_cpp(&loot, other_guid);
+        assert_eq!(player_items.len(), 1);
+        assert_eq!(other_items.len(), 1);
+        assert_eq!(player_items[0].ui_type, LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP);
+        assert_eq!(other_items[0].ui_type, LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP);
+
+        mark_loot_item_looted_for_player_like_cpp(&mut loot, 0, player_guid);
+
+        let player_ffa = loot
+            .player_ffa_items
+            .iter()
+            .find(|(player, _)| *player == player_guid)
+            .and_then(|(_, items)| items.iter().find(|item| item.loot_list_id == 0))
+            .unwrap();
+        let other_ffa = loot
+            .player_ffa_items
+            .iter()
+            .find(|(player, _)| *player == other_guid)
+            .and_then(|(_, items)| items.iter().find(|item| item.loot_list_id == 0))
+            .unwrap();
+
+        assert!(player_ffa.is_looted);
+        assert!(!other_ffa.is_looted);
+        assert!(represented_loot_response_items_like_cpp(&loot, player_guid).is_empty());
+        assert_eq!(
+            represented_loot_response_items_like_cpp(&loot, other_guid).len(),
+            1
+        );
     }
 
     fn loot_release_packet(object: ObjectGuid) -> WorldPacket {
@@ -5161,6 +5317,7 @@ mod tests {
             loot_method: 0,
             loot_master: ObjectGuid::EMPTY,
             round_robin_player: ObjectGuid::EMPTY,
+            player_ffa_items: Vec::new(),
             allowed_looters: Vec::new(),
             items: vec![],
             looted_by_player: false,
@@ -5291,6 +5448,7 @@ mod tests {
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: vec![master_guid, candidate_guid],
                 items: Vec::new(),
                 looted_by_player: false,
@@ -5355,6 +5513,7 @@ mod tests {
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: vec![master_guid, candidate_guid],
                 items: Vec::new(),
                 looted_by_player: false,
@@ -5401,6 +5560,7 @@ mod tests {
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: vec![master_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -5477,6 +5637,7 @@ mod tests {
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -5607,6 +5768,7 @@ mod tests {
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -5675,6 +5837,7 @@ mod tests {
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -5814,6 +5977,7 @@ mod tests {
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: vec![player_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -5872,6 +6036,7 @@ mod tests {
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -5963,6 +6128,7 @@ mod tests {
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -6050,6 +6216,7 @@ mod tests {
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -6213,6 +6380,7 @@ mod tests {
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -6344,6 +6512,7 @@ mod tests {
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -6453,6 +6622,7 @@ mod tests {
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -6559,6 +6729,7 @@ mod tests {
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -6646,6 +6817,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: Vec::new(),
                 looted_by_player: false,
@@ -6843,6 +7015,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![],
                 looted_by_player: false,
@@ -6872,6 +7045,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -6914,6 +7088,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -6958,6 +7133,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7020,6 +7196,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7077,6 +7254,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![],
                 looted_by_player: false,
@@ -7114,6 +7292,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![],
                 looted_by_player: false,
@@ -7127,6 +7306,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![],
                 looted_by_player: false,
@@ -7202,6 +7382,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7272,6 +7453,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7328,6 +7510,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7381,6 +7564,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7624,6 +7808,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7684,6 +7869,7 @@ mod tests {
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7748,6 +7934,7 @@ mod tests {
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7853,6 +8040,7 @@ mod tests {
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: vec![master_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7910,6 +8098,7 @@ mod tests {
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: vec![master_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7991,6 +8180,7 @@ mod tests {
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: vec![target_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -8098,6 +8288,7 @@ mod tests {
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: vec![target_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -8160,6 +8351,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -8206,6 +8398,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -8253,6 +8446,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -8306,6 +8500,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -8357,6 +8552,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -8407,6 +8603,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: Vec::new(),
                 looted_by_player: false,
@@ -8455,6 +8652,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: Vec::new(),
                 looted_by_player: false,
@@ -8497,6 +8695,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: Vec::new(),
                 looted_by_player: false,
@@ -8543,6 +8742,7 @@ mod tests {
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
