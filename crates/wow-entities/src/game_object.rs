@@ -18,6 +18,12 @@ pub const GAMEOBJECT_DATA_CHEST_USE_GROUP_LOOT_RULES: usize = 15;
 pub const GAMEOBJECT_DATA_CHEST_DUNGEON_ENCOUNTER: usize = 25;
 pub const GAMEOBJECT_DATA_CHEST_PERSONAL_LOOT: usize = 30;
 pub const GAMEOBJECT_DATA_CHEST_PUSH_LOOT: usize = 33;
+pub const GAMEOBJECT_DATA_GATHERING_NODE_DESPAWN_DELAY: usize = 6;
+pub const GAMEOBJECT_DATA_GATHERING_NODE_TRIGGERED_EVENT: usize = 7;
+pub const GAMEOBJECT_DATA_GATHERING_NODE_XP_DIFFICULTY: usize = 13;
+pub const GAMEOBJECT_DATA_GATHERING_NODE_SPELL: usize = 14;
+pub const GAMEOBJECT_DATA_GATHERING_NODE_MAX_LOOTS: usize = 18;
+pub const GAMEOBJECT_DATA_GATHERING_NODE_LINKED_TRAP: usize = 20;
 
 pub const GAME_OBJECT_DATA_PARENT_BIT: usize = 0;
 pub const GAME_OBJECT_DATA_DISPLAY_ID_BIT: usize = 4;
@@ -86,6 +92,17 @@ pub struct GameObjectTemplateData {
     pub data: [u32; MAX_GAMEOBJECT_DATA],
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GatheringNodeUseSource {
+    pub loot_id: u32,
+    pub despawn_delay_secs: u32,
+    pub triggered_event_id: u32,
+    pub xp_difficulty: u32,
+    pub spell_id: u32,
+    pub max_loots: u32,
+    pub linked_trap_entry: u32,
+}
+
 impl GameObjectTemplateData {
     pub const fn new(go_type: u32, data: [u32; MAX_GAMEOBJECT_DATA]) -> Self {
         Self { go_type, data }
@@ -111,6 +128,22 @@ impl GameObjectTemplateData {
             dungeon_encounter_id: self.data[GAMEOBJECT_DATA_CHEST_DUNGEON_ENCOUNTER],
             personal_loot_id: self.data[GAMEOBJECT_DATA_CHEST_PERSONAL_LOOT],
             push_loot_id: self.data[GAMEOBJECT_DATA_CHEST_PUSH_LOOT],
+        })
+    }
+
+    pub const fn gathering_node_use_source_like_cpp(&self) -> Option<GatheringNodeUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_GATHERING_NODE {
+            return None;
+        }
+
+        Some(GatheringNodeUseSource {
+            loot_id: self.get_loot_id_like_cpp(),
+            despawn_delay_secs: self.data[GAMEOBJECT_DATA_GATHERING_NODE_DESPAWN_DELAY],
+            triggered_event_id: self.data[GAMEOBJECT_DATA_GATHERING_NODE_TRIGGERED_EVENT],
+            xp_difficulty: self.data[GAMEOBJECT_DATA_GATHERING_NODE_XP_DIFFICULTY],
+            spell_id: self.data[GAMEOBJECT_DATA_GATHERING_NODE_SPELL],
+            max_loots: self.data[GAMEOBJECT_DATA_GATHERING_NODE_MAX_LOOTS],
+            linked_trap_entry: self.data[GAMEOBJECT_DATA_GATHERING_NODE_LINKED_TRAP],
         })
     }
 }
@@ -685,6 +718,37 @@ mod tests {
         assert_eq!(
             GameObjectTemplateData::new(GAMEOBJECT_TYPE_FISHING_HOLE, data)
                 .chest_loot_source_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn gathering_node_use_source_uses_cpp_data_indices() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[GAMEOBJECT_DATA_CHEST_LOOT] = 10;
+        data[GAMEOBJECT_DATA_GATHERING_NODE_DESPAWN_DELAY] = 15;
+        data[GAMEOBJECT_DATA_GATHERING_NODE_TRIGGERED_EVENT] = 20;
+        data[GAMEOBJECT_DATA_GATHERING_NODE_XP_DIFFICULTY] = 5;
+        data[GAMEOBJECT_DATA_GATHERING_NODE_SPELL] = 30;
+        data[GAMEOBJECT_DATA_GATHERING_NODE_MAX_LOOTS] = 3;
+        data[GAMEOBJECT_DATA_GATHERING_NODE_LINKED_TRAP] = 40;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_GATHERING_NODE, data)
+                .gathering_node_use_source_like_cpp(),
+            Some(GatheringNodeUseSource {
+                loot_id: 10,
+                despawn_delay_secs: 15,
+                triggered_event_id: 20,
+                xp_difficulty: 5,
+                spell_id: 30,
+                max_loots: 3,
+                linked_trap_entry: 40,
+            })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data)
+                .gathering_node_use_source_like_cpp(),
             None
         );
     }

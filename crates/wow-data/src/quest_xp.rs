@@ -11,7 +11,7 @@ use crate::wdc4::Wdc4Reader;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::Path;
-use tracing::{info, warn};
+use tracing::info;
 
 /// One row from QuestXP.db2.
 /// ID = quest level; difficulty[0..9] = XP per difficulty tier.
@@ -105,6 +105,19 @@ impl QuestXpStore {
         round_xp(xp)
     }
 
+    /// C++ `QuestXPEntry const* questXp = sQuestXPStore.LookupEntry(player->GetLevel())`
+    /// followed by `Quest::RoundXPValue(questXp->Difficulty[xpDifficulty])`.
+    pub fn player_level_difficulty_xp_like_cpp(&self, player_level: u8, xp_difficulty: u32) -> u32 {
+        if xp_difficulty >= 10 {
+            return 0;
+        }
+
+        self.rows
+            .get(&(player_level as u32))
+            .map(|row| round_xp(row.difficulty[xp_difficulty as usize]))
+            .unwrap_or(0)
+    }
+
     fn nearest(&self, target: u32) -> Option<&QuestXpRow> {
         self.rows
             .values()
@@ -114,11 +127,15 @@ impl QuestXpStore {
 
 /// C# ref: Quest::RoundXPValue — rounds to nearest 5.
 fn round_xp(xp: u32) -> u32 {
-    if xp <= 10 {
-        return xp;
+    if xp <= 100 {
+        5 * ((xp + 2) / 5)
+    } else if xp <= 500 {
+        10 * ((xp + 5) / 10)
+    } else if xp <= 1000 {
+        25 * ((xp + 12) / 25)
+    } else {
+        50 * ((xp + 25) / 50)
     }
-    // Round to nearest 5
-    ((xp + 2) / 5) * 5
 }
 
 impl Default for QuestXpStore {
@@ -126,5 +143,43 @@ impl Default for QuestXpStore {
         Self {
             rows: HashMap::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_xp_value_matches_cpp_thresholds() {
+        assert_eq!(round_xp(1), 0);
+        assert_eq!(round_xp(3), 5);
+        assert_eq!(round_xp(102), 100);
+        assert_eq!(round_xp(106), 110);
+        assert_eq!(round_xp(511), 500);
+        assert_eq!(round_xp(513), 525);
+        assert_eq!(round_xp(1024), 1000);
+        assert_eq!(round_xp(1026), 1050);
+    }
+
+    #[test]
+    fn player_level_difficulty_xp_uses_raw_player_level_row_like_cpp() {
+        let mut rows = HashMap::new();
+        rows.insert(
+            42,
+            QuestXpRow {
+                level: 42,
+                difficulty: [0, 1, 11, 101, 511, 1026, 0, 0, 0, 0],
+            },
+        );
+        let store = QuestXpStore { rows };
+
+        assert_eq!(store.player_level_difficulty_xp_like_cpp(42, 1), 0);
+        assert_eq!(store.player_level_difficulty_xp_like_cpp(42, 2), 10);
+        assert_eq!(store.player_level_difficulty_xp_like_cpp(42, 3), 100);
+        assert_eq!(store.player_level_difficulty_xp_like_cpp(42, 4), 500);
+        assert_eq!(store.player_level_difficulty_xp_like_cpp(42, 5), 1050);
+        assert_eq!(store.player_level_difficulty_xp_like_cpp(41, 5), 0);
+        assert_eq!(store.player_level_difficulty_xp_like_cpp(42, 10), 0);
     }
 }

@@ -1200,6 +1200,11 @@
   Rust targets: `crates/wow-world/src/handlers/misc.rs`, `crates/wow-world/src/handlers/loot.rs`, docs.
   Acceptance: `CMSG_GAME_OBJ_USE` now routes non-chest `GetLootId` gameobjects for fishing holes and gathering nodes: fishing holes generate personal `LootTemplates_Gameobject` with `LOOT_FISHINGHOLE`, while gathering nodes generate per-session personal `LootTemplates_Gameobject` with `LOOT_CHEST` like C++. Both use the represented loot response/open path and avoid claiming side effects not yet ported. Remaining gaps: fishing criteria, gathering triggered events, linked traps, XP reward, spell cast, max-loot/despawn/dynamic-flag transitions and canonical per-player `m_personalLoot` ownership remain pending.
 
+- [x] **#NEXT.R8.ENTITIES.311** Add represented gathering-node XP reward.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp` (`gatheringNode.xpDifficulty` branch), `/home/server/woltk-trinity-legacy/src/server/game/Quests/QuestDef.cpp` (`Quest::RoundXPValue`), `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObjectData.h` (`gatheringNode` Data6/Data7/Data13/Data14/Data18/Data20).
+  Rust targets: `crates/wow-data/src/quest_xp.rs`, `crates/wow-entities/src/game_object.rs`, `crates/wow-world/src/handlers/loot.rs`, `crates/wow-world/src/handlers/misc.rs`, docs.
+  Acceptance: `QuestXpStore` now exposes the exact C++ player-level row + difficulty lookup used by gathering nodes and fixes `RoundXPValue` threshold rounding to match C++; represented gathering-node use captures C++ side-effect fields and grants non-kill XP once per represented session/gameobject when `xpDifficulty` is 1..9 and QuestXP data exists. Remaining gaps: canonical per-player `m_personalLoot`, criteria, triggered events, linked traps, spell cast, max-loot/despawn/dynamic flags and script hooks remain pending.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.R8.ENTITIES.003** Bind `wow-map` grid unload actions to real entity methods once Creature/GameObject/Corpse exist.

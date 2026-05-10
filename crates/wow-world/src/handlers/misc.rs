@@ -829,9 +829,11 @@ impl crate::session::WorldSession {
                 self.open_represented_fishing_hole_like_cpp(gameobject_guid, loot_id)
                     .await;
             }
-            GAMEOBJECT_TYPE_GATHERING_NODE if loot_id != 0 => {
-                self.open_represented_gathering_node_like_cpp(gameobject_guid, loot_id)
-                    .await;
+            GAMEOBJECT_TYPE_GATHERING_NODE => {
+                if let Some(source) = template.gathering_node_use_source_like_cpp() {
+                    self.open_represented_gathering_node_like_cpp(gameobject_guid, source)
+                        .await;
+                }
             }
             _ => {
                 debug!(

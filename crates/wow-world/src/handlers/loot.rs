@@ -25,8 +25,8 @@ use wow_core::{ObjectGuid, guid::HighGuid};
 use wow_data::{ItemRandomEnchantmentTemplateEntry, ItemRandomPropertyTemplateEntry};
 use wow_database::{CharStatements, SqlTransaction, WorldStatements};
 use wow_entities::{
-    GameObjectLootSource, INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_END,
-    INVENTORY_SLOT_ITEM_START, Item, ItemPosCount, make_item_pos,
+    GameObjectLootSource, GatheringNodeUseSource, INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0,
+    INVENTORY_SLOT_ITEM_END, INVENTORY_SLOT_ITEM_START, Item, ItemPosCount, make_item_pos,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_loot::{
@@ -342,15 +342,43 @@ impl WorldSession {
     pub(crate) async fn open_represented_gathering_node_like_cpp(
         &mut self,
         gameobject_guid: ObjectGuid,
-        loot_id: u32,
+        source: GatheringNodeUseSource,
     ) {
+        let is_first_represented_use = !self
+            .represented_unique_gameobject_uses
+            .contains(&gameobject_guid);
+        if is_first_represented_use {
+            self.represented_unique_gameobject_uses
+                .insert(gameobject_guid);
+        }
+
         self.open_represented_gameobject_personal_loot_like_cpp(
             gameobject_guid,
-            loot_id,
+            source.loot_id,
             LOOT_TYPE_CHEST_LIKE_CPP,
             false,
         )
         .await;
+
+        if is_first_represented_use {
+            let xp = self.represented_gathering_node_xp_like_cpp(source.xp_difficulty);
+            if xp != 0 {
+                self.give_xp(xp, ObjectGuid::EMPTY, false).await;
+            }
+        }
+    }
+
+    fn represented_gathering_node_xp_like_cpp(&self, xp_difficulty: u32) -> u32 {
+        if xp_difficulty == 0 || xp_difficulty >= 10 {
+            return 0;
+        }
+
+        self.quest_xp_store
+            .as_ref()
+            .map(|store| {
+                store.player_level_difficulty_xp_like_cpp(self.player_level, xp_difficulty)
+            })
+            .unwrap_or(0)
     }
 
     async fn open_represented_gameobject_personal_loot_like_cpp(
