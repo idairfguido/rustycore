@@ -35,6 +35,29 @@ pub struct DungeonEncounterData {
     pub dungeon_encounter_ids: [u32; MAX_DUNGEON_ENCOUNTERS_PER_BOSS],
 }
 
+/// Minimal C++ `BossAI::GetBossId()` contract.
+pub trait BossAiLikeCpp {
+    fn boss_id(&self) -> u32;
+}
+
+/// Small value object for tests and future script/AI adapters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BossAiRef {
+    boss_id: u32,
+}
+
+impl BossAiRef {
+    pub fn new(boss_id: u32) -> Self {
+        Self { boss_id }
+    }
+}
+
+impl BossAiLikeCpp for BossAiRef {
+    fn boss_id(&self) -> u32 {
+        self.boss_id
+    }
+}
+
 /// Minimal C++ `BossInfo` data needed for `GetBossDungeonEncounter`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BossInfo {
@@ -132,6 +155,16 @@ impl InstanceScriptBase {
         self.boss(boss_id)?
             .dungeon_encounter_for_difficulty(store, self.difficulty_id)
     }
+
+    /// C++ `InstanceScript::GetBossDungeonEncounter(Creature const*)` after
+    /// the `dynamic_cast<BossAI const*>` succeeds.
+    pub fn boss_dungeon_encounter_for_boss_ai<'a, T: BossAiLikeCpp>(
+        &self,
+        store: &'a DungeonEncounterStore,
+        boss_ai: Option<&T>,
+    ) -> Option<&'a DungeonEncounterEntry> {
+        self.boss_dungeon_encounter(store, boss_ai?.boss_id())
+    }
 }
 
 #[cfg(test)]
@@ -180,5 +213,36 @@ mod tests {
 
         script.load_dungeon_encounter_data(&store, 0, [1, 0, 0, 0]);
         assert!(script.boss_dungeon_encounter(&store, 0).is_none());
+    }
+
+    #[test]
+    fn creature_overload_uses_boss_ai_boss_id_like_cpp() {
+        let store = DungeonEncounterStore::from_entries([encounter(2, 4)]);
+        let mut script = InstanceScriptBase::new(4, 2);
+        let boss_ai = BossAiRef::new(1);
+
+        script.load_dungeon_encounter_data(&store, 1, [2, 0, 0, 0]);
+
+        assert_eq!(
+            script
+                .boss_dungeon_encounter_for_boss_ai(&store, Some(&boss_ai))
+                .unwrap()
+                .id,
+            2
+        );
+    }
+
+    #[test]
+    fn creature_overload_returns_none_when_dynamic_cast_fails_like_cpp() {
+        let store = DungeonEncounterStore::from_entries([encounter(2, 4)]);
+        let mut script = InstanceScriptBase::new(4, 2);
+
+        script.load_dungeon_encounter_data(&store, 1, [2, 0, 0, 0]);
+
+        assert!(
+            script
+                .boss_dungeon_encounter_for_boss_ai::<BossAiRef>(&store, None)
+                .is_none()
+        );
     }
 }

@@ -1165,6 +1165,11 @@
   Rust targets: `Cargo.toml`, `Cargo.lock`, `crates/wow-instances/Cargo.toml`, `crates/wow-instances/src/lib.rs`, docs.
   Acceptance: the workspace now has a `wow-instances` crate instead of a missing declared target. It ports the pure C++ encounter metadata path for `InstanceScript`: `EncounterState`, `DungeonEncounterData`, `BossInfo`, `InstanceScriptBase::load_dungeon_encounter_data`, bulk row loading and `boss_dungeon_encounter` difficulty selection. Tests assert the C++ first-match semantics where `DifficultyID == 0` matches any difficulty, nonmatching rows are skipped, invalid boss IDs no-op and missing DB2 rows produce no stored encounter pointer. Remaining gaps: `GetBossDungeonEncounter(Creature const*)` still needs BossAI/Creature AI ownership, and full `InstanceScript` map state, boss transitions, persistence, doors/minions, criteria and LFG delivery remain pending.
 
+- [x] **#NEXT.R8.ENTITIES.304** Represent C++ `BossAI::GetBossId()` for encounter lookup.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/AI/ScriptedAI/ScriptedCreature.h` (`BossAI`, `GetBossId`, `_bossId`), `/home/server/woltk-trinity-legacy/src/server/game/AI/ScriptedAI/ScriptedCreature.cpp` (`BossAI::BossAI`), `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceScript.cpp` (`GetBossDungeonEncounter(Creature const*)` dynamic_cast branch).
+  Rust targets: `crates/wow-instances/src/lib.rs`, docs.
+  Acceptance: `wow-instances` now exposes a minimal `BossAiLikeCpp` contract and `BossAiRef` value for future script/AI adapters, and `InstanceScriptBase::boss_dungeon_encounter_for_boss_ai` mirrors the C++ creature overload after `dynamic_cast<BossAI const*>`: `None` returns no encounter, and a boss-AI source resolves by `boss_id()` through the already-ported boss/difficulty lookup. Tests cover both success and failed-cast branches. Remaining gaps: real `CreatureAI`/script instances do not yet implement this contract, and no runtime creature registration consumes it yet.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.R8.ENTITIES.003** Bind `wow-map` grid unload actions to real entity methods once Creature/GameObject/Corpse exist.

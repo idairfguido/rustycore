@@ -218,7 +218,7 @@ NOTE: `InstanceSaveMgr` no longer exists as a separate class in this WoLK 3.4.3 
 <!-- REFINE.021:END rust-target-coverage -->
 
 **Files in `/home/server/rustycore`:**
-- `crates/wow-instances/src/lib.rs` — foundation started in `#NEXT.R8.ENTITIES.303`: the crate exists and ports the pure C++ encounter metadata path for `MAX_DUNGEON_ENCOUNTERS_PER_BOSS`, `EncounterState`, `DungeonEncounterData`, `BossInfo::GetDungeonEncounterForDifficulty`, `InstanceScript::LoadDungeonEncounterData` and `InstanceScript::GetBossDungeonEncounter(uint32)`. Full per-instance state, map integration, lock manager, boss transitions, doors/minions, persistence, criteria and LFG delivery remain pending.
+- `crates/wow-instances/src/lib.rs` — foundation started in `#NEXT.R8.ENTITIES.303/#NEXT.R8.ENTITIES.304`: the crate exists and ports the pure C++ encounter metadata path for `MAX_DUNGEON_ENCOUNTERS_PER_BOSS`, `EncounterState`, `DungeonEncounterData`, `BossInfo::GetDungeonEncounterForDifficulty`, `InstanceScript::LoadDungeonEncounterData`, `InstanceScript::GetBossDungeonEncounter(uint32)` and the `BossAI::GetBossId()` branch behind `InstanceScript::GetBossDungeonEncounter(Creature const*)`. Full per-instance state, map integration, lock manager, boss transitions, doors/minions, persistence, criteria and LFG delivery remain pending.
 
 **What's implemented:**
 - `crates/wow-world/src/map_manager.rs` (per the active WIP commits) provides a `MapManager` global stub with placeholder for `GenerateInstanceId` (must verify), but no lock store and no script dispatch. (See WIP commit `f83c48d82`.)
