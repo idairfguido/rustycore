@@ -2813,6 +2813,13 @@ impl WorldSession {
                     .collect(),
                 pass_on_group_loot: self.pass_on_group_loot,
                 enchanting_skill: self.represented_enchanting_skill,
+                known_spells: self.known_spells.clone(),
+                active_quest_statuses: self
+                    .player_quests
+                    .iter()
+                    .map(|(quest_id, status)| (*quest_id, status.status))
+                    .collect(),
+                rewarded_quests: self.rewarded_quests.clone(),
                 player_name: name.clone(),
                 account_id: self.account_id,
                 race: self.player_race,
@@ -2827,6 +2834,28 @@ impl WorldSession {
             "Registered player {:?} ({}) in broadcast registry (map {})",
             guid, name, self.current_map_id
         );
+    }
+
+    pub(crate) fn sync_player_registry_state_like_cpp(&self) {
+        let (Some(guid), Some(registry)) = (self.player_guid, &self.player_registry) else {
+            return;
+        };
+        if let Some(mut info) = registry.get_mut(&guid) {
+            info.active_loot_rolls = self
+                .represented_loot_rolls
+                .keys()
+                .map(|key| (key.0, key.1))
+                .collect();
+            info.pass_on_group_loot = self.pass_on_group_loot;
+            info.enchanting_skill = self.represented_enchanting_skill;
+            info.known_spells = self.known_spells.clone();
+            info.active_quest_statuses = self
+                .player_quests
+                .iter()
+                .map(|(quest_id, status)| (*quest_id, status.status))
+                .collect();
+            info.rewarded_quests = self.rewarded_quests.clone();
+        }
     }
 
     fn object_accessor_player_object(&self) -> Option<WorldObject> {
@@ -5620,6 +5649,9 @@ mod tests {
             active_loot_rolls: Vec::new(),
             pass_on_group_loot: false,
             enchanting_skill: 0,
+            known_spells: Vec::new(),
+            active_quest_statuses: Default::default(),
+            rewarded_quests: Default::default(),
             player_name: format!("Player{}", guid.counter()),
             account_id: guid.counter() as u32,
             race: 1,
@@ -5629,6 +5661,54 @@ mod tests {
             display_id: 49,
             visible_items: [(0, 0, 0); 19],
         }
+    }
+
+    #[test]
+    fn player_registry_publishes_loot_condition_state_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let guid = ObjectGuid::create_player(1, 42);
+        let registry = Arc::new(PlayerRegistry::default());
+        session.set_player_guid(Some(guid));
+        session.player_position = Some(Position::ZERO);
+        session.player_name = Some("Tester".to_string());
+        session.known_spells = vec![12_345];
+        session.player_quests.insert(
+            100,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id: 100,
+                status: 1,
+                explored: false,
+                objective_counts: Vec::new(),
+            },
+        );
+        session.rewarded_quests.insert(200);
+        session.set_player_registry(Arc::clone(&registry));
+
+        session.register_in_player_registry();
+        {
+            let info = registry.get(&guid).expect("registered player");
+            assert_eq!(info.known_spells, vec![12_345]);
+            assert_eq!(info.active_quest_statuses.get(&100), Some(&1));
+            assert!(info.rewarded_quests.contains(&200));
+        }
+
+        session.known_spells.push(54_321);
+        session.player_quests.insert(
+            300,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id: 300,
+                status: 2,
+                explored: false,
+                objective_counts: Vec::new(),
+            },
+        );
+        session.rewarded_quests.insert(400);
+        session.sync_player_registry_state_like_cpp();
+
+        let info = registry.get(&guid).expect("synced player");
+        assert!(info.known_spells.contains(&54_321));
+        assert_eq!(info.active_quest_statuses.get(&300), Some(&2));
+        assert!(info.rewarded_quests.contains(&400));
     }
 
     #[test]

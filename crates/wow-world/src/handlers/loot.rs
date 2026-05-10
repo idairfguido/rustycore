@@ -7,7 +7,7 @@
 //!
 //! Reference: C# Game/Handlers/LootHandler.cs
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -3854,7 +3854,7 @@ impl WorldSession {
             |condition| {
                 self.evaluate_creature_loot_condition_for_player_like_cpp_representable(
                     condition,
-                    player_context,
+                    &player_context,
                 )
             },
         ) {
@@ -3869,7 +3869,7 @@ impl WorldSession {
             context.item.item_id,
             context.item.needs_quest,
             addon,
-            player_context,
+            &player_context,
         ) && template.max_stack_size != 0
     }
 
@@ -3878,7 +3878,7 @@ impl WorldSession {
         item_id: u32,
         needs_quest: bool,
         addon_metadata: ItemTemplateAddonLootMetadataLikeCpp,
-        player_context: RepresentedLootPlayerContext,
+        player_context: &RepresentedLootPlayerContext,
     ) -> bool {
         if player_context.is_current {
             return self.item_loot_quest_status_allows_like_cpp(
@@ -3893,7 +3893,10 @@ impl WorldSession {
         }
 
         let start_quest_id = self.item_template_start_quest_id(item_id).unwrap_or(0);
-        !needs_quest && start_quest_id == 0
+        let has_non_none_start_quest_status = u32::try_from(start_quest_id)
+            .ok()
+            .is_some_and(|quest_id| quest_id != 0 && player_context.quest_status(quest_id) != 0);
+        !needs_quest && !has_non_none_start_quest_status
     }
 
     fn represented_loot_player_context_like_cpp(
@@ -3906,6 +3909,13 @@ impl WorldSession {
                 class: self.player_class,
                 gender: self.player_gender,
                 level: self.player_level,
+                known_spells: self.known_spells.clone(),
+                active_quest_statuses: self
+                    .player_quests
+                    .iter()
+                    .map(|(quest_id, status)| (*quest_id, status.status))
+                    .collect(),
+                rewarded_quests: self.rewarded_quests.clone(),
                 is_current: true,
             });
         }
@@ -3917,6 +3927,9 @@ impl WorldSession {
             class: player.class,
             gender: player.sex,
             level: player.level,
+            known_spells: player.known_spells.clone(),
+            active_quest_statuses: player.active_quest_statuses.clone(),
+            rewarded_quests: player.rewarded_quests.clone(),
             is_current: false,
         })
     }
@@ -4048,7 +4061,7 @@ impl WorldSession {
     fn evaluate_creature_loot_condition_for_player_like_cpp_representable(
         &self,
         condition: &LootConditionRowLikeCpp,
-        player_context: RepresentedLootPlayerContext,
+        player_context: &RepresentedLootPlayerContext,
     ) -> Option<bool> {
         match condition.condition_type_or_reference {
             0 => Some(true),
@@ -4066,31 +4079,9 @@ impl WorldSession {
             6 => Some(
                 player_team_for_race_cpp_representable(player_context.race) == condition.value1,
             ),
-            8 => {
-                if !player_context.is_current {
-                    return None;
-                }
-                Some(self.rewarded_quests.contains(&condition.value1))
-            }
-            9 => {
-                if !player_context.is_current {
-                    return None;
-                }
-                Some(
-                    self.player_quests
-                        .get(&condition.value1)
-                        .is_some_and(|status| status.status == 1),
-                )
-            }
-            14 => {
-                if !player_context.is_current {
-                    return None;
-                }
-                Some(
-                    !self.player_quests.contains_key(&condition.value1)
-                        && !self.rewarded_quests.contains(&condition.value1),
-                )
-            }
+            8 => Some(player_context.rewarded_quests.contains(&condition.value1)),
+            9 => Some(player_context.quest_status(condition.value1) == 1),
+            14 => Some(player_context.quest_status(condition.value1) == 0),
             15 => Some(
                 player_class_mask_like_cpp(player_context.class)
                     .is_some_and(|mask| mask & condition.value1 != 0),
@@ -4100,44 +4091,28 @@ impl WorldSession {
                     .is_some_and(|mask| mask & condition.value1 != 0),
             ),
             20 => Some(u32::from(player_context.gender) == condition.value1),
-            25 => {
-                if !player_context.is_current {
-                    return None;
-                }
-                i32::try_from(condition.value1)
-                    .ok()
-                    .map(|spell_id| self.known_spells.contains(&spell_id))
-            }
+            25 => i32::try_from(condition.value1)
+                .ok()
+                .map(|spell_id| player_context.known_spells.contains(&spell_id)),
             27 => condition_compare_values_like_cpp(
                 condition.value2,
                 u32::from(player_context.level),
                 condition.value1,
             ),
-            28 => {
-                if !player_context.is_current {
-                    return None;
-                }
-                Some(
-                    self.player_quests
+            28 => Some(
+                player_context.quest_status(condition.value1) == 2
+                    && !player_context.rewarded_quests.contains(&condition.value1),
+            ),
+            47 => Some(
+                player_quest_status_mask_like_cpp(
+                    player_context
+                        .active_quest_statuses
                         .get(&condition.value1)
-                        .is_some_and(|status| status.status == 2)
-                        && !self.rewarded_quests.contains(&condition.value1),
-                )
-            }
-            47 => {
-                if !player_context.is_current {
-                    return None;
-                }
-                Some(
-                    player_quest_status_mask_like_cpp(
-                        self.player_quests
-                            .get(&condition.value1)
-                            .map(|status| status.status),
-                        self.rewarded_quests.contains(&condition.value1),
-                    ) & condition.value2
-                        != 0,
-                )
-            }
+                        .copied(),
+                    player_context.rewarded_quests.contains(&condition.value1),
+                ) & condition.value2
+                    != 0,
+            ),
             48 => {
                 if !player_context.is_current {
                     return None;
@@ -4920,13 +4895,28 @@ struct ItemTemplateAddonLootMetadataLikeCpp {
     quest_log_item_id: i32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct RepresentedLootPlayerContext {
     race: u8,
     class: u8,
     gender: u8,
     level: u8,
+    known_spells: Vec<i32>,
+    active_quest_statuses: HashMap<u32, u8>,
+    rewarded_quests: HashSet<u32>,
     is_current: bool,
+}
+
+impl RepresentedLootPlayerContext {
+    fn quest_status(&self, quest_id: u32) -> u8 {
+        if self.rewarded_quests.contains(&quest_id) {
+            return 3;
+        }
+        self.active_quest_statuses
+            .get(&quest_id)
+            .copied()
+            .unwrap_or(0)
+    }
 }
 
 impl ItemTemplateAddonLootMetadataLikeCpp {
@@ -5763,7 +5753,10 @@ mod tests {
     use crate::session::{RepresentedGameObjectUseEffect, RepresentedLootRollCriteriaEvent};
     use rand::{SeedableRng, rngs::StdRng};
     use std::time::{Duration, Instant};
-    use std::{collections::HashMap, sync::Arc};
+    use std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    };
     use wow_ai::CreatureAI;
     use wow_constants::{
         InventoryResult, InventoryType, ItemBondingType, ItemClass, ItemContext, ItemFlags2,
@@ -6358,6 +6351,9 @@ mod tests {
             active_loot_rolls: Vec::new(),
             pass_on_group_loot: false,
             enchanting_skill: 0,
+            known_spells: Vec::new(),
+            active_quest_statuses: Default::default(),
+            rewarded_quests: Default::default(),
             player_name: format!("Player{}", guid.counter()),
             account_id: guid.counter() as u32,
             race: 1,
@@ -6396,78 +6392,147 @@ mod tests {
             class: 1,
             gender: 0,
             level: 80,
+            known_spells: Vec::new(),
+            active_quest_statuses: HashMap::new(),
+            rewarded_quests: HashSet::new(),
             is_current: false,
         };
 
         assert_eq!(
             session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
                 &loot_condition(6, 469, 0, 0),
-                remote_context,
+                &remote_context,
             ),
             Some(true)
         );
         assert_eq!(
             session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
                 &loot_condition(15, 1, 0, 0),
-                remote_context,
+                &remote_context,
             ),
             Some(true)
         );
         assert_eq!(
             session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
                 &loot_condition(16, 1, 0, 0),
-                remote_context,
+                &remote_context,
             ),
             Some(true)
         );
         assert_eq!(
             session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
                 &loot_condition(20, 0, 0, 0),
-                remote_context,
+                &remote_context,
             ),
             Some(true)
         );
         assert_eq!(
             session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
                 &loot_condition(27, 70, 3, 0),
-                remote_context,
+                &remote_context,
             ),
             Some(true)
         );
     }
 
     #[test]
-    fn represented_personal_loot_remote_stateful_conditions_fail_closed_like_cpp() {
+    fn represented_personal_loot_remote_quest_and_spell_conditions_use_registry_like_cpp() {
+        let (session, _) = make_session_with_send_capacity(1);
+        let mut active_quest_statuses = HashMap::new();
+        active_quest_statuses.insert(100, 1);
+        active_quest_statuses.insert(200, 2);
+        let mut rewarded_quests = HashSet::new();
+        rewarded_quests.insert(300);
+        let remote_context = RepresentedLootPlayerContext {
+            race: 1,
+            class: 1,
+            gender: 0,
+            level: 80,
+            known_spells: vec![12_345],
+            active_quest_statuses,
+            rewarded_quests,
+            is_current: false,
+        };
+
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(9, 100, 0, 0),
+                &remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(28, 200, 0, 0),
+                &remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(8, 300, 0, 0),
+                &remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(14, 400, 0, 0),
+                &remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(25, 12_345, 0, 0),
+                &remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(47, 100, 0x08, 0),
+                &remote_context,
+            ),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn represented_personal_loot_remote_unpublished_conditions_fail_closed_like_cpp() {
         let (session, _) = make_session_with_send_capacity(1);
         let remote_context = RepresentedLootPlayerContext {
             race: 1,
             class: 1,
             gender: 0,
             level: 80,
+            known_spells: Vec::new(),
+            active_quest_statuses: HashMap::new(),
+            rewarded_quests: HashSet::new(),
             is_current: false,
         };
 
-        for condition_type in [2, 8, 9, 14, 25, 28, 47, 48] {
+        for condition_type in [2, 48] {
             assert_eq!(
                 session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
                     &loot_condition(condition_type, 1, 1, 0),
-                    remote_context,
+                    &remote_context,
                 ),
                 None,
                 "condition type {condition_type} must not be guessed for remote tappers"
             );
         }
 
-        let mut negative_remote_quest = loot_condition(9, 1, 0, 0);
-        negative_remote_quest.negative = true;
+        let mut negative_remote_objective = loot_condition(48, 1, 0, 0);
+        negative_remote_objective.negative = true;
         assert!(
             !loot_conditions_allow_player_with_references_like_cpp_representable(
-                &[negative_remote_quest],
+                &[negative_remote_objective],
                 &HashMap::new(),
                 |condition| {
                     session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
                         condition,
-                        remote_context,
+                        &remote_context,
                     )
                 },
             )

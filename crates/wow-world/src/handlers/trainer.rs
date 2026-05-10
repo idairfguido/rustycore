@@ -420,6 +420,7 @@ impl WorldSession {
 
         // ── Update in-memory state ─────────────────────────────────────────
         self.known_spells.push(spell_id);
+        self.sync_player_registry_state_like_cpp();
 
         info!(
             account = self.account_id,

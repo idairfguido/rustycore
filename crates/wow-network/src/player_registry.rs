@@ -10,6 +10,7 @@
 //! to fan-out packets to nearby players on the same map.
 
 use dashmap::DashMap;
+use std::collections::{HashMap, HashSet};
 use wow_core::{ObjectGuid, Position};
 use wow_packet::packets::loot::LootEntry;
 
@@ -74,6 +75,12 @@ pub struct PlayerBroadcastInfo {
     pub pass_on_group_loot: bool,
     /// Represented `Player::GetSkillValue(SKILL_ENCHANTING)` used by group-roll disenchant masks.
     pub enchanting_skill: u16,
+    /// Current known spells, used for remote `ConditionMgr`/loot checks that mirror `Player::HasSpell`.
+    pub known_spells: Vec<i32>,
+    /// Current quest status map, keyed by quest id, used for remote `Player::GetQuestStatus` checks.
+    pub active_quest_statuses: HashMap<u32, u8>,
+    /// Rewarded quest ids, used for remote `QUEST_STATUS_REWARDED` checks.
+    pub rewarded_quests: HashSet<u32>,
     /// Character name — used for whisper target lookups.
     pub player_name: String,
     /// Account ID — kept for future same-account filtering.

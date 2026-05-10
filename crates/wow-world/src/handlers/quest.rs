@@ -330,6 +330,7 @@ impl WorldSession {
 
         // Save to DB
         self.save_quest_to_db(quest_id, 1).await;
+        self.sync_player_registry_state_like_cpp();
 
         info!(account = self.account_id, quest_id, "Quest accepted");
 
@@ -357,6 +358,7 @@ impl WorldSession {
         if let Some(qid) = quest_id {
             self.player_quests.remove(&qid);
             self.delete_quest_from_db(qid).await;
+            self.sync_player_registry_state_like_cpp();
             info!(
                 account = self.account_id,
                 quest_id = qid,
@@ -695,6 +697,7 @@ impl WorldSession {
         } else {
             self.delete_quest_from_db(quest_id).await;
         }
+        self.sync_player_registry_state_like_cpp();
 
         info!(
             account = self.account_id,
