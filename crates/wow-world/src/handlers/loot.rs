@@ -33,7 +33,8 @@ use wow_loot::{
     GeneratedLootItem, LootConditionId, LootConditionRowLikeCpp, LootFillOptions,
     LootItemRandomProperties, LootItemTemplateMetadata, LootStoreItem, LootStoreItemContext,
     LootStoreKind, LootTemplate, condition_compare_values_like_cpp,
-    loot_condition_reference_ids_like_cpp, loot_condition_reference_self_references_like_cpp,
+    generate_money_loot_with_rate_like_cpp, loot_condition_reference_ids_like_cpp,
+    loot_condition_reference_self_references_like_cpp,
     loot_condition_row_normalize_without_external_stores_like_cpp,
     loot_conditions_allow_player_with_references_like_cpp_representable,
 };
@@ -2524,7 +2525,12 @@ impl WorldSession {
         gold_max: u32,
     ) -> CreatureLoot {
         let coins = if gold_max > 0 {
-            rand::thread_rng().gen_range(gold_min..=gold_max)
+            generate_money_loot_with_rate_like_cpp(
+                gold_min,
+                gold_max,
+                self.loot_drop_rates_like_cpp().money,
+                &mut rand::thread_rng(),
+            )
         } else {
             generate_legacy_creature_coin_fallback_like_cpp(creature_guid, level)
         };
@@ -4394,8 +4400,8 @@ mod tests {
     use wow_entities::{Item, ItemCreateInfo, MAX_ITEM_SPELLS};
     use wow_loot::{GeneratedLootItem, LootStoreItem};
     use wow_network::{
-        GroupInfo, GroupRegistry, LootRollVoteCommand, PendingInvites, PlayerBroadcastInfo,
-        PlayerRegistry, SessionCommand,
+        GroupInfo, GroupRegistry, LootDropRatesLikeCpp, LootRollVoteCommand, PendingInvites,
+        PlayerBroadcastInfo, PlayerRegistry, SessionCommand,
     };
     use wow_packet::WorldPacket;
     use wow_packet::packets::loot::{
@@ -4759,6 +4765,22 @@ mod tests {
                 applied_at: std::time::Instant::now(),
             },
         );
+    }
+
+    #[tokio::test]
+    async fn represented_creature_money_uses_cpp_money_drop_rate() {
+        let mut session = make_session();
+        session.set_loot_drop_rates_like_cpp(LootDropRatesLikeCpp {
+            money: 2.5,
+            ..LootDropRatesLikeCpp::default()
+        });
+
+        let loot = session
+            .generate_represented_creature_loot_like_cpp(test_creature_guid(1), 10, 25, 0, 100, 100)
+            .await;
+
+        assert_eq!(loot.coins, 250);
+        assert!(loot.items.is_empty());
     }
 
     fn test_gameobject_guid(counter: i64) -> ObjectGuid {

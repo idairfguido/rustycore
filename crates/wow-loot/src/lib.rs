@@ -254,6 +254,28 @@ pub struct LootStore {
 
 pub type LootStores = HashMap<LootStoreKind, LootStore>;
 
+#[must_use]
+pub fn generate_money_loot_with_rate_like_cpp<R: Rng + ?Sized>(
+    min_amount: u32,
+    max_amount: u32,
+    rate: f32,
+    rng: &mut R,
+) -> u32 {
+    if max_amount == 0 {
+        return 0;
+    }
+
+    if max_amount <= min_amount {
+        return ((max_amount as f32) * rate) as u32;
+    }
+
+    if max_amount - min_amount < 32_700 {
+        return ((rng.gen_range(min_amount..=max_amount) as f32) * rate) as u32;
+    }
+
+    (((rng.gen_range((min_amount >> 8)..=(max_amount >> 8)) as f32) * rate) as u32) << 8
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LootReferenceUse {
     pub store_kind: LootStoreKind,
@@ -1487,7 +1509,8 @@ mod tests {
         MissingLootConditionTemplate, MissingLootConditionTemplateItem,
         check_loot_condition_links_like_cpp, check_loot_condition_references_like_cpp,
         check_loot_references_like_cpp, condition_compare_values_like_cpp,
-        loot_condition_reference_ids_like_cpp, loot_condition_reference_self_references_like_cpp,
+        generate_money_loot_with_rate_like_cpp, loot_condition_reference_ids_like_cpp,
+        loot_condition_reference_self_references_like_cpp,
         loot_condition_row_is_loadable_without_external_stores_like_cpp,
         loot_condition_row_normalize_without_external_stores_like_cpp,
         loot_conditions_allow_player_like_cpp_representable,
@@ -2475,5 +2498,29 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(err, LootFillError::MissingLootTemplate { loot_id: 999 });
+    }
+
+    #[test]
+    fn generate_money_loot_matches_cpp_boundary_branches() {
+        let mut rng = StdRng::seed_from_u64(0xC0FFEE);
+        assert_eq!(
+            generate_money_loot_with_rate_like_cpp(0, 0, 1.0, &mut rng),
+            0
+        );
+        assert_eq!(
+            generate_money_loot_with_rate_like_cpp(120, 100, 1.0, &mut rng),
+            100
+        );
+        assert_eq!(
+            generate_money_loot_with_rate_like_cpp(120, 100, 2.5, &mut rng),
+            250
+        );
+
+        let small_range = generate_money_loot_with_rate_like_cpp(100, 200, 1.0, &mut rng);
+        assert!((100..=200).contains(&small_range));
+
+        let wide_range = generate_money_loot_with_rate_like_cpp(1_000, 100_000, 1.0, &mut rng);
+        assert_eq!(wide_range & 0xFF, 0);
+        assert!((((1_000 >> 8) << 8)..=((100_000 >> 8) << 8)).contains(&wide_range));
     }
 }

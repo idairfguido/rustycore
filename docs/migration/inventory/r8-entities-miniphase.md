@@ -1100,6 +1100,11 @@
   Rust targets: full workspace plus `crates/wow-data/src/currency.rs`, `docs/migration/loot.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
   Acceptance: dirty tree was inventoried before continuing (111 modified files and 10 untracked `wow-data` DB2 modules at checkpoint time). Base validation is green: `cargo check --workspace`, `cargo test --workspace`, package-level smoke tests for touched crates, `cargo fmt --check`, and `git diff --check` all pass. One brittle Rust-only test assumption was fixed after C++ contrast: `CurrencyTypesStore` now tests lookup semantics against a real loaded DB2 ID instead of requiring ID `395`, because C++ global stores require correct `HasRecord`/`LookupEntry` behavior over available records, not that a specific local client-data row exists. This checkpoint does not certify full port parity; it only establishes a build/test-clean baseline for the next C++-contrasted gap closures.
 
+- [x] **#NEXT.R8.ENTITIES.291** Centralize C++ `Loot::generateMoneyLoot` money generation in `wow-loot`.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Loot/Loot.cpp` (`Loot::generateMoneyLoot`), `/home/server/woltk-trinity-legacy/src/server/game/World/World.h` (`RATE_DROP_MONEY`).
+  Rust targets: `crates/wow-loot/src/lib.rs`, `crates/wow-world/src/handlers/spell.rs`, `crates/wow-world/src/handlers/loot.rs`, docs.
+  Acceptance: `wow_loot::generate_money_loot_with_rate_like_cpp` now owns the contrasted C++ branch shape: `maxAmount == 0` returns zero for a fresh Rust loot value, `maxAmount <= minAmount` uses max, small ranges roll inclusive `min..=max`, large ranges roll shifted `min >> 8..=max >> 8` and shift back, and all nonzero branches multiply by `Rate.Drop.Money`. Represented `CMSG_OPEN_ITEM` item money loot now consumes the shared helper instead of a private duplicate, and represented creature corpse money now applies `Rate.Drop.Money` to DB gold bounds instead of ignoring the configured rate. Remaining gaps: full canonical `Loot` ownership/state, money generation stored on canonical `Loot`, and removal of the represented legacy fallback for creatures without DB gold bounds.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.R8.ENTITIES.003** Bind `wow-map` grid unload actions to real entity methods once Creature/GameObject/Corpse exist.
