@@ -316,15 +316,22 @@ impl WorldSession {
                 }
             }
 
-            let Some(entry) = self.loot_table.get(&owner_guid).and_then(|loot| {
-                loot.items
-                    .iter()
-                    .find(|entry| {
-                        entry.loot_list_id == loot_req.loot_list_id
-                            && !loot_item_is_looted_for_player_like_cpp(loot, entry, player_guid)
-                    })
-                    .cloned()
-            }) else {
+            let Some((entry, dungeon_encounter_id)) =
+                self.loot_table.get(&owner_guid).and_then(|loot| {
+                    loot.items
+                        .iter()
+                        .find(|entry| {
+                            entry.loot_list_id == loot_req.loot_list_id
+                                && !loot_item_is_looted_for_player_like_cpp(
+                                    loot,
+                                    entry,
+                                    player_guid,
+                                )
+                        })
+                        .cloned()
+                        .map(|entry| (entry, loot.dungeon_encounter_id))
+                })
+            else {
                 self.send_equip_error(InventoryResult::LootGone, None, None, 0, 0);
                 continue;
             };
@@ -344,7 +351,10 @@ impl WorldSession {
                 continue;
             }
 
-            if !self.store_direct_loot_item_like_cpp(&entry).await {
+            if !self
+                .store_direct_loot_item_like_cpp(&entry, dungeon_encounter_id)
+                .await
+            {
                 continue;
             }
 
@@ -732,6 +742,7 @@ impl WorldSession {
             return false;
         }
         let loot_guid = loot.loot_guid;
+        let dungeon_encounter_id = loot.dungeon_encounter_id as i32;
 
         let Some(entry) = loot.items.iter().find(|entry| {
             entry.loot_list_id == roll.loot_list_id
@@ -769,7 +780,7 @@ impl WorldSession {
             item: loot_roll_broadcast_item_like_cpp(&entry, LOOT_SLOT_TYPE_ROLL_ONGOING_LIKE_CPP),
             autopassed: false,
             off_spec: false,
-            dungeon_encounter_id: 0,
+            dungeon_encounter_id,
         };
 
         let finish = represented_loot_roll_finish_winner_like_cpp(state);
@@ -800,6 +811,11 @@ impl WorldSession {
         let Some(owner_guid) = self.active_loot_owner_for_loot_object_like_cpp(loot_obj) else {
             return;
         };
+        let dungeon_encounter_id = self
+            .loot_table
+            .get(&owner_guid)
+            .map(|loot| loot.dungeon_encounter_id as i32)
+            .unwrap_or(0);
 
         if let Some(loot) = self.loot_table.get_mut(&owner_guid) {
             if let Some(loot_entry) = loot
@@ -822,7 +838,7 @@ impl WorldSession {
             let packet = LootAllPassed {
                 loot_obj,
                 item: loot_roll_broadcast_item_like_cpp(entry, LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP),
-                dungeon_encounter_id: 0,
+                dungeon_encounter_id,
             };
             if let Some(state) = finished_state {
                 for (player_guid, vote) in &state.voters {
@@ -843,6 +859,7 @@ impl WorldSession {
                 entry,
                 winner_guid,
                 state,
+                dungeon_encounter_id,
             );
         }
 
@@ -853,7 +870,7 @@ impl WorldSession {
             roll_type: winner_vote.vote,
             item: loot_roll_broadcast_item_like_cpp(entry, LOOT_SLOT_TYPE_LOCKED_LIKE_CPP),
             main_spec: true,
-            dungeon_encounter_id: 0,
+            dungeon_encounter_id,
         };
         self.broadcast_represented_loot_roll_packet_like_cpp(&locked, entry, Some(winner_guid));
 
@@ -999,6 +1016,7 @@ impl WorldSession {
         entry: &LootEntry,
         winner_guid: ObjectGuid,
         state: &RepresentedLootRollState,
+        dungeon_encounter_id: i32,
     ) {
         for (player_guid, vote) in &state.voters {
             let (roll, roll_type) = match vote.vote {
@@ -1023,7 +1041,7 @@ impl WorldSession {
                 ),
                 autopassed: false,
                 off_spec: false,
-                dungeon_encounter_id: 0,
+                dungeon_encounter_id,
             };
 
             self.broadcast_represented_loot_roll_packet_to_voters_like_cpp(
@@ -1191,6 +1209,7 @@ impl WorldSession {
             let Some(loot) = self.loot_table.get(&owner_guid) else {
                 return;
             };
+            let dungeon_encounter_id = loot.dungeon_encounter_id;
 
             if loot.loot_method != LOOT_METHOD_MASTER_LIKE_CPP {
                 return;
@@ -1232,7 +1251,10 @@ impl WorldSession {
 
             let entry = item.clone();
             if master_loot_item.target == player_guid {
-                if !self.store_direct_loot_item_like_cpp(&entry).await {
+                if !self
+                    .store_direct_loot_item_like_cpp(&entry, dungeon_encounter_id)
+                    .await
+                {
                     return;
                 }
                 self.mark_represented_master_loot_item_removed_like_cpp(
@@ -1249,6 +1271,7 @@ impl WorldSession {
                         owner_guid,
                         req.object,
                         req.loot_list_id,
+                        dungeon_encounter_id,
                         entry,
                     )
                     .await
@@ -1292,6 +1315,7 @@ impl WorldSession {
         owner_guid: ObjectGuid,
         loot_obj: ObjectGuid,
         loot_list_id: u8,
+        dungeon_encounter_id: u32,
         entry: LootEntry,
     ) -> MasterLootGiveResult {
         let Some(player_guid) = self.player_guid else {
@@ -1313,6 +1337,7 @@ impl WorldSession {
             loot_owner: owner_guid,
             loot_obj,
             loot_list_id,
+            dungeon_encounter_id,
             entry,
             result_tx,
         });
@@ -1337,6 +1362,11 @@ impl WorldSession {
         winner_guid: ObjectGuid,
         winner_vote: RepresentedLootRollVote,
     ) {
+        let dungeon_encounter_id = self
+            .loot_table
+            .get(&owner_guid)
+            .map(|loot| loot.dungeon_encounter_id)
+            .unwrap_or(0);
         if winner_vote.vote == ROLL_VOTE_DISENCHANT_LIKE_CPP {
             if self
                 .store_represented_disenchant_loot_winner_like_cpp(
@@ -1345,6 +1375,7 @@ impl WorldSession {
                     loot_list_id,
                     entry,
                     winner_guid,
+                    dungeon_encounter_id,
                 )
                 .await
             {
@@ -1375,7 +1406,10 @@ impl WorldSession {
         store_entry.roll_winner = winner_guid;
 
         if self.player_guid == Some(winner_guid) {
-            if self.store_direct_loot_item_like_cpp(&store_entry).await {
+            if self
+                .store_direct_loot_item_like_cpp(&store_entry, dungeon_encounter_id)
+                .await
+            {
                 self.mark_represented_master_loot_item_removed_like_cpp(
                     owner_guid,
                     loot_obj,
@@ -1392,6 +1426,7 @@ impl WorldSession {
                 owner_guid,
                 loot_obj,
                 loot_list_id,
+                dungeon_encounter_id,
                 store_entry,
             )
             .await
@@ -1433,6 +1468,7 @@ impl WorldSession {
         loot_list_id: u8,
         entry: &LootEntry,
         winner_guid: ObjectGuid,
+        dungeon_encounter_id: u32,
     ) -> bool {
         let Some(template) = self
             .item_stats_store()
@@ -1461,7 +1497,10 @@ impl WorldSession {
 
         if self.player_guid == Some(winner_guid) {
             for disenchant_entry in &disenchant_entries {
-                if !self.store_direct_loot_item_like_cpp(disenchant_entry).await {
+                if !self
+                    .store_direct_loot_item_like_cpp(disenchant_entry, dungeon_encounter_id)
+                    .await
+                {
                     return false;
                 }
             }
@@ -1475,6 +1514,7 @@ impl WorldSession {
                     owner_guid,
                     loot_obj,
                     loot_list_id,
+                    dungeon_encounter_id,
                     disenchant_entry,
                 )
                 .await
@@ -1738,6 +1778,7 @@ impl WorldSession {
         owner_guid: ObjectGuid,
         loot_obj: ObjectGuid,
         loot_list_id: u8,
+        dungeon_encounter_id: u32,
         entry: LootEntry,
     ) -> MasterLootGiveResult {
         let Some(registry) = self.player_registry() else {
@@ -1755,6 +1796,7 @@ impl WorldSession {
             loot_owner: owner_guid,
             loot_obj,
             loot_list_id,
+            dungeon_encounter_id,
             entry,
             result_tx,
         });
@@ -1838,7 +1880,10 @@ impl WorldSession {
             return;
         }
 
-        let result = if self.store_direct_loot_item_like_cpp(&command.entry).await {
+        let result = if self
+            .store_direct_loot_item_like_cpp(&command.entry, command.dungeon_encounter_id)
+            .await
+        {
             MasterLootGiveResult::Stored
         } else {
             MasterLootGiveResult::StoreFailed(LOOT_ERROR_MASTER_OTHER_LIKE_CPP)
@@ -1887,7 +1932,10 @@ impl WorldSession {
             return;
         }
 
-        let result = if self.store_direct_loot_item_like_cpp(&command.entry).await {
+        let result = if self
+            .store_direct_loot_item_like_cpp(&command.entry, command.dungeon_encounter_id)
+            .await
+        {
             MasterLootGiveResult::Stored
         } else {
             MasterLootGiveResult::StoreFailed(LOOT_ERROR_MASTER_OTHER_LIKE_CPP)
@@ -2418,6 +2466,7 @@ impl WorldSession {
                             loot.loot_method,
                             entry,
                             valid_rolls,
+                            loot.dungeon_encounter_id as i32,
                         ),
                     ));
                 }
@@ -2439,7 +2488,7 @@ impl WorldSession {
                             ),
                             autopassed: false,
                             off_spec: false,
-                            dungeon_encounter_id: 0,
+                            dungeon_encounter_id: loot.dungeon_encounter_id as i32,
                         },
                         state.clone(),
                     ));
@@ -3403,7 +3452,11 @@ impl WorldSession {
         }
     }
 
-    async fn store_direct_loot_item_like_cpp(&mut self, loot_entry: &LootEntry) -> bool {
+    async fn store_direct_loot_item_like_cpp(
+        &mut self,
+        loot_entry: &LootEntry,
+        dungeon_encounter_id: u32,
+    ) -> bool {
         let item_id = loot_entry.item_id;
         let count = loot_entry.quantity;
         let Some(player_guid) = self.player_guid else {
@@ -3655,6 +3708,7 @@ impl WorldSession {
                 added_count,
                 new_count,
                 false,
+                dungeon_encounter_id,
             );
         }
 
@@ -3669,6 +3723,7 @@ impl WorldSession {
                 stack.count,
                 stack.count,
                 false,
+                dungeon_encounter_id,
             );
         }
 
@@ -3767,7 +3822,9 @@ impl WorldSession {
         quantity: u32,
         quantity_in_inventory: u32,
         created: bool,
+        dungeon_encounter_id: u32,
     ) {
+        let is_encounter_loot = dungeon_encounter_id != 0;
         self.send_packet(&ItemPushResult {
             player_guid,
             slot: u8::from(INVENTORY_SLOT_BAG_0),
@@ -3782,17 +3839,21 @@ impl WorldSession {
             quest_log_item_id: 0,
             quantity: quantity as i32,
             quantity_in_inventory: quantity_in_inventory as i32,
-            dungeon_encounter_id: 0,
+            dungeon_encounter_id: dungeon_encounter_id as i32,
             battle_pet_species_id: 0,
             battle_pet_breed_id: 0,
             battle_pet_breed_quality: 0,
             battle_pet_level: 0,
             item_guid,
             pushed: false,
-            display_text: ItemPushResultDisplayType::Normal,
+            display_text: if is_encounter_loot {
+                ItemPushResultDisplayType::EncounterLoot
+            } else {
+                ItemPushResultDisplayType::Normal
+            },
             created,
             is_bonus_roll: false,
-            is_encounter_loot: false,
+            is_encounter_loot,
         });
     }
 
@@ -4243,6 +4304,7 @@ fn start_loot_roll_packet_like_cpp(
     loot_method: u8,
     entry: &LootEntry,
     valid_rolls: u8,
+    dungeon_encounter_id: i32,
 ) -> StartLootRoll {
     StartLootRoll {
         loot_obj,
@@ -4265,7 +4327,7 @@ fn start_loot_roll_packet_like_cpp(
             quantity: entry.quantity,
             loot_item_type: 0,
         },
-        dungeon_encounter_id: 0,
+        dungeon_encounter_id,
     }
 }
 
@@ -4654,17 +4716,18 @@ struct PlannedLootNewStack {
 #[cfg(test)]
 mod tests {
     use super::{
-        ITEM_FLAGS_CU_FOLLOW_LOOT_RULES_LIKE_CPP, ItemTemplateAddonLootMetadataLikeCpp,
-        LOOT_METHOD_GROUP_LIKE_CPP, LOOT_METHOD_MASTER_LIKE_CPP,
-        LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP, LOOT_SLOT_TYPE_ROLL_ONGOING_LIKE_CPP,
-        LootStoreRandomProperties, ROLL_ALL_TYPE_NO_DISENCHANT_LIKE_CPP,
-        ROLL_FLAG_TYPE_NEED_LIKE_CPP, ROLL_VOTE_GREED_LIKE_CPP, ROLL_VOTE_NEED_LIKE_CPP,
-        ROLL_VOTE_NOT_EMITTED_YET_LIKE_CPP, ROLL_VOTE_NOT_VALID_LIKE_CPP, ROLL_VOTE_PASS_LIKE_CPP,
+        INVENTORY_SLOT_BAG_0, ITEM_FLAGS_CU_FOLLOW_LOOT_RULES_LIKE_CPP,
+        ItemTemplateAddonLootMetadataLikeCpp, LOOT_METHOD_GROUP_LIKE_CPP,
+        LOOT_METHOD_MASTER_LIKE_CPP, LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP,
+        LOOT_SLOT_TYPE_ROLL_ONGOING_LIKE_CPP, LootStoreRandomProperties,
+        ROLL_ALL_TYPE_NO_DISENCHANT_LIKE_CPP, ROLL_FLAG_TYPE_NEED_LIKE_CPP,
+        ROLL_VOTE_GREED_LIKE_CPP, ROLL_VOTE_NEED_LIKE_CPP, ROLL_VOTE_NOT_EMITTED_YET_LIKE_CPP,
+        ROLL_VOTE_NOT_VALID_LIKE_CPP, ROLL_VOTE_PASS_LIKE_CPP,
         generated_creature_loot_item_to_entry_like_cpp, loot_is_looted_like_cpp, loot_item_context,
         loot_store_data_can_stack_with_item, loot_type_for_client_like_cpp,
         mark_loot_allowed_for_player_like_cpp, mark_loot_item_looted_for_player_like_cpp,
         represented_loot_object_guid_like_cpp, represented_loot_response_items_like_cpp,
-        select_weighted_random_enchantment_like_cpp,
+        select_weighted_random_enchantment_like_cpp, start_loot_roll_packet_like_cpp,
     };
     use crate::session::RepresentedLootRollCriteriaEvent;
     use rand::{SeedableRng, rngs::StdRng};
@@ -4854,6 +4917,70 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.acquire_reason, LOOT_TYPE_DISENCHANTING_LIKE_CPP);
+    }
+
+    #[test]
+    fn represented_start_loot_roll_carries_cpp_dungeon_encounter_id() {
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let loot_obj = ObjectGuid::create_world_object(HighGuid::LootObject, 0, 1, 0, 0, 1, 900);
+        let entry = represented_loot_entry(0, 25, player_guid);
+
+        let packet = start_loot_roll_packet_like_cpp(
+            loot_obj,
+            571,
+            LOOT_METHOD_GROUP_LIKE_CPP,
+            &entry,
+            ROLL_ALL_TYPE_NO_DISENCHANT_LIKE_CPP,
+            615,
+        );
+
+        assert_eq!(packet.dungeon_encounter_id, 615);
+    }
+
+    #[test]
+    fn represented_loot_item_push_result_carries_cpp_encounter_loot_fields() {
+        let (session, send_rx) = make_session_with_send();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let item_guid = ObjectGuid::create_item(1, 700);
+        let entry = represented_loot_entry(0, 25, player_guid);
+
+        session.send_loot_item_push_result(
+            player_guid,
+            item_guid,
+            &entry,
+            0,
+            0,
+            0,
+            1,
+            1,
+            false,
+            615,
+        );
+
+        let sent = send_rx.try_recv().unwrap();
+        let mut sent = WorldPacket::from_bytes(&sent);
+        assert_eq!(
+            sent.read_uint16().unwrap(),
+            wow_constants::ServerOpcodes::ItemPushResult as u16
+        );
+        assert_eq!(sent.read_packed_guid().unwrap(), player_guid);
+        assert_eq!(sent.read_uint8().unwrap(), u8::from(INVENTORY_SLOT_BAG_0));
+        assert_eq!(sent.read_int32().unwrap(), 0);
+        assert_eq!(sent.read_int32().unwrap(), 0);
+        assert_eq!(sent.read_int32().unwrap(), 1);
+        assert_eq!(sent.read_int32().unwrap(), 1);
+        assert_eq!(sent.read_int32().unwrap(), 615);
+        assert_eq!(sent.read_int32().unwrap(), 0);
+        assert_eq!(sent.read_int32().unwrap(), 0);
+        assert_eq!(sent.read_uint32().unwrap(), 0);
+        assert_eq!(sent.read_int32().unwrap(), 0);
+        assert_eq!(sent.read_packed_guid().unwrap(), item_guid);
+        assert!(!sent.read_bit().unwrap());
+        assert!(!sent.read_bit().unwrap());
+        assert_eq!(sent.read_bits(3).unwrap(), 2);
+        assert!(!sent.read_bit().unwrap());
+        assert!(sent.read_bit().unwrap());
+        assert_eq!(sent.read_int32().unwrap(), 25);
     }
 
     #[test]
