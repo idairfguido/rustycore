@@ -240,7 +240,7 @@ NOTE: `InstanceSaveMgr` no longer exists as a separate class in this WoLK 3.4.3 
 - All ~120 dungeon/raid scripts (each a separate Trait/struct in Rust).
 
 **Suspicious / likely divergent (hipótesis pre-auditoría):**
-- `MapManager::GenerateInstanceId` in WIP commit may not honor the `INSTANCE_ID_HIGH_MASK | _NORMAL_MASK` bit pattern — verify before persisting any IDs (DB-level break if wrong). The mask constants now exist in `wow-instances`, but allocator policy is still pending.
+- `MapManager::GenerateInstanceId` was audited against C++: this fork does not OR the `INSTANCE_ID_*_MASK` constants in the allocator; it reserves 0, returns the lowest free sequential id, registers loaded ids, and reuses freed ids. Rust now ports that pure allocator behavior in `wow-world`.
 - No code path in current Rust calls anything resembling `CanJoinInstanceLock` — players can be ported into instances without lock validation; risk of phantom lock binding.
 
 **Tests existing:**
@@ -346,7 +346,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [ ] **#INST.38** Implement `SMSG_PENDING_RAID_LOCK` + `CMSG_INSTANCE_LOCK_RESPONSE` round-trip (M)
 - [ ] **#INST.39** Implement instance respawn purge on reset (`gameobject_respawn` / `creature_respawn` rows by `instanceId`) (M)
 - [ ] **#INST.40** Wire `InstanceMap::Update(diff)` → `InstanceScript::Update` + combat-res tick (L)
-- [ ] **#INST.41** Audit & fix `MapManager::GenerateInstanceId` in WIP `map_manager.rs` to honor the bit-mask scheme (L)
+- [x] **#INST.41** Audit & fix `MapManager::GenerateInstanceId` in WIP `map_manager.rs` (L) — contrasted with C++ `MapManager.cpp`: no mask OR is applied by this fork; Rust now reserves 0, registers loaded ids, returns the lowest free sequential id, and reuses freed ids.
 - [ ] **#INST.42** Add GM commands `.instance unbind`, `.instance reset`, `.instance stats` (M)
 - [ ] **#INST.43** Plumb `CanJoinInstanceLock` into the teleport / portal / `MapManager::PlayerCannotEnter` path (H)
 
@@ -459,8 +459,8 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 🟡 parcialmente mitigado. Auditado contra `/home/server/rustycore/crates/` y contrastado con `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceLockMgr.cpp/.h`.
 
 **Hallazgos clave:**
-- `crates/wow-instances/` existe y contiene las constantes `INSTANCE_ID_HIGH_MASK`, `_LFG_MASK`, `_NORMAL_MASK`; todavía no hay generador de instance IDs ni free-id reuse.
-- Los 2 únicos call-sites de `add_creature(0,0,0,0,…)` están en tests del propio `map_manager.rs` (líneas 761, 774). Sin caller real, la pregunta "qué bits usan los IDs" todavía no se ha decidido.
+- `crates/wow-instances/` existe y contiene las constantes `INSTANCE_ID_HIGH_MASK`, `_LFG_MASK`, `_NORMAL_MASK`; `MapManager::GenerateInstanceId` fue contrastado y en C++ no usa esas máscaras.
+- Los 2 únicos call-sites de `add_creature(0,0,0,0,…)` están en tests del propio `map_manager.rs` (líneas 761, 774). Sin caller real, todavía falta conectar el allocator a la creación real de instancias.
 - `InstanceLockMgr` análogo: core in-memory creado en `#NEXT.R8.INSTANCES.001`; statements, builders, async load glue y weak-ref cleanup creados en `#NEXT.R8.INSTANCES.002`; global/runtime wiring sigue pendiente.
 - 0 handlers para `CMSG_RESET_INSTANCES`, `CMSG_INSTANCE_LOCK_RESPONSE`, `CMSG_REQUEST_RAID_INFO`. 0 builders para `SMSG_RAID_INSTANCE_INFO`, `SMSG_PENDING_RAID_LOCK`, `SMSG_INSTANCE_ENCOUNTER_*`, `SMSG_INSTANCE_RESET*`.
 
@@ -468,4 +468,4 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - ⚠️ **`CMSG_REQUEST_RAID_INFO` no está registrado** en `wow-handler` ni stubbed en `misc.rs`. El cliente al hacer `Shift-O → Raid` espera `SMSG_RAID_INSTANCE_INFO`; sin handler ni stub, el packet se descarta en el dispatcher (registro inventario) y la pestaña queda *forever-loading*. Si y cuando se cree wow-instances, este es el primer opcode a registrar (incluso si solo devuelve 0 locks).
 - Bajo riesgo de UI hang en el resto del flujo: el cliente nunca llega a "set difficulty" o "reset instance" porque el botón "Enter Dungeon" requiere primero un raid info populado.
 
-**Acción:** mantener `🟡 foundation in progress`. Siguiente cierre recomendado: completar el wiring runtime de `#INST.7/#INST.11/#INST.12` y `#INST.41` antes de persistir IDs generados.
+**Acción:** mantener `🟡 foundation in progress`. Siguiente cierre recomendado: completar el wiring runtime de `#INST.7/#INST.11/#INST.12` antes de persistir IDs generados.
