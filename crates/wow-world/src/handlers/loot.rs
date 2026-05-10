@@ -3896,7 +3896,10 @@ impl WorldSession {
         let has_non_none_start_quest_status = u32::try_from(start_quest_id)
             .ok()
             .is_some_and(|quest_id| quest_id != 0 && player_context.quest_status(quest_id) != 0);
-        !needs_quest && !has_non_none_start_quest_status
+        let has_quest_for_item =
+            self.represented_has_quest_for_item_like_cpp(item_id, addon_metadata, player_context);
+
+        (!needs_quest && !has_non_none_start_quest_status) || has_quest_for_item
     }
 
     fn represented_loot_player_context_like_cpp(
@@ -3915,7 +3918,13 @@ impl WorldSession {
                     .iter()
                     .map(|(quest_id, status)| (*quest_id, status.status))
                     .collect(),
+                active_quest_objective_counts: self
+                    .player_quests
+                    .iter()
+                    .map(|(quest_id, status)| (*quest_id, status.objective_counts.clone()))
+                    .collect(),
                 rewarded_quests: self.rewarded_quests.clone(),
+                inventory_item_counts: self.represented_inventory_item_counts_like_cpp(),
                 is_current: true,
             });
         }
@@ -3929,7 +3938,9 @@ impl WorldSession {
             level: player.level,
             known_spells: player.known_spells.clone(),
             active_quest_statuses: player.active_quest_statuses.clone(),
+            active_quest_objective_counts: player.active_quest_objective_counts.clone(),
             rewarded_quests: player.rewarded_quests.clone(),
+            inventory_item_counts: player.inventory_item_counts.clone(),
             is_current: false,
         })
     }
@@ -4049,13 +4060,128 @@ impl WorldSession {
         })
     }
 
+    fn represented_has_quest_for_item_like_cpp(
+        &self,
+        item_id: u32,
+        addon_metadata: ItemTemplateAddonLootMetadataLikeCpp,
+        player_context: &RepresentedLootPlayerContext,
+    ) -> bool {
+        if player_context.is_current {
+            return self.has_incomplete_quest_objective_for_item_like_cpp(item_id)
+                || (addon_metadata.quest_log_item_id != 0
+                    && self.has_incomplete_quest_objective_for_object_id_like_cpp(
+                        addon_metadata.quest_log_item_id,
+                    ))
+                || self.has_incomplete_quest_item_drop_for_item_like_cpp(item_id);
+        }
+
+        let Ok(item_object_id) = i32::try_from(item_id) else {
+            return false;
+        };
+        self.remote_has_incomplete_quest_objective_for_object_id_like_cpp(
+            item_object_id,
+            player_context,
+        ) || (addon_metadata.quest_log_item_id != 0
+            && self.remote_has_incomplete_quest_objective_for_object_id_like_cpp(
+                addon_metadata.quest_log_item_id,
+                player_context,
+            ))
+            || self.remote_has_incomplete_quest_item_drop_for_item_like_cpp(item_id, player_context)
+    }
+
+    fn remote_has_incomplete_quest_objective_for_object_id_like_cpp(
+        &self,
+        item_object_id: i32,
+        player_context: &RepresentedLootPlayerContext,
+    ) -> bool {
+        let Some(quest_store) = &self.quest_store else {
+            return false;
+        };
+
+        player_context
+            .active_quest_objective_counts
+            .iter()
+            .any(|(quest_id, objective_counts)| {
+                if player_context.quest_status(*quest_id) != 1 {
+                    return false;
+                }
+
+                let Some(quest) = quest_store.get(*quest_id) else {
+                    return false;
+                };
+
+                quest
+                    .objectives
+                    .iter()
+                    .enumerate()
+                    .any(|(fallback_index, objective)| {
+                        if objective.obj_type != 1 || objective.object_id != item_object_id {
+                            return false;
+                        }
+
+                        let storage_index = usize::try_from(objective.storage_index)
+                            .ok()
+                            .unwrap_or(fallback_index);
+                        let current = objective_counts.get(storage_index).copied().unwrap_or(0);
+                        current < objective.amount.max(1)
+                    })
+            })
+    }
+
+    fn remote_has_incomplete_quest_item_drop_for_item_like_cpp(
+        &self,
+        item_id: u32,
+        player_context: &RepresentedLootPlayerContext,
+    ) -> bool {
+        let Some(quest_store) = &self.quest_store else {
+            return false;
+        };
+
+        player_context
+            .active_quest_statuses
+            .iter()
+            .any(|(quest_id, status)| {
+                if *status != 1 {
+                    return false;
+                }
+
+                let Some(quest) = quest_store.get(*quest_id) else {
+                    return false;
+                };
+
+                quest
+                    .item_drop
+                    .iter()
+                    .enumerate()
+                    .any(|(index, drop_item_id)| {
+                        if *drop_item_id != item_id {
+                            return false;
+                        }
+
+                        let Some(template) = self.item_storage_template(item_id) else {
+                            return false;
+                        };
+
+                        let quantity = quest.item_drop_quantity[index];
+                        let mut max_allowed_count = if quantity != 0 {
+                            quantity
+                        } else {
+                            template.max_stack_size
+                        };
+                        if template.max_count > 0 {
+                            max_allowed_count = max_allowed_count.min(template.max_count as u32);
+                        }
+
+                        player_context.inventory_item_count(item_id) < max_allowed_count
+                    })
+            })
+    }
+
     fn direct_inventory_item_count_like_cpp(&self, item_id: u32) -> u32 {
-        self.inventory_items
-            .values()
-            .filter(|inventory_item| inventory_item.entry_id == item_id)
-            .filter_map(|inventory_item| self.inventory_item_objects.get(&inventory_item.guid))
-            .filter(|item| !item.is_in_trade())
-            .fold(0_u32, |total, item| total.saturating_add(item.count()))
+        self.represented_inventory_item_counts_like_cpp()
+            .get(&item_id)
+            .copied()
+            .unwrap_or(0)
     }
 
     fn evaluate_creature_loot_condition_for_player_like_cpp_representable(
@@ -4066,15 +4192,15 @@ impl WorldSession {
         match condition.condition_type_or_reference {
             0 => Some(true),
             2 => {
-                if !player_context.is_current {
-                    return None;
-                }
                 if condition.value3 != 0 {
                     return None;
                 }
-                Some(
-                    self.direct_inventory_item_count_like_cpp(condition.value1) >= condition.value2,
-                )
+                let item_count = if player_context.is_current {
+                    self.direct_inventory_item_count_like_cpp(condition.value1)
+                } else {
+                    player_context.inventory_item_count(condition.value1)
+                };
+                Some(item_count >= condition.value2)
             }
             6 => Some(
                 player_team_for_race_cpp_representable(player_context.race) == condition.value1,
@@ -4114,13 +4240,15 @@ impl WorldSession {
                     != 0,
             ),
             48 => {
-                if !player_context.is_current {
-                    return None;
-                }
-                Some(
+                let progress = if player_context.is_current {
                     self.player_quest_objective_progress_like_cpp(condition.value1)
-                        == Some(condition.value3 as i32),
-                )
+                } else {
+                    self.remote_player_quest_objective_progress_like_cpp(
+                        condition.value1,
+                        player_context,
+                    )
+                };
+                Some(progress == Some(condition.value3 as i32))
             }
             CONDITION_OBJECT_ENTRY_GUID_LIKE_CPP => {
                 Some(condition.value1 == TYPEID_PLAYER_LIKE_CPP)
@@ -4153,6 +4281,32 @@ impl WorldSession {
                     .copied()
                     .unwrap_or(0),
             );
+        }
+
+        None
+    }
+
+    fn remote_player_quest_objective_progress_like_cpp(
+        &self,
+        objective_id: u32,
+        player_context: &RepresentedLootPlayerContext,
+    ) -> Option<i32> {
+        let quest_store = self.quest_store.as_ref()?;
+
+        for (quest_id, objective_counts) in &player_context.active_quest_objective_counts {
+            let Some(quest) = quest_store.get(*quest_id) else {
+                continue;
+            };
+            let Some((_, objective)) = quest
+                .objectives
+                .iter()
+                .enumerate()
+                .find(|(_, objective)| objective.id == objective_id)
+            else {
+                continue;
+            };
+            let objective_index = objective.storage_index.max(0) as usize;
+            return Some(objective_counts.get(objective_index).copied().unwrap_or(0));
         }
 
         None
@@ -4676,6 +4830,7 @@ impl WorldSession {
             ));
         }
 
+        self.sync_player_registry_state_like_cpp();
         true
     }
 
@@ -4903,7 +5058,9 @@ struct RepresentedLootPlayerContext {
     level: u8,
     known_spells: Vec<i32>,
     active_quest_statuses: HashMap<u32, u8>,
+    active_quest_objective_counts: HashMap<u32, Vec<i32>>,
     rewarded_quests: HashSet<u32>,
+    inventory_item_counts: HashMap<u32, u32>,
     is_current: bool,
 }
 
@@ -4914,6 +5071,13 @@ impl RepresentedLootPlayerContext {
         }
         self.active_quest_statuses
             .get(&quest_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn inventory_item_count(&self, item_id: u32) -> u32 {
+        self.inventory_item_counts
+            .get(&item_id)
             .copied()
             .unwrap_or(0)
     }
@@ -5763,6 +5927,7 @@ mod tests {
         ItemQuality,
     };
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
+    use wow_data::quest::{QuestObjective, QuestStore, QuestTemplate};
     use wow_data::{
         ChrSpecializationEntry, ChrSpecializationStore, ItemDisenchantLootEntry,
         ItemDisenchantLootStore, ItemRandomEnchantmentTemplateEntry,
@@ -5778,7 +5943,6 @@ mod tests {
     };
     use wow_loot::{
         GeneratedLootItem, LOOT_SLOT_TYPE_OWNER_LIKE_CPP, LootConditionRowLikeCpp, LootStoreItem,
-        loot_conditions_allow_player_with_references_like_cpp_representable,
     };
     use wow_network::{
         GroupInfo, GroupRegistry, LootDropRatesLikeCpp, LootRollVoteCommand, PendingInvites,
@@ -6353,7 +6517,9 @@ mod tests {
             enchanting_skill: 0,
             known_spells: Vec::new(),
             active_quest_statuses: Default::default(),
+            active_quest_objective_counts: Default::default(),
             rewarded_quests: Default::default(),
+            inventory_item_counts: Default::default(),
             player_name: format!("Player{}", guid.counter()),
             account_id: guid.counter() as u32,
             race: 1,
@@ -6384,6 +6550,46 @@ mod tests {
         }
     }
 
+    fn test_quest_template(id: u32) -> QuestTemplate {
+        QuestTemplate {
+            id,
+            quest_type: 0,
+            quest_level: 1,
+            quest_max_scaling_level: 0,
+            min_level: 1,
+            quest_sort_id: 0,
+            quest_info_id: 0,
+            suggested_group_num: 0,
+            reward_next_quest: 0,
+            reward_xp_difficulty: 0,
+            reward_xp_multiplier: 1.0,
+            reward_money_difficulty: 0,
+            reward_money_multiplier: 1.0,
+            reward_bonus_money: 0,
+            reward_display_spell: [0; 3],
+            reward_spell: 0,
+            reward_honor: 0,
+            flags: 0,
+            flags_ex: 0,
+            flags_ex2: 0,
+            reward_items: [0; 4],
+            reward_amounts: [0; 4],
+            item_drop: [0; 4],
+            item_drop_quantity: [0; 4],
+            log_title: String::new(),
+            log_description: String::new(),
+            quest_description: String::new(),
+            area_description: String::new(),
+            quest_completion_log: String::new(),
+            objectives: Vec::new(),
+            allowable_races: 0,
+            allowable_classes: 0,
+            max_level: 0,
+            prev_quest_id: 0,
+            reward_choice_items: [(0, 0); 6],
+        }
+    }
+
     #[test]
     fn represented_personal_loot_remote_context_uses_registry_fields_like_cpp() {
         let (session, _) = make_session_with_send_capacity(1);
@@ -6394,7 +6600,9 @@ mod tests {
             level: 80,
             known_spells: Vec::new(),
             active_quest_statuses: HashMap::new(),
+            active_quest_objective_counts: HashMap::new(),
             rewarded_quests: HashSet::new(),
+            inventory_item_counts: HashMap::new(),
             is_current: false,
         };
 
@@ -6450,7 +6658,9 @@ mod tests {
             level: 80,
             known_spells: vec![12_345],
             active_quest_statuses,
+            active_quest_objective_counts: HashMap::new(),
             rewarded_quests,
+            inventory_item_counts: HashMap::new(),
             is_current: false,
         };
 
@@ -6499,44 +6709,180 @@ mod tests {
     }
 
     #[test]
-    fn represented_personal_loot_remote_unpublished_conditions_fail_closed_like_cpp() {
-        let (session, _) = make_session_with_send_capacity(1);
+    fn represented_personal_loot_remote_inventory_and_objective_conditions_use_registry_like_cpp() {
+        let (mut session, _) = make_session_with_send_capacity(1);
+        let mut quest_store = QuestStore::new();
+        let mut quest = test_quest_template(100);
+        quest.objectives.push(QuestObjective {
+            id: 11,
+            quest_id: 100,
+            obj_type: 1,
+            order: 0,
+            storage_index: 0,
+            object_id: 7001,
+            amount: 7,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        quest_store.quests.insert(100, quest);
+        session.set_quest_store(Arc::new(quest_store));
+        let mut active_quest_statuses = HashMap::new();
+        active_quest_statuses.insert(100, 1);
+        let mut active_quest_objective_counts = HashMap::new();
+        active_quest_objective_counts.insert(100, vec![5]);
+        let mut inventory_item_counts = HashMap::new();
+        inventory_item_counts.insert(9001, 2);
         let remote_context = RepresentedLootPlayerContext {
             race: 1,
             class: 1,
             gender: 0,
             level: 80,
             known_spells: Vec::new(),
-            active_quest_statuses: HashMap::new(),
+            active_quest_statuses,
+            active_quest_objective_counts,
             rewarded_quests: HashSet::new(),
+            inventory_item_counts,
             is_current: false,
         };
 
-        for condition_type in [2, 48] {
-            assert_eq!(
-                session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
-                    &loot_condition(condition_type, 1, 1, 0),
-                    &remote_context,
-                ),
-                None,
-                "condition type {condition_type} must not be guessed for remote tappers"
-            );
-        }
-
-        let mut negative_remote_objective = loot_condition(48, 1, 0, 0);
-        negative_remote_objective.negative = true;
-        assert!(
-            !loot_conditions_allow_player_with_references_like_cpp_representable(
-                &[negative_remote_objective],
-                &HashMap::new(),
-                |condition| {
-                    session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
-                        condition,
-                        &remote_context,
-                    )
-                },
-            )
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(2, 9001, 2, 0),
+                &remote_context,
+            ),
+            Some(true)
         );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(2, 9001, 3, 0),
+                &remote_context,
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(2, 9001, 2, 1),
+                &remote_context,
+            ),
+            None
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(48, 11, 0, 5),
+                &remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(48, 11, 0, 4),
+                &remote_context,
+            ),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn represented_personal_loot_remote_has_quest_for_item_objective_like_cpp() {
+        let (mut session, _) = make_session_with_send_capacity(1);
+        install_limited_test_item_template(&mut session, 7001, 0);
+        let mut quest_store = QuestStore::new();
+        let mut quest = test_quest_template(100);
+        quest.objectives.push(QuestObjective {
+            id: 1,
+            quest_id: 100,
+            obj_type: 1,
+            order: 0,
+            storage_index: 0,
+            object_id: 7001,
+            amount: 3,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        quest_store.quests.insert(100, quest);
+        session.set_quest_store(Arc::new(quest_store));
+
+        let mut active_quest_statuses = HashMap::new();
+        active_quest_statuses.insert(100, 1);
+        let mut active_quest_objective_counts = HashMap::new();
+        active_quest_objective_counts.insert(100, vec![2]);
+        let mut remote_context = RepresentedLootPlayerContext {
+            race: 1,
+            class: 1,
+            gender: 0,
+            level: 80,
+            known_spells: Vec::new(),
+            active_quest_statuses,
+            active_quest_objective_counts,
+            rewarded_quests: HashSet::new(),
+            inventory_item_counts: HashMap::new(),
+            is_current: false,
+        };
+
+        assert!(session.item_loot_quest_status_allows_for_player_like_cpp(
+            7001,
+            true,
+            ItemTemplateAddonLootMetadataLikeCpp::default(),
+            &remote_context,
+        ));
+
+        remote_context
+            .active_quest_objective_counts
+            .insert(100, vec![3]);
+        assert!(!session.item_loot_quest_status_allows_for_player_like_cpp(
+            7001,
+            true,
+            ItemTemplateAddonLootMetadataLikeCpp::default(),
+            &remote_context,
+        ));
+    }
+
+    #[test]
+    fn represented_personal_loot_remote_has_quest_for_item_drop_like_cpp() {
+        let (mut session, _) = make_session_with_send_capacity(1);
+        install_limited_test_item_template(&mut session, 7002, 0);
+        let mut quest_store = QuestStore::new();
+        let mut quest = test_quest_template(200);
+        quest.item_drop[0] = 7002;
+        quest.item_drop_quantity[0] = 4;
+        quest_store.quests.insert(200, quest);
+        session.set_quest_store(Arc::new(quest_store));
+
+        let mut active_quest_statuses = HashMap::new();
+        active_quest_statuses.insert(200, 1);
+        let mut inventory_item_counts = HashMap::new();
+        inventory_item_counts.insert(7002, 3);
+        let mut remote_context = RepresentedLootPlayerContext {
+            race: 1,
+            class: 1,
+            gender: 0,
+            level: 80,
+            known_spells: Vec::new(),
+            active_quest_statuses,
+            active_quest_objective_counts: HashMap::new(),
+            rewarded_quests: HashSet::new(),
+            inventory_item_counts,
+            is_current: false,
+        };
+
+        assert!(session.item_loot_quest_status_allows_for_player_like_cpp(
+            7002,
+            true,
+            ItemTemplateAddonLootMetadataLikeCpp::default(),
+            &remote_context,
+        ));
+
+        remote_context.inventory_item_counts.insert(7002, 4);
+        assert!(!session.item_loot_quest_status_allows_for_player_like_cpp(
+            7002,
+            true,
+            ItemTemplateAddonLootMetadataLikeCpp::default(),
+            &remote_context,
+        ));
     }
 
     fn install_master_loot_group(

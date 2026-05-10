@@ -79,8 +79,12 @@ pub struct PlayerBroadcastInfo {
     pub known_spells: Vec<i32>,
     /// Current quest status map, keyed by quest id, used for remote `Player::GetQuestStatus` checks.
     pub active_quest_statuses: HashMap<u32, u8>,
+    /// Active quest objective counters, keyed by quest id, used for remote `Player::HasQuestForItem`.
+    pub active_quest_objective_counts: HashMap<u32, Vec<i32>>,
     /// Rewarded quest ids, used for remote `QUEST_STATUS_REWARDED` checks.
     pub rewarded_quests: HashSet<u32>,
+    /// Direct inventory item counts, keyed by item entry, used for remote quest-loot gates.
+    pub inventory_item_counts: HashMap<u32, u32>,
     /// Character name — used for whisper target lookups.
     pub player_name: String,
     /// Account ID — kept for future same-account filtering.

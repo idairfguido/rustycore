@@ -1984,6 +1984,28 @@ impl WorldSession {
         }
         self.remove_inventory_item_object(item_guid);
         self.sync_object_accessor_player();
+        self.sync_player_registry_state_like_cpp();
+    }
+
+    pub(crate) fn represented_inventory_item_counts_like_cpp(&self) -> HashMap<u32, u32> {
+        self.inventory_items
+            .values()
+            .filter_map(|inventory_item| self.inventory_item_objects.get(&inventory_item.guid))
+            .chain(self.inventory_item_objects.values().filter(|item| {
+                !item.container_guid().is_empty()
+                    && self
+                        .inventory_item_objects
+                        .contains_key(&item.container_guid())
+            }))
+            .filter(|item| !item.is_in_trade())
+            .fold(HashMap::new(), |mut counts, item| {
+                let entry_id = item.object().entry();
+                counts
+                    .entry(entry_id)
+                    .and_modify(|count| *count = count.saturating_add(item.count()))
+                    .or_insert(item.count());
+                counts
+            })
     }
 
     /// Resolve an inventory item by (bag, slot) following C++ Player::GetItemByPos.
@@ -2684,6 +2706,7 @@ impl WorldSession {
                 );
             }
         }
+        self.sync_player_registry_state_like_cpp();
     }
 
     /// Set the QuestXP store (loaded from QuestXP.db2).
@@ -2819,7 +2842,13 @@ impl WorldSession {
                     .iter()
                     .map(|(quest_id, status)| (*quest_id, status.status))
                     .collect(),
+                active_quest_objective_counts: self
+                    .player_quests
+                    .iter()
+                    .map(|(quest_id, status)| (*quest_id, status.objective_counts.clone()))
+                    .collect(),
                 rewarded_quests: self.rewarded_quests.clone(),
+                inventory_item_counts: self.represented_inventory_item_counts_like_cpp(),
                 player_name: name.clone(),
                 account_id: self.account_id,
                 race: self.player_race,
@@ -2854,7 +2883,13 @@ impl WorldSession {
                 .iter()
                 .map(|(quest_id, status)| (*quest_id, status.status))
                 .collect();
+            info.active_quest_objective_counts = self
+                .player_quests
+                .iter()
+                .map(|(quest_id, status)| (*quest_id, status.objective_counts.clone()))
+                .collect();
             info.rewarded_quests = self.rewarded_quests.clone();
+            info.inventory_item_counts = self.represented_inventory_item_counts_like_cpp();
         }
     }
 
@@ -5651,7 +5686,9 @@ mod tests {
             enchanting_skill: 0,
             known_spells: Vec::new(),
             active_quest_statuses: Default::default(),
+            active_quest_objective_counts: Default::default(),
             rewarded_quests: Default::default(),
+            inventory_item_counts: Default::default(),
             player_name: format!("Player{}", guid.counter()),
             account_id: guid.counter() as u32,
             race: 1,
@@ -5678,10 +5715,53 @@ mod tests {
                 quest_id: 100,
                 status: 1,
                 explored: false,
-                objective_counts: Vec::new(),
+                objective_counts: vec![2, 3],
             },
         );
         session.rewarded_quests.insert(200);
+        let item_guid = ObjectGuid::create_item(1, 500);
+        session.inventory_items.insert(
+            0,
+            InventoryItem {
+                guid: item_guid,
+                entry_id: 9001,
+                db_guid: 500,
+                inventory_type: Some(0),
+            },
+        );
+        session.insert_inventory_item_object(session.make_inventory_item_object(
+            item_guid,
+            9001,
+            guid,
+            4,
+            0,
+            ItemContext::None,
+            0,
+        ));
+        let bag_guid = ObjectGuid::create_item(1, 501);
+        session.inventory_items.insert(
+            1,
+            InventoryItem {
+                guid: bag_guid,
+                entry_id: 8000,
+                db_guid: 501,
+                inventory_type: Some(18),
+            },
+        );
+        session.insert_inventory_item_object(session.make_inventory_item_object(
+            bag_guid,
+            8000,
+            guid,
+            1,
+            0,
+            ItemContext::None,
+            1,
+        ));
+        let child_guid = ObjectGuid::create_item(1, 502);
+        let mut child_item =
+            session.make_inventory_item_object(child_guid, 9001, guid, 2, 0, ItemContext::None, 0);
+        child_item.set_container_guid_and_slot(bag_guid, 0);
+        session.insert_inventory_item_object(child_item);
         session.set_player_registry(Arc::clone(&registry));
 
         session.register_in_player_registry();
@@ -5689,7 +5769,12 @@ mod tests {
             let info = registry.get(&guid).expect("registered player");
             assert_eq!(info.known_spells, vec![12_345]);
             assert_eq!(info.active_quest_statuses.get(&100), Some(&1));
+            assert_eq!(
+                info.active_quest_objective_counts.get(&100),
+                Some(&vec![2, 3])
+            );
             assert!(info.rewarded_quests.contains(&200));
+            assert_eq!(info.inventory_item_counts.get(&9001), Some(&6));
         }
 
         session.known_spells.push(54_321);
@@ -5699,16 +5784,21 @@ mod tests {
                 quest_id: 300,
                 status: 2,
                 explored: false,
-                objective_counts: Vec::new(),
+                objective_counts: vec![7],
             },
         );
         session.rewarded_quests.insert(400);
+        if let Some(item) = session.inventory_item_objects.get_mut(&item_guid) {
+            item.set_count(6);
+        }
         session.sync_player_registry_state_like_cpp();
 
         let info = registry.get(&guid).expect("synced player");
         assert!(info.known_spells.contains(&54_321));
         assert_eq!(info.active_quest_statuses.get(&300), Some(&2));
+        assert_eq!(info.active_quest_objective_counts.get(&300), Some(&vec![7]));
         assert!(info.rewarded_quests.contains(&400));
+        assert_eq!(info.inventory_item_counts.get(&9001), Some(&8));
     }
 
     #[test]
