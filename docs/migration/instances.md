@@ -186,8 +186,7 @@ NOTE: `InstanceSaveMgr` no longer exists as a separate class in this WoLK 3.4.3 
 | `CMSG_REQUEST_INSTANCE_INFO` | client → server | Build dungeon list (post 4.x) |
 | `SMSG_INSTANCE_RESET` | server → client | After successful reset (per-player or per-group) |
 | `SMSG_INSTANCE_RESET_FAILED` | server → client | When `IsInUse()` blocks reset |
-| `SMSG_RAID_INSTANCE_INFO` | server → client | Periodic raid lock list to client (`Player::SendRaidInfo`) |
-| `SMSG_INSTANCE_INFO` | server → client | Dungeon list with extension flags |
+| `SMSG_INSTANCE_INFO` | server → client | Periodic instance lock list to client (`Player::SendRaidInfo`) |
 | `SMSG_RAID_INSTANCE_MESSAGE` | server → client | Welcome / "instance expires in X" / "you are saved" |
 | `SMSG_PENDING_RAID_LOCK` | server → client | Convert-to-permanent confirm prompt on entry |
 | `SMSG_INSTANCE_ENCOUNTER_ENGAGE_UNIT` / `_DISENGAGE_UNIT` | server → client | `SendEncounterUnit` |
@@ -340,7 +339,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [ ] **#INST.32** Implement `MarkAreaTriggerDone` / `IsAreaTriggerDone` set tracking (L)
 - [ ] **#INST.33** Implement `UpdateLfgEncounterState` integration (depends on `wow-lfg` doc) (M)
 - [ ] **#INST.34** Implement `UpdatePhasing` integration (depends on `phasing.md`) (M)
-- [ ] **#INST.35** Implement `Player::SendRaidInfo` → `SMSG_RAID_INSTANCE_INFO` builder (M)
+- [~] **#INST.35** Implement `Player::SendRaidInfo` → `SMSG_INSTANCE_INFO` builder (M) — C++ packet layout and empty `CMSG_REQUEST_RAID_INFO` response done; lock population from runtime `InstanceLockMgr` pending.
 - [ ] **#INST.36** Implement `WorldSession::HandleResetInstancesOpcode` (`CMSG_RESET_INSTANCES`) → call `ResetInstanceLocksForPlayer` or `Group::ResetInstances` (M)
 - [ ] **#INST.37** Implement `SMSG_INSTANCE_RESET` / `_FAILED` / `SMSG_RAID_INSTANCE_MESSAGE` packet senders (M)
 - [ ] **#INST.38** Implement `SMSG_PENDING_RAID_LOCK` + `CMSG_INSTANCE_LOCK_RESPONSE` round-trip (M)
@@ -462,10 +461,10 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - `crates/wow-instances/` existe y contiene las constantes `INSTANCE_ID_HIGH_MASK`, `_LFG_MASK`, `_NORMAL_MASK`; `MapManager::GenerateInstanceId` fue contrastado y en C++ no usa esas máscaras.
 - Los 2 únicos call-sites de `add_creature(0,0,0,0,…)` están en tests del propio `map_manager.rs` (líneas 761, 774). Sin caller real, todavía falta conectar el allocator a la creación real de instancias.
 - `InstanceLockMgr` análogo: core in-memory creado en `#NEXT.R8.INSTANCES.001`; statements, builders, async load glue y weak-ref cleanup creados en `#NEXT.R8.INSTANCES.002`; global/runtime wiring sigue pendiente.
-- 0 handlers para `CMSG_RESET_INSTANCES`, `CMSG_INSTANCE_LOCK_RESPONSE`, `CMSG_REQUEST_RAID_INFO`. 0 builders para `SMSG_RAID_INSTANCE_INFO`, `SMSG_PENDING_RAID_LOCK`, `SMSG_INSTANCE_ENCOUNTER_*`, `SMSG_INSTANCE_RESET*`.
+- `CMSG_REQUEST_RAID_INFO` registrado y responde `SMSG_INSTANCE_INFO` vacío; falta poblar locks reales desde `InstanceLockMgr`. 0 handlers para `CMSG_RESET_INSTANCES`, `CMSG_INSTANCE_LOCK_RESPONSE`. 0 builders para `SMSG_PENDING_RAID_LOCK`, `SMSG_INSTANCE_ENCOUNTER_*`, `SMSG_INSTANCE_RESET*`.
 
 **Riesgo de UI hang silencioso:**
-- ⚠️ **`CMSG_REQUEST_RAID_INFO` no está registrado** en `wow-handler` ni stubbed en `misc.rs`. El cliente al hacer `Shift-O → Raid` espera `SMSG_RAID_INSTANCE_INFO`; sin handler ni stub, el packet se descarta en el dispatcher (registro inventario) y la pestaña queda *forever-loading*. Si y cuando se cree wow-instances, este es el primer opcode a registrar (incluso si solo devuelve 0 locks).
+- `CMSG_REQUEST_RAID_INFO` ya no queda silencioso: responde `SMSG_INSTANCE_INFO` vacío. La prueba de cliente puede validar que la pestaña no queda cargando indefinidamente, pero todavía no valida locks reales.
 - Bajo riesgo de UI hang en el resto del flujo: el cliente nunca llega a "set difficulty" o "reset instance" porque el botón "Enter Dungeon" requiere primero un raid info populado.
 
 **Acción:** mantener `🟡 foundation in progress`. Siguiente cierre recomendado: completar el wiring runtime de `#INST.7/#INST.11/#INST.12` antes de persistir IDs generados.

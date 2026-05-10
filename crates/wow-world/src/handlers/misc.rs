@@ -16,6 +16,7 @@ use wow_entities::{
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::ClientPacket;
+use wow_packet::packets::instance::InstanceInfo;
 use wow_packet::packets::item::{
     GetItemPurchaseData, ItemPurchaseContents, ItemPurchaseRefundCurrency, ItemPurchaseRefundItem,
     SetItemPurchaseData,
@@ -727,7 +728,9 @@ impl crate::session::WorldSession {
     }
     pub async fn handle_battle_pet_request_journal(&mut self, _pkt: wow_packet::WorldPacket) {}
     pub async fn handle_arena_team_roster(&mut self, _pkt: wow_packet::WorldPacket) {}
-    pub async fn handle_request_raid_info(&mut self, _pkt: wow_packet::WorldPacket) {}
+    pub async fn handle_request_raid_info(&mut self, _pkt: wow_packet::WorldPacket) {
+        self.send_packet(&InstanceInfo::default());
+    }
     pub async fn handle_request_conquest_formula_constants(
         &mut self,
         _pkt: wow_packet::WorldPacket,

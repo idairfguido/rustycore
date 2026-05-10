@@ -13,6 +13,7 @@ pub mod chat;
 pub mod combat;
 pub mod gossip;
 pub mod inspect;
+pub mod instance;
 pub mod item;
 pub mod loot;
 pub mod misc;
