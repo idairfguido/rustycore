@@ -33,14 +33,15 @@ use wow_entities::INVENTORY_SLOT_BAG_0;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_loot::{
     LootConditionRowLikeCpp, condition_compare_values_like_cpp,
-    loot_condition_reference_ids_like_cpp, loot_condition_reference_self_references_like_cpp,
+    generate_money_loot_with_rate_like_cpp, loot_condition_reference_ids_like_cpp,
+    loot_condition_reference_self_references_like_cpp,
     loot_condition_row_normalize_without_external_stores_like_cpp,
     loot_conditions_allow_player_with_references_like_cpp_representable,
 };
 use wow_packet::ClientPacket;
 use wow_packet::packets::item::{ItemExpirePurchaseRefund, ItemInstance};
 use wow_packet::packets::loot::{
-    CreatureLoot, LootEntry, LootEntryFlags, LootItemData, LootResponse,
+    CreatureLoot, LOOT_TYPE_ITEM_LIKE_CPP, LootEntry, LootEntryFlags, LootItemData, LootResponse,
 };
 use wow_packet::packets::spell::{
     CastFailed, CastSpellRequest, OpenItem, SpellCastVisual, SpellStartPkt, SpellTargetData,
@@ -431,7 +432,18 @@ impl WorldSession {
                 CreatureLoot {
                     loot_guid: item.guid,
                     coins,
+                    unlooted_count: items
+                        .iter()
+                        .filter(|entry| !entry.taken)
+                        .count()
+                        .min(u8::MAX as usize) as u8,
+                    loot_type: LOOT_TYPE_ITEM_LIKE_CPP,
+                    dungeon_encounter_id: 0,
                     loot_method: 0,
+                    loot_master: ObjectGuid::EMPTY,
+                    round_robin_player: ObjectGuid::EMPTY,
+                    player_ffa_items: Vec::new(),
+                    players_looting: Vec::new(),
                     allowed_looters: vec![player_guid],
                     items,
                     looted_by_player: false,
@@ -479,7 +491,7 @@ impl WorldSession {
             owner: item.guid,
             loot_obj: loot_guid,
             failure_reason: 0,
-            acquire_reason: 0,
+            acquire_reason: LOOT_TYPE_ITEM_LIKE_CPP,
             loot_method: 0,
             threshold: 2,
             coins,
@@ -1604,36 +1616,6 @@ fn stored_loot_item_should_persist_like_cpp(
     !bag_family.contains(BagFamilyMask::CURRENCY_TOKENS)
 }
 
-#[cfg(test)]
-fn generate_money_loot_like_cpp<R: Rng + ?Sized>(
-    min_amount: u32,
-    max_amount: u32,
-    rng: &mut R,
-) -> u32 {
-    generate_money_loot_with_rate_like_cpp(min_amount, max_amount, 1.0, rng)
-}
-
-fn generate_money_loot_with_rate_like_cpp<R: Rng + ?Sized>(
-    min_amount: u32,
-    max_amount: u32,
-    rate: f32,
-    rng: &mut R,
-) -> u32 {
-    if max_amount == 0 {
-        return 0;
-    }
-
-    if max_amount <= min_amount {
-        return ((max_amount as f32) * rate) as u32;
-    }
-
-    if max_amount - min_amount < 32_700 {
-        return ((rng.gen_range(min_amount..=max_amount) as f32) * rate) as u32;
-    }
-
-    (((rng.gen_range((min_amount >> 8)..=(max_amount >> 8)) as f32) * rate) as u32) << 8
-}
-
 fn roll_chance_with_rate_like_cpp<R: Rng + ?Sized>(chance: f32, rate: f32, rng: &mut R) -> bool {
     if chance >= 100.0 {
         return true;
@@ -1971,8 +1953,7 @@ mod tests {
     use super::{
         ITEM_FLAGS_CU_FOLLOW_LOOT_RULES_LIKE_CPP, ITEM_FLAGS_CU_IGNORE_QUEST_STATUS_LIKE_CPP,
         ItemTemplateAddonLootMetadataLikeCpp, LootTemplateRow, add_loot_item_stacks_like_cpp,
-        apply_wrapped_gift_transform_like_cpp, generate_money_loot_like_cpp,
-        generate_money_loot_with_rate_like_cpp, item_loot_quest_status_allows_like_cpp,
+        apply_wrapped_gift_transform_like_cpp, item_loot_quest_status_allows_like_cpp,
         loot_entry_flags_for_row_metadata_like_cpp, loot_template_group_row_can_roll_like_cpp,
         loot_template_plain_row_can_roll_like_cpp, loot_template_reference_row_can_roll_like_cpp,
         player_class_mask_like_cpp, player_quest_status_mask_like_cpp, player_race_mask_like_cpp,
@@ -2054,18 +2035,28 @@ mod tests {
     fn item_money_loot_generation_matches_cpp_boundary_branches() {
         let mut rng = StdRng::seed_from_u64(0xC0FFEE);
 
-        assert_eq!(generate_money_loot_like_cpp(0, 0, &mut rng), 0);
-        assert_eq!(generate_money_loot_like_cpp(120, 100, &mut rng), 100);
-        assert_eq!(generate_money_loot_like_cpp(100, 100, &mut rng), 100);
         assert_eq!(
-            generate_money_loot_with_rate_like_cpp(120, 100, 2.5, &mut rng),
+            wow_loot::generate_money_loot_with_rate_like_cpp(0, 0, 1.0, &mut rng),
+            0
+        );
+        assert_eq!(
+            wow_loot::generate_money_loot_with_rate_like_cpp(120, 100, 1.0, &mut rng),
+            100
+        );
+        assert_eq!(
+            wow_loot::generate_money_loot_with_rate_like_cpp(100, 100, 1.0, &mut rng),
+            100
+        );
+        assert_eq!(
+            wow_loot::generate_money_loot_with_rate_like_cpp(120, 100, 2.5, &mut rng),
             250
         );
 
-        let small_range = generate_money_loot_like_cpp(100, 200, &mut rng);
+        let small_range = wow_loot::generate_money_loot_with_rate_like_cpp(100, 200, 1.0, &mut rng);
         assert!((100..=200).contains(&small_range));
 
-        let wide_range = generate_money_loot_like_cpp(1_000, 100_000, &mut rng);
+        let wide_range =
+            wow_loot::generate_money_loot_with_rate_like_cpp(1_000, 100_000, 1.0, &mut rng);
         assert_eq!(wide_range & 0xFF, 0);
         assert!((((1_000 >> 8) << 8)..=((100_000 >> 8) << 8)).contains(&wide_range));
     }

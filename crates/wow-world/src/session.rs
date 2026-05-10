@@ -23,11 +23,12 @@ use wow_constants::{
 use wow_core::{ObjectGuid, ObjectGuidGenerator};
 use wow_data::{
     AreaTriggerStore, ChrSpecializationStore, CurrencyTypesEntry, CurrencyTypesStore,
-    HotfixBlobCache, ImportPriceStores, ItemAppearanceStore, ItemClassStore, ItemCurrencyCostStore,
-    ItemDisenchantLootStore, ItemExtendedCostStore, ItemModifiedAppearanceStore,
-    ItemPriceBaseStore, ItemRandomEnchantmentTemplateStore, ItemRandomPropertiesStore,
-    ItemRandomPropertyTemplateEntry, ItemRandomSuffixStore, ItemStatsStore, ItemStore, LockStore,
-    PlayerStatsStore, RandPropPointsStore, SkillStore, SpellItemEnchantmentStore, SpellStore,
+    DungeonEncounterStore, HotfixBlobCache, ImportPriceStores, ItemAppearanceStore, ItemClassStore,
+    ItemCurrencyCostStore, ItemDisenchantLootStore, ItemExtendedCostStore,
+    ItemModifiedAppearanceStore, ItemPriceBaseStore, ItemRandomEnchantmentTemplateStore,
+    ItemRandomPropertiesStore, ItemRandomPropertyTemplateEntry, ItemRandomSuffixStore,
+    ItemStatsStore, ItemStore, LockStore, PlayerStatsStore, RandPropPointsStore, SkillStore,
+    SpellItemEnchantmentStore, SpellStore,
 };
 use wow_database::{
     CharStatements, CharacterDatabase, LoginDatabase, PreparedStatement, SqlTransaction,
@@ -252,6 +253,9 @@ pub struct WorldSession {
     // ChrSpecialization store (loot specialization validation)
     chr_specialization_store: Option<Arc<ChrSpecializationStore>>,
 
+    // DungeonEncounter store (instance encounter lock/loot metadata)
+    dungeon_encounter_store: Option<Arc<DungeonEncounterStore>>,
+
     // Shared player registry for broadcasting to nearby sessions
     player_registry: Option<Arc<PlayerRegistry>>,
 
@@ -454,6 +458,8 @@ pub struct WorldSession {
     loot_drop_rates: LootDropRatesLikeCpp,
     /// C++ `CONFIG_ENABLE_AE_LOOT` represented switch.
     enable_ae_loot_like_cpp: bool,
+    /// Session-local representation of `GameObject::m_unique_users` for no-GetLootId chest uses.
+    pub(crate) represented_unique_gameobject_uses: std::collections::HashSet<wow_core::ObjectGuid>,
 
     // ── Dynamic visibility tracking ───────────────────────────────
     /// GUIDs of all creatures currently visible to this client.
@@ -616,6 +622,8 @@ pub struct PendingRespawn {
     pub loot_id: u32,
     pub gold_min: u32,
     pub gold_max: u32,
+    pub boss_id: Option<u32>,
+    pub dungeon_encounter_id: u32,
 }
 
 fn is_represented_bag_slot(slot: u8) -> bool {
@@ -682,6 +690,7 @@ impl WorldSession {
             skill_store: None,
             area_trigger_store: None,
             chr_specialization_store: None,
+            dungeon_encounter_store: None,
             player_registry: None,
             object_accessor: None,
             group_registry: None,
@@ -756,6 +765,7 @@ impl WorldSession {
             represented_loot_roll_criteria_events: Vec::new(),
             loot_drop_rates: LootDropRatesLikeCpp::default(),
             enable_ae_loot_like_cpp: false,
+            represented_unique_gameobject_uses: std::collections::HashSet::new(),
             visible_creatures: std::collections::HashSet::new(),
             visible_gameobjects: std::collections::HashSet::new(),
             last_visibility_pos: None,
@@ -791,6 +801,8 @@ impl WorldSession {
         loot_id: u32,
         gold_min: u32,
         gold_max: u32,
+        boss_id: Option<u32>,
+        dungeon_encounter_id: u32,
     ) {
         let guid = create_data.guid;
         let entry = create_data.entry;
@@ -852,6 +864,8 @@ impl WorldSession {
                 loot_id,
                 gold_min,
                 gold_max,
+                boss_id,
+                dungeon_encounter_id,
             ),
         );
     }
@@ -2329,6 +2343,16 @@ impl WorldSession {
     /// Get the ChrSpecialization store reference.
     pub fn chr_specialization_store(&self) -> Option<&Arc<ChrSpecializationStore>> {
         self.chr_specialization_store.as_ref()
+    }
+
+    /// Set the DungeonEncounter store for this session.
+    pub fn set_dungeon_encounter_store(&mut self, store: Arc<DungeonEncounterStore>) {
+        self.dungeon_encounter_store = Some(store);
+    }
+
+    /// Get the DungeonEncounter store reference.
+    pub fn dungeon_encounter_store(&self) -> Option<&Arc<DungeonEncounterStore>> {
+        self.dungeon_encounter_store.as_ref()
     }
 
     /// Set the skill store for this session.
@@ -4482,6 +4506,8 @@ impl WorldSession {
                         loot_id: c.loot_id,
                         gold_min: c.gold_min,
                         gold_max: c.gold_max,
+                        boss_id: c.boss_id,
+                        dungeon_encounter_id: c.dungeon_encounter_id,
                     });
                     tracing::info!(
                         "Corpse despawned: {:?} (entry {}) — respawn in {}s",
@@ -4545,6 +4571,8 @@ impl WorldSession {
                 r.loot_id,
                 r.gold_min,
                 r.gold_max,
+                r.boss_id,
+                r.dungeon_encounter_id,
             );
             self.visible_creatures.insert(guid);
         }
@@ -5349,7 +5377,9 @@ mod tests {
     };
     use wow_network::{GroupInfo, PlayerBroadcastInfo};
     use wow_packet::ServerPacket;
-    use wow_packet::packets::loot::{CreatureLoot, LootEntry, LootEntryFlags};
+    use wow_packet::packets::loot::{
+        CreatureLoot, LOOT_TYPE_CORPSE_LIKE_CPP, LOOT_TYPE_ITEM_LIKE_CPP, LootEntry, LootEntryFlags,
+    };
 
     fn make_session() -> (
         WorldSession,
@@ -5428,6 +5458,8 @@ mod tests {
             20.0,
             0,
             0,
+            0,
+            None,
             0,
         );
     }
@@ -7127,7 +7159,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: child_guid,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_ITEM_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 1,
@@ -7162,7 +7201,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: active_guid,
                 coins: 37,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: Vec::new(),
                 looted_by_player: false,
@@ -7173,7 +7219,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: inactive_guid,
                 coins: 91,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7376,7 +7429,14 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,

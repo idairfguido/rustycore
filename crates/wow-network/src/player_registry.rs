@@ -26,6 +26,7 @@ pub struct MasterLootGiveCommand {
     pub loot_owner: ObjectGuid,
     pub loot_obj: ObjectGuid,
     pub loot_list_id: u8,
+    pub dungeon_encounter_id: u32,
     pub entry: LootEntry,
     pub result_tx: flume::Sender<MasterLootGiveResult>,
 }
@@ -42,6 +43,7 @@ pub struct LootRollStoreWinnerCommand {
     pub loot_owner: ObjectGuid,
     pub loot_obj: ObjectGuid,
     pub loot_list_id: u8,
+    pub dungeon_encounter_id: u32,
     pub entry: LootEntry,
     pub result_tx: flume::Sender<MasterLootGiveResult>,
 }

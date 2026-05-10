@@ -426,6 +426,16 @@ async fn main() -> Result<()> {
         chr_specialization_store.len()
     );
 
+    // Load DungeonEncounter.db2 for C++ instance encounter lock/loot metadata.
+    let dungeon_encounter_store = Arc::new(
+        wow_data::DungeonEncounterStore::load(&data_dir, &locale)
+            .context("Failed to load DungeonEncounter.db2 — check DataDir and DBC.Locale config")?,
+    );
+    info!(
+        "Loaded {} dungeon encounters from DungeonEncounter.db2",
+        dungeon_encounter_store.len()
+    );
+
     // Load ItemAppearance.db2 for item display-info resolution.
     let item_appearance_store = Arc::new(
         wow_data::ItemAppearanceStore::load(&data_dir, &locale)
@@ -742,6 +752,7 @@ async fn main() -> Result<()> {
         spell_store: Some(Arc::clone(&spell_store)),
         area_trigger_store: Some(Arc::clone(&area_trigger_store)),
         chr_specialization_store: Some(Arc::clone(&chr_specialization_store)),
+        dungeon_encounter_store: Some(Arc::clone(&dungeon_encounter_store)),
         quest_store: Some(Arc::clone(&quest_store)),
         quest_xp_store: Some(Arc::clone(&quest_xp_store)),
         player_xp_table: Some(Arc::clone(&player_xp_table)),
@@ -1399,6 +1410,9 @@ async fn create_session(
     }
     if let Some(ref store) = resources.chr_specialization_store {
         session.set_chr_specialization_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.dungeon_encounter_store {
+        session.set_dungeon_encounter_store(Arc::clone(store));
     }
     if let Some(ref store) = resources.quest_store {
         session.set_quest_store(Arc::clone(store));

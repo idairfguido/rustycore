@@ -25,7 +25,7 @@ use wow_core::{ObjectGuid, guid::HighGuid};
 use wow_data::{ItemRandomEnchantmentTemplateEntry, ItemRandomPropertyTemplateEntry};
 use wow_database::{CharStatements, SqlTransaction, WorldStatements};
 use wow_entities::{
-    INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_END,
+    GameObjectLootSource, INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_END,
     INVENTORY_SLOT_ITEM_START, Item, ItemPosCount, make_item_pos,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
@@ -33,9 +33,11 @@ use wow_loot::{
     GeneratedLootItem, LootConditionId, LootConditionRowLikeCpp, LootFillOptions,
     LootItemRandomProperties, LootItemTemplateMetadata, LootStoreItem, LootStoreItemContext,
     LootStoreKind, LootTemplate, condition_compare_values_like_cpp,
-    loot_condition_reference_ids_like_cpp, loot_condition_reference_self_references_like_cpp,
+    generate_money_loot_with_rate_like_cpp, loot_condition_reference_ids_like_cpp,
+    loot_condition_reference_self_references_like_cpp,
     loot_condition_row_normalize_without_external_stores_like_cpp,
     loot_conditions_allow_player_with_references_like_cpp_representable,
+    loot_item_ui_type_for_player_like_cpp,
 };
 use wow_network::{
     LootRollStoreWinnerCommand, LootRollVoteCommand, MasterLootGiveCommand, MasterLootGiveResult,
@@ -48,10 +50,14 @@ use wow_packet::packets::loot::{
     AELootTargets, AELootTargetsAck, CoinRemoved, CreatureLoot, LOOT_ERROR_DIDNT_KILL_LIKE_CPP,
     LOOT_ERROR_MASTER_INV_FULL_LIKE_CPP, LOOT_ERROR_MASTER_OTHER_LIKE_CPP,
     LOOT_ERROR_MASTER_UNIQUE_ITEM_LIKE_CPP, LOOT_ERROR_NO_LOOT_LIKE_CPP,
-    LOOT_ERROR_PLAYER_NOT_FOUND_LIKE_CPP, LOOT_ERROR_TOO_FAR_LIKE_CPP, LootAllPassed, LootEntry,
-    LootEntryFlags, LootItemData, LootItemPkt, LootList, LootMoney, LootMoneyNotify, LootRelease,
-    LootReleaseAll, LootRemoved, LootResponse, LootRoll, LootRollBroadcast, LootRollWon, LootUnit,
-    MasterLootCandidateList, MasterLootItem, SLootRelease, SetLootSpecialization, StartLootRoll,
+    LOOT_ERROR_PLAYER_NOT_FOUND_LIKE_CPP, LOOT_ERROR_TOO_FAR_LIKE_CPP, LOOT_TYPE_CHEST_LIKE_CPP,
+    LOOT_TYPE_CORPSE_LIKE_CPP, LOOT_TYPE_DISENCHANTING_LIKE_CPP, LOOT_TYPE_FISHING_JUNK_LIKE_CPP,
+    LOOT_TYPE_FISHING_LIKE_CPP, LOOT_TYPE_FISHINGHOLE_LIKE_CPP, LOOT_TYPE_INSIGNIA_LIKE_CPP,
+    LOOT_TYPE_MILLING_LIKE_CPP, LOOT_TYPE_PROSPECTING_LIKE_CPP, LOOT_TYPE_SKINNING_LIKE_CPP,
+    LootAllPassed, LootEntry, LootEntryFlags, LootItemData, LootItemPkt, LootList, LootMoney,
+    LootMoneyNotify, LootRelease, LootReleaseAll, LootRemoved, LootResponse, LootRoll,
+    LootRollBroadcast, LootRollWon, LootUnit, MasterLootCandidateList, MasterLootItem,
+    NotNormalLootItem, SLootRelease, SetLootSpecialization, StartLootRoll,
 };
 use wow_packet::packets::update::{ItemCreateData, UpdateObject};
 use wow_packet::{ClientPacket, ServerPacket};
@@ -249,6 +255,187 @@ impl WorldSession {
         }
     }
 
+    pub(crate) async fn open_represented_gameobject_chest_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        source: GameObjectLootSource,
+    ) {
+        let Some(player_guid) = self.player_guid else {
+            return;
+        };
+        if !self.player_is_alive_like_cpp() {
+            return;
+        }
+        if !gameobject_guid.is_game_object() || !self.visible_gameobjects.contains(&gameobject_guid)
+        {
+            return;
+        }
+
+        if source.should_autostore_push_loot_like_cpp()
+            && !self
+                .represented_unique_gameobject_uses
+                .contains(&gameobject_guid)
+        {
+            self.represented_unique_gameobject_uses
+                .insert(gameobject_guid);
+            self.autostore_represented_gameobject_chest_push_loot_like_cpp(gameobject_guid, source)
+                .await;
+        }
+        if !source.has_open_loot_like_cpp() {
+            return;
+        }
+
+        self.ensure_represented_gameobject_chest_loot_like_cpp(
+            gameobject_guid,
+            player_guid,
+            source,
+        )
+        .await;
+
+        if let Some(loot) = self.loot_table.get_mut(&gameobject_guid) {
+            mark_loot_allowed_for_player_like_cpp(loot, player_guid);
+        }
+
+        let Some(loot) = self.loot_table.get(&gameobject_guid) else {
+            return;
+        };
+        if !loot_can_be_opened_by_player_like_cpp(loot, player_guid) {
+            return;
+        }
+
+        let response = LootResponse {
+            owner: gameobject_guid,
+            loot_obj: loot.loot_guid,
+            failure_reason: 0,
+            acquire_reason: loot_type_for_client_like_cpp(loot.loot_type),
+            loot_method: loot.loot_method,
+            threshold: 2,
+            coins: loot.coins,
+            items: represented_loot_response_items_like_cpp(loot, player_guid),
+            currencies: vec![],
+            acquired: true,
+            ae_looting: false,
+        };
+
+        if !self.active_loot_guid.is_empty() && !self.active_loot_guid.is_item() {
+            self.do_loot_release_all_like_cpp(player_guid).await;
+        }
+        self.set_active_loot_guid(gameobject_guid);
+        self.send_packet(&response);
+        self.represented_on_loot_opened_like_cpp(gameobject_guid, player_guid);
+    }
+
+    pub(crate) async fn open_represented_fishing_hole_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        loot_id: u32,
+    ) {
+        self.open_represented_gameobject_personal_loot_like_cpp(
+            gameobject_guid,
+            loot_id,
+            LOOT_TYPE_FISHINGHOLE_LIKE_CPP,
+            true,
+        )
+        .await;
+    }
+
+    pub(crate) async fn open_represented_gathering_node_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        loot_id: u32,
+    ) {
+        self.open_represented_gameobject_personal_loot_like_cpp(
+            gameobject_guid,
+            loot_id,
+            LOOT_TYPE_CHEST_LIKE_CPP,
+            false,
+        )
+        .await;
+    }
+
+    async fn open_represented_gameobject_personal_loot_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        loot_id: u32,
+        loot_type: u8,
+        replace_existing: bool,
+    ) {
+        let Some(player_guid) = self.player_guid else {
+            return;
+        };
+        if loot_id == 0 || !self.player_is_alive_like_cpp() {
+            return;
+        }
+        if !gameobject_guid.is_game_object() || !self.visible_gameobjects.contains(&gameobject_guid)
+        {
+            return;
+        }
+
+        if replace_existing || !self.loot_table.contains_key(&gameobject_guid) {
+            let items = self
+                .generate_represented_gameobject_loot_items_like_cpp(loot_id)
+                .await
+                .unwrap_or_else(|| {
+                    debug!(
+                        loot_id,
+                        gameobject = ?gameobject_guid,
+                        "gameobject personal loot template unavailable"
+                    );
+                    Vec::new()
+                });
+            self.loot_table.insert(
+                gameobject_guid,
+                CreatureLoot {
+                    loot_guid: represented_loot_object_guid_like_cpp(gameobject_guid),
+                    coins: 0,
+                    unlooted_count: 0,
+                    loot_type,
+                    dungeon_encounter_id: 0,
+                    loot_method: 0,
+                    loot_master: ObjectGuid::EMPTY,
+                    round_robin_player: ObjectGuid::EMPTY,
+                    player_ffa_items: Vec::new(),
+                    players_looting: Vec::new(),
+                    allowed_looters: Vec::new(),
+                    items,
+                    looted_by_player: false,
+                },
+            );
+        }
+
+        if let Some(loot) = self.loot_table.get_mut(&gameobject_guid) {
+            mark_loot_allowed_for_player_like_cpp(loot, player_guid);
+        }
+
+        let Some(loot) = self.loot_table.get(&gameobject_guid) else {
+            return;
+        };
+        if !loot_can_be_opened_by_player_like_cpp(loot, player_guid) {
+            return;
+        }
+
+        let response = LootResponse {
+            owner: gameobject_guid,
+            loot_obj: loot.loot_guid,
+            failure_reason: 0,
+            acquire_reason: loot_type_for_client_like_cpp(loot.loot_type),
+            loot_method: loot.loot_method,
+            threshold: 2,
+            coins: loot.coins,
+            items: represented_loot_response_items_like_cpp(loot, player_guid),
+            currencies: vec![],
+            acquired: true,
+            ae_looting: false,
+        };
+
+        if !self.active_loot_guid.is_empty() && !self.active_loot_guid.is_item() {
+            self.do_loot_release_all_like_cpp(player_guid).await;
+        }
+        self.set_active_loot_guid(gameobject_guid);
+        self.send_packet(&response);
+        self.represented_on_loot_opened_like_cpp(gameobject_guid, player_guid);
+    }
+
     /// CMSG_LOOT_ITEM — player clicks to take a specific item from the loot.
     pub async fn handle_loot_item(&mut self, mut pkt: wow_packet::WorldPacket) {
         let req = match LootItemPkt::read(&mut pkt) {
@@ -264,7 +451,7 @@ impl WorldSession {
             None => return,
         };
 
-        let mut taken_items: Vec<(ObjectGuid, ObjectGuid, u8, u32, u32)> = Vec::new();
+        let mut taken_items: Vec<(ObjectGuid, ObjectGuid, u8, u32, u32, bool)> = Vec::new();
         let mut item_release: Vec<ObjectGuid> = Vec::new();
 
         for loot_req in &req.requests {
@@ -276,6 +463,8 @@ impl WorldSession {
                 });
                 continue;
             };
+
+            self.ensure_represented_player_looting_like_cpp(owner_guid, player_guid);
 
             if owner_guid.is_game_object() && !self.visible_gameobjects.contains(&owner_guid) {
                 self.send_packet(&SLootRelease {
@@ -308,15 +497,22 @@ impl WorldSession {
                 }
             }
 
-            let Some(entry) = self.loot_table.get(&owner_guid).and_then(|loot| {
-                loot.items
-                    .iter()
-                    .find(|entry| {
-                        entry.loot_list_id == loot_req.loot_list_id
-                            && !entry.is_looted_for_player_like_cpp(player_guid)
-                    })
-                    .cloned()
-            }) else {
+            let Some((entry, dungeon_encounter_id)) =
+                self.loot_table.get(&owner_guid).and_then(|loot| {
+                    loot.items
+                        .iter()
+                        .find(|entry| {
+                            entry.loot_list_id == loot_req.loot_list_id
+                                && !loot_item_is_looted_for_player_like_cpp(
+                                    loot,
+                                    entry,
+                                    player_guid,
+                                )
+                        })
+                        .cloned()
+                        .map(|entry| (entry, loot.dungeon_encounter_id))
+                })
+            else {
                 self.send_equip_error(InventoryResult::LootGone, None, None, 0, 0);
                 continue;
             };
@@ -336,7 +532,10 @@ impl WorldSession {
                 continue;
             }
 
-            if !self.store_direct_loot_item_like_cpp(&entry).await {
+            if !self
+                .store_direct_loot_item_like_cpp(&entry, dungeon_encounter_id)
+                .await
+            {
                 continue;
             }
 
@@ -351,17 +550,24 @@ impl WorldSession {
             }
 
             if let Some(loot) = self.loot_table.get_mut(&owner_guid) {
-                if let Some(entry) = loot.items.iter_mut().find(|entry| {
-                    entry.loot_list_id == loot_req.loot_list_id
-                        && !entry.is_looted_for_player_like_cpp(player_guid)
-                }) {
-                    entry.mark_looted_for_player_like_cpp(player_guid);
+                if let Some(entry) = loot
+                    .items
+                    .iter()
+                    .find(|entry| entry.loot_list_id == loot_req.loot_list_id)
+                    .cloned()
+                {
+                    mark_loot_item_looted_for_player_like_cpp(
+                        loot,
+                        loot_req.loot_list_id,
+                        player_guid,
+                    );
                     taken_items.push((
                         owner_guid,
                         loot_req.object,
                         entry.loot_list_id,
                         entry.item_id,
                         entry.quantity,
+                        entry.flags.freeforall,
                     ));
                 }
 
@@ -371,13 +577,17 @@ impl WorldSession {
             }
         }
 
-        for (owner_guid, loot_obj, list_id, item_id, quantity) in taken_items {
-            let removed = LootRemoved {
-                owner: owner_guid,
-                loot_obj,
-                loot_list_id: list_id,
-            };
-            self.send_packet(&removed);
+        for (owner_guid, loot_obj, list_id, item_id, quantity, freeforall) in taken_items {
+            if freeforall {
+                let removed = LootRemoved {
+                    owner: owner_guid,
+                    loot_obj,
+                    loot_list_id: list_id,
+                };
+                self.send_packet(&removed);
+            } else {
+                self.represented_notify_loot_item_removed_like_cpp(owner_guid, list_id);
+            }
             debug!(
                 account = self.account_id,
                 item = item_id,
@@ -447,10 +657,9 @@ impl WorldSession {
         let mut item_release: Vec<ObjectGuid> = Vec::new();
         let mut player_money_delta = 0u64;
 
-        for (loot_guid, loot_obj, money) in &money_by_loot {
-            self.send_packet(&CoinRemoved {
-                loot_obj: *loot_obj,
-            });
+        for (loot_guid, _loot_obj, money) in &money_by_loot {
+            self.ensure_represented_player_looting_like_cpp(*loot_guid, player_guid);
+            self.represented_notify_money_removed_like_cpp(*loot_guid);
 
             let recipients = self.represented_loot_money_recipients_like_cpp(*loot_guid);
             let money = u64::from(*money);
@@ -714,6 +923,7 @@ impl WorldSession {
             return false;
         }
         let loot_guid = loot.loot_guid;
+        let dungeon_encounter_id = loot.dungeon_encounter_id as i32;
 
         let Some(entry) = loot.items.iter().find(|entry| {
             entry.loot_list_id == roll.loot_list_id
@@ -751,7 +961,7 @@ impl WorldSession {
             item: loot_roll_broadcast_item_like_cpp(&entry, LOOT_SLOT_TYPE_ROLL_ONGOING_LIKE_CPP),
             autopassed: false,
             off_spec: false,
-            dungeon_encounter_id: 0,
+            dungeon_encounter_id,
         };
 
         let finish = represented_loot_roll_finish_winner_like_cpp(state);
@@ -782,6 +992,11 @@ impl WorldSession {
         let Some(owner_guid) = self.active_loot_owner_for_loot_object_like_cpp(loot_obj) else {
             return;
         };
+        let dungeon_encounter_id = self
+            .loot_table
+            .get(&owner_guid)
+            .map(|loot| loot.dungeon_encounter_id as i32)
+            .unwrap_or(0);
 
         if let Some(loot) = self.loot_table.get_mut(&owner_guid) {
             if let Some(loot_entry) = loot
@@ -804,7 +1019,7 @@ impl WorldSession {
             let packet = LootAllPassed {
                 loot_obj,
                 item: loot_roll_broadcast_item_like_cpp(entry, LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP),
-                dungeon_encounter_id: 0,
+                dungeon_encounter_id,
             };
             if let Some(state) = finished_state {
                 for (player_guid, vote) in &state.voters {
@@ -825,6 +1040,7 @@ impl WorldSession {
                 entry,
                 winner_guid,
                 state,
+                dungeon_encounter_id,
             );
         }
 
@@ -835,7 +1051,7 @@ impl WorldSession {
             roll_type: winner_vote.vote,
             item: loot_roll_broadcast_item_like_cpp(entry, LOOT_SLOT_TYPE_LOCKED_LIKE_CPP),
             main_spec: true,
-            dungeon_encounter_id: 0,
+            dungeon_encounter_id,
         };
         self.broadcast_represented_loot_roll_packet_like_cpp(&locked, entry, Some(winner_guid));
 
@@ -981,6 +1197,7 @@ impl WorldSession {
         entry: &LootEntry,
         winner_guid: ObjectGuid,
         state: &RepresentedLootRollState,
+        dungeon_encounter_id: i32,
     ) {
         for (player_guid, vote) in &state.voters {
             let (roll, roll_type) = match vote.vote {
@@ -1005,7 +1222,7 @@ impl WorldSession {
                 ),
                 autopassed: false,
                 off_spec: false,
-                dungeon_encounter_id: 0,
+                dungeon_encounter_id,
             };
 
             self.broadcast_represented_loot_roll_packet_to_voters_like_cpp(
@@ -1173,6 +1390,7 @@ impl WorldSession {
             let Some(loot) = self.loot_table.get(&owner_guid) else {
                 return;
             };
+            let dungeon_encounter_id = loot.dungeon_encounter_id;
 
             if loot.loot_method != LOOT_METHOD_MASTER_LIKE_CPP {
                 return;
@@ -1214,7 +1432,10 @@ impl WorldSession {
 
             let entry = item.clone();
             if master_loot_item.target == player_guid {
-                if !self.store_direct_loot_item_like_cpp(&entry).await {
+                if !self
+                    .store_direct_loot_item_like_cpp(&entry, dungeon_encounter_id)
+                    .await
+                {
                     return;
                 }
                 self.mark_represented_master_loot_item_removed_like_cpp(
@@ -1231,6 +1452,7 @@ impl WorldSession {
                         owner_guid,
                         req.object,
                         req.loot_list_id,
+                        dungeon_encounter_id,
                         entry,
                     )
                     .await
@@ -1274,6 +1496,7 @@ impl WorldSession {
         owner_guid: ObjectGuid,
         loot_obj: ObjectGuid,
         loot_list_id: u8,
+        dungeon_encounter_id: u32,
         entry: LootEntry,
     ) -> MasterLootGiveResult {
         let Some(player_guid) = self.player_guid else {
@@ -1295,6 +1518,7 @@ impl WorldSession {
             loot_owner: owner_guid,
             loot_obj,
             loot_list_id,
+            dungeon_encounter_id,
             entry,
             result_tx,
         });
@@ -1319,6 +1543,11 @@ impl WorldSession {
         winner_guid: ObjectGuid,
         winner_vote: RepresentedLootRollVote,
     ) {
+        let dungeon_encounter_id = self
+            .loot_table
+            .get(&owner_guid)
+            .map(|loot| loot.dungeon_encounter_id)
+            .unwrap_or(0);
         if winner_vote.vote == ROLL_VOTE_DISENCHANT_LIKE_CPP {
             if self
                 .store_represented_disenchant_loot_winner_like_cpp(
@@ -1327,6 +1556,7 @@ impl WorldSession {
                     loot_list_id,
                     entry,
                     winner_guid,
+                    dungeon_encounter_id,
                 )
                 .await
             {
@@ -1357,7 +1587,10 @@ impl WorldSession {
         store_entry.roll_winner = winner_guid;
 
         if self.player_guid == Some(winner_guid) {
-            if self.store_direct_loot_item_like_cpp(&store_entry).await {
+            if self
+                .store_direct_loot_item_like_cpp(&store_entry, dungeon_encounter_id)
+                .await
+            {
                 self.mark_represented_master_loot_item_removed_like_cpp(
                     owner_guid,
                     loot_obj,
@@ -1374,6 +1607,7 @@ impl WorldSession {
                 owner_guid,
                 loot_obj,
                 loot_list_id,
+                dungeon_encounter_id,
                 store_entry,
             )
             .await
@@ -1415,6 +1649,7 @@ impl WorldSession {
         loot_list_id: u8,
         entry: &LootEntry,
         winner_guid: ObjectGuid,
+        dungeon_encounter_id: u32,
     ) -> bool {
         let Some(template) = self
             .item_stats_store()
@@ -1443,7 +1678,10 @@ impl WorldSession {
 
         if self.player_guid == Some(winner_guid) {
             for disenchant_entry in &disenchant_entries {
-                if !self.store_direct_loot_item_like_cpp(disenchant_entry).await {
+                if !self
+                    .store_direct_loot_item_like_cpp(disenchant_entry, dungeon_encounter_id)
+                    .await
+                {
                     return false;
                 }
             }
@@ -1457,6 +1695,7 @@ impl WorldSession {
                     owner_guid,
                     loot_obj,
                     loot_list_id,
+                    dungeon_encounter_id,
                     disenchant_entry,
                 )
                 .await
@@ -1720,6 +1959,7 @@ impl WorldSession {
         owner_guid: ObjectGuid,
         loot_obj: ObjectGuid,
         loot_list_id: u8,
+        dungeon_encounter_id: u32,
         entry: LootEntry,
     ) -> MasterLootGiveResult {
         let Some(registry) = self.player_registry() else {
@@ -1737,6 +1977,7 @@ impl WorldSession {
             loot_owner: owner_guid,
             loot_obj,
             loot_list_id,
+            dungeon_encounter_id,
             entry,
             result_tx,
         });
@@ -1820,7 +2061,10 @@ impl WorldSession {
             return;
         }
 
-        let result = if self.store_direct_loot_item_like_cpp(&command.entry).await {
+        let result = if self
+            .store_direct_loot_item_like_cpp(&command.entry, command.dungeon_encounter_id)
+            .await
+        {
             MasterLootGiveResult::Stored
         } else {
             MasterLootGiveResult::StoreFailed(LOOT_ERROR_MASTER_OTHER_LIKE_CPP)
@@ -1869,7 +2113,10 @@ impl WorldSession {
             return;
         }
 
-        let result = if self.store_direct_loot_item_like_cpp(&command.entry).await {
+        let result = if self
+            .store_direct_loot_item_like_cpp(&command.entry, command.dungeon_encounter_id)
+            .await
+        {
             MasterLootGiveResult::Stored
         } else {
             MasterLootGiveResult::StoreFailed(LOOT_ERROR_MASTER_OTHER_LIKE_CPP)
@@ -1902,12 +2149,14 @@ impl WorldSession {
             return;
         };
 
-        if entry.is_looted_for_player_like_cpp(target) {
+        let was_unlooted = !entry.is_looted_for_player_like_cpp(target);
+        if !was_unlooted {
             return;
         }
 
         entry.quantity = 0;
         entry.mark_looted_for_player_like_cpp(target);
+        loot.unlooted_count = loot.unlooted_count.saturating_sub(1);
         self.send_packet(&LootRemoved {
             owner: owner_guid,
             loot_obj,
@@ -2011,7 +2260,7 @@ impl WorldSession {
 
         let mut result = Vec::new();
         for owner_guid in candidates {
-            let Some((level, entry, loot_id, gold_min, gold_max)) =
+            let Some((level, entry, loot_id, gold_min, gold_max, dungeon_encounter_id)) =
                 self.creatures.get(&owner_guid).map(|creature| {
                     (
                         creature.level,
@@ -2019,6 +2268,7 @@ impl WorldSession {
                         creature.loot_id,
                         creature.gold_min,
                         creature.gold_max,
+                        creature.dungeon_encounter_id,
                     )
                 })
             else {
@@ -2026,7 +2276,14 @@ impl WorldSession {
             };
 
             self.ensure_represented_creature_loot_like_cpp(
-                owner_guid, level, entry, loot_id, gold_min, gold_max,
+                owner_guid,
+                player_guid,
+                level,
+                entry,
+                loot_id,
+                gold_min,
+                gold_max,
+                dungeon_encounter_id,
             )
             .await;
             if let Some(loot) = self.loot_table.get_mut(&owner_guid) {
@@ -2051,7 +2308,7 @@ impl WorldSession {
         player_guid: ObjectGuid,
         ae_looting: bool,
     ) -> Option<LootResponse> {
-        let (level, entry, loot_id, gold_min, gold_max) =
+        let (level, entry, loot_id, gold_min, gold_max, dungeon_encounter_id) =
             self.creatures.get(&owner_guid).map(|creature| {
                 (
                     creature.level,
@@ -2059,10 +2316,18 @@ impl WorldSession {
                     creature.loot_id,
                     creature.gold_min,
                     creature.gold_max,
+                    creature.dungeon_encounter_id,
                 )
             })?;
         self.ensure_represented_creature_loot_like_cpp(
-            owner_guid, level, entry, loot_id, gold_min, gold_max,
+            owner_guid,
+            player_guid,
+            level,
+            entry,
+            loot_id,
+            gold_min,
+            gold_max,
+            dungeon_encounter_id,
         )
         .await;
 
@@ -2079,7 +2344,7 @@ impl WorldSession {
             owner: owner_guid,
             loot_obj: loot.loot_guid,
             failure_reason: 0,
-            acquire_reason: 0,
+            acquire_reason: loot_type_for_client_like_cpp(loot.loot_type),
             loot_method: loot.loot_method,
             threshold: 2,
             coins: loot.coins,
@@ -2095,6 +2360,8 @@ impl WorldSession {
         owner_guid: ObjectGuid,
         player_guid: ObjectGuid,
     ) {
+        self.ensure_represented_player_looting_like_cpp(owner_guid, player_guid);
+
         self.represented_notify_loot_list_like_cpp(owner_guid);
 
         let first_open = match self.loot_table.get_mut(&owner_guid) {
@@ -2144,7 +2411,7 @@ impl WorldSession {
         let master = if loot.loot_method == LOOT_METHOD_MASTER_LIKE_CPP
             && loot_has_over_threshold_item_like_cpp(loot)
         {
-            self.represented_group_master_looter_guid_like_cpp()
+            (!loot.loot_master.is_empty()).then_some(loot.loot_master)
         } else {
             None
         };
@@ -2153,7 +2420,8 @@ impl WorldSession {
             owner: owner_guid,
             loot_obj: loot.loot_guid,
             master,
-            round_robin_winner: None,
+            round_robin_winner: (!loot.round_robin_player.is_empty())
+                .then_some(loot.round_robin_player),
         };
         let bytes = packet.to_bytes();
 
@@ -2177,15 +2445,93 @@ impl WorldSession {
         }
     }
 
-    fn represented_group_master_looter_guid_like_cpp(&self) -> Option<ObjectGuid> {
-        let (Some(group_guid), Some(registry)) = (self.group_guid, self.group_registry()) else {
-            return None;
+    fn ensure_represented_player_looting_like_cpp(
+        &mut self,
+        owner_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    ) {
+        if let Some(loot) = self.loot_table.get_mut(&owner_guid)
+            && !loot.players_looting.contains(&player_guid)
+        {
+            loot.players_looting.push(player_guid);
+        }
+    }
+
+    fn represented_notify_loot_item_removed_like_cpp(
+        &self,
+        owner_guid: ObjectGuid,
+        loot_list_id: u8,
+    ) {
+        let Some(loot) = self.loot_table.get(&owner_guid) else {
+            return;
+        };
+        let Some(entry) = loot
+            .items
+            .iter()
+            .find(|entry| entry.loot_list_id == loot_list_id)
+        else {
+            return;
         };
 
-        registry
-            .get(&group_guid)
-            .map(|group| group.master_looter_guid)
-            .filter(|guid| !guid.is_empty())
+        let packet = LootRemoved {
+            owner: owner_guid,
+            loot_obj: loot.loot_guid,
+            loot_list_id,
+        };
+        let bytes = packet.to_bytes();
+
+        for looter in &loot.players_looting {
+            if !entry.allowed_looters.contains(looter) {
+                continue;
+            }
+
+            if Some(*looter) == self.player_guid {
+                self.send_packet(&packet);
+                continue;
+            }
+
+            let Some(registry) = self.player_registry() else {
+                continue;
+            };
+            let Some(player) = registry.get(looter) else {
+                continue;
+            };
+            if player.map_id != self.current_map_id {
+                continue;
+            }
+
+            let _ = player.send_tx.send(bytes.clone());
+        }
+    }
+
+    fn represented_notify_money_removed_like_cpp(&self, owner_guid: ObjectGuid) {
+        let Some(loot) = self.loot_table.get(&owner_guid) else {
+            return;
+        };
+
+        let packet = CoinRemoved {
+            loot_obj: loot.loot_guid,
+        };
+        let bytes = packet.to_bytes();
+
+        for looter in &loot.players_looting {
+            if Some(*looter) == self.player_guid {
+                self.send_packet(&packet);
+                continue;
+            }
+
+            let Some(registry) = self.player_registry() else {
+                continue;
+            };
+            let Some(player) = registry.get(looter) else {
+                continue;
+            };
+            if player.map_id != self.current_map_id {
+                continue;
+            }
+
+            let _ = player.send_tx.send(bytes.clone());
+        }
     }
 
     fn represented_start_group_loot_rolls_on_first_open_like_cpp(
@@ -2305,6 +2651,7 @@ impl WorldSession {
                             loot.loot_method,
                             entry,
                             valid_rolls,
+                            loot.dungeon_encounter_id as i32,
                         ),
                     ));
                 }
@@ -2326,7 +2673,7 @@ impl WorldSession {
                             ),
                             autopassed: false,
                             off_spec: false,
-                            dungeon_encounter_id: 0,
+                            dungeon_encounter_id: loot.dungeon_encounter_id as i32,
                         },
                         state.clone(),
                     ));
@@ -2493,38 +2840,286 @@ impl WorldSession {
     async fn ensure_represented_creature_loot_like_cpp(
         &mut self,
         creature_guid: ObjectGuid,
+        loot_owner_guid: ObjectGuid,
         level: u8,
         entry: u32,
         loot_id: u32,
         gold_min: u32,
         gold_max: u32,
+        dungeon_encounter_id: u32,
     ) {
         if !self.loot_table.contains_key(&creature_guid) {
             let loot = self
                 .generate_represented_creature_loot_like_cpp(
                     creature_guid,
+                    loot_owner_guid,
                     level,
                     entry,
                     loot_id,
                     gold_min,
                     gold_max,
+                    dungeon_encounter_id,
                 )
                 .await;
             self.loot_table.insert(creature_guid, loot);
         }
     }
 
+    async fn ensure_represented_gameobject_chest_loot_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        source: GameObjectLootSource,
+    ) {
+        if !self.loot_table.contains_key(&gameobject_guid) {
+            let loot = self
+                .generate_represented_gameobject_chest_loot_like_cpp(
+                    gameobject_guid,
+                    player_guid,
+                    source,
+                )
+                .await;
+            self.loot_table.insert(gameobject_guid, loot);
+        }
+    }
+
+    async fn generate_represented_gameobject_chest_loot_like_cpp(
+        &self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        source: GameObjectLootSource,
+    ) -> CreatureLoot {
+        let (loot_method, loot_master, round_robin_player) = self
+            .represented_gameobject_chest_group_state_like_cpp(
+                source.use_group_loot_rules,
+                player_guid,
+            );
+        let loot_id = source.open_loot_id_like_cpp();
+        let items = self
+            .generate_represented_gameobject_loot_items_like_cpp(loot_id)
+            .await
+            .unwrap_or_else(|| {
+                if loot_id != 0 {
+                    debug!(
+                        loot_id,
+                        gameobject = ?gameobject_guid,
+                        "gameobject loot template unavailable for represented chest"
+                    );
+                }
+                Vec::new()
+            });
+        let (min_money, max_money) = self
+            .load_gameobject_template_addon_money_loot_like_cpp(gameobject_guid.entry())
+            .await;
+        let coins = generate_money_loot_with_rate_like_cpp(
+            min_money,
+            max_money,
+            self.loot_drop_rates_like_cpp().money,
+            &mut rand::thread_rng(),
+        );
+
+        CreatureLoot {
+            loot_guid: represented_loot_object_guid_like_cpp(gameobject_guid),
+            coins,
+            unlooted_count: 0,
+            loot_type: LOOT_TYPE_CHEST_LIKE_CPP,
+            dungeon_encounter_id: source.dungeon_encounter_id,
+            loot_method,
+            loot_master,
+            round_robin_player,
+            player_ffa_items: Vec::new(),
+            players_looting: Vec::new(),
+            allowed_looters: Vec::new(),
+            items,
+            looted_by_player: false,
+        }
+    }
+
+    fn represented_gameobject_chest_group_state_like_cpp(
+        &self,
+        use_group_loot_rules: bool,
+        player_guid: ObjectGuid,
+    ) -> (u8, ObjectGuid, ObjectGuid) {
+        if !use_group_loot_rules {
+            return (0, ObjectGuid::EMPTY, ObjectGuid::EMPTY);
+        }
+        let Some(group_guid) = self.group_guid else {
+            return (0, ObjectGuid::EMPTY, ObjectGuid::EMPTY);
+        };
+        let Some(registry) = self.group_registry() else {
+            return (0, ObjectGuid::EMPTY, ObjectGuid::EMPTY);
+        };
+        let Some(group) = registry.get(&group_guid) else {
+            return (0, ObjectGuid::EMPTY, ObjectGuid::EMPTY);
+        };
+
+        (group.loot_method, group.master_looter_guid, player_guid)
+    }
+
+    async fn generate_represented_gameobject_loot_items_like_cpp(
+        &self,
+        loot_id: u32,
+    ) -> Option<Vec<LootEntry>> {
+        if loot_id == 0 {
+            return Some(Vec::new());
+        }
+
+        let stores = self.loot_stores()?;
+        let store = stores.get(&LootStoreKind::Gameobject)?;
+        let rates = self.loot_drop_rates_like_cpp();
+        let condition_ids =
+            store.condition_ids_for_fill_like_cpp(loot_id, LootStoreKind::Gameobject, stores);
+        let condition_rows = self
+            .load_represented_creature_loot_condition_rows_like_cpp(&condition_ids)
+            .await;
+        let condition_references = self
+            .load_represented_creature_loot_condition_reference_rows_like_cpp(&condition_rows)
+            .await;
+        let addon_metadata = self
+            .load_item_template_addon_loot_metadata_for_item_ids_like_cpp(
+                condition_ids.iter().map(|id| id.source_entry),
+            )
+            .await;
+        let generated = {
+            let mut rng = rand::thread_rng();
+            store
+                .fill_loot_with_context_like_cpp(
+                    loot_id,
+                    LootStoreKind::Gameobject,
+                    stores,
+                    LootFillOptions {
+                        loot_mode: LOOT_MODE_DEFAULT_LIKE_CPP,
+                        rates_allowed: true,
+                        referenced_amount_rate: rates.item_referenced_amount,
+                        item_context: ItemContext::None as u8,
+                    },
+                    &mut rng,
+                    |item_id| {
+                        self.item_storage_template(item_id).map(|template| {
+                            LootItemTemplateMetadata {
+                                max_stack: template.max_stack_size.max(1),
+                                has_multi_drop_flag: template.flags.contains(ItemFlags::MULTI_DROP),
+                                has_follow_loot_rules_flag: false,
+                            }
+                        })
+                    },
+                    |item| self.item_drop_rate_like_cpp(item.item_id),
+                    |context| {
+                        self.represented_creature_loot_item_allowed_like_cpp(
+                            context,
+                            &condition_rows,
+                            &condition_references,
+                            &addon_metadata,
+                        )
+                    },
+                    |item_id| {
+                        let random_properties =
+                            self.generate_loot_store_random_properties_like_cpp(item_id);
+                        LootItemRandomProperties {
+                            id: random_properties.id,
+                            seed: random_properties.seed,
+                        }
+                    },
+                )
+                .ok()?
+        };
+
+        Some(
+            generated
+                .into_iter()
+                .map(|item| {
+                    let metadata = addon_metadata
+                        .get(&item.item_id)
+                        .copied()
+                        .unwrap_or_default();
+                    generated_creature_loot_item_to_entry_like_cpp(item, metadata)
+                })
+                .collect(),
+        )
+    }
+
+    async fn autostore_represented_gameobject_chest_push_loot_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        source: GameObjectLootSource,
+    ) -> bool {
+        if !source.should_autostore_push_loot_like_cpp() {
+            return true;
+        }
+
+        let items = self
+            .generate_represented_gameobject_loot_items_like_cpp(source.push_loot_id)
+            .await
+            .unwrap_or_else(|| {
+                debug!(
+                    loot_id = source.push_loot_id,
+                    gameobject = ?gameobject_guid,
+                    "gameobject push loot template unavailable for represented chest"
+                );
+                Vec::new()
+            });
+
+        let mut all_stored = true;
+        for entry in items {
+            if !self
+                .store_direct_loot_item_like_cpp(&entry, source.dungeon_encounter_id)
+                .await
+            {
+                all_stored = false;
+            }
+        }
+
+        all_stored
+    }
+
+    async fn load_gameobject_template_addon_money_loot_like_cpp(
+        &self,
+        gameobject_entry: u32,
+    ) -> (u32, u32) {
+        let Some(world_db) = self.world_db() else {
+            return (0, 0);
+        };
+
+        let mut stmt = world_db.prepare(WorldStatements::SEL_GAMEOBJECT_TEMPLATE_ADDON_MONEY_LOOT);
+        stmt.set_u32(0, gameobject_entry);
+
+        match world_db.query(&stmt).await {
+            Ok(result) if !result.is_empty() => {
+                let min_money = result.try_read::<u32>(0).unwrap_or(0);
+                let max_money = result.try_read::<u32>(1).unwrap_or(0);
+                (min_money, max_money)
+            }
+            Ok(_) => (0, 0),
+            Err(err) => {
+                warn!(
+                    gameobject_entry,
+                    "failed to load gameobject_template_addon money loot: {err}"
+                );
+                (0, 0)
+            }
+        }
+    }
+
     async fn generate_represented_creature_loot_like_cpp(
         &self,
         creature_guid: ObjectGuid,
+        loot_owner_guid: ObjectGuid,
         level: u8,
         entry: u32,
         loot_id: u32,
         gold_min: u32,
         gold_max: u32,
+        dungeon_encounter_id: u32,
     ) -> CreatureLoot {
+        let (loot_method, loot_master, round_robin_player) =
+            self.represented_creature_loot_group_state_like_cpp(loot_owner_guid);
         let coins = if gold_max > 0 {
-            rand::thread_rng().gen_range(gold_min..=gold_max)
+            generate_money_loot_with_rate_like_cpp(
+                gold_min,
+                gold_max,
+                self.loot_drop_rates_like_cpp().money,
+                &mut rand::thread_rng(),
+            )
         } else {
             generate_legacy_creature_coin_fallback_like_cpp(creature_guid, level)
         };
@@ -2545,11 +3140,35 @@ impl WorldSession {
         CreatureLoot {
             loot_guid: represented_loot_object_guid_like_cpp(creature_guid),
             coins,
-            loot_method: 0,
+            unlooted_count: 0,
+            loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+            dungeon_encounter_id,
+            loot_method,
+            loot_master,
+            round_robin_player,
+            player_ffa_items: Vec::new(),
+            players_looting: Vec::new(),
             allowed_looters: Vec::new(),
             items,
             looted_by_player: false,
         }
+    }
+
+    fn represented_creature_loot_group_state_like_cpp(
+        &self,
+        loot_owner_guid: ObjectGuid,
+    ) -> (u8, ObjectGuid, ObjectGuid) {
+        let Some(group_guid) = self.group_guid else {
+            return (0, ObjectGuid::EMPTY, ObjectGuid::EMPTY);
+        };
+        let Some(registry) = self.group_registry() else {
+            return (0, ObjectGuid::EMPTY, ObjectGuid::EMPTY);
+        };
+        let Some(group) = registry.get(&group_guid) else {
+            return (0, ObjectGuid::EMPTY, ObjectGuid::EMPTY);
+        };
+
+        (group.loot_method, group.master_looter_guid, loot_owner_guid)
     }
 
     async fn generate_represented_creature_loot_items_like_cpp(
@@ -3145,6 +3764,10 @@ impl WorldSession {
         };
         let fully_looted = loot_is_looted_like_cpp(loot);
 
+        if let Some(loot) = self.loot_table.get_mut(&owner_guid) {
+            loot.players_looting.retain(|looter| *looter != player_guid);
+        }
+
         // Acknowledge the release to the client.
         let release = SLootRelease {
             loot_obj: owner_guid,
@@ -3160,6 +3783,17 @@ impl WorldSession {
         self.clear_active_loot_guid_if(owner_guid);
 
         if !fully_looted {
+            let round_robin_released = self.loot_table.get_mut(&owner_guid).is_some_and(|loot| {
+                if loot.round_robin_player == player_guid {
+                    loot.round_robin_player = ObjectGuid::EMPTY;
+                    true
+                } else {
+                    false
+                }
+            });
+            if round_robin_released {
+                self.represented_notify_loot_list_like_cpp(owner_guid);
+            }
             return true;
         }
 
@@ -3241,7 +3875,11 @@ impl WorldSession {
         }
     }
 
-    async fn store_direct_loot_item_like_cpp(&mut self, loot_entry: &LootEntry) -> bool {
+    async fn store_direct_loot_item_like_cpp(
+        &mut self,
+        loot_entry: &LootEntry,
+        dungeon_encounter_id: u32,
+    ) -> bool {
         let item_id = loot_entry.item_id;
         let count = loot_entry.quantity;
         let Some(player_guid) = self.player_guid else {
@@ -3493,6 +4131,7 @@ impl WorldSession {
                 added_count,
                 new_count,
                 false,
+                dungeon_encounter_id,
             );
         }
 
@@ -3507,6 +4146,7 @@ impl WorldSession {
                 stack.count,
                 stack.count,
                 false,
+                dungeon_encounter_id,
             );
         }
 
@@ -3605,7 +4245,9 @@ impl WorldSession {
         quantity: u32,
         quantity_in_inventory: u32,
         created: bool,
+        dungeon_encounter_id: u32,
     ) {
+        let is_encounter_loot = dungeon_encounter_id != 0;
         self.send_packet(&ItemPushResult {
             player_guid,
             slot: u8::from(INVENTORY_SLOT_BAG_0),
@@ -3620,17 +4262,21 @@ impl WorldSession {
             quest_log_item_id: 0,
             quantity: quantity as i32,
             quantity_in_inventory: quantity_in_inventory as i32,
-            dungeon_encounter_id: 0,
+            dungeon_encounter_id: dungeon_encounter_id as i32,
             battle_pet_species_id: 0,
             battle_pet_breed_id: 0,
             battle_pet_breed_quality: 0,
             battle_pet_level: 0,
             item_guid,
             pushed: false,
-            display_text: ItemPushResultDisplayType::Normal,
+            display_text: if is_encounter_loot {
+                ItemPushResultDisplayType::EncounterLoot
+            } else {
+                ItemPushResultDisplayType::Normal
+            },
             created,
             is_bonus_roll: false,
-            is_encounter_loot: false,
+            is_encounter_loot,
         });
     }
 
@@ -3843,8 +4489,21 @@ fn represented_loot_object_guid_like_cpp(owner: ObjectGuid) -> ObjectGuid {
     )
 }
 
+fn loot_type_for_client_like_cpp(loot_type: u8) -> u8 {
+    match loot_type {
+        LOOT_TYPE_PROSPECTING_LIKE_CPP | LOOT_TYPE_MILLING_LIKE_CPP => {
+            LOOT_TYPE_DISENCHANTING_LIKE_CPP
+        }
+        LOOT_TYPE_INSIGNIA_LIKE_CPP => LOOT_TYPE_SKINNING_LIKE_CPP,
+        LOOT_TYPE_FISHINGHOLE_LIKE_CPP | LOOT_TYPE_FISHING_JUNK_LIKE_CPP => {
+            LOOT_TYPE_FISHING_LIKE_CPP
+        }
+        _ => loot_type,
+    }
+}
+
 fn loot_is_looted_like_cpp(loot: &CreatureLoot) -> bool {
-    loot.coins == 0 && loot.items.iter().all(LootEntry::fully_looted_like_cpp)
+    loot.coins == 0 && loot.unlooted_count == 0
 }
 
 fn mark_loot_allowed_for_player_like_cpp(loot: &mut CreatureLoot, player_guid: ObjectGuid) {
@@ -3853,8 +4512,107 @@ fn mark_loot_allowed_for_player_like_cpp(loot: &mut CreatureLoot, player_guid: O
     }
 
     for entry in &mut loot.items {
-        if entry.allowed_looters.is_empty() {
+        if entry.allowed_looters.is_empty() || entry.flags.freeforall {
             entry.add_allowed_looter_like_cpp(player_guid);
+        }
+    }
+
+    let existing_ffa_item_ids: Vec<u8> = loot
+        .player_ffa_items
+        .iter()
+        .find(|(player, _)| *player == player_guid)
+        .map(|(_, items)| items.iter().map(|item| item.loot_list_id).collect())
+        .unwrap_or_default();
+    let mut ffa_items = Vec::new();
+    for entry in &mut loot.items {
+        if entry.flags.freeforall
+            && entry.has_allowed_looter_like_cpp(player_guid)
+            && !existing_ffa_item_ids.contains(&entry.loot_list_id)
+        {
+            ffa_items.push(NotNormalLootItem {
+                loot_list_id: entry.loot_list_id,
+                is_looted: false,
+            });
+            loot.unlooted_count = loot.unlooted_count.saturating_add(1);
+        } else if !entry.flags.freeforall
+            && entry.has_allowed_looter_like_cpp(player_guid)
+            && !entry.flags.counted
+        {
+            entry.flags.counted = true;
+            loot.unlooted_count = loot.unlooted_count.saturating_add(1);
+        }
+    }
+
+    if !ffa_items.is_empty() {
+        match loot
+            .player_ffa_items
+            .iter_mut()
+            .find(|(player, _)| *player == player_guid)
+        {
+            Some((_, existing)) => existing.extend(ffa_items),
+            None => loot.player_ffa_items.push((player_guid, ffa_items)),
+        }
+    }
+}
+
+fn loot_player_has_unlooted_ffa_item_like_cpp(
+    loot: &CreatureLoot,
+    player_guid: ObjectGuid,
+    loot_list_id: u8,
+) -> bool {
+    loot.player_ffa_items
+        .iter()
+        .find(|(player, _)| *player == player_guid)
+        .is_some_and(|(_, items)| {
+            items
+                .iter()
+                .any(|item| item.loot_list_id == loot_list_id && !item.is_looted)
+        })
+}
+
+fn loot_item_is_looted_for_player_like_cpp(
+    loot: &CreatureLoot,
+    entry: &LootEntry,
+    player_guid: ObjectGuid,
+) -> bool {
+    if entry.flags.freeforall {
+        !loot_player_has_unlooted_ffa_item_like_cpp(loot, player_guid, entry.loot_list_id)
+    } else {
+        entry.taken
+    }
+}
+
+fn mark_loot_item_looted_for_player_like_cpp(
+    loot: &mut CreatureLoot,
+    loot_list_id: u8,
+    player_guid: ObjectGuid,
+) {
+    let should_decrement = loot
+        .items
+        .iter()
+        .find(|entry| entry.loot_list_id == loot_list_id)
+        .is_some_and(|entry| !loot_item_is_looted_for_player_like_cpp(loot, entry, player_guid));
+
+    if let Some(entry) = loot
+        .items
+        .iter_mut()
+        .find(|entry| entry.loot_list_id == loot_list_id)
+    {
+        entry.mark_looted_for_player_like_cpp(player_guid);
+        if entry.flags.freeforall {
+            if let Some((_, items)) = loot
+                .player_ffa_items
+                .iter_mut()
+                .find(|(player, _)| *player == player_guid)
+                && let Some(item) = items
+                    .iter_mut()
+                    .find(|item| item.loot_list_id == loot_list_id)
+            {
+                item.is_looted = true;
+            }
+        }
+        if should_decrement {
+            loot.unlooted_count = loot.unlooted_count.saturating_sub(1);
         }
     }
 }
@@ -3865,18 +4623,35 @@ fn represented_loot_response_items_like_cpp(
 ) -> Vec<LootItemData> {
     loot.items
         .iter()
-        .filter(|entry| entry.visible_in_represented_free_for_all_view_like_cpp(player_guid))
-        .map(|entry| LootItemData {
-            item_type: 0,
-            ui_type: entry.free_for_all_ui_type_like_cpp(),
-            can_trade_to_tap_list: false,
-            loot: ItemInstance {
-                item_id: entry.item_id as i32,
-                ..ItemInstance::default()
-            },
-            loot_list_id: entry.loot_list_id,
-            quantity: entry.quantity,
-            loot_item_type: 0,
+        .filter_map(|entry| {
+            let ui_type = loot_item_ui_type_for_player_like_cpp(
+                player_guid,
+                &entry.allowed_looters,
+                loot_item_is_looted_for_player_like_cpp(loot, entry, player_guid),
+                entry.flags.freeforall,
+                loot_player_has_unlooted_ffa_item_like_cpp(loot, player_guid, entry.loot_list_id),
+                entry.flags.needs_quest,
+                entry.flags.follow_loot_rules,
+                loot.loot_method,
+                loot.round_robin_player,
+                loot.loot_master,
+                entry.flags.under_threshold,
+                entry.flags.blocked,
+                entry.roll_winner,
+            )?;
+
+            Some(LootItemData {
+                item_type: 0,
+                ui_type,
+                can_trade_to_tap_list: false,
+                loot: ItemInstance {
+                    item_id: entry.item_id as i32,
+                    ..ItemInstance::default()
+                },
+                loot_list_id: entry.loot_list_id,
+                quantity: entry.quantity,
+                loot_item_type: 0,
+            })
         })
         .collect()
 }
@@ -3952,6 +4727,7 @@ fn start_loot_roll_packet_like_cpp(
     loot_method: u8,
     entry: &LootEntry,
     valid_rolls: u8,
+    dungeon_encounter_id: i32,
 ) -> StartLootRoll {
     StartLootRoll {
         loot_obj,
@@ -3974,7 +4750,7 @@ fn start_loot_roll_packet_like_cpp(
             quantity: entry.quantity,
             loot_item_type: 0,
         },
-        dungeon_encounter_id: 0,
+        dungeon_encounter_id,
     }
 }
 
@@ -4175,7 +4951,7 @@ fn loot_has_item_for_all_like_cpp(loot: &CreatureLoot, player_guid: ObjectGuid) 
 
 fn loot_has_item_for_player_like_cpp(loot: &CreatureLoot, player_guid: ObjectGuid) -> bool {
     loot.items.iter().any(|entry| {
-        !entry.is_looted_for_player_like_cpp(player_guid)
+        !loot_item_is_looted_for_player_like_cpp(loot, entry, player_guid)
             && entry.has_allowed_looter_like_cpp(player_guid)
             && (!entry.flags.follow_loot_rules || entry.flags.freeforall)
     })
@@ -4363,14 +5139,18 @@ struct PlannedLootNewStack {
 #[cfg(test)]
 mod tests {
     use super::{
-        ITEM_FLAGS_CU_FOLLOW_LOOT_RULES_LIKE_CPP, ItemTemplateAddonLootMetadataLikeCpp,
-        LOOT_METHOD_GROUP_LIKE_CPP, LOOT_METHOD_MASTER_LIKE_CPP, LootStoreRandomProperties,
+        INVENTORY_SLOT_BAG_0, ITEM_FLAGS_CU_FOLLOW_LOOT_RULES_LIKE_CPP,
+        ItemTemplateAddonLootMetadataLikeCpp, LOOT_METHOD_GROUP_LIKE_CPP,
+        LOOT_METHOD_MASTER_LIKE_CPP, LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP,
+        LOOT_SLOT_TYPE_ROLL_ONGOING_LIKE_CPP, LootStoreRandomProperties,
         ROLL_ALL_TYPE_NO_DISENCHANT_LIKE_CPP, ROLL_FLAG_TYPE_NEED_LIKE_CPP,
         ROLL_VOTE_GREED_LIKE_CPP, ROLL_VOTE_NEED_LIKE_CPP, ROLL_VOTE_NOT_EMITTED_YET_LIKE_CPP,
         ROLL_VOTE_NOT_VALID_LIKE_CPP, ROLL_VOTE_PASS_LIKE_CPP,
         generated_creature_loot_item_to_entry_like_cpp, loot_is_looted_like_cpp, loot_item_context,
-        loot_store_data_can_stack_with_item, represented_loot_object_guid_like_cpp,
-        select_weighted_random_enchantment_like_cpp,
+        loot_store_data_can_stack_with_item, loot_type_for_client_like_cpp,
+        mark_loot_allowed_for_player_like_cpp, mark_loot_item_looted_for_player_like_cpp,
+        represented_loot_object_guid_like_cpp, represented_loot_response_items_like_cpp,
+        select_weighted_random_enchantment_like_cpp, start_loot_roll_packet_like_cpp,
     };
     use crate::session::RepresentedLootRollCriteriaEvent;
     use rand::{SeedableRng, rngs::StdRng};
@@ -4391,18 +5171,23 @@ mod tests {
         RandPropPointsStore,
     };
     use wow_database::{CharStatements, StatementDef};
-    use wow_entities::{Item, ItemCreateInfo, MAX_ITEM_SPELLS};
-    use wow_loot::{GeneratedLootItem, LootStoreItem};
+    use wow_entities::{GameObjectLootSource, Item, ItemCreateInfo, MAX_ITEM_SPELLS};
+    use wow_loot::{GeneratedLootItem, LOOT_SLOT_TYPE_OWNER_LIKE_CPP, LootStoreItem};
     use wow_network::{
-        GroupInfo, GroupRegistry, LootRollVoteCommand, PendingInvites, PlayerBroadcastInfo,
-        PlayerRegistry, SessionCommand,
+        GroupInfo, GroupRegistry, LootDropRatesLikeCpp, LootRollVoteCommand, PendingInvites,
+        PlayerBroadcastInfo, PlayerRegistry, SessionCommand,
     };
     use wow_packet::WorldPacket;
     use wow_packet::packets::loot::{
         CreatureLoot, LOOT_ERROR_MASTER_OTHER_LIKE_CPP, LOOT_ERROR_MASTER_UNIQUE_ITEM_LIKE_CPP,
         LOOT_ERROR_NO_LOOT_LIKE_CPP, LOOT_ERROR_PLAYER_NOT_FOUND_LIKE_CPP,
-        LOOT_ERROR_TOO_FAR_LIKE_CPP, LootEntry, LootEntryFlags, LootRoll, MasterLootItem,
-        SetLootSpecialization,
+        LOOT_ERROR_TOO_FAR_LIKE_CPP, LOOT_TYPE_CHEST_LIKE_CPP, LOOT_TYPE_CORPSE_LIKE_CPP,
+        LOOT_TYPE_CORPSE_PERSONAL_LIKE_CPP, LOOT_TYPE_DISENCHANTING_LIKE_CPP,
+        LOOT_TYPE_FISHING_JUNK_LIKE_CPP, LOOT_TYPE_FISHING_LIKE_CPP,
+        LOOT_TYPE_FISHINGHOLE_LIKE_CPP, LOOT_TYPE_GATHERING_NODE_LIKE_CPP,
+        LOOT_TYPE_INSIGNIA_LIKE_CPP, LOOT_TYPE_ITEM_LIKE_CPP, LOOT_TYPE_MILLING_LIKE_CPP,
+        LOOT_TYPE_NONE_LIKE_CPP, LOOT_TYPE_PROSPECTING_LIKE_CPP, LOOT_TYPE_SKINNING_LIKE_CPP,
+        LootEntry, LootEntryFlags, LootRoll, MasterLootItem, SetLootSpecialization,
     };
 
     use crate::session::{
@@ -4458,6 +5243,182 @@ mod tests {
         pkt
     }
 
+    fn represented_loot_entry(
+        loot_list_id: u8,
+        item_id: u32,
+        player_guid: ObjectGuid,
+    ) -> LootEntry {
+        LootEntry {
+            loot_list_id,
+            item_id,
+            quantity: 1,
+            random_properties_id: 0,
+            random_properties_seed: 0,
+            item_context: 0,
+            flags: LootEntryFlags {
+                follow_loot_rules: true,
+                freeforall: false,
+                blocked: false,
+                counted: false,
+                under_threshold: false,
+                needs_quest: false,
+            },
+            allowed_looters: vec![player_guid],
+            roll_winner: ObjectGuid::EMPTY,
+            ffa_looted_by: Vec::new(),
+            taken: false,
+        }
+    }
+
+    #[test]
+    fn represented_loot_type_for_client_matches_cpp_aliases() {
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_NONE_LIKE_CPP),
+            LOOT_TYPE_NONE_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_CORPSE_LIKE_CPP),
+            LOOT_TYPE_CORPSE_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_ITEM_LIKE_CPP),
+            LOOT_TYPE_ITEM_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_GATHERING_NODE_LIKE_CPP),
+            LOOT_TYPE_GATHERING_NODE_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_CHEST_LIKE_CPP),
+            LOOT_TYPE_CHEST_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_CORPSE_PERSONAL_LIKE_CPP),
+            LOOT_TYPE_CORPSE_PERSONAL_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_PROSPECTING_LIKE_CPP),
+            LOOT_TYPE_DISENCHANTING_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_MILLING_LIKE_CPP),
+            LOOT_TYPE_DISENCHANTING_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_INSIGNIA_LIKE_CPP),
+            LOOT_TYPE_SKINNING_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_FISHINGHOLE_LIKE_CPP),
+            LOOT_TYPE_FISHING_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_FISHING_JUNK_LIKE_CPP),
+            LOOT_TYPE_FISHING_LIKE_CPP
+        );
+    }
+
+    #[tokio::test]
+    async fn represented_loot_response_acquire_reason_uses_cpp_loot_type_mapping() {
+        let mut session = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let owner_guid = test_creature_guid(19_096);
+        let loot_guid = represented_loot_object_guid_like_cpp(owner_guid);
+        let entry = represented_loot_entry(0, 25, player_guid);
+        session
+            .creatures
+            .insert(owner_guid, test_creature(owner_guid, false));
+        session.loot_table.insert(
+            owner_guid,
+            CreatureLoot {
+                loot_guid,
+                coins: 0,
+                unlooted_count: 1,
+                loot_type: LOOT_TYPE_PROSPECTING_LIKE_CPP,
+                dungeon_encounter_id: 0,
+                loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
+                allowed_looters: vec![player_guid],
+                items: vec![entry],
+                looted_by_player: false,
+            },
+        );
+
+        let response = session
+            .represented_loot_response_for_owner_like_cpp(owner_guid, player_guid, false)
+            .await
+            .unwrap();
+
+        assert_eq!(response.acquire_reason, LOOT_TYPE_DISENCHANTING_LIKE_CPP);
+    }
+
+    #[test]
+    fn represented_start_loot_roll_carries_cpp_dungeon_encounter_id() {
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let loot_obj = ObjectGuid::create_world_object(HighGuid::LootObject, 0, 1, 0, 0, 1, 900);
+        let entry = represented_loot_entry(0, 25, player_guid);
+
+        let packet = start_loot_roll_packet_like_cpp(
+            loot_obj,
+            571,
+            LOOT_METHOD_GROUP_LIKE_CPP,
+            &entry,
+            ROLL_ALL_TYPE_NO_DISENCHANT_LIKE_CPP,
+            615,
+        );
+
+        assert_eq!(packet.dungeon_encounter_id, 615);
+    }
+
+    #[test]
+    fn represented_loot_item_push_result_carries_cpp_encounter_loot_fields() {
+        let (session, send_rx) = make_session_with_send();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let item_guid = ObjectGuid::create_item(1, 700);
+        let entry = represented_loot_entry(0, 25, player_guid);
+
+        session.send_loot_item_push_result(
+            player_guid,
+            item_guid,
+            &entry,
+            0,
+            0,
+            0,
+            1,
+            1,
+            false,
+            615,
+        );
+
+        let sent = send_rx.try_recv().unwrap();
+        let mut sent = WorldPacket::from_bytes(&sent);
+        assert_eq!(
+            sent.read_uint16().unwrap(),
+            wow_constants::ServerOpcodes::ItemPushResult as u16
+        );
+        assert_eq!(sent.read_packed_guid().unwrap(), player_guid);
+        assert_eq!(sent.read_uint8().unwrap(), u8::from(INVENTORY_SLOT_BAG_0));
+        assert_eq!(sent.read_int32().unwrap(), 0);
+        assert_eq!(sent.read_int32().unwrap(), 0);
+        assert_eq!(sent.read_int32().unwrap(), 1);
+        assert_eq!(sent.read_int32().unwrap(), 1);
+        assert_eq!(sent.read_int32().unwrap(), 615);
+        assert_eq!(sent.read_int32().unwrap(), 0);
+        assert_eq!(sent.read_int32().unwrap(), 0);
+        assert_eq!(sent.read_uint32().unwrap(), 0);
+        assert_eq!(sent.read_int32().unwrap(), 0);
+        assert_eq!(sent.read_packed_guid().unwrap(), item_guid);
+        assert!(!sent.read_bit().unwrap());
+        assert!(!sent.read_bit().unwrap());
+        assert_eq!(sent.read_bits(3).unwrap(), 2);
+        assert!(!sent.read_bit().unwrap());
+        assert!(sent.read_bit().unwrap());
+        assert_eq!(sent.read_int32().unwrap(), 25);
+    }
+
     #[test]
     fn creature_generated_loot_entry_uses_item_template_addon_follow_loot_rules_like_cpp() {
         let generated = GeneratedLootItem {
@@ -4495,6 +5456,218 @@ mod tests {
         );
         assert!(follow_entry.flags.follow_loot_rules);
         assert!(follow_entry.flags.needs_quest);
+    }
+
+    #[test]
+    fn represented_loot_response_items_use_cpp_ui_type_decision_tree() {
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let other_guid = ObjectGuid::create_player(1, 77);
+        let loot_guid = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 1, 100);
+
+        let mut rolling_entry = represented_loot_entry(0, 25, player_guid);
+        rolling_entry.flags.blocked = true;
+
+        let mut won_entry = represented_loot_entry(1, 26, player_guid);
+        won_entry.roll_winner = player_guid;
+
+        let mut hidden_entry = represented_loot_entry(2, 27, player_guid);
+        hidden_entry.roll_winner = other_guid;
+
+        let mut allowed_entry = represented_loot_entry(3, 28, player_guid);
+        allowed_entry.flags.under_threshold = true;
+
+        let loot = CreatureLoot {
+            loot_guid,
+            coins: 0,
+            unlooted_count: 0,
+            loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+            dungeon_encounter_id: 0,
+            loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
+            loot_master: ObjectGuid::EMPTY,
+            round_robin_player: ObjectGuid::EMPTY,
+            player_ffa_items: Vec::new(),
+            players_looting: Vec::new(),
+            allowed_looters: vec![player_guid],
+            items: vec![rolling_entry, won_entry, hidden_entry, allowed_entry],
+            looted_by_player: false,
+        };
+
+        let items = represented_loot_response_items_like_cpp(&loot, player_guid);
+
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].loot_list_id, 0);
+        assert_eq!(items[0].ui_type, LOOT_SLOT_TYPE_ROLL_ONGOING_LIKE_CPP);
+        assert_eq!(items[1].loot_list_id, 1);
+        assert_eq!(items[1].ui_type, LOOT_SLOT_TYPE_OWNER_LIKE_CPP);
+        assert_eq!(items[2].loot_list_id, 3);
+        assert_eq!(items[2].ui_type, LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP);
+    }
+
+    #[test]
+    fn represented_ffa_loot_uses_player_ffa_items_like_cpp() {
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let other_guid = ObjectGuid::create_player(1, 77);
+        let loot_guid = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 1, 101);
+
+        let mut ffa_entry = represented_loot_entry(0, 25, player_guid);
+        ffa_entry.flags.freeforall = true;
+        ffa_entry.allowed_looters.clear();
+
+        let mut loot = CreatureLoot {
+            loot_guid,
+            coins: 0,
+            unlooted_count: 0,
+            loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+            dungeon_encounter_id: 0,
+            loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
+            loot_master: ObjectGuid::EMPTY,
+            round_robin_player: ObjectGuid::EMPTY,
+            player_ffa_items: Vec::new(),
+            players_looting: Vec::new(),
+            allowed_looters: Vec::new(),
+            items: vec![ffa_entry],
+            looted_by_player: false,
+        };
+
+        mark_loot_allowed_for_player_like_cpp(&mut loot, player_guid);
+        mark_loot_allowed_for_player_like_cpp(&mut loot, other_guid);
+        assert_eq!(loot.unlooted_count, 2);
+
+        let player_items = represented_loot_response_items_like_cpp(&loot, player_guid);
+        let other_items = represented_loot_response_items_like_cpp(&loot, other_guid);
+        assert_eq!(player_items.len(), 1);
+        assert_eq!(other_items.len(), 1);
+        assert_eq!(player_items[0].ui_type, LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP);
+        assert_eq!(other_items[0].ui_type, LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP);
+
+        mark_loot_item_looted_for_player_like_cpp(&mut loot, 0, player_guid);
+        assert_eq!(loot.unlooted_count, 1);
+
+        let player_ffa = loot
+            .player_ffa_items
+            .iter()
+            .find(|(player, _)| *player == player_guid)
+            .and_then(|(_, items)| items.iter().find(|item| item.loot_list_id == 0))
+            .unwrap();
+        let other_ffa = loot
+            .player_ffa_items
+            .iter()
+            .find(|(player, _)| *player == other_guid)
+            .and_then(|(_, items)| items.iter().find(|item| item.loot_list_id == 0))
+            .unwrap();
+
+        assert!(player_ffa.is_looted);
+        assert!(!other_ffa.is_looted);
+        assert!(represented_loot_response_items_like_cpp(&loot, player_guid).is_empty());
+        assert_eq!(
+            represented_loot_response_items_like_cpp(&loot, other_guid).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn represented_unlooted_count_counts_shared_items_once_like_cpp() {
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let other_guid = ObjectGuid::create_player(1, 77);
+        let loot_guid = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 1, 102);
+
+        let mut entry = represented_loot_entry(0, 25, player_guid);
+        entry.allowed_looters.clear();
+
+        let mut loot = CreatureLoot {
+            loot_guid,
+            coins: 0,
+            unlooted_count: 0,
+            loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+            dungeon_encounter_id: 0,
+            loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
+            loot_master: ObjectGuid::EMPTY,
+            round_robin_player: ObjectGuid::EMPTY,
+            player_ffa_items: Vec::new(),
+            players_looting: Vec::new(),
+            allowed_looters: Vec::new(),
+            items: vec![entry],
+            looted_by_player: false,
+        };
+
+        mark_loot_allowed_for_player_like_cpp(&mut loot, player_guid);
+        assert_eq!(loot.unlooted_count, 1);
+        assert!(loot.items[0].flags.counted);
+
+        mark_loot_allowed_for_player_like_cpp(&mut loot, other_guid);
+        assert_eq!(loot.unlooted_count, 1);
+
+        mark_loot_item_looted_for_player_like_cpp(&mut loot, 0, player_guid);
+        assert_eq!(loot.unlooted_count, 0);
+        mark_loot_item_looted_for_player_like_cpp(&mut loot, 0, player_guid);
+        assert_eq!(loot.unlooted_count, 0);
+    }
+
+    #[test]
+    fn represented_loot_removed_uses_players_looting_like_cpp() {
+        let (mut session, send_rx) = make_session_with_send();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let open_guid = ObjectGuid::create_player(1, 77);
+        let closed_guid = ObjectGuid::create_player(1, 88);
+        let owner_guid = test_creature_guid(19_095);
+        let loot_object = represented_loot_object_guid_like_cpp(owner_guid);
+        let (open_tx, open_rx) = flume::bounded::<Vec<u8>>(1);
+        let (closed_tx, closed_rx) = flume::bounded::<Vec<u8>>(1);
+        let player_registry = Arc::new(PlayerRegistry::default());
+        player_registry.insert(open_guid, broadcast_info(open_guid, open_tx));
+        player_registry.insert(closed_guid, broadcast_info(closed_guid, closed_tx));
+        session.set_player_registry(player_registry);
+        session.set_player_guid(Some(player_guid));
+        session.loot_table.insert(
+            owner_guid,
+            CreatureLoot {
+                loot_guid: loot_object,
+                coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
+                loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: vec![player_guid, open_guid],
+                allowed_looters: vec![player_guid, open_guid, closed_guid],
+                items: vec![LootEntry {
+                    loot_list_id: 0,
+                    item_id: 25,
+                    quantity: 1,
+                    random_properties_id: 0,
+                    random_properties_seed: 0,
+                    item_context: 0,
+                    flags: LootEntryFlags::default(),
+                    allowed_looters: vec![player_guid, open_guid, closed_guid],
+                    roll_winner: ObjectGuid::EMPTY,
+                    ffa_looted_by: Vec::new(),
+                    taken: false,
+                }],
+                looted_by_player: false,
+            },
+        );
+
+        session.represented_notify_loot_item_removed_like_cpp(owner_guid, 0);
+
+        let sent = send_rx.try_recv().unwrap();
+        let mut sent = WorldPacket::from_bytes(&sent);
+        assert_eq!(
+            sent.read_uint16().unwrap(),
+            wow_constants::ServerOpcodes::LootRemoved as u16
+        );
+        assert_eq!(sent.read_packed_guid().unwrap(), owner_guid);
+        assert_eq!(sent.read_packed_guid().unwrap(), loot_object);
+        assert_eq!(sent.read_uint8().unwrap(), 0);
+
+        let sent = open_rx.try_recv().unwrap();
+        let mut sent = WorldPacket::from_bytes(&sent);
+        assert_eq!(
+            sent.read_uint16().unwrap(),
+            wow_constants::ServerOpcodes::LootRemoved as u16
+        );
+        assert!(closed_rx.try_recv().is_err());
     }
 
     fn loot_release_packet(object: ObjectGuid) -> WorldPacket {
@@ -4542,6 +5715,8 @@ mod tests {
             0,
             0,
             0,
+            0,
+            None,
             0,
         );
         creature.is_alive = is_alive;
@@ -4759,6 +5934,101 @@ mod tests {
                 applied_at: std::time::Instant::now(),
             },
         );
+    }
+
+    #[tokio::test]
+    async fn represented_creature_money_uses_cpp_money_drop_rate() {
+        let mut session = make_session();
+        session.set_loot_drop_rates_like_cpp(LootDropRatesLikeCpp {
+            money: 2.5,
+            ..LootDropRatesLikeCpp::default()
+        });
+
+        let loot = session
+            .generate_represented_creature_loot_like_cpp(
+                test_creature_guid(1),
+                ObjectGuid::create_player(1, 42),
+                10,
+                25,
+                0,
+                100,
+                100,
+                0,
+            )
+            .await;
+
+        assert_eq!(loot.coins, 250);
+        assert!(loot.items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn represented_creature_loot_generation_carries_cpp_dungeon_encounter_id() {
+        let session = make_session();
+
+        let loot = session
+            .generate_represented_creature_loot_like_cpp(
+                test_creature_guid(19_097),
+                ObjectGuid::create_player(1, 42),
+                10,
+                25,
+                0,
+                0,
+                0,
+                615,
+            )
+            .await;
+
+        assert_eq!(loot.dungeon_encounter_id, 615);
+    }
+
+    #[tokio::test]
+    async fn represented_gameobject_chest_loot_carries_cpp_source_metadata() {
+        let session = make_session();
+        let source = GameObjectLootSource {
+            loot_id: 0,
+            use_group_loot_rules: false,
+            dungeon_encounter_id: 733,
+            personal_loot_id: 10_001,
+            push_loot_id: 0,
+        };
+
+        let loot = session
+            .generate_represented_gameobject_chest_loot_like_cpp(
+                test_gameobject_guid(91_001),
+                ObjectGuid::create_player(1, 42),
+                source,
+            )
+            .await;
+
+        assert_eq!(loot.loot_type, LOOT_TYPE_CHEST_LIKE_CPP);
+        assert_eq!(loot.dungeon_encounter_id, 733);
+        assert_eq!(loot.loot_method, 0);
+    }
+
+    #[tokio::test]
+    async fn represented_creature_loot_captures_group_method_master_and_round_robin_like_cpp() {
+        let mut session = make_session();
+        let master_guid = ObjectGuid::create_player(1, 42);
+        let candidate_guid = ObjectGuid::create_player(1, 77);
+        let owner_guid = test_creature_guid(19_049);
+        install_master_loot_group(&mut session, master_guid, candidate_guid);
+
+        let loot = session
+            .generate_represented_creature_loot_like_cpp(
+                owner_guid,
+                master_guid,
+                10,
+                25,
+                0,
+                0,
+                0,
+                0,
+            )
+            .await;
+
+        assert_eq!(loot.loot_method, LOOT_METHOD_MASTER_LIKE_CPP);
+        assert_eq!(loot.loot_master, master_guid);
+        assert_eq!(loot.round_robin_player, master_guid);
     }
 
     fn test_gameobject_guid(counter: i64) -> ObjectGuid {
@@ -4988,7 +6258,14 @@ mod tests {
         let mut loot = CreatureLoot {
             loot_guid: ObjectGuid::EMPTY,
             coins: 1,
+            unlooted_count: 0,
+            loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+            dungeon_encounter_id: 0,
             loot_method: 0,
+            loot_master: ObjectGuid::EMPTY,
+            round_robin_player: ObjectGuid::EMPTY,
+            player_ffa_items: Vec::new(),
+            players_looting: Vec::new(),
             allowed_looters: Vec::new(),
             items: vec![],
             looted_by_player: false,
@@ -5009,9 +6286,13 @@ mod tests {
             ffa_looted_by: Vec::new(),
             taken: false,
         });
+        loot.unlooted_count = 1;
         assert!(!loot_is_looted_like_cpp(&loot));
 
         loot.items[0].taken = true;
+        assert!(!loot_is_looted_like_cpp(&loot));
+
+        loot.unlooted_count = 0;
         assert!(loot_is_looted_like_cpp(&loot));
     }
 
@@ -5116,7 +6397,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 1,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
+                loot_master: master_guid,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: vec![master_guid, candidate_guid],
                 items: Vec::new(),
                 looted_by_player: false,
@@ -5178,7 +6466,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: represented_loot_object_guid_like_cpp(owner_guid),
                 coins: 1,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
+                loot_master: master_guid,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: vec![master_guid, candidate_guid],
                 items: Vec::new(),
                 looted_by_player: false,
@@ -5222,7 +6517,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 1,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
+                loot_master: master_guid,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: vec![master_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -5296,7 +6598,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -5424,7 +6733,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -5490,7 +6806,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -5627,7 +6950,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: vec![player_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -5683,7 +7013,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -5772,7 +7109,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -5857,7 +7201,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -6018,7 +7369,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -6147,7 +7505,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -6254,7 +7619,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -6358,7 +7730,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: vec![player_guid, candidate_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -6443,7 +7822,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: represented_loot_object_guid_like_cpp(old_guid),
                 coins: 7,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: Vec::new(),
                 looted_by_player: false,
@@ -6638,7 +8024,14 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![],
                 looted_by_player: false,
@@ -6665,7 +8058,14 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -6705,7 +8105,14 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -6747,7 +8154,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: inactive_guid,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -6807,7 +8221,14 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -6862,7 +8283,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object_guid,
                 coins: 3,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![],
                 looted_by_player: false,
@@ -6897,7 +8325,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object_one,
                 coins: 3,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![],
                 looted_by_player: false,
@@ -6908,7 +8343,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object_two,
                 coins: 7,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![],
                 looted_by_player: false,
@@ -6981,7 +8423,14 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 9,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7049,7 +8498,14 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7103,7 +8559,14 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7154,7 +8617,14 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7395,7 +8865,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7453,7 +8930,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
+                loot_master: master_guid,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7515,7 +8999,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
+                loot_master: master_guid,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7618,7 +9109,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
+                loot_master: master_guid,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: vec![master_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7673,7 +9171,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
+                loot_master: master_guid,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: vec![master_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7702,6 +9207,7 @@ mod tests {
         let loot = session.loot_table.get(&loot_owner).unwrap();
         assert_eq!(loot.items[0].quantity, 0);
         assert!(loot.items[0].is_looted_for_player_like_cpp(master_guid));
+        assert_eq!(loot.unlooted_count, 0);
 
         let sent = send_rx.try_recv().unwrap();
         let mut sent = WorldPacket::from_bytes(&sent);
@@ -7752,7 +9258,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
+                loot_master: master_guid,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: vec![target_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7857,7 +9370,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
+                loot_master: master_guid,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: vec![target_guid],
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7917,7 +9437,14 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7961,7 +9488,14 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -8006,7 +9540,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object_guid,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -8057,7 +9598,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: secondary_loot_object,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -8106,7 +9654,14 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -8154,7 +9709,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: spoofed_guid,
                 coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: Vec::new(),
                 looted_by_player: false,
@@ -8200,7 +9762,14 @@ mod tests {
             CreatureLoot {
                 loot_guid: represented_loot_object_guid_like_cpp(secondary_guid),
                 coins: 5,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: Vec::new(),
                 looted_by_player: false,
@@ -8229,6 +9798,7 @@ mod tests {
     async fn loot_release_keeps_unlooted_creature_loot_like_cpp() {
         let (mut session, send_rx) = make_session_with_send();
         let player_guid = ObjectGuid::create_player(1, 42);
+        let other_guid = ObjectGuid::create_player(1, 77);
         let loot_guid = test_creature_guid(19_013);
         session.set_player_guid(Some(player_guid));
         session.set_active_loot_guid(loot_guid);
@@ -8240,7 +9810,14 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 7,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: vec![player_guid, other_guid],
                 allowed_looters: Vec::new(),
                 items: Vec::new(),
                 looted_by_player: false,
@@ -8261,6 +9838,10 @@ mod tests {
         assert_eq!(sent.read_packed_guid().unwrap(), player_guid);
         assert!(!session.is_active_loot_guid(loot_guid));
         assert!(session.loot_table.contains_key(&loot_guid));
+        assert_eq!(
+            session.loot_table.get(&loot_guid).unwrap().players_looting,
+            vec![other_guid]
+        );
         assert!(
             session
                 .creatures
@@ -8284,7 +9865,14 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 1,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,

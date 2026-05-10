@@ -120,6 +120,9 @@ pub enum WorldStatements {
     /// Min/max money loot bounds for an item from item_template_addon.
     /// Args: item ID (u32).
     SEL_ITEM_TEMPLATE_ADDON_MONEY_LOOT,
+    /// Min/max money loot bounds for a gameobject from gameobject_template_addon.
+    /// Args: gameobject template entry (u32).
+    SEL_GAMEOBJECT_TEMPLATE_ADDON_MONEY_LOOT,
     /// FlagsCu and QuestLogItemId for loot eligibility from item_template_addon.
     /// Args: item ID (u32).
     SEL_ITEM_TEMPLATE_ADDON_LOOT_METADATA,
@@ -505,6 +508,11 @@ impl StatementDef for WorldStatements {
                 "SELECT LEAST(COALESCE(MinMoneyLoot, 0), COALESCE(MaxMoneyLoot, 0)), ",
                 "GREATEST(COALESCE(MinMoneyLoot, 0), COALESCE(MaxMoneyLoot, 0)) ",
                 "FROM item_template_addon WHERE Id = ? LIMIT 1",
+            ),
+            Self::SEL_GAMEOBJECT_TEMPLATE_ADDON_MONEY_LOOT => concat!(
+                "SELECT LEAST(COALESCE(mingold, 0), COALESCE(maxgold, 0)), ",
+                "GREATEST(COALESCE(mingold, 0), COALESCE(maxgold, 0)) ",
+                "FROM gameobject_template_addon WHERE entry = ? LIMIT 1",
             ),
             Self::SEL_ITEM_TEMPLATE_ADDON_LOOT_METADATA => concat!(
                 "SELECT COALESCE(FlagsCu, 0), COALESCE(QuestLogItemId, 0) ",

@@ -20,6 +20,21 @@ pub const LOOT_ERROR_MASTER_UNIQUE_ITEM_LIKE_CPP: u8 = 13;
 pub const LOOT_ERROR_MASTER_OTHER_LIKE_CPP: u8 = 14;
 pub const LOOT_ERROR_NO_LOOT_LIKE_CPP: u8 = 17;
 
+pub const LOOT_TYPE_NONE_LIKE_CPP: u8 = 0;
+pub const LOOT_TYPE_CORPSE_LIKE_CPP: u8 = 1;
+pub const LOOT_TYPE_FISHING_LIKE_CPP: u8 = 3;
+pub const LOOT_TYPE_DISENCHANTING_LIKE_CPP: u8 = 4;
+pub const LOOT_TYPE_ITEM_LIKE_CPP: u8 = 5;
+pub const LOOT_TYPE_SKINNING_LIKE_CPP: u8 = 6;
+pub const LOOT_TYPE_GATHERING_NODE_LIKE_CPP: u8 = 8;
+pub const LOOT_TYPE_CHEST_LIKE_CPP: u8 = 9;
+pub const LOOT_TYPE_CORPSE_PERSONAL_LIKE_CPP: u8 = 14;
+pub const LOOT_TYPE_FISHINGHOLE_LIKE_CPP: u8 = 20;
+pub const LOOT_TYPE_INSIGNIA_LIKE_CPP: u8 = 21;
+pub const LOOT_TYPE_FISHING_JUNK_LIKE_CPP: u8 = 22;
+pub const LOOT_TYPE_PROSPECTING_LIKE_CPP: u8 = 23;
+pub const LOOT_TYPE_MILLING_LIKE_CPP: u8 = 24;
+
 // ── LootUnit (CMSG_LOOT_UNIT) ────────────────────────────────────
 
 /// Client requests to loot a unit (dead creature).
@@ -569,10 +584,23 @@ impl ServerPacket for MasterLootCandidateList {
 pub struct CreatureLoot {
     pub loot_guid: ObjectGuid,
     pub coins: u32,
+    pub unlooted_count: u8,
+    pub loot_type: u8,
+    pub dungeon_encounter_id: u32,
     pub loot_method: u8,
+    pub loot_master: ObjectGuid,
+    pub round_robin_player: ObjectGuid,
+    pub player_ffa_items: Vec<(ObjectGuid, Vec<NotNormalLootItem>)>,
+    pub players_looting: Vec<ObjectGuid>,
     pub allowed_looters: Vec<ObjectGuid>,
     pub items: Vec<LootEntry>,
     pub looted_by_player: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotNormalLootItem {
+    pub loot_list_id: u8,
+    pub is_looted: bool,
 }
 
 #[derive(Debug, Clone)]

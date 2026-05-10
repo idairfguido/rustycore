@@ -11,6 +11,7 @@
 use std::time::{Duration, Instant};
 
 use wow_core::{ObjectGuid, Position};
+use wow_instances::BossAiRef;
 
 // ── CreatureState ──────────────────────────────────────────────────
 
@@ -114,6 +115,10 @@ pub struct CreatureAI {
     pub gold_min: u32,
     /// C++ `CreatureDifficulty::GoldMax`.
     pub gold_max: u32,
+    /// Represented C++ `BossAI::_bossId`, if this creature uses BossAI.
+    pub boss_id: Option<u32>,
+    /// Represented C++ `Loot::_dungeonEncounterId` source for corpse loot.
+    pub dungeon_encounter_id: u32,
 }
 
 impl CreatureAI {
@@ -134,6 +139,8 @@ impl CreatureAI {
         loot_id: u32,
         gold_min: u32,
         gold_max: u32,
+        boss_id: Option<u32>,
+        dungeon_encounter_id: u32,
     ) -> Self {
         let now = Instant::now();
         // Derive rough damage if zero
@@ -176,6 +183,8 @@ impl CreatureAI {
             loot_id,
             gold_min,
             gold_max,
+            boss_id,
+            dungeon_encounter_id,
         }
     }
 
@@ -359,10 +368,61 @@ impl CreatureAI {
     }
 }
 
+impl CreatureAI {
+    /// Return the represented C++ `BossAI` view only when this creature has
+    /// script-provided boss identity. A plain creature must behave like a
+    /// failed `dynamic_cast<BossAI const*>`.
+    pub fn boss_ai_like_cpp(&self) -> Option<BossAiRef> {
+        self.boss_id.map(BossAiRef::new)
+    }
+}
+
 // ── Position distance helper ──────────────────────────────────────
 // Position already has .distance() from wow-core; we define this
 // convenience method here for internal use.
 
 fn position_dist(a: &Position, b: &Position) -> f32 {
     a.distance(b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wow_instances::BossAiLikeCpp;
+
+    fn creature_with_boss_id(boss_id: Option<u32>) -> CreatureAI {
+        CreatureAI::new(
+            ObjectGuid::EMPTY,
+            1,
+            Position::ZERO,
+            100,
+            1,
+            1,
+            2,
+            0.0,
+            1,
+            35,
+            0,
+            0,
+            0,
+            0,
+            0,
+            boss_id,
+            0,
+        )
+    }
+
+    #[test]
+    fn plain_creature_has_no_boss_ai_view_like_cpp_failed_dynamic_cast() {
+        let creature = creature_with_boss_id(None);
+
+        assert!(creature.boss_ai_like_cpp().is_none());
+    }
+
+    #[test]
+    fn boss_creature_exposes_script_boss_id_like_cpp_boss_ai() {
+        let creature = creature_with_boss_id(Some(7));
+
+        assert_eq!(creature.boss_ai_like_cpp().unwrap().boss_id(), 7);
+    }
 }

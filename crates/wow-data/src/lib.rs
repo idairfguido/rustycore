@@ -8,6 +8,7 @@
 pub mod area_trigger;
 pub mod chr_specialization;
 pub mod currency;
+pub mod dungeon_encounter;
 pub mod hotfix_cache;
 pub mod import_price;
 pub mod item;
@@ -38,6 +39,7 @@ pub use area_trigger::{
 };
 pub use chr_specialization::{ChrSpecializationEntry, ChrSpecializationStore};
 pub use currency::{CurrencyTypesEntry, CurrencyTypesStore};
+pub use dungeon_encounter::{DungeonEncounterEntry, DungeonEncounterStore};
 pub use hotfix_cache::{HotfixBlobCache, build_hotfix_blob_cache};
 pub use import_price::{
     ImportPriceArmorEntry, ImportPriceArmorStore, ImportPriceQualityEntry, ImportPriceQualityStore,

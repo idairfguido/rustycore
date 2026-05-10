@@ -2983,6 +2983,7 @@ dependencies = [
  "wow-constants",
  "wow-core",
  "wow-ecs",
+ "wow-instances",
 ]
 
 [[package]]
@@ -3112,6 +3113,13 @@ dependencies = [
  "wow-constants",
  "wow-core",
  "wow-packet",
+]
+
+[[package]]
+name = "wow-instances"
+version = "0.1.0"
+dependencies = [
+ "wow-data",
 ]
 
 [[package]]

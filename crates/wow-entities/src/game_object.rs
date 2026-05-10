@@ -8,6 +8,16 @@ use crate::{
 
 pub const DEFAULT_GAMEOBJECT_RESPAWN_DELAY_SECS: u32 = 300;
 pub const GAMEOBJECT_LOOT_MODE_DEFAULT: u16 = 0x1;
+pub const GAMEOBJECT_TYPE_CHEST: u32 = 3;
+pub const GAMEOBJECT_TYPE_FISHING_HOLE: u32 = 25;
+pub const GAMEOBJECT_TYPE_GATHERING_NODE: u32 = 50;
+
+pub const MAX_GAMEOBJECT_DATA: usize = 35;
+pub const GAMEOBJECT_DATA_CHEST_LOOT: usize = 1;
+pub const GAMEOBJECT_DATA_CHEST_USE_GROUP_LOOT_RULES: usize = 15;
+pub const GAMEOBJECT_DATA_CHEST_DUNGEON_ENCOUNTER: usize = 25;
+pub const GAMEOBJECT_DATA_CHEST_PERSONAL_LOOT: usize = 30;
+pub const GAMEOBJECT_DATA_CHEST_PUSH_LOOT: usize = 33;
 
 pub const GAME_OBJECT_DATA_PARENT_BIT: usize = 0;
 pub const GAME_OBJECT_DATA_DISPLAY_ID_BIT: usize = 4;
@@ -37,6 +47,72 @@ pub enum LootState {
     Ready = 1,
     Activated = 2,
     JustDeactivated = 3,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameObjectLootSource {
+    pub loot_id: u32,
+    pub use_group_loot_rules: bool,
+    pub dungeon_encounter_id: u32,
+    pub personal_loot_id: u32,
+    pub push_loot_id: u32,
+}
+
+impl GameObjectLootSource {
+    pub const fn is_empty(&self) -> bool {
+        self.loot_id == 0 && self.personal_loot_id == 0 && self.push_loot_id == 0
+    }
+
+    pub const fn open_loot_id_like_cpp(&self) -> u32 {
+        if self.loot_id != 0 {
+            self.loot_id
+        } else {
+            self.personal_loot_id
+        }
+    }
+
+    pub const fn has_open_loot_like_cpp(&self) -> bool {
+        self.open_loot_id_like_cpp() != 0
+    }
+
+    pub const fn should_autostore_push_loot_like_cpp(&self) -> bool {
+        self.loot_id == 0 && self.push_loot_id != 0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameObjectTemplateData {
+    pub go_type: u32,
+    pub data: [u32; MAX_GAMEOBJECT_DATA],
+}
+
+impl GameObjectTemplateData {
+    pub const fn new(go_type: u32, data: [u32; MAX_GAMEOBJECT_DATA]) -> Self {
+        Self { go_type, data }
+    }
+
+    pub const fn get_loot_id_like_cpp(&self) -> u32 {
+        match self.go_type {
+            GAMEOBJECT_TYPE_CHEST
+            | GAMEOBJECT_TYPE_FISHING_HOLE
+            | GAMEOBJECT_TYPE_GATHERING_NODE => self.data[GAMEOBJECT_DATA_CHEST_LOOT],
+            _ => 0,
+        }
+    }
+
+    pub const fn chest_loot_source_like_cpp(&self) -> Option<GameObjectLootSource> {
+        if self.go_type != GAMEOBJECT_TYPE_CHEST {
+            return None;
+        }
+
+        Some(GameObjectLootSource {
+            loot_id: self.get_loot_id_like_cpp(),
+            use_group_loot_rules: self.data[GAMEOBJECT_DATA_CHEST_USE_GROUP_LOOT_RULES] != 0,
+            dungeon_encounter_id: self.data[GAMEOBJECT_DATA_CHEST_DUNGEON_ENCOUNTER],
+            personal_loot_id: self.data[GAMEOBJECT_DATA_CHEST_PERSONAL_LOOT],
+            push_loot_id: self.data[GAMEOBJECT_DATA_CHEST_PUSH_LOOT],
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -544,6 +620,73 @@ mod tests {
         assert!(!go.grid_unload_delete_requested());
         assert!(!go.grid_unload_respawn_relocation_requested());
         assert!(!go.game_object_data_changes_mask().is_any_set());
+    }
+
+    #[test]
+    fn gameobject_template_get_loot_id_matches_cpp_switch() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[GAMEOBJECT_DATA_CHEST_LOOT] = 44;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data).get_loot_id_like_cpp(),
+            44
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_FISHING_HOLE, data).get_loot_id_like_cpp(),
+            44
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_GATHERING_NODE, data)
+                .get_loot_id_like_cpp(),
+            44
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(2, data).get_loot_id_like_cpp(),
+            0
+        );
+    }
+
+    #[test]
+    fn chest_loot_source_uses_cpp_data_indices() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[GAMEOBJECT_DATA_CHEST_LOOT] = 10;
+        data[GAMEOBJECT_DATA_CHEST_USE_GROUP_LOOT_RULES] = 1;
+        data[GAMEOBJECT_DATA_CHEST_DUNGEON_ENCOUNTER] = 1234;
+        data[GAMEOBJECT_DATA_CHEST_PERSONAL_LOOT] = 20;
+        data[GAMEOBJECT_DATA_CHEST_PUSH_LOOT] = 30;
+
+        let source = GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data)
+            .chest_loot_source_like_cpp()
+            .expect("chest templates expose a chest loot source");
+
+        assert_eq!(
+            source,
+            GameObjectLootSource {
+                loot_id: 10,
+                use_group_loot_rules: true,
+                dungeon_encounter_id: 1234,
+                personal_loot_id: 20,
+                push_loot_id: 30,
+            }
+        );
+        assert!(!source.is_empty());
+        assert_eq!(source.open_loot_id_like_cpp(), 10);
+        assert!(source.has_open_loot_like_cpp());
+        assert!(!source.should_autostore_push_loot_like_cpp());
+
+        data[GAMEOBJECT_DATA_CHEST_LOOT] = 0;
+        data[GAMEOBJECT_DATA_CHEST_PERSONAL_LOOT] = 0;
+        let push_source = GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data)
+            .chest_loot_source_like_cpp()
+            .expect("chest templates expose a chest loot source");
+        assert!(!push_source.is_empty());
+        assert!(!push_source.has_open_loot_like_cpp());
+        assert!(push_source.should_autostore_push_loot_like_cpp());
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_FISHING_HOLE, data)
+                .chest_loot_source_like_cpp(),
+            None
+        );
     }
 
     #[test]

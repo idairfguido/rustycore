@@ -9,6 +9,11 @@
 
 use tracing::{debug, info, warn};
 use wow_constants::{ClientOpcodes, ItemExtendedCostFlags};
+use wow_database::WorldStatements;
+use wow_entities::{
+    GAMEOBJECT_TYPE_FISHING_HOLE, GAMEOBJECT_TYPE_GATHERING_NODE, GameObjectTemplateData,
+    MAX_GAMEOBJECT_DATA,
+};
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::ClientPacket;
 use wow_packet::packets::item::{
@@ -764,10 +769,79 @@ impl crate::session::WorldSession {
     // ── Game object interaction ───────────────────────────────────────────────
 
     /// CMSG_GAME_OBJ_USE — player interacts with a world game object.
-    /// C# ref: SpellHandler.HandleGameObjectUse → obj.Use(player)
-    /// TODO: implement per-type object behavior (mailbox, door, chest, etc.)
-    pub async fn handle_game_obj_use(&mut self, _pkt: wow_packet::WorldPacket) {
-        info!("GameObjUse account {} (stub)", self.account_id);
+    /// C++ ref: `GameObject::Use` dispatches by `GameObjectTemplate::type`.
+    pub async fn handle_game_obj_use(&mut self, mut pkt: wow_packet::WorldPacket) {
+        let gameobject_guid = match pkt.read_packed_guid() {
+            Ok(guid) => guid,
+            Err(e) => {
+                warn!("GameObjUse: failed to read gameobject guid: {e}");
+                return;
+            }
+        };
+
+        if !gameobject_guid.is_game_object() || !self.visible_gameobjects.contains(&gameobject_guid)
+        {
+            return;
+        }
+
+        let Some(world_db) = self.world_db().cloned() else {
+            return;
+        };
+        let mut stmt = world_db.prepare(WorldStatements::SEL_GAMEOBJECT_TEMPLATE_BY_ENTRY);
+        stmt.set_u32(0, gameobject_guid.entry());
+        let result = match world_db.query(&stmt).await {
+            Ok(result) => result,
+            Err(e) => {
+                warn!(
+                    entry = gameobject_guid.entry(),
+                    "GameObjUse: failed to query gameobject template: {e}"
+                );
+                return;
+            }
+        };
+        if result.is_empty() {
+            return;
+        }
+
+        let go_type = result.try_read::<u32>(1).unwrap_or(0);
+        let mut data = [0_u32; MAX_GAMEOBJECT_DATA];
+        for (index, value) in data.iter_mut().enumerate() {
+            *value = result
+                .try_read::<i32>(8 + index)
+                .and_then(|raw| u32::try_from(raw).ok())
+                .unwrap_or(0);
+        }
+
+        let template = GameObjectTemplateData::new(go_type, data);
+        if let Some(source) = template.chest_loot_source_like_cpp() {
+            if source.is_empty() {
+                return;
+            }
+
+            self.open_represented_gameobject_chest_like_cpp(gameobject_guid, source)
+                .await;
+            return;
+        }
+
+        let loot_id = template.get_loot_id_like_cpp();
+        match go_type {
+            GAMEOBJECT_TYPE_FISHING_HOLE if loot_id != 0 => {
+                self.open_represented_fishing_hole_like_cpp(gameobject_guid, loot_id)
+                    .await;
+            }
+            GAMEOBJECT_TYPE_GATHERING_NODE if loot_id != 0 => {
+                self.open_represented_gathering_node_like_cpp(gameobject_guid, loot_id)
+                    .await;
+            }
+            _ => {
+                debug!(
+                    account = self.account_id,
+                    guid = ?gameobject_guid,
+                    go_type,
+                    "GameObjUse: represented gameobject use type is not ported yet"
+                );
+            }
+        }
     }
 
     /// CMSG_GAME_OBJ_REPORT_USE — client reports a game object use event.
