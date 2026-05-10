@@ -1110,6 +1110,11 @@
   Rust targets: `crates/wow-loot/src/lib.rs`, `crates/wow-world/src/handlers/loot.rs`, docs.
   Acceptance: `wow_loot::loot_item_ui_type_for_player_like_cpp` now mirrors the C++ slot-visibility/UI decision order for looted rows, `allowedGUIDs`, per-player FFA rows, quest-only rows, free-for-all, round-robin, master-loot, group/need-before-greed rolls and personal loot. Represented `LootResponse` item construction now consumes that helper instead of the previous free-for-all-only visibility/UI shortcut. Remaining gaps: represented `CreatureLoot` still lacks canonical `roundRobinPlayer`, `_lootMaster` and `Loot::GetPlayerFFAItems()` ownership state, so those arguments are bridged from currently available represented fields until canonical `Loot` ownership replaces the session bridge.
 
+- [x] **#NEXT.R8.ENTITIES.293** Carry C++ loot method, master and round-robin owner on represented creature loot.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Loot/Loot.cpp` (`Loot::Loot`, `Loot::FillLoot`, `Loot::NotifyLootList`), `/home/server/woltk-trinity-legacy/src/server/game/Handlers/LootHandler.cpp` (`DoLootRelease` round-robin clear).
+  Rust targets: `crates/wow-packet/src/packets/loot.rs`, `crates/wow-world/src/handlers/loot.rs`, `crates/wow-world/src/handlers/spell.rs`, `crates/wow-world/src/handlers/character.rs`, `crates/wow-world/src/session.rs`, docs.
+  Acceptance: represented `CreatureLoot` now stores `loot_master` and `round_robin_player` alongside `loot_method`. Represented creature loot generation copies the current group loot method and master-looter GUID like C++ `Loot::Loot`, assigns the first represented corpse loot owner as `roundRobinPlayer` like C++ `FillLoot` for group corpse loot, feeds both fields into `LootItem::GetUiTypeForPlayer` parity, includes them in `SMSG_LOOT_LIST` fanout like `NotifyLootList`, and clears/broadcasts round-robin ownership on release like `DoLootRelease`. Remaining gaps: this is still represented/session-backed state, not canonical `Creature::m_loot`/shared `Loot`, and per-player `Loot::GetPlayerFFAItems()` remains pending.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.R8.ENTITIES.003** Bind `wow-map` grid unload actions to real entity methods once Creature/GameObject/Corpse exist.

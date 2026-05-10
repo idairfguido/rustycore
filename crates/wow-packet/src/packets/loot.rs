@@ -570,6 +570,8 @@ pub struct CreatureLoot {
     pub loot_guid: ObjectGuid,
     pub coins: u32,
     pub loot_method: u8,
+    pub loot_master: ObjectGuid,
+    pub round_robin_player: ObjectGuid,
     pub allowed_looters: Vec<ObjectGuid>,
     pub items: Vec<LootEntry>,
     pub looted_by_player: bool,

@@ -7128,6 +7128,8 @@ mod tests {
                 loot_guid: child_guid,
                 coins: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 1,
@@ -7163,6 +7165,8 @@ mod tests {
                 loot_guid: active_guid,
                 coins: 37,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
                 allowed_looters: Vec::new(),
                 items: Vec::new(),
                 looted_by_player: false,
@@ -7174,6 +7178,8 @@ mod tests {
                 loot_guid: inactive_guid,
                 coins: 91,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
@@ -7377,6 +7383,8 @@ mod tests {
                 loot_guid,
                 coins: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,

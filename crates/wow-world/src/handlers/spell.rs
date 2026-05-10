@@ -433,6 +433,8 @@ impl WorldSession {
                     loot_guid: item.guid,
                     coins,
                     loot_method: 0,
+                    loot_master: ObjectGuid::EMPTY,
+                    round_robin_player: ObjectGuid::EMPTY,
                     allowed_looters: vec![player_guid],
                     items,
                     looted_by_player: false,

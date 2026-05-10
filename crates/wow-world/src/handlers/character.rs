@@ -7734,6 +7734,8 @@ mod tests {
                 loot_guid,
                 coins: 0,
                 loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
                 allowed_looters: Vec::new(),
                 items: vec![LootEntry {
                     loot_list_id: 0,
