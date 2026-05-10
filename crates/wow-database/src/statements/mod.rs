@@ -90,6 +90,11 @@ mod tests {
                 .contains("item_template_addon")
         );
         assert!(
+            WorldStatements::SEL_GAMEOBJECT_TEMPLATE_ADDON_MONEY_LOOT
+                .sql()
+                .contains("gameobject_template_addon")
+        );
+        assert!(
             WorldStatements::SEL_ITEM_TEMPLATE_ADDON_LOOT_METADATA
                 .sql()
                 .contains("QuestLogItemId")
@@ -101,6 +106,13 @@ mod tests {
         );
         assert_eq!(
             WorldStatements::SEL_ITEM_TEMPLATE_ADDON_MONEY_LOOT
+                .sql()
+                .matches('?')
+                .count(),
+            1
+        );
+        assert_eq!(
+            WorldStatements::SEL_GAMEOBJECT_TEMPLATE_ADDON_MONEY_LOOT
                 .sql()
                 .matches('?')
                 .count(),

@@ -2787,10 +2787,19 @@ impl WorldSession {
                 }
                 Vec::new()
             });
+        let (min_money, max_money) = self
+            .load_gameobject_template_addon_money_loot_like_cpp(gameobject_guid.entry())
+            .await;
+        let coins = generate_money_loot_with_rate_like_cpp(
+            min_money,
+            max_money,
+            self.loot_drop_rates_like_cpp().money,
+            &mut rand::thread_rng(),
+        );
 
         CreatureLoot {
             loot_guid: represented_loot_object_guid_like_cpp(gameobject_guid),
-            coins: 0,
+            coins,
             unlooted_count: 0,
             loot_type: LOOT_TYPE_CHEST_LIKE_CPP,
             dungeon_encounter_id: source.dungeon_encounter_id,
@@ -2906,6 +2915,34 @@ impl WorldSession {
                 })
                 .collect(),
         )
+    }
+
+    async fn load_gameobject_template_addon_money_loot_like_cpp(
+        &self,
+        gameobject_entry: u32,
+    ) -> (u32, u32) {
+        let Some(world_db) = self.world_db() else {
+            return (0, 0);
+        };
+
+        let mut stmt = world_db.prepare(WorldStatements::SEL_GAMEOBJECT_TEMPLATE_ADDON_MONEY_LOOT);
+        stmt.set_u32(0, gameobject_entry);
+
+        match world_db.query(&stmt).await {
+            Ok(result) if !result.is_empty() => {
+                let min_money = result.try_read::<u32>(0).unwrap_or(0);
+                let max_money = result.try_read::<u32>(1).unwrap_or(0);
+                (min_money, max_money)
+            }
+            Ok(_) => (0, 0),
+            Err(err) => {
+                warn!(
+                    gameobject_entry,
+                    "failed to load gameobject_template_addon money loot: {err}"
+                );
+                (0, 0)
+            }
+        }
     }
 
     async fn generate_represented_creature_loot_like_cpp(
