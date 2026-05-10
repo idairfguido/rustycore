@@ -1230,6 +1230,11 @@
   Rust targets: `crates/wow-world/src/session.rs`, `crates/wow-world/src/handlers/loot.rs`, docs.
   Acceptance: represented personal encounter chest generation now treats the shared `CreatureLoot.coins` as zero and records session-local money by `(gameobject, player)` for each eligible tapper, matching the C++ shape where each tapper gets its own `Loot`. `LootResponse` and `CMSG_LOOT_MONEY` read the current player's personal money, and money pickup zeroes only that player's represented personal-money entry while preserving other tappers' entries. Remaining gaps: canonical per-player `Loot` objects/items, `LootTemplate::ProcessPersonalLoot`, `FillNotNormalLootFor`, map-difficulty loot mode, persistence and canonical `GameObject::m_personalLoot`.
 
+- [x] **#NEXT.R8.ENTITIES.317** Represent personal encounter item ownership.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Loot/LootMgr.cpp` (`LootTemplate::ProcessPersonalLoot` chooses one looter for each rolled entry/group), `/home/server/woltk-trinity-legacy/src/server/game/Loot/Loot.cpp` (`Loot::FillNotNormalLootFor` allowed-looter/counting rules).
+  Rust targets: `crates/wow-world/src/handlers/loot.rs`, docs.
+  Acceptance: represented personal encounter chest items are no longer marked lootable by every tapper. After represented generation, each generated item is assigned to one eligible tapper, FFA state is rebuilt for that tapper, and `unlooted_count` follows the C++ `FillNotNormalLootFor` counting split between normal and FFA items. Remaining gaps: exact `ProcessPersonalLoot` reference/group looter-selection loops in `wow-loot`, per-tapper condition evaluation for non-current players, canonical per-player `Loot` objects and canonical `GameObject::m_personalLoot`.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.R8.ENTITIES.003** Bind `wow-map` grid unload actions to real entity methods once Creature/GameObject/Corpse exist.

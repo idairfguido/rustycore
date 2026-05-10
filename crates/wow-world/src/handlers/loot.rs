@@ -3162,13 +3162,16 @@ impl WorldSession {
                 .insert(gameobject_guid);
             self.represented_personal_loot_money
                 .retain(|(owner, _), _| *owner != gameobject_guid);
-            let mut allowed_tappers = 0usize;
-            for tapper in self.represented_gameobject_personal_encounter_tappers_like_cpp(
-                gameobject_guid,
-                player_guid,
-                source.dungeon_encounter_id,
-            ) {
-                mark_loot_allowed_for_player_like_cpp(&mut loot, tapper);
+            let represented_tappers = self
+                .represented_gameobject_personal_encounter_tappers_like_cpp(
+                    gameobject_guid,
+                    player_guid,
+                    source.dungeon_encounter_id,
+                );
+            for tapper in &represented_tappers {
+                if !loot.allowed_looters.contains(tapper) {
+                    loot.allowed_looters.push(*tapper);
+                }
                 let tapper_money = generate_money_loot_with_rate_like_cpp(
                     min_money,
                     max_money,
@@ -3176,10 +3179,14 @@ impl WorldSession {
                     &mut rand::thread_rng(),
                 );
                 self.represented_personal_loot_money
-                    .insert((gameobject_guid, tapper), tapper_money);
-                allowed_tappers += 1;
+                    .insert((gameobject_guid, *tapper), tapper_money);
             }
-            if allowed_tappers == 0 {
+            assign_represented_personal_loot_items_like_cpp(
+                &mut loot,
+                &represented_tappers,
+                &mut rand::thread_rng(),
+            );
+            if represented_tappers.is_empty() {
                 self.represented_personal_loot_owners
                     .remove(&gameobject_guid);
             }
@@ -4864,6 +4871,52 @@ fn mark_loot_allowed_for_player_like_cpp(loot: &mut CreatureLoot, player_guid: O
     }
 }
 
+fn assign_represented_personal_loot_items_like_cpp<R: Rng + ?Sized>(
+    loot: &mut CreatureLoot,
+    tappers: &[ObjectGuid],
+    rng: &mut R,
+) {
+    if tappers.is_empty() {
+        return;
+    }
+
+    loot.unlooted_count = 0;
+    loot.player_ffa_items.clear();
+
+    for entry in &mut loot.items {
+        entry.allowed_looters.clear();
+        entry.ffa_looted_by.clear();
+        entry.flags.counted = false;
+
+        let chosen_tapper = tappers[rng.gen_range(0..tappers.len())];
+        entry.add_allowed_looter_like_cpp(chosen_tapper);
+
+        if entry.flags.freeforall {
+            match loot
+                .player_ffa_items
+                .iter_mut()
+                .find(|(player, _)| *player == chosen_tapper)
+            {
+                Some((_, existing)) => existing.push(NotNormalLootItem {
+                    loot_list_id: entry.loot_list_id,
+                    is_looted: false,
+                }),
+                None => loot.player_ffa_items.push((
+                    chosen_tapper,
+                    vec![NotNormalLootItem {
+                        loot_list_id: entry.loot_list_id,
+                        is_looted: false,
+                    }],
+                )),
+            }
+            loot.unlooted_count = loot.unlooted_count.saturating_add(1);
+        } else if !entry.flags.counted {
+            entry.flags.counted = true;
+            loot.unlooted_count = loot.unlooted_count.saturating_add(1);
+        }
+    }
+}
+
 fn loot_player_has_unlooted_ffa_item_like_cpp(
     loot: &CreatureLoot,
     player_guid: ObjectGuid,
@@ -5455,6 +5508,7 @@ mod tests {
         ROLL_ALL_TYPE_NO_DISENCHANT_LIKE_CPP, ROLL_FLAG_TYPE_NEED_LIKE_CPP,
         ROLL_VOTE_GREED_LIKE_CPP, ROLL_VOTE_NEED_LIKE_CPP, ROLL_VOTE_NOT_EMITTED_YET_LIKE_CPP,
         ROLL_VOTE_NOT_VALID_LIKE_CPP, ROLL_VOTE_PASS_LIKE_CPP,
+        assign_represented_personal_loot_items_like_cpp,
         generated_creature_loot_item_to_entry_like_cpp, loot_is_looted_like_cpp, loot_item_context,
         loot_store_data_can_stack_with_item, loot_type_for_client_like_cpp,
         mark_loot_allowed_for_player_like_cpp, mark_loot_item_looted_for_player_like_cpp,
@@ -6609,6 +6663,75 @@ mod tests {
             Some(&456)
         );
         assert_eq!(session.loot_table.get(&gameobject_guid).unwrap().coins, 999);
+    }
+
+    #[test]
+    fn represented_gameobject_personal_encounter_items_are_single_tapper_like_cpp() {
+        let first_tapper = ObjectGuid::create_player(1, 42);
+        let second_tapper = ObjectGuid::create_player(1, 77);
+        let mut loot = CreatureLoot {
+            loot_guid: represented_loot_object_guid_like_cpp(test_gameobject_guid(91_014)),
+            coins: 0,
+            unlooted_count: 0,
+            loot_type: LOOT_TYPE_CHEST_LIKE_CPP,
+            dungeon_encounter_id: 733,
+            loot_method: 0,
+            loot_master: ObjectGuid::EMPTY,
+            round_robin_player: ObjectGuid::EMPTY,
+            player_ffa_items: Vec::new(),
+            players_looting: Vec::new(),
+            allowed_looters: vec![first_tapper, second_tapper],
+            items: vec![
+                LootEntry {
+                    loot_list_id: 0,
+                    item_id: 1_001,
+                    quantity: 1,
+                    random_properties_id: 0,
+                    random_properties_seed: 0,
+                    item_context: 0,
+                    flags: LootEntryFlags::default(),
+                    allowed_looters: vec![first_tapper, second_tapper],
+                    roll_winner: ObjectGuid::EMPTY,
+                    ffa_looted_by: Vec::new(),
+                    taken: false,
+                },
+                LootEntry {
+                    loot_list_id: 1,
+                    item_id: 1_002,
+                    quantity: 1,
+                    random_properties_id: 0,
+                    random_properties_seed: 0,
+                    item_context: 0,
+                    flags: LootEntryFlags {
+                        freeforall: true,
+                        ..LootEntryFlags::default()
+                    },
+                    allowed_looters: vec![first_tapper, second_tapper],
+                    roll_winner: ObjectGuid::EMPTY,
+                    ffa_looted_by: vec![first_tapper],
+                    taken: false,
+                },
+            ],
+            looted_by_player: false,
+        };
+        let mut rng = StdRng::seed_from_u64(7);
+
+        assign_represented_personal_loot_items_like_cpp(
+            &mut loot,
+            &[first_tapper, second_tapper],
+            &mut rng,
+        );
+
+        assert_eq!(loot.unlooted_count, 2);
+        assert_eq!(loot.items[0].allowed_looters.len(), 1);
+        assert_eq!(loot.items[1].allowed_looters.len(), 1);
+        assert!([first_tapper, second_tapper].contains(&loot.items[0].allowed_looters[0]));
+        assert!([first_tapper, second_tapper].contains(&loot.items[1].allowed_looters[0]));
+        assert!(loot.items[0].flags.counted);
+        assert!(!loot.items[1].flags.counted);
+        assert_eq!(loot.items[1].ffa_looted_by, Vec::<ObjectGuid>::new());
+        assert_eq!(loot.player_ffa_items.len(), 1);
+        assert_eq!(loot.player_ffa_items[0].1[0].loot_list_id, 1);
     }
 
     #[tokio::test]
