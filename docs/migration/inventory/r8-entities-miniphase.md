@@ -1135,6 +1135,11 @@
   Rust targets: `crates/wow-world/src/handlers/loot.rs`, docs.
   Acceptance: represented master-loot and represented loot-roll winner removal now decrement `CreatureLoot.unlooted_count` only when the target transition was still unlooted, matching the C++ removal branch after a successful store. Unit coverage asserts self-target master-loot removal clears both item state and the represented unlooted counter. Remaining gaps: canonical shared `Loot`, full DB-backed remote success validation, roll-loss/mail fallback semantics and real criteria/news/script side effects remain pending.
 
+- [x] **#NEXT.R8.ENTITIES.298** Carry represented C++ `LootType`/`GetLootTypeForClient` into `LootResponse.AcquireReason`.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Loot/Loot.h` (`LootType`, `GetLootTypeForClient`, `Loot::_dungeonEncounterId`), `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp` (`Player::SendLoot`, `Player::StoreLootItem`), `/home/server/woltk-trinity-legacy/src/server/game/Handlers/LootHandler.cpp` (`HandleLootMoneyOpcode`, `HandleLootReleaseOpcode`).
+  Rust targets: `crates/wow-packet/src/packets/loot.rs`, `crates/wow-world/src/handlers/loot.rs`, `crates/wow-world/src/handlers/spell.rs`, `crates/wow-world/src/handlers/character.rs`, `crates/wow-world/src/session.rs`, docs.
+  Acceptance: represented `CreatureLoot` now carries `loot_type` and `dungeon_encounter_id` fields like C++ `Loot`; represented creature corpse generation initializes `LOOT_CORPSE`, represented item-container opening initializes `LOOT_ITEM`, and `LootResponse.AcquireReason` now uses the C++ `GetLootTypeForClient` mapping (`PROSPECTING`/`MILLING` -> `DISENCHANTING`, `INSIGNIA` -> `SKINNING`, `FISHINGHOLE`/`FISHING_JUNK` -> `FISHING`) instead of a hardcoded zero. Unit coverage asserts both the alias mapping and the represented response field. Remaining gaps: `dungeon_encounter_id` is carried but not yet fed into canonical `SendNewItem`/criteria paths, and non-corpse loot sources such as skinning, pickpocketing, fishing, prospecting and milling still need canonical runtime wiring.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.R8.ENTITIES.003** Bind `wow-map` grid unload actions to real entity methods once Creature/GameObject/Corpse exist.

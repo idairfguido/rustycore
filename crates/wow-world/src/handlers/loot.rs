@@ -50,7 +50,10 @@ use wow_packet::packets::loot::{
     AELootTargets, AELootTargetsAck, CoinRemoved, CreatureLoot, LOOT_ERROR_DIDNT_KILL_LIKE_CPP,
     LOOT_ERROR_MASTER_INV_FULL_LIKE_CPP, LOOT_ERROR_MASTER_OTHER_LIKE_CPP,
     LOOT_ERROR_MASTER_UNIQUE_ITEM_LIKE_CPP, LOOT_ERROR_NO_LOOT_LIKE_CPP,
-    LOOT_ERROR_PLAYER_NOT_FOUND_LIKE_CPP, LOOT_ERROR_TOO_FAR_LIKE_CPP, LootAllPassed, LootEntry,
+    LOOT_ERROR_PLAYER_NOT_FOUND_LIKE_CPP, LOOT_ERROR_TOO_FAR_LIKE_CPP, LOOT_TYPE_CORPSE_LIKE_CPP,
+    LOOT_TYPE_DISENCHANTING_LIKE_CPP, LOOT_TYPE_FISHING_JUNK_LIKE_CPP, LOOT_TYPE_FISHING_LIKE_CPP,
+    LOOT_TYPE_FISHINGHOLE_LIKE_CPP, LOOT_TYPE_INSIGNIA_LIKE_CPP, LOOT_TYPE_MILLING_LIKE_CPP,
+    LOOT_TYPE_PROSPECTING_LIKE_CPP, LOOT_TYPE_SKINNING_LIKE_CPP, LootAllPassed, LootEntry,
     LootEntryFlags, LootItemData, LootItemPkt, LootList, LootMoney, LootMoneyNotify, LootRelease,
     LootReleaseAll, LootRemoved, LootResponse, LootRoll, LootRollBroadcast, LootRollWon, LootUnit,
     MasterLootCandidateList, MasterLootItem, NotNormalLootItem, SLootRelease,
@@ -2108,7 +2111,7 @@ impl WorldSession {
             owner: owner_guid,
             loot_obj: loot.loot_guid,
             failure_reason: 0,
-            acquire_reason: 0,
+            acquire_reason: loot_type_for_client_like_cpp(loot.loot_type),
             loot_method: loot.loot_method,
             threshold: 2,
             coins: loot.coins,
@@ -2666,6 +2669,8 @@ impl WorldSession {
             loot_guid: represented_loot_object_guid_like_cpp(creature_guid),
             coins,
             unlooted_count: 0,
+            loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+            dungeon_encounter_id: 0,
             loot_method,
             loot_master,
             round_robin_player,
@@ -4000,6 +4005,19 @@ fn represented_loot_object_guid_like_cpp(owner: ObjectGuid) -> ObjectGuid {
     )
 }
 
+fn loot_type_for_client_like_cpp(loot_type: u8) -> u8 {
+    match loot_type {
+        LOOT_TYPE_PROSPECTING_LIKE_CPP | LOOT_TYPE_MILLING_LIKE_CPP => {
+            LOOT_TYPE_DISENCHANTING_LIKE_CPP
+        }
+        LOOT_TYPE_INSIGNIA_LIKE_CPP => LOOT_TYPE_SKINNING_LIKE_CPP,
+        LOOT_TYPE_FISHINGHOLE_LIKE_CPP | LOOT_TYPE_FISHING_JUNK_LIKE_CPP => {
+            LOOT_TYPE_FISHING_LIKE_CPP
+        }
+        _ => loot_type,
+    }
+}
+
 fn loot_is_looted_like_cpp(loot: &CreatureLoot) -> bool {
     loot.coins == 0 && loot.unlooted_count == 0
 }
@@ -4643,9 +4661,10 @@ mod tests {
         ROLL_FLAG_TYPE_NEED_LIKE_CPP, ROLL_VOTE_GREED_LIKE_CPP, ROLL_VOTE_NEED_LIKE_CPP,
         ROLL_VOTE_NOT_EMITTED_YET_LIKE_CPP, ROLL_VOTE_NOT_VALID_LIKE_CPP, ROLL_VOTE_PASS_LIKE_CPP,
         generated_creature_loot_item_to_entry_like_cpp, loot_is_looted_like_cpp, loot_item_context,
-        loot_store_data_can_stack_with_item, mark_loot_allowed_for_player_like_cpp,
-        mark_loot_item_looted_for_player_like_cpp, represented_loot_object_guid_like_cpp,
-        represented_loot_response_items_like_cpp, select_weighted_random_enchantment_like_cpp,
+        loot_store_data_can_stack_with_item, loot_type_for_client_like_cpp,
+        mark_loot_allowed_for_player_like_cpp, mark_loot_item_looted_for_player_like_cpp,
+        represented_loot_object_guid_like_cpp, represented_loot_response_items_like_cpp,
+        select_weighted_random_enchantment_like_cpp,
     };
     use crate::session::RepresentedLootRollCriteriaEvent;
     use rand::{SeedableRng, rngs::StdRng};
@@ -4676,7 +4695,11 @@ mod tests {
     use wow_packet::packets::loot::{
         CreatureLoot, LOOT_ERROR_MASTER_OTHER_LIKE_CPP, LOOT_ERROR_MASTER_UNIQUE_ITEM_LIKE_CPP,
         LOOT_ERROR_NO_LOOT_LIKE_CPP, LOOT_ERROR_PLAYER_NOT_FOUND_LIKE_CPP,
-        LOOT_ERROR_TOO_FAR_LIKE_CPP, LootEntry, LootEntryFlags, LootRoll, MasterLootItem,
+        LOOT_ERROR_TOO_FAR_LIKE_CPP, LOOT_TYPE_CORPSE_LIKE_CPP, LOOT_TYPE_DISENCHANTING_LIKE_CPP,
+        LOOT_TYPE_FISHING_JUNK_LIKE_CPP, LOOT_TYPE_FISHING_LIKE_CPP,
+        LOOT_TYPE_FISHINGHOLE_LIKE_CPP, LOOT_TYPE_INSIGNIA_LIKE_CPP, LOOT_TYPE_ITEM_LIKE_CPP,
+        LOOT_TYPE_MILLING_LIKE_CPP, LOOT_TYPE_NONE_LIKE_CPP, LOOT_TYPE_PROSPECTING_LIKE_CPP,
+        LOOT_TYPE_SKINNING_LIKE_CPP, LootEntry, LootEntryFlags, LootRoll, MasterLootItem,
         SetLootSpecialization,
     };
 
@@ -4761,6 +4784,79 @@ mod tests {
     }
 
     #[test]
+    fn represented_loot_type_for_client_matches_cpp_aliases() {
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_NONE_LIKE_CPP),
+            LOOT_TYPE_NONE_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_CORPSE_LIKE_CPP),
+            LOOT_TYPE_CORPSE_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_ITEM_LIKE_CPP),
+            LOOT_TYPE_ITEM_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_PROSPECTING_LIKE_CPP),
+            LOOT_TYPE_DISENCHANTING_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_MILLING_LIKE_CPP),
+            LOOT_TYPE_DISENCHANTING_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_INSIGNIA_LIKE_CPP),
+            LOOT_TYPE_SKINNING_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_FISHINGHOLE_LIKE_CPP),
+            LOOT_TYPE_FISHING_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_FISHING_JUNK_LIKE_CPP),
+            LOOT_TYPE_FISHING_LIKE_CPP
+        );
+    }
+
+    #[tokio::test]
+    async fn represented_loot_response_acquire_reason_uses_cpp_loot_type_mapping() {
+        let mut session = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let owner_guid = test_creature_guid(19_096);
+        let loot_guid = represented_loot_object_guid_like_cpp(owner_guid);
+        let entry = represented_loot_entry(0, 25, player_guid);
+        session
+            .creatures
+            .insert(owner_guid, test_creature(owner_guid, false));
+        session.loot_table.insert(
+            owner_guid,
+            CreatureLoot {
+                loot_guid,
+                coins: 0,
+                unlooted_count: 1,
+                loot_type: LOOT_TYPE_PROSPECTING_LIKE_CPP,
+                dungeon_encounter_id: 0,
+                loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
+                allowed_looters: vec![player_guid],
+                items: vec![entry],
+                looted_by_player: false,
+            },
+        );
+
+        let response = session
+            .represented_loot_response_for_owner_like_cpp(owner_guid, player_guid, false)
+            .await
+            .unwrap();
+
+        assert_eq!(response.acquire_reason, LOOT_TYPE_DISENCHANTING_LIKE_CPP);
+    }
+
+    #[test]
     fn creature_generated_loot_entry_uses_item_template_addon_follow_loot_rules_like_cpp() {
         let generated = GeneratedLootItem {
             item_id: 25,
@@ -4821,6 +4917,8 @@ mod tests {
             loot_guid,
             coins: 0,
             unlooted_count: 0,
+            loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+            dungeon_encounter_id: 0,
             loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
             loot_master: ObjectGuid::EMPTY,
             round_robin_player: ObjectGuid::EMPTY,
@@ -4856,6 +4954,8 @@ mod tests {
             loot_guid,
             coins: 0,
             unlooted_count: 0,
+            loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+            dungeon_encounter_id: 0,
             loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
             loot_master: ObjectGuid::EMPTY,
             round_robin_player: ObjectGuid::EMPTY,
@@ -4915,6 +5015,8 @@ mod tests {
             loot_guid,
             coins: 0,
             unlooted_count: 0,
+            loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+            dungeon_encounter_id: 0,
             loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
             loot_master: ObjectGuid::EMPTY,
             round_robin_player: ObjectGuid::EMPTY,
@@ -4959,6 +5061,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -5536,6 +5640,8 @@ mod tests {
             loot_guid: ObjectGuid::EMPTY,
             coins: 1,
             unlooted_count: 0,
+            loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+            dungeon_encounter_id: 0,
             loot_method: 0,
             loot_master: ObjectGuid::EMPTY,
             round_robin_player: ObjectGuid::EMPTY,
@@ -5673,6 +5779,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 1,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -5740,6 +5848,8 @@ mod tests {
                 loot_guid: represented_loot_object_guid_like_cpp(owner_guid),
                 coins: 1,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -5789,6 +5899,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 1,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -5868,6 +5980,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6001,6 +6115,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6072,6 +6188,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6214,6 +6332,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6275,6 +6395,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6369,6 +6491,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6459,6 +6583,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6625,6 +6751,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6759,6 +6887,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6871,6 +7001,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6980,6 +7112,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7070,6 +7204,8 @@ mod tests {
                 loot_guid: represented_loot_object_guid_like_cpp(old_guid),
                 coins: 7,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7270,6 +7406,8 @@ mod tests {
                 loot_guid,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7302,6 +7440,8 @@ mod tests {
                 loot_guid,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7347,6 +7487,8 @@ mod tests {
                 loot_guid,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7394,6 +7536,8 @@ mod tests {
                 loot_guid: inactive_guid,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7459,6 +7603,8 @@ mod tests {
                 loot_guid,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7519,6 +7665,8 @@ mod tests {
                 loot_guid: loot_object_guid,
                 coins: 3,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7559,6 +7707,8 @@ mod tests {
                 loot_guid: loot_object_one,
                 coins: 3,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7575,6 +7725,8 @@ mod tests {
                 loot_guid: loot_object_two,
                 coins: 7,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7653,6 +7805,8 @@ mod tests {
                 loot_guid,
                 coins: 9,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7726,6 +7880,8 @@ mod tests {
                 loot_guid,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7785,6 +7941,8 @@ mod tests {
                 loot_guid,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7841,6 +7999,8 @@ mod tests {
                 loot_guid,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8087,6 +8247,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8150,6 +8312,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8217,6 +8381,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8325,6 +8491,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8385,6 +8553,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8470,6 +8640,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8580,6 +8752,8 @@ mod tests {
                 loot_guid: loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8645,6 +8819,8 @@ mod tests {
                 loot_guid,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8694,6 +8870,8 @@ mod tests {
                 loot_guid,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8744,6 +8922,8 @@ mod tests {
                 loot_guid: loot_object_guid,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8800,6 +8980,8 @@ mod tests {
                 loot_guid: secondary_loot_object,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8854,6 +9036,8 @@ mod tests {
                 loot_guid,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8907,6 +9091,8 @@ mod tests {
                 loot_guid: spoofed_guid,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8958,6 +9144,8 @@ mod tests {
                 loot_guid: represented_loot_object_guid_like_cpp(secondary_guid),
                 coins: 5,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -9004,6 +9192,8 @@ mod tests {
                 loot_guid,
                 coins: 7,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -9057,6 +9247,8 @@ mod tests {
                 loot_guid,
                 coins: 0,
                 unlooted_count: 1,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,

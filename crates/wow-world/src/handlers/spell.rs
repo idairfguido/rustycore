@@ -41,7 +41,7 @@ use wow_loot::{
 use wow_packet::ClientPacket;
 use wow_packet::packets::item::{ItemExpirePurchaseRefund, ItemInstance};
 use wow_packet::packets::loot::{
-    CreatureLoot, LootEntry, LootEntryFlags, LootItemData, LootResponse,
+    CreatureLoot, LOOT_TYPE_ITEM_LIKE_CPP, LootEntry, LootEntryFlags, LootItemData, LootResponse,
 };
 use wow_packet::packets::spell::{
     CastFailed, CastSpellRequest, OpenItem, SpellCastVisual, SpellStartPkt, SpellTargetData,
@@ -437,6 +437,8 @@ impl WorldSession {
                         .filter(|entry| !entry.taken)
                         .count()
                         .min(u8::MAX as usize) as u8,
+                    loot_type: LOOT_TYPE_ITEM_LIKE_CPP,
+                    dungeon_encounter_id: 0,
                     loot_method: 0,
                     loot_master: ObjectGuid::EMPTY,
                     round_robin_player: ObjectGuid::EMPTY,
@@ -489,7 +491,7 @@ impl WorldSession {
             owner: item.guid,
             loot_obj: loot_guid,
             failure_reason: 0,
-            acquire_reason: 0,
+            acquire_reason: LOOT_TYPE_ITEM_LIKE_CPP,
             loot_method: 0,
             threshold: 2,
             coins,

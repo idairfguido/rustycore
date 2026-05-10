@@ -7674,7 +7674,9 @@ impl WorldSession {
 mod tests {
     use super::*;
     use wow_packet::WorldPacket;
-    use wow_packet::packets::loot::{CreatureLoot, LootEntry, LootEntryFlags};
+    use wow_packet::packets::loot::{
+        CreatureLoot, LOOT_TYPE_CORPSE_LIKE_CPP, LootEntry, LootEntryFlags,
+    };
 
     fn make_session_with_send_capacity(
         capacity: usize,
@@ -7734,6 +7736,8 @@ mod tests {
                 loot_guid,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,

@@ -5349,7 +5349,9 @@ mod tests {
     };
     use wow_network::{GroupInfo, PlayerBroadcastInfo};
     use wow_packet::ServerPacket;
-    use wow_packet::packets::loot::{CreatureLoot, LootEntry, LootEntryFlags};
+    use wow_packet::packets::loot::{
+        CreatureLoot, LOOT_TYPE_CORPSE_LIKE_CPP, LOOT_TYPE_ITEM_LIKE_CPP, LootEntry, LootEntryFlags,
+    };
 
     fn make_session() -> (
         WorldSession,
@@ -7128,6 +7130,8 @@ mod tests {
                 loot_guid: child_guid,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_ITEM_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7168,6 +7172,8 @@ mod tests {
                 loot_guid: active_guid,
                 coins: 37,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7184,6 +7190,8 @@ mod tests {
                 loot_guid: inactive_guid,
                 coins: 91,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7392,6 +7400,8 @@ mod tests {
                 loot_guid,
                 coins: 0,
                 unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
