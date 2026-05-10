@@ -2663,6 +2663,7 @@ impl WorldSession {
         CreatureLoot {
             loot_guid: represented_loot_object_guid_like_cpp(creature_guid),
             coins,
+            unlooted_count: 0,
             loot_method,
             loot_master,
             round_robin_player,
@@ -3998,7 +3999,7 @@ fn represented_loot_object_guid_like_cpp(owner: ObjectGuid) -> ObjectGuid {
 }
 
 fn loot_is_looted_like_cpp(loot: &CreatureLoot) -> bool {
-    loot.coins == 0 && loot.items.iter().all(LootEntry::fully_looted_like_cpp)
+    loot.coins == 0 && loot.unlooted_count == 0
 }
 
 fn mark_loot_allowed_for_player_like_cpp(loot: &mut CreatureLoot, player_guid: ObjectGuid) {
@@ -4012,16 +4013,29 @@ fn mark_loot_allowed_for_player_like_cpp(loot: &mut CreatureLoot, player_guid: O
         }
     }
 
+    let existing_ffa_item_ids: Vec<u8> = loot
+        .player_ffa_items
+        .iter()
+        .find(|(player, _)| *player == player_guid)
+        .map(|(_, items)| items.iter().map(|item| item.loot_list_id).collect())
+        .unwrap_or_default();
     let mut ffa_items = Vec::new();
-    for entry in &loot.items {
+    for entry in &mut loot.items {
         if entry.flags.freeforall
             && entry.has_allowed_looter_like_cpp(player_guid)
-            && !loot_player_has_ffa_item_like_cpp(loot, player_guid, entry.loot_list_id)
+            && !existing_ffa_item_ids.contains(&entry.loot_list_id)
         {
             ffa_items.push(NotNormalLootItem {
                 loot_list_id: entry.loot_list_id,
                 is_looted: false,
             });
+            loot.unlooted_count = loot.unlooted_count.saturating_add(1);
+        } else if !entry.flags.freeforall
+            && entry.has_allowed_looter_like_cpp(player_guid)
+            && !entry.flags.counted
+        {
+            entry.flags.counted = true;
+            loot.unlooted_count = loot.unlooted_count.saturating_add(1);
         }
     }
 
@@ -4035,17 +4049,6 @@ fn mark_loot_allowed_for_player_like_cpp(loot: &mut CreatureLoot, player_guid: O
             None => loot.player_ffa_items.push((player_guid, ffa_items)),
         }
     }
-}
-
-fn loot_player_has_ffa_item_like_cpp(
-    loot: &CreatureLoot,
-    player_guid: ObjectGuid,
-    loot_list_id: u8,
-) -> bool {
-    loot.player_ffa_items
-        .iter()
-        .find(|(player, _)| *player == player_guid)
-        .is_some_and(|(_, items)| items.iter().any(|item| item.loot_list_id == loot_list_id))
 }
 
 fn loot_player_has_unlooted_ffa_item_like_cpp(
@@ -4080,26 +4083,33 @@ fn mark_loot_item_looted_for_player_like_cpp(
     loot_list_id: u8,
     player_guid: ObjectGuid,
 ) {
+    let should_decrement = loot
+        .items
+        .iter()
+        .find(|entry| entry.loot_list_id == loot_list_id)
+        .is_some_and(|entry| !loot_item_is_looted_for_player_like_cpp(loot, entry, player_guid));
+
     if let Some(entry) = loot
         .items
         .iter_mut()
         .find(|entry| entry.loot_list_id == loot_list_id)
     {
         entry.mark_looted_for_player_like_cpp(player_guid);
-        if !entry.flags.freeforall {
-            return;
+        if entry.flags.freeforall {
+            if let Some((_, items)) = loot
+                .player_ffa_items
+                .iter_mut()
+                .find(|(player, _)| *player == player_guid)
+                && let Some(item) = items
+                    .iter_mut()
+                    .find(|item| item.loot_list_id == loot_list_id)
+            {
+                item.is_looted = true;
+            }
         }
-    }
-
-    if let Some((_, items)) = loot
-        .player_ffa_items
-        .iter_mut()
-        .find(|(player, _)| *player == player_guid)
-        && let Some(item) = items
-            .iter_mut()
-            .find(|item| item.loot_list_id == loot_list_id)
-    {
-        item.is_looted = true;
+        if should_decrement {
+            loot.unlooted_count = loot.unlooted_count.saturating_sub(1);
+        }
     }
 }
 
@@ -4808,6 +4818,7 @@ mod tests {
         let loot = CreatureLoot {
             loot_guid,
             coins: 0,
+            unlooted_count: 0,
             loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
             loot_master: ObjectGuid::EMPTY,
             round_robin_player: ObjectGuid::EMPTY,
@@ -4842,6 +4853,7 @@ mod tests {
         let mut loot = CreatureLoot {
             loot_guid,
             coins: 0,
+            unlooted_count: 0,
             loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
             loot_master: ObjectGuid::EMPTY,
             round_robin_player: ObjectGuid::EMPTY,
@@ -4854,6 +4866,7 @@ mod tests {
 
         mark_loot_allowed_for_player_like_cpp(&mut loot, player_guid);
         mark_loot_allowed_for_player_like_cpp(&mut loot, other_guid);
+        assert_eq!(loot.unlooted_count, 2);
 
         let player_items = represented_loot_response_items_like_cpp(&loot, player_guid);
         let other_items = represented_loot_response_items_like_cpp(&loot, other_guid);
@@ -4863,6 +4876,7 @@ mod tests {
         assert_eq!(other_items[0].ui_type, LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP);
 
         mark_loot_item_looted_for_player_like_cpp(&mut loot, 0, player_guid);
+        assert_eq!(loot.unlooted_count, 1);
 
         let player_ffa = loot
             .player_ffa_items
@@ -4887,6 +4901,42 @@ mod tests {
     }
 
     #[test]
+    fn represented_unlooted_count_counts_shared_items_once_like_cpp() {
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let other_guid = ObjectGuid::create_player(1, 77);
+        let loot_guid = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 1, 102);
+
+        let mut entry = represented_loot_entry(0, 25, player_guid);
+        entry.allowed_looters.clear();
+
+        let mut loot = CreatureLoot {
+            loot_guid,
+            coins: 0,
+            unlooted_count: 0,
+            loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
+            loot_master: ObjectGuid::EMPTY,
+            round_robin_player: ObjectGuid::EMPTY,
+            player_ffa_items: Vec::new(),
+            players_looting: Vec::new(),
+            allowed_looters: Vec::new(),
+            items: vec![entry],
+            looted_by_player: false,
+        };
+
+        mark_loot_allowed_for_player_like_cpp(&mut loot, player_guid);
+        assert_eq!(loot.unlooted_count, 1);
+        assert!(loot.items[0].flags.counted);
+
+        mark_loot_allowed_for_player_like_cpp(&mut loot, other_guid);
+        assert_eq!(loot.unlooted_count, 1);
+
+        mark_loot_item_looted_for_player_like_cpp(&mut loot, 0, player_guid);
+        assert_eq!(loot.unlooted_count, 0);
+        mark_loot_item_looted_for_player_like_cpp(&mut loot, 0, player_guid);
+        assert_eq!(loot.unlooted_count, 0);
+    }
+
+    #[test]
     fn represented_loot_removed_uses_players_looting_like_cpp() {
         let (mut session, send_rx) = make_session_with_send();
         let player_guid = ObjectGuid::create_player(1, 42);
@@ -4906,6 +4956,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -5482,6 +5533,7 @@ mod tests {
         let mut loot = CreatureLoot {
             loot_guid: ObjectGuid::EMPTY,
             coins: 1,
+            unlooted_count: 0,
             loot_method: 0,
             loot_master: ObjectGuid::EMPTY,
             round_robin_player: ObjectGuid::EMPTY,
@@ -5507,9 +5559,13 @@ mod tests {
             ffa_looted_by: Vec::new(),
             taken: false,
         });
+        loot.unlooted_count = 1;
         assert!(!loot_is_looted_like_cpp(&loot));
 
         loot.items[0].taken = true;
+        assert!(!loot_is_looted_like_cpp(&loot));
+
+        loot.unlooted_count = 0;
         assert!(loot_is_looted_like_cpp(&loot));
     }
 
@@ -5614,6 +5670,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 1,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -5680,6 +5737,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: represented_loot_object_guid_like_cpp(owner_guid),
                 coins: 1,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -5728,6 +5786,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -5806,6 +5865,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -5938,6 +5998,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6008,6 +6069,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6149,6 +6211,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6209,6 +6272,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6302,6 +6366,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6391,6 +6456,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6556,6 +6622,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6689,6 +6756,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6800,6 +6868,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6908,6 +6977,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_GROUP_LIKE_CPP,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -6997,6 +7067,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: represented_loot_object_guid_like_cpp(old_guid),
                 coins: 7,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7196,6 +7267,7 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7227,6 +7299,7 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7271,6 +7344,7 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7317,6 +7391,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: inactive_guid,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7381,6 +7456,7 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7440,6 +7516,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object_guid,
                 coins: 3,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7479,6 +7556,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object_one,
                 coins: 3,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7494,6 +7572,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object_two,
                 coins: 7,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7571,6 +7650,7 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 9,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7643,6 +7723,7 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7701,6 +7782,7 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7756,6 +7838,7 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8001,6 +8084,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8063,6 +8147,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8129,6 +8214,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8236,6 +8322,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8295,6 +8382,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8378,6 +8466,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8487,6 +8576,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: LOOT_METHOD_MASTER_LIKE_CPP,
                 loot_master: master_guid,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8551,6 +8641,7 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8599,6 +8690,7 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8648,6 +8740,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: loot_object_guid,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8703,6 +8796,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: secondary_loot_object,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8756,6 +8850,7 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8808,6 +8903,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: spoofed_guid,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8858,6 +8954,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: represented_loot_object_guid_like_cpp(secondary_guid),
                 coins: 5,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8903,6 +9000,7 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 7,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -8955,6 +9053,7 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 1,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,

@@ -432,6 +432,11 @@ impl WorldSession {
                 CreatureLoot {
                     loot_guid: item.guid,
                     coins,
+                    unlooted_count: items
+                        .iter()
+                        .filter(|entry| !entry.taken)
+                        .count()
+                        .min(u8::MAX as usize) as u8,
                     loot_method: 0,
                     loot_master: ObjectGuid::EMPTY,
                     round_robin_player: ObjectGuid::EMPTY,

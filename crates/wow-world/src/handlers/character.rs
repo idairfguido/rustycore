@@ -7733,6 +7733,7 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,

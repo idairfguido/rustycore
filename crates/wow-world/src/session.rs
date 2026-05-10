@@ -7127,6 +7127,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: child_guid,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7166,6 +7167,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: active_guid,
                 coins: 37,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7181,6 +7183,7 @@ mod tests {
             CreatureLoot {
                 loot_guid: inactive_guid,
                 coins: 91,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,
@@ -7388,6 +7391,7 @@ mod tests {
             CreatureLoot {
                 loot_guid,
                 coins: 0,
+                unlooted_count: 0,
                 loot_method: 0,
                 loot_master: ObjectGuid::EMPTY,
                 round_robin_player: ObjectGuid::EMPTY,

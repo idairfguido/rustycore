@@ -569,6 +569,7 @@ impl ServerPacket for MasterLootCandidateList {
 pub struct CreatureLoot {
     pub loot_guid: ObjectGuid,
     pub coins: u32,
+    pub unlooted_count: u8,
     pub loot_method: u8,
     pub loot_master: ObjectGuid,
     pub round_robin_player: ObjectGuid,
