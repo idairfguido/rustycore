@@ -63,7 +63,8 @@ use wow_packet::packets::update::{ItemCreateData, UpdateObject};
 use wow_packet::{ClientPacket, ServerPacket};
 
 use crate::session::{
-    InventoryItem, RepresentedLootRollState, RepresentedLootRollVote, WorldSession,
+    InventoryItem, RepresentedGameObjectUseEffect, RepresentedLootRollState,
+    RepresentedLootRollVote, WorldSession,
 };
 
 const LOOT_METHOD_MASTER_LIKE_CPP: u8 = 2;
@@ -271,26 +272,46 @@ impl WorldSession {
             return;
         }
 
-        if source.should_autostore_push_loot_like_cpp()
-            && !self
-                .represented_unique_gameobject_uses
-                .contains(&gameobject_guid)
-        {
+        let is_first_represented_unique_use = !self
+            .represented_unique_gameobject_uses
+            .contains(&gameobject_guid);
+        if source.loot_id == 0 && is_first_represented_unique_use {
             self.represented_unique_gameobject_uses
                 .insert(gameobject_guid);
-            self.autostore_represented_gameobject_chest_push_loot_like_cpp(gameobject_guid, source)
+            if source.should_autostore_push_loot_like_cpp() {
+                self.autostore_represented_gameobject_chest_push_loot_like_cpp(
+                    gameobject_guid,
+                    source,
+                )
                 .await;
+            }
+            self.record_represented_gameobject_use_effects_like_cpp(
+                gameobject_guid,
+                player_guid,
+                source.triggered_event_id,
+                source.linked_trap_entry,
+            );
         }
         if !source.has_open_loot_like_cpp() {
             return;
         }
 
+        let should_record_generation_effects =
+            source.loot_id != 0 && !self.loot_table.contains_key(&gameobject_guid);
         self.ensure_represented_gameobject_chest_loot_like_cpp(
             gameobject_guid,
             player_guid,
             source,
         )
         .await;
+        if should_record_generation_effects && self.loot_table.contains_key(&gameobject_guid) {
+            self.record_represented_gameobject_use_effects_like_cpp(
+                gameobject_guid,
+                player_guid,
+                source.triggered_event_id,
+                source.linked_trap_entry,
+            );
+        }
 
         if let Some(loot) = self.loot_table.get_mut(&gameobject_guid) {
             mark_loot_allowed_for_player_like_cpp(loot, player_guid);
@@ -344,6 +365,17 @@ impl WorldSession {
         gameobject_guid: ObjectGuid,
         source: GatheringNodeUseSource,
     ) {
+        let Some(player_guid) = self.player_guid else {
+            return;
+        };
+        if !self.player_is_alive_like_cpp() {
+            return;
+        }
+        if !gameobject_guid.is_game_object() || !self.visible_gameobjects.contains(&gameobject_guid)
+        {
+            return;
+        }
+
         let is_first_represented_use = !self
             .represented_unique_gameobject_uses
             .contains(&gameobject_guid);
@@ -365,6 +397,39 @@ impl WorldSession {
             if xp != 0 {
                 self.give_xp(xp, ObjectGuid::EMPTY, false).await;
             }
+            self.record_represented_gameobject_use_effects_like_cpp(
+                gameobject_guid,
+                player_guid,
+                source.triggered_event_id,
+                source.linked_trap_entry,
+            );
+        }
+    }
+
+    fn record_represented_gameobject_use_effects_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        triggered_event_id: u32,
+        linked_trap_entry: u32,
+    ) {
+        if triggered_event_id != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: triggered_event_id,
+                },
+            );
+        }
+        if linked_trap_entry != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::TriggerLinkedTrap {
+                    gameobject_guid,
+                    player_guid,
+                    trap_entry: linked_trap_entry,
+                },
+            );
         }
     }
 
@@ -5180,7 +5245,7 @@ mod tests {
         represented_loot_object_guid_like_cpp, represented_loot_response_items_like_cpp,
         select_weighted_random_enchantment_like_cpp, start_loot_roll_packet_like_cpp,
     };
-    use crate::session::RepresentedLootRollCriteriaEvent;
+    use crate::session::{RepresentedGameObjectUseEffect, RepresentedLootRollCriteriaEvent};
     use rand::{SeedableRng, rngs::StdRng};
     use std::sync::Arc;
     use std::time::{Duration, Instant};
@@ -5199,7 +5264,9 @@ mod tests {
         RandPropPointsStore,
     };
     use wow_database::{CharStatements, StatementDef};
-    use wow_entities::{GameObjectLootSource, Item, ItemCreateInfo, MAX_ITEM_SPELLS};
+    use wow_entities::{
+        GameObjectLootSource, GatheringNodeUseSource, Item, ItemCreateInfo, MAX_ITEM_SPELLS,
+    };
     use wow_loot::{GeneratedLootItem, LOOT_SLOT_TYPE_OWNER_LIKE_CPP, LootStoreItem};
     use wow_network::{
         GroupInfo, GroupRegistry, LootDropRatesLikeCpp, LootRollVoteCommand, PendingInvites,
@@ -6018,6 +6085,8 @@ mod tests {
             dungeon_encounter_id: 733,
             personal_loot_id: 10_001,
             push_loot_id: 0,
+            triggered_event_id: 0,
+            linked_trap_entry: 0,
         };
 
         let loot = session
@@ -6031,6 +6100,174 @@ mod tests {
         assert_eq!(loot.loot_type, LOOT_TYPE_CHEST_LIKE_CPP);
         assert_eq!(loot.dungeon_encounter_id, 733);
         assert_eq!(loot.loot_method, 0);
+    }
+
+    #[tokio::test]
+    async fn represented_gameobject_chest_first_generation_records_use_effects_like_cpp() {
+        let mut session = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let gameobject_guid = test_gameobject_guid(91_002);
+        session.set_player_guid(Some(player_guid));
+        session.visible_gameobjects.insert(gameobject_guid);
+
+        let source = GameObjectLootSource {
+            loot_id: 55,
+            use_group_loot_rules: false,
+            dungeon_encounter_id: 0,
+            personal_loot_id: 0,
+            push_loot_id: 0,
+            triggered_event_id: 777,
+            linked_trap_entry: 888,
+        };
+
+        session
+            .open_represented_gameobject_chest_like_cpp(gameobject_guid, source)
+            .await;
+        session
+            .open_represented_gameobject_chest_like_cpp(gameobject_guid, source)
+            .await;
+
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: 777,
+                },
+                RepresentedGameObjectUseEffect::TriggerLinkedTrap {
+                    gameobject_guid,
+                    player_guid,
+                    trap_entry: 888,
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn represented_gameobject_chest_push_unique_use_records_effects_like_cpp() {
+        let mut session = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let gameobject_guid = test_gameobject_guid(91_004);
+        session.set_player_guid(Some(player_guid));
+        session.visible_gameobjects.insert(gameobject_guid);
+
+        let source = GameObjectLootSource {
+            loot_id: 0,
+            use_group_loot_rules: false,
+            dungeon_encounter_id: 0,
+            personal_loot_id: 0,
+            push_loot_id: 99,
+            triggered_event_id: 321,
+            linked_trap_entry: 654,
+        };
+
+        session
+            .open_represented_gameobject_chest_like_cpp(gameobject_guid, source)
+            .await;
+        session
+            .open_represented_gameobject_chest_like_cpp(gameobject_guid, source)
+            .await;
+
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: 321,
+                },
+                RepresentedGameObjectUseEffect::TriggerLinkedTrap {
+                    gameobject_guid,
+                    player_guid,
+                    trap_entry: 654,
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn represented_gameobject_chest_no_loot_unique_use_records_effects_like_cpp() {
+        let mut session = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let gameobject_guid = test_gameobject_guid(91_005);
+        session.set_player_guid(Some(player_guid));
+        session.visible_gameobjects.insert(gameobject_guid);
+
+        let source = GameObjectLootSource {
+            loot_id: 0,
+            use_group_loot_rules: false,
+            dungeon_encounter_id: 0,
+            personal_loot_id: 0,
+            push_loot_id: 0,
+            triggered_event_id: 901,
+            linked_trap_entry: 902,
+        };
+
+        session
+            .open_represented_gameobject_chest_like_cpp(gameobject_guid, source)
+            .await;
+        session
+            .open_represented_gameobject_chest_like_cpp(gameobject_guid, source)
+            .await;
+
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: 901,
+                },
+                RepresentedGameObjectUseEffect::TriggerLinkedTrap {
+                    gameobject_guid,
+                    player_guid,
+                    trap_entry: 902,
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn represented_gathering_node_first_use_records_effects_like_cpp() {
+        let mut session = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let gameobject_guid = test_gameobject_guid(91_003);
+        session.set_player_guid(Some(player_guid));
+        session.visible_gameobjects.insert(gameobject_guid);
+
+        let source = GatheringNodeUseSource {
+            loot_id: 0,
+            despawn_delay_secs: 0,
+            triggered_event_id: 123,
+            xp_difficulty: 0,
+            spell_id: 0,
+            max_loots: 10,
+            linked_trap_entry: 456,
+        };
+
+        session
+            .open_represented_gathering_node_like_cpp(gameobject_guid, source)
+            .await;
+        session
+            .open_represented_gathering_node_like_cpp(gameobject_guid, source)
+            .await;
+
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: 123,
+                },
+                RepresentedGameObjectUseEffect::TriggerLinkedTrap {
+                    gameobject_guid,
+                    player_guid,
+                    trap_entry: 456,
+                },
+            ]
+        );
     }
 
     #[tokio::test]

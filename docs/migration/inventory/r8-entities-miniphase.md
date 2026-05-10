@@ -1205,6 +1205,11 @@
   Rust targets: `crates/wow-data/src/quest_xp.rs`, `crates/wow-entities/src/game_object.rs`, `crates/wow-world/src/handlers/loot.rs`, `crates/wow-world/src/handlers/misc.rs`, docs.
   Acceptance: `QuestXpStore` now exposes the exact C++ player-level row + difficulty lookup used by gathering nodes and fixes `RoundXPValue` threshold rounding to match C++; represented gathering-node use captures C++ side-effect fields and grants non-kill XP once per represented session/gameobject when `xpDifficulty` is 1..9 and QuestXP data exists. Remaining gaps: canonical per-player `m_personalLoot`, criteria, triggered events, linked traps, spell cast, max-loot/despawn/dynamic flags and script hooks remain pending.
 
+- [x] **#NEXT.R8.ENTITIES.312** Record represented gameobject use events and linked traps.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp` (`GameEvents::Trigger`, `TriggeringLinkedGameObject` in chest/gathering branches), `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObjectData.h` (`chest.triggeredEvent` Data6, `chest.linkedTrap` Data7, `gatheringNode.triggeredEvent` Data7, `gatheringNode.linkedTrap` Data20).
+  Rust targets: `crates/wow-entities/src/game_object.rs`, `crates/wow-world/src/session.rs`, `crates/wow-world/src/handlers/loot.rs`, docs.
+  Acceptance: represented chest and gathering-node use now records the C++ hook points for nonzero triggered events and linked traps. Chest records them once when `m_loot` would be created for a nonzero `GetLootId`, and once in the C++ unique-use branch when there is no `GetLootId`; gathering records them once per represented session/gameobject first use. This intentionally records hooks rather than executing real events/traps because canonical `GameEvents` and linked-trap runtime are not ported yet. Remaining gaps: actual GameEvents execution, real `TriggeringLinkedGameObject`, canonical `m_unique_users`/`m_personalLoot`, gathering spell cast, max-loot/despawn/dynamic flags and script hooks remain pending.
+
 ## Follow-Up Work Items
 
 - [ ] **#NEXT.R8.ENTITIES.003** Bind `wow-map` grid unload actions to real entity methods once Creature/GameObject/Corpse exist.

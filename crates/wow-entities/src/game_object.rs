@@ -14,6 +14,8 @@ pub const GAMEOBJECT_TYPE_GATHERING_NODE: u32 = 50;
 
 pub const MAX_GAMEOBJECT_DATA: usize = 35;
 pub const GAMEOBJECT_DATA_CHEST_LOOT: usize = 1;
+pub const GAMEOBJECT_DATA_CHEST_TRIGGERED_EVENT: usize = 6;
+pub const GAMEOBJECT_DATA_CHEST_LINKED_TRAP: usize = 7;
 pub const GAMEOBJECT_DATA_CHEST_USE_GROUP_LOOT_RULES: usize = 15;
 pub const GAMEOBJECT_DATA_CHEST_DUNGEON_ENCOUNTER: usize = 25;
 pub const GAMEOBJECT_DATA_CHEST_PERSONAL_LOOT: usize = 30;
@@ -62,6 +64,8 @@ pub struct GameObjectLootSource {
     pub dungeon_encounter_id: u32,
     pub personal_loot_id: u32,
     pub push_loot_id: u32,
+    pub triggered_event_id: u32,
+    pub linked_trap_entry: u32,
 }
 
 impl GameObjectLootSource {
@@ -128,6 +132,8 @@ impl GameObjectTemplateData {
             dungeon_encounter_id: self.data[GAMEOBJECT_DATA_CHEST_DUNGEON_ENCOUNTER],
             personal_loot_id: self.data[GAMEOBJECT_DATA_CHEST_PERSONAL_LOOT],
             push_loot_id: self.data[GAMEOBJECT_DATA_CHEST_PUSH_LOOT],
+            triggered_event_id: self.data[GAMEOBJECT_DATA_CHEST_TRIGGERED_EVENT],
+            linked_trap_entry: self.data[GAMEOBJECT_DATA_CHEST_LINKED_TRAP],
         })
     }
 
@@ -683,6 +689,8 @@ mod tests {
     fn chest_loot_source_uses_cpp_data_indices() {
         let mut data = [0; MAX_GAMEOBJECT_DATA];
         data[GAMEOBJECT_DATA_CHEST_LOOT] = 10;
+        data[GAMEOBJECT_DATA_CHEST_TRIGGERED_EVENT] = 40;
+        data[GAMEOBJECT_DATA_CHEST_LINKED_TRAP] = 50;
         data[GAMEOBJECT_DATA_CHEST_USE_GROUP_LOOT_RULES] = 1;
         data[GAMEOBJECT_DATA_CHEST_DUNGEON_ENCOUNTER] = 1234;
         data[GAMEOBJECT_DATA_CHEST_PERSONAL_LOOT] = 20;
@@ -700,6 +708,8 @@ mod tests {
                 dungeon_encounter_id: 1234,
                 personal_loot_id: 20,
                 push_loot_id: 30,
+                triggered_event_id: 40,
+                linked_trap_entry: 50,
             }
         );
         assert!(!source.is_empty());

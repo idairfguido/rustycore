@@ -76,6 +76,20 @@ pub(crate) struct RepresentedLootRollState {
     pub voters: HashMap<ObjectGuid, RepresentedLootRollVote>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepresentedGameObjectUseEffect {
+    TriggerGameEvent {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        event_id: u32,
+    },
+    TriggerLinkedTrap {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        trap_entry: u32,
+    },
+}
+
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RepresentedLootRollCriteriaEvent {
@@ -460,6 +474,8 @@ pub struct WorldSession {
     enable_ae_loot_like_cpp: bool,
     /// Session-local representation of `GameObject::m_unique_users` for no-GetLootId chest uses.
     pub(crate) represented_unique_gameobject_uses: std::collections::HashSet<wow_core::ObjectGuid>,
+    /// Represented C++ `GameEvents::Trigger` and `TriggeringLinkedGameObject` hook points.
+    pub(crate) represented_gameobject_use_effects: Vec<RepresentedGameObjectUseEffect>,
 
     // ── Dynamic visibility tracking ───────────────────────────────
     /// GUIDs of all creatures currently visible to this client.
@@ -766,6 +782,7 @@ impl WorldSession {
             loot_drop_rates: LootDropRatesLikeCpp::default(),
             enable_ae_loot_like_cpp: false,
             represented_unique_gameobject_uses: std::collections::HashSet::new(),
+            represented_gameobject_use_effects: Vec::new(),
             visible_creatures: std::collections::HashSet::new(),
             visible_gameobjects: std::collections::HashSet::new(),
             last_visibility_pos: None,
