@@ -3115,6 +3115,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "wow-instances"
+version = "0.1.0"
+dependencies = [
+ "wow-data",
+]
+
+[[package]]
 name = "wow-logging"
 version = "0.1.0"
 dependencies = [

@@ -218,7 +218,7 @@ NOTE: `InstanceSaveMgr` no longer exists as a separate class in this WoLK 3.4.3 
 <!-- REFINE.021:END rust-target-coverage -->
 
 **Files in `/home/server/rustycore`:**
-- *(none)* — no `crates/wow-instances/` exists. The workspace lacks any per-instance state, lock manager, or `InstanceScript` analogue.
+- `crates/wow-instances/src/lib.rs` — foundation started in `#NEXT.R8.ENTITIES.303`: the crate exists and ports the pure C++ encounter metadata path for `MAX_DUNGEON_ENCOUNTERS_PER_BOSS`, `EncounterState`, `DungeonEncounterData`, `BossInfo::GetDungeonEncounterForDifficulty`, `InstanceScript::LoadDungeonEncounterData` and `InstanceScript::GetBossDungeonEncounter(uint32)`. Full per-instance state, map integration, lock manager, boss transitions, doors/minions, persistence, criteria and LFG delivery remain pending.
 
 **What's implemented:**
 - `crates/wow-world/src/map_manager.rs` (per the active WIP commits) provides a `MapManager` global stub with placeholder for `GenerateInstanceId` (must verify), but no lock store and no script dispatch. (See WIP commit `f83c48d82`.)
@@ -392,7 +392,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 
 | Scope | Decision | C++ retained | Evidence |
 |---|---|---|---|
-| `active_port_scope` | Full C++ surface remains in migration scope; no product exclusion recorded. | 7 files / 2783 lines; refs: `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceScript.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceLockMgr.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceScript.h` | `crates/wow-instances/` (NOT YET CREATED — must be added to workspace) \| ❌ not started |
+| `active_port_scope` | Full C++ surface remains in migration scope; no product exclusion recorded. | 7 files / 2783 lines; refs: `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceScript.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceLockMgr.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceScript.h` | `crates/wow-instances/` exists with the #NEXT.R8.ENTITIES.303 encounter-metadata foundation; full module still mostly pending |
 
 <!-- REFINE.025:END product-scope -->
 
@@ -404,7 +404,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 
 | ID | Rust evidence | C++ evidence | Status | Notes |
 |---|---|---|---|---|
-| `#INSTANCES.DIV.001` | `crates/wow-instances` (`missing_declared_path`, 0 Rust lines) | 7 C++ files / 2783 lines assigned; refs: `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceScript.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceLockMgr.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceScript.h` | `missing_declared_path` | Declared/proposed Rust target is absent while C++ coverage exists. declared/proposed target does not exist |
+| `#INSTANCES.DIV.001` | `crates/wow-instances` | 7 C++ files / 2783 lines assigned; refs: `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceScript.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceLockMgr.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Instances/InstanceScript.h` | `foundation_started` | Declared Rust target exists as of #NEXT.R8.ENTITIES.303; broad C++ surface remains to port. |
 
 <!-- REFINE.023:END known-divergences -->
 
