@@ -7,12 +7,14 @@
 
 use std::{
     collections::HashMap,
-    sync::{Arc, RwLock},
+    sync::{Arc, RwLock, Weak},
 };
 
 use wow_core::{ObjectGuid, guid::HighGuid};
 use wow_data::{DungeonEncounterEntry, DungeonEncounterStore};
-use wow_database::{CharStatements, PreparedStatement, StatementDef};
+use wow_database::{
+    CharStatements, CharacterDatabase, DatabaseError, PreparedStatement, StatementDef,
+};
 
 /// C++ `MAX_DUNGEON_ENCOUNTERS_PER_BOSS`.
 pub const MAX_DUNGEON_ENCOUNTERS_PER_BOSS: usize = 4;
@@ -266,10 +268,75 @@ pub struct InstanceLockResetResult {
 pub struct InstanceLockMgr {
     temporary_instance_locks_by_player: HashMap<ObjectGuid, HashMap<InstanceLockKey, InstanceLock>>,
     instance_locks_by_player: HashMap<ObjectGuid, HashMap<InstanceLockKey, InstanceLock>>,
-    instance_lock_data_by_id: HashMap<u32, Arc<RwLock<SharedInstanceLockData>>>,
+    instance_lock_data_by_id: HashMap<u32, Weak<RwLock<SharedInstanceLockData>>>,
 }
 
 impl InstanceLockMgr {
+    pub async fn load_from_database_like_cpp(
+        &mut self,
+        character_db: &CharacterDatabase,
+        entries_for: impl FnMut(u32, u8) -> Option<MapDb2Entries>,
+    ) -> Result<Vec<InstanceLockLoadIssue>, DatabaseError> {
+        let mut shared_result = character_db
+            .query(&character_db.prepare(CharStatements::SEL_INSTANCE))
+            .await?;
+        let mut shared_rows = Vec::new();
+        if !shared_result.is_empty() {
+            loop {
+                shared_rows.push(SharedInstanceLockRow {
+                    instance_id: shared_result.try_read::<u32>(0).unwrap_or(0),
+                    data: shared_result.read_string(1),
+                    completed_encounters_mask: shared_result.try_read::<u32>(2).unwrap_or(0),
+                    entrance_world_safe_loc_id: shared_result.try_read::<u32>(3).unwrap_or(0),
+                });
+                if !shared_result.next_row() {
+                    break;
+                }
+            }
+        }
+
+        let mut character_result = character_db
+            .query(&character_db.prepare(CharStatements::SEL_CHARACTER_INSTANCE_LOCK))
+            .await?;
+        let mut character_rows = Vec::new();
+        if !character_result.is_empty() {
+            loop {
+                let guid = character_result
+                    .try_read::<u64>(0)
+                    .or_else(|| {
+                        character_result
+                            .try_read::<i64>(0)
+                            .map(|value| value as u64)
+                    })
+                    .unwrap_or(0);
+                character_rows.push(CharacterInstanceLockRow {
+                    player_guid_counter: guid,
+                    map_id: character_result.try_read::<u32>(1).unwrap_or(0),
+                    lock_id: character_result.try_read::<u32>(2).unwrap_or(0),
+                    instance_id: character_result.try_read::<u32>(3).unwrap_or(0),
+                    difficulty_id: character_result.try_read::<u8>(4).unwrap_or(0),
+                    data: character_result.read_string(5),
+                    completed_encounters_mask: character_result.try_read::<u32>(6).unwrap_or(0),
+                    entrance_world_safe_loc_id: character_result.try_read::<u32>(7).unwrap_or(0),
+                    expiry_time: character_result
+                        .try_read::<u64>(8)
+                        .or_else(|| {
+                            character_result
+                                .try_read::<i64>(8)
+                                .map(|value| value as u64)
+                        })
+                        .unwrap_or(0),
+                    extended: character_result.try_read::<u8>(9).unwrap_or(0) != 0,
+                });
+                if !character_result.next_row() {
+                    break;
+                }
+            }
+        }
+
+        Ok(self.load_from_rows_like_cpp(shared_rows, character_rows, entries_for))
+    }
+
     pub fn load_from_rows_like_cpp(
         &mut self,
         shared_rows: impl IntoIterator<Item = SharedInstanceLockRow>,
@@ -280,18 +347,19 @@ impl InstanceLockMgr {
         self.instance_locks_by_player.clear();
         self.instance_lock_data_by_id.clear();
 
+        let mut shared_data_by_id = HashMap::new();
         for row in shared_rows {
-            self.instance_lock_data_by_id.insert(
-                row.instance_id,
-                Arc::new(RwLock::new(SharedInstanceLockData {
-                    instance_id: row.instance_id,
-                    data: InstanceLockData {
-                        data: row.data,
-                        completed_encounters_mask: row.completed_encounters_mask,
-                        entrance_world_safe_loc_id: row.entrance_world_safe_loc_id,
-                    },
-                })),
-            );
+            let shared_data = Arc::new(RwLock::new(SharedInstanceLockData {
+                instance_id: row.instance_id,
+                data: InstanceLockData {
+                    data: row.data,
+                    completed_encounters_mask: row.completed_encounters_mask,
+                    entrance_world_safe_loc_id: row.entrance_world_safe_loc_id,
+                },
+            }));
+            self.instance_lock_data_by_id
+                .insert(row.instance_id, Arc::downgrade(&shared_data));
+            shared_data_by_id.insert(row.instance_id, shared_data);
         }
 
         let mut issues = Vec::new();
@@ -313,7 +381,7 @@ impl InstanceLockMgr {
             };
 
             let mut lock = if entries.is_instance_id_bound() {
-                let Some(shared_data) = self.instance_lock_data_by_id.get(&row.instance_id) else {
+                let Some(shared_data) = shared_data_by_id.get(&row.instance_id) else {
                     issues.push(InstanceLockLoadIssue::MissingSharedInstanceData {
                         player_guid_counter: row.player_guid_counter,
                         instance_id: row.instance_id,
@@ -379,7 +447,7 @@ impl InstanceLockMgr {
         let mut instance_lock = if entries.is_instance_id_bound() {
             let shared_data = Arc::new(RwLock::new(SharedInstanceLockData::default()));
             self.instance_lock_data_by_id
-                .insert(instance_id, Arc::clone(&shared_data));
+                .insert(instance_id, Arc::downgrade(&shared_data));
             InstanceLock::new_shared(
                 entries.map_id,
                 entries.difficulty_id,
@@ -461,14 +529,14 @@ impl InstanceLockMgr {
                 let shared_data = self
                     .instance_lock_data_by_id
                     .get(&update_event.instance_id)
-                    .cloned()
+                    .and_then(Weak::upgrade)
                     .unwrap_or_else(|| {
                         let shared_data = Arc::new(RwLock::new(SharedInstanceLockData {
                             instance_id: update_event.instance_id,
                             data: InstanceLockData::default(),
                         }));
                         self.instance_lock_data_by_id
-                            .insert(update_event.instance_id, Arc::clone(&shared_data));
+                            .insert(update_event.instance_id, Arc::downgrade(&shared_data));
                         shared_data
                     });
                 InstanceLock::new_shared(
@@ -552,16 +620,14 @@ impl InstanceLockMgr {
         TransferAbortReason::None
     }
 
-    pub fn update_shared_instance_lock(&mut self, update_event: InstanceLockUpdateEvent) {
+    pub fn update_shared_instance_lock(
+        &mut self,
+        update_event: InstanceLockUpdateEvent,
+    ) -> Option<SharedInstanceLockData> {
         let shared_data = self
             .instance_lock_data_by_id
-            .entry(update_event.instance_id)
-            .or_insert_with(|| {
-                Arc::new(RwLock::new(SharedInstanceLockData {
-                    instance_id: update_event.instance_id,
-                    data: InstanceLockData::default(),
-                }))
-            });
+            .get(&update_event.instance_id)
+            .and_then(Weak::upgrade)?;
         let mut data = shared_data.write().unwrap();
         data.instance_id = update_event.instance_id;
         data.data.data = update_event.new_data;
@@ -571,6 +637,20 @@ impl InstanceLockMgr {
         if let Some(entrance_id) = update_event.entrance_world_safe_loc_id {
             data.data.entrance_world_safe_loc_id = entrance_id;
         }
+        Some(data.clone())
+    }
+
+    pub fn cleanup_unreferenced_shared_instance_lock_data_like_cpp(
+        &mut self,
+        instance_id: u32,
+    ) -> Option<PreparedStatement> {
+        let weak_data = self.instance_lock_data_by_id.get(&instance_id)?;
+        if weak_data.upgrade().is_some() {
+            return None;
+        }
+
+        self.instance_lock_data_by_id.remove(&instance_id);
+        Some(Self::delete_instance_statement(instance_id))
     }
 
     pub fn update_instance_lock_extension_for_player_at(
@@ -1283,6 +1363,67 @@ mod tests {
             mgr.get_instance_locks_for_player(ObjectGuid::create_global(HighGuid::Player, 0, 55))
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn cleanup_unreferenced_shared_instance_data_matches_cpp_delete_path() {
+        let mut mgr = InstanceLockMgr::default();
+
+        let issues = mgr.load_from_rows_like_cpp(
+            [SharedInstanceLockRow {
+                instance_id: 9001,
+                data: "orphan".to_string(),
+                completed_encounters_mask: 0,
+                entrance_world_safe_loc_id: 0,
+            }],
+            [],
+            |_, _| None,
+        );
+
+        assert!(issues.is_empty());
+        assert_eq!(mgr.statistics().instance_count, 1);
+
+        let stmt = mgr
+            .cleanup_unreferenced_shared_instance_lock_data_like_cpp(9001)
+            .unwrap();
+
+        assert_eq!(stmt.sql(), CharStatements::DEL_INSTANCE.sql());
+        assert!(matches!(stmt.params(), [SqlParam::U32(9001)]));
+        assert_eq!(mgr.statistics().instance_count, 0);
+    }
+
+    #[test]
+    fn cleanup_keeps_referenced_shared_instance_data_like_cpp() {
+        let entries = raid_entries();
+        let mut mgr = InstanceLockMgr::default();
+
+        mgr.load_from_rows_like_cpp(
+            [SharedInstanceLockRow {
+                instance_id: 9001,
+                data: "shared".to_string(),
+                completed_encounters_mask: 0,
+                entrance_world_safe_loc_id: 0,
+            }],
+            [CharacterInstanceLockRow {
+                player_guid_counter: 55,
+                map_id: entries.map_id,
+                lock_id: entries.lock_id,
+                instance_id: 9001,
+                difficulty_id: entries.difficulty_id,
+                data: "player".to_string(),
+                completed_encounters_mask: 0,
+                entrance_world_safe_loc_id: 0,
+                expiry_time: 500,
+                extended: false,
+            }],
+            |_, _| Some(entries),
+        );
+
+        assert!(
+            mgr.cleanup_unreferenced_shared_instance_lock_data_like_cpp(9001)
+                .is_none()
+        );
+        assert_eq!(mgr.statistics().instance_count, 1);
     }
 
     #[test]
