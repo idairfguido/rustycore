@@ -25,7 +25,7 @@ use wow_core::{ObjectGuid, guid::HighGuid};
 use wow_data::{ItemRandomEnchantmentTemplateEntry, ItemRandomPropertyTemplateEntry};
 use wow_database::{CharStatements, SqlTransaction, WorldStatements};
 use wow_entities::{
-    INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_END,
+    GameObjectLootSource, INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_END,
     INVENTORY_SLOT_ITEM_START, Item, ItemPosCount, make_item_pos,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
@@ -50,14 +50,14 @@ use wow_packet::packets::loot::{
     AELootTargets, AELootTargetsAck, CoinRemoved, CreatureLoot, LOOT_ERROR_DIDNT_KILL_LIKE_CPP,
     LOOT_ERROR_MASTER_INV_FULL_LIKE_CPP, LOOT_ERROR_MASTER_OTHER_LIKE_CPP,
     LOOT_ERROR_MASTER_UNIQUE_ITEM_LIKE_CPP, LOOT_ERROR_NO_LOOT_LIKE_CPP,
-    LOOT_ERROR_PLAYER_NOT_FOUND_LIKE_CPP, LOOT_ERROR_TOO_FAR_LIKE_CPP, LOOT_TYPE_CORPSE_LIKE_CPP,
-    LOOT_TYPE_DISENCHANTING_LIKE_CPP, LOOT_TYPE_FISHING_JUNK_LIKE_CPP, LOOT_TYPE_FISHING_LIKE_CPP,
-    LOOT_TYPE_FISHINGHOLE_LIKE_CPP, LOOT_TYPE_INSIGNIA_LIKE_CPP, LOOT_TYPE_MILLING_LIKE_CPP,
-    LOOT_TYPE_PROSPECTING_LIKE_CPP, LOOT_TYPE_SKINNING_LIKE_CPP, LootAllPassed, LootEntry,
-    LootEntryFlags, LootItemData, LootItemPkt, LootList, LootMoney, LootMoneyNotify, LootRelease,
-    LootReleaseAll, LootRemoved, LootResponse, LootRoll, LootRollBroadcast, LootRollWon, LootUnit,
-    MasterLootCandidateList, MasterLootItem, NotNormalLootItem, SLootRelease,
-    SetLootSpecialization, StartLootRoll,
+    LOOT_ERROR_PLAYER_NOT_FOUND_LIKE_CPP, LOOT_ERROR_TOO_FAR_LIKE_CPP, LOOT_TYPE_CHEST_LIKE_CPP,
+    LOOT_TYPE_CORPSE_LIKE_CPP, LOOT_TYPE_DISENCHANTING_LIKE_CPP, LOOT_TYPE_FISHING_JUNK_LIKE_CPP,
+    LOOT_TYPE_FISHING_LIKE_CPP, LOOT_TYPE_FISHINGHOLE_LIKE_CPP, LOOT_TYPE_INSIGNIA_LIKE_CPP,
+    LOOT_TYPE_MILLING_LIKE_CPP, LOOT_TYPE_PROSPECTING_LIKE_CPP, LOOT_TYPE_SKINNING_LIKE_CPP,
+    LootAllPassed, LootEntry, LootEntryFlags, LootItemData, LootItemPkt, LootList, LootMoney,
+    LootMoneyNotify, LootRelease, LootReleaseAll, LootRemoved, LootResponse, LootRoll,
+    LootRollBroadcast, LootRollWon, LootUnit, MasterLootCandidateList, MasterLootItem,
+    NotNormalLootItem, SLootRelease, SetLootSpecialization, StartLootRoll,
 };
 use wow_packet::packets::update::{ItemCreateData, UpdateObject};
 use wow_packet::{ClientPacket, ServerPacket};
@@ -253,6 +253,62 @@ impl WorldSession {
                 }
             }
         }
+    }
+
+    pub(crate) async fn open_represented_gameobject_chest_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        source: GameObjectLootSource,
+    ) {
+        let Some(player_guid) = self.player_guid else {
+            return;
+        };
+        if !self.player_is_alive_like_cpp() {
+            return;
+        }
+        if !gameobject_guid.is_game_object() || !self.visible_gameobjects.contains(&gameobject_guid)
+        {
+            return;
+        }
+
+        self.ensure_represented_gameobject_chest_loot_like_cpp(
+            gameobject_guid,
+            player_guid,
+            source,
+        )
+        .await;
+
+        if let Some(loot) = self.loot_table.get_mut(&gameobject_guid) {
+            mark_loot_allowed_for_player_like_cpp(loot, player_guid);
+        }
+
+        let Some(loot) = self.loot_table.get(&gameobject_guid) else {
+            return;
+        };
+        if !loot_can_be_opened_by_player_like_cpp(loot, player_guid) {
+            return;
+        }
+
+        let response = LootResponse {
+            owner: gameobject_guid,
+            loot_obj: loot.loot_guid,
+            failure_reason: 0,
+            acquire_reason: loot_type_for_client_like_cpp(loot.loot_type),
+            loot_method: loot.loot_method,
+            threshold: 2,
+            coins: loot.coins,
+            items: represented_loot_response_items_like_cpp(loot, player_guid),
+            currencies: vec![],
+            acquired: true,
+            ae_looting: false,
+        };
+
+        if !self.active_loot_guid.is_empty() && !self.active_loot_guid.is_item() {
+            self.do_loot_release_all_like_cpp(player_guid).await;
+        }
+        self.set_active_loot_guid(gameobject_guid);
+        self.send_packet(&response);
+        self.represented_on_loot_opened_like_cpp(gameobject_guid, player_guid);
     }
 
     /// CMSG_LOOT_ITEM — player clicks to take a specific item from the loot.
@@ -2684,6 +2740,174 @@ impl WorldSession {
         }
     }
 
+    async fn ensure_represented_gameobject_chest_loot_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        source: GameObjectLootSource,
+    ) {
+        if !self.loot_table.contains_key(&gameobject_guid) {
+            let loot = self
+                .generate_represented_gameobject_chest_loot_like_cpp(
+                    gameobject_guid,
+                    player_guid,
+                    source,
+                )
+                .await;
+            self.loot_table.insert(gameobject_guid, loot);
+        }
+    }
+
+    async fn generate_represented_gameobject_chest_loot_like_cpp(
+        &self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        source: GameObjectLootSource,
+    ) -> CreatureLoot {
+        let (loot_method, loot_master, round_robin_player) = self
+            .represented_gameobject_chest_group_state_like_cpp(
+                source.use_group_loot_rules,
+                player_guid,
+            );
+        let loot_id = if source.loot_id != 0 {
+            source.loot_id
+        } else {
+            source.personal_loot_id
+        };
+        let items = self
+            .generate_represented_gameobject_loot_items_like_cpp(loot_id)
+            .await
+            .unwrap_or_else(|| {
+                if loot_id != 0 {
+                    debug!(
+                        loot_id,
+                        gameobject = ?gameobject_guid,
+                        "gameobject loot template unavailable for represented chest"
+                    );
+                }
+                Vec::new()
+            });
+
+        CreatureLoot {
+            loot_guid: represented_loot_object_guid_like_cpp(gameobject_guid),
+            coins: 0,
+            unlooted_count: 0,
+            loot_type: LOOT_TYPE_CHEST_LIKE_CPP,
+            dungeon_encounter_id: source.dungeon_encounter_id,
+            loot_method,
+            loot_master,
+            round_robin_player,
+            player_ffa_items: Vec::new(),
+            players_looting: Vec::new(),
+            allowed_looters: Vec::new(),
+            items,
+            looted_by_player: false,
+        }
+    }
+
+    fn represented_gameobject_chest_group_state_like_cpp(
+        &self,
+        use_group_loot_rules: bool,
+        player_guid: ObjectGuid,
+    ) -> (u8, ObjectGuid, ObjectGuid) {
+        if !use_group_loot_rules {
+            return (0, ObjectGuid::EMPTY, ObjectGuid::EMPTY);
+        }
+        let Some(group_guid) = self.group_guid else {
+            return (0, ObjectGuid::EMPTY, ObjectGuid::EMPTY);
+        };
+        let Some(registry) = self.group_registry() else {
+            return (0, ObjectGuid::EMPTY, ObjectGuid::EMPTY);
+        };
+        let Some(group) = registry.get(&group_guid) else {
+            return (0, ObjectGuid::EMPTY, ObjectGuid::EMPTY);
+        };
+
+        (group.loot_method, group.master_looter_guid, player_guid)
+    }
+
+    async fn generate_represented_gameobject_loot_items_like_cpp(
+        &self,
+        loot_id: u32,
+    ) -> Option<Vec<LootEntry>> {
+        if loot_id == 0 {
+            return Some(Vec::new());
+        }
+
+        let stores = self.loot_stores()?;
+        let store = stores.get(&LootStoreKind::Gameobject)?;
+        let rates = self.loot_drop_rates_like_cpp();
+        let condition_ids =
+            store.condition_ids_for_fill_like_cpp(loot_id, LootStoreKind::Gameobject, stores);
+        let condition_rows = self
+            .load_represented_creature_loot_condition_rows_like_cpp(&condition_ids)
+            .await;
+        let condition_references = self
+            .load_represented_creature_loot_condition_reference_rows_like_cpp(&condition_rows)
+            .await;
+        let addon_metadata = self
+            .load_item_template_addon_loot_metadata_for_item_ids_like_cpp(
+                condition_ids.iter().map(|id| id.source_entry),
+            )
+            .await;
+        let generated = {
+            let mut rng = rand::thread_rng();
+            store
+                .fill_loot_with_context_like_cpp(
+                    loot_id,
+                    LootStoreKind::Gameobject,
+                    stores,
+                    LootFillOptions {
+                        loot_mode: LOOT_MODE_DEFAULT_LIKE_CPP,
+                        rates_allowed: true,
+                        referenced_amount_rate: rates.item_referenced_amount,
+                        item_context: ItemContext::None as u8,
+                    },
+                    &mut rng,
+                    |item_id| {
+                        self.item_storage_template(item_id).map(|template| {
+                            LootItemTemplateMetadata {
+                                max_stack: template.max_stack_size.max(1),
+                                has_multi_drop_flag: template.flags.contains(ItemFlags::MULTI_DROP),
+                                has_follow_loot_rules_flag: false,
+                            }
+                        })
+                    },
+                    |item| self.item_drop_rate_like_cpp(item.item_id),
+                    |context| {
+                        self.represented_creature_loot_item_allowed_like_cpp(
+                            context,
+                            &condition_rows,
+                            &condition_references,
+                            &addon_metadata,
+                        )
+                    },
+                    |item_id| {
+                        let random_properties =
+                            self.generate_loot_store_random_properties_like_cpp(item_id);
+                        LootItemRandomProperties {
+                            id: random_properties.id,
+                            seed: random_properties.seed,
+                        }
+                    },
+                )
+                .ok()?
+        };
+
+        Some(
+            generated
+                .into_iter()
+                .map(|item| {
+                    let metadata = addon_metadata
+                        .get(&item.item_id)
+                        .copied()
+                        .unwrap_or_default();
+                    generated_creature_loot_item_to_entry_like_cpp(item, metadata)
+                })
+                .collect(),
+        )
+    }
+
     async fn generate_represented_creature_loot_like_cpp(
         &self,
         creature_guid: ObjectGuid,
@@ -4755,7 +4979,7 @@ mod tests {
         RandPropPointsStore,
     };
     use wow_database::{CharStatements, StatementDef};
-    use wow_entities::{Item, ItemCreateInfo, MAX_ITEM_SPELLS};
+    use wow_entities::{GameObjectLootSource, Item, ItemCreateInfo, MAX_ITEM_SPELLS};
     use wow_loot::{GeneratedLootItem, LOOT_SLOT_TYPE_OWNER_LIKE_CPP, LootStoreItem};
     use wow_network::{
         GroupInfo, GroupRegistry, LootDropRatesLikeCpp, LootRollVoteCommand, PendingInvites,
@@ -4765,12 +4989,13 @@ mod tests {
     use wow_packet::packets::loot::{
         CreatureLoot, LOOT_ERROR_MASTER_OTHER_LIKE_CPP, LOOT_ERROR_MASTER_UNIQUE_ITEM_LIKE_CPP,
         LOOT_ERROR_NO_LOOT_LIKE_CPP, LOOT_ERROR_PLAYER_NOT_FOUND_LIKE_CPP,
-        LOOT_ERROR_TOO_FAR_LIKE_CPP, LOOT_TYPE_CORPSE_LIKE_CPP, LOOT_TYPE_DISENCHANTING_LIKE_CPP,
+        LOOT_ERROR_TOO_FAR_LIKE_CPP, LOOT_TYPE_CHEST_LIKE_CPP, LOOT_TYPE_CORPSE_LIKE_CPP,
+        LOOT_TYPE_CORPSE_PERSONAL_LIKE_CPP, LOOT_TYPE_DISENCHANTING_LIKE_CPP,
         LOOT_TYPE_FISHING_JUNK_LIKE_CPP, LOOT_TYPE_FISHING_LIKE_CPP,
-        LOOT_TYPE_FISHINGHOLE_LIKE_CPP, LOOT_TYPE_INSIGNIA_LIKE_CPP, LOOT_TYPE_ITEM_LIKE_CPP,
-        LOOT_TYPE_MILLING_LIKE_CPP, LOOT_TYPE_NONE_LIKE_CPP, LOOT_TYPE_PROSPECTING_LIKE_CPP,
-        LOOT_TYPE_SKINNING_LIKE_CPP, LootEntry, LootEntryFlags, LootRoll, MasterLootItem,
-        SetLootSpecialization,
+        LOOT_TYPE_FISHINGHOLE_LIKE_CPP, LOOT_TYPE_GATHERING_NODE_LIKE_CPP,
+        LOOT_TYPE_INSIGNIA_LIKE_CPP, LOOT_TYPE_ITEM_LIKE_CPP, LOOT_TYPE_MILLING_LIKE_CPP,
+        LOOT_TYPE_NONE_LIKE_CPP, LOOT_TYPE_PROSPECTING_LIKE_CPP, LOOT_TYPE_SKINNING_LIKE_CPP,
+        LootEntry, LootEntryFlags, LootRoll, MasterLootItem, SetLootSpecialization,
     };
 
     use crate::session::{
@@ -4866,6 +5091,18 @@ mod tests {
         assert_eq!(
             loot_type_for_client_like_cpp(LOOT_TYPE_ITEM_LIKE_CPP),
             LOOT_TYPE_ITEM_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_GATHERING_NODE_LIKE_CPP),
+            LOOT_TYPE_GATHERING_NODE_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_CHEST_LIKE_CPP),
+            LOOT_TYPE_CHEST_LIKE_CPP
+        );
+        assert_eq!(
+            loot_type_for_client_like_cpp(LOOT_TYPE_CORPSE_PERSONAL_LIKE_CPP),
+            LOOT_TYPE_CORPSE_PERSONAL_LIKE_CPP
         );
         assert_eq!(
             loot_type_for_client_like_cpp(LOOT_TYPE_PROSPECTING_LIKE_CPP),
@@ -5550,6 +5787,29 @@ mod tests {
             .await;
 
         assert_eq!(loot.dungeon_encounter_id, 615);
+    }
+
+    #[tokio::test]
+    async fn represented_gameobject_chest_loot_carries_cpp_source_metadata() {
+        let session = make_session();
+        let source = GameObjectLootSource {
+            loot_id: 0,
+            use_group_loot_rules: false,
+            dungeon_encounter_id: 733,
+            personal_loot_id: 10_001,
+        };
+
+        let loot = session
+            .generate_represented_gameobject_chest_loot_like_cpp(
+                test_gameobject_guid(91_001),
+                ObjectGuid::create_player(1, 42),
+                source,
+            )
+            .await;
+
+        assert_eq!(loot.loot_type, LOOT_TYPE_CHEST_LIKE_CPP);
+        assert_eq!(loot.dungeon_encounter_id, 733);
+        assert_eq!(loot.loot_method, 0);
     }
 
     #[tokio::test]
