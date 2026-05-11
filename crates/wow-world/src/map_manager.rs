@@ -617,14 +617,21 @@ impl WorldCreature {
         &mut self,
         movement_inform: bool,
     ) -> Option<PointMovementInform> {
-        let motion = &mut self.creature.unit_mut().subsystems_mut().motion;
-        let generator = motion
-            .active_generators
-            .iter_mut()
-            .find(|generator| generator.kind == MovementGeneratorKind::Rotate)?;
-        generator
-            .finalize_rotate_like_cpp(movement_inform, true)
-            .inform
+        let inform = {
+            let motion = &mut self.creature.unit_mut().subsystems_mut().motion;
+            let generator = motion
+                .active_generators
+                .iter_mut()
+                .find(|generator| generator.kind == MovementGeneratorKind::Rotate)?;
+            generator
+                .finalize_rotate_like_cpp(movement_inform, true)
+                .inform
+        };
+        if let Some(inform) = inform {
+            self.creature
+                .record_ai_movement_inform(inform.kind.trinity_id(), inform.movement_id);
+        }
+        inform
     }
 
     pub fn update_move_spline_like_cpp(&mut self) -> bool {
@@ -1880,6 +1887,13 @@ mod tests {
             creature.finalize_rotate_movement_like_cpp(true),
             Some(PointMovementInform {
                 kind: MovementGeneratorKind::Rotate,
+                movement_id: 8,
+            })
+        );
+        assert_eq!(
+            creature.creature.ai_ownership().last_movement_inform,
+            Some(wow_entities::CreatureMovementInform {
+                movement_type: MovementGeneratorKind::Rotate.trinity_id(),
                 movement_id: 8,
             })
         );
