@@ -118,6 +118,8 @@ pub struct Wdc4Reader {
     copy_table: Vec<(u32, u32)>,
     /// Map from record_id → record_index for fast lookup.
     id_to_index: HashMap<u32, usize>,
+    /// Parent/relationship id by record index, when present in WDC4 relationship data.
+    relationship_ids: Vec<Option<u32>>,
     /// For offset-map files: byte offset of each record within record_data.
     /// Empty for non-offset-map files (fixed-size records use record_idx * record_size).
     record_offsets: Vec<usize>,
@@ -156,6 +158,26 @@ impl Wdc4Reader {
             );
             sections.push(parse_section_header(&data[offset..]));
             offset += SECTION_HEADER_SIZE;
+        }
+
+        let has_no_records = header.record_count == 0
+            && sections
+                .iter()
+                .all(|section| section.record_count == 0 && section.copy_table_count == 0);
+        if has_no_records && header.field_storage_info_size == 0 {
+            return Ok(Self {
+                header,
+                field_info: Vec::new(),
+                pallet_data: Vec::new(),
+                common_data: Vec::new(),
+                record_data: Vec::new(),
+                record_ids: Vec::new(),
+                copy_table: Vec::new(),
+                id_to_index: HashMap::new(),
+                relationship_ids: Vec::new(),
+                record_offsets: Vec::new(),
+                record_sizes: Vec::new(),
+            });
         }
 
         // Parse field meta (unused directly — field_storage_info has all we need)
@@ -202,6 +224,7 @@ impl Wdc4Reader {
         let mut copy_table = Vec::new();
         let mut record_offsets: Vec<usize> = Vec::new();
         let mut record_sizes: Vec<usize> = Vec::new();
+        let mut relationship_ids: Vec<Option<u32>> = Vec::new();
 
         for (si, sec) in sections.iter().enumerate() {
             if sec.record_count == 0 && sec.copy_table_count == 0 {
@@ -260,6 +283,20 @@ impl Wdc4Reader {
                 cursor = copy_end;
             }
 
+            if !has_offset_map && sec._relationship_data_size > 0 {
+                let rel_end = cursor + sec._relationship_data_size as usize;
+                ensure!(
+                    rel_end <= data.len(),
+                    "section {si} relationship_data truncated"
+                );
+                merge_relationship_data(
+                    &data[cursor..rel_end],
+                    base_data_len / record_size,
+                    &mut relationship_ids,
+                )?;
+                cursor = rel_end;
+            }
+
             // Offset map entries + offset map ID list (only for offset-map files)
             //
             // WDC4 offset-map section layout after copy_table:
@@ -286,8 +323,19 @@ impl Wdc4Reader {
                 }
                 cursor = om_end;
 
-                // Skip relationship data
-                cursor += sec._relationship_data_size as usize;
+                if sec._relationship_data_size > 0 {
+                    let rel_end = cursor + sec._relationship_data_size as usize;
+                    ensure!(
+                        rel_end <= data.len(),
+                        "section {si} relationship_data truncated"
+                    );
+                    merge_relationship_data(
+                        &data[cursor..rel_end],
+                        base_data_len / record_size.max(1),
+                        &mut relationship_ids,
+                    )?;
+                    cursor = rel_end;
+                }
 
                 // Parse offset map ID list
                 let om_id_bytes = om_count * 4;
@@ -379,6 +427,7 @@ impl Wdc4Reader {
             record_ids,
             copy_table,
             id_to_index,
+            relationship_ids,
             record_offsets,
             record_sizes,
         })
@@ -488,6 +537,11 @@ impl Wdc4Reader {
         self.get_array_element(record_idx, field, array_index, 16) as i16
     }
 
+    /// Read an array element as u16 (for ushort[] arrays like QuestXP::Difficulty).
+    pub fn get_array_u16(&self, record_idx: usize, field: usize, array_index: usize) -> u16 {
+        self.get_array_element(record_idx, field, array_index, 16) as u16
+    }
+
     /// Read an array element as i8 (for sbyte[] arrays like StatModifierBonusStat).
     pub fn get_array_i8(&self, record_idx: usize, field: usize, array_index: usize) -> i8 {
         self.get_array_element(record_idx, field, array_index, 8) as i8
@@ -501,6 +555,13 @@ impl Wdc4Reader {
     /// Get the record index for a given record ID.
     pub fn get_record_index(&self, record_id: u32) -> Option<usize> {
         self.id_to_index.get(&record_id).copied()
+    }
+
+    /// Return the WDC4 relationship/parent id for a record index when the table has one.
+    pub fn get_relationship_id(&self, record_idx: usize) -> Option<u32> {
+        self.relationship_ids
+            .get(record_idx)
+            .and_then(|relationship_id| *relationship_id)
     }
 
     /// Debug: describe a field's compression and bit layout.
@@ -747,6 +808,36 @@ fn split_common_data(raw: &[u8], fields: &[FieldStorageInfo]) -> Vec<HashMap<u32
         }
     }
     result
+}
+
+fn merge_relationship_data(
+    raw: &[u8],
+    base_record_index: usize,
+    relationship_ids: &mut Vec<Option<u32>>,
+) -> Result<()> {
+    if raw.is_empty() {
+        return Ok(());
+    }
+
+    ensure!(raw.len() >= 12, "relationship_data too small");
+    let count = read_u32_le(raw, 0) as usize;
+    let entries_start = 12usize;
+    ensure!(
+        raw.len() >= entries_start + count * 8,
+        "relationship_data truncated"
+    );
+
+    for i in 0..count {
+        let entry_offset = entries_start + i * 8;
+        let relationship_id = read_u32_le(raw, entry_offset);
+        let record_index = base_record_index + read_u32_le(raw, entry_offset + 4) as usize;
+        if relationship_ids.len() <= record_index {
+            relationship_ids.resize(record_index + 1, None);
+        }
+        relationship_ids[record_index] = Some(relationship_id);
+    }
+
+    Ok(())
 }
 
 /// Read `bit_count` bits from `record_data` starting at byte offset `record_start`

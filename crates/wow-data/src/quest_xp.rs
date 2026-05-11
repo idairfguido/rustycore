@@ -41,16 +41,16 @@ impl QuestXpStore {
             let row = QuestXpRow {
                 level: id,
                 difficulty: [
-                    reader.get_field_u32(idx, 0),
-                    reader.get_field_u32(idx, 1),
-                    reader.get_field_u32(idx, 2),
-                    reader.get_field_u32(idx, 3),
-                    reader.get_field_u32(idx, 4),
-                    reader.get_field_u32(idx, 5),
-                    reader.get_field_u32(idx, 6),
-                    reader.get_field_u32(idx, 7),
-                    reader.get_field_u32(idx, 8),
-                    reader.get_field_u32(idx, 9),
+                    u32::from(reader.get_array_u16(idx, 0, 0)),
+                    u32::from(reader.get_array_u16(idx, 0, 1)),
+                    u32::from(reader.get_array_u16(idx, 0, 2)),
+                    u32::from(reader.get_array_u16(idx, 0, 3)),
+                    u32::from(reader.get_array_u16(idx, 0, 4)),
+                    u32::from(reader.get_array_u16(idx, 0, 5)),
+                    u32::from(reader.get_array_u16(idx, 0, 6)),
+                    u32::from(reader.get_array_u16(idx, 0, 7)),
+                    u32::from(reader.get_array_u16(idx, 0, 8)),
+                    u32::from(reader.get_array_u16(idx, 0, 9)),
                 ],
             };
             rows.insert(id, row);

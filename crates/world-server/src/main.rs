@@ -881,9 +881,11 @@ async fn main() -> Result<()> {
     let map_update_handle =
         spawn_canonical_map_update_loop(Arc::clone(&canonical_map_manager), map_update_interval_ms);
 
+    set_realm_online(&login_db, realm_id).await?;
+
     // Wait for shutdown signal
     tokio::select! {
-        _ = tokio::signal::ctrl_c() => {
+        _ = shutdown_signal() => {
             info!("Shutdown signal received, stopping...");
         }
         result = realm_handle => {
@@ -903,8 +905,57 @@ async fn main() -> Result<()> {
         }
     }
 
+    if let Err(e) = set_realm_offline(&login_db, realm_id).await {
+        tracing::error!("Failed to mark realm {realm_id} offline: {e}");
+    }
+
     info!("World server stopped.");
     Ok(())
+}
+
+async fn set_realm_online(login_db: &LoginDatabase, realm_id: u16) -> Result<()> {
+    const REALM_FLAG_OFFLINE: u8 = 0x02;
+
+    login_db
+        .direct_execute(&format!(
+            "UPDATE realmlist SET flag = flag & ~{REALM_FLAG_OFFLINE}, population = 0 WHERE id = {realm_id}"
+        ))
+        .await
+        .context("Failed to mark realm online")?;
+
+    info!("Realm {realm_id} marked online");
+    Ok(())
+}
+
+async fn set_realm_offline(login_db: &LoginDatabase, realm_id: u16) -> Result<()> {
+    const REALM_FLAG_OFFLINE: u8 = 0x02;
+
+    login_db
+        .direct_execute(&format!(
+            "UPDATE realmlist SET flag = flag | {REALM_FLAG_OFFLINE} WHERE id = {realm_id}"
+        ))
+        .await
+        .context("Failed to mark realm offline")?;
+
+    info!("Realm {realm_id} marked offline");
+    Ok(())
+}
+
+#[cfg(unix)]
+async fn shutdown_signal() {
+    use tokio::signal::unix::{SignalKind, signal};
+
+    let mut terminate = signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = terminate.recv() => {}
+    }
+}
+
+#[cfg(not(unix))]
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
 }
 
 fn load_world_config() -> Result<LoadReport> {
