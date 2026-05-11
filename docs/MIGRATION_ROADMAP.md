@@ -616,7 +616,7 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
       - [x] **#032b2c** Invertir el owner efectivo: los mutadores operan sobre `SessionPlayerInventoryRuntime` cuando existe controlador y los campos heredados de `WorldSession` quedan como espejo/compatibilidad hasta su retirada en `#032d`.
   - [ ] **#032c** Cambiar handlers directos (`character`, `loot`, `trainer`, `spell`, `quest`, `chat`, `group`) a getters/mutators del controlador, contrastando cada bloque contra `Player`/`WorldSession` C++.
     - [x] **#032c1** `chat`/`group`: reemplazar lecturas directas de GUID/nombre/mapa/posición por getters del controlador, equivalente a C++ `WorldSession::GetPlayer()->GetGUID()/GetName()/GetMapId()/GetPosition()`.
-    - [ ] **#032c2** `quest`/`spell`: reemplazar raza/clase/nivel/género/spells/inventario por getters canónicos y cubrir condiciones/quest availability.
+    - [x] **#032c2** `quest`/`spell`: reemplazar raza/clase/nivel/género/spells/inventario por getters canónicos y cubrir condiciones/quest availability.
     - [ ] **#032c3** `loot`: reemplazar GUID/mapa/posición/nivel/clase/inventario por getters canónicos en roll/master-loot/store paths.
     - [ ] **#032c4** `character`/`trainer`: reemplazar gold/currency/player metadata/inventory directos por mutadores/getters canónicos y cerrar residuos de login/logout.
   - [ ] **#032d** Retirar o hacer privados los campos heredados cuando dejen de ser fuente runtime, dejando solo puentes `cfg(test)` si aún son necesarios.

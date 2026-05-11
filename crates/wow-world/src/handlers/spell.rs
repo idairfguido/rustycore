@@ -112,7 +112,7 @@ impl WorldSession {
     /// 3. If cast_time > 0: initiate cast (SMSG_SPELL_START), wait for tick_active_spell_cast().
     /// 4. If instant: execute immediately.
     pub async fn handle_cast_spell(&mut self, mut pkt: wow_packet::WorldPacket) {
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(g) => g,
             None => {
                 warn!("handle_cast_spell: no player_guid");
@@ -143,7 +143,7 @@ impl WorldSession {
         );
 
         // ── Validation: Known spell ─────────────────────────────────────
-        if !self.known_spells.contains(&spell_id) {
+        if !self.known_spells_like_cpp().contains(&spell_id) {
             warn!(
                 account = self.account_id,
                 spell_id = spell_id,
@@ -391,7 +391,7 @@ impl WorldSession {
             return;
         }
 
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return;
         };
 
@@ -587,7 +587,7 @@ impl WorldSession {
         slot: u8,
         item_guid: ObjectGuid,
     ) {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return;
         };
         let Some(item) = self.get_inventory_item_by_pos(bag, slot) else {
@@ -600,7 +600,10 @@ impl WorldSession {
             return;
         };
 
-        let runtime_item = self.inventory_item_objects.get(&item_guid).cloned();
+        let runtime_item = self
+            .inventory_item_objects_like_cpp()
+            .get(&item_guid)
+            .cloned();
         let should_expire_refund = runtime_item
             .as_ref()
             .is_some_and(|item_object| item_object.is_refundable());
@@ -1279,10 +1282,13 @@ impl WorldSession {
     }
 
     fn direct_inventory_item_count_like_cpp_representable(&self, item_id: u32) -> u32 {
-        self.inventory_items
+        self.inventory_items_like_cpp()
             .values()
             .filter(|inventory_item| inventory_item.entry_id == item_id)
-            .filter_map(|inventory_item| self.inventory_item_objects.get(&inventory_item.guid))
+            .filter_map(|inventory_item| {
+                self.inventory_item_objects_like_cpp()
+                    .get(&inventory_item.guid)
+            })
             .filter(|item| !item.is_in_trade())
             .fold(0_u32, |total, item| total.saturating_add(item.count()))
     }
@@ -1314,7 +1320,10 @@ impl WorldSession {
                         >= condition.value2,
                 )
             }
-            6 => Some(player_team_for_race_cpp_representable(self.player_race) == condition.value1),
+            6 => Some(
+                player_team_for_race_cpp_representable(self.player_race_like_cpp())
+                    == condition.value1,
+            ),
             8 => Some(self.rewarded_quests.contains(&condition.value1)),
             9 => Some(
                 self.player_quests
@@ -1326,20 +1335,20 @@ impl WorldSession {
                     && !self.rewarded_quests.contains(&condition.value1),
             ),
             15 => Some(
-                player_class_mask_like_cpp(self.player_class)
+                player_class_mask_like_cpp(self.player_class_like_cpp())
                     .is_some_and(|mask| mask & condition.value1 != 0),
             ),
             16 => Some(
-                player_race_mask_like_cpp(self.player_race)
+                player_race_mask_like_cpp(self.player_race_like_cpp())
                     .is_some_and(|mask| mask & condition.value1 != 0),
             ),
-            20 => Some(u32::from(self.player_gender) == condition.value1),
+            20 => Some(u32::from(self.player_gender_like_cpp()) == condition.value1),
             25 => i32::try_from(condition.value1)
                 .ok()
-                .map(|spell_id| self.known_spells.contains(&spell_id)),
+                .map(|spell_id| self.known_spells_like_cpp().contains(&spell_id)),
             27 => condition_compare_values_like_cpp(
                 condition.value2,
-                u32::from(self.player_level),
+                u32::from(self.player_level_like_cpp()),
                 condition.value1,
             ),
             28 => Some(

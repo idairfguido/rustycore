@@ -299,9 +299,9 @@ impl WorldSession {
                 warn!(
                     account = self.account_id,
                     quest_id,
-                    race = self.player_race,
-                    class = self.player_class,
-                    level = self.player_level,
+                    race = self.player_race_like_cpp(),
+                    class = self.player_class_like_cpp(),
+                    level = self.player_level_like_cpp(),
                     "AcceptQuest: player does not meet requirements (CanTakeQuest failed)"
                 );
                 return;
@@ -722,7 +722,9 @@ impl WorldSession {
 
         // Give XP reward — C# Player.RewardQuest → GiveXP
         if xp > 0 {
-            let player_guid = self.player_guid.unwrap_or(wow_core::ObjectGuid::new(0, 0));
+            let player_guid = self
+                .player_guid()
+                .unwrap_or(wow_core::ObjectGuid::new(0, 0));
             self.give_xp(xp, player_guid, false).await;
         }
     }
@@ -822,14 +824,18 @@ impl WorldSession {
         }
 
         // SatisfyQuestRace + SatisfyQuestClass + SatisfyQuestLevel
-        quest.is_available_for(self.player_race, self.player_class, self.player_level)
+        quest.is_available_for(
+            self.player_race_like_cpp(),
+            self.player_class_like_cpp(),
+            self.player_level_like_cpp(),
+        )
     }
 
     /// Save quest status to the characters database.
     async fn save_quest_to_db(&self, quest_id: u32, status: u8) {
         use wow_database::CharStatements;
 
-        let guid = match self.player_guid {
+        let guid = match self.player_guid() {
             Some(g) => g.counter() as u32,
             None => return,
         };
@@ -857,7 +863,7 @@ impl WorldSession {
     async fn delete_quest_from_db(&self, quest_id: u32) {
         use wow_database::CharStatements;
 
-        let guid = match self.player_guid {
+        let guid = match self.player_guid() {
             Some(g) => g.counter() as u32,
             None => return,
         };
@@ -882,7 +888,7 @@ impl WorldSession {
     pub(crate) async fn load_player_quests(&mut self) {
         use wow_database::CharStatements;
 
-        let guid = match self.player_guid {
+        let guid = match self.player_guid() {
             Some(g) => g.counter() as u32,
             None => return,
         };
