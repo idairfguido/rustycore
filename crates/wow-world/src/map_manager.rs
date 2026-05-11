@@ -482,6 +482,31 @@ impl WorldCreature {
         }
     }
 
+    pub fn finalize_point_movement_like_cpp(
+        &mut self,
+        active: bool,
+        movement_inform: bool,
+    ) -> Option<PointMovementInform> {
+        let finalize = {
+            let motion = &mut self.creature.unit_mut().subsystems_mut().motion;
+            let generator = motion
+                .active_generators
+                .iter_mut()
+                .find(|generator| generator.kind == MovementGeneratorKind::Point)?;
+            generator.finalize_point_like_cpp(active, movement_inform)
+        };
+        if finalize.clear_roaming_move {
+            self.creature
+                .unit_mut()
+                .clear_unit_state(UnitState::ROAMING_MOVE.bits());
+        }
+        if let Some(inform) = finalize.inform {
+            self.creature
+                .record_ai_movement_inform(inform.kind.trinity_id(), inform.movement_id);
+        }
+        finalize.inform
+    }
+
     pub fn begin_facing_spline_like_cpp(
         &mut self,
         facing_angle: f32,
@@ -1712,6 +1737,39 @@ mod tests {
         assert!(motion.spline.enabled);
         assert_eq!(motion.spline.spline_id, spline.id());
         assert_eq!(motion.spline.final_destination, Some((14, 10, 0)));
+
+        {
+            let motion = &mut creature.creature.unit_mut().subsystems_mut().motion;
+            let generator = motion
+                .active_generators
+                .iter_mut()
+                .find(|generator| generator.kind == MovementGeneratorKind::Point)
+                .expect("point generator");
+            assert_eq!(
+                generator.update_point_like_cpp(true, true),
+                PointMovementAction::Finished
+            );
+        }
+        assert_eq!(
+            creature.finalize_point_movement_like_cpp(true, true),
+            Some(PointMovementInform {
+                kind: MovementGeneratorKind::Point,
+                movement_id: 42,
+            })
+        );
+        assert!(
+            !creature
+                .creature
+                .unit()
+                .has_unit_state(UnitState::ROAMING_MOVE.bits())
+        );
+        assert_eq!(
+            creature.creature.ai_ownership().last_movement_inform,
+            Some(wow_entities::CreatureMovementInform {
+                movement_type: MovementGeneratorKind::Point.trinity_id(),
+                movement_id: 42,
+            })
+        );
     }
 
     #[test]
