@@ -6,8 +6,8 @@
 //! `WorldSession` — per-player session that receives packets from the
 //! [`WorldSocket`](wow_network::WorldSocket) and dispatches them to handlers.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use parking_lot::RwLock;
@@ -58,6 +58,16 @@ use wow_packet::packets::item::{
     ItemPushResult, ItemPushResultDisplayType, ItemTimeUpdate,
 };
 use wow_packet::packets::misc::{BuyFailed, SellResponse};
+
+fn rounded_median_u32(sorted_values: &[u32]) -> u32 {
+    debug_assert!(!sorted_values.is_empty());
+    let mid = sorted_values.len() / 2;
+    if sorted_values.len() % 2 == 1 {
+        sorted_values[mid]
+    } else {
+        ((f64::from(sorted_values[mid - 1]) + f64::from(sorted_values[mid])) / 2.0).round() as u32
+    }
+}
 use wow_packet::{ClientPacket, WorldPacket};
 
 /// Maximum number of packets processed per `update()` call.
@@ -573,6 +583,12 @@ pub struct WorldSession {
 
     /// Time remaining until next TimeSyncRequest (in ms).
     pub(crate) time_sync_timer_ms: u32,
+    /// Time sync requests sent to the client: sequence index -> server send time.
+    pub(crate) time_sync_pending_requests: HashMap<u32, u32>,
+    /// Last Trinity-style clock delta samples, `(clock_delta, round_trip_duration)`.
+    pub(crate) time_sync_clock_delta_queue: VecDeque<(i64, u32)>,
+    /// Server-client clock delta used to translate movement times.
+    pub(crate) time_sync_clock_delta: i64,
 
     // ── Logout ──────────────────────────────────────────────────────
     /// When set, the session is counting down to logout (20s timer).
@@ -1001,6 +1017,9 @@ impl WorldSession {
             instance_link_rx: None,
             time_sync_next_counter: 0,
             time_sync_timer_ms: 0,
+            time_sync_pending_requests: HashMap::new(),
+            time_sync_clock_delta_queue: VecDeque::with_capacity(6),
+            time_sync_clock_delta: 0,
             logout_time: None,
             login_time: None,
             total_played_time: 0,
@@ -3828,20 +3847,118 @@ impl WorldSession {
     /// Send a TimeSyncRequest and schedule the next one.
     pub(crate) fn send_time_sync(&mut self) {
         use wow_packet::packets::misc::TimeSyncRequest;
-        self.send_packet(&TimeSyncRequest {
-            sequence_index: self.time_sync_next_counter,
-        });
+        let sequence_index = self.time_sync_next_counter;
+        self.send_packet(&TimeSyncRequest { sequence_index });
         trace!(
             "Sent TimeSyncRequest(seq={}) for account {}",
-            self.time_sync_next_counter, self.account_id
+            sequence_index, self.account_id
         );
-        // First 2 syncs are 5s apart, then every 10s (matches C#)
-        self.time_sync_timer_ms = if self.time_sync_next_counter <= 1 {
+        self.time_sync_pending_requests
+            .insert(sequence_index, Self::game_time_ms_like_cpp());
+        // C++ uses 5s for the first request, then 10s.
+        self.time_sync_timer_ms = if self.time_sync_next_counter == 0 {
             5000
         } else {
             10000
         };
         self.time_sync_next_counter += 1;
+    }
+
+    /// Monotonic millisecond counter matching TrinityCore's `getMSTime()` scale.
+    pub(crate) fn game_time_ms_like_cpp() -> u32 {
+        static SERVER_START: OnceLock<Instant> = OnceLock::new();
+        let start = SERVER_START.get_or_init(Instant::now);
+        start.elapsed().as_millis() as u32
+    }
+
+    pub(crate) fn reset_time_sync_like_cpp(&mut self) {
+        self.time_sync_next_counter = 0;
+        self.time_sync_pending_requests.clear();
+    }
+
+    pub(crate) fn record_time_sync_response_like_cpp(
+        &mut self,
+        sequence_index: u32,
+        client_time: u32,
+    ) {
+        let Some(server_time_at_sent) = self.time_sync_pending_requests.remove(&sequence_index)
+        else {
+            return;
+        };
+
+        let received_time = Self::game_time_ms_like_cpp();
+        let round_trip_duration = received_time.wrapping_sub(server_time_at_sent);
+        let lag_delay = round_trip_duration / 2;
+        let clock_delta =
+            i64::from(server_time_at_sent) + i64::from(lag_delay) - i64::from(client_time);
+
+        if self.time_sync_clock_delta_queue.len() == 6 {
+            self.time_sync_clock_delta_queue.pop_front();
+        }
+        self.time_sync_clock_delta_queue
+            .push_back((clock_delta, round_trip_duration));
+        self.compute_new_clock_delta_like_cpp();
+    }
+
+    fn compute_new_clock_delta_like_cpp(&mut self) {
+        if self.time_sync_clock_delta_queue.is_empty() {
+            return;
+        }
+
+        let mut latencies: Vec<u32> = self
+            .time_sync_clock_delta_queue
+            .iter()
+            .map(|(_, round_trip_duration)| *round_trip_duration)
+            .collect();
+        latencies.sort_unstable();
+        let latency_median = rounded_median_u32(&latencies);
+        let latency_mean =
+            latencies.iter().map(|v| f64::from(*v)).sum::<f64>() / latencies.len() as f64;
+        let latency_variance = latencies
+            .iter()
+            .map(|v| {
+                let diff = f64::from(*v) - latency_mean;
+                diff * diff
+            })
+            .sum::<f64>()
+            / latencies.len() as f64;
+        let latency_standard_deviation = latency_variance.sqrt().round() as u32;
+
+        let latency_threshold = latency_standard_deviation.saturating_add(latency_median);
+        let mut clock_delta_sum = 0i64;
+        let mut sample_size_after_filtering = 0u32;
+        for (clock_delta, round_trip_duration) in &self.time_sync_clock_delta_queue {
+            if *round_trip_duration < latency_threshold {
+                clock_delta_sum += *clock_delta;
+                sample_size_after_filtering += 1;
+            }
+        }
+
+        if sample_size_after_filtering != 0 {
+            let mean_clock_delta =
+                (clock_delta_sum as f64 / f64::from(sample_size_after_filtering)).round() as i64;
+            if (mean_clock_delta - self.time_sync_clock_delta).abs() > 25 {
+                self.time_sync_clock_delta = mean_clock_delta;
+            }
+        } else if self.time_sync_clock_delta == 0 {
+            self.time_sync_clock_delta = self
+                .time_sync_clock_delta_queue
+                .back()
+                .map(|(clock_delta, _)| *clock_delta)
+                .unwrap_or_default();
+        }
+    }
+
+    pub(crate) fn adjust_client_movement_time_like_cpp(&self, time: u32) -> u32 {
+        let movement_time = i64::from(time) + self.time_sync_clock_delta;
+        if self.time_sync_clock_delta == 0 || !(0..=i64::from(u32::MAX)).contains(&movement_time) {
+            warn!(
+                "The computed movement time using clockDelta is erroneous. Using fallback instead"
+            );
+            Self::game_time_ms_like_cpp()
+        } else {
+            movement_time as u32
+        }
     }
 
     /// Process pending packets asynchronously. Call after `update()`.
@@ -6421,6 +6538,48 @@ mod tests {
         );
 
         (session, pkt_tx, send_rx)
+    }
+
+    #[test]
+    fn time_sync_response_sets_initial_clock_delta_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let sent_time = WorldSession::game_time_ms_like_cpp().wrapping_sub(20);
+        session.time_sync_pending_requests.insert(7, sent_time);
+
+        session.record_time_sync_response_like_cpp(7, sent_time.wrapping_sub(1_000));
+
+        assert!(session.time_sync_pending_requests.is_empty());
+        assert_eq!(session.time_sync_clock_delta_queue.len(), 1);
+        assert!(
+            session.time_sync_clock_delta >= 1_000,
+            "expected initial fallback delta from first sample"
+        );
+    }
+
+    #[test]
+    fn adjust_client_movement_time_uses_clock_delta_or_cpp_fallback() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        session.time_sync_clock_delta = 250;
+        assert_eq!(session.adjust_client_movement_time_like_cpp(1_000), 1_250);
+
+        session.time_sync_clock_delta = 0;
+        let adjusted = session.adjust_client_movement_time_like_cpp(1_000);
+        assert_ne!(adjusted, 1_000);
+    }
+
+    #[test]
+    fn send_time_sync_uses_cpp_timer_sequence() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+
+        session.send_time_sync();
+        assert_eq!(session.time_sync_next_counter, 1);
+        assert_eq!(session.time_sync_timer_ms, 5_000);
+        assert!(session.time_sync_pending_requests.contains_key(&0));
+
+        session.send_time_sync();
+        assert_eq!(session.time_sync_next_counter, 2);
+        assert_eq!(session.time_sync_timer_ms, 10_000);
+        assert!(session.time_sync_pending_requests.contains_key(&1));
     }
 
     fn shared_map_manager() -> crate::map_manager::SharedMapManager {

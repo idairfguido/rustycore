@@ -36,7 +36,7 @@ Fecha: 2026-05-11
 | `TransportInfo` default C++ tiene `seat=-1`, `prevTime=0`, `vehicleId=0`; bits de prev/vehicle dependen de no cero al escribir | Rust modela `prev_time`/`vehicle_id` como `Option`, correcto en wire, pero no normaliza/limpia transport inválido en handler. | OK wire / Missing runtime | Cubrir en `#A06.4` junto a validación de transport. |
 | Handler C++ rechaza si player está teletransportándose, GUID no coincide, posición inválida, movespline no finalizada | Corregido parcialmente en `#A06.3`: Rust ya exige GUID cargado/exacto y valida X/Y/Z/orientación con los límites de `GridDefines.h`. Teleport/movespline siguen pendientes porque no hay runtime equivalente completo. | OK parcial | Mantener teleport/movespline bajo Fase 2 Movement/Map runtime. |
 | Handler C++ procesa transport: dist > grid, offsets > 75, coordenada world+transport válida, add/remove passenger, reset transport si no aplica | Corregido parcialmente en `#A06.4`: Rust rechaza distancias stale > grid, offsets ±75 y coordenadas world+transport inválidas. Add/remove passenger y reset de transport requieren `TransportBase`/Map runtime real. | OK parcial | Mantener integración real en Transport/Map phase. |
-| Handler C++ ajusta tiempo con `AdjustClientMovementTime` antes de guardar/broadcast | Rust rebroadcast usa tiempo del cliente tal cual. | Missing | `#A06.5`: añadir helper equivalente o TODO explícito ligado a time-sync. |
+| Handler C++ ajusta tiempo con `AdjustClientMovementTime` antes de guardar/broadcast | Corregido en `#A06.5`: Rust registra requests pendientes, calcula delta con cola circular de 6 muestras y ajusta `MovementInfo.time` antes del update/broadcast. También corrige el timer efectivo C++: 5s solo para la primera sync, luego 10s. | OK | Mantener tests de delta/fallback/timer; `GetReceivedTime` se aproxima con el momento de handler Rust. |
 | Handler C++ side effects: fall damage, parachute/flight aura interrupts, pet unsummon, sit-to-stand, under-map damage, jump procs | Rust solo actualiza posición, visibility, area triggers y broadcast. | Missing | `#A06.6`: dividir side effects por sistemas dependientes (Aura/Spell, Pet, Map min-height, Combat). |
 | `SetActiveMover` C++ solo loguea mismatch si player está en world | Rust loguea warning para mismatch pero no cambia estado, comportamiento aceptable. | OK distinto | Bajar a `trace/debug` si el log molesta en pruebas. |
 | `MoveInitActiveMoverComplete` C++ setea local flag, transport server time y actualiza visibility | Rust solo loguea. | Missing | `#A06.7`: representar local flag/transport server time cuando ActivePlayerData local flags esté conectado. |
@@ -49,7 +49,7 @@ Fecha: 2026-05-11
 - `#A06.2`: corregido; `standingOnGameObjectGUID` e `inertia` ya se conservan en Rust.
 - `#A06.3`: corregido en validación mínima; quedan guards de teleport/movespline para Fase 2.
 - `#A06.4`: validación mínima corregida; integración passenger/reset queda para Transport/Map runtime.
-- `#A06.5`: portar `AdjustClientMovementTime` o documentar puente temporal con time sync.
+- `#A06.5`: corregido; `AdjustClientMovementTime` y time-sync delta básico portados.
 - `#A06.6`: dividir side effects de movement por sistemas dependientes.
 - `#A06.7`: portar efectos de `MoveInitActiveMoverComplete`.
 - `#A06.8`: inventariar y portar ACK movement opcodes.

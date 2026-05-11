@@ -2038,7 +2038,7 @@ impl WorldSession {
             "TimeSyncResponse: seq={}, client_time={} for account {}",
             resp.sequence_index, resp.client_time, self.account_id
         );
-        // TODO: compute clock delta for lag compensation (not needed for basic world entry)
+        self.record_time_sync_response_like_cpp(resp.sequence_index, resp.client_time);
     }
 
     /// Handle CMSG_LOGOUT_REQUEST — player wants to log out.
@@ -7476,7 +7476,7 @@ impl WorldSession {
 
         // 6. TimeSyncRequest (critical — client needs time sync)
         //    Also initializes the periodic timer (5s first, then 10s).
-        self.time_sync_next_counter = 0;
+        self.reset_time_sync_like_cpp();
         self.send_time_sync();
 
         // 7. ContactList (social/friends — empty)

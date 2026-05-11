@@ -77,7 +77,7 @@ impl WorldSession {
     /// Parses MovementInfo, validates it, updates player position,
     /// and queues a broadcast to nearby players.
     pub async fn handle_movement(&mut self, mut pkt: wow_packet::WorldPacket) {
-        let info = match ClientPlayerMovement::read(&mut pkt) {
+        let mut info = match ClientPlayerMovement::read(&mut pkt) {
             Ok(m) => m,
             Err(e) => {
                 warn!(
@@ -105,7 +105,7 @@ impl WorldSession {
             return;
         }
 
-        let pos = &info.info.position;
+        let pos = info.info.position;
         if !pos.is_valid_map_coord_like_cpp() {
             warn!(
                 account = self.account_id,
@@ -148,6 +148,8 @@ impl WorldSession {
                 return;
             }
         }
+
+        info.info.time = self.adjust_client_movement_time_like_cpp(info.info.time);
 
         // Update server-side player position.
         self.set_player_position_like_cpp(info.info.position);
