@@ -671,6 +671,349 @@ pub struct StableInfoValuesUpdate {
     pub stable_master: ObjectGuid,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PerksVendorItemValuesUpdate {
+    pub vendor_item_id: i32,
+    pub mount_id: i32,
+    pub battle_pet_species_id: i32,
+    pub transmog_set_id: i32,
+    pub item_modified_appearance_id: i32,
+    pub field_14: i32,
+    pub field_18: i32,
+    pub price: i32,
+    pub available_until: i64,
+    pub disabled: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActivePlayerDataValuesUpdate {
+    pub active_player_data_mask: [u32; 48],
+    pub sort_bags_right_to_left: bool,
+    pub insert_items_left_to_right: bool,
+    pub research_sites: Vec<u16>,
+    pub research_sites_update_mask: Option<Vec<u32>>,
+    pub research_site_progress: Vec<u32>,
+    pub research_site_progress_update_mask: Option<Vec<u32>>,
+    pub research: Vec<ResearchValuesUpdate>,
+    pub research_update_mask: Option<Vec<u32>>,
+    pub known_titles: Vec<u64>,
+    pub known_titles_update_mask: Option<Vec<u32>>,
+    pub daily_quests_completed: Vec<i32>,
+    pub daily_quests_completed_update_mask: Option<Vec<u32>>,
+    pub available_quest_line_x_quest_ids: Vec<i32>,
+    pub available_quest_line_x_quest_ids_update_mask: Option<Vec<u32>>,
+    pub field_1000: Vec<i32>,
+    pub field_1000_update_mask: Option<Vec<u32>>,
+    pub heirlooms: Vec<i32>,
+    pub heirlooms_update_mask: Option<Vec<u32>>,
+    pub heirloom_flags: Vec<u32>,
+    pub heirloom_flags_update_mask: Option<Vec<u32>>,
+    pub toys: Vec<i32>,
+    pub toys_update_mask: Option<Vec<u32>>,
+    pub transmog: Vec<u32>,
+    pub transmog_update_mask: Option<Vec<u32>>,
+    pub conditional_transmog: Vec<i32>,
+    pub conditional_transmog_update_mask: Option<Vec<u32>>,
+    pub self_res_spells: Vec<i32>,
+    pub self_res_spells_update_mask: Option<Vec<u32>>,
+    pub spell_pct_mod_by_label: Vec<SpellPctModByLabelValuesUpdate>,
+    pub spell_pct_mod_by_label_update_mask: Option<Vec<u32>>,
+    pub spell_flat_mod_by_label: Vec<SpellFlatModByLabelValuesUpdate>,
+    pub spell_flat_mod_by_label_update_mask: Option<Vec<u32>>,
+    pub task_quests: Vec<QuestLogValuesUpdate>,
+    pub task_quests_update_mask: Option<Vec<u32>>,
+    pub category_cooldown_mods: Vec<CategoryCooldownModValuesUpdate>,
+    pub category_cooldown_mods_update_mask: Option<Vec<u32>>,
+    pub weekly_spell_uses: Vec<WeeklySpellUseValuesUpdate>,
+    pub weekly_spell_uses_update_mask: Option<Vec<u32>>,
+    pub character_restrictions: Vec<CharacterRestrictionValuesUpdate>,
+    pub character_restrictions_update_mask: Option<Vec<u32>>,
+    pub trait_configs: Vec<TraitConfigValuesUpdate>,
+    pub trait_configs_update_mask: Option<Vec<u32>>,
+    pub farsight_object: ObjectGuid,
+    pub summoned_battle_pet_guid: ObjectGuid,
+    pub coinage: u64,
+    pub xp: i32,
+    pub next_level_xp: i32,
+    pub trial_xp: i32,
+    pub skill: SkillInfoValuesUpdate,
+    pub character_points: i32,
+    pub max_talent_tiers: i32,
+    pub track_creature_mask: u32,
+    pub mainhand_expertise: f32,
+    pub offhand_expertise: f32,
+    pub ranged_expertise: f32,
+    pub combat_rating_expertise: f32,
+    pub block_percentage: f32,
+    pub dodge_percentage: f32,
+    pub dodge_percentage_from_attribute: f32,
+    pub parry_percentage: f32,
+    pub parry_percentage_from_attribute: f32,
+    pub crit_percentage: f32,
+    pub ranged_crit_percentage: f32,
+    pub offhand_crit_percentage: f32,
+    pub shield_block: i32,
+    pub shield_block_crit_percentage: f32,
+    pub mastery: f32,
+    pub speed: f32,
+    pub avoidance: f32,
+    pub sturdiness: f32,
+    pub versatility: i32,
+    pub versatility_bonus: f32,
+    pub pvp_power_damage: f32,
+    pub pvp_power_healing: f32,
+    pub mod_healing_done_pos: i32,
+    pub mod_healing_percent: f32,
+    pub mod_healing_done_percent: f32,
+    pub mod_periodic_healing_done_percent: f32,
+    pub mod_spell_power_percent: f32,
+    pub mod_resilience_percent: f32,
+    pub override_spell_power_by_ap_percent: f32,
+    pub override_ap_by_spell_power_percent: f32,
+    pub mod_target_resistance: i32,
+    pub mod_target_physical_resistance: i32,
+    pub local_flags: u32,
+    pub grantable_levels: u8,
+    pub multi_action_bars: u8,
+    pub lifetime_max_rank: u8,
+    pub num_respecs: u8,
+    pub ammo_id: i32,
+    pub pvp_medals: u32,
+    pub today_honorable_kills: u16,
+    pub today_dishonorable_kills: u16,
+    pub yesterday_honorable_kills: u16,
+    pub yesterday_dishonorable_kills: u16,
+    pub last_week_honorable_kills: u16,
+    pub last_week_dishonorable_kills: u16,
+    pub this_week_honorable_kills: u16,
+    pub this_week_dishonorable_kills: u16,
+    pub this_week_contribution: u32,
+    pub lifetime_honorable_kills: u32,
+    pub lifetime_dishonorable_kills: u32,
+    pub field_f24: u32,
+    pub yesterday_contribution: u32,
+    pub last_week_contribution: u32,
+    pub last_week_rank: u32,
+    pub watched_faction_index: i32,
+    pub max_level: i32,
+    pub scaling_player_level_delta: i32,
+    pub max_creature_scaling_level: i32,
+    pub pet_spell_power: i32,
+    pub ui_hit_modifier: f32,
+    pub ui_spell_hit_modifier: f32,
+    pub home_realm_time_offset: i32,
+    pub mod_pet_haste: f32,
+    pub local_regen_flags: u8,
+    pub aura_vision: u8,
+    pub num_backpack_slots: u8,
+    pub override_spells_id: i32,
+    pub lfg_bonus_faction_id: i32,
+    pub loot_spec_id: u16,
+    pub override_zone_pvp_type: u32,
+    pub honor: i32,
+    pub honor_next_level: i32,
+    pub field_f74: i32,
+    pub pvp_tier_max_from_wins: i32,
+    pub pvp_last_weeks_tier_max_from_wins: i32,
+    pub pvp_rank_progress: u8,
+    pub perks_program_currency: i32,
+    pub research_history: ResearchHistoryValuesUpdate,
+    pub frozen_perks_vendor_item: PerksVendorItemValuesUpdate,
+    pub transport_server_time: i32,
+    pub active_combat_trait_config_id: u32,
+    pub glyphs_enabled: u8,
+    pub lfg_roles: u8,
+    pub pet_stable: Option<StableInfoValuesUpdate>,
+    pub num_stable_slots: u8,
+    pub inv_slots: [ObjectGuid; 141],
+    pub track_resource_mask: [u32; 2],
+    pub spell_crit_percentage: [f32; 7],
+    pub mod_damage_done_pos: [i32; 7],
+    pub mod_damage_done_neg: [i32; 7],
+    pub mod_damage_done_percent: [f32; 7],
+    pub explored_zones: [u64; 240],
+    pub rest_info: [RestInfoValuesUpdate; 2],
+    pub weapon_dmg_multipliers: [f32; 3],
+    pub weapon_atk_speed_multipliers: [f32; 3],
+    pub buyback_price: [u32; 12],
+    pub buyback_timestamp: [i64; 12],
+    pub combat_ratings: [i32; 32],
+    pub pvp_info: [PvpInfoValuesUpdate; 7],
+    pub no_reagent_cost_mask: [u32; 4],
+    pub profession_skill_line: [i32; 2],
+    pub bag_slot_flags: [u32; 4],
+    pub bank_bag_slot_flags: [u32; 7],
+    pub quest_completed: [u64; 875],
+    pub glyph_slots: [u32; 6],
+    pub glyphs: [u32; 6],
+}
+
+impl Default for ActivePlayerDataValuesUpdate {
+    fn default() -> Self {
+        Self {
+            active_player_data_mask: [0; 48],
+            sort_bags_right_to_left: false,
+            insert_items_left_to_right: false,
+            research_sites: Vec::new(),
+            research_sites_update_mask: None,
+            research_site_progress: Vec::new(),
+            research_site_progress_update_mask: None,
+            research: Vec::new(),
+            research_update_mask: None,
+            known_titles: Vec::new(),
+            known_titles_update_mask: None,
+            daily_quests_completed: Vec::new(),
+            daily_quests_completed_update_mask: None,
+            available_quest_line_x_quest_ids: Vec::new(),
+            available_quest_line_x_quest_ids_update_mask: None,
+            field_1000: Vec::new(),
+            field_1000_update_mask: None,
+            heirlooms: Vec::new(),
+            heirlooms_update_mask: None,
+            heirloom_flags: Vec::new(),
+            heirloom_flags_update_mask: None,
+            toys: Vec::new(),
+            toys_update_mask: None,
+            transmog: Vec::new(),
+            transmog_update_mask: None,
+            conditional_transmog: Vec::new(),
+            conditional_transmog_update_mask: None,
+            self_res_spells: Vec::new(),
+            self_res_spells_update_mask: None,
+            spell_pct_mod_by_label: Vec::new(),
+            spell_pct_mod_by_label_update_mask: None,
+            spell_flat_mod_by_label: Vec::new(),
+            spell_flat_mod_by_label_update_mask: None,
+            task_quests: Vec::new(),
+            task_quests_update_mask: None,
+            category_cooldown_mods: Vec::new(),
+            category_cooldown_mods_update_mask: None,
+            weekly_spell_uses: Vec::new(),
+            weekly_spell_uses_update_mask: None,
+            character_restrictions: Vec::new(),
+            character_restrictions_update_mask: None,
+            trait_configs: Vec::new(),
+            trait_configs_update_mask: None,
+            farsight_object: ObjectGuid::EMPTY,
+            summoned_battle_pet_guid: ObjectGuid::EMPTY,
+            coinage: 0,
+            xp: 0,
+            next_level_xp: 0,
+            trial_xp: 0,
+            skill: SkillInfoValuesUpdate::default(),
+            character_points: 0,
+            max_talent_tiers: 0,
+            track_creature_mask: 0,
+            mainhand_expertise: 0.0,
+            offhand_expertise: 0.0,
+            ranged_expertise: 0.0,
+            combat_rating_expertise: 0.0,
+            block_percentage: 0.0,
+            dodge_percentage: 0.0,
+            dodge_percentage_from_attribute: 0.0,
+            parry_percentage: 0.0,
+            parry_percentage_from_attribute: 0.0,
+            crit_percentage: 0.0,
+            ranged_crit_percentage: 0.0,
+            offhand_crit_percentage: 0.0,
+            shield_block: 0,
+            shield_block_crit_percentage: 0.0,
+            mastery: 0.0,
+            speed: 0.0,
+            avoidance: 0.0,
+            sturdiness: 0.0,
+            versatility: 0,
+            versatility_bonus: 0.0,
+            pvp_power_damage: 0.0,
+            pvp_power_healing: 0.0,
+            mod_healing_done_pos: 0,
+            mod_healing_percent: 0.0,
+            mod_healing_done_percent: 0.0,
+            mod_periodic_healing_done_percent: 0.0,
+            mod_spell_power_percent: 0.0,
+            mod_resilience_percent: 0.0,
+            override_spell_power_by_ap_percent: 0.0,
+            override_ap_by_spell_power_percent: 0.0,
+            mod_target_resistance: 0,
+            mod_target_physical_resistance: 0,
+            local_flags: 0,
+            grantable_levels: 0,
+            multi_action_bars: 0,
+            lifetime_max_rank: 0,
+            num_respecs: 0,
+            ammo_id: 0,
+            pvp_medals: 0,
+            today_honorable_kills: 0,
+            today_dishonorable_kills: 0,
+            yesterday_honorable_kills: 0,
+            yesterday_dishonorable_kills: 0,
+            last_week_honorable_kills: 0,
+            last_week_dishonorable_kills: 0,
+            this_week_honorable_kills: 0,
+            this_week_dishonorable_kills: 0,
+            this_week_contribution: 0,
+            lifetime_honorable_kills: 0,
+            lifetime_dishonorable_kills: 0,
+            field_f24: 0,
+            yesterday_contribution: 0,
+            last_week_contribution: 0,
+            last_week_rank: 0,
+            watched_faction_index: 0,
+            max_level: 0,
+            scaling_player_level_delta: 0,
+            max_creature_scaling_level: 0,
+            pet_spell_power: 0,
+            ui_hit_modifier: 0.0,
+            ui_spell_hit_modifier: 0.0,
+            home_realm_time_offset: 0,
+            mod_pet_haste: 0.0,
+            local_regen_flags: 0,
+            aura_vision: 0,
+            num_backpack_slots: 0,
+            override_spells_id: 0,
+            lfg_bonus_faction_id: 0,
+            loot_spec_id: 0,
+            override_zone_pvp_type: 0,
+            honor: 0,
+            honor_next_level: 0,
+            field_f74: 0,
+            pvp_tier_max_from_wins: 0,
+            pvp_last_weeks_tier_max_from_wins: 0,
+            pvp_rank_progress: 0,
+            perks_program_currency: 0,
+            research_history: ResearchHistoryValuesUpdate::default(),
+            frozen_perks_vendor_item: PerksVendorItemValuesUpdate::default(),
+            transport_server_time: 0,
+            active_combat_trait_config_id: 0,
+            glyphs_enabled: 0,
+            lfg_roles: 0,
+            pet_stable: None,
+            num_stable_slots: 0,
+            inv_slots: [ObjectGuid::EMPTY; 141],
+            track_resource_mask: [0; 2],
+            spell_crit_percentage: [0.0; 7],
+            mod_damage_done_pos: [0; 7],
+            mod_damage_done_neg: [0; 7],
+            mod_damage_done_percent: [0.0; 7],
+            explored_zones: [0; 240],
+            rest_info: [RestInfoValuesUpdate::default(); 2],
+            weapon_dmg_multipliers: [0.0; 3],
+            weapon_atk_speed_multipliers: [0.0; 3],
+            buyback_price: [0; 12],
+            buyback_timestamp: [0; 12],
+            combat_ratings: [0; 32],
+            pvp_info: [PvpInfoValuesUpdate::default(); 7],
+            no_reagent_cost_mask: [0; 4],
+            profession_skill_line: [0; 2],
+            bag_slot_flags: [0; 4],
+            bank_bag_slot_flags: [0; 7],
+            quest_completed: [0; 875],
+            glyph_slots: [0; 6],
+            glyphs: [0; 6],
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerDataValuesDeltaUpdate {
     pub changed_object_type_mask: u32,
@@ -2362,6 +2705,11 @@ pub enum UpdateBlock {
         guid: ObjectGuid,
         data: PlayerDataValuesDeltaUpdate,
     },
+    /// VALUES update for ActivePlayerData.
+    FullActivePlayerValuesUpdate {
+        guid: ObjectGuid,
+        data: ActivePlayerDataValuesUpdate,
+    },
     /// VALUES update for ContainerData, optionally including ItemData.
     ContainerValuesUpdate {
         guid: ObjectGuid,
@@ -2780,6 +3128,21 @@ impl UpdateObject {
         }
     }
 
+    /// Create a full VALUES update for `UF::ActivePlayerData`.
+    pub fn full_active_player_values_update(
+        guid: ObjectGuid,
+        map_id: u16,
+        data: ActivePlayerDataValuesUpdate,
+    ) -> Self {
+        Self {
+            map_id,
+            num_updates: 1,
+            destroy_guids: Vec::new(),
+            out_of_range_guids: Vec::new(),
+            blocks: vec![UpdateBlock::FullActivePlayerValuesUpdate { guid, data }],
+        }
+    }
+
     /// Create a VALUES update for `UF::ContainerData`, with optional `ItemData`.
     pub fn container_values_update(
         guid: ObjectGuid,
@@ -2954,6 +3317,9 @@ impl ServerPacket for UpdateObject {
                 }
                 UpdateBlock::FullPlayerValuesUpdate { guid, data } => {
                     write_full_player_values_update_block(&mut blocks_buf, guid, data);
+                }
+                UpdateBlock::FullActivePlayerValuesUpdate { guid, data } => {
+                    write_full_active_player_values_update_block(&mut blocks_buf, guid, data);
                 }
                 UpdateBlock::ContainerValuesUpdate { guid, data } => {
                     write_container_values_update_block(&mut blocks_buf, guid, data);
@@ -3519,6 +3885,7 @@ const VALUES_TYPE_ITEM: u32 = 1 << 1;
 const VALUES_TYPE_CONTAINER: u32 = 1 << 2;
 const VALUES_TYPE_UNIT: u32 = 1 << 5;
 const VALUES_TYPE_PLAYER: u32 = 1 << 6;
+const VALUES_TYPE_ACTIVE_PLAYER: u32 = 1 << 7;
 const VALUES_TYPE_GAME_OBJECT: u32 = 1 << 8;
 const VALUES_TYPE_DYNAMIC_OBJECT: u32 = 1 << 9;
 const VALUES_TYPE_CORPSE: u32 = 1 << 10;
@@ -5369,6 +5736,23 @@ fn write_full_player_values_update_block(
     buf.write_bytes(&val_data);
 }
 
+fn write_full_active_player_values_update_block(
+    buf: &mut WorldPacket,
+    guid: &ObjectGuid,
+    data: &ActivePlayerDataValuesUpdate,
+) {
+    buf.write_uint8(UpdateType::Values as u8);
+    buf.write_packed_guid(guid);
+
+    let mut val_buf = WorldPacket::new_empty();
+    val_buf.write_uint32(VALUES_TYPE_ACTIVE_PLAYER);
+    write_active_player_data_values_update_section(&mut val_buf, data);
+
+    let val_data = val_buf.into_data();
+    buf.write_uint32(val_data.len() as u32);
+    buf.write_bytes(&val_data);
+}
+
 /// UnitData VALUES update: VirtualItems[3] and/or stat fields.
 ///
 /// C# UnitData.WriteUpdate format:
@@ -5915,6 +6299,777 @@ pub fn write_stable_info_values_update(buf: &mut WorldPacket, data: &StableInfoV
     }
 }
 
+pub fn write_perks_vendor_item_values_update(
+    buf: &mut WorldPacket,
+    data: PerksVendorItemValuesUpdate,
+) {
+    buf.write_int32(data.vendor_item_id);
+    buf.write_int32(data.mount_id);
+    buf.write_int32(data.battle_pet_species_id);
+    buf.write_int32(data.transmog_set_id);
+    buf.write_int32(data.item_modified_appearance_id);
+    buf.write_int32(data.field_14);
+    buf.write_int32(data.field_18);
+    buf.write_int32(data.price);
+    buf.write_int64(data.available_until);
+    buf.write_bit(data.disabled);
+    buf.flush_bits();
+}
+
+fn active_player_mask_has(data: &ActivePlayerDataValuesUpdate, bit: usize) -> bool {
+    field_blocks_have(&data.active_player_data_mask, bit)
+}
+
+pub fn write_active_player_data_values_update_section(
+    buf: &mut WorldPacket,
+    data: &ActivePlayerDataValuesUpdate,
+) {
+    let mut group0 = 0u32;
+    let mut group1 = 0u32;
+    for block in 0..32 {
+        if data.active_player_data_mask[block] != 0 {
+            group0 |= 1 << block;
+        }
+    }
+    for block in 32..48 {
+        if data.active_player_data_mask[block] != 0 {
+            group1 |= 1 << (block - 32);
+        }
+    }
+
+    buf.write_uint32(group0);
+    buf.write_bits(group1, 16);
+    for block in data.active_player_data_mask {
+        if block != 0 {
+            buf.write_bits(block, 32);
+        }
+    }
+
+    if active_player_mask_has(data, 0) {
+        if active_player_mask_has(data, 1) {
+            buf.write_bit(data.sort_bags_right_to_left);
+        }
+        if active_player_mask_has(data, 2) {
+            buf.write_bit(data.insert_items_left_to_right);
+        }
+        if active_player_mask_has(data, 3) {
+            write_dynamic_field_update_mask(
+                buf,
+                data.known_titles.len(),
+                data.known_titles_update_mask.as_deref(),
+            );
+        }
+    }
+    if active_player_mask_has(data, 20) && active_player_mask_has(data, 21) {
+        write_dynamic_field_update_mask(
+            buf,
+            data.research_sites.len(),
+            data.research_sites_update_mask.as_deref(),
+        );
+    }
+    if active_player_mask_has(data, 22) && active_player_mask_has(data, 23) {
+        write_dynamic_field_update_mask(
+            buf,
+            data.research_site_progress.len(),
+            data.research_site_progress_update_mask.as_deref(),
+        );
+    }
+    if active_player_mask_has(data, 24) && active_player_mask_has(data, 25) {
+        write_dynamic_field_update_mask(
+            buf,
+            data.research.len(),
+            data.research_update_mask.as_deref(),
+        );
+    }
+    if active_player_mask_has(data, 20) && active_player_mask_has(data, 21) {
+        for (index, value) in data.research_sites.iter().enumerate() {
+            if dynamic_mask_has_index(data.research_sites_update_mask.as_deref(), index) {
+                buf.write_uint16(*value);
+            }
+        }
+    }
+    if active_player_mask_has(data, 22) && active_player_mask_has(data, 23) {
+        for (index, value) in data.research_site_progress.iter().enumerate() {
+            if dynamic_mask_has_index(data.research_site_progress_update_mask.as_deref(), index) {
+                buf.write_uint32(*value);
+            }
+        }
+    }
+    if active_player_mask_has(data, 24) && active_player_mask_has(data, 25) {
+        for (index, research) in data.research.iter().enumerate() {
+            if dynamic_mask_has_index(data.research_update_mask.as_deref(), index) {
+                write_research_values_update(buf, *research);
+            }
+        }
+    }
+    buf.flush_bits();
+
+    if active_player_mask_has(data, 0) {
+        if active_player_mask_has(data, 4) {
+            write_dynamic_field_update_mask(
+                buf,
+                data.daily_quests_completed.len(),
+                data.daily_quests_completed_update_mask.as_deref(),
+            );
+        }
+        if active_player_mask_has(data, 5) {
+            write_dynamic_field_update_mask(
+                buf,
+                data.available_quest_line_x_quest_ids.len(),
+                data.available_quest_line_x_quest_ids_update_mask.as_deref(),
+            );
+        }
+        if active_player_mask_has(data, 6) {
+            write_dynamic_field_update_mask(
+                buf,
+                data.field_1000.len(),
+                data.field_1000_update_mask.as_deref(),
+            );
+        }
+        if active_player_mask_has(data, 7) {
+            write_dynamic_field_update_mask(
+                buf,
+                data.heirlooms.len(),
+                data.heirlooms_update_mask.as_deref(),
+            );
+        }
+        if active_player_mask_has(data, 8) {
+            write_dynamic_field_update_mask(
+                buf,
+                data.heirloom_flags.len(),
+                data.heirloom_flags_update_mask.as_deref(),
+            );
+        }
+        if active_player_mask_has(data, 9) {
+            write_dynamic_field_update_mask(buf, data.toys.len(), data.toys_update_mask.as_deref());
+        }
+        if active_player_mask_has(data, 10) {
+            write_dynamic_field_update_mask(
+                buf,
+                data.transmog.len(),
+                data.transmog_update_mask.as_deref(),
+            );
+        }
+        if active_player_mask_has(data, 11) {
+            write_dynamic_field_update_mask(
+                buf,
+                data.conditional_transmog.len(),
+                data.conditional_transmog_update_mask.as_deref(),
+            );
+        }
+        if active_player_mask_has(data, 12) {
+            write_dynamic_field_update_mask(
+                buf,
+                data.self_res_spells.len(),
+                data.self_res_spells_update_mask.as_deref(),
+            );
+        }
+        if active_player_mask_has(data, 13) {
+            write_dynamic_field_update_mask(
+                buf,
+                data.character_restrictions.len(),
+                data.character_restrictions_update_mask.as_deref(),
+            );
+        }
+        if active_player_mask_has(data, 14) {
+            write_dynamic_field_update_mask(
+                buf,
+                data.spell_pct_mod_by_label.len(),
+                data.spell_pct_mod_by_label_update_mask.as_deref(),
+            );
+        }
+        if active_player_mask_has(data, 15) {
+            write_dynamic_field_update_mask(
+                buf,
+                data.spell_flat_mod_by_label.len(),
+                data.spell_flat_mod_by_label_update_mask.as_deref(),
+            );
+        }
+        if active_player_mask_has(data, 16) {
+            write_dynamic_field_update_mask(
+                buf,
+                data.task_quests.len(),
+                data.task_quests_update_mask.as_deref(),
+            );
+        }
+        if active_player_mask_has(data, 17) {
+            write_dynamic_field_update_mask(
+                buf,
+                data.trait_configs.len(),
+                data.trait_configs_update_mask.as_deref(),
+            );
+        }
+        if active_player_mask_has(data, 18) {
+            write_dynamic_field_update_mask(
+                buf,
+                data.category_cooldown_mods.len(),
+                data.category_cooldown_mods_update_mask.as_deref(),
+            );
+        }
+        if active_player_mask_has(data, 19) {
+            write_dynamic_field_update_mask(
+                buf,
+                data.weekly_spell_uses.len(),
+                data.weekly_spell_uses_update_mask.as_deref(),
+            );
+        }
+    }
+    buf.flush_bits();
+
+    if active_player_mask_has(data, 0) {
+        if active_player_mask_has(data, 3) {
+            for (index, value) in data.known_titles.iter().enumerate() {
+                if dynamic_mask_has_index(data.known_titles_update_mask.as_deref(), index) {
+                    buf.write_uint64(*value);
+                }
+            }
+        }
+        if active_player_mask_has(data, 4) {
+            for (index, value) in data.daily_quests_completed.iter().enumerate() {
+                if dynamic_mask_has_index(data.daily_quests_completed_update_mask.as_deref(), index)
+                {
+                    buf.write_int32(*value);
+                }
+            }
+        }
+        if active_player_mask_has(data, 5) {
+            for (index, value) in data.available_quest_line_x_quest_ids.iter().enumerate() {
+                if dynamic_mask_has_index(
+                    data.available_quest_line_x_quest_ids_update_mask.as_deref(),
+                    index,
+                ) {
+                    buf.write_int32(*value);
+                }
+            }
+        }
+        if active_player_mask_has(data, 6) {
+            for (index, value) in data.field_1000.iter().enumerate() {
+                if dynamic_mask_has_index(data.field_1000_update_mask.as_deref(), index) {
+                    buf.write_int32(*value);
+                }
+            }
+        }
+        if active_player_mask_has(data, 7) {
+            for (index, value) in data.heirlooms.iter().enumerate() {
+                if dynamic_mask_has_index(data.heirlooms_update_mask.as_deref(), index) {
+                    buf.write_int32(*value);
+                }
+            }
+        }
+        if active_player_mask_has(data, 8) {
+            for (index, value) in data.heirloom_flags.iter().enumerate() {
+                if dynamic_mask_has_index(data.heirloom_flags_update_mask.as_deref(), index) {
+                    buf.write_uint32(*value);
+                }
+            }
+        }
+        if active_player_mask_has(data, 9) {
+            for (index, value) in data.toys.iter().enumerate() {
+                if dynamic_mask_has_index(data.toys_update_mask.as_deref(), index) {
+                    buf.write_int32(*value);
+                }
+            }
+        }
+        if active_player_mask_has(data, 10) {
+            for (index, value) in data.transmog.iter().enumerate() {
+                if dynamic_mask_has_index(data.transmog_update_mask.as_deref(), index) {
+                    buf.write_uint32(*value);
+                }
+            }
+        }
+        if active_player_mask_has(data, 11) {
+            for (index, value) in data.conditional_transmog.iter().enumerate() {
+                if dynamic_mask_has_index(data.conditional_transmog_update_mask.as_deref(), index) {
+                    buf.write_int32(*value);
+                }
+            }
+        }
+        if active_player_mask_has(data, 12) {
+            for (index, value) in data.self_res_spells.iter().enumerate() {
+                if dynamic_mask_has_index(data.self_res_spells_update_mask.as_deref(), index) {
+                    buf.write_int32(*value);
+                }
+            }
+        }
+        if active_player_mask_has(data, 14) {
+            for (index, value) in data.spell_pct_mod_by_label.iter().enumerate() {
+                if dynamic_mask_has_index(data.spell_pct_mod_by_label_update_mask.as_deref(), index)
+                {
+                    write_spell_pct_mod_by_label_values_update(buf, *value);
+                }
+            }
+        }
+        if active_player_mask_has(data, 15) {
+            for (index, value) in data.spell_flat_mod_by_label.iter().enumerate() {
+                if dynamic_mask_has_index(
+                    data.spell_flat_mod_by_label_update_mask.as_deref(),
+                    index,
+                ) {
+                    write_spell_flat_mod_by_label_values_update(buf, *value);
+                }
+            }
+        }
+        if active_player_mask_has(data, 16) {
+            for (index, value) in data.task_quests.iter().enumerate() {
+                if dynamic_mask_has_index(data.task_quests_update_mask.as_deref(), index) {
+                    write_quest_log_values_update(buf, value);
+                }
+            }
+        }
+        if active_player_mask_has(data, 18) {
+            for (index, value) in data.category_cooldown_mods.iter().enumerate() {
+                if dynamic_mask_has_index(data.category_cooldown_mods_update_mask.as_deref(), index)
+                {
+                    write_category_cooldown_mod_values_update(buf, *value);
+                }
+            }
+        }
+        if active_player_mask_has(data, 19) {
+            for (index, value) in data.weekly_spell_uses.iter().enumerate() {
+                if dynamic_mask_has_index(data.weekly_spell_uses_update_mask.as_deref(), index) {
+                    write_weekly_spell_use_values_update(buf, *value);
+                }
+            }
+        }
+        if active_player_mask_has(data, 13) {
+            for (index, value) in data.character_restrictions.iter().enumerate() {
+                if dynamic_mask_has_index(data.character_restrictions_update_mask.as_deref(), index)
+                {
+                    write_character_restriction_values_update(buf, *value);
+                }
+            }
+        }
+        if active_player_mask_has(data, 17) {
+            for (index, value) in data.trait_configs.iter().enumerate() {
+                if dynamic_mask_has_index(data.trait_configs_update_mask.as_deref(), index) {
+                    write_trait_config_values_update(buf, value);
+                }
+            }
+        }
+        if active_player_mask_has(data, 26) {
+            buf.write_packed_guid(&data.farsight_object);
+        }
+        if active_player_mask_has(data, 27) {
+            buf.write_packed_guid(&data.summoned_battle_pet_guid);
+        }
+        if active_player_mask_has(data, 28) {
+            buf.write_uint64(data.coinage);
+        }
+        if active_player_mask_has(data, 29) {
+            buf.write_int32(data.xp);
+        }
+        if active_player_mask_has(data, 30) {
+            buf.write_int32(data.next_level_xp);
+        }
+        if active_player_mask_has(data, 31) {
+            buf.write_int32(data.trial_xp);
+        }
+        if active_player_mask_has(data, 32) {
+            write_skill_info_values_update(buf, &data.skill);
+        }
+        if active_player_mask_has(data, 33) {
+            buf.write_int32(data.character_points);
+        }
+        if active_player_mask_has(data, 34) {
+            buf.write_int32(data.max_talent_tiers);
+        }
+        if active_player_mask_has(data, 35) {
+            buf.write_uint32(data.track_creature_mask);
+        }
+        if active_player_mask_has(data, 36) {
+            buf.write_float(data.mainhand_expertise);
+        }
+        if active_player_mask_has(data, 37) {
+            buf.write_float(data.offhand_expertise);
+        }
+    }
+    if active_player_mask_has(data, 38) {
+        if active_player_mask_has(data, 39) {
+            buf.write_float(data.ranged_expertise);
+        }
+        if active_player_mask_has(data, 40) {
+            buf.write_float(data.combat_rating_expertise);
+        }
+        if active_player_mask_has(data, 41) {
+            buf.write_float(data.block_percentage);
+        }
+        if active_player_mask_has(data, 42) {
+            buf.write_float(data.dodge_percentage);
+        }
+        if active_player_mask_has(data, 43) {
+            buf.write_float(data.dodge_percentage_from_attribute);
+        }
+        if active_player_mask_has(data, 44) {
+            buf.write_float(data.parry_percentage);
+        }
+        if active_player_mask_has(data, 45) {
+            buf.write_float(data.parry_percentage_from_attribute);
+        }
+        if active_player_mask_has(data, 46) {
+            buf.write_float(data.crit_percentage);
+        }
+        if active_player_mask_has(data, 47) {
+            buf.write_float(data.ranged_crit_percentage);
+        }
+        if active_player_mask_has(data, 48) {
+            buf.write_float(data.offhand_crit_percentage);
+        }
+        if active_player_mask_has(data, 49) {
+            buf.write_int32(data.shield_block);
+        }
+        if active_player_mask_has(data, 50) {
+            buf.write_float(data.shield_block_crit_percentage);
+        }
+        if active_player_mask_has(data, 51) {
+            buf.write_float(data.mastery);
+        }
+        if active_player_mask_has(data, 52) {
+            buf.write_float(data.speed);
+        }
+        if active_player_mask_has(data, 53) {
+            buf.write_float(data.avoidance);
+        }
+        if active_player_mask_has(data, 54) {
+            buf.write_float(data.sturdiness);
+        }
+        if active_player_mask_has(data, 55) {
+            buf.write_int32(data.versatility);
+        }
+        if active_player_mask_has(data, 56) {
+            buf.write_float(data.versatility_bonus);
+        }
+        if active_player_mask_has(data, 57) {
+            buf.write_float(data.pvp_power_damage);
+        }
+        if active_player_mask_has(data, 58) {
+            buf.write_float(data.pvp_power_healing);
+        }
+        if active_player_mask_has(data, 59) {
+            buf.write_int32(data.mod_healing_done_pos);
+        }
+        if active_player_mask_has(data, 60) {
+            buf.write_float(data.mod_healing_percent);
+        }
+        if active_player_mask_has(data, 61) {
+            buf.write_float(data.mod_healing_done_percent);
+        }
+        if active_player_mask_has(data, 62) {
+            buf.write_float(data.mod_periodic_healing_done_percent);
+        }
+        if active_player_mask_has(data, 63) {
+            buf.write_float(data.mod_spell_power_percent);
+        }
+        if active_player_mask_has(data, 64) {
+            buf.write_float(data.mod_resilience_percent);
+        }
+        if active_player_mask_has(data, 65) {
+            buf.write_float(data.override_spell_power_by_ap_percent);
+        }
+        if active_player_mask_has(data, 66) {
+            buf.write_float(data.override_ap_by_spell_power_percent);
+        }
+        if active_player_mask_has(data, 67) {
+            buf.write_int32(data.mod_target_resistance);
+        }
+        if active_player_mask_has(data, 68) {
+            buf.write_int32(data.mod_target_physical_resistance);
+        }
+        if active_player_mask_has(data, 69) {
+            buf.write_uint32(data.local_flags);
+        }
+    }
+    if active_player_mask_has(data, 70) {
+        if active_player_mask_has(data, 71) {
+            buf.write_uint8(data.grantable_levels);
+        }
+        if active_player_mask_has(data, 72) {
+            buf.write_uint8(data.multi_action_bars);
+        }
+        if active_player_mask_has(data, 73) {
+            buf.write_uint8(data.lifetime_max_rank);
+        }
+        if active_player_mask_has(data, 74) {
+            buf.write_uint8(data.num_respecs);
+        }
+        if active_player_mask_has(data, 75) {
+            buf.write_int32(data.ammo_id);
+        }
+        if active_player_mask_has(data, 76) {
+            buf.write_uint32(data.pvp_medals);
+        }
+        if active_player_mask_has(data, 77) {
+            buf.write_uint16(data.today_honorable_kills);
+        }
+        if active_player_mask_has(data, 78) {
+            buf.write_uint16(data.today_dishonorable_kills);
+        }
+        if active_player_mask_has(data, 79) {
+            buf.write_uint16(data.yesterday_honorable_kills);
+        }
+        if active_player_mask_has(data, 80) {
+            buf.write_uint16(data.yesterday_dishonorable_kills);
+        }
+        if active_player_mask_has(data, 81) {
+            buf.write_uint16(data.last_week_honorable_kills);
+        }
+        if active_player_mask_has(data, 82) {
+            buf.write_uint16(data.last_week_dishonorable_kills);
+        }
+        if active_player_mask_has(data, 83) {
+            buf.write_uint16(data.this_week_honorable_kills);
+        }
+        if active_player_mask_has(data, 84) {
+            buf.write_uint16(data.this_week_dishonorable_kills);
+        }
+        if active_player_mask_has(data, 85) {
+            buf.write_uint32(data.this_week_contribution);
+        }
+        if active_player_mask_has(data, 86) {
+            buf.write_uint32(data.lifetime_honorable_kills);
+        }
+        if active_player_mask_has(data, 87) {
+            buf.write_uint32(data.lifetime_dishonorable_kills);
+        }
+        if active_player_mask_has(data, 88) {
+            buf.write_uint32(data.field_f24);
+        }
+        if active_player_mask_has(data, 89) {
+            buf.write_uint32(data.yesterday_contribution);
+        }
+        if active_player_mask_has(data, 90) {
+            buf.write_uint32(data.last_week_contribution);
+        }
+        if active_player_mask_has(data, 91) {
+            buf.write_uint32(data.last_week_rank);
+        }
+        if active_player_mask_has(data, 92) {
+            buf.write_int32(data.watched_faction_index);
+        }
+        if active_player_mask_has(data, 93) {
+            buf.write_int32(data.max_level);
+        }
+        if active_player_mask_has(data, 94) {
+            buf.write_int32(data.scaling_player_level_delta);
+        }
+        if active_player_mask_has(data, 95) {
+            buf.write_int32(data.max_creature_scaling_level);
+        }
+        if active_player_mask_has(data, 96) {
+            buf.write_int32(data.pet_spell_power);
+        }
+        if active_player_mask_has(data, 97) {
+            buf.write_float(data.ui_hit_modifier);
+        }
+        if active_player_mask_has(data, 98) {
+            buf.write_float(data.ui_spell_hit_modifier);
+        }
+        if active_player_mask_has(data, 99) {
+            buf.write_int32(data.home_realm_time_offset);
+        }
+        if active_player_mask_has(data, 100) {
+            buf.write_float(data.mod_pet_haste);
+        }
+        if active_player_mask_has(data, 101) {
+            buf.write_uint8(data.local_regen_flags);
+        }
+    }
+    if active_player_mask_has(data, 102) {
+        if active_player_mask_has(data, 103) {
+            buf.write_uint8(data.aura_vision);
+        }
+        if active_player_mask_has(data, 104) {
+            buf.write_uint8(data.num_backpack_slots);
+        }
+        if active_player_mask_has(data, 105) {
+            buf.write_int32(data.override_spells_id);
+        }
+        if active_player_mask_has(data, 106) {
+            buf.write_int32(data.lfg_bonus_faction_id);
+        }
+        if active_player_mask_has(data, 107) {
+            buf.write_uint16(data.loot_spec_id);
+        }
+        if active_player_mask_has(data, 108) {
+            buf.write_uint32(data.override_zone_pvp_type);
+        }
+        if active_player_mask_has(data, 109) {
+            buf.write_int32(data.honor);
+        }
+        if active_player_mask_has(data, 110) {
+            buf.write_int32(data.honor_next_level);
+        }
+        if active_player_mask_has(data, 111) {
+            buf.write_int32(data.field_f74);
+        }
+        if active_player_mask_has(data, 112) {
+            buf.write_int32(data.pvp_tier_max_from_wins);
+        }
+        if active_player_mask_has(data, 113) {
+            buf.write_int32(data.pvp_last_weeks_tier_max_from_wins);
+        }
+        if active_player_mask_has(data, 114) {
+            buf.write_uint8(data.pvp_rank_progress);
+        }
+        if active_player_mask_has(data, 115) {
+            buf.write_int32(data.perks_program_currency);
+        }
+        if active_player_mask_has(data, 118) {
+            buf.write_int32(data.transport_server_time);
+        }
+        if active_player_mask_has(data, 119) {
+            buf.write_uint32(data.active_combat_trait_config_id);
+        }
+        if active_player_mask_has(data, 120) {
+            buf.write_uint8(data.glyphs_enabled);
+        }
+        if active_player_mask_has(data, 121) {
+            buf.write_uint8(data.lfg_roles);
+        }
+        if active_player_mask_has(data, 123) {
+            buf.write_uint8(data.num_stable_slots);
+        }
+    }
+    buf.flush_bits();
+    if active_player_mask_has(data, 102) {
+        buf.write_bits(data.pet_stable.is_some() as u32, 1);
+        if active_player_mask_has(data, 116) {
+            write_research_history_values_update(buf, &data.research_history);
+        }
+        if active_player_mask_has(data, 117) {
+            write_perks_vendor_item_values_update(buf, data.frozen_perks_vendor_item);
+        }
+        if active_player_mask_has(data, 122) {
+            if let Some(pet_stable) = &data.pet_stable {
+                write_stable_info_values_update(buf, pet_stable);
+            }
+        }
+    }
+    if active_player_mask_has(data, 124) {
+        for index in 0..141 {
+            if active_player_mask_has(data, 125 + index) {
+                buf.write_packed_guid(&data.inv_slots[index]);
+            }
+        }
+    }
+    if active_player_mask_has(data, 266) {
+        for index in 0..2 {
+            if active_player_mask_has(data, 267 + index) {
+                buf.write_uint32(data.track_resource_mask[index]);
+            }
+        }
+    }
+    if active_player_mask_has(data, 269) {
+        for index in 0..7 {
+            if active_player_mask_has(data, 270 + index) {
+                buf.write_float(data.spell_crit_percentage[index]);
+            }
+            if active_player_mask_has(data, 277 + index) {
+                buf.write_int32(data.mod_damage_done_pos[index]);
+            }
+            if active_player_mask_has(data, 284 + index) {
+                buf.write_int32(data.mod_damage_done_neg[index]);
+            }
+            if active_player_mask_has(data, 291 + index) {
+                buf.write_float(data.mod_damage_done_percent[index]);
+            }
+        }
+    }
+    if active_player_mask_has(data, 298) {
+        for index in 0..240 {
+            if active_player_mask_has(data, 299 + index) {
+                buf.write_uint64(data.explored_zones[index]);
+            }
+        }
+    }
+    if active_player_mask_has(data, 539) {
+        for index in 0..2 {
+            if active_player_mask_has(data, 540 + index) {
+                write_rest_info_values_update(buf, data.rest_info[index]);
+            }
+        }
+    }
+    if active_player_mask_has(data, 542) {
+        for index in 0..3 {
+            if active_player_mask_has(data, 543 + index) {
+                buf.write_float(data.weapon_dmg_multipliers[index]);
+            }
+            if active_player_mask_has(data, 546 + index) {
+                buf.write_float(data.weapon_atk_speed_multipliers[index]);
+            }
+        }
+    }
+    if active_player_mask_has(data, 549) {
+        for index in 0..12 {
+            if active_player_mask_has(data, 550 + index) {
+                buf.write_uint32(data.buyback_price[index]);
+            }
+            if active_player_mask_has(data, 562 + index) {
+                buf.write_int64(data.buyback_timestamp[index]);
+            }
+        }
+    }
+    if active_player_mask_has(data, 574) {
+        for index in 0..32 {
+            if active_player_mask_has(data, 575 + index) {
+                buf.write_int32(data.combat_ratings[index]);
+            }
+        }
+    }
+    if active_player_mask_has(data, 615) {
+        for index in 0..4 {
+            if active_player_mask_has(data, 616 + index) {
+                buf.write_uint32(data.no_reagent_cost_mask[index]);
+            }
+        }
+    }
+    if active_player_mask_has(data, 620) {
+        for index in 0..2 {
+            if active_player_mask_has(data, 621 + index) {
+                buf.write_int32(data.profession_skill_line[index]);
+            }
+        }
+    }
+    if active_player_mask_has(data, 623) {
+        for index in 0..4 {
+            if active_player_mask_has(data, 624 + index) {
+                buf.write_uint32(data.bag_slot_flags[index]);
+            }
+        }
+    }
+    if active_player_mask_has(data, 628) {
+        for index in 0..7 {
+            if active_player_mask_has(data, 629 + index) {
+                buf.write_uint32(data.bank_bag_slot_flags[index]);
+            }
+        }
+    }
+    if active_player_mask_has(data, 636) {
+        for index in 0..875 {
+            if active_player_mask_has(data, 637 + index) {
+                buf.write_uint64(data.quest_completed[index]);
+            }
+        }
+    }
+    if active_player_mask_has(data, 1512) {
+        for index in 0..6 {
+            if active_player_mask_has(data, 1513 + index) {
+                buf.write_uint32(data.glyph_slots[index]);
+            }
+            if active_player_mask_has(data, 1519 + index) {
+                buf.write_uint32(data.glyphs[index]);
+            }
+        }
+    }
+    if active_player_mask_has(data, 607) {
+        for index in 0..7 {
+            if active_player_mask_has(data, 608 + index) {
+                write_pvp_info_values_update(buf, data.pvp_info[index]);
+            }
+        }
+    }
+    buf.flush_bits();
+}
+
 /// ActivePlayerData VALUES update for the runtime paths currently emitted by
 /// RustyCore: InvSlots[141], buyback, coinage and combat stats.
 ///
@@ -5954,6 +7109,7 @@ fn write_active_player_data_values_update(
 
     // Coinage: block 0 bit 28 (ActivePlayerData.Coinage = new(0, 28))
     if coinage_change.is_some() {
+        blocks[0] |= 1 << 0;
         blocks[0] |= 1 << 28;
     }
 
@@ -6977,7 +8133,7 @@ mod tests {
         let bytes = values.into_data();
         assert_eq!(&bytes[0..4], &[0x01, 0x00, 0x00, 0x00]); // group 0: block 0
         assert_eq!(&bytes[4..6], &[0x00, 0x00]); // group 1: no blocks 32..47
-        assert_eq!(&bytes[6..10], &[0x10, 0x00, 0x00, 0x00]); // block 0: bit 28
+        assert_eq!(&bytes[6..10], &[0x10, 0x00, 0x00, 0x01]); // block 0: bits 0 and 28
         assert_eq!(u64::from_le_bytes(bytes[10..18].try_into().unwrap()), 1234);
         assert_eq!(bytes.len(), 18);
     }
@@ -7082,6 +8238,98 @@ mod tests {
             i32::from_le_bytes(bytes[bytes.len() - 4..].try_into().unwrap()),
             99
         );
+    }
+
+    fn set_active_player_bit(data: &mut ActivePlayerDataValuesUpdate, bit: usize) {
+        data.active_player_data_mask[bit / 32] |= 1 << (bit % 32);
+    }
+
+    #[test]
+    fn full_active_player_values_update_matches_cpp_coinage_shape() {
+        let mut data = ActivePlayerDataValuesUpdate {
+            coinage: 1234,
+            ..Default::default()
+        };
+        set_active_player_bit(&mut data, 0);
+        set_active_player_bit(&mut data, 28);
+
+        let mut values = WorldPacket::new_empty();
+        write_active_player_data_values_update_section(&mut values, &data);
+
+        let bytes = values.into_data();
+        assert_eq!(&bytes[0..4], &[0x01, 0x00, 0x00, 0x00]); // group 0: block 0
+        assert_eq!(&bytes[4..6], &[0x00, 0x00]); // group 1: no blocks 32..47
+        assert_eq!(&bytes[6..10], &[0x10, 0x00, 0x00, 0x01]); // block 0: bits 0 and 28
+        assert_eq!(u64::from_le_bytes(bytes[10..18].try_into().unwrap()), 1234);
+        assert_eq!(bytes.len(), 18);
+    }
+
+    #[test]
+    fn full_active_player_values_update_block_uses_active_player_type_mask() {
+        let mut data = ActivePlayerDataValuesUpdate {
+            coinage: 1234,
+            ..Default::default()
+        };
+        set_active_player_bit(&mut data, 0);
+        set_active_player_bit(&mut data, 28);
+
+        let mut block = WorldPacket::new_empty();
+        write_full_active_player_values_update_block(&mut block, &ObjectGuid::EMPTY, &data);
+
+        let bytes = block.into_data();
+        assert_eq!(bytes[0], UpdateType::Values as u8);
+        assert_eq!(&bytes[1..3], &[0, 0]);
+        assert_eq!(
+            u32::from_le_bytes(bytes[7..11].try_into().unwrap()),
+            VALUES_TYPE_ACTIVE_PLAYER
+        );
+        assert_eq!(u64::from_le_bytes(bytes[21..29].try_into().unwrap()), 1234);
+    }
+
+    #[test]
+    fn full_active_player_values_update_matches_cpp_late_array_order() {
+        let mut data = ActivePlayerDataValuesUpdate::default();
+        set_active_player_bit(&mut data, 636);
+        set_active_player_bit(&mut data, 637);
+        set_active_player_bit(&mut data, 1512);
+        set_active_player_bit(&mut data, 1513);
+        set_active_player_bit(&mut data, 1519);
+        set_active_player_bit(&mut data, 607);
+        set_active_player_bit(&mut data, 608);
+        data.quest_completed[0] = 0x0102_0304_0506_0708;
+        data.glyph_slots[0] = 55;
+        data.glyphs[0] = 66;
+        data.pvp_info[0] = PvpInfoValuesUpdate {
+            pvp_info_mask: 0x0D,
+            bracket: 7,
+            pvp_rating_id: 99,
+            ..Default::default()
+        };
+
+        let mut values = WorldPacket::new_empty();
+        write_active_player_data_values_update_section(&mut values, &data);
+
+        let bytes = values.into_data();
+        let quest_pos = bytes
+            .windows(8)
+            .position(|window| window == 0x0102_0304_0506_0708u64.to_le_bytes())
+            .expect("QuestCompleted value must be present");
+        let glyph_slot_pos = bytes
+            .windows(4)
+            .position(|window| window == 55u32.to_le_bytes())
+            .expect("GlyphSlots value must be present");
+        let glyph_pos = bytes
+            .windows(4)
+            .position(|window| window == 66u32.to_le_bytes())
+            .expect("Glyphs value must be present");
+        let pvp_pos = bytes
+            .windows(4)
+            .position(|window| window == 99i32.to_le_bytes())
+            .expect("PVP rating value must be present");
+
+        assert!(quest_pos < glyph_slot_pos);
+        assert!(glyph_slot_pos < glyph_pos);
+        assert!(glyph_pos < pvp_pos);
     }
 
     #[test]
