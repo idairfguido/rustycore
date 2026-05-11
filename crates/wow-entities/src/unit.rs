@@ -787,8 +787,8 @@ mod tests {
                 .spells
                 .history
                 .cooldown(42)
-                .map(|cooldown| cooldown.duration_ms),
-            Some(1_500)
+                .map(|cooldown| cooldown.cooldown_end_ms),
+            Some(1_600)
         );
         assert!(unit.subsystems().combat.is_threatened_by(target));
         assert!(unit.subsystems().motion.spline.enabled);

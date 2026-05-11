@@ -229,8 +229,9 @@ pub use unit::{
 pub use unit_subsystems::{
     AiSubsystem, AppliedAuraRef, AuraRef, AuraSubsystem, CURRENT_FIRST_NON_MELEE_SPELL,
     CURRENT_MAX_SPELL, CombatSubsystem, ControlSubsystem, CurrentSpellRef, CurrentSpellSlot,
-    MotionSubsystem, MoveSplineState, MovementGeneratorKind, OwnedAuraRef, SpellChargeState,
-    SpellCooldown, SpellHistory, SpellSubsystem, UnitSubsystems, VehicleKitState, VehicleSubsystem,
+    INFINITY_COOLDOWN_DELAY_MS, MAX_SPELL_SCHOOL, MotionSubsystem, MoveSplineState,
+    MovementGeneratorKind, OwnedAuraRef, SpellChargeState, SpellCooldown, SpellHistory,
+    SpellSubsystem, UnitSubsystems, VehicleKitState, VehicleSubsystem,
 };
 pub use update_fields::{
     ACTIVE_PLAYER_DATA_BITS, AREA_TRIGGER_DATA_BITS, CONTAINER_DATA_BITS, CONVERSATION_DATA_BITS,

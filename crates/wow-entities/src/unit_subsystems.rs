@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use wow_constants::SpellState;
 use wow_core::ObjectGuid;
@@ -191,72 +191,419 @@ impl CurrentSpellRef {
     }
 }
 
+pub const MAX_SPELL_SCHOOL: usize = 7;
+pub const INFINITY_COOLDOWN_DELAY_MS: u64 = 30 * 24 * 60 * 60 * 1_000;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpellCooldown {
-    pub started_at_ms: u64,
-    pub duration_ms: u32,
+    pub spell_id: u32,
+    pub item_id: u32,
+    pub cooldown_end_ms: u64,
+    pub category_id: u32,
+    pub category_end_ms: u64,
+    pub on_hold: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpellChargeState {
-    pub charges: u8,
-    pub started_at_ms: u64,
-    pub recharge_ms: u32,
+    pub recharge_start_ms: u64,
+    pub recharge_end_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SpellHistory {
     pub cooldowns: HashMap<u32, SpellCooldown>,
-    pub charges: HashMap<u32, SpellChargeState>,
+    pub cooldowns_before_duel: HashMap<u32, SpellCooldown>,
+    pub category_cooldowns: HashMap<u32, u32>,
+    pub school_lockouts: [u64; MAX_SPELL_SCHOOL],
+    pub charges: HashMap<u32, VecDeque<SpellChargeState>>,
+    pub global_cooldowns: HashMap<u32, u64>,
 }
 
 impl SpellHistory {
+    pub fn start_cooldown(
+        &mut self,
+        now_ms: u64,
+        spell_id: u32,
+        item_id: u32,
+        cooldown_ms: u64,
+        category_id: u32,
+        category_cooldown_ms: u64,
+        on_hold: bool,
+    ) -> bool {
+        let (cooldown_end_ms, category_end_ms) = if on_hold {
+            (
+                if cooldown_ms > 0 {
+                    now_ms + INFINITY_COOLDOWN_DELAY_MS
+                } else if category_cooldown_ms > 0 {
+                    now_ms + INFINITY_COOLDOWN_DELAY_MS
+                } else {
+                    now_ms
+                },
+                if category_cooldown_ms > 0 {
+                    now_ms + INFINITY_COOLDOWN_DELAY_MS
+                } else {
+                    now_ms
+                },
+            )
+        } else {
+            (
+                if cooldown_ms > 0 {
+                    now_ms + cooldown_ms
+                } else if category_cooldown_ms > 0 {
+                    now_ms + category_cooldown_ms
+                } else {
+                    now_ms
+                },
+                if category_cooldown_ms > 0 {
+                    now_ms + category_cooldown_ms
+                } else {
+                    now_ms
+                },
+            )
+        };
+
+        if cooldown_end_ms == now_ms && category_end_ms == now_ms {
+            return false;
+        }
+
+        self.add_cooldown(
+            spell_id,
+            item_id,
+            cooldown_end_ms,
+            category_id,
+            category_end_ms,
+            on_hold,
+        )
+    }
+
     pub fn set_cooldown(&mut self, spell_id: u32, started_at_ms: u64, duration_ms: u32) {
+        self.start_cooldown(
+            started_at_ms,
+            spell_id,
+            0,
+            u64::from(duration_ms),
+            0,
+            0,
+            false,
+        );
+    }
+
+    pub fn add_cooldown(
+        &mut self,
+        spell_id: u32,
+        item_id: u32,
+        cooldown_end_ms: u64,
+        category_id: u32,
+        category_end_ms: u64,
+        on_hold: bool,
+    ) -> bool {
+        let should_replace = self.cooldowns.get(&spell_id).is_none_or(|current| {
+            cooldown_end_ms > current.cooldown_end_ms
+                || category_end_ms > current.category_end_ms
+                || on_hold
+        });
+
+        if !should_replace {
+            return false;
+        }
+
         self.cooldowns.insert(
             spell_id,
             SpellCooldown {
-                started_at_ms,
-                duration_ms,
+                spell_id,
+                item_id,
+                cooldown_end_ms,
+                category_id,
+                category_end_ms,
+                on_hold,
             },
         );
+
+        if category_id != 0 {
+            self.category_cooldowns.insert(category_id, spell_id);
+        }
+
+        true
     }
 
     pub fn cooldown(&self, spell_id: u32) -> Option<SpellCooldown> {
         self.cooldowns.get(&spell_id).copied()
     }
 
+    pub fn has_cooldown(&self, spell_id: u32, category_id: u32, now_ms: u64) -> bool {
+        self.cooldowns
+            .get(&spell_id)
+            .is_some_and(|cooldown| cooldown.on_hold || cooldown.cooldown_end_ms > now_ms)
+            || (category_id != 0
+                && self
+                    .category_cooldowns
+                    .get(&category_id)
+                    .and_then(|spell_id| self.cooldowns.get(spell_id))
+                    .is_some_and(|cooldown| cooldown.on_hold || cooldown.category_end_ms > now_ms))
+    }
+
+    pub fn remaining_cooldown_ms(&self, spell_id: u32, category_id: u32, now_ms: u64) -> u64 {
+        if let Some(cooldown) = self.cooldowns.get(&spell_id) {
+            return cooldown.cooldown_end_ms.saturating_sub(now_ms);
+        }
+
+        self.remaining_category_cooldown_ms(category_id, now_ms)
+    }
+
+    pub fn remaining_category_cooldown_ms(&self, category_id: u32, now_ms: u64) -> u64 {
+        self.category_cooldowns
+            .get(&category_id)
+            .and_then(|spell_id| self.cooldowns.get(spell_id))
+            .map_or(0, |cooldown| {
+                cooldown.category_end_ms.saturating_sub(now_ms)
+            })
+    }
+
+    pub fn modify_cooldown(
+        &mut self,
+        spell_id: u32,
+        cooldown_delta_ms: i64,
+        without_category_cooldown: bool,
+        now_ms: u64,
+    ) -> bool {
+        if cooldown_delta_ms == 0 {
+            return false;
+        }
+
+        let Some(cooldown) = self.cooldowns.get_mut(&spell_id) else {
+            return false;
+        };
+
+        cooldown.cooldown_end_ms = apply_ms_delta(cooldown.cooldown_end_ms, cooldown_delta_ms);
+        if cooldown.category_id != 0 {
+            if !without_category_cooldown {
+                cooldown.category_end_ms =
+                    apply_ms_delta(cooldown.category_end_ms, cooldown_delta_ms);
+            }
+            if cooldown.cooldown_end_ms < cooldown.category_end_ms {
+                cooldown.cooldown_end_ms = cooldown.category_end_ms;
+            }
+        }
+
+        if cooldown.cooldown_end_ms <= now_ms && !cooldown.on_hold {
+            self.clear_cooldown(spell_id);
+        }
+
+        true
+    }
+
     pub fn clear_cooldown(&mut self, spell_id: u32) -> bool {
-        self.cooldowns.remove(&spell_id).is_some()
+        let Some(cooldown) = self.cooldowns.remove(&spell_id) else {
+            return false;
+        };
+        if cooldown.category_id != 0 {
+            self.category_cooldowns.remove(&cooldown.category_id);
+        }
+        true
+    }
+
+    pub fn reset_all_cooldowns(&mut self) {
+        self.cooldowns.clear();
+        self.category_cooldowns.clear();
     }
 
     pub fn set_charges(
         &mut self,
-        spell_id: u32,
+        charge_category_id: u32,
         charges: u8,
         started_at_ms: u64,
         recharge_ms: u32,
     ) {
-        self.charges.insert(
-            spell_id,
-            SpellChargeState {
-                charges,
-                started_at_ms,
-                recharge_ms,
-            },
-        );
+        let queue = self.charges.entry(charge_category_id).or_default();
+        queue.clear();
+        let mut start = started_at_ms;
+        for _ in 0..charges {
+            let end = start + u64::from(recharge_ms);
+            queue.push_back(SpellChargeState {
+                recharge_start_ms: start,
+                recharge_end_ms: end,
+            });
+            start = end;
+        }
     }
 
-    pub fn charges(&self, spell_id: u32) -> Option<SpellChargeState> {
-        self.charges.get(&spell_id).copied()
+    pub fn charges(&self, charge_category_id: u32) -> Option<&VecDeque<SpellChargeState>> {
+        self.charges.get(&charge_category_id)
     }
 
-    pub fn clear_charges(&mut self, spell_id: u32) -> bool {
-        self.charges.remove(&spell_id).is_some()
+    pub fn consumed_charges(&self, charge_category_id: u32) -> u8 {
+        self.charges
+            .get(&charge_category_id)
+            .map_or(0, |charges| charges.len().min(u8::MAX as usize) as u8)
+    }
+
+    pub fn has_charge(&self, charge_category_id: u32, max_charges: i32) -> bool {
+        charge_category_id == 0
+            || max_charges <= 0
+            || self
+                .charges
+                .get(&charge_category_id)
+                .is_none_or(|charges| charges.len() < max_charges as usize)
+    }
+
+    pub fn consume_charge(
+        &mut self,
+        charge_category_id: u32,
+        now_ms: u64,
+        recovery_ms: u32,
+        max_charges: i32,
+    ) -> bool {
+        if charge_category_id == 0 || recovery_ms == 0 || max_charges <= 0 {
+            return false;
+        }
+
+        let queue = self.charges.entry(charge_category_id).or_default();
+        let recharge_start_ms = queue.back().map_or(now_ms, |charge| charge.recharge_end_ms);
+        queue.push_back(SpellChargeState {
+            recharge_start_ms,
+            recharge_end_ms: recharge_start_ms + u64::from(recovery_ms),
+        });
+        true
+    }
+
+    pub fn modify_charge_recovery_time(
+        &mut self,
+        charge_category_id: u32,
+        cooldown_delta_ms: i64,
+        now_ms: u64,
+    ) -> bool {
+        let Some(queue) = self.charges.get_mut(&charge_category_id) else {
+            return false;
+        };
+        if queue.is_empty() {
+            return false;
+        }
+
+        for charge in queue.iter_mut() {
+            charge.recharge_start_ms = apply_ms_delta(charge.recharge_start_ms, cooldown_delta_ms);
+            charge.recharge_end_ms = apply_ms_delta(charge.recharge_end_ms, cooldown_delta_ms);
+        }
+
+        while queue
+            .front()
+            .is_some_and(|charge| charge.recharge_end_ms < now_ms)
+        {
+            queue.pop_front();
+        }
+
+        true
+    }
+
+    pub fn restore_charge(&mut self, charge_category_id: u32) -> bool {
+        self.charges
+            .get_mut(&charge_category_id)
+            .and_then(VecDeque::pop_back)
+            .is_some()
+    }
+
+    pub fn clear_charges(&mut self, charge_category_id: u32) -> bool {
+        self.charges.remove(&charge_category_id).is_some()
+    }
+
+    pub fn reset_all_charges(&mut self) {
+        self.charges.clear();
+    }
+
+    pub fn lock_spell_school(&mut self, school_mask: u32, now_ms: u64, lockout_ms: u64) {
+        let lockout_end = now_ms + lockout_ms;
+        for school in 0..MAX_SPELL_SCHOOL {
+            if (school_mask & (1 << school)) != 0 {
+                self.school_lockouts[school] = lockout_end;
+            }
+        }
+    }
+
+    pub fn is_school_locked(&self, school_mask: u32, now_ms: u64) -> bool {
+        (0..MAX_SPELL_SCHOOL).any(|school| {
+            (school_mask & (1 << school)) != 0 && self.school_lockouts[school] > now_ms
+        })
+    }
+
+    pub fn add_global_cooldown(
+        &mut self,
+        recovery_category_id: u32,
+        now_ms: u64,
+        duration_ms: u64,
+    ) {
+        self.global_cooldowns
+            .insert(recovery_category_id, now_ms + duration_ms);
+    }
+
+    pub fn has_global_cooldown(&self, recovery_category_id: u32, now_ms: u64) -> bool {
+        self.global_cooldowns
+            .get(&recovery_category_id)
+            .is_some_and(|end_ms| *end_ms > now_ms)
+    }
+
+    pub fn cancel_global_cooldown(&mut self, recovery_category_id: u32) {
+        self.global_cooldowns.insert(recovery_category_id, 0);
+    }
+
+    pub fn remaining_global_cooldown_ms(&self, recovery_category_id: u32, now_ms: u64) -> u64 {
+        self.global_cooldowns
+            .get(&recovery_category_id)
+            .map_or(0, |end_ms| end_ms.saturating_sub(now_ms))
+    }
+
+    pub fn save_cooldown_state_before_duel(&mut self) {
+        self.cooldowns_before_duel = self.cooldowns.clone();
+    }
+
+    pub fn restore_cooldown_state_after_duel(&mut self) {
+        self.cooldowns = self.cooldowns_before_duel.clone();
+        self.category_cooldowns.clear();
+        for (spell_id, cooldown) in &self.cooldowns {
+            if cooldown.category_id != 0 {
+                self.category_cooldowns
+                    .insert(cooldown.category_id, *spell_id);
+            }
+        }
+    }
+
+    pub fn update(&mut self, now_ms: u64) {
+        self.category_cooldowns.retain(|_, spell_id| {
+            self.cooldowns
+                .get(spell_id)
+                .is_some_and(|cooldown| cooldown.on_hold || cooldown.category_end_ms >= now_ms)
+        });
+
+        let expired: Vec<u32> = self
+            .cooldowns
+            .iter()
+            .filter_map(|(spell_id, cooldown)| {
+                (!cooldown.on_hold && cooldown.cooldown_end_ms < now_ms).then_some(*spell_id)
+            })
+            .collect();
+        for spell_id in expired {
+            self.clear_cooldown(spell_id);
+        }
+
+        for queue in self.charges.values_mut() {
+            while queue
+                .front()
+                .is_some_and(|charge| charge.recharge_end_ms <= now_ms)
+            {
+                queue.pop_front();
+            }
+        }
     }
 
     pub fn reset(&mut self) {
-        self.cooldowns.clear();
-        self.charges.clear();
+        *self = Self::default();
+    }
+}
+
+fn apply_ms_delta(value: u64, delta: i64) -> u64 {
+    if delta.is_negative() {
+        value.saturating_sub(delta.unsigned_abs())
+    } else {
+        value.saturating_add(delta as u64)
     }
 }
 
@@ -638,22 +985,103 @@ mod unit_subsystems_tests {
         assert_eq!(
             subsystems.spells.history.cooldown(200),
             Some(SpellCooldown {
-                started_at_ms: 1_000,
-                duration_ms: 30_000,
+                spell_id: 200,
+                item_id: 0,
+                cooldown_end_ms: 31_000,
+                category_id: 0,
+                category_end_ms: 1_000,
+                on_hold: false,
             })
         );
         assert_eq!(
-            subsystems
-                .spells
-                .history
-                .charges(200)
-                .map(|state| state.charges),
+            subsystems.spells.history.charges(200).map(VecDeque::len),
             Some(2)
         );
         assert!(subsystems.spells.history.clear_cooldown(200));
         subsystems.spells.history.reset();
         assert!(subsystems.spells.history.cooldowns.is_empty());
         assert!(subsystems.spells.history.charges.is_empty());
+    }
+
+    #[test]
+    fn spell_history_cooldowns_track_spell_category_hold_and_update_like_cpp() {
+        let mut history = SpellHistory::default();
+
+        assert!(history.start_cooldown(1_000, 100, 7, 3_000, 9, 1_500, false));
+        assert!(history.has_cooldown(100, 9, 2_000));
+        assert_eq!(history.remaining_cooldown_ms(100, 9, 2_000), 2_000);
+        assert_eq!(history.remaining_category_cooldown_ms(9, 2_000), 500);
+
+        assert!(!history.add_cooldown(100, 7, 2_000, 9, 1_500, false));
+        assert_eq!(
+            history
+                .cooldown(100)
+                .map(|cooldown| cooldown.cooldown_end_ms),
+            Some(4_000)
+        );
+
+        assert!(history.start_cooldown(2_000, 101, 0, 1, 11, 1, true));
+        let held = history.cooldown(101).expect("on-hold cooldown");
+        assert!(held.on_hold);
+        assert_eq!(held.cooldown_end_ms, 2_000 + INFINITY_COOLDOWN_DELAY_MS);
+        assert_eq!(held.category_end_ms, 2_000 + INFINITY_COOLDOWN_DELAY_MS);
+
+        assert!(history.modify_cooldown(100, -2_000, false, 2_500));
+        assert_eq!(history.cooldown(100), None);
+        assert!(!history.has_cooldown(100, 9, 2_500));
+
+        history.update(2_501);
+        assert!(!history.has_cooldown(100, 9, 2_501));
+        assert!(history.has_cooldown(101, 11, 2_501));
+    }
+
+    #[test]
+    fn spell_history_charges_school_locks_gcd_and_duel_snapshot_match_cpp_shape() {
+        let mut history = SpellHistory::default();
+
+        assert!(history.consume_charge(44, 1_000, 5_000, 2));
+        assert!(history.consume_charge(44, 1_500, 5_000, 2));
+        assert!(!history.has_charge(44, 2));
+        assert_eq!(history.consumed_charges(44), 2);
+        assert_eq!(
+            history
+                .charges(44)
+                .and_then(|charges| charges.front())
+                .map(|charge| charge.recharge_end_ms),
+            Some(6_000)
+        );
+
+        assert!(history.modify_charge_recovery_time(44, -1_000, 1_500));
+        assert_eq!(
+            history
+                .charges(44)
+                .and_then(|charges| charges.front())
+                .map(|charge| charge.recharge_end_ms),
+            Some(5_000)
+        );
+        assert!(history.restore_charge(44));
+        assert_eq!(history.consumed_charges(44), 1);
+        history.update(5_000);
+        assert_eq!(history.consumed_charges(44), 0);
+
+        history.lock_spell_school(0b0010_1000, 10_000, 3_000);
+        assert!(history.is_school_locked(0b0000_1000, 12_000));
+        assert!(history.is_school_locked(0b0010_0000, 12_000));
+        assert!(!history.is_school_locked(0b0000_1000, 13_001));
+
+        history.add_global_cooldown(12, 20_000, 1_500);
+        assert!(history.has_global_cooldown(12, 21_000));
+        assert_eq!(history.remaining_global_cooldown_ms(12, 21_000), 500);
+        history.cancel_global_cooldown(12);
+        assert!(!history.has_global_cooldown(12, 21_000));
+
+        history.start_cooldown(30_000, 777, 0, 10_000, 55, 5_000, false);
+        history.save_cooldown_state_before_duel();
+        history.start_cooldown(31_000, 888, 0, 10_000, 66, 5_000, false);
+        history.restore_cooldown_state_after_duel();
+        assert!(history.has_cooldown(777, 55, 31_000));
+        assert!(!history.has_cooldown(888, 66, 31_000));
+        assert_eq!(history.category_cooldowns.get(&55), Some(&777));
     }
 
     #[test]
