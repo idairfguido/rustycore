@@ -300,7 +300,7 @@ impl WorldSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::AuraApplication;
+    use crate::session::{AuraApplication, RepresentedAuraEffectLikeCpp};
     use wow_core::ObjectGuid;
 
     fn make_session() -> WorldSession {
@@ -331,7 +331,24 @@ mod tests {
             aura_flags: 0x1,
             aura_interrupt_flags: flags,
             aura_interrupt_flags2: flags2,
+            represented_effect: None,
+            represented_amount: 0,
+            represented_multiplier: 1.0,
             applied_at: std::time::Instant::now(),
+        }
+    }
+
+    fn fall_aura(
+        slot: u8,
+        effect: RepresentedAuraEffectLikeCpp,
+        amount: i32,
+        multiplier: f32,
+    ) -> AuraApplication {
+        AuraApplication {
+            represented_effect: Some(effect),
+            represented_amount: amount,
+            represented_multiplier: multiplier,
+            ..visible_aura(slot, 0, 0)
         }
     }
 
@@ -403,6 +420,76 @@ mod tests {
         harmless.jump.fall_time = 1_600;
         session.apply_movement_side_effects_like_cpp(Some(ClientOpcodes::MoveFallLand), &harmless);
         assert_eq!(session.fall_damage_events_like_cpp().len(), 1);
+    }
+
+    #[test]
+    fn movement_fall_damage_applies_cpp_aura_modifiers_and_guards() {
+        let mut session = make_session();
+        session.set_player_health_like_cpp(1_000, 1_000);
+        session.set_fall_information_like_cpp(1_200, 150.0);
+        session.visible_auras.insert(
+            4,
+            fall_aura(4, RepresentedAuraEffectLikeCpp::SafeFall, 10, 1.0),
+        );
+        session.visible_auras.insert(
+            5,
+            fall_aura(5, RepresentedAuraEffectLikeCpp::ModifyFallDamagePct, 0, 0.5),
+        );
+        let mut info = MovementInfo::default();
+        info.position.z = 100.0;
+        info.jump.fall_time = 1_500;
+
+        session.apply_movement_side_effects_like_cpp(Some(ClientOpcodes::MoveFallLand), &info);
+
+        let events = session.fall_damage_events_like_cpp();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].damage, 238);
+        assert_eq!(events[0].final_damage, 238);
+        assert_eq!(session.player_health_like_cpp(), 762);
+
+        let mut guarded = make_session();
+        guarded.set_player_health_like_cpp(1_000, 1_000);
+        guarded.set_fall_information_like_cpp(1_200, 150.0);
+        guarded.visible_auras.insert(
+            6,
+            fall_aura(6, RepresentedAuraEffectLikeCpp::FeatherFall, 0, 1.0),
+        );
+        guarded.apply_movement_side_effects_like_cpp(Some(ClientOpcodes::MoveFallLand), &info);
+        assert!(guarded.fall_damage_events_like_cpp().is_empty());
+
+        let mut god = make_session();
+        god.set_player_health_like_cpp(1_000, 1_000);
+        god.set_fall_information_like_cpp(1_200, 150.0);
+        god.set_player_cheat_god_like_cpp(true);
+        god.apply_movement_side_effects_like_cpp(Some(ClientOpcodes::MoveFallLand), &info);
+        assert!(god.fall_damage_events_like_cpp().is_empty());
+
+        let mut gm = make_session();
+        gm.set_player_health_like_cpp(1_000, 1_000);
+        gm.set_fall_information_like_cpp(1_200, 150.0);
+        gm.set_player_game_master_like_cpp(true);
+        gm.apply_movement_side_effects_like_cpp(Some(ClientOpcodes::MoveFallLand), &info);
+        assert!(gm.fall_damage_events_like_cpp().is_empty());
+
+        let mut immune = make_session();
+        immune.set_player_health_like_cpp(1_000, 1_000);
+        immune.set_fall_information_like_cpp(1_200, 150.0);
+        immune.set_player_normal_damage_immune_like_cpp(true);
+        immune.apply_movement_side_effects_like_cpp(Some(ClientOpcodes::MoveFallLand), &info);
+        assert!(immune.fall_damage_events_like_cpp().is_empty());
+
+        let mut environmental = make_session();
+        environmental.set_player_health_like_cpp(1_000, 1_000);
+        environmental.set_fall_information_like_cpp(1_200, 150.0);
+        environmental.set_player_environmental_damage_immune_like_cpp(true);
+        environmental
+            .apply_movement_side_effects_like_cpp(Some(ClientOpcodes::MoveFallLand), &info);
+        assert_eq!(environmental.fall_damage_events_like_cpp()[0].damage, 657);
+        assert_eq!(
+            environmental.fall_damage_events_like_cpp()[0].final_damage,
+            0
+        );
+        assert_eq!(environmental.player_health_like_cpp(), 1_000);
     }
 
     #[test]

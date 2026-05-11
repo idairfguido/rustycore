@@ -474,9 +474,10 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
   - [x] **#A06.5** Portar `AdjustClientMovementTime`: cola circular de 6 muestras, pendientes por sequence, delta filtrado por latencia y ajuste de `MovementInfo.time` antes de rebroadcast.
   - [ ] **#A06.6** Separar side effects C++ de movement: fall damage, aura interrupts, pet unsummon, sit-to-stand, under-map damage y jump procs.
     - [x] **#A06.6.1** Portar side effects representables hoy: remover auras `LandingOrFlight`/`Jump`, sentar-a-stand en movimiento y registrar hooks de unsummon temporal de pet / jump proc.
-    - [x] **#A06.6.2** Portar base de `Player::HandleFall` / `UpdateFallInformationIfNeed`: `m_lastFallTime/Z`, umbral 14.57, fórmula C++ de daño, clamp a max health y aplicación al estado representado de salud/vida; modificadores de aura quedan en `#A06.6.4`.
+    - [x] **#A06.6.2** Portar base de `Player::HandleFall` / `UpdateFallInformationIfNeed`: `m_lastFallTime/Z`, umbral 14.57, fórmula C++ de daño, clamp a max health y aplicación al estado representado de salud/vida.
     - [x] **#A06.6.3** Portar under-map damage: `MapManager::min_height_like_cpp` expone el fallback C++ `TerrainInfo::GetMinHeight == -500.0` cuando no hay grid, `handle_movement` marca `PLAYER_FLAGS_IS_OUT_OF_BOUNDS` representado, aplica `DAMAGE_FALL_TO_VOID` por vida máxima y mata si el daño ambiental no lo hizo. La altura real de terrain/grid y el hook Battleground siguen en las tareas Map/Terrain/Battleground, no se finge aquí.
-    - [ ] **#A06.6.4** Conectar hooks registrados a Pet runtime y Proc/Aura runtime completos.
+    - [x] **#A06.6.4a** Portar los modificadores/guards de aura usados por `Player::HandleFall`: `HOVER`, `FEATHER_FALL`, `FLY`, inmunidad normal, `SAFE_FALL`, `MODIFY_FALL_DAMAGE_PCT`, `CHEAT_GOD`, inmunidad ambiental y aura 43621 (Gust of Wind) sobre el modelo de aura representado actual.
+    - [ ] **#A06.6.4** Conectar hooks registrados a Pet runtime y Proc/Aura runtime completos: `UnsummonPetTemporaryIfAny`, `Unit::ProcSkillsAndAuras(PROC_FLAG_JUMP)` y aura runtime real en vez de `visible_auras` representado.
   - [ ] **#A06.7** Portar efectos de `MoveInitActiveMoverComplete`: local flag, transport server time y visibility update.
   - [ ] **#A06.8** Inventariar y portar ACK movement opcodes (`KnockBack`, speed, force, collision height, spline done, time skipped).
 - [ ] **#A07** Auditar **Combat** (`wow-combat` + handlers) vs `src/server/game/Combat/`. Damage roll, miss tables, hit info.

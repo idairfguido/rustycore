@@ -696,6 +696,14 @@ pub struct WorldSession {
     pub(crate) in_combat: bool,
     /// Represented `Player::IsAlive()` state for handler guards that need C++ ordering.
     player_alive_like_cpp: bool,
+    /// Represented `Player::IsGameMaster()` movement/fall guard.
+    player_game_master_like_cpp: bool,
+    /// Represented `CHEAT_GOD` movement/fall guard.
+    player_cheat_god_like_cpp: bool,
+    /// Represented `IsImmunedToDamage(SPELL_SCHOOL_MASK_NORMAL)` fall guard.
+    player_normal_damage_immune_like_cpp: bool,
+    /// Represented `IsImmuneToEnvironmentalDamage()` guard inside EnvironmentalDamage.
+    player_environmental_damage_immune_like_cpp: bool,
     /// Represented player health used by movement/environmental side effects.
     player_health_like_cpp: u32,
     /// Represented player max health used by movement/environmental side effects.
@@ -912,6 +920,12 @@ pub struct AuraApplication {
     pub aura_interrupt_flags: u32,
     /// Trinity SpellAuraInterruptFlags2 bitmask used by represented removal paths.
     pub aura_interrupt_flags2: u32,
+    /// Represented Trinity aura effect queried directly by movement/fall handlers.
+    pub represented_effect: Option<RepresentedAuraEffectLikeCpp>,
+    /// C++ `GetTotalAuraModifier` amount for represented integer aura effects.
+    pub represented_amount: i32,
+    /// C++ `GetTotalAuraMultiplier` factor for represented multiplier aura effects.
+    pub represented_multiplier: f32,
     /// Monotonic timestamp when this aura was applied — used for expiry checks.
     pub applied_at: Instant,
 }
@@ -919,6 +933,15 @@ pub struct AuraApplication {
 pub(crate) const SPELL_AURA_INTERRUPT_FLAG_LOOTING_LIKE_CPP: u32 = 0x0000_0800;
 pub(crate) const SPELL_AURA_INTERRUPT_FLAG_LANDING_OR_FLIGHT_LIKE_CPP: u32 = 0x0200_0000;
 pub(crate) const SPELL_AURA_INTERRUPT_FLAG2_JUMP_LIKE_CPP: u32 = 0x0000_0020;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepresentedAuraEffectLikeCpp {
+    FeatherFall,
+    Hover,
+    SafeFall,
+    Fly,
+    ModifyFallDamagePct,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct MovementFallDamageEvent {
@@ -1099,6 +1122,10 @@ impl WorldSession {
             combat_target: None,
             in_combat: false,
             player_alive_like_cpp: true,
+            player_game_master_like_cpp: false,
+            player_cheat_god_like_cpp: false,
+            player_normal_damage_immune_like_cpp: false,
+            player_environmental_damage_immune_like_cpp: false,
             player_health_like_cpp: 100,
             player_max_health_like_cpp: 100,
             last_fall_time_like_cpp: 0,
@@ -3779,6 +3806,9 @@ impl WorldSession {
             aura_flags,
             aura_interrupt_flags: 0,
             aura_interrupt_flags2: 0,
+            represented_effect: None,
+            represented_amount: 0,
+            represented_multiplier: 1.0,
             applied_at: Instant::now(),
         };
 
@@ -5537,6 +5567,26 @@ impl WorldSession {
         self.player_alive_like_cpp
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_player_game_master_like_cpp(&mut self, is_game_master: bool) {
+        self.player_game_master_like_cpp = is_game_master;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_player_cheat_god_like_cpp(&mut self, enabled: bool) {
+        self.player_cheat_god_like_cpp = enabled;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_player_normal_damage_immune_like_cpp(&mut self, immune: bool) {
+        self.player_normal_damage_immune_like_cpp = immune;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_player_environmental_damage_immune_like_cpp(&mut self, immune: bool) {
+        self.player_environmental_damage_immune_like_cpp = immune;
+    }
+
     pub(crate) fn set_player_health_like_cpp(&mut self, health: u32, max_health: u32) {
         self.player_max_health_like_cpp = max_health.max(1);
         self.player_health_like_cpp = health.min(self.player_max_health_like_cpp);
@@ -5574,23 +5624,50 @@ impl WorldSession {
         movement_info: &wow_packet::packets::movement::MovementInfo,
     ) -> Option<MovementFallDamageEvent> {
         let z_diff = self.last_fall_z_like_cpp - movement_info.position.z;
-        if z_diff < 14.57 || !self.player_alive_like_cpp {
+        if z_diff < 14.57
+            || !self.player_alive_like_cpp
+            || self.player_game_master_like_cpp
+            || self.has_represented_aura_effect_like_cpp(RepresentedAuraEffectLikeCpp::Hover)
+            || self.has_represented_aura_effect_like_cpp(RepresentedAuraEffectLikeCpp::FeatherFall)
+            || self.has_represented_aura_effect_like_cpp(RepresentedAuraEffectLikeCpp::Fly)
+            || self.player_normal_damage_immune_like_cpp
+        {
             return None;
         }
 
-        let damage_percent = 0.018 * z_diff - 0.2426;
+        let safe_fall =
+            self.total_represented_aura_modifier_like_cpp(RepresentedAuraEffectLikeCpp::SafeFall);
+        let damage_percent = 0.018 * (z_diff - safe_fall as f32) - 0.2426;
         if damage_percent <= 0.0 {
             return None;
         }
 
         let mut damage = (damage_percent * self.player_max_health_like_cpp as f32) as u32;
+        if self.player_cheat_god_like_cpp {
+            damage = 0;
+        }
+        damage = (damage as f32
+            * self.total_represented_aura_multiplier_like_cpp(
+                RepresentedAuraEffectLikeCpp::ModifyFallDamagePct,
+            )) as u32;
+        if self
+            .visible_auras
+            .values()
+            .any(|aura| aura.spell_id == 43_621)
+        {
+            damage = self.player_max_health_like_cpp / 2;
+        }
         damage = damage.min(self.player_max_health_like_cpp);
         if damage == 0 {
             return None;
         }
 
         let original_health = self.player_health_like_cpp;
-        let final_damage = damage.min(original_health);
+        let final_damage = if self.player_environmental_damage_immune_like_cpp {
+            0
+        } else {
+            damage.min(original_health)
+        };
         self.player_health_like_cpp = self.player_health_like_cpp.saturating_sub(final_damage);
         if self.player_health_like_cpp == 0 {
             self.player_alive_like_cpp = false;
@@ -5603,6 +5680,33 @@ impl WorldSession {
         };
         self.fall_damage_events_like_cpp.push(event);
         Some(event)
+    }
+
+    fn has_represented_aura_effect_like_cpp(&self, effect: RepresentedAuraEffectLikeCpp) -> bool {
+        self.visible_auras
+            .values()
+            .any(|aura| aura.represented_effect == Some(effect))
+    }
+
+    fn total_represented_aura_modifier_like_cpp(
+        &self,
+        effect: RepresentedAuraEffectLikeCpp,
+    ) -> i32 {
+        self.visible_auras
+            .values()
+            .filter(|aura| aura.represented_effect == Some(effect))
+            .map(|aura| aura.represented_amount)
+            .sum()
+    }
+
+    fn total_represented_aura_multiplier_like_cpp(
+        &self,
+        effect: RepresentedAuraEffectLikeCpp,
+    ) -> f32 {
+        self.visible_auras
+            .values()
+            .filter(|aura| aura.represented_effect == Some(effect))
+            .fold(1.0, |acc, aura| acc * aura.represented_multiplier)
     }
 
     #[cfg(test)]
