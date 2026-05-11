@@ -517,6 +517,33 @@ pub struct DungeonScoreSummaryValuesUpdate {
     pub runs: Vec<DungeonScoreMapSummaryValuesUpdate>,
 }
 
+#[derive(Debug, Clone)]
+pub struct SkillInfoValuesUpdate {
+    pub skill_info_mask: [u32; 57],
+    pub skill_line_id: [u16; 256],
+    pub skill_step: [u16; 256],
+    pub skill_rank: [u16; 256],
+    pub skill_starting_rank: [u16; 256],
+    pub skill_max_rank: [u16; 256],
+    pub skill_temp_bonus: [i16; 256],
+    pub skill_perm_bonus: [u16; 256],
+}
+
+impl Default for SkillInfoValuesUpdate {
+    fn default() -> Self {
+        Self {
+            skill_info_mask: [0; 57],
+            skill_line_id: [0; 256],
+            skill_step: [0; 256],
+            skill_rank: [0; 256],
+            skill_starting_rank: [0; 256],
+            skill_max_rank: [0; 256],
+            skill_temp_bonus: [0; 256],
+            skill_perm_bonus: [0; 256],
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerDataValuesDeltaUpdate {
     pub changed_object_type_mask: u32,
@@ -4100,6 +4127,12 @@ fn field_mask_has(mask: u64, bit: usize) -> bool {
     mask & (1u64 << bit) != 0
 }
 
+fn field_blocks_have(blocks: &[u32], bit: usize) -> bool {
+    let block = bit / 32;
+    let bit_in_block = bit % 32;
+    blocks.get(block).copied().unwrap_or(0) & (1 << bit_in_block) != 0
+}
+
 fn write_artifact_power_values_update(buf: &mut WorldPacket, data: &ArtifactPowerValuesUpdate) {
     buf.write_int16(data.artifact_power_id);
     buf.write_uint8(data.purchased_rank);
@@ -5411,6 +5444,56 @@ fn write_player_data_values_update(
     buf.flush_bits();
 }
 
+pub fn write_skill_info_values_update(buf: &mut WorldPacket, data: &SkillInfoValuesUpdate) {
+    let mut group0 = 0u32;
+    let mut group1 = 0u32;
+    for block in 0..32 {
+        if data.skill_info_mask[block] != 0 {
+            group0 |= 1 << block;
+        }
+    }
+    for block in 32..57 {
+        if data.skill_info_mask[block] != 0 {
+            group1 |= 1 << (block - 32);
+        }
+    }
+
+    buf.write_uint32(group0);
+    buf.write_bits(group1, 25);
+    for block in data.skill_info_mask {
+        if block != 0 {
+            buf.write_bits(block, 32);
+        }
+    }
+
+    buf.flush_bits();
+    if field_blocks_have(&data.skill_info_mask, 0) {
+        for index in 0..256 {
+            if field_blocks_have(&data.skill_info_mask, 1 + index) {
+                buf.write_uint16(data.skill_line_id[index]);
+            }
+            if field_blocks_have(&data.skill_info_mask, 257 + index) {
+                buf.write_uint16(data.skill_step[index]);
+            }
+            if field_blocks_have(&data.skill_info_mask, 513 + index) {
+                buf.write_uint16(data.skill_rank[index]);
+            }
+            if field_blocks_have(&data.skill_info_mask, 769 + index) {
+                buf.write_uint16(data.skill_starting_rank[index]);
+            }
+            if field_blocks_have(&data.skill_info_mask, 1025 + index) {
+                buf.write_uint16(data.skill_max_rank[index]);
+            }
+            if field_blocks_have(&data.skill_info_mask, 1281 + index) {
+                buf.write_int16(data.skill_temp_bonus[index]);
+            }
+            if field_blocks_have(&data.skill_info_mask, 1537 + index) {
+                buf.write_uint16(data.skill_perm_bonus[index]);
+            }
+        }
+    }
+}
+
 /// ActivePlayerData VALUES update for the runtime paths currently emitted by
 /// RustyCore: InvSlots[141], buyback, coinage and combat stats.
 ///
@@ -6577,6 +6660,29 @@ mod tests {
         assert_eq!(
             i32::from_le_bytes(bytes[bytes.len() - 4..].try_into().unwrap()),
             99
+        );
+    }
+
+    #[test]
+    fn skill_info_values_update_matches_cpp_mask_and_value_order() {
+        let mut data = SkillInfoValuesUpdate::default();
+        data.skill_info_mask[0] = (1 << 0) | (1 << 1);
+        data.skill_info_mask[16] = 1 << 1; // global bit 513: SkillRank[0]
+        data.skill_line_id[0] = 164;
+        data.skill_rank[0] = 75;
+
+        let mut values = WorldPacket::new_empty();
+        write_skill_info_values_update(&mut values, &data);
+
+        let bytes = values.into_data();
+        assert_eq!(&bytes[0..4], &[0x01, 0x00, 0x01, 0x00]); // blocks 0 and 16
+        assert_eq!(
+            u16::from_le_bytes(bytes[bytes.len() - 4..bytes.len() - 2].try_into().unwrap()),
+            164
+        );
+        assert_eq!(
+            u16::from_le_bytes(bytes[bytes.len() - 2..].try_into().unwrap()),
+            75
         );
     }
 
