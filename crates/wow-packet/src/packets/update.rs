@@ -93,6 +93,40 @@ pub struct SceneObjectDataValuesUpdate {
     pub scene_type: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConversationLineValuesUpdate {
+    pub conversation_line_id: i32,
+    pub start_time: u32,
+    pub ui_camera_id: i32,
+    pub actor_index: u8,
+    pub flags: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConversationActorValuesUpdate {
+    pub actor_type: u32,
+    pub id: i32,
+    pub creature_id: u32,
+    pub creature_display_info_id: u32,
+    pub actor_guid: ObjectGuid,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConversationDataValuesUpdate {
+    pub changed_object_type_mask: u32,
+    pub object_data: Option<ObjectDataValuesUpdate>,
+    pub conversation_data_mask: u32,
+    pub lines: Vec<ConversationLineValuesUpdate>,
+    pub actors: Vec<ConversationActorValuesUpdate>,
+    /// C++ `DynamicUpdateField<ConversationActor>` nested mask blocks.
+    ///
+    /// `None` represents `ignoreNestedChangesMask=true`, so all actors present in
+    /// `actors` are marked and written. `Some(blocks)` writes exactly those
+    /// nested change-mask bits and serializes only marked actor indices.
+    pub actor_update_mask: Option<Vec<u32>>,
+    pub last_line_end_time: i32,
+}
+
 // ── ItemCreateData ──────────────────────────────────────────────────
 
 /// Data needed to build an Item CREATE_OBJECT block for the client.
@@ -1514,6 +1548,11 @@ pub enum UpdateBlock {
         guid: ObjectGuid,
         data: SceneObjectDataValuesUpdate,
     },
+    /// VALUES update for ConversationData.
+    ConversationValuesUpdate {
+        guid: ObjectGuid,
+        data: ConversationDataValuesUpdate,
+    },
     /// Out-of-range destroy (removes object from client view without full destroy).
     DestroyOutOfRange { guid: ObjectGuid },
 }
@@ -1822,6 +1861,21 @@ impl UpdateObject {
         }
     }
 
+    /// Create a VALUES update for `UF::ConversationData`.
+    pub fn conversation_values_update(
+        guid: ObjectGuid,
+        map_id: u16,
+        data: ConversationDataValuesUpdate,
+    ) -> Self {
+        Self {
+            map_id,
+            num_updates: 1,
+            destroy_guids: Vec::new(),
+            out_of_range_guids: Vec::new(),
+            blocks: vec![UpdateBlock::ConversationValuesUpdate { guid, data }],
+        }
+    }
+
     /// Create an UpdateObject with item CREATE blocks.
     ///
     /// Each item gets its own block. Sent BEFORE the player CREATE packet
@@ -1960,6 +2014,9 @@ impl ServerPacket for UpdateObject {
                 }
                 UpdateBlock::SceneObjectValuesUpdate { guid, data } => {
                     write_scene_object_values_update_block(&mut blocks_buf, guid, *data);
+                }
+                UpdateBlock::ConversationValuesUpdate { guid, data } => {
+                    write_conversation_values_update_block(&mut blocks_buf, guid, data);
                 }
                 UpdateBlock::DestroyOutOfRange { .. } => {
                     // Handled via destroy_guids / out_of_range_guids, not as a block.
@@ -2520,6 +2577,7 @@ fn write_object_values_update_block(
 const VALUES_TYPE_OBJECT: u32 = 1 << 0;
 const VALUES_TYPE_DYNAMIC_OBJECT: u32 = 1 << 9;
 const VALUES_TYPE_SCENE_OBJECT: u32 = 1 << 12;
+const VALUES_TYPE_CONVERSATION: u32 = 1 << 13;
 
 fn write_object_data_values_update_section(buf: &mut WorldPacket, data: ObjectDataValuesUpdate) {
     let mask = data.object_data_mask & 0x0F;
@@ -2644,6 +2702,155 @@ fn write_scene_object_values_update_block(
             }
             if mask & 0x10 != 0 {
                 val_buf.write_uint32(data.scene_type);
+            }
+        }
+    }
+
+    let val_data = val_buf.into_data();
+    buf.write_uint32(val_data.len() as u32);
+    buf.write_bytes(&val_data);
+}
+
+fn write_conversation_line_values_update(
+    buf: &mut WorldPacket,
+    line: &ConversationLineValuesUpdate,
+) {
+    buf.write_int32(line.conversation_line_id);
+    buf.write_uint32(line.start_time);
+    buf.write_int32(line.ui_camera_id);
+    buf.write_uint8(line.actor_index);
+    buf.write_uint8(line.flags);
+}
+
+fn write_conversation_actor_values_update(
+    buf: &mut WorldPacket,
+    actor: &ConversationActorValuesUpdate,
+) {
+    buf.write_bits(actor.actor_type & 1, 1);
+    buf.write_int32(actor.id);
+
+    if actor.actor_type == 1 {
+        buf.write_uint32(actor.creature_id);
+        buf.write_uint32(actor.creature_display_info_id);
+    }
+
+    if actor.actor_type == 0 {
+        buf.write_packed_guid(&actor.actor_guid);
+    }
+
+    buf.flush_bits();
+}
+
+fn dynamic_mask_block(mask_blocks: &[u32], block_index: usize) -> u32 {
+    mask_blocks.get(block_index).copied().unwrap_or(0)
+}
+
+fn write_dynamic_field_update_mask(
+    buf: &mut WorldPacket,
+    size: usize,
+    update_mask: Option<&[u32]>,
+) {
+    buf.write_bits(size as u32, 32);
+
+    if size > 32 {
+        for block in 0..(size / 32) {
+            let mask = update_mask
+                .map(|blocks| dynamic_mask_block(blocks, block))
+                .unwrap_or(0xFFFF_FFFF);
+            buf.write_uint32(mask);
+        }
+    } else if size == 32 {
+        let mask = update_mask
+            .map(|blocks| dynamic_mask_block(blocks, 0))
+            .unwrap_or(0xFFFF_FFFF);
+        buf.write_bits(mask, 32);
+        return;
+    }
+
+    if size % 32 != 0 {
+        let block = size / 32;
+        let bits = (size % 32) as u32;
+        let mask = update_mask
+            .map(|blocks| dynamic_mask_block(blocks, block))
+            .unwrap_or(0xFFFF_FFFF);
+        buf.write_bits(mask, bits);
+    }
+}
+
+fn dynamic_mask_has_index(update_mask: Option<&[u32]>, index: usize) -> bool {
+    match update_mask {
+        None => true,
+        Some(blocks) => {
+            let block = index / 32;
+            let bit = index % 32;
+            dynamic_mask_block(blocks, block) & (1 << bit) != 0
+        }
+    }
+}
+
+fn write_conversation_values_update_block(
+    buf: &mut WorldPacket,
+    guid: &ObjectGuid,
+    data: &ConversationDataValuesUpdate,
+) {
+    buf.write_uint8(UpdateType::Values as u8);
+    buf.write_packed_guid(guid);
+
+    let mut val_buf = WorldPacket::new_empty();
+    val_buf.write_uint32(data.changed_object_type_mask);
+
+    if data.changed_object_type_mask & VALUES_TYPE_OBJECT != 0 {
+        if let Some(object_data) = data.object_data {
+            write_object_data_values_update_section(&mut val_buf, object_data);
+        } else {
+            write_object_data_values_update_section(
+                &mut val_buf,
+                ObjectDataValuesUpdate {
+                    changed_object_type_mask: VALUES_TYPE_OBJECT,
+                    object_data_mask: 0,
+                    entry_id: 0,
+                    dynamic_flags: 0,
+                    scale: 0.0,
+                },
+            );
+        }
+    }
+
+    if data.changed_object_type_mask & VALUES_TYPE_CONVERSATION != 0 {
+        let mask = data.conversation_data_mask & 0x0F;
+        val_buf.write_bits(mask, 4);
+
+        if mask & 0x01 != 0 {
+            if mask & 0x02 != 0 {
+                val_buf.write_bits(data.lines.len() as u32, 32);
+                for line in &data.lines {
+                    write_conversation_line_values_update(&mut val_buf, line);
+                }
+            }
+        }
+        val_buf.flush_bits();
+
+        if mask & 0x01 != 0 {
+            if mask & 0x04 != 0 {
+                write_dynamic_field_update_mask(
+                    &mut val_buf,
+                    data.actors.len(),
+                    data.actor_update_mask.as_deref(),
+                );
+            }
+        }
+        val_buf.flush_bits();
+
+        if mask & 0x01 != 0 {
+            if mask & 0x04 != 0 {
+                for (index, actor) in data.actors.iter().enumerate() {
+                    if dynamic_mask_has_index(data.actor_update_mask.as_deref(), index) {
+                        write_conversation_actor_values_update(&mut val_buf, actor);
+                    }
+                }
+            }
+            if mask & 0x08 != 0 {
+                val_buf.write_int32(data.last_line_end_time);
             }
         }
     }
@@ -3422,6 +3629,96 @@ mod tests {
         assert_eq!(&bytes[20..22], &[0, 0]);
         assert_eq!(u32::from_le_bytes(bytes[22..26].try_into().unwrap()), 1);
         assert_eq!(bytes.len(), 26);
+    }
+
+    #[test]
+    fn conversation_values_update_block_matches_cpp_last_line_delta_shape() {
+        let mut block = WorldPacket::new_empty();
+        write_conversation_values_update_block(
+            &mut block,
+            &ObjectGuid::EMPTY,
+            &ConversationDataValuesUpdate {
+                changed_object_type_mask: VALUES_TYPE_CONVERSATION,
+                object_data: None,
+                conversation_data_mask: 0b1001,
+                lines: Vec::new(),
+                actors: Vec::new(),
+                actor_update_mask: None,
+                last_line_end_time: 12_345,
+            },
+        );
+
+        let bytes = block.into_data();
+        assert_eq!(bytes[0], UpdateType::Values as u8);
+        assert_eq!(&bytes[1..3], &[0, 0]);
+        assert_eq!(u32::from_le_bytes(bytes[3..7].try_into().unwrap()), 9);
+        assert_eq!(
+            u32::from_le_bytes(bytes[7..11].try_into().unwrap()),
+            VALUES_TYPE_CONVERSATION
+        );
+        assert_eq!(bytes[11], 0b1001_0000);
+        assert_eq!(
+            i32::from_le_bytes(bytes[12..16].try_into().unwrap()),
+            12_345
+        );
+        assert_eq!(bytes.len(), 16);
+    }
+
+    #[test]
+    fn conversation_values_update_block_matches_cpp_lines_actors_delta_shape() {
+        let mut block = WorldPacket::new_empty();
+        write_conversation_values_update_block(
+            &mut block,
+            &ObjectGuid::EMPTY,
+            &ConversationDataValuesUpdate {
+                changed_object_type_mask: VALUES_TYPE_CONVERSATION,
+                object_data: None,
+                conversation_data_mask: 0b1111,
+                lines: vec![ConversationLineValuesUpdate {
+                    conversation_line_id: 7,
+                    start_time: 100,
+                    ui_camera_id: -3,
+                    actor_index: 2,
+                    flags: 0x80,
+                }],
+                actors: vec![ConversationActorValuesUpdate {
+                    actor_type: 1,
+                    id: 55,
+                    creature_id: 12_345,
+                    creature_display_info_id: 54_321,
+                    actor_guid: ObjectGuid::EMPTY,
+                }],
+                actor_update_mask: None,
+                last_line_end_time: 777,
+            },
+        );
+
+        let bytes = block.into_data();
+        assert_eq!(bytes[0], UpdateType::Values as u8);
+        assert_eq!(&bytes[1..3], &[0, 0]);
+        assert_eq!(u32::from_le_bytes(bytes[3..7].try_into().unwrap()), 45);
+        assert_eq!(
+            u32::from_le_bytes(bytes[7..11].try_into().unwrap()),
+            VALUES_TYPE_CONVERSATION
+        );
+        assert_eq!(&bytes[11..16], &[0xF0, 0x00, 0x00, 0x00, 0x10]);
+        assert_eq!(i32::from_le_bytes(bytes[16..20].try_into().unwrap()), 7);
+        assert_eq!(u32::from_le_bytes(bytes[20..24].try_into().unwrap()), 100);
+        assert_eq!(i32::from_le_bytes(bytes[24..28].try_into().unwrap()), -3);
+        assert_eq!(&bytes[28..30], &[2, 0x80]);
+        assert_eq!(&bytes[30..35], &[0x00, 0x00, 0x00, 0x01, 0x80]);
+        assert_eq!(bytes[35], 0x80);
+        assert_eq!(i32::from_le_bytes(bytes[36..40].try_into().unwrap()), 55);
+        assert_eq!(
+            u32::from_le_bytes(bytes[40..44].try_into().unwrap()),
+            12_345
+        );
+        assert_eq!(
+            u32::from_le_bytes(bytes[44..48].try_into().unwrap()),
+            54_321
+        );
+        assert_eq!(i32::from_le_bytes(bytes[48..52].try_into().unwrap()), 777);
+        assert_eq!(bytes.len(), 52);
     }
 
     #[test]
