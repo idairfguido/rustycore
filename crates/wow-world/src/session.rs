@@ -131,6 +131,8 @@ pub(crate) struct MovementAckEventLikeCpp {
     pub opcode: ClientOpcodes,
     pub mover_guid: ObjectGuid,
     pub ack_index: Option<i32>,
+    pub movement_force_id: Option<ObjectGuid>,
+    pub movement_force_type: Option<u8>,
     pub adjusted_time: Option<u32>,
     pub speed: Option<f32>,
     pub time_skipped: Option<u32>,
@@ -4537,6 +4539,18 @@ impl WorldSession {
                     Err(e) => warn!("Failed to read MoveSetCollisionHeightAck: {e}"),
                 }
             }
+            ClientOpcodes::MoveApplyMovementForceAck => {
+                match wow_packet::packets::movement::MoveApplyMovementForceAck::read(&mut pkt) {
+                    Ok(ack) => self.handle_move_apply_movement_force_ack(ack).await,
+                    Err(e) => warn!("Failed to read MoveApplyMovementForceAck: {e}"),
+                }
+            }
+            ClientOpcodes::MoveRemoveMovementForceAck => {
+                match wow_packet::packets::movement::MoveRemoveMovementForceAck::read(&mut pkt) {
+                    Ok(ack) => self.handle_move_remove_movement_force_ack(ack).await,
+                    Err(e) => warn!("Failed to read MoveRemoveMovementForceAck: {e}"),
+                }
+            }
             ClientOpcodes::MoveTimeSkipped => {
                 match wow_packet::packets::movement::MoveTimeSkipped::read(&mut pkt) {
                     Ok(skipped) => self.handle_move_time_skipped(skipped).await,
@@ -5986,6 +6000,8 @@ impl WorldSession {
                 opcode,
                 mover_guid: ack.status.guid,
                 ack_index: Some(ack.ack_index),
+                movement_force_id: None,
+                movement_force_type: None,
                 adjusted_time: None,
                 speed: None,
                 time_skipped: None,
@@ -6003,6 +6019,8 @@ impl WorldSession {
             opcode,
             mover_guid: status.guid,
             ack_index: Some(ack.ack_index),
+            movement_force_id: None,
+            movement_force_type: None,
             adjusted_time: Some(status.time),
             speed: None,
             time_skipped: None,
@@ -6028,6 +6046,8 @@ impl WorldSession {
             opcode: ClientOpcodes::MoveTimeSkipped,
             mover_guid,
             ack_index: None,
+            movement_force_id: None,
+            movement_force_type: None,
             adjusted_time: accepted.then_some(self.player_movement_time_like_cpp),
             speed: None,
             time_skipped: Some(time_skipped),
@@ -6048,6 +6068,8 @@ impl WorldSession {
             opcode,
             mover_guid: ack.status.guid,
             ack_index: Some(ack.ack_index),
+            movement_force_id: None,
+            movement_force_type: None,
             adjusted_time: None,
             speed,
             time_skipped: None,
@@ -6055,6 +6077,80 @@ impl WorldSession {
             accepted,
         });
         accepted
+    }
+
+    pub(crate) fn record_apply_movement_force_ack_like_cpp(
+        &mut self,
+        ack: &wow_packet::packets::movement::MovementAck,
+        force: &wow_packet::packets::movement::MovementForce,
+    ) -> bool {
+        if !self.validate_movement_ack_status_like_cpp(&ack.status) {
+            self.record_movement_ack_event_like_cpp(MovementAckEventLikeCpp {
+                opcode: ClientOpcodes::MoveApplyMovementForceAck,
+                mover_guid: ack.status.guid,
+                ack_index: Some(ack.ack_index),
+                movement_force_id: Some(force.id),
+                movement_force_type: Some(force.force_type.to_wire()),
+                adjusted_time: None,
+                speed: None,
+                time_skipped: None,
+                spline_id: None,
+                accepted: false,
+            });
+            return false;
+        }
+
+        let adjusted_time = self.adjust_client_movement_time_like_cpp(ack.status.time);
+        self.record_movement_ack_event_like_cpp(MovementAckEventLikeCpp {
+            opcode: ClientOpcodes::MoveApplyMovementForceAck,
+            mover_guid: ack.status.guid,
+            ack_index: Some(ack.ack_index),
+            movement_force_id: Some(force.id),
+            movement_force_type: Some(force.force_type.to_wire()),
+            adjusted_time: Some(adjusted_time),
+            speed: None,
+            time_skipped: None,
+            spline_id: None,
+            accepted: true,
+        });
+        true
+    }
+
+    pub(crate) fn record_remove_movement_force_ack_like_cpp(
+        &mut self,
+        ack: &wow_packet::packets::movement::MovementAck,
+        force_id: ObjectGuid,
+    ) -> bool {
+        if !self.validate_movement_ack_status_like_cpp(&ack.status) {
+            self.record_movement_ack_event_like_cpp(MovementAckEventLikeCpp {
+                opcode: ClientOpcodes::MoveRemoveMovementForceAck,
+                mover_guid: ack.status.guid,
+                ack_index: Some(ack.ack_index),
+                movement_force_id: Some(force_id),
+                movement_force_type: None,
+                adjusted_time: None,
+                speed: None,
+                time_skipped: None,
+                spline_id: None,
+                accepted: false,
+            });
+            return false;
+        }
+
+        let adjusted_time = self.adjust_client_movement_time_like_cpp(ack.status.time);
+        self.record_movement_ack_event_like_cpp(MovementAckEventLikeCpp {
+            opcode: ClientOpcodes::MoveRemoveMovementForceAck,
+            mover_guid: ack.status.guid,
+            ack_index: Some(ack.ack_index),
+            movement_force_id: Some(force_id),
+            movement_force_type: None,
+            adjusted_time: Some(adjusted_time),
+            speed: None,
+            time_skipped: None,
+            spline_id: None,
+            accepted: true,
+        });
+        true
     }
 
     pub(crate) fn record_move_spline_done_like_cpp(
@@ -6067,6 +6163,8 @@ impl WorldSession {
             opcode: ClientOpcodes::MoveSplineDone,
             mover_guid: status.guid,
             ack_index: None,
+            movement_force_id: None,
+            movement_force_type: None,
             adjusted_time: None,
             speed: None,
             time_skipped: None,
@@ -6087,6 +6185,8 @@ impl WorldSession {
             opcode: ClientOpcodes::MoveTeleportAck,
             mover_guid,
             ack_index: Some(ack_index),
+            movement_force_id: None,
+            movement_force_type: None,
             adjusted_time: (move_time >= 0).then_some(move_time as u32),
             speed: None,
             time_skipped: None,

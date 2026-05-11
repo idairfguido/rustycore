@@ -55,7 +55,7 @@ Fecha: 2026-05-11
 | `MoveTimeSkipped` | Corregido en `#A06.8a`: Rust salió de `misc` stub, lee `MoverGUID` + `TimeSkipped`, valida mover y suma `time_skipped` al tiempo de movimiento representado. | OK parcial | `#A06.8d`: emitir `SMSG_MOVE_SKIP_TIME` a set, excluyendo al jugador como C++. |
 | `MoveSplineDone` | Corregido en `#A06.8a` a nivel parser/handler: Rust lee `MovementInfo` + `SplineID`, valida y registra. | OK parcial | `#A06.8e`: integrar taxi flight, teleport de nodos y cleanup post-taxi cuando MotionMaster/Taxi runtime esté completo. |
 | `MoveTeleportAck` | Corregido en `#A06.8a` a nivel parser/handler: Rust lee `MoverGUID`, `AckIndex`, `MoveTime`, valida GUID y registra. | OK parcial | `#A06.8f`: near-teleport semaphore, aplicar destino, zone/PvP/pet/delayed operations cuando Player teleport runtime exista. |
-| ACKs de movement force (`MoveApplyMovementForceAck`, `MoveRemoveMovementForceAck`) | C++ los parsea y rebroadcasts con `MoveUpdateApply/RemoveMovementForce`; Rust aún no tiene `MovementForce` parser ni server update equivalente en esta subfase. | Missing | `#A06.8d`: portar `MovementForce` wire y broadcasts. |
+| ACKs de movement force (`MoveApplyMovementForceAck`, `MoveRemoveMovementForceAck`) | Corregido parcialmente en `#A06.8d`: Rust porta `MovementForce` wire (`ID`, origin/direction XYZ, transport id, magnitude, `Unused910`, type de 2 bits), parsea Apply/Remove ACK, valida GUID/coord, ajusta time y registra force id/type. | OK parcial | `#A06.8c`: emitir `SMSG_MOVE_UPDATE_APPLY_MOVEMENT_FORCE` y `SMSG_MOVE_UPDATE_REMOVE_MOVEMENT_FORCE` a set. |
 | `SMSG_ON_MONSTER_MOVE` C++ usa `MovementMonsterSpline` completo con flags, filters, face modes, packed deltas, extras | Rust `MonsterMove` es una versión simplificada de un punto y no representa `MoveSpline`. | Missing | Cubrir en Fase 2.1 `MoveSpline real`; no usarlo como port completo. |
 
 ## TODOs añadidos al roadmap
@@ -68,7 +68,8 @@ Fecha: 2026-05-11
 - `#A06.6`: `#A06.6.1-#A06.6.2` corregidos; quedan `#A06.6.3-#A06.6.4` para under-map y conexión real Aura/Pet/Proc.
 - `#A06.7`: portar efectos de `MoveInitActiveMoverComplete`.
 - `#A06.8a`: corregido; parsers/handlers base para ACKs genéricos, speed ACKs, knockback, collision height, time skipped, spline done y teleport ack.
-- `#A06.8b-#A06.8g`: pendientes explícitos para speed anticheat/counters, broadcasts knockback/time-skipped/movement-force, taxi spline done y near teleport runtime.
+- `#A06.8d`: corregido parcialmente; `MovementForce` wire y Apply/Remove ACK quedan parseados y registrados.
+- `#A06.8b/#A06.8c/#A06.8e-#A06.8g`: pendientes explícitos para speed anticheat/counters, broadcasts knockback/time-skipped/movement-force, taxi spline done, near teleport runtime y `ValidateMovementInfo` completo.
 
 ## Conclusión
 

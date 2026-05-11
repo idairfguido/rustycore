@@ -21,9 +21,10 @@ use wow_constants::unit::UnitStandStateType;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::ServerPacket;
 use wow_packet::packets::movement::{
-    ClientPlayerMovement, MoveInitActiveMoverComplete, MoveKnockBackAck, MoveSetCollisionHeightAck,
-    MoveSplineDone, MoveTeleportAck, MoveTimeSkipped, MoveUpdate, MovementAckMessage, MovementInfo,
-    MovementSpeedAck, SetActiveMover,
+    ClientPlayerMovement, MoveApplyMovementForceAck, MoveInitActiveMoverComplete, MoveKnockBackAck,
+    MoveRemoveMovementForceAck, MoveSetCollisionHeightAck, MoveSplineDone, MoveTeleportAck,
+    MoveTimeSkipped, MoveUpdate, MovementAckMessage, MovementInfo, MovementSpeedAck,
+    SetActiveMover,
 };
 
 use crate::session::{
@@ -350,6 +351,26 @@ impl WorldSession {
         );
     }
 
+    /// Handle C++ `HandleMoveApplyMovementForceAck` bookkeeping until movement-force broadcasts exist.
+    pub async fn handle_move_apply_movement_force_ack(&mut self, pkt: MoveApplyMovementForceAck) {
+        trace!(
+            account = self.account_id,
+            force = ?pkt.force.id,
+            "MoveApplyMovementForceAck"
+        );
+        self.record_apply_movement_force_ack_like_cpp(&pkt.ack, &pkt.force);
+    }
+
+    /// Handle C++ `HandleMoveRemoveMovementForceAck` bookkeeping until movement-force broadcasts exist.
+    pub async fn handle_move_remove_movement_force_ack(&mut self, pkt: MoveRemoveMovementForceAck) {
+        trace!(
+            account = self.account_id,
+            force = ?pkt.id,
+            "MoveRemoveMovementForceAck"
+        );
+        self.record_remove_movement_force_ack_like_cpp(&pkt.ack, pkt.id);
+    }
+
     /// Handle C++ `HandleMoveTimeSkippedOpcode`.
     pub async fn handle_move_time_skipped(&mut self, pkt: MoveTimeSkipped) {
         trace!(
@@ -671,6 +692,71 @@ mod tests {
         assert_eq!(session.player_movement_time_like_cpp(), 125);
         assert!(!session.movement_ack_events_like_cpp()[2].accepted);
     }
+
+    #[test]
+    fn movement_force_ack_helpers_record_cpp_adjusted_time_and_force_id() {
+        let mut session = make_session();
+        let guid = ObjectGuid::create_player(1, 42);
+        let force_guid = ObjectGuid::create_world_object(
+            wow_core::guid::HighGuid::GameObject,
+            0,
+            1,
+            0,
+            0,
+            9,
+            88,
+        );
+        session.set_player_guid(Some(guid));
+
+        let ack = wow_packet::packets::movement::MovementAck {
+            status: MovementInfo {
+                guid,
+                time: 1_000,
+                position: wow_core::Position::new(10.0, 20.0, 30.0, 1.5),
+                ..MovementInfo::default()
+            },
+            ack_index: 44,
+        };
+        let force = wow_packet::packets::movement::MovementForce {
+            id: force_guid,
+            origin: [1.0, 2.0, 3.0],
+            direction: [4.0, 5.0, 6.0],
+            transport_id: 0,
+            magnitude: 7.0,
+            unused_910: 0,
+            force_type: wow_packet::packets::movement::MovementForceType::Gravity,
+        };
+
+        assert!(session.record_apply_movement_force_ack_like_cpp(&ack, &force));
+        assert_eq!(session.movement_ack_events_like_cpp().len(), 1);
+        assert_eq!(
+            session.movement_ack_events_like_cpp()[0].opcode,
+            ClientOpcodes::MoveApplyMovementForceAck
+        );
+        assert_eq!(
+            session.movement_ack_events_like_cpp()[0].movement_force_id,
+            Some(force_guid)
+        );
+        assert_eq!(
+            session.movement_ack_events_like_cpp()[0].movement_force_type,
+            Some(1)
+        );
+        assert!(
+            session.movement_ack_events_like_cpp()[0]
+                .adjusted_time
+                .is_some()
+        );
+
+        assert!(session.record_remove_movement_force_ack_like_cpp(&ack, force_guid));
+        assert_eq!(
+            session.movement_ack_events_like_cpp()[1].opcode,
+            ClientOpcodes::MoveRemoveMovementForceAck
+        );
+        assert_eq!(
+            session.movement_ack_events_like_cpp()[1].movement_force_id,
+            Some(force_guid)
+        );
+    }
 }
 
 // ── Handler registration (SetActiveMover) ────────────────────────
@@ -764,6 +850,24 @@ inventory::submit! {
         status: SessionStatus::LoggedIn,
         processing: PacketProcessing::Inplace,
         handler_name: "handle_move_set_collision_height_ack",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::MoveApplyMovementForceAck,
+        status: SessionStatus::LoggedIn,
+        processing: PacketProcessing::Inplace,
+        handler_name: "handle_move_apply_movement_force_ack",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::MoveRemoveMovementForceAck,
+        status: SessionStatus::LoggedIn,
+        processing: PacketProcessing::Inplace,
+        handler_name: "handle_move_remove_movement_force_ack",
     }
 }
 

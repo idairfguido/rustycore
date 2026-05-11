@@ -464,6 +464,133 @@ impl MoveSetCollisionHeightAck {
     }
 }
 
+/// C++ `MovementForceType`, stored as two bits on the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MovementForceType {
+    SingleDirectional,
+    Gravity,
+    Unknown(u8),
+}
+
+impl MovementForceType {
+    fn from_wire(value: u8) -> Self {
+        match value {
+            0 => Self::SingleDirectional,
+            1 => Self::Gravity,
+            value => Self::Unknown(value),
+        }
+    }
+
+    pub fn to_wire(self) -> u8 {
+        match self {
+            Self::SingleDirectional => 0,
+            Self::Gravity => 1,
+            Self::Unknown(value) => value & 0x03,
+        }
+    }
+}
+
+/// C++ `MovementForce` wire shape.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MovementForce {
+    pub id: ObjectGuid,
+    pub origin: [f32; 3],
+    pub direction: [f32; 3],
+    pub transport_id: u32,
+    pub magnitude: f32,
+    pub unused_910: i32,
+    pub force_type: MovementForceType,
+}
+
+impl MovementForce {
+    pub fn read(pkt: &mut WorldPacket) -> Result<Self, PacketError> {
+        Ok(Self {
+            id: pkt.read_packed_guid()?,
+            origin: [pkt.read_float()?, pkt.read_float()?, pkt.read_float()?],
+            direction: [pkt.read_float()?, pkt.read_float()?, pkt.read_float()?],
+            transport_id: pkt.read_uint32()?,
+            magnitude: pkt.read_float()?,
+            unused_910: pkt.read_int32()?,
+            force_type: MovementForceType::from_wire(pkt.read_bits(2)? as u8),
+        })
+    }
+
+    pub fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_packed_guid(&self.id);
+        for value in self.origin {
+            pkt.write_float(value);
+        }
+        for value in self.direction {
+            pkt.write_float(value);
+        }
+        pkt.write_uint32(self.transport_id);
+        pkt.write_float(self.magnitude);
+        pkt.write_int32(self.unused_910);
+        pkt.write_bits(u32::from(self.force_type.to_wire()), 2);
+        pkt.flush_bits();
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MoveApplyMovementForceAck {
+    pub ack: MovementAck,
+    pub force: MovementForce,
+}
+
+impl MoveApplyMovementForceAck {
+    pub fn read(pkt: &mut WorldPacket) -> Result<Self, PacketError> {
+        Ok(Self {
+            ack: MovementAck::read(pkt)?,
+            force: MovementForce::read(pkt)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MoveRemoveMovementForceAck {
+    pub ack: MovementAck,
+    pub id: ObjectGuid,
+}
+
+impl MoveRemoveMovementForceAck {
+    pub fn read(pkt: &mut WorldPacket) -> Result<Self, PacketError> {
+        Ok(Self {
+            ack: MovementAck::read(pkt)?,
+            id: pkt.read_packed_guid()?,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MoveUpdateApplyMovementForce {
+    pub status: MovementInfo,
+    pub force: MovementForce,
+}
+
+impl ServerPacket for MoveUpdateApplyMovementForce {
+    const OPCODE: ServerOpcodes = ServerOpcodes::MoveUpdateApplyMovementForce;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        self.status.write(pkt);
+        self.force.write(pkt);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MoveUpdateRemoveMovementForce {
+    pub status: MovementInfo,
+    pub trigger_guid: ObjectGuid,
+}
+
+impl ServerPacket for MoveUpdateRemoveMovementForce {
+    const OPCODE: ServerOpcodes = ServerOpcodes::MoveUpdateRemoveMovementForce;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        self.status.write(pkt);
+        pkt.write_packed_guid(&self.trigger_guid);
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MoveTimeSkipped {
     pub mover_guid: ObjectGuid,
@@ -843,5 +970,46 @@ mod tests {
         assert_eq!(teleport.mover_guid, guid);
         assert_eq!(teleport.ack_index, 11);
         assert_eq!(teleport.move_time, 12);
+    }
+
+    #[test]
+    fn movement_force_ack_packets_read_cpp_field_order() {
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let force_guid = ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 0, 0, 9, 88);
+        let info = MovementInfo {
+            guid: player_guid,
+            time: 1234,
+            position: Position::new(1.0, 2.0, 3.0, 4.0),
+            ..MovementInfo::default()
+        };
+        let force = MovementForce {
+            id: force_guid,
+            origin: [1.0, 2.0, 3.0],
+            direction: [4.0, 5.0, 6.0],
+            transport_id: 7,
+            magnitude: 8.5,
+            unused_910: 9,
+            force_type: MovementForceType::Gravity,
+        };
+
+        let mut pkt = WorldPacket::new_empty();
+        info.write(&mut pkt);
+        pkt.write_int32(33);
+        force.write(&mut pkt);
+        let mut pkt = WorldPacket::from_bytes(pkt.data());
+        let apply = MoveApplyMovementForceAck::read(&mut pkt).unwrap();
+        assert_eq!(apply.ack.status.guid, player_guid);
+        assert_eq!(apply.ack.ack_index, 33);
+        assert_eq!(apply.force, force);
+
+        let mut pkt = WorldPacket::new_empty();
+        info.write(&mut pkt);
+        pkt.write_int32(34);
+        pkt.write_packed_guid(&force_guid);
+        let mut pkt = WorldPacket::from_bytes(pkt.data());
+        let remove = MoveRemoveMovementForceAck::read(&mut pkt).unwrap();
+        assert_eq!(remove.ack.status.guid, player_guid);
+        assert_eq!(remove.ack.ack_index, 34);
+        assert_eq!(remove.id, force_guid);
     }
 }
