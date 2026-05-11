@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use wow_constants::{TypeId, TypeMask};
 use wow_core::ObjectGuid;
@@ -213,7 +213,6 @@ impl MapObjectRecord {
 pub struct ObjectAccessor {
     players: HashMap<ObjectGuid, AccessorPlayer>,
     player_names: HashMap<String, ObjectGuid>,
-    map_objects: BTreeMap<MapKey, HashMap<ObjectGuid, MapObjectRecord>>,
 }
 
 impl ObjectAccessor {
@@ -356,34 +355,6 @@ impl ObjectAccessor {
         self.players.len()
     }
 
-    pub fn insert_map_object(
-        &mut self,
-        kind: AccessorObjectKind,
-        object: WorldObject,
-    ) -> Result<(), ObjectAccessorError> {
-        let record = MapObjectRecord::new(kind, object)?;
-        let key = MapKey::from_world_object(record.object());
-        self.map_objects
-            .entry(key)
-            .or_default()
-            .insert(record.object.guid(), record);
-        Ok(())
-    }
-
-    pub fn remove_map_object(
-        &mut self,
-        guid: ObjectGuid,
-        map_id: u32,
-        instance_id: u32,
-    ) -> Option<MapObjectRecord> {
-        self.map_objects
-            .get_mut(&MapKey {
-                map_id,
-                instance_id,
-            })?
-            .remove(&guid)
-    }
-
     pub fn get_world_object(
         &self,
         context: &WorldObject,
@@ -391,16 +362,15 @@ impl ObjectAccessor {
     ) -> Option<&WorldObject> {
         match AccessorObjectKind::from_guid(guid)? {
             AccessorObjectKind::Player => self.get_player(context, guid),
-            AccessorObjectKind::Creature => self.get_creature(context, guid),
-            AccessorObjectKind::Pet => self.get_pet(context, guid),
-            AccessorObjectKind::GameObject | AccessorObjectKind::Transport => {
-                self.get_game_object(context, guid)
-            }
-            AccessorObjectKind::DynamicObject => self.get_dynamic_object(context, guid),
-            AccessorObjectKind::AreaTrigger => self.get_area_trigger(context, guid),
-            AccessorObjectKind::Corpse => self.get_corpse(context, guid),
-            AccessorObjectKind::SceneObject => self.get_scene_object(context, guid),
-            AccessorObjectKind::Conversation => self.get_conversation(context, guid),
+            AccessorObjectKind::Creature
+            | AccessorObjectKind::Pet
+            | AccessorObjectKind::GameObject
+            | AccessorObjectKind::Transport
+            | AccessorObjectKind::DynamicObject
+            | AccessorObjectKind::AreaTrigger
+            | AccessorObjectKind::Corpse
+            | AccessorObjectKind::SceneObject
+            | AccessorObjectKind::Conversation => None,
         }
     }
 
@@ -430,32 +400,15 @@ impl ObjectAccessor {
             AccessorObjectKind::Player if type_mask.contains(TypeMask::PLAYER) => self
                 .get_player(context, guid)
                 .map(AccessorObjectRef::WorldObject),
-            AccessorObjectKind::GameObject | AccessorObjectKind::Transport
-                if type_mask.contains(TypeMask::GAME_OBJECT) =>
-            {
-                self.get_game_object(context, guid)
-                    .map(AccessorObjectRef::WorldObject)
-            }
-            AccessorObjectKind::Creature | AccessorObjectKind::Pet
-                if type_mask.contains(TypeMask::UNIT) =>
-            {
-                self.get_unit(context, guid)
-                    .map(AccessorObjectRef::WorldObject)
-            }
-            AccessorObjectKind::DynamicObject if type_mask.contains(TypeMask::DYNAMIC_OBJECT) => {
-                self.get_dynamic_object(context, guid)
-                    .map(AccessorObjectRef::WorldObject)
-            }
-            AccessorObjectKind::AreaTrigger if type_mask.contains(TypeMask::AREA_TRIGGER) => self
-                .get_area_trigger(context, guid)
-                .map(AccessorObjectRef::WorldObject),
-            AccessorObjectKind::SceneObject if type_mask.contains(TypeMask::SCENE_OBJECT) => self
-                .get_scene_object(context, guid)
-                .map(AccessorObjectRef::WorldObject),
-            AccessorObjectKind::Conversation if type_mask.contains(TypeMask::CONVERSATION) => self
-                .get_conversation(context, guid)
-                .map(AccessorObjectRef::WorldObject),
-            AccessorObjectKind::Corpse => None,
+            AccessorObjectKind::GameObject
+            | AccessorObjectKind::Transport
+            | AccessorObjectKind::Creature
+            | AccessorObjectKind::Pet
+            | AccessorObjectKind::DynamicObject
+            | AccessorObjectKind::AreaTrigger
+            | AccessorObjectKind::SceneObject
+            | AccessorObjectKind::Conversation
+            | AccessorObjectKind::Corpse => None,
             _ => None,
         }
     }
@@ -604,6 +557,98 @@ impl ObjectAccessor {
         }
     }
 
+    pub fn get_unit_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a WorldObject>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        if guid.is_player() {
+            return self.get_player(context, guid);
+        }
+        if guid.is_pet() {
+            return self.get_pet_from_map_source(context, source, guid);
+        }
+        self.get_creature_from_map_source(context, source, guid)
+    }
+
+    pub fn get_creature_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a WorldObject>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        self.get_map_object_from_source(context, source, guid, &[AccessorObjectKind::Creature])
+    }
+
+    pub fn get_pet_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a WorldObject>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        self.get_map_object_from_source(context, source, guid, &[AccessorObjectKind::Pet])
+    }
+
+    pub fn get_creature_or_pet_or_vehicle_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a WorldObject>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        if guid.is_pet() {
+            return self.get_pet_from_map_source(context, source, guid);
+        }
+        if guid.is_creature_or_vehicle() {
+            return self.get_creature_from_map_source(context, source, guid);
+        }
+        None
+    }
+
+    pub fn get_game_object_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a WorldObject>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        self.get_map_object_from_source(
+            context,
+            source,
+            guid,
+            &[
+                AccessorObjectKind::GameObject,
+                AccessorObjectKind::Transport,
+            ],
+        )
+    }
+
+    pub fn get_corpse_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a WorldObject>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        self.get_map_object_from_source(context, source, guid, &[AccessorObjectKind::Corpse])
+    }
+
     pub fn get_player(&self, context: &WorldObject, guid: ObjectGuid) -> Option<&WorldObject> {
         let player = self.find_connected_player(guid)?;
         player
@@ -613,100 +658,93 @@ impl ObjectAccessor {
             .filter(|player| same_map(context, player))
     }
 
+    #[deprecated(note = "map-local unit lookup requires ObjectAccessorMapSource")]
     pub fn get_unit(&self, context: &WorldObject, guid: ObjectGuid) -> Option<&WorldObject> {
         if guid.is_player() {
             return self.get_player(context, guid);
         }
-        if guid.is_pet() {
-            return self.get_pet(context, guid);
-        }
-        self.get_creature(context, guid)
+        let _ = (context, guid);
+        None
     }
 
+    #[deprecated(note = "map-local creature lookup requires ObjectAccessorMapSource")]
     pub fn get_creature(&self, context: &WorldObject, guid: ObjectGuid) -> Option<&WorldObject> {
-        self.get_map_object(context, guid, &[AccessorObjectKind::Creature])
+        let _ = (context, guid);
+        None
     }
 
+    #[deprecated(note = "map-local pet lookup requires ObjectAccessorMapSource")]
     pub fn get_pet(&self, context: &WorldObject, guid: ObjectGuid) -> Option<&WorldObject> {
-        self.get_map_object(context, guid, &[AccessorObjectKind::Pet])
+        let _ = (context, guid);
+        None
     }
 
+    #[deprecated(note = "map-local creature/pet/vehicle lookup requires ObjectAccessorMapSource")]
     pub fn get_creature_or_pet_or_vehicle(
         &self,
         context: &WorldObject,
         guid: ObjectGuid,
     ) -> Option<&WorldObject> {
-        if guid.is_pet() {
-            return self.get_pet(context, guid);
-        }
-        if guid.is_creature_or_vehicle() {
-            return self.get_creature(context, guid);
-        }
+        let _ = (context, guid);
         None
     }
 
+    #[deprecated(note = "map-local gameobject lookup requires ObjectAccessorMapSource")]
     pub fn get_game_object(&self, context: &WorldObject, guid: ObjectGuid) -> Option<&WorldObject> {
-        self.get_map_object(
-            context,
-            guid,
-            &[
-                AccessorObjectKind::GameObject,
-                AccessorObjectKind::Transport,
-            ],
-        )
+        let _ = (context, guid);
+        None
     }
 
+    #[deprecated(note = "map-local transport lookup requires ObjectAccessorMapSource")]
     pub fn get_transport(&self, context: &WorldObject, guid: ObjectGuid) -> Option<&WorldObject> {
-        self.get_map_object(context, guid, &[AccessorObjectKind::Transport])
+        let _ = (context, guid);
+        None
     }
 
+    #[deprecated(note = "map-local dynamic object lookup requires ObjectAccessorMapSource")]
     pub fn get_dynamic_object(
         &self,
         context: &WorldObject,
         guid: ObjectGuid,
     ) -> Option<&WorldObject> {
-        self.get_map_object(context, guid, &[AccessorObjectKind::DynamicObject])
+        let _ = (context, guid);
+        None
     }
 
+    #[deprecated(note = "map-local area trigger lookup requires ObjectAccessorMapSource")]
     pub fn get_area_trigger(
         &self,
         context: &WorldObject,
         guid: ObjectGuid,
     ) -> Option<&WorldObject> {
-        self.get_map_object(context, guid, &[AccessorObjectKind::AreaTrigger])
+        let _ = (context, guid);
+        None
     }
 
+    #[deprecated(note = "map-local corpse lookup requires ObjectAccessorMapSource")]
     pub fn get_corpse(&self, context: &WorldObject, guid: ObjectGuid) -> Option<&WorldObject> {
-        self.get_map_object(context, guid, &[AccessorObjectKind::Corpse])
+        let _ = (context, guid);
+        None
     }
 
+    #[deprecated(note = "map-local scene object lookup requires ObjectAccessorMapSource")]
     pub fn get_scene_object(
         &self,
         context: &WorldObject,
         guid: ObjectGuid,
     ) -> Option<&WorldObject> {
-        self.get_map_object(context, guid, &[AccessorObjectKind::SceneObject])
+        let _ = (context, guid);
+        None
     }
 
+    #[deprecated(note = "map-local conversation lookup requires ObjectAccessorMapSource")]
     pub fn get_conversation(
         &self,
         context: &WorldObject,
         guid: ObjectGuid,
     ) -> Option<&WorldObject> {
-        self.get_map_object(context, guid, &[AccessorObjectKind::Conversation])
-    }
-
-    fn get_map_object(
-        &self,
-        context: &WorldObject,
-        guid: ObjectGuid,
-        allowed: &[AccessorObjectKind],
-    ) -> Option<&WorldObject> {
-        let record = self
-            .map_objects
-            .get(&MapKey::from_world_object(context))?
-            .get(&guid)?;
-        allowed.contains(&record.kind).then_some(record.object())
+        let _ = (context, guid);
+        None
     }
 
     fn get_map_object_from_source<'a, Source>(
@@ -763,21 +801,6 @@ pub enum ObjectAccessorError {
     ObjectHasNoMap {
         guid: ObjectGuid,
     },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct MapKey {
-    map_id: u32,
-    instance_id: u32,
-}
-
-impl MapKey {
-    const fn from_world_object(object: &WorldObject) -> Self {
-        Self {
-            map_id: object.map_id(),
-            instance_id: object.instance_id(),
-        }
-    }
 }
 
 pub fn normalize_player_name(name: &str) -> Option<String> {
@@ -937,17 +960,21 @@ mod tests {
     }
 
     #[test]
-    fn save_all_players_with_does_not_break_name_or_bridge_map_state() {
+    fn save_all_players_with_does_not_break_name_or_canonical_map_source_lookup() {
         let mut accessor = ObjectAccessor::default();
         let context = world_object(HighGuid::Player, 530, 1, true);
         let player_guid = context.guid();
         let creature = world_object(HighGuid::Creature, 530, 1, true);
         let creature_guid = creature.guid();
+        let record = MapObjectRecord::new(AccessorObjectKind::Creature, creature).unwrap();
+        let mut source = TestMapSource {
+            map_id: 530,
+            instance_id: 1,
+            records: std::collections::HashMap::new(),
+        };
+        source.records.insert(creature_guid, record);
 
         accessor.add_player("valeera", context.clone()).unwrap();
-        accessor
-            .insert_map_object(AccessorObjectKind::Creature, creature)
-            .unwrap();
 
         let saved = accessor
             .save_all_players_with(|_| Ok::<(), ()>(()))
@@ -963,7 +990,7 @@ mod tests {
         );
         assert_eq!(
             accessor
-                .get_creature(&context, creature_guid)
+                .get_creature_from_map_source(&context, &source, creature_guid)
                 .unwrap()
                 .guid(),
             creature_guid
@@ -1005,7 +1032,6 @@ mod tests {
         };
         source.records.insert(creature_guid, record);
 
-        assert!(accessor.get_creature(&context, creature_guid).is_none());
         assert_eq!(
             accessor
                 .get_world_object_from_map_source(&context, &source, creature_guid)
@@ -1051,31 +1077,38 @@ mod tests {
     }
 
     #[test]
-    fn world_object_dispatches_by_high_guid_to_map_store() {
-        let mut accessor = ObjectAccessor::default();
+    fn world_object_dispatches_by_high_guid_to_map_source() {
+        let accessor = ObjectAccessor::default();
         let context = world_object(HighGuid::Player, 530, 1, true);
         let creature = world_object(HighGuid::Creature, 530, 1, true);
         let gameobject = world_object(HighGuid::GameObject, 530, 1, true);
         let creature_guid = creature.guid();
         let gameobject_guid = gameobject.guid();
+        let mut source = TestMapSource {
+            map_id: 530,
+            instance_id: 1,
+            records: std::collections::HashMap::new(),
+        };
 
-        accessor
-            .insert_map_object(AccessorObjectKind::Creature, creature)
-            .unwrap();
-        accessor
-            .insert_map_object(AccessorObjectKind::GameObject, gameobject)
-            .unwrap();
+        source.records.insert(
+            creature_guid,
+            MapObjectRecord::new(AccessorObjectKind::Creature, creature).unwrap(),
+        );
+        source.records.insert(
+            gameobject_guid,
+            MapObjectRecord::new(AccessorObjectKind::GameObject, gameobject).unwrap(),
+        );
 
         assert_eq!(
             accessor
-                .get_world_object(&context, creature_guid)
+                .get_world_object_from_map_source(&context, &source, creature_guid)
                 .unwrap()
                 .guid(),
             creature_guid
         );
         assert_eq!(
             accessor
-                .get_world_object(&context, gameobject_guid)
+                .get_world_object_from_map_source(&context, &source, gameobject_guid)
                 .unwrap()
                 .guid(),
             gameobject_guid
@@ -1083,28 +1116,49 @@ mod tests {
     }
 
     #[test]
-    fn object_by_type_mask_matches_cpp_dispatch_rules() {
-        let mut accessor = ObjectAccessor::default();
+    fn object_by_type_mask_matches_cpp_dispatch_rules_with_map_source() {
+        let accessor = ObjectAccessor::default();
         let context = world_object(HighGuid::Player, 530, 1, true);
         let creature = world_object(HighGuid::Creature, 530, 1, true);
         let creature_guid = creature.guid();
-        accessor
-            .insert_map_object(AccessorObjectKind::Creature, creature)
-            .unwrap();
+        let mut source = TestMapSource {
+            map_id: 530,
+            instance_id: 1,
+            records: std::collections::HashMap::new(),
+        };
+        source.records.insert(
+            creature_guid,
+            MapObjectRecord::new(AccessorObjectKind::Creature, creature).unwrap(),
+        );
 
         assert!(
             accessor
-                .get_object_by_type_mask(&context, creature_guid, TypeMask::UNIT)
+                .get_object_ref_by_type_mask_from_map_source(
+                    &context,
+                    &source,
+                    creature_guid,
+                    TypeMask::UNIT
+                )
                 .is_some()
         );
         assert!(
             accessor
-                .get_object_by_type_mask(&context, creature_guid, TypeMask::GAME_OBJECT)
+                .get_object_ref_by_type_mask_from_map_source(
+                    &context,
+                    &source,
+                    creature_guid,
+                    TypeMask::GAME_OBJECT
+                )
                 .is_none()
         );
         assert!(
             accessor
-                .get_object_by_type_mask(&context, creature_guid, TypeMask::PLAYER)
+                .get_object_ref_by_type_mask_from_map_source(
+                    &context,
+                    &source,
+                    creature_guid,
+                    TypeMask::PLAYER
+                )
                 .is_none()
         );
     }
@@ -1172,44 +1226,71 @@ mod tests {
 
     #[test]
     fn corpse_is_directly_accessible_but_not_returned_by_type_mask_like_cpp() {
-        let mut accessor = ObjectAccessor::default();
+        let accessor = ObjectAccessor::default();
         let context = world_object(HighGuid::Player, 530, 1, true);
         let corpse = world_object(HighGuid::Corpse, 530, 1, true);
         let corpse_guid = corpse.guid();
+        let mut source = TestMapSource {
+            map_id: 530,
+            instance_id: 1,
+            records: std::collections::HashMap::new(),
+        };
 
-        accessor
-            .insert_map_object(AccessorObjectKind::Corpse, corpse)
-            .unwrap();
+        source.records.insert(
+            corpse_guid,
+            MapObjectRecord::new(AccessorObjectKind::Corpse, corpse).unwrap(),
+        );
 
         assert_eq!(
-            accessor.get_corpse(&context, corpse_guid).unwrap().guid(),
+            accessor
+                .get_corpse_from_map_source(&context, &source, corpse_guid)
+                .unwrap()
+                .guid(),
             corpse_guid
         );
-        assert!(accessor.get_world_object(&context, corpse_guid).is_some());
         assert!(
             accessor
-                .get_object_by_type_mask(&context, corpse_guid, TypeMask::CORPSE)
+                .get_world_object_from_map_source(&context, &source, corpse_guid)
+                .is_some()
+        );
+        assert!(
+            accessor
+                .get_object_ref_by_type_mask_from_map_source(
+                    &context,
+                    &source,
+                    corpse_guid,
+                    TypeMask::CORPSE
+                )
                 .is_none()
         );
     }
 
     #[test]
     fn unit_and_creature_or_pet_or_vehicle_helpers_match_cpp() {
-        let mut accessor = ObjectAccessor::default();
+        let accessor = ObjectAccessor::default();
         let context = world_object(HighGuid::Player, 530, 1, true);
         let pet = world_object(HighGuid::Pet, 530, 1, true);
         let pet_guid = pet.guid();
-        accessor
-            .insert_map_object(AccessorObjectKind::Pet, pet)
-            .unwrap();
+        let mut source = TestMapSource {
+            map_id: 530,
+            instance_id: 1,
+            records: std::collections::HashMap::new(),
+        };
+        source.records.insert(
+            pet_guid,
+            MapObjectRecord::new(AccessorObjectKind::Pet, pet).unwrap(),
+        );
 
         assert_eq!(
-            accessor.get_unit(&context, pet_guid).unwrap().guid(),
+            accessor
+                .get_unit_from_map_source(&context, &source, pet_guid)
+                .unwrap()
+                .guid(),
             pet_guid
         );
         assert_eq!(
             accessor
-                .get_creature_or_pet_or_vehicle(&context, pet_guid)
+                .get_creature_or_pet_or_vehicle_from_map_source(&context, &source, pet_guid)
                 .unwrap()
                 .guid(),
             pet_guid
