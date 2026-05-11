@@ -222,6 +222,7 @@ NOTE: `InstanceSaveMgr` no longer exists as a separate class in this WoLK 3.4.3 
 - `#NEXT.R8.INSTANCES.002` adds the C++ character DB statement set for `instance`, `character_instance_lock`, and `account_instance_times`, plus pure Rust load reconstruction from DB row shapes, async DB load glue, prepared-statement builders for the same delete/insert/update operations used by C++ `InstanceLockMgr`, and weak-ref cleanup for unreferenced shared instance data.
 - `#NEXT.R8.INSTANCES.003` adds C++-indexed `Map.db2`/`MapDifficulty.db2` readers, wires them into world-server startup/session resources, invokes `InstanceLockMgr::load_from_database_like_cpp()` with real DB2 `MapDb2Entries` resolution, and registers persisted instance ids with both MapManager paths.
 - `#NEXT.R8.INSTANCES.004` adds transaction-aware `UpdateInstanceLockForPlayer` and `UpdateSharedInstanceLock` wrappers that mutate the in-memory lock state and append the same C++ delete/insert statement pairs to a caller-owned `SqlTransaction`.
+- `#NEXT.R8.INSTANCES.005` adds transaction-aware `UpdateInstanceLockExtensionForPlayer` and `ResetInstanceLocksForPlayer` wrappers that mutate the in-memory lock state and append the same C++ extension/force-expire update statements to a caller-owned `SqlTransaction`.
 
 **What's implemented:**
 - `crates/wow-world/src/map_manager.rs` (per the active WIP commits) provides a `MapManager` global stub with placeholder for `GenerateInstanceId` (must verify), but no lock store and no script dispatch. (See WIP commit `f83c48d82`.)
@@ -318,8 +319,8 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [x] **#INST.10** Implement `CreateInstanceLockForNewInstance` → temporary map (L)
 - [~] **#INST.11** Implement `UpdateInstanceLockForPlayer` (promote temp→perm, REPLACE row, transactional) (H) — in-memory promotion/merge plus C++ delete/insert transaction append path done; real gameplay call-sites pending.
 - [~] **#INST.12** Implement `UpdateSharedInstanceLock` for raid-id locks (M) — in-memory shared data plus C++ delete/insert transaction append path done; real gameplay call-sites pending.
-- [~] **#INST.13** Implement `UpdateInstanceLockExtensionForPlayer` (toggle + recompute expiry) (M) — in-memory plus C++ update statement builder done; DB execution pending.
-- [~] **#INST.14** Implement `ResetInstanceLocksForPlayer` w/ in-use guard (M) — in-memory expiry plus force-expire statement builder done; DB execution pending.
+- [~] **#INST.13** Implement `UpdateInstanceLockExtensionForPlayer` (toggle + recompute expiry) (M) — in-memory behavior plus C++ update statement transaction append path done; real calendar/player call-sites pending.
+- [~] **#INST.14** Implement `ResetInstanceLocksForPlayer` w/ in-use guard (M) — in-memory expiry plus C++ force-expire transaction append path done; real reset handler/call-sites pending.
 - [x] **#INST.15** Implement `OnSharedInstanceLockDataDelete` cleanup (L) — Rust exposes cleanup builder for unreferenced weak shared data; actual DB execution remains caller responsibility.
 - [x] **#INST.16** Implement `GetNextResetTime` from `MapDifficulty.ResetInterval` + reset-hour config (M)
 - [x] **#INST.17** Implement instance-id allocator + free-id reuse (M) — contrasted with C++: this fork declares mask constants but `MapManager::GenerateInstanceId` returns sequential ids without OR-ing masks.
@@ -461,7 +462,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 **Hallazgos clave:**
 - `crates/wow-instances/` existe y contiene las constantes `INSTANCE_ID_HIGH_MASK`, `_LFG_MASK`, `_NORMAL_MASK`; `MapManager::GenerateInstanceId` fue contrastado y en C++ no usa esas máscaras.
 - Los 2 únicos call-sites de `add_creature(0,0,0,0,…)` están en tests del propio `map_manager.rs` (líneas 761, 774). Sin caller real, todavía falta conectar el allocator a la creación real de instancias.
-- `InstanceLockMgr` análogo: core in-memory creado en `#NEXT.R8.INSTANCES.001`; statements, builders, async load glue y weak-ref cleanup creados en `#NEXT.R8.INSTANCES.002`; shared manager inyectado en world-server/session; startup DB2 resolver/load creado en `#NEXT.R8.INSTANCES.003`; wrappers transaccionales de update creados en `#NEXT.R8.INSTANCES.004`; call-sites de gameplay siguen pendientes.
+- `InstanceLockMgr` análogo: core in-memory creado en `#NEXT.R8.INSTANCES.001`; statements, builders, async load glue y weak-ref cleanup creados en `#NEXT.R8.INSTANCES.002`; shared manager inyectado en world-server/session; startup DB2 resolver/load creado en `#NEXT.R8.INSTANCES.003`; wrappers transaccionales de update/shared creados en `#NEXT.R8.INSTANCES.004`; wrappers transaccionales de extension/reset creados en `#NEXT.R8.INSTANCES.005`; call-sites de gameplay siguen pendientes.
 - `CMSG_REQUEST_RAID_INFO` registrado y responde `SMSG_INSTANCE_INFO`; lee el shared `InstanceLockMgr` cuando exista player GUID y resuelve locks cargados con `Map.db2`/`MapDifficulty.db2`, manteniendo fallback vacío si no hay locks. 0 handlers para `CMSG_RESET_INSTANCES`, `CMSG_INSTANCE_LOCK_RESPONSE`. 0 builders para `SMSG_PENDING_RAID_LOCK`, `SMSG_INSTANCE_ENCOUNTER_*`, `SMSG_INSTANCE_RESET*`.
 
 **Riesgo de UI hang silencioso:**

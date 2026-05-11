@@ -772,6 +772,36 @@ impl InstanceLockMgr {
         Some((old_expiry, new_expiry))
     }
 
+    /// C++ `InstanceLockMgr::UpdateInstanceLockExtensionForPlayer`.
+    ///
+    /// Mutates the active lock extension flag and appends the matching
+    /// `CHAR_UPD_CHARACTER_INSTANCE_LOCK_EXTENSION` statement.
+    pub fn update_instance_lock_extension_for_player_tx_at(
+        &mut self,
+        tx: &mut SqlTransaction,
+        player_guid: ObjectGuid,
+        entries: &MapDb2Entries,
+        extended: bool,
+        schedule: ResetSchedule,
+        now: InstanceResetTime,
+    ) -> Option<(InstanceResetTime, InstanceResetTime)> {
+        let expiry_times = self.update_instance_lock_extension_for_player_at(
+            player_guid,
+            entries,
+            extended,
+            schedule,
+            now,
+        )?;
+
+        tx.append(Self::update_character_instance_lock_extension_statement(
+            player_guid,
+            entries,
+            extended,
+        ));
+
+        Some(expiry_times)
+    }
+
     pub fn reset_instance_locks_for_player_at(
         &mut self,
         player_guid: ObjectGuid,
@@ -806,6 +836,44 @@ impl InstanceLockMgr {
                 - entries.reset_interval.raid_duration_secs();
             lock.extended = false;
             result.reset.push(lock.clone());
+        }
+
+        result
+    }
+
+    /// C++ `InstanceLockMgr::ResetInstanceLocksForPlayer`.
+    ///
+    /// Mutates resettable locks and appends one
+    /// `CHAR_UPD_CHARACTER_INSTANCE_LOCK_FORCE_EXPIRE` per reset lock.
+    pub fn reset_instance_locks_for_player_tx_at(
+        &mut self,
+        tx: &mut SqlTransaction,
+        player_guid: ObjectGuid,
+        map_id: Option<u32>,
+        difficulty_id: Option<u8>,
+        entries_by_key: &HashMap<InstanceLockKey, MapDb2Entries>,
+        schedule: ResetSchedule,
+        now: InstanceResetTime,
+    ) -> InstanceLockResetResult {
+        let result = self.reset_instance_locks_for_player_at(
+            player_guid,
+            map_id,
+            difficulty_id,
+            entries_by_key,
+            schedule,
+            now,
+        );
+
+        for lock in &result.reset {
+            if let Some(entries) = entries_by_key.values().find(|entries| {
+                entries.map_id == lock.map_id && entries.difficulty_id == lock.difficulty_id
+            }) {
+                tx.append(Self::force_expire_character_instance_lock_statement(
+                    player_guid,
+                    entries,
+                    lock.expiry_time,
+                ));
+            }
         }
 
         result
@@ -1814,6 +1882,37 @@ mod tests {
     }
 
     #[test]
+    fn update_instance_lock_extension_tx_appends_update_like_cpp() {
+        let entries = raid_entries();
+        let mut mgr = InstanceLockMgr::default();
+        let mut tx = SqlTransaction::new();
+        let schedule = ResetSchedule::default();
+        let now = 10 * 86_400;
+
+        mgr.update_instance_lock_for_player_at(
+            player(1),
+            &entries,
+            update_event(100, None),
+            schedule,
+            now,
+        );
+
+        let (old_expiry, new_expiry) = mgr
+            .update_instance_lock_extension_for_player_tx_at(
+                &mut tx,
+                player(1),
+                &entries,
+                true,
+                schedule,
+                now,
+            )
+            .unwrap();
+
+        assert_eq!(tx.len(), 1);
+        assert!(new_expiry > old_expiry);
+    }
+
+    #[test]
     fn reset_instance_locks_skips_in_use_and_expires_reset_locks_like_cpp() {
         let entries = raid_entries();
         let mut mgr = InstanceLockMgr::default();
@@ -1867,6 +1966,41 @@ mod tests {
         );
         assert!(reset_two.reset.is_empty());
         assert_eq!(reset_two.failed_to_reset.len(), 1);
+    }
+
+    #[test]
+    fn reset_instance_locks_tx_appends_force_expire_like_cpp() {
+        let entries = raid_entries();
+        let mut mgr = InstanceLockMgr::default();
+        let mut tx = SqlTransaction::new();
+        let schedule = ResetSchedule::default();
+        let now = 10 * 86_400;
+
+        mgr.update_instance_lock_for_player_at(
+            player(1),
+            &entries,
+            update_event(100, None),
+            schedule,
+            now,
+        );
+        let entries_by_key = HashMap::from([(entries.key(), entries)]);
+
+        let result = mgr.reset_instance_locks_for_player_tx_at(
+            &mut tx,
+            player(1),
+            None,
+            None,
+            &entries_by_key,
+            schedule,
+            now,
+        );
+
+        assert_eq!(result.reset.len(), 1);
+        assert_eq!(tx.len(), 1);
+        assert!(
+            mgr.find_active_instance_lock_at(player(1), &entries, now)
+                .is_none()
+        );
     }
 
     #[test]
