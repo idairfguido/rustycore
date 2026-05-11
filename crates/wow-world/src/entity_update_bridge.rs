@@ -4,7 +4,7 @@ use wow_entities::{
 };
 use wow_packet::packets::update::{
     ActivePlayerDataValuesUpdate as PacketActivePlayerDataValuesUpdate,
-    PlayerDataValuesDeltaUpdate, VisibleItemValuesUpdate,
+    PlayerDataValuesDeltaUpdate, UpdateObject, VisibleItemValuesUpdate,
 };
 
 const VISIBLE_ITEM_FULL_UPDATE_MASK: u32 = 0x0F;
@@ -29,6 +29,15 @@ pub fn player_values_update_to_packet(
     }
 
     (packet_update.changed_object_type_mask != 0).then_some(packet_update)
+}
+
+pub fn player_values_update_to_update_object(
+    guid: wow_core::ObjectGuid,
+    map_id: u16,
+    update: &PlayerValuesUpdate,
+) -> Option<UpdateObject> {
+    player_values_update_to_packet(update)
+        .map(|packet_update| UpdateObject::full_player_values_update(guid, map_id, packet_update))
 }
 
 fn copy_player_data_update(
@@ -86,10 +95,12 @@ fn copy_mask_blocks<const N: usize>(src: &[u32], dst: &mut [u32; N]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wow_core::ObjectGuid;
     use wow_entities::{
         ACTIVE_PLAYER_DATA_COINAGE_BIT, ACTIVE_PLAYER_DATA_PARENT_BIT, PLAYER_DATA_FLAGS_BIT,
         PLAYER_DATA_PARENT_BIT, Player, VisibleItemValues,
     };
+    use wow_packet::ServerPacket;
 
     fn mask_has(mask: &[u32], bit: usize) -> bool {
         (mask[bit / 32] & (1 << (bit % 32))) != 0
@@ -156,6 +167,29 @@ mod tests {
         assert_eq!(
             packet_update.active_player_data.as_ref().unwrap().coinage,
             42
+        );
+    }
+
+    #[test]
+    fn builds_update_object_from_entity_player_values_update() {
+        let mut player = Player::new(Some(7), false);
+        player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(ObjectGuid::create_uniq(0x42));
+        player.clear_data_changes();
+        player.set_money(1234);
+
+        let update = player.values_update(true);
+        let packet = player_values_update_to_update_object(player.guid(), 571, &update).unwrap();
+        let bytes = packet.to_bytes();
+
+        assert!(!bytes.is_empty());
+        assert!(
+            bytes
+                .windows(1234u64.to_le_bytes().len())
+                .any(|window| window == 1234u64.to_le_bytes())
         );
     }
 }
