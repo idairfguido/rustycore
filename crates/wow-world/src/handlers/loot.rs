@@ -176,7 +176,7 @@ impl WorldSession {
             }
         };
 
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
@@ -265,7 +265,7 @@ impl WorldSession {
         gameobject_guid: ObjectGuid,
         source: GameObjectLootSource,
     ) {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return;
         };
         if !self.player_is_alive_like_cpp() {
@@ -380,7 +380,7 @@ impl WorldSession {
         gameobject_guid: ObjectGuid,
         source: GatheringNodeUseSource,
     ) {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return;
         };
         if !self.player_is_alive_like_cpp() {
@@ -523,7 +523,10 @@ impl WorldSession {
         self.quest_xp_store
             .as_ref()
             .map(|store| {
-                store.player_level_difficulty_xp_like_cpp(self.player_level, xp_difficulty)
+                store.player_level_difficulty_xp_like_cpp(
+                    self.player_level_like_cpp(),
+                    xp_difficulty,
+                )
             })
             .unwrap_or(0)
     }
@@ -535,7 +538,7 @@ impl WorldSession {
         loot_type: u8,
         replace_existing: bool,
     ) {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return;
         };
         if loot_id == 0 || !self.player_is_alive_like_cpp() {
@@ -625,7 +628,7 @@ impl WorldSession {
             }
         };
 
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
@@ -800,7 +803,7 @@ impl WorldSession {
             }
         };
 
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(guid) => guid,
             None => return,
         };
@@ -913,7 +916,7 @@ impl WorldSession {
     }
 
     fn represented_loot_money_recipients_like_cpp(&self, loot_guid: ObjectGuid) -> Vec<ObjectGuid> {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return Vec::new();
         };
 
@@ -933,7 +936,7 @@ impl WorldSession {
             return vec![player_guid];
         };
 
-        let source_position = self.player_position.unwrap_or_default();
+        let source_position = self.player_position_like_cpp().unwrap_or_default();
         let mut recipients = Vec::new();
 
         for member_guid in &group.members {
@@ -950,7 +953,7 @@ impl WorldSession {
                 continue;
             };
 
-            if member.map_id != self.current_map_id {
+            if member.map_id != self.player_map_id_like_cpp() {
                 continue;
             }
 
@@ -1034,7 +1037,7 @@ impl WorldSession {
 
         debug!(account = self.account_id, unit = ?req.unit, "CMSG_LOOT_RELEASE");
 
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
@@ -1050,7 +1053,7 @@ impl WorldSession {
     /// represented handler preserves the current wire behavior without emitting
     /// synthetic errors.
     pub async fn handle_loot_roll(&mut self, roll: LootRoll) {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return;
         };
 
@@ -1089,7 +1092,7 @@ impl WorldSession {
             if *owner.key() == player_guid {
                 continue;
             }
-            if owner.map_id != self.current_map_id {
+            if owner.map_id != self.player_map_id_like_cpp() {
                 continue;
             }
             if owner.active_loot_rolls.contains(&roll_key) {
@@ -1472,7 +1475,7 @@ impl WorldSession {
         packet: &P,
         target: ObjectGuid,
     ) {
-        if self.player_guid == Some(target) {
+        if self.player_guid() == Some(target) {
             self.send_packet(packet);
             return;
         }
@@ -1483,7 +1486,7 @@ impl WorldSession {
         let Some(player) = registry.get(&target) else {
             return;
         };
-        if player.map_id != self.current_map_id {
+        if player.map_id != self.player_map_id_like_cpp() {
             return;
         }
 
@@ -1496,7 +1499,7 @@ impl WorldSession {
         entry: &LootEntry,
         except: Option<ObjectGuid>,
     ) {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return;
         };
 
@@ -1517,7 +1520,7 @@ impl WorldSession {
             let Some(player) = registry.get(looter) else {
                 continue;
             };
-            if player.map_id != self.current_map_id {
+            if player.map_id != self.player_map_id_like_cpp() {
                 continue;
             }
 
@@ -1540,7 +1543,7 @@ impl WorldSession {
                 continue;
             }
 
-            if self.player_guid == Some(*player_guid) {
+            if self.player_guid() == Some(*player_guid) {
                 self.send_packet(packet);
                 continue;
             }
@@ -1551,7 +1554,7 @@ impl WorldSession {
             let Some(player) = registry.get(player_guid) else {
                 continue;
             };
-            if player.map_id != self.current_map_id {
+            if player.map_id != self.player_map_id_like_cpp() {
                 continue;
             }
 
@@ -1566,7 +1569,7 @@ impl WorldSession {
     /// loot method `MASTER_LOOT` and the stored master-looter GUID matching the
     /// current player.
     pub async fn handle_master_loot_item(&mut self, master_loot_item: MasterLootItem) {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return;
         };
 
@@ -1727,7 +1730,7 @@ impl WorldSession {
         dungeon_encounter_id: u32,
         entry: LootEntry,
     ) -> MasterLootGiveResult {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return MasterLootGiveResult::TargetMismatch;
         };
         let Some(registry) = self.player_registry() else {
@@ -1814,7 +1817,7 @@ impl WorldSession {
             .unwrap_or_else(|| entry.clone());
         store_entry.roll_winner = winner_guid;
 
-        if self.player_guid == Some(winner_guid) {
+        if self.player_guid() == Some(winner_guid) {
             if self
                 .store_direct_loot_item_like_cpp(&store_entry, dungeon_encounter_id)
                 .await
@@ -1904,7 +1907,7 @@ impl WorldSession {
             return false;
         }
 
-        if self.player_guid == Some(winner_guid) {
+        if self.player_guid() == Some(winner_guid) {
             for disenchant_entry in &disenchant_entries {
                 if !self
                     .store_direct_loot_item_like_cpp(disenchant_entry, dungeon_encounter_id)
@@ -2264,7 +2267,7 @@ impl WorldSession {
         &mut self,
         command: MasterLootGiveCommand,
     ) {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             let _ = command.result_tx.send(MasterLootGiveResult::TargetMismatch);
             return;
         };
@@ -2315,7 +2318,7 @@ impl WorldSession {
         &mut self,
         command: LootRollStoreWinnerCommand,
     ) {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             let _ = command.result_tx.send(MasterLootGiveResult::TargetMismatch);
             return;
         };
@@ -2397,7 +2400,7 @@ impl WorldSession {
     /// C++ accepts non-zero values only when `sChrSpecializationStore` has the
     /// row and its `ClassID` matches the player's class; `SpecID == 0` clears.
     pub async fn handle_set_loot_specialization(&mut self, packet: SetLootSpecialization) {
-        if self.player_guid.is_none() {
+        if self.player_guid().is_none() {
             return;
         }
 
@@ -2412,7 +2415,7 @@ impl WorldSession {
         let Some(spec) = store.get(packet.spec_id) else {
             return;
         };
-        if spec.class_id != self.player_class {
+        if spec.class_id != self.player_class_like_cpp() {
             return;
         }
 
@@ -2420,13 +2423,13 @@ impl WorldSession {
     }
 
     fn represented_master_loot_target_exists_like_cpp(&self, target: ObjectGuid) -> bool {
-        if self.player_guid == Some(target) {
+        if self.player_guid() == Some(target) {
             return true;
         }
 
         self.player_registry()
             .and_then(|registry| registry.get(&target))
-            .is_some_and(|target_info| target_info.map_id == self.current_map_id)
+            .is_some_and(|target_info| target_info.map_id == self.player_map_id_like_cpp())
     }
 
     fn represented_master_loot_target_eligible_like_cpp(&self, target: ObjectGuid) -> bool {
@@ -2449,7 +2452,7 @@ impl WorldSession {
         item_id: u32,
         count: u32,
     ) -> Option<u8> {
-        if self.player_guid != Some(target) {
+        if self.player_guid() != Some(target) {
             return None;
         }
 
@@ -2465,7 +2468,7 @@ impl WorldSession {
         main_loot_target: ObjectGuid,
         player_guid: ObjectGuid,
     ) -> Vec<ObjectGuid> {
-        let Some(player_position) = self.player_position else {
+        let Some(player_position) = self.player_position_like_cpp() else {
             return Vec::new();
         };
 
@@ -2655,7 +2658,7 @@ impl WorldSession {
         let bytes = packet.to_bytes();
 
         for allowed_looter in &loot.allowed_looters {
-            if Some(*allowed_looter) == self.player_guid {
+            if Some(*allowed_looter) == self.player_guid() {
                 self.send_packet(&packet);
                 continue;
             }
@@ -2666,7 +2669,7 @@ impl WorldSession {
             let Some(player) = registry.get(allowed_looter) else {
                 continue;
             };
-            if player.map_id != self.current_map_id {
+            if player.map_id != self.player_map_id_like_cpp() {
                 continue;
             }
 
@@ -2714,7 +2717,7 @@ impl WorldSession {
                 continue;
             }
 
-            if Some(*looter) == self.player_guid {
+            if Some(*looter) == self.player_guid() {
                 self.send_packet(&packet);
                 continue;
             }
@@ -2725,7 +2728,7 @@ impl WorldSession {
             let Some(player) = registry.get(looter) else {
                 continue;
             };
-            if player.map_id != self.current_map_id {
+            if player.map_id != self.player_map_id_like_cpp() {
                 continue;
             }
 
@@ -2744,7 +2747,7 @@ impl WorldSession {
         let bytes = packet.to_bytes();
 
         for looter in &loot.players_looting {
-            if Some(*looter) == self.player_guid {
+            if Some(*looter) == self.player_guid() {
                 self.send_packet(&packet);
                 continue;
             }
@@ -2755,7 +2758,7 @@ impl WorldSession {
             let Some(player) = registry.get(looter) else {
                 continue;
             };
-            if player.map_id != self.current_map_id {
+            if player.map_id != self.player_map_id_like_cpp() {
                 continue;
             }
 
@@ -2768,7 +2771,7 @@ impl WorldSession {
         owner_guid: ObjectGuid,
         player_guid: ObjectGuid,
     ) {
-        let current_map_id = self.current_map_id;
+        let current_map_id = self.player_map_id_like_cpp();
         let player_registry = self.player_registry().cloned();
         let mut packets = Vec::new();
         let mut auto_pass_packets = Vec::new();
@@ -2930,7 +2933,7 @@ impl WorldSession {
             let Some(player) = registry.get(&looter) else {
                 continue;
             };
-            if player.map_id != self.current_map_id {
+            if player.map_id != self.player_map_id_like_cpp() {
                 continue;
             }
 
@@ -2943,7 +2946,7 @@ impl WorldSession {
     }
 
     fn publish_represented_loot_roll_ownership_like_cpp(&self) {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return;
         };
         let Some(registry) = self.player_registry() else {
@@ -3817,7 +3820,7 @@ impl WorldSession {
     ) -> bool {
         self.represented_creature_loot_item_allowed_for_player_like_cpp(
             context,
-            self.player_guid.unwrap_or(ObjectGuid::EMPTY),
+            self.player_guid().unwrap_or(ObjectGuid::EMPTY),
             condition_rows,
             condition_references,
             addon_metadata,
@@ -3913,13 +3916,13 @@ impl WorldSession {
         &self,
         player_guid: ObjectGuid,
     ) -> Option<RepresentedLootPlayerContext> {
-        if Some(player_guid) == self.player_guid {
+        if Some(player_guid) == self.player_guid() {
             return Some(RepresentedLootPlayerContext {
-                race: self.player_race,
-                class: self.player_class,
-                gender: self.player_gender,
-                level: self.player_level,
-                known_spells: self.known_spells.clone(),
+                race: self.player_race_like_cpp(),
+                class: self.player_class_like_cpp(),
+                gender: self.player_gender_like_cpp(),
+                level: self.player_level_like_cpp(),
+                known_spells: self.known_spells_like_cpp().to_vec(),
                 active_quest_statuses: self
                     .player_quests
                     .iter()
@@ -4577,7 +4580,7 @@ impl WorldSession {
     ) -> bool {
         let item_id = loot_entry.item_id;
         let count = loot_entry.quantity;
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return false;
         };
         let Some(char_db) = self.char_db().map(Arc::clone) else {
@@ -4600,17 +4603,20 @@ impl WorldSession {
             let bag = (dest.pos >> 8) as u8;
             let slot = (dest.pos & 0x00FF) as u8;
             bag == u8::from(INVENTORY_SLOT_BAG_0)
-                && self.inventory_items.get(&slot).is_some_and(|existing| {
-                    self.inventory_item_objects
-                        .get(&existing.guid)
-                        .is_some_and(|item| {
-                            !loot_store_data_can_stack_with_item(
-                                loot_entry,
-                                store_random_properties,
-                                item,
-                            )
-                        })
-                })
+                && self
+                    .inventory_items_like_cpp()
+                    .get(&slot)
+                    .is_some_and(|existing| {
+                        self.inventory_item_objects_like_cpp()
+                            .get(&existing.guid)
+                            .is_some_and(|item| {
+                                !loot_store_data_can_stack_with_item(
+                                    loot_entry,
+                                    store_random_properties,
+                                    item,
+                                )
+                            })
+                    })
         }) {
             let Some(compatible_dest) = self.plan_direct_loot_item_preserving_cpp_store_metadata(
                 loot_entry,
@@ -4639,8 +4645,10 @@ impl WorldSession {
                 .unwrap_or(1)
                 .max(1);
 
-            if let Some(existing) = self.inventory_items.get(&slot) {
-                let Some(existing_object) = self.inventory_item_objects.get(&existing.guid) else {
+            if let Some(existing) = self.inventory_items_like_cpp().get(&slot) {
+                let Some(existing_object) =
+                    self.inventory_item_objects_like_cpp().get(&existing.guid)
+                else {
                     self.send_equip_error(InventoryResult::ItemNotFound, None, None, 0, 0);
                     return false;
                 };
@@ -4792,7 +4800,7 @@ impl WorldSession {
         }
         self.sync_object_accessor_player();
 
-        let map_id = self.current_map_id;
+        let map_id = self.player_map_id_like_cpp();
         if !created_new_stacks.is_empty() {
             let item_creates = created_new_stacks
                 .iter()
@@ -4870,16 +4878,17 @@ impl WorldSession {
         let mut remaining = loot_entry.quantity;
         let mut dest = Vec::new();
 
-        let mut existing_slots: Vec<u8> = self.inventory_items.keys().copied().collect();
+        let mut existing_slots: Vec<u8> = self.inventory_items_like_cpp().keys().copied().collect();
         existing_slots.sort_unstable();
         for slot in existing_slots {
             if remaining == 0 {
                 break;
             }
-            let Some(existing) = self.inventory_items.get(&slot) else {
+            let Some(existing) = self.inventory_items_like_cpp().get(&slot) else {
                 continue;
             };
-            let Some(existing_object) = self.inventory_item_objects.get(&existing.guid) else {
+            let Some(existing_object) = self.inventory_item_objects_like_cpp().get(&existing.guid)
+            else {
                 continue;
             };
             if existing.entry_id != loot_entry.item_id
@@ -4911,7 +4920,7 @@ impl WorldSession {
             if remaining == 0 {
                 break;
             }
-            if self.inventory_items.contains_key(&slot) {
+            if self.inventory_items_like_cpp().contains_key(&slot) {
                 continue;
             }
             let quantity = max_stack.min(remaining);
@@ -4972,12 +4981,15 @@ impl WorldSession {
     }
 
     async fn destroy_fully_looted_direct_item(&mut self, item_guid: ObjectGuid) {
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(guid) => guid,
             None => return,
         };
 
-        let runtime_item = self.inventory_item_objects.get(&item_guid).cloned();
+        let runtime_item = self
+            .inventory_item_objects_like_cpp()
+            .get(&item_guid)
+            .cloned();
         let (bag, slot) = match runtime_item.as_ref() {
             Some(item) => (item.bag_slot(), item.slot()),
             None => return,
