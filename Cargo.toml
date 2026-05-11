@@ -17,6 +17,7 @@ members = [
     "crates/wow-ecs",
     "crates/wow-world",
     "crates/wow-map",
+    "crates/wow-movement",
     "crates/wow-entities",
     "crates/wow-spell",
     "crates/wow-combat",
@@ -150,6 +151,7 @@ wow-proto = { path = "crates/wow-proto" }
 wow-ecs = { path = "crates/wow-ecs" }
 wow-world = { path = "crates/wow-world" }
 wow-map = { path = "crates/wow-map" }
+wow-movement = { path = "crates/wow-movement" }
 wow-entities = { path = "crates/wow-entities" }
 wow-spell = { path = "crates/wow-spell" }
 wow-combat = { path = "crates/wow-combat" }

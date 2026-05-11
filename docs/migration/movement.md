@@ -1,11 +1,11 @@
 # Migration: Movement
 
 > **C++ canonical path:** `src/server/game/Movement/` (+ `src/server/game/Server/Packets/MovementPackets.{h,cpp}`)
-> **Rust target crate(s):** `crates/wow-packet/` (packets), `crates/wow-world/` (handlers + per-session state), `crates/wow-recastdetour/` (Detour FFI scaffold), future `crates/wow-movement/`
+> **Rust target crate(s):** `crates/wow-packet/` (packets), `crates/wow-world/` (handlers + per-session state), `crates/wow-recastdetour/` (Detour FFI scaffold), `crates/wow-movement/`
 > **Layer:** L5 (depende de Maps L3 + Entities L4 + DataStores L1)
-> **Status:** ⚠️ partial — solo parsing CMSG_MOVE_*, broadcast SMSG_MOVE_UPDATE y posición server-side. Sin spline real, sin pathfinding, sin generators.
+> **Status:** ⚠️ partial — parsing/broadcasts de movimiento y primer núcleo `MoveSpline` aislado; aún sin Unit/MotionMaster/pathfinding/generators conectados.
 > **Audited vs C++:** ✅ audited 2026-05-01 (engine missing entirely — see §13)
-> **Last updated:** 2026-05-01
+> **Last updated:** 2026-05-11
 
 ---
 
@@ -293,7 +293,7 @@ DBC/DB2 stores consumed:
 | `crates/wow-packet` | `crate_dir` | 25 | 13058 | `exists_active` | crate exists |
 | `crates/wow-world` | `crate_dir` | 17 | 12778 | `exists_active` | crate exists |
 | `crates/wow-recastdetour` | `crate_dir` | 1 | 0 | `exists_empty` | crate exists; no active Rust source lines |
-| `crates/wow-movement` | `crate_dir` | 0 | 0 | `missing_declared_path` | declared/proposed target does not exist |
+| `crates/wow-movement` | `crate_dir` | 2 | active | `exists_active` | crate exists; first spline runtime core added in `#A06.8h.3a` |
 | `crates/wow-packet/src/packets/movement.rs` | `file` | 1 | 461 | `exists_active` | file exists |
 | `crates/wow-world/src/handlers/movement.rs` | `file` | 1 | 204 | `exists_active` | file exists |
 | `crates/wow-recastdetour/src/lib.rs` | `file` | 1 | 0 | `exists_empty` | file exists but has 0 lines |
@@ -305,20 +305,22 @@ DBC/DB2 stores consumed:
 - `crates/wow-packet/src/packets/movement.rs` — 461 líneas — cubre ~5–8% del C++ (sólo MovementInfo R/W, MoveUpdate, MonsterMove single-segment, SetActiveMover, MoveInitActiveMoverComplete).
 - `crates/wow-world/src/handlers/movement.rs` — 204 líneas — 28 opcodes CMSG_MOVE_* registrados; un único `handle_movement` que parsea + valida GUID + actualiza `player_position` + broadcast.
 - `crates/wow-recastdetour/src/lib.rs` — 0 líneas (solo `Cargo.toml`) — placeholder, sin FFI bindings reales aún.
+- `crates/wow-movement/src/spline.rs` — núcleo inicial de `MoveSpline` contrastado contra C++: flags, args, fall/parabolic math, CatmullRom-compatible storage, duración, update/finalize.
 - `crates/wow-world/src/handlers/misc.rs` — TimeSyncResponse handler (anti-cheat clock skeleton).
-- No existe `crates/wow-movement/`, no hay MotionMaster, no hay MovementGenerator trait, no hay MoveSpline, no hay PathGenerator, no hay WaypointManager.
+- No hay MotionMaster, no hay MovementGenerator trait, no hay PathGenerator, no hay WaypointManager; el `MoveSpline` real existe como núcleo aislado y aún no sustituye al shell runtime de Unit.
 
 **What's implemented:**
 - Parsing completo de `MovementInfo` (incluyendo bits de transport, fall, inertia, adv_flying, jump direction).
 - Serialización de `MovementInfo` para SMSG_MOVE_UPDATE (broadcast a otros sesion-holders mismo map_id).
-- `SMSG_ON_MONSTER_MOVE` simplificado: una sola destination, un spline_id, sin packed deltas, sin facing complex.
+- `SMSG_ON_MONSTER_MOVE` DTO C++-like para destino, tolerancia, flags, elapsed/moveTime/fade/mode/transport/seat, counts bit-packed, face payload, puntos y packed deltas; todavía no está alimentado por un `MoveSpline` real conectado a Unit.
+- `crates/wow-movement` con primer núcleo `MoveSpline`: `MoveSplineFlag`, `MoveSplineInitArgs::Validate`, fall/parabolic math, almacenamiento lineal/CatmullRom-compatible, duración, `ComputePosition`, `updateState`, cyclic wrap y `Finalize`.
 - Validación anti-cheat trivial (GUID match + posición finita).
 - Update de `player_position` en `WorldSession`; sync con `PlayerBroadcastInfo` registry.
 - Hook a `update_visibility()` y `check_area_triggers()` en el handler.
 - Stub `SetActiveMover` y `MoveInitActiveMoverComplete` (solo logging).
 
 **What's missing vs C++:**
-- **MoveSpline + Spline interpolation** — sin curva catmullrom, sin parabolic, sin fall, sin cyclic. SMSG_ON_MONSTER_MOVE solo sirve para "go to point" en línea recta.
+- **MoveSpline conectado a Unit** — el núcleo aislado existe, pero no está integrado en `Unit::Update`, `MoveSplineState`, packet mapper productivo ni transport motion; faltan extras, `MoveSplineInit::Launch/Stop` y lifecycle completo.
 - **MotionMaster + MovementGenerator stack** — creature movement no tiene driver; no hay slots, no hay Update() per-tick.
 - **PathGenerator (Detour)** — el crate `wow-recastdetour` está vacío. Sin pathfinding real, sin NavMesh load, sin smooth path.
 - **WaypointManager** — sin loader de `waypoint_path*`.
@@ -563,7 +565,7 @@ Complejidad: **L** (<1h), **M** (1-4h), **H** (4-12h), **XL** (>12h, splitear).
 
 ---
 
-*Template version: 1.0 (2026-05-01).* Last updated: 2026-05-01.
+*Template version: 1.0 (2026-05-01).* Last updated: 2026-05-11.
 
 ---
 
@@ -571,16 +573,16 @@ Complejidad: **L** (<1h), **M** (1-4h), **H** (4-12h), **XL** (>12h, splitear).
 
 **Scope.** Cross-checked C++ canonical sources at `/home/server/woltk-trinity-legacy/src/server/game/Movement/` (MotionMaster + 13 generators + Spline subsystem + PathGenerator + Waypoints + MovementPackets) against the Rust workspace at `/home/server/rustycore/crates/`.
 
-**Empty-crate finding.** There is **no `crates/wow-movement/` crate at all** in the workspace. The placeholder `crates/wow-recastdetour/src/lib.rs` exists but contains 0 lines of actual FFI — only a `Cargo.toml` shell. So the entire spline/generators/pathfinding subsystem is **absent**, not merely incomplete. All current movement code lives in two files:
+**Historical empty-crate finding, updated 2026-05-11.** The original 2026-05-01 audit found no `crates/wow-movement/` crate. `#A06.8h.3a` now creates it and ports the first isolated `MoveSpline` core, but `wow-recastdetour` is still empty and the spline/generators/pathfinding subsystem remains incomplete until Unit/MotionMaster/pathgen are connected. The old finding is no longer "missing crate"; it is now "runtime not integrated".
 - `crates/wow-packet/src/packets/movement.rs` (461 lines, parser + writer for `MovementInfo`).
 - `crates/wow-world/src/handlers/movement.rs` (204 lines, single `handle_movement` for ~28 CMSG_MOVE_* opcodes).
 
 **MovementGenerator subclass count.** C++ ships **13 concrete subclasses** under `Movement/MovementGenerators/` (Idle, Random, Waypoint, Confused, Chase, Home, Flight, Point, Fleeing, Formation, SplineChain, Generic, Follow) plus the `PathMovementBase` helper. **Rust ships 0 generators** — there is no `MovementGenerator` trait, no `MotionMaster` struct, no slot stack, no `Update` per-tick. Creature movement is driven by the legacy `WorldCreature` wandering inside `wow-ai` (a single `pick_wander_destination` linear-tween), which means there is no chase-on-aggro, no flee, no waypoint patrol, no formation, no taxi flight, no splined boss tour.
 
-**Spline movement.** **Rust has none.** No `MoveSpline`, no `MoveSplineFlag`, no `MoveSplineInit`, no templated `Spline<T>` (linear/catmullrom/bezier). `SMSG_ON_MONSTER_MOVE` exists in `wow-packet` but only as a single-segment straight-line writer with no parabolic, fall, cyclic, packed-deltas, or facing-type variants. C++ `MovementUtil::computeFallTime`/`computeFallElevation` and the Wotlk-Classic-specific `MovementFlags3` (adv_flying, inertia, impulse) parsing exist on the read side but are not used by any server-driven motion.
+**Spline movement.** **Rust now has an isolated core, not a complete runtime.** `crates/wow-movement` ports `MoveSplineFlag`, `MoveSplineInitArgs`, fall/parabolic math and core `MoveSpline` state/update/position logic. `SMSG_ON_MONSTER_MOVE` also has a C++-like DTO. Missing pieces remain large: no `MoveSplineInit::Launch/Stop`, no Unit-owned live spline update/relocation, no MotionMaster/generators, no packet mapper from real spline extras, no transport transform and no pathgen.
 
 **Speed packets / FallToGround / JumpExtraData.** All three are **missing on the send side**. Opcodes for `SMSG_MOVE_SET_RUN_SPEED`, `SMSG_MOVE_SPLINE_SET_RUN_SPEED`, `SMSG_MOVE_UPDATE_KNOCK_BACK`, `SMSG_MOVE_TELEPORT`, `SMSG_FLIGHT_SPLINE_SYNC` are listed in `crates/wow-constants/src/opcodes.rs` (verified — `MoveSplineSetRunSpeed = 0x2de7`, etc.) but **no writers and no callers** exist anywhere in the workspace. `CMSG_MOVE_FALL_LAND` is parsed via the generic `MovementInfo` reader but no fall-damage compute is wired (would be `Movement::computeFallDamage`). `CMSG_MOVE_JUMP` is likewise just deserialized into `MovementInfo` — there is no anti-cheat against jump apex/`z_speed` and no server-driven jump emission (`MoveSplineInit::SetParabolic`).
 
 **Anti-cheat surface.** C++ runs `MovementAnticheat` on every CMSG with delta-time/delta-position/speed-cap/fly-flag/root-state checks. Rust validates only `GUID match + position is finite`. Time-sync ack is parsed but no drift table is kept. Transport offset is parsed but never re-broadcast — global position is taken at face value.
 
-**Worst divergence.** **There is no server-side motion engine of any kind.** Every NPC visible to a player only ever moves because the legacy `wow-ai` wander loop tweens its `current_pos` linearly between two random points; that delta is never serialized as a spline, only as periodic `SMSG_MOVE_UPDATE` snapshots if at all. The moment a designer needs a creature to chase, flee, return home, fly a taxi route, or follow a waypoint script (i.e. anything beyond aimless wander), there is no API to call — `MotionMaster` itself does not exist in the workspace, and adding it requires the whole `wow-movement` crate plus the 13 generators plus the Detour FFI before any AI script can request `MovePoint` or `MoveChase`. This is the largest single greenfield in the engines layer (estimated XL across §9 tasks #MOVE.2 → #MOVE.30).
+**Worst divergence.** **There is still no integrated server-side motion engine.** Every NPC visible to a player still depends on represented wander until the new `wow-movement` core is wired into Unit/MotionMaster/generators. The moment a designer needs chase, flee, return home, taxi route or scripted waypoint movement, there is still no product API to call. The gap is reduced from "no movement crate" to "movement crate foundation exists, runtime integration absent".

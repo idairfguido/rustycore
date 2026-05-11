@@ -3166,6 +3166,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "wow-movement"
+version = "0.1.0"
+dependencies = [
+ "bitflags",
+ "wow-core",
+]
+
+[[package]]
 name = "wow-network"
 version = "0.1.0"
 dependencies = [
