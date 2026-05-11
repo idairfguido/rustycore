@@ -12,9 +12,18 @@ pub struct AuraSubsystem {
     pub owned_auras: Vec<OwnedAuraRef>,
     pub applied_auras: Vec<AppliedAuraRef>,
     pub visible_auras: HashMap<u8, AuraRef>,
+    pub visible_auras_to_update: HashSet<u8>,
     pub removed_auras: Vec<AuraRef>,
+    pub removed_auras_count: u32,
+    pub interruptible_auras: Vec<AppliedAuraRef>,
+    pub aura_interrupt_flags: HashMap<AppliedAuraRef, (u32, u32)>,
+    pub aura_state_auras: HashMap<u8, Vec<AppliedAuraRef>>,
+    pub aura_state_mask: u32,
     pub interrupt_flags: u32,
     pub interrupt_flags2: u32,
+    pub proc_depth: u16,
+    pub proc_chain_length: i32,
+    pub diminishing: [DiminishingReturnState; DIMINISHING_MAX],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -72,6 +81,59 @@ impl AppliedAuraRef {
     }
 }
 
+pub const AURA_STATE_NONE: u8 = 0;
+pub const AURA_STATE_DEFENSIVE: u8 = 1;
+pub const AURA_STATE_RAID_ENCOUNTER_2: u8 = 14;
+pub const AURA_STATE_ROGUE_POISONED: u8 = 16;
+pub const AURA_STATE_ENRAGED: u8 = 17;
+pub const PER_CASTER_AURA_STATE_MASK: u32 =
+    (1 << (AURA_STATE_RAID_ENCOUNTER_2 - 1)) | (1 << (AURA_STATE_ROGUE_POISONED - 1));
+
+pub const DIMINISHING_NONE: usize = 0;
+pub const DIMINISHING_ROOT: usize = 1;
+pub const DIMINISHING_STUN: usize = 2;
+pub const DIMINISHING_INCAPACITATE: usize = 3;
+pub const DIMINISHING_DISORIENT: usize = 4;
+pub const DIMINISHING_SILENCE: usize = 5;
+pub const DIMINISHING_AOE_KNOCKBACK: usize = 6;
+pub const DIMINISHING_TAUNT: usize = 7;
+pub const DIMINISHING_LIMITONLY: usize = 8;
+pub const DIMINISHING_MAX: usize = 9;
+pub const DIMINISHING_RESET_INTERVAL_MS: u64 = 18_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[repr(u8)]
+pub enum DiminishingLevel {
+    Level1 = 0,
+    Level2 = 1,
+    Level3 = 2,
+    Immune = 3,
+    TauntImmune = 4,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiminishingReturnState {
+    pub stack: u16,
+    pub hit_time_ms: u64,
+    pub hit_count: DiminishingLevel,
+}
+
+impl Default for DiminishingReturnState {
+    fn default() -> Self {
+        Self {
+            stack: 0,
+            hit_time_ms: 0,
+            hit_count: DiminishingLevel::Level1,
+        }
+    }
+}
+
+impl DiminishingReturnState {
+    pub fn clear(&mut self) {
+        *self = Self::default();
+    }
+}
+
 impl AuraSubsystem {
     pub fn add_owned(&mut self, aura: OwnedAuraRef) {
         if !self.owned_auras.contains(&aura) {
@@ -98,6 +160,13 @@ impl AuraSubsystem {
     pub fn remove_applied(&mut self, aura: AppliedAuraRef) -> bool {
         let before = self.applied_auras.len();
         self.applied_auras.retain(|known| *known != aura);
+        self.interruptible_auras.retain(|known| *known != aura);
+        self.aura_interrupt_flags.remove(&aura);
+        for auras in self.aura_state_auras.values_mut() {
+            auras.retain(|known| *known != aura);
+        }
+        self.aura_state_auras.retain(|_, auras| !auras.is_empty());
+        self.update_interrupt_masks();
         before != self.applied_auras.len()
     }
 
@@ -107,23 +176,213 @@ impl AuraSubsystem {
 
     pub fn set_visible(&mut self, slot: u8, aura: AuraRef) {
         self.visible_auras.insert(slot, aura);
+        self.visible_auras_to_update.insert(slot);
     }
 
     pub fn clear_visible(&mut self, slot: u8) -> Option<AuraRef> {
+        self.visible_auras_to_update.remove(&slot);
         self.visible_auras.remove(&slot)
     }
 
     pub fn mark_removed(&mut self, aura: AuraRef) {
         self.removed_auras.push(aura);
+        self.removed_auras_count = self.removed_auras_count.saturating_add(1);
     }
 
     pub fn clear_removed(&mut self) {
         self.removed_auras.clear();
+        self.removed_auras_count = 0;
     }
 
     pub fn removed_count(&self) -> usize {
         self.removed_auras.len()
     }
+
+    pub fn register_applied_aura(
+        &mut self,
+        aura: AppliedAuraRef,
+        aura_state: Option<u8>,
+        interrupt_flags: u32,
+        interrupt_flags2: u32,
+    ) {
+        self.add_applied(aura);
+        if interrupt_flags != 0 || interrupt_flags2 != 0 {
+            if !self.interruptible_auras.contains(&aura) {
+                self.interruptible_auras.push(aura);
+            }
+            self.aura_interrupt_flags
+                .insert(aura, (interrupt_flags, interrupt_flags2));
+            self.interrupt_flags |= interrupt_flags;
+            self.interrupt_flags2 |= interrupt_flags2;
+        }
+        if let Some(aura_state) = aura_state.filter(|state| *state != AURA_STATE_NONE) {
+            self.aura_state_auras
+                .entry(aura_state)
+                .or_default()
+                .push(aura);
+            self.modify_aura_state(aura_state, true);
+        }
+    }
+
+    pub fn unapply_aura(&mut self, aura: AppliedAuraRef, remove_mode_marker: u8) -> bool {
+        let removed = self.remove_applied(aura);
+        if removed {
+            self.mark_removed(AuraRef::new(aura.spell_id, aura.caster_guid));
+            if remove_mode_marker != 0 {
+                self.removed_auras_count = self.removed_auras_count.saturating_add(0);
+            }
+            self.rebuild_aura_state_mask();
+        }
+        removed
+    }
+
+    pub fn has_interrupt_flag(&self, flags: u32) -> bool {
+        (self.interrupt_flags & flags) != 0
+    }
+
+    pub fn has_interrupt_flag2(&self, flags: u32) -> bool {
+        (self.interrupt_flags2 & flags) != 0
+    }
+
+    pub fn remove_interruptible_auras(&mut self, flags: u32, flags2: u32) -> Vec<AppliedAuraRef> {
+        let removed: Vec<_> = self
+            .interruptible_auras
+            .iter()
+            .copied()
+            .filter(|aura| {
+                self.aura_interrupt_flags
+                    .get(aura)
+                    .is_some_and(|(known_flags, known_flags2)| {
+                        (flags != 0 && (known_flags & flags) != 0)
+                            || (flags2 != 0 && (known_flags2 & flags2) != 0)
+                    })
+            })
+            .collect();
+        for aura in &removed {
+            self.unapply_aura(*aura, 1);
+        }
+        removed
+    }
+
+    pub fn modify_aura_state(&mut self, flag: u8, apply: bool) {
+        if flag == AURA_STATE_NONE {
+            return;
+        }
+        let mask = 1 << (flag - 1);
+        if apply {
+            self.aura_state_mask |= mask;
+        } else {
+            self.aura_state_mask &= !mask;
+        }
+    }
+
+    pub fn has_aura_state(&self, flag: u8) -> bool {
+        if flag == AURA_STATE_NONE {
+            return false;
+        }
+        (self.aura_state_mask & (1 << (flag - 1))) != 0
+    }
+
+    pub fn build_aura_state_update_for_target(&self, target: ObjectGuid) -> u32 {
+        let mut aura_states = self.aura_state_mask & !PER_CASTER_AURA_STATE_MASK;
+        for (state, auras) in &self.aura_state_auras {
+            let mask = 1 << (*state - 1);
+            if (mask & PER_CASTER_AURA_STATE_MASK) != 0
+                && auras.iter().any(|aura| aura.caster_guid == target)
+            {
+                aura_states |= mask;
+            }
+        }
+        aura_states
+    }
+
+    pub fn can_proc(&self) -> bool {
+        self.proc_depth == 0
+    }
+
+    pub fn set_cant_proc(&mut self, apply: bool) {
+        if apply {
+            self.proc_depth = self.proc_depth.saturating_add(1);
+        } else {
+            self.proc_depth = self.proc_depth.saturating_sub(1);
+        }
+    }
+
+    pub fn get_diminishing(&self, group: usize, now_ms: u64) -> DiminishingLevel {
+        let Some(diminish) = self.diminishing.get(group) else {
+            return DiminishingLevel::Level1;
+        };
+        if diminish.hit_count == DiminishingLevel::Level1 {
+            return DiminishingLevel::Level1;
+        }
+        if diminish.stack == 0
+            && now_ms.saturating_sub(diminish.hit_time_ms) > DIMINISHING_RESET_INTERVAL_MS
+        {
+            return DiminishingLevel::Level1;
+        }
+        diminish.hit_count
+    }
+
+    pub fn incr_diminishing(&mut self, group: usize, max_level: DiminishingLevel, now_ms: u64) {
+        if group >= DIMINISHING_MAX {
+            return;
+        }
+        let current = self.get_diminishing(group, now_ms);
+        if current < max_level {
+            self.diminishing[group].hit_count = next_diminishing_level(current, max_level);
+        }
+    }
+
+    pub fn apply_diminishing_aura(&mut self, group: usize, apply: bool, now_ms: u64) {
+        let Some(diminish) = self.diminishing.get_mut(group) else {
+            return;
+        };
+        if apply {
+            diminish.stack = diminish.stack.saturating_add(1);
+        } else if diminish.stack > 0 {
+            diminish.stack -= 1;
+            if diminish.stack == 0 {
+                diminish.hit_time_ms = now_ms;
+            }
+        }
+    }
+
+    pub fn clear_diminishings(&mut self) {
+        for diminish in &mut self.diminishing {
+            diminish.clear();
+        }
+    }
+
+    fn update_interrupt_masks(&mut self) {
+        self.interrupt_flags = 0;
+        self.interrupt_flags2 = 0;
+        for (flags, flags2) in self.aura_interrupt_flags.values() {
+            self.interrupt_flags |= *flags;
+            self.interrupt_flags2 |= *flags2;
+        }
+    }
+
+    fn rebuild_aura_state_mask(&mut self) {
+        self.aura_state_mask = 0;
+        let states: Vec<_> = self.aura_state_auras.keys().copied().collect();
+        for state in states {
+            self.modify_aura_state(state, true);
+        }
+    }
+}
+
+fn next_diminishing_level(
+    current: DiminishingLevel,
+    max_level: DiminishingLevel,
+) -> DiminishingLevel {
+    let next = match current {
+        DiminishingLevel::Level1 => DiminishingLevel::Level2,
+        DiminishingLevel::Level2 => DiminishingLevel::Level3,
+        DiminishingLevel::Level3 => DiminishingLevel::Immune,
+        DiminishingLevel::Immune => DiminishingLevel::TauntImmune,
+        DiminishingLevel::TauntImmune => DiminishingLevel::TauntImmune,
+    };
+    next.min(max_level)
 }
 
 /// Trinity-compatible current spell slots represented in RustyCore state.
@@ -2102,6 +2361,67 @@ mod unit_subsystems_tests {
         subsystems.spells.history.reset();
         assert!(subsystems.spells.history.cooldowns.is_empty());
         assert!(subsystems.spells.history.charges.is_empty());
+    }
+
+    #[test]
+    fn aura_application_interrupt_state_and_diminishing_match_cpp_shape() {
+        let mut auras = AuraSubsystem::default();
+        let caster = guid(2);
+        let other = guid(3);
+        let defensive = AppliedAuraRef::new(200, caster, 0, 0x1);
+        let poison = AppliedAuraRef::new(201, caster, 1, 0x2);
+        let other_poison = AppliedAuraRef::new(202, other, 2, 0x4);
+
+        auras.register_applied_aura(defensive, Some(AURA_STATE_DEFENSIVE), 0x8, 0);
+        assert!(auras.has_applied(defensive));
+        assert!(auras.has_interrupt_flag(0x8));
+        assert!(auras.has_aura_state(AURA_STATE_DEFENSIVE));
+        assert_eq!(
+            auras.build_aura_state_update_for_target(other),
+            1 << (AURA_STATE_DEFENSIVE - 1)
+        );
+
+        auras.register_applied_aura(poison, Some(AURA_STATE_ROGUE_POISONED), 0, 0x20);
+        auras.register_applied_aura(other_poison, Some(AURA_STATE_ROGUE_POISONED), 0, 0);
+        assert!(auras.has_interrupt_flag2(0x20));
+        assert_eq!(
+            auras.build_aura_state_update_for_target(caster),
+            (1 << (AURA_STATE_DEFENSIVE - 1)) | (1 << (AURA_STATE_ROGUE_POISONED - 1))
+        );
+
+        assert_eq!(auras.remove_interruptible_auras(0, 0x20), vec![poison]);
+        assert!(!auras.has_applied(poison));
+        assert!(auras.has_applied(other_poison));
+        assert!(!auras.has_interrupt_flag2(0x20));
+        assert_eq!(auras.removed_auras_count, 1);
+
+        assert!(auras.can_proc());
+        auras.set_cant_proc(true);
+        assert!(!auras.can_proc());
+        auras.set_cant_proc(false);
+        assert!(auras.can_proc());
+
+        assert_eq!(
+            auras.get_diminishing(DIMINISHING_STUN, 1_000),
+            DiminishingLevel::Level1
+        );
+        auras.incr_diminishing(DIMINISHING_STUN, DiminishingLevel::Immune, 1_000);
+        assert_eq!(
+            auras.get_diminishing(DIMINISHING_STUN, 1_000),
+            DiminishingLevel::Level2
+        );
+        auras.apply_diminishing_aura(DIMINISHING_STUN, true, 2_000);
+        auras.apply_diminishing_aura(DIMINISHING_STUN, false, 3_000);
+        assert_eq!(auras.diminishing[DIMINISHING_STUN].hit_time_ms, 3_000);
+        assert_eq!(
+            auras.get_diminishing(DIMINISHING_STUN, 21_001),
+            DiminishingLevel::Level1
+        );
+        auras.clear_diminishings();
+        assert_eq!(
+            auras.diminishing[DIMINISHING_STUN],
+            DiminishingReturnState::default()
+        );
     }
 
     #[test]

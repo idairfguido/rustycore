@@ -703,6 +703,11 @@ mod tests {
         assert_eq!(unit.speed_rate(), [1.0; MAX_MOVE_TYPE]);
         assert!(unit.subsystems().auras.owned_auras.is_empty());
         assert!(unit.subsystems().auras.applied_auras.is_empty());
+        assert!(unit.subsystems().auras.interruptible_auras.is_empty());
+        assert!(unit.subsystems().auras.aura_state_auras.is_empty());
+        assert_eq!(unit.subsystems().auras.aura_state_mask, 0);
+        assert_eq!(unit.subsystems().auras.removed_auras_count, 0);
+        assert!(unit.subsystems().auras.can_proc());
         assert!(unit.subsystems().spells.current_spells.is_empty());
         assert!(unit.subsystems().spells.history.cooldowns.is_empty());
         assert!(unit.subsystems().combat.threat.is_empty());
