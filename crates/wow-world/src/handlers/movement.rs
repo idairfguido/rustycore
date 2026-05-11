@@ -461,7 +461,7 @@ impl WorldSession {
             move_time = pkt.move_time,
             "MoveTeleportAck"
         );
-        self.record_move_teleport_ack_like_cpp(pkt.mover_guid, pkt.ack_index, pkt.move_time);
+        self.handle_move_teleport_ack_like_cpp(pkt.mover_guid, pkt.ack_index, pkt.move_time);
     }
 }
 
@@ -469,8 +469,9 @@ impl WorldSession {
 mod tests {
     use super::*;
     use crate::session::{
-        AuraApplication, MoveSplineDoneTaxiActionLikeCpp, MovementSpeedAckActionLikeCpp,
-        RepresentedAuraEffectLikeCpp, RepresentedTaxiFlightNodeLikeCpp, UnitMoveTypeLikeCpp,
+        AuraApplication, MoveSplineDoneTaxiActionLikeCpp, MoveTeleportAckActionLikeCpp,
+        MovementSpeedAckActionLikeCpp, RepresentedAuraEffectLikeCpp,
+        RepresentedTaxiFlightNodeLikeCpp, UnitMoveTypeLikeCpp,
     };
     use wow_constants::unit::UnitFlags;
     use wow_core::ObjectGuid;
@@ -996,6 +997,63 @@ mod tests {
             event.teleport_position,
             Some(wow_core::Position::new(50.0, 60.0, 70.0, 1.0))
         );
+    }
+
+    #[test]
+    fn move_teleport_ack_applies_near_teleport_cpp_side_effects() {
+        let mut session = make_session();
+        let guid = ObjectGuid::create_player(1, 42);
+        let destination = wow_core::Position::new(12.0, 13.0, 14.0, 1.5);
+        session.set_player_guid(Some(guid));
+        session.set_player_map_position_like_cpp(0, wow_core::Position::new(1.0, 2.0, 3.0, 0.5));
+        session.set_fall_information_like_cpp(1_200, 80.0);
+        session.set_player_zone_area_like_cpp(10, 11);
+        session.set_player_pvp_state_like_cpp(true, false, false);
+        session.set_near_teleport_pending_like_cpp(true, Some((0, destination)), Some((20, 21)));
+
+        let action = session.handle_move_teleport_ack_like_cpp(guid, 77, 1_234);
+        assert_eq!(action, MoveTeleportAckActionLikeCpp::Accepted);
+        assert!(!session.near_teleport_pending_like_cpp());
+        assert_eq!(session.player_position_like_cpp(), Some(destination));
+        assert_eq!(session.fall_information_like_cpp(), (0, 14.0));
+        assert_eq!(session.player_zone_area_like_cpp(), (20, 21));
+        assert_eq!(session.temporary_pet_resummon_requests_like_cpp(), 1);
+        assert_eq!(session.delayed_operations_processed_like_cpp(), 1);
+
+        let event = session.move_teleport_ack_events_like_cpp().last().unwrap();
+        assert_eq!(event.action, MoveTeleportAckActionLikeCpp::Accepted);
+        assert_eq!(event.old_zone_id, Some(10));
+        assert_eq!(event.new_zone_id, Some(20));
+        assert!(event.honorless_target_cast);
+        assert!(!event.pvp_disabled);
+        assert!(event.pet_resummon_requested);
+        assert!(event.delayed_operations_processed);
+    }
+
+    #[test]
+    fn move_teleport_ack_ignores_wrong_or_missing_near_teleport_like_cpp() {
+        let mut session = make_session();
+        let guid = ObjectGuid::create_player(1, 42);
+        let other_guid = ObjectGuid::create_player(1, 43);
+        let original_position = wow_core::Position::new(1.0, 2.0, 3.0, 0.5);
+        session.set_player_guid(Some(guid));
+        session.set_player_map_position_like_cpp(0, original_position);
+
+        let action = session.handle_move_teleport_ack_like_cpp(guid, 1, 2);
+        assert_eq!(action, MoveTeleportAckActionLikeCpp::NotBeingTeleportedNear);
+        assert_eq!(session.player_position_like_cpp(), Some(original_position));
+
+        session.set_near_teleport_pending_like_cpp(
+            true,
+            Some((0, wow_core::Position::new(9.0, 9.0, 9.0, 0.0))),
+            Some((30, 31)),
+        );
+        let action = session.handle_move_teleport_ack_like_cpp(other_guid, 3, 4);
+        assert_eq!(action, MoveTeleportAckActionLikeCpp::WrongMover);
+        assert!(session.near_teleport_pending_like_cpp());
+        assert_eq!(session.player_position_like_cpp(), Some(original_position));
+        assert_eq!(session.temporary_pet_resummon_requests_like_cpp(), 0);
+        assert_eq!(session.delayed_operations_processed_like_cpp(), 0);
     }
 
     fn broadcast_info(

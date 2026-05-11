@@ -167,6 +167,31 @@ pub(crate) struct MoveSplineDoneTaxiEventLikeCpp {
     pub honorless_target_cast: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MoveTeleportAckActionLikeCpp {
+    NotBeingTeleportedNear,
+    WrongMover,
+    MissingDestination,
+    Accepted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct MoveTeleportAckEventLikeCpp {
+    pub mover_guid: ObjectGuid,
+    pub ack_index: i32,
+    pub move_time: i32,
+    pub action: MoveTeleportAckActionLikeCpp,
+    pub destination_map_id: Option<u16>,
+    pub destination_position: Option<wow_core::Position>,
+    pub old_zone_id: Option<u32>,
+    pub new_zone_id: Option<u32>,
+    pub new_area_id: Option<u32>,
+    pub honorless_target_cast: bool,
+    pub pvp_disabled: bool,
+    pub pet_resummon_requested: bool,
+    pub delayed_operations_processed: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct RepresentedTaxiFlightStateLikeCpp {
     current_node: RepresentedTaxiFlightNodeLikeCpp,
@@ -848,8 +873,27 @@ pub struct WorldSession {
     taxi_mounted_like_cpp: bool,
     /// Represented `pvpInfo.IsHostile` branch for Honorless Target after taxi landing.
     player_pvp_hostile_like_cpp: bool,
+    /// Represented `Player::IsPvP()` branch for friendly-area near teleport handling.
+    player_pvp_enabled_like_cpp: bool,
+    /// Represented `PLAYER_FLAGS_IN_PVP` branch for friendly-area near teleport handling.
+    player_in_pvp_flag_like_cpp: bool,
+    /// Current represented zone/area ids until Map/Terrain runtime can calculate them.
+    player_zone_id_like_cpp: u32,
+    player_area_id_like_cpp: u32,
     /// `MoveSplineDone` taxi decisions recorded until full Taxi/MotionMaster runtime exists.
     move_spline_done_taxi_events_like_cpp: Vec<MoveSplineDoneTaxiEventLikeCpp>,
+    /// C++ `Player::mSemaphoreTeleport_Near` represented state.
+    near_teleport_pending_like_cpp: bool,
+    /// C++ `Player::m_teleport_dest` represented state for near teleports.
+    near_teleport_destination_like_cpp: Option<(u16, wow_core::Position)>,
+    /// Represented zone/area for the pending near-teleport destination.
+    near_teleport_destination_zone_area_like_cpp: Option<(u32, u32)>,
+    /// Near teleport ACK side-effect audit events.
+    move_teleport_ack_events_like_cpp: Vec<MoveTeleportAckEventLikeCpp>,
+    /// Count of C++ `ResummonPetTemporaryUnSummonedIfAny` calls after near teleport ACK.
+    temporary_pet_resummon_requests_like_cpp: u32,
+    /// Count of C++ `ProcessDelayedOperations` calls after successful near teleport ACK.
+    delayed_operations_processed_like_cpp: u32,
     /// C++ `Player::m_forced_speed_changes[MAX_MOVE_TYPE]` represented state.
     forced_speed_changes_like_cpp: [u8; UnitMoveTypeLikeCpp::COUNT],
     /// C++ `Unit::m_speed_rate[MAX_MOVE_TYPE]` represented state for player-controlled movers.
@@ -1286,7 +1330,17 @@ impl WorldSession {
             taxi_unit_flags_like_cpp: UnitFlags::empty(),
             taxi_mounted_like_cpp: false,
             player_pvp_hostile_like_cpp: false,
+            player_pvp_enabled_like_cpp: false,
+            player_in_pvp_flag_like_cpp: false,
+            player_zone_id_like_cpp: 0,
+            player_area_id_like_cpp: 0,
             move_spline_done_taxi_events_like_cpp: Vec::new(),
+            near_teleport_pending_like_cpp: false,
+            near_teleport_destination_like_cpp: None,
+            near_teleport_destination_zone_area_like_cpp: None,
+            move_teleport_ack_events_like_cpp: Vec::new(),
+            temporary_pet_resummon_requests_like_cpp: 0,
+            delayed_operations_processed_like_cpp: 0,
             forced_speed_changes_like_cpp: [0; UnitMoveTypeLikeCpp::COUNT],
             movement_speed_rates_like_cpp: [1.0; UnitMoveTypeLikeCpp::COUNT],
             player_on_transport_like_cpp: false,
@@ -6458,6 +6512,148 @@ impl WorldSession {
         accepted
     }
 
+    pub(crate) fn handle_move_teleport_ack_like_cpp(
+        &mut self,
+        mover_guid: ObjectGuid,
+        ack_index: i32,
+        move_time: i32,
+    ) -> MoveTeleportAckActionLikeCpp {
+        let accepted = self.record_move_teleport_ack_like_cpp(mover_guid, ack_index, move_time);
+        if !self.near_teleport_pending_like_cpp {
+            return self.record_move_teleport_ack_event_like_cpp(
+                mover_guid,
+                ack_index,
+                move_time,
+                MoveTeleportAckActionLikeCpp::NotBeingTeleportedNear,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                false,
+                false,
+                false,
+            );
+        }
+
+        if !accepted {
+            return self.record_move_teleport_ack_event_like_cpp(
+                mover_guid,
+                ack_index,
+                move_time,
+                MoveTeleportAckActionLikeCpp::WrongMover,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                false,
+                false,
+                false,
+            );
+        }
+
+        let Some((map_id, destination)) = self.near_teleport_destination_like_cpp else {
+            return self.record_move_teleport_ack_event_like_cpp(
+                mover_guid,
+                ack_index,
+                move_time,
+                MoveTeleportAckActionLikeCpp::MissingDestination,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                false,
+                false,
+                false,
+            );
+        };
+
+        self.near_teleport_pending_like_cpp = false;
+        let old_zone = self.player_zone_id_like_cpp;
+        self.set_player_map_position_like_cpp(map_id, destination);
+        self.update_registry_position();
+        self.set_fall_information_like_cpp(0, destination.z);
+
+        let (new_zone, new_area) = self
+            .near_teleport_destination_zone_area_like_cpp
+            .unwrap_or((self.player_zone_id_like_cpp, self.player_area_id_like_cpp));
+        self.player_zone_id_like_cpp = new_zone;
+        self.player_area_id_like_cpp = new_area;
+
+        let zone_changed = old_zone != new_zone;
+        let honorless_target_cast = zone_changed && self.player_pvp_hostile_like_cpp;
+        let pvp_disabled = zone_changed
+            && !self.player_pvp_hostile_like_cpp
+            && self.player_pvp_enabled_like_cpp
+            && !self.player_in_pvp_flag_like_cpp;
+        if pvp_disabled {
+            self.player_pvp_enabled_like_cpp = false;
+        }
+
+        self.temporary_pet_resummon_requests_like_cpp = self
+            .temporary_pet_resummon_requests_like_cpp
+            .saturating_add(1);
+        self.delayed_operations_processed_like_cpp =
+            self.delayed_operations_processed_like_cpp.saturating_add(1);
+
+        self.record_move_teleport_ack_event_like_cpp(
+            mover_guid,
+            ack_index,
+            move_time,
+            MoveTeleportAckActionLikeCpp::Accepted,
+            Some(map_id),
+            Some(destination),
+            Some(old_zone),
+            Some(new_zone),
+            Some(new_area),
+            honorless_target_cast,
+            pvp_disabled,
+            true,
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_move_teleport_ack_event_like_cpp(
+        &mut self,
+        mover_guid: ObjectGuid,
+        ack_index: i32,
+        move_time: i32,
+        action: MoveTeleportAckActionLikeCpp,
+        destination_map_id: Option<u16>,
+        destination_position: Option<wow_core::Position>,
+        old_zone_id: Option<u32>,
+        new_zone_id: Option<u32>,
+        new_area_id: Option<u32>,
+        honorless_target_cast: bool,
+        pvp_disabled: bool,
+        pet_resummon_requested: bool,
+        delayed_operations_processed: bool,
+    ) -> MoveTeleportAckActionLikeCpp {
+        self.move_teleport_ack_events_like_cpp
+            .push(MoveTeleportAckEventLikeCpp {
+                mover_guid,
+                ack_index,
+                move_time,
+                action,
+                destination_map_id,
+                destination_position,
+                old_zone_id,
+                new_zone_id,
+                new_area_id,
+                honorless_target_cast,
+                pvp_disabled,
+                pet_resummon_requested,
+                delayed_operations_processed,
+            });
+        action
+    }
+
     #[cfg(test)]
     pub(crate) fn movement_ack_events_like_cpp(&self) -> &[MovementAckEventLikeCpp] {
         &self.movement_ack_events_like_cpp
@@ -6521,6 +6717,61 @@ impl WorldSession {
         &self,
     ) -> &[MoveSplineDoneTaxiEventLikeCpp] {
         &self.move_spline_done_taxi_events_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_player_zone_area_like_cpp(&mut self, zone_id: u32, area_id: u32) {
+        self.player_zone_id_like_cpp = zone_id;
+        self.player_area_id_like_cpp = area_id;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn player_zone_area_like_cpp(&self) -> (u32, u32) {
+        (self.player_zone_id_like_cpp, self.player_area_id_like_cpp)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_player_pvp_state_like_cpp(
+        &mut self,
+        hostile: bool,
+        pvp_enabled: bool,
+        in_pvp_flag: bool,
+    ) {
+        self.player_pvp_hostile_like_cpp = hostile;
+        self.player_pvp_enabled_like_cpp = pvp_enabled;
+        self.player_in_pvp_flag_like_cpp = in_pvp_flag;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_near_teleport_pending_like_cpp(
+        &mut self,
+        pending: bool,
+        destination: Option<(u16, wow_core::Position)>,
+        zone_area: Option<(u32, u32)>,
+    ) {
+        self.near_teleport_pending_like_cpp = pending;
+        self.near_teleport_destination_like_cpp = destination;
+        self.near_teleport_destination_zone_area_like_cpp = zone_area;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn near_teleport_pending_like_cpp(&self) -> bool {
+        self.near_teleport_pending_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn move_teleport_ack_events_like_cpp(&self) -> &[MoveTeleportAckEventLikeCpp] {
+        &self.move_teleport_ack_events_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn temporary_pet_resummon_requests_like_cpp(&self) -> u32 {
+        self.temporary_pet_resummon_requests_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn delayed_operations_processed_like_cpp(&self) -> u32 {
+        self.delayed_operations_processed_like_cpp
     }
 
     pub(crate) fn player_movement_time_like_cpp(&self) -> u32 {
