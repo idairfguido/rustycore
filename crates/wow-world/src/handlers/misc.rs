@@ -645,9 +645,9 @@ impl crate::session::WorldSession {
 
         const NPC_FLAG_FLIGHT_MASTER: u32 = 0x2000;
         let is_flight_master = self
-            .creatures
-            .get(&unit_guid)
-            .map(|c| c.npc_flags & NPC_FLAG_FLIGHT_MASTER != 0)
+            .mutate_world_creature(unit_guid, |creature| {
+                creature.npc_flags() & NPC_FLAG_FLIGHT_MASTER != 0
+            })
             .unwrap_or(false);
 
         // TaxiNodeStatus: 0=None, 1=Learned, 2=Unlearned, 3=NotEligible

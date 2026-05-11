@@ -78,8 +78,8 @@ impl WorldSession {
         };
 
         // ── Resolve creature entry ─────────────────────────────────────────
-        let entry = match self.creatures.get(&trainer_guid) {
-            Some(ai) => ai.entry,
+        let entry = match self.mutate_world_creature(trainer_guid, |creature| creature.entry()) {
+            Some(entry) => entry,
             None => {
                 // Fallback: query DB by spawn GUID
                 let mut stmt = world_db.prepare(WorldStatements::SEL_CREATURE_ENTRY_BY_GUID);

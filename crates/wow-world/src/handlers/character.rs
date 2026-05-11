@@ -2071,7 +2071,7 @@ impl WorldSession {
         self.clear_buyback_on_logout().await;
 
         if let Some(player_guid) = self.player_guid() {
-            self.do_loot_release_all_like_cpp(player_guid).await;
+            self.close_active_loot_windows_like_cpp(player_guid);
         }
 
         // Mark character offline in DB
@@ -3092,18 +3092,23 @@ impl WorldSession {
         }
 
         let count = blocks.len();
-        // Snapshot visible set from AI tracker (populated in loop above).
-        self.visible_creatures = self.creatures.keys().cloned().collect();
+        // Snapshot visible set from the map-owned creature store.
+        self.visible_creatures = self.world_creature_guids().into_iter().collect();
         self.last_visibility_pos = Some(*position);
         let update = UpdateObject::create_creatures(blocks, map_id);
         self.send_packet(&update);
+        let visible_guids: Vec<_> = self.visible_creatures.iter().copied().collect();
+        let mob_count = visible_guids
+            .iter()
+            .filter(|g| {
+                self.mutate_world_creature(**g, |creature| creature.npc_flags() == 0)
+                    .unwrap_or(false)
+            })
+            .count();
+        let npc_count = self.visible_creatures.len().saturating_sub(mob_count);
         debug!(
             "Sent {} creatures ({} mobs / {} npcs) to account {} on map {}",
-            count,
-            self.creatures.values().filter(|a| a.npc_flags == 0).count(),
-            self.creatures.values().filter(|a| a.npc_flags > 0).count(),
-            self.account_id,
-            map_id
+            count, mob_count, npc_count, self.account_id, map_id
         );
     }
 
@@ -3303,9 +3308,6 @@ impl WorldSession {
                 "Visibility update: {} creatures out of range",
                 removed_creatures.len()
             );
-            for g in &removed_creatures {
-                self.creatures.remove(g);
-            }
             self.send_packet(&UpdateObject::out_of_range_objects(
                 removed_creatures,
                 map_id,
@@ -3976,16 +3978,11 @@ impl WorldSession {
 
         const GOSSIP_FLAG: u32 = 0x1;
 
-        let npc_flags = self
-            .creatures
-            .get(&hello.unit)
-            .map(|c| c.npc_flags)
-            .unwrap_or(0);
-        let entry = self
-            .creatures
-            .get(&hello.unit)
-            .map(|c| c.entry)
-            .unwrap_or(0);
+        let (npc_flags, entry) = self
+            .mutate_world_creature(hello.unit, |creature| {
+                (creature.npc_flags(), creature.entry())
+            })
+            .unwrap_or((0, 0));
 
         info!(
             "GossipHello npc_flags=0x{:X} entry={} for {:?}",
@@ -4192,9 +4189,7 @@ impl WorldSession {
         const GUILD_BANKER: u32 = 0x800000;
 
         let npc_flags = self
-            .creatures
-            .get(&hello.unit)
-            .map(|c| c.npc_flags)
+            .mutate_world_creature(hello.unit, |creature| creature.npc_flags())
             .unwrap_or(0);
 
         if npc_flags & VENDOR_MASK != 0 {
@@ -4417,9 +4412,9 @@ impl WorldSession {
             None => return,
         };
 
-        // Resolve creature entry: first from AI tracker, then fallback from DB by spawn GUID.
-        let entry = match self.creatures.get(&vendor_guid) {
-            Some(ai) => ai.entry,
+        // Resolve creature entry: first from map-owned creature state, then fallback from DB by spawn GUID.
+        let entry = match self.mutate_world_creature(vendor_guid, |creature| creature.entry()) {
+            Some(entry) => entry,
             None => {
                 let mut stmt = world_db.prepare(WorldStatements::SEL_CREATURE_ENTRY_BY_GUID);
                 stmt.set_u64(0, vendor_guid.low_value() as u64);
@@ -4863,8 +4858,8 @@ impl WorldSession {
         };
 
         // ── Get vendor NPC entry from creature GUID ──
-        let vendor_entry = match self.creatures.get(&buy.vendor_guid) {
-            Some(c) => c.entry,
+        let vendor_entry = match self.mutate_world_creature(buy.vendor_guid, |c| c.entry()) {
+            Some(entry) => entry,
             None => {
                 warn!("BuyItem: vendor {:?} not in creatures", buy.vendor_guid);
                 self.send_buy_error(
@@ -5496,7 +5491,10 @@ impl WorldSession {
             None => return,
         };
         let map_id = self.current_map_id;
-        if !self.creatures.contains_key(&buyback.vendor_guid) {
+        if self
+            .mutate_world_creature(buyback.vendor_guid, |_| ())
+            .is_none()
+        {
             self.send_sell_error(SellResult::CantFindVendor, None, ObjectGuid::EMPTY);
             return;
         }
@@ -7647,8 +7645,9 @@ impl WorldSession {
         self.login_time = Some(std::time::Instant::now());
         // Store initial position for aggro checks / movement tracking.
         self.player_position = Some(*position);
-        // Clear creature/loot state for fresh login.
-        self.creatures.clear();
+        // Clear per-session loot/visibility state for fresh login. Creatures
+        // remain map-owned, matching C++ Map ownership.
+        self.visible_creatures.clear();
         self.loot_table.clear();
         self.set_active_loot_guid(ObjectGuid::EMPTY);
         self.combat_target = None;

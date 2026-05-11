@@ -192,21 +192,24 @@ impl WorldSession {
         }
 
         // Check creature exists and is dead.
-        let creature = match self.creatures.get(&req.unit) {
-            Some(c) => c,
+        let (creature_alive, creature_position) = match self
+            .mutate_world_creature(req.unit, |creature| {
+                (creature.is_alive(), creature.position())
+            }) {
+            Some(state) => state,
             None => {
                 warn!("LootUnit: creature {:?} not found", req.unit);
                 return;
             }
         };
 
-        if creature.is_alive {
+        if creature_alive {
             return;
         }
 
         if self
             .player_position
-            .is_some_and(|player| !player.is_within_dist(&creature.current_pos, 30.0))
+            .is_some_and(|player| !player.is_within_dist(&creature_position, 30.0))
         {
             return;
         }
@@ -651,7 +654,9 @@ impl WorldSession {
             }
 
             if owner_guid.is_creature_or_vehicle() {
-                let Some(creature) = self.creatures.get(&owner_guid) else {
+                let Some(creature_position) =
+                    self.mutate_world_creature(owner_guid, |creature| creature.position())
+                else {
                     self.send_loot_error_like_cpp(
                         loot_req.object,
                         owner_guid,
@@ -662,7 +667,7 @@ impl WorldSession {
 
                 if self
                     .player_position
-                    .is_some_and(|player| !player.is_within_dist(&creature.current_pos, 30.0))
+                    .is_some_and(|player| !player.is_within_dist(&creature_position, 30.0))
                 {
                     self.send_loot_error_like_cpp(
                         loot_req.object,
@@ -2462,33 +2467,32 @@ impl WorldSession {
         };
 
         let mut candidates: Vec<ObjectGuid> = self
-            .creatures
-            .iter()
-            .filter_map(|(guid, creature)| {
-                if *guid == main_loot_target
-                    || !guid.is_creature_or_vehicle()
-                    || creature.is_alive
-                    || !player_position.is_within_dist(&creature.current_pos, 30.0)
-                {
-                    return None;
+            .world_creature_guids()
+            .into_iter()
+            .filter(|guid| {
+                if *guid == main_loot_target || !guid.is_creature_or_vehicle() {
+                    return false;
                 }
-
-                Some(*guid)
+                self.mutate_world_creature(*guid, |creature| {
+                    !creature.is_alive()
+                        && player_position.is_within_dist(&creature.position(), 30.0)
+                })
+                .unwrap_or(false)
             })
             .collect();
         candidates.sort_by_key(|guid| (guid.high_value(), guid.low_value()));
 
         let mut result = Vec::new();
         for owner_guid in candidates {
-            let Some((level, entry, loot_id, gold_min, gold_max, dungeon_encounter_id)) =
-                self.creatures.get(&owner_guid).map(|creature| {
+            let Some((level, entry, loot_id, gold_min, gold_max, dungeon_encounter_id)) = self
+                .mutate_world_creature(owner_guid, |creature| {
                     (
-                        creature.level,
-                        creature.entry,
-                        creature.loot_id,
-                        creature.gold_min,
-                        creature.gold_max,
-                        creature.dungeon_encounter_id,
+                        creature.level(),
+                        creature.entry(),
+                        creature.loot_id(),
+                        creature.gold_min(),
+                        creature.gold_max(),
+                        creature.dungeon_encounter_id(),
                     )
                 })
             else {
@@ -2530,15 +2534,15 @@ impl WorldSession {
         player_guid: ObjectGuid,
         ae_looting: bool,
     ) -> Option<LootResponse> {
-        let (level, entry, loot_id, gold_min, gold_max, dungeon_encounter_id) =
-            self.creatures.get(&owner_guid).map(|creature| {
+        let (level, entry, loot_id, gold_min, gold_max, dungeon_encounter_id) = self
+            .mutate_world_creature(owner_guid, |creature| {
                 (
-                    creature.level,
-                    creature.entry,
-                    creature.loot_id,
-                    creature.gold_min,
-                    creature.gold_max,
-                    creature.dungeon_encounter_id,
+                    creature.level(),
+                    creature.entry(),
+                    creature.loot_id(),
+                    creature.gold_min(),
+                    creature.gold_max(),
+                    creature.dungeon_encounter_id(),
                 )
             })?;
         self.ensure_represented_creature_loot_like_cpp(
@@ -4411,6 +4415,26 @@ impl WorldSession {
         }
     }
 
+    pub(crate) fn close_active_loot_windows_like_cpp(&mut self, player_guid: ObjectGuid) {
+        let mut active_owners: Vec<ObjectGuid> =
+            self.active_loot_view_owners.iter().copied().collect();
+        if active_owners.is_empty() && !self.active_loot_guid.is_empty() {
+            active_owners.push(self.active_loot_guid);
+        }
+        active_owners.sort_by_key(|guid| (guid.high_value(), guid.low_value()));
+
+        for owner_guid in active_owners {
+            if let Some(loot) = self.loot_table.get_mut(&owner_guid) {
+                loot.players_looting.retain(|looter| *looter != player_guid);
+            }
+            self.send_packet(&SLootRelease {
+                loot_obj: owner_guid,
+                owner: player_guid,
+            });
+            self.clear_active_loot_guid_if(owner_guid);
+        }
+    }
+
     async fn do_loot_release_owner_like_cpp(
         &mut self,
         owner_guid: ObjectGuid,
@@ -4476,12 +4500,13 @@ impl WorldSession {
         // C# uses `RateCorpseDecayLooted` config × `m_corpseDelay` (default 60s).
         // We use a simple 30s fixed decay.
         let marked = self
-            .mutate_legacy_creature_and_sync(owner_guid, |creature| {
-                if !creature.is_alive && creature.corpse_despawn_at.is_none() {
+            .mutate_world_creature(owner_guid, |creature| {
+                if !creature.is_alive() && creature.corpse_despawn_at().is_none() {
                     const CORPSE_DECAY_SECS: u64 = 30;
-                    creature.corpse_despawn_at =
-                        Some(Instant::now() + Duration::from_secs(CORPSE_DECAY_SECS));
-                    Some((creature.entry, CORPSE_DECAY_SECS))
+                    creature.set_corpse_despawn_at(Some(
+                        Instant::now() + Duration::from_secs(CORPSE_DECAY_SECS),
+                    ));
+                    Some((creature.entry(), CORPSE_DECAY_SECS))
                 } else {
                     None
                 }

@@ -69,6 +69,11 @@ pub struct CreatureAiOwnershipState {
     pub unit_flags: u32,
     pub min_damage: u32,
     pub max_damage: u32,
+    pub loot_id: u32,
+    pub gold_min: u32,
+    pub gold_max: u32,
+    pub boss_id: Option<u32>,
+    pub dungeon_encounter_id: u32,
 }
 
 impl Default for CreatureAiOwnershipState {
@@ -95,6 +100,11 @@ impl Default for CreatureAiOwnershipState {
             unit_flags: 0,
             min_damage: BASE_MINDAMAGE as u32,
             max_damage: BASE_MAXDAMAGE as u32,
+            loot_id: 0,
+            gold_min: 0,
+            gold_max: 0,
+            boss_id: None,
+            dungeon_encounter_id: 0,
         }
     }
 }
@@ -1932,6 +1942,11 @@ mod tests {
         assert_eq!(creature.cleanup_before_delete_count(), 0);
         assert!(!creature.grid_unload_delete_requested());
         assert!(!creature.grid_unload_respawn_relocation_requested());
+        assert_eq!(creature.ai_ownership().loot_id, 0);
+        assert_eq!(creature.ai_ownership().gold_min, 0);
+        assert_eq!(creature.ai_ownership().gold_max, 0);
+        assert_eq!(creature.ai_ownership().boss_id, None);
+        assert_eq!(creature.ai_ownership().dungeon_encounter_id, 0);
     }
 
     #[test]

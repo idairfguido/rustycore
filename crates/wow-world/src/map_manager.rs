@@ -209,6 +209,26 @@ impl WorldCreature {
         self.creature.ai_ownership().max_damage
     }
 
+    pub fn loot_id(&self) -> u32 {
+        self.creature.ai_ownership().loot_id
+    }
+
+    pub fn gold_min(&self) -> u32 {
+        self.creature.ai_ownership().gold_min
+    }
+
+    pub fn gold_max(&self) -> u32 {
+        self.creature.ai_ownership().gold_max
+    }
+
+    pub fn boss_id(&self) -> Option<u32> {
+        self.creature.ai_ownership().boss_id
+    }
+
+    pub fn dungeon_encounter_id(&self) -> u32 {
+        self.creature.ai_ownership().dungeon_encounter_id
+    }
+
     pub fn state(&self) -> CreatureAiState {
         self.creature.ai_state()
     }
@@ -755,6 +775,17 @@ impl MapManager {
         map.grids
             .values_mut()
             .find_map(|grid| grid.get_creature_mut(guid))
+    }
+
+    pub fn creature_guids(&self, map_id: u16, instance_id: u32) -> Vec<ObjectGuid> {
+        self.get_map(map_id, instance_id)
+            .map(|map| {
+                map.grids
+                    .values()
+                    .flat_map(|grid| grid.creatures.keys().copied())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub fn remove_creature_any(
