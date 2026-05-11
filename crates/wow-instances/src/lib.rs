@@ -1183,6 +1183,92 @@ pub struct BossStateTransitionPlan {
     pub update_doors_minions_and_spawn_groups: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CombatResurrectionEvent {
+    GainCharge {
+        in_combat_res_count: u8,
+        combat_res_charge_recovery: u32,
+    },
+    InCombatResurrection,
+}
+
+/// C++ `InstanceScript` combat-resurrection counters/timer.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CombatResurrectionTracker {
+    charges: u8,
+    timer_ms: u32,
+    timer_started: bool,
+}
+
+impl CombatResurrectionTracker {
+    pub fn initialize_like_cpp(&mut self, charges: u8, interval_ms: u32) {
+        self.charges = charges;
+        if interval_ms == 0 {
+            return;
+        }
+
+        self.timer_ms = interval_ms;
+        self.timer_started = true;
+    }
+
+    pub fn reset_like_cpp(&mut self) {
+        self.charges = 0;
+        self.timer_ms = 0;
+        self.timer_started = false;
+    }
+
+    pub fn add_charge_like_cpp(&mut self, player_count: u32) -> CombatResurrectionEvent {
+        self.charges = self.charges.wrapping_add(1);
+        self.timer_ms = combat_resurrection_charge_interval_like_cpp(player_count);
+        CombatResurrectionEvent::GainCharge {
+            in_combat_res_count: self.charges,
+            combat_res_charge_recovery: self.timer_ms,
+        }
+    }
+
+    pub fn use_charge_like_cpp(&mut self) -> CombatResurrectionEvent {
+        self.charges = self.charges.wrapping_sub(1);
+        CombatResurrectionEvent::InCombatResurrection
+    }
+
+    pub fn update_like_cpp(
+        &mut self,
+        diff_ms: u32,
+        player_count: u32,
+    ) -> Option<CombatResurrectionEvent> {
+        if !self.timer_started {
+            return None;
+        }
+
+        if self.timer_ms <= diff_ms {
+            Some(self.add_charge_like_cpp(player_count))
+        } else {
+            self.timer_ms -= diff_ms;
+            None
+        }
+    }
+
+    pub const fn charges(&self) -> u8 {
+        self.charges
+    }
+
+    pub const fn timer_ms(&self) -> u32 {
+        self.timer_ms
+    }
+
+    pub const fn timer_started(&self) -> bool {
+        self.timer_started
+    }
+}
+
+pub const fn combat_resurrection_charge_interval_like_cpp(player_count: u32) -> u32 {
+    if player_count == 0 {
+        0
+    } else {
+        (90 * 60 * 1000) / player_count
+    }
+}
+
 /// C++ `DungeonEncounterData`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DungeonEncounterData {
@@ -1254,6 +1340,7 @@ pub struct InstanceScriptBase {
     header: String,
     bosses: Vec<BossInfo>,
     persistent_values: Vec<(String, PersistentInstanceScriptValue)>,
+    combat_resurrections: CombatResurrectionTracker,
 }
 
 impl InstanceScriptBase {
@@ -1263,6 +1350,7 @@ impl InstanceScriptBase {
             header: String::new(),
             bosses: vec![BossInfo::default(); boss_count],
             persistent_values: Vec::new(),
+            combat_resurrections: CombatResurrectionTracker::default(),
         }
     }
 
@@ -1373,6 +1461,32 @@ impl InstanceScriptBase {
         self.persistent_values
             .iter()
             .find_map(|(key, value)| (key == name).then_some(value))
+    }
+
+    pub fn combat_resurrections(&self) -> CombatResurrectionTracker {
+        self.combat_resurrections
+    }
+
+    pub fn initialize_combat_resurrections_like_cpp(&mut self, charges: u8, interval_ms: u32) {
+        self.combat_resurrections
+            .initialize_like_cpp(charges, interval_ms);
+    }
+
+    pub fn reset_combat_resurrections_like_cpp(&mut self) {
+        self.combat_resurrections.reset_like_cpp();
+    }
+
+    pub fn update_combat_resurrection_like_cpp(
+        &mut self,
+        diff_ms: u32,
+        player_count: u32,
+    ) -> Option<CombatResurrectionEvent> {
+        self.combat_resurrections
+            .update_like_cpp(diff_ms, player_count)
+    }
+
+    pub fn use_combat_resurrection_like_cpp(&mut self) -> CombatResurrectionEvent {
+        self.combat_resurrections.use_charge_like_cpp()
     }
 
     pub fn get_save_data_like_cpp(&self) -> String {
@@ -2635,6 +2749,80 @@ mod tests {
                 .is_none()
         );
         assert_eq!(script.boss_state(0), EncounterState::Done);
+    }
+
+    #[test]
+    fn combat_resurrection_interval_matches_cpp_player_count_rule() {
+        assert_eq!(combat_resurrection_charge_interval_like_cpp(0), 0);
+        assert_eq!(combat_resurrection_charge_interval_like_cpp(1), 5_400_000);
+        assert_eq!(combat_resurrection_charge_interval_like_cpp(9), 600_000);
+    }
+
+    #[test]
+    fn combat_resurrection_initialize_update_and_gain_charge_match_cpp() {
+        let mut tracker = CombatResurrectionTracker::default();
+
+        tracker.initialize_like_cpp(1, 600_000);
+        assert_eq!(tracker.charges(), 1);
+        assert_eq!(tracker.timer_ms(), 600_000);
+        assert!(tracker.timer_started());
+
+        assert_eq!(tracker.update_like_cpp(100_000, 9), None);
+        assert_eq!(tracker.timer_ms(), 500_000);
+
+        assert_eq!(
+            tracker.update_like_cpp(500_000, 9),
+            Some(CombatResurrectionEvent::GainCharge {
+                in_combat_res_count: 2,
+                combat_res_charge_recovery: 600_000,
+            })
+        );
+        assert_eq!(tracker.charges(), 2);
+        assert_eq!(tracker.timer_ms(), 600_000);
+    }
+
+    #[test]
+    fn combat_resurrection_use_and_reset_match_cpp() {
+        let mut tracker = CombatResurrectionTracker::default();
+        tracker.initialize_like_cpp(1, 600_000);
+
+        assert_eq!(
+            tracker.use_charge_like_cpp(),
+            CombatResurrectionEvent::InCombatResurrection
+        );
+        assert_eq!(tracker.charges(), 0);
+
+        tracker.reset_like_cpp();
+        assert_eq!(tracker.charges(), 0);
+        assert_eq!(tracker.timer_ms(), 0);
+        assert!(!tracker.timer_started());
+        assert_eq!(tracker.update_like_cpp(600_000, 9), None);
+    }
+
+    #[test]
+    fn instance_script_combat_resurrection_wrappers_use_tracker_like_cpp() {
+        let mut script = InstanceScriptBase::new(4, 1);
+
+        script.initialize_combat_resurrections_like_cpp(1, 600_000);
+        assert_eq!(script.combat_resurrections().charges(), 1);
+        assert_eq!(
+            script.update_combat_resurrection_like_cpp(600_000, 9),
+            Some(CombatResurrectionEvent::GainCharge {
+                in_combat_res_count: 2,
+                combat_res_charge_recovery: 600_000,
+            })
+        );
+        assert_eq!(
+            script.use_combat_resurrection_like_cpp(),
+            CombatResurrectionEvent::InCombatResurrection
+        );
+        assert_eq!(script.combat_resurrections().charges(), 1);
+
+        script.reset_combat_resurrections_like_cpp();
+        assert_eq!(
+            script.combat_resurrections(),
+            CombatResurrectionTracker::default()
+        );
     }
 
     #[test]

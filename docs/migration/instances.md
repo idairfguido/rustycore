@@ -229,6 +229,7 @@ NOTE: `InstanceSaveMgr` no longer exists as a separate class in this WoLK 3.4.3 
 - `#NEXT.R8.INSTANCES.011` adds the pure C++ `InstanceScript::Create`, `InstanceScriptDataReader::Load`, `InstanceScriptDataWriter::FillData/GetString`, and numeric `PersistentInstanceScriptValue` save/load core: header check, boss-state array, transient-state normalization, strict error cases, and compact C++-ordered JSON output.
 - `#NEXT.R8.INSTANCES.012` adds pure C++ `InstanceScript` encounter query helpers: `IsEncounterInProgress`, `IsEncounterCompleted`, `IsEncounterCompletedInMaskByBossId`, and `GetEncounterCount`-equivalent boss count behavior.
 - `#NEXT.R8.INSTANCES.013` adds pure C++ `InstanceScript::SetBossState` transition planning: `TO_BE_DECIDED` load initialization, unchanged/no-regression guards, alive world-boss-minion DONE guard, combat-res/start/end/player-notify flags, encounter-id derived update-lock/criteria/boss-kill/LFG flags, and door/minion/spawn-group follow-up flag.
+- `#NEXT.R8.INSTANCES.014` adds pure C++ combat-resurrection tracker behavior: player-count interval calculation, initialize/reset, timer update, charge gain event, and use-charge event matching the already ported combat-resurrection packets.
 
 **What's implemented:**
 - `crates/wow-world/src/map_manager.rs` (per the active WIP commits) provides a `MapManager` global stub with placeholder for `GenerateInstanceId` (must verify), but no lock store and no script dispatch. (See WIP commit `f83c48d82`.)
@@ -343,7 +344,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [~] **#INST.26** Implement encounter-frame packet senders: `SendEncounterUnit`, `SendEncounterStart`, `SendEncounterEnd` (M) — C++ packet builders done; real `InstanceScript::SendToPlayers` call-sites pending.
 - [~] **#INST.27** Implement `SendBossKillCredit` (`SMSG_BOSS_KILL`) (L) — C++ packet builder done; real boss-state call-site pending.
 - [ ] **#INST.28** Implement `DoUpdateWorldState`, `DoCastSpellOnPlayers`, `DoRemoveAurasDueToSpellOnPlayers`, `DoUpdateCriteria`, `DoSendNotifyToInstance` (M)
-- [~] **#INST.29** Implement combat-resurrection tracker (`InitializeCombatResurrections`, `Use`, `Reset`, `GetCombatResurrectionChargeInterval`, `Update`) (M) — C++ combat-resurrection packets done; tracker/state machine pending.
+- [x] **#INST.29** Implement combat-resurrection tracker (`InitializeCombatResurrections`, `Use`, `Reset`, `GetCombatResurrectionChargeInterval`, `Update`) (M)
 - [ ] **#INST.30** Implement entrance-location resolver (`SetEntranceLocation`, `Get`, `ComputeEntranceLocationForCompletedEncounters`) (M)
 - [~] **#INST.31** Implement `PersistentInstanceScriptValue<T>` (i64 / f64 variant) w/ change-notify (M) — numeric value registration/save/load done; change-notify event into `InstanceMap::UpdateInstanceLock(UpdateAdditionalSaveDataEvent)` pending.
 - [ ] **#INST.32** Implement `MarkAreaTriggerDone` / `IsAreaTriggerDone` set tracking (L)
