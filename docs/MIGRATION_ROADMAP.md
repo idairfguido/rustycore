@@ -468,7 +468,7 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
 - [ ] **#A05** Auditar **Foundation** (`wow-core`) vs `src/server/game/Globals/` + `src/server/shared/`. GUID encoding, Position math, Time.
 - [x] **#A06** Auditar **Movement parsing** (`wow-packet/movement.rs`, handlers/movement.rs) vs `src/server/game/Server/Packets/MovementPackets.*`, `Entities/Object/MovementInfo.h` y `Handlers/MovementHandler.cpp`. Resultado: `docs/audits/movement.md`; `MovementInfo::read` está cerca del wire C++, pero el writer y handler quedan en ⚠️ con subtareas:
   - [x] **#A06.1** Corregir `MovementInfo::write` para que `hasFallData = falling flags || fallTime != 0` y `hasFallDirection = falling flags`, como `MovementPackets.cpp`.
-  - [ ] **#A06.2** Representar `standingOnGameObjectGUID` e `inertia` en `MovementInfo`; no descartarlos al leer ni forzarlos a `false` al escribir.
+  - [x] **#A06.2** Representar `standingOnGameObjectGUID` e `inertia` en `MovementInfo`; no descartarlos al leer ni forzarlos a `false` al escribir.
   - [ ] **#A06.3** Endurecer validación de `handle_movement`: GUID no vacío y exactamente mover actual, orientación/coordenadas válidas, guard de teleport/movespline cuando existan equivalentes.
   - [ ] **#A06.4** Validar/normalizar transport: offset ±75, distancia > grid tras teleport, world coord con transport, reset si no existe transport/vehicle.
   - [ ] **#A06.5** Portar `AdjustClientMovementTime` o puente temporal documentado con time-sync antes de rebroadcast.

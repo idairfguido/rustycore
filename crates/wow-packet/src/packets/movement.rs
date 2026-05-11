@@ -59,7 +59,9 @@ pub struct MovementInfo {
     pub step_up_start_elevation: f32,
     pub jump: JumpInfo,
     pub transport: Option<TransportInfo>,
+    pub inertia: Option<InertiaInfo>,
     pub adv_flying: Option<AdvFlyingInfo>,
+    pub standing_on_gameobject_guid: Option<ObjectGuid>,
 }
 
 impl Default for MovementInfo {
@@ -75,7 +77,9 @@ impl Default for MovementInfo {
             step_up_start_elevation: 0.0,
             jump: JumpInfo::default(),
             transport: None,
+            inertia: None,
             adv_flying: None,
+            standing_on_gameobject_guid: None,
         }
     }
 }
@@ -101,6 +105,15 @@ pub struct TransportInfo {
     pub time: u32,
     pub prev_time: Option<u32>,
     pub vehicle_id: Option<i32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct InertiaInfo {
+    pub id: i32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub lifetime: u32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -180,19 +193,23 @@ impl MovementInfo {
             None
         };
 
-        // standing on gameobject guid (skip)
-        if has_standing_on_go {
-            pkt.read_packed_guid()?;
-        }
+        let standing_on_gameobject_guid = if has_standing_on_go {
+            Some(pkt.read_packed_guid()?)
+        } else {
+            None
+        };
 
-        // inertia (skip)
-        if has_inertia {
-            let _id = pkt.read_int32()?;
-            let _fx = pkt.read_float()?;
-            let _fy = pkt.read_float()?;
-            let _fz = pkt.read_float()?;
-            let _lifetime = pkt.read_uint32()?;
-        }
+        let inertia = if has_inertia {
+            Some(InertiaInfo {
+                id: pkt.read_int32()?,
+                x: pkt.read_float()?,
+                y: pkt.read_float()?,
+                z: pkt.read_float()?,
+                lifetime: pkt.read_uint32()?,
+            })
+        } else {
+            None
+        };
 
         let adv_flying = if has_adv_flying {
             let fwd = pkt.read_float()?;
@@ -238,7 +255,9 @@ impl MovementInfo {
             step_up_start_elevation,
             jump,
             transport,
+            inertia,
             adv_flying,
+            standing_on_gameobject_guid,
         })
     }
 
@@ -249,7 +268,9 @@ impl MovementInfo {
             .flags
             .intersects(MovementFlag::FALLING | MovementFlag::FALLING_FAR);
         let has_fall = has_fall_direction || self.jump.fall_time != 0;
+        let has_inertia = self.inertia.is_some();
         let has_adv_flying = self.adv_flying.is_some();
+        let has_standing_on_gameobject_guid = self.standing_on_gameobject_guid.is_some();
 
         pkt.write_packed_guid(&self.guid);
         pkt.write_uint32(self.flags.bits());
@@ -266,13 +287,13 @@ impl MovementInfo {
         pkt.write_uint32(0u32); // remove_forces_count
         pkt.write_uint32(0u32); // move_index
 
-        pkt.write_bit(false); // has_standing_on_go
+        pkt.write_bit(has_standing_on_gameobject_guid);
         pkt.write_bit(has_transport);
         pkt.write_bit(has_fall);
         pkt.write_bit(false); // has_spline
         pkt.write_bit(false); // height_change_failed
         pkt.write_bit(false); // remote_time_valid
-        pkt.write_bit(false); // has_inertia
+        pkt.write_bit(has_inertia);
         pkt.write_bit(has_adv_flying);
         pkt.flush_bits();
 
@@ -293,6 +314,18 @@ impl MovementInfo {
             if let Some(vid) = t.vehicle_id {
                 pkt.write_int32(vid);
             }
+        }
+
+        if let Some(guid) = &self.standing_on_gameobject_guid {
+            pkt.write_packed_guid(guid);
+        }
+
+        if let Some(inertia) = &self.inertia {
+            pkt.write_int32(inertia.id);
+            pkt.write_float(inertia.x);
+            pkt.write_float(inertia.y);
+            pkt.write_float(inertia.z);
+            pkt.write_uint32(inertia.lifetime);
         }
 
         if let Some(af) = &self.adv_flying {
@@ -492,6 +525,7 @@ impl ClientPacket for MoveInitActiveMoverComplete {
 mod tests {
     use super::*;
     use crate::world_packet::WorldPacket;
+    use wow_core::guid::HighGuid;
 
     #[test]
     fn movement_info_write_includes_fall_data_when_falling_flag_is_set_like_cpp() {
@@ -531,5 +565,55 @@ mod tests {
         let decoded = MovementInfo::read(&mut pkt).unwrap();
         assert_eq!(decoded.jump.fall_time, 0);
         assert!(!decoded.jump.has_direction);
+    }
+
+    #[test]
+    fn movement_info_preserves_standing_guid_and_inertia_like_cpp() {
+        let info = MovementInfo {
+            guid: ObjectGuid::create_player(1, 42),
+            time: 77,
+            position: Position::new(10.0, 20.0, 30.0, 1.5),
+            standing_on_gameobject_guid: Some(ObjectGuid::create_world_object(
+                HighGuid::GameObject,
+                0,
+                1,
+                0,
+                0,
+                7,
+                9001,
+            )),
+            inertia: Some(InertiaInfo {
+                id: 12,
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+                lifetime: 400,
+            }),
+            ..MovementInfo::default()
+        };
+
+        let mut pkt = WorldPacket::new_empty();
+        info.write(&mut pkt);
+
+        let mut pkt = WorldPacket::from_bytes(pkt.data());
+        let decoded = MovementInfo::read(&mut pkt).unwrap();
+        assert_eq!(
+            decoded.standing_on_gameobject_guid,
+            Some(ObjectGuid::create_world_object(
+                HighGuid::GameObject,
+                0,
+                1,
+                0,
+                0,
+                7,
+                9001,
+            ))
+        );
+        let inertia = decoded.inertia.unwrap();
+        assert_eq!(inertia.id, 12);
+        assert_eq!(inertia.x, 1.0);
+        assert_eq!(inertia.y, 2.0);
+        assert_eq!(inertia.z, 3.0);
+        assert_eq!(inertia.lifetime, 400);
     }
 }

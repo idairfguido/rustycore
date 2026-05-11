@@ -32,7 +32,7 @@ Fecha: 2026-05-11
 |---|---|---|---|
 | Orden base `MovementInfo` (`guid`, flags, time, XYZO, pitch, step, remove forces, move index, 8 bits, bloques opcionales) | `MovementInfo::read` sigue el orden C++ para campos base, transport, standing GUID skip, inertia skip, adv flying y fall. | OK parcial | Añadir tests de roundtrip con transport/fall/adv flying para fijar wire format. |
 | Escritura `hasFallData = falling flag || fallTime != 0`; `hasFallDirection = MOVEMENTFLAG_FALLING | FALLING_FAR` | Corregido en `#A06.1`: Rust deriva ambos bits de `MovementFlag::FALLING/FALLING_FAR` como C++ y cubre el caso `fallTime=0` con flags de caída. | OK | Mantener test de regresión en `wow-packet::packets::movement`. |
-| `standingOnGameObjectGUID` e `inertia` se conservan como `Optional` en C++ | Rust los consume y descarta; `write` siempre emite `false` para ambos. | Missing | `#A06.2`: representar ambos campos en `MovementInfo` antes de depender de MoveUpdate completo. |
+| `standingOnGameObjectGUID` e `inertia` se conservan como `Optional` en C++ | Corregido en `#A06.2`: Rust los representa en `MovementInfo`, los conserva al leer y los vuelve a emitir en `write`. | OK | Mantener test de regresión en `wow-packet::packets::movement`. |
 | `TransportInfo` default C++ tiene `seat=-1`, `prevTime=0`, `vehicleId=0`; bits de prev/vehicle dependen de no cero al escribir | Rust modela `prev_time`/`vehicle_id` como `Option`, correcto en wire, pero no normaliza/limpia transport inválido en handler. | OK wire / Missing runtime | Cubrir en `#A06.4` junto a validación de transport. |
 | Handler C++ rechaza si player está teletransportándose, GUID no coincide, posición inválida, movespline no finalizada | Rust solo comprueba GUID contra player y finitud XYZ; permite GUID vacío y no valida orientación/map bounds/movespline/teleport state. | Missing / Bug | `#A06.3`: endurecer validación mínima (`guid` debe ser player, `Position::is_valid` equivalente, teleport guard cuando exista estado). |
 | Handler C++ procesa transport: dist > grid, offsets > 75, coordenada world+transport válida, add/remove passenger, reset transport si no aplica | Rust acepta transport sin validar y lo rebroadcast. | Missing | `#A06.4`: añadir validación/normalización mínima de transport; integración real queda para Transport/Map phase. |
@@ -46,7 +46,7 @@ Fecha: 2026-05-11
 ## TODOs añadidos al roadmap
 
 - `#A06.1`: corregido; `MovementInfo::write` usa la regla C++ de fall-data/fall-direction.
-- `#A06.2`: representar `standingOnGameObjectGUID` e `inertia` en Rust.
+- `#A06.2`: corregido; `standingOnGameObjectGUID` e `inertia` ya se conservan en Rust.
 - `#A06.3`: endurecer validación de movement en handler.
 - `#A06.4`: validar/normalizar transport.
 - `#A06.5`: portar `AdjustClientMovementTime` o documentar puente temporal con time sync.
