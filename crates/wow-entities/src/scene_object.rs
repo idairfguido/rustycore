@@ -64,6 +64,8 @@ pub struct SceneObject {
     scene_object_data_changes: UpdateMask,
     stationary_position: Position,
     created_by_spell_cast: ObjectGuid,
+    grid_unload_cleanup_before_delete_count: u32,
+    grid_unload_delete_requested: bool,
 }
 
 impl SceneObject {
@@ -84,6 +86,8 @@ impl SceneObject {
             scene_object_data_changes: UpdateMask::new(SCENE_OBJECT_DATA_BITS),
             stationary_position: Position::new(0.0, 0.0, 0.0, 0.0),
             created_by_spell_cast: ObjectGuid::EMPTY,
+            grid_unload_cleanup_before_delete_count: 0,
+            grid_unload_delete_requested: false,
         }
     }
 
@@ -105,6 +109,29 @@ impl SceneObject {
 
     pub fn clear_scene_object_data_changes(&mut self) {
         self.scene_object_data_changes.reset_all();
+    }
+
+    pub const fn cleanup_before_delete_count(&self) -> u32 {
+        self.grid_unload_cleanup_before_delete_count
+    }
+
+    pub const fn grid_unload_delete_requested(&self) -> bool {
+        self.grid_unload_delete_requested
+    }
+
+    pub fn set_destroyed_object(&mut self, destroyed: bool) {
+        self.world.object_mut().set_destroyed_object(destroyed);
+    }
+
+    pub fn cleanup_before_delete(&mut self) {
+        self.grid_unload_cleanup_before_delete_count = self
+            .grid_unload_cleanup_before_delete_count
+            .saturating_add(1);
+    }
+
+    pub fn request_delete_from_grid_unload(&mut self) {
+        self.grid_unload_delete_requested = true;
+        self.world.clear_current_cell();
     }
 
     pub const fn stationary_position(&self) -> Position {

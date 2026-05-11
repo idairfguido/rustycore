@@ -571,6 +571,10 @@ pub struct Creature {
     grid_unload_cleanup_before_delete_count: u32,
     grid_unload_delete_requested: bool,
     grid_unload_respawn_relocation_requested: bool,
+    owned_dynamic_objects: Vec<ObjectGuid>,
+    removed_dynamic_objects_from_grid_unload: Vec<ObjectGuid>,
+    owned_area_triggers: Vec<ObjectGuid>,
+    removed_area_triggers_from_grid_unload: Vec<ObjectGuid>,
     lifecycle_metadata: CreatureLifecycleMetadata,
     runtime_state: CreatureRuntimeState,
     ai_ownership: CreatureAiOwnershipState,
@@ -626,6 +630,10 @@ impl Creature {
             grid_unload_cleanup_before_delete_count: 0,
             grid_unload_delete_requested: false,
             grid_unload_respawn_relocation_requested: false,
+            owned_dynamic_objects: Vec::new(),
+            removed_dynamic_objects_from_grid_unload: Vec::new(),
+            owned_area_triggers: Vec::new(),
+            removed_area_triggers_from_grid_unload: Vec::new(),
             lifecycle_metadata: CreatureLifecycleMetadata::default(),
             runtime_state: CreatureRuntimeState::default(),
             ai_ownership: CreatureAiOwnershipState::default(),
@@ -1264,6 +1272,40 @@ impl Creature {
         self.grid_unload_respawn_relocation_requested
     }
 
+    pub fn register_dynamic_object(&mut self, guid: ObjectGuid) {
+        self.owned_dynamic_objects.push(guid);
+    }
+
+    pub fn unregister_dynamic_object(&mut self, guid: ObjectGuid) {
+        self.owned_dynamic_objects
+            .retain(|owned_guid| *owned_guid != guid);
+    }
+
+    pub fn dynamic_objects(&self) -> &[ObjectGuid] {
+        &self.owned_dynamic_objects
+    }
+
+    pub fn removed_dynamic_objects_from_grid_unload(&self) -> &[ObjectGuid] {
+        &self.removed_dynamic_objects_from_grid_unload
+    }
+
+    pub fn register_area_trigger(&mut self, guid: ObjectGuid) {
+        self.owned_area_triggers.push(guid);
+    }
+
+    pub fn unregister_area_trigger(&mut self, guid: ObjectGuid) {
+        self.owned_area_triggers
+            .retain(|owned_guid| *owned_guid != guid);
+    }
+
+    pub fn area_triggers(&self) -> &[ObjectGuid] {
+        &self.owned_area_triggers
+    }
+
+    pub fn removed_area_triggers_from_grid_unload(&self) -> &[ObjectGuid] {
+        &self.removed_area_triggers_from_grid_unload
+    }
+
     pub fn set_destroyed_object(&mut self, destroyed: bool) {
         self.unit
             .world_mut()
@@ -1271,20 +1313,22 @@ impl Creature {
             .set_destroyed_object(destroyed);
     }
 
-    /// Rust placeholder for TrinityCore `Creature::RemoveAllDynObjects`.
-    ///
-    /// Dynamic-object ownership is not represented on canonical `Creature` yet,
-    /// so the grid unload bridge can call this safely as an explicit no-op.
-    pub fn remove_all_dyn_objects(&mut self) {}
+    pub fn remove_all_dyn_objects(&mut self) {
+        self.removed_dynamic_objects_from_grid_unload
+            .extend(self.owned_dynamic_objects.drain(..));
+    }
 
-    /// Rust placeholder for TrinityCore `Creature::RemoveAllAreaTriggers`.
-    ///
-    /// Area-trigger ownership is not represented on canonical `Creature` yet,
-    /// so the grid unload bridge can call this safely as an explicit no-op.
-    pub fn remove_all_area_triggers(&mut self) {}
+    pub fn remove_all_area_triggers(&mut self) {
+        self.removed_area_triggers_from_grid_unload
+            .extend(self.owned_area_triggers.drain(..));
+    }
 
     pub fn combat_stop(&mut self) {
         self.unit.set_attacking(None);
+    }
+
+    pub const fn is_in_combat(&self) -> bool {
+        self.unit.attacking().is_some()
     }
 
     pub fn request_respawn_relocation_from_grid_unload(&mut self) {
@@ -2080,9 +2124,13 @@ mod tests {
     #[test]
     fn creature_grid_unload_helpers_apply_represented_state() {
         let victim = wow_core::ObjectGuid::new(1, 2);
+        let dynamic_object = wow_core::ObjectGuid::new(1, 3);
+        let area_trigger = wow_core::ObjectGuid::new(1, 4);
         let mut creature = Creature::new(false);
         creature.unit_mut().set_attacking(Some(victim));
         creature.unit_mut().world_mut().set_current_cell(7, 8);
+        creature.register_dynamic_object(dynamic_object);
+        creature.register_area_trigger(area_trigger);
 
         creature.set_destroyed_object(true);
         creature.remove_all_dyn_objects();
@@ -2093,6 +2141,16 @@ mod tests {
         creature.request_delete_from_grid_unload();
 
         assert!(creature.unit().world().object().is_destroyed_object());
+        assert!(creature.dynamic_objects().is_empty());
+        assert_eq!(
+            creature.removed_dynamic_objects_from_grid_unload(),
+            &[dynamic_object]
+        );
+        assert!(creature.area_triggers().is_empty());
+        assert_eq!(
+            creature.removed_area_triggers_from_grid_unload(),
+            &[area_trigger]
+        );
         assert_eq!(creature.unit().attacking(), None);
         assert!(creature.grid_unload_respawn_relocation_requested());
         assert_eq!(creature.cleanup_before_delete_count(), 1);

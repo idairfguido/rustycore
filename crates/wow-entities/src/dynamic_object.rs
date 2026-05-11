@@ -74,6 +74,8 @@ pub struct DynamicObject {
     aura_bound: bool,
     removed_aura_pending: bool,
     caster_viewpoint: bool,
+    grid_unload_cleanup_before_delete_count: u32,
+    grid_unload_delete_requested: bool,
 }
 
 impl DynamicObject {
@@ -97,6 +99,8 @@ impl DynamicObject {
             aura_bound: false,
             removed_aura_pending: false,
             caster_viewpoint: false,
+            grid_unload_cleanup_before_delete_count: 0,
+            grid_unload_delete_requested: false,
         }
     }
 
@@ -138,6 +142,29 @@ impl DynamicObject {
 
     pub const fn is_caster_viewpoint(&self) -> bool {
         self.caster_viewpoint
+    }
+
+    pub const fn cleanup_before_delete_count(&self) -> u32 {
+        self.grid_unload_cleanup_before_delete_count
+    }
+
+    pub const fn grid_unload_delete_requested(&self) -> bool {
+        self.grid_unload_delete_requested
+    }
+
+    pub fn set_destroyed_object(&mut self, destroyed: bool) {
+        self.world.object_mut().set_destroyed_object(destroyed);
+    }
+
+    pub fn cleanup_before_delete(&mut self) {
+        self.grid_unload_cleanup_before_delete_count = self
+            .grid_unload_cleanup_before_delete_count
+            .saturating_add(1);
+    }
+
+    pub fn request_delete_from_grid_unload(&mut self) {
+        self.grid_unload_delete_requested = true;
+        self.world.clear_current_cell();
     }
 
     pub const fn caster_guid(&self) -> ObjectGuid {

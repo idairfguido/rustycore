@@ -6,7 +6,9 @@
 //! - `game/Maps/Map.cpp::UnloadGrid`
 
 use wow_core::ObjectGuid;
-use wow_entities::{Corpse, Creature, GameObject};
+use wow_entities::{
+    AreaTrigger, Conversation, Corpse, Creature, DynamicObject, GameObject, SceneObject,
+};
 
 use crate::cell::GridObjectGuids;
 use crate::grid::NGrid;
@@ -84,7 +86,11 @@ pub enum GridUnloadApplyOutcome {
 pub trait GridUnloadEntityStore {
     fn creature_mut(&mut self, guid: ObjectGuid) -> Option<&mut Creature>;
     fn game_object_mut(&mut self, guid: ObjectGuid) -> Option<&mut GameObject>;
+    fn dynamic_object_mut(&mut self, guid: ObjectGuid) -> Option<&mut DynamicObject>;
     fn corpse_mut(&mut self, guid: ObjectGuid) -> Option<&mut Corpse>;
+    fn area_trigger_mut(&mut self, guid: ObjectGuid) -> Option<&mut AreaTrigger>;
+    fn scene_object_mut(&mut self, guid: ObjectGuid) -> Option<&mut SceneObject>;
+    fn conversation_mut(&mut self, guid: ObjectGuid) -> Option<&mut Conversation>;
 }
 
 pub fn apply_grid_unload_action<S>(
@@ -109,7 +115,11 @@ where
             }),
         GridUnloadAction::CombatStop(guid) => store
             .creature_mut(guid)
-            .map(|creature| creature.combat_stop())
+            .map(|creature| {
+                if creature.is_in_combat() {
+                    creature.combat_stop();
+                }
+            })
             .map_or(GridUnloadApplyOutcome::MissingEntity, |_| {
                 GridUnloadApplyOutcome::Applied
             }),
@@ -204,6 +214,62 @@ impl GridUnloadEntity for Corpse {
     }
 }
 
+impl GridUnloadEntity for DynamicObject {
+    fn set_destroyed_object(&mut self, destroyed: bool) {
+        self.set_destroyed_object(destroyed);
+    }
+
+    fn cleanup_before_delete(&mut self) {
+        self.cleanup_before_delete();
+    }
+
+    fn request_delete_from_grid_unload(&mut self) {
+        self.request_delete_from_grid_unload();
+    }
+}
+
+impl GridUnloadEntity for AreaTrigger {
+    fn set_destroyed_object(&mut self, destroyed: bool) {
+        self.set_destroyed_object(destroyed);
+    }
+
+    fn cleanup_before_delete(&mut self) {
+        self.cleanup_before_delete();
+    }
+
+    fn request_delete_from_grid_unload(&mut self) {
+        self.request_delete_from_grid_unload();
+    }
+}
+
+impl GridUnloadEntity for SceneObject {
+    fn set_destroyed_object(&mut self, destroyed: bool) {
+        self.set_destroyed_object(destroyed);
+    }
+
+    fn cleanup_before_delete(&mut self) {
+        self.cleanup_before_delete();
+    }
+
+    fn request_delete_from_grid_unload(&mut self) {
+        self.request_delete_from_grid_unload();
+    }
+}
+
+impl GridUnloadEntity for Conversation {
+    fn set_destroyed_object(&mut self, destroyed: bool) {
+        self.set_destroyed_object(destroyed);
+    }
+
+    fn cleanup_before_delete(&mut self) {
+        self.cleanup_before_delete();
+    }
+
+    fn request_delete_from_grid_unload(&mut self) {
+        self.request_delete_from_grid_unload();
+    }
+}
+
 fn apply_grid_unload_object_kind<S>(
     store: &mut S,
     kind: GridObjectKind,
@@ -226,16 +292,36 @@ where
             .map_or(GridUnloadApplyOutcome::MissingEntity, |_| {
                 GridUnloadApplyOutcome::Applied
             }),
+        GridObjectKind::DynamicObject => store
+            .dynamic_object_mut(guid)
+            .map(|dynamic_object| apply(dynamic_object))
+            .map_or(GridUnloadApplyOutcome::MissingEntity, |_| {
+                GridUnloadApplyOutcome::Applied
+            }),
         GridObjectKind::Corpse => store
             .corpse_mut(guid)
             .map(|corpse| apply(corpse))
             .map_or(GridUnloadApplyOutcome::MissingEntity, |_| {
                 GridUnloadApplyOutcome::Applied
             }),
-        GridObjectKind::DynamicObject
-        | GridObjectKind::AreaTrigger
-        | GridObjectKind::SceneObject
-        | GridObjectKind::Conversation => GridUnloadApplyOutcome::UnsupportedKind,
+        GridObjectKind::AreaTrigger => store
+            .area_trigger_mut(guid)
+            .map(|area_trigger| apply(area_trigger))
+            .map_or(GridUnloadApplyOutcome::MissingEntity, |_| {
+                GridUnloadApplyOutcome::Applied
+            }),
+        GridObjectKind::SceneObject => store
+            .scene_object_mut(guid)
+            .map(|scene_object| apply(scene_object))
+            .map_or(GridUnloadApplyOutcome::MissingEntity, |_| {
+                GridUnloadApplyOutcome::Applied
+            }),
+        GridObjectKind::Conversation => store
+            .conversation_mut(guid)
+            .map(|conversation| apply(conversation))
+            .map_or(GridUnloadApplyOutcome::MissingEntity, |_| {
+                GridUnloadApplyOutcome::Applied
+            }),
     }
 }
 
@@ -374,7 +460,11 @@ mod tests {
     struct TestGridUnloadStore {
         creatures: HashMap<ObjectGuid, Creature>,
         game_objects: HashMap<ObjectGuid, GameObject>,
+        dynamic_objects: HashMap<ObjectGuid, DynamicObject>,
         corpses: HashMap<ObjectGuid, Corpse>,
+        area_triggers: HashMap<ObjectGuid, AreaTrigger>,
+        scene_objects: HashMap<ObjectGuid, SceneObject>,
+        conversations: HashMap<ObjectGuid, Conversation>,
     }
 
     impl GridUnloadEntityStore for TestGridUnloadStore {
@@ -386,8 +476,24 @@ mod tests {
             self.game_objects.get_mut(&guid)
         }
 
+        fn dynamic_object_mut(&mut self, guid: ObjectGuid) -> Option<&mut DynamicObject> {
+            self.dynamic_objects.get_mut(&guid)
+        }
+
         fn corpse_mut(&mut self, guid: ObjectGuid) -> Option<&mut Corpse> {
             self.corpses.get_mut(&guid)
+        }
+
+        fn area_trigger_mut(&mut self, guid: ObjectGuid) -> Option<&mut AreaTrigger> {
+            self.area_triggers.get_mut(&guid)
+        }
+
+        fn scene_object_mut(&mut self, guid: ObjectGuid) -> Option<&mut SceneObject> {
+            self.scene_objects.get_mut(&guid)
+        }
+
+        fn conversation_mut(&mut self, guid: ObjectGuid) -> Option<&mut Conversation> {
+            self.conversations.get_mut(&guid)
         }
     }
 
@@ -564,6 +670,39 @@ mod tests {
     }
 
     #[test]
+    fn apply_stoper_actions_remove_creature_owned_dynamic_objects_and_area_triggers() {
+        let creature_guid = guid(HighGuid::Creature, 4);
+        let dynamic_object_guid = guid(HighGuid::DynamicObject, 5);
+        let area_trigger_guid = guid(HighGuid::AreaTrigger, 6);
+        let mut creature = Creature::new(false);
+        creature.register_dynamic_object(dynamic_object_guid);
+        creature.register_area_trigger(area_trigger_guid);
+        let mut store = TestGridUnloadStore::default();
+        store.creatures.insert(creature_guid, creature);
+
+        let outcomes = apply_grid_unload_actions(
+            &mut store,
+            [
+                GridUnloadAction::RemoveAllDynObjects(creature_guid),
+                GridUnloadAction::RemoveAllAreaTriggers(creature_guid),
+            ],
+        );
+
+        assert_eq!(outcomes, vec![GridUnloadApplyOutcome::Applied; 2]);
+        let creature = store.creatures.get(&creature_guid).unwrap();
+        assert!(creature.dynamic_objects().is_empty());
+        assert_eq!(
+            creature.removed_dynamic_objects_from_grid_unload(),
+            &[dynamic_object_guid]
+        );
+        assert!(creature.area_triggers().is_empty());
+        assert_eq!(
+            creature.removed_area_triggers_from_grid_unload(),
+            &[area_trigger_guid]
+        );
+    }
+
+    #[test]
     fn apply_cleanup_and_delete_are_represented_without_panics() {
         let creature_guid = guid(HighGuid::Creature, 4);
         let mut creature = Creature::new(false);
@@ -571,15 +710,33 @@ mod tests {
         let go_guid = guid(HighGuid::GameObject, 5);
         let mut go = GameObject::new();
         go.world_mut().set_current_cell(13, 14);
+        let dynamic_object_guid = guid(HighGuid::DynamicObject, 6);
+        let mut dynamic_object = DynamicObject::new(false);
+        dynamic_object.world_mut().set_current_cell(15, 16);
         let corpse_guid = guid(HighGuid::Corpse, 6);
         let mut corpse = Corpse::new_at(CorpseType::Bones, 10);
-        corpse.set_cell_coord(15, 16);
-        corpse.world_mut().set_current_cell(15, 16);
+        corpse.set_cell_coord(17, 18);
+        corpse.world_mut().set_current_cell(17, 18);
+        let area_trigger_guid = guid(HighGuid::AreaTrigger, 7);
+        let mut area_trigger = AreaTrigger::new();
+        area_trigger.world_mut().set_current_cell(19, 20);
+        let scene_object_guid = guid(HighGuid::SceneObject, 8);
+        let mut scene_object = SceneObject::new();
+        scene_object.world_mut().set_current_cell(21, 22);
+        let conversation_guid = guid(HighGuid::Conversation, 9);
+        let mut conversation = Conversation::new();
+        conversation.world_mut().set_current_cell(23, 24);
 
         let mut store = TestGridUnloadStore::default();
         store.creatures.insert(creature_guid, creature);
         store.game_objects.insert(go_guid, go);
+        store
+            .dynamic_objects
+            .insert(dynamic_object_guid, dynamic_object);
         store.corpses.insert(corpse_guid, corpse);
+        store.area_triggers.insert(area_trigger_guid, area_trigger);
+        store.scene_objects.insert(scene_object_guid, scene_object);
+        store.conversations.insert(conversation_guid, conversation);
 
         let outcomes = apply_grid_unload_actions(
             &mut store,
@@ -588,12 +745,32 @@ mod tests {
                 GridUnloadAction::DeleteObject(GridObjectKind::Creature, creature_guid),
                 GridUnloadAction::CleanupsBeforeDelete(GridObjectKind::GameObject, go_guid),
                 GridUnloadAction::DeleteObject(GridObjectKind::GameObject, go_guid),
+                GridUnloadAction::CleanupsBeforeDelete(
+                    GridObjectKind::DynamicObject,
+                    dynamic_object_guid,
+                ),
+                GridUnloadAction::DeleteObject(GridObjectKind::DynamicObject, dynamic_object_guid),
                 GridUnloadAction::CleanupsBeforeDelete(GridObjectKind::Corpse, corpse_guid),
                 GridUnloadAction::DeleteObject(GridObjectKind::Corpse, corpse_guid),
+                GridUnloadAction::CleanupsBeforeDelete(
+                    GridObjectKind::AreaTrigger,
+                    area_trigger_guid,
+                ),
+                GridUnloadAction::DeleteObject(GridObjectKind::AreaTrigger, area_trigger_guid),
+                GridUnloadAction::CleanupsBeforeDelete(
+                    GridObjectKind::SceneObject,
+                    scene_object_guid,
+                ),
+                GridUnloadAction::DeleteObject(GridObjectKind::SceneObject, scene_object_guid),
+                GridUnloadAction::CleanupsBeforeDelete(
+                    GridObjectKind::Conversation,
+                    conversation_guid,
+                ),
+                GridUnloadAction::DeleteObject(GridObjectKind::Conversation, conversation_guid),
             ],
         );
 
-        assert_eq!(outcomes, vec![GridUnloadApplyOutcome::Applied; 6]);
+        assert_eq!(outcomes, vec![GridUnloadApplyOutcome::Applied; 14]);
         let creature = store.creatures.get(&creature_guid).unwrap();
         assert_eq!(creature.cleanup_before_delete_count(), 1);
         assert!(creature.grid_unload_delete_requested());
@@ -602,11 +779,27 @@ mod tests {
         assert_eq!(go.cleanup_before_delete_count(), 1);
         assert!(go.grid_unload_delete_requested());
         assert_eq!(go.world().current_cell(), None);
+        let dynamic_object = store.dynamic_objects.get(&dynamic_object_guid).unwrap();
+        assert_eq!(dynamic_object.cleanup_before_delete_count(), 1);
+        assert!(dynamic_object.grid_unload_delete_requested());
+        assert_eq!(dynamic_object.world().current_cell(), None);
         let corpse = store.corpses.get(&corpse_guid).unwrap();
         assert_eq!(corpse.cleanup_before_delete_count(), 1);
         assert!(corpse.grid_unload_delete_requested());
         assert_eq!(corpse.cell_coord(), None);
         assert_eq!(corpse.world().current_cell(), None);
+        let area_trigger = store.area_triggers.get(&area_trigger_guid).unwrap();
+        assert_eq!(area_trigger.cleanup_before_delete_count(), 1);
+        assert!(area_trigger.grid_unload_delete_requested());
+        assert_eq!(area_trigger.world().current_cell(), None);
+        let scene_object = store.scene_objects.get(&scene_object_guid).unwrap();
+        assert_eq!(scene_object.cleanup_before_delete_count(), 1);
+        assert!(scene_object.grid_unload_delete_requested());
+        assert_eq!(scene_object.world().current_cell(), None);
+        let conversation = store.conversations.get(&conversation_guid).unwrap();
+        assert_eq!(conversation.cleanup_before_delete_count(), 1);
+        assert!(conversation.grid_unload_delete_requested());
+        assert_eq!(conversation.world().current_cell(), None);
     }
 
     #[test]
