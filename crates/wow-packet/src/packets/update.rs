@@ -127,6 +127,104 @@ pub struct ConversationDataValuesUpdate {
     pub last_line_end_time: i32,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameObjectDataValuesUpdate {
+    pub changed_object_type_mask: u32,
+    pub object_data: Option<ObjectDataValuesUpdate>,
+    pub game_object_data_mask: u32,
+    pub state_world_effect_ids: Vec<u32>,
+    pub enable_doodad_sets: Vec<i32>,
+    pub enable_doodad_sets_update_mask: Option<Vec<u32>>,
+    pub world_effects: Vec<i32>,
+    pub world_effects_update_mask: Option<Vec<u32>>,
+    pub display_id: i32,
+    pub spell_visual_id: u32,
+    pub state_spell_visual_id: u32,
+    pub spawn_tracking_state_anim_id: u32,
+    pub spawn_tracking_state_anim_kit_id: u32,
+    pub created_by: ObjectGuid,
+    pub guild_guid: ObjectGuid,
+    pub flags: u32,
+    pub parent_rotation: [f32; 4],
+    pub faction_template: i32,
+    pub level: i32,
+    pub state: i8,
+    pub type_id: i8,
+    pub percent_health: u8,
+    pub art_kit: u32,
+    pub custom_param: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChrCustomizationChoiceValuesUpdate {
+    pub option_id: u32,
+    pub choice_id: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CorpseDataValuesUpdate {
+    pub changed_object_type_mask: u32,
+    pub object_data: Option<ObjectDataValuesUpdate>,
+    pub corpse_data_mask: u32,
+    pub customizations: Vec<ChrCustomizationChoiceValuesUpdate>,
+    pub customizations_update_mask: Option<Vec<u32>>,
+    pub dynamic_flags: u32,
+    pub owner: ObjectGuid,
+    pub party_guid: ObjectGuid,
+    pub guild_guid: ObjectGuid,
+    pub display_id: u32,
+    pub race_id: u8,
+    pub sex: u8,
+    pub class: u8,
+    pub flags: u32,
+    pub faction_template: i32,
+    pub items: [u32; 19],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScaleCurveValuesUpdate {
+    pub scale_curve_mask: u32,
+    pub override_active: bool,
+    pub start_time_offset: u32,
+    pub parameter_curve: u32,
+    pub points: [(f32, f32); 2],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VisualAnimValuesUpdate {
+    pub visual_anim_mask: u32,
+    pub field_c: bool,
+    pub animation_data_id: u32,
+    pub anim_kit_id: u32,
+    pub anim_progress: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AreaTriggerDataValuesUpdate {
+    pub changed_object_type_mask: u32,
+    pub object_data: Option<ObjectDataValuesUpdate>,
+    pub area_trigger_data_mask: u32,
+    pub override_scale_curve: ScaleCurveValuesUpdate,
+    pub extra_scale_curve: ScaleCurveValuesUpdate,
+    pub override_move_curve_x: ScaleCurveValuesUpdate,
+    pub override_move_curve_y: ScaleCurveValuesUpdate,
+    pub override_move_curve_z: ScaleCurveValuesUpdate,
+    pub caster: ObjectGuid,
+    pub duration: u32,
+    pub time_to_target: u32,
+    pub time_to_target_scale: u32,
+    pub time_to_target_extra_scale: u32,
+    pub time_to_target_pos: u32,
+    pub spell_id: i32,
+    pub spell_for_visuals: i32,
+    pub spell_visual_id: i32,
+    pub bounds_radius_2d: f32,
+    pub decal_properties_id: u32,
+    pub creating_effect_guid: ObjectGuid,
+    pub orbit_path_target: ObjectGuid,
+    pub visual_anim: VisualAnimValuesUpdate,
+}
+
 // ── ItemCreateData ──────────────────────────────────────────────────
 
 /// Data needed to build an Item CREATE_OBJECT block for the client.
@@ -1553,6 +1651,21 @@ pub enum UpdateBlock {
         guid: ObjectGuid,
         data: ConversationDataValuesUpdate,
     },
+    /// VALUES update for GameObjectData.
+    GameObjectValuesUpdate {
+        guid: ObjectGuid,
+        data: GameObjectDataValuesUpdate,
+    },
+    /// VALUES update for CorpseData.
+    CorpseValuesUpdate {
+        guid: ObjectGuid,
+        data: CorpseDataValuesUpdate,
+    },
+    /// VALUES update for AreaTriggerData.
+    AreaTriggerValuesUpdate {
+        guid: ObjectGuid,
+        data: AreaTriggerDataValuesUpdate,
+    },
     /// Out-of-range destroy (removes object from client view without full destroy).
     DestroyOutOfRange { guid: ObjectGuid },
 }
@@ -1876,6 +1989,51 @@ impl UpdateObject {
         }
     }
 
+    /// Create a VALUES update for `UF::GameObjectData`.
+    pub fn game_object_values_update(
+        guid: ObjectGuid,
+        map_id: u16,
+        data: GameObjectDataValuesUpdate,
+    ) -> Self {
+        Self {
+            map_id,
+            num_updates: 1,
+            destroy_guids: Vec::new(),
+            out_of_range_guids: Vec::new(),
+            blocks: vec![UpdateBlock::GameObjectValuesUpdate { guid, data }],
+        }
+    }
+
+    /// Create a VALUES update for `UF::CorpseData`.
+    pub fn corpse_values_update(
+        guid: ObjectGuid,
+        map_id: u16,
+        data: CorpseDataValuesUpdate,
+    ) -> Self {
+        Self {
+            map_id,
+            num_updates: 1,
+            destroy_guids: Vec::new(),
+            out_of_range_guids: Vec::new(),
+            blocks: vec![UpdateBlock::CorpseValuesUpdate { guid, data }],
+        }
+    }
+
+    /// Create a VALUES update for `UF::AreaTriggerData`.
+    pub fn area_trigger_values_update(
+        guid: ObjectGuid,
+        map_id: u16,
+        data: AreaTriggerDataValuesUpdate,
+    ) -> Self {
+        Self {
+            map_id,
+            num_updates: 1,
+            destroy_guids: Vec::new(),
+            out_of_range_guids: Vec::new(),
+            blocks: vec![UpdateBlock::AreaTriggerValuesUpdate { guid, data }],
+        }
+    }
+
     /// Create an UpdateObject with item CREATE blocks.
     ///
     /// Each item gets its own block. Sent BEFORE the player CREATE packet
@@ -2017,6 +2175,15 @@ impl ServerPacket for UpdateObject {
                 }
                 UpdateBlock::ConversationValuesUpdate { guid, data } => {
                     write_conversation_values_update_block(&mut blocks_buf, guid, data);
+                }
+                UpdateBlock::GameObjectValuesUpdate { guid, data } => {
+                    write_game_object_values_update_block(&mut blocks_buf, guid, data);
+                }
+                UpdateBlock::CorpseValuesUpdate { guid, data } => {
+                    write_corpse_values_update_block(&mut blocks_buf, guid, data);
+                }
+                UpdateBlock::AreaTriggerValuesUpdate { guid, data } => {
+                    write_area_trigger_values_update_block(&mut blocks_buf, guid, data);
                 }
                 UpdateBlock::DestroyOutOfRange { .. } => {
                     // Handled via destroy_guids / out_of_range_guids, not as a block.
@@ -2575,7 +2742,10 @@ fn write_object_values_update_block(
 }
 
 const VALUES_TYPE_OBJECT: u32 = 1 << 0;
+const VALUES_TYPE_GAME_OBJECT: u32 = 1 << 8;
 const VALUES_TYPE_DYNAMIC_OBJECT: u32 = 1 << 9;
+const VALUES_TYPE_CORPSE: u32 = 1 << 10;
+const VALUES_TYPE_AREA_TRIGGER: u32 = 1 << 11;
 const VALUES_TYPE_SCENE_OBJECT: u32 = 1 << 12;
 const VALUES_TYPE_CONVERSATION: u32 = 1 << 13;
 
@@ -2851,6 +3021,403 @@ fn write_conversation_values_update_block(
             }
             if mask & 0x08 != 0 {
                 val_buf.write_int32(data.last_line_end_time);
+            }
+        }
+    }
+
+    let val_data = val_buf.into_data();
+    buf.write_uint32(val_data.len() as u32);
+    buf.write_bytes(&val_data);
+}
+
+fn write_changed_i32_dynamic_values(
+    buf: &mut WorldPacket,
+    values: &[i32],
+    update_mask: Option<&[u32]>,
+) {
+    for (index, value) in values.iter().enumerate() {
+        if dynamic_mask_has_index(update_mask, index) {
+            buf.write_int32(*value);
+        }
+    }
+}
+
+fn write_game_object_values_update_block(
+    buf: &mut WorldPacket,
+    guid: &ObjectGuid,
+    data: &GameObjectDataValuesUpdate,
+) {
+    buf.write_uint8(UpdateType::Values as u8);
+    buf.write_packed_guid(guid);
+
+    let mut val_buf = WorldPacket::new_empty();
+    val_buf.write_uint32(data.changed_object_type_mask);
+
+    if data.changed_object_type_mask & VALUES_TYPE_OBJECT != 0 {
+        if let Some(object_data) = data.object_data {
+            write_object_data_values_update_section(&mut val_buf, object_data);
+        } else {
+            write_object_data_values_update_section(
+                &mut val_buf,
+                ObjectDataValuesUpdate {
+                    changed_object_type_mask: VALUES_TYPE_OBJECT,
+                    object_data_mask: 0,
+                    entry_id: 0,
+                    dynamic_flags: 0,
+                    scale: 0.0,
+                },
+            );
+        }
+    }
+
+    if data.changed_object_type_mask & VALUES_TYPE_GAME_OBJECT != 0 {
+        let mask = data.game_object_data_mask & 0x000F_FFFF;
+        val_buf.write_bits(mask, 20);
+
+        if mask & 0x0000_0001 != 0 && mask & 0x0000_0002 != 0 {
+            val_buf.write_bits(data.state_world_effect_ids.len() as u32, 32);
+            for effect_id in &data.state_world_effect_ids {
+                val_buf.write_uint32(*effect_id);
+            }
+        }
+        val_buf.flush_bits();
+
+        if mask & 0x0000_0001 != 0 {
+            if mask & 0x0000_0004 != 0 {
+                write_dynamic_field_update_mask(
+                    &mut val_buf,
+                    data.enable_doodad_sets.len(),
+                    data.enable_doodad_sets_update_mask.as_deref(),
+                );
+            }
+            if mask & 0x0000_0008 != 0 {
+                write_dynamic_field_update_mask(
+                    &mut val_buf,
+                    data.world_effects.len(),
+                    data.world_effects_update_mask.as_deref(),
+                );
+            }
+        }
+        val_buf.flush_bits();
+
+        if mask & 0x0000_0001 != 0 {
+            if mask & 0x0000_0004 != 0 {
+                write_changed_i32_dynamic_values(
+                    &mut val_buf,
+                    &data.enable_doodad_sets,
+                    data.enable_doodad_sets_update_mask.as_deref(),
+                );
+            }
+            if mask & 0x0000_0008 != 0 {
+                write_changed_i32_dynamic_values(
+                    &mut val_buf,
+                    &data.world_effects,
+                    data.world_effects_update_mask.as_deref(),
+                );
+            }
+            if mask & 0x0000_0010 != 0 {
+                val_buf.write_int32(data.display_id);
+            }
+            if mask & 0x0000_0020 != 0 {
+                val_buf.write_uint32(data.spell_visual_id);
+            }
+            if mask & 0x0000_0040 != 0 {
+                val_buf.write_uint32(data.state_spell_visual_id);
+            }
+            if mask & 0x0000_0080 != 0 {
+                val_buf.write_uint32(data.spawn_tracking_state_anim_id);
+            }
+            if mask & 0x0000_0100 != 0 {
+                val_buf.write_uint32(data.spawn_tracking_state_anim_kit_id);
+            }
+            if mask & 0x0000_0200 != 0 {
+                val_buf.write_packed_guid(&data.created_by);
+            }
+            if mask & 0x0000_0400 != 0 {
+                val_buf.write_packed_guid(&data.guild_guid);
+            }
+            if mask & 0x0000_0800 != 0 {
+                val_buf.write_uint32(data.flags);
+            }
+            if mask & 0x0000_1000 != 0 {
+                for component in data.parent_rotation {
+                    val_buf.write_float(component);
+                }
+            }
+            if mask & 0x0000_2000 != 0 {
+                val_buf.write_int32(data.faction_template);
+            }
+            if mask & 0x0000_4000 != 0 {
+                val_buf.write_int32(data.level);
+            }
+            if mask & 0x0000_8000 != 0 {
+                val_buf.write_int8(data.state);
+            }
+            if mask & 0x0001_0000 != 0 {
+                val_buf.write_int8(data.type_id);
+            }
+            if mask & 0x0002_0000 != 0 {
+                val_buf.write_uint8(data.percent_health);
+            }
+            if mask & 0x0004_0000 != 0 {
+                val_buf.write_uint32(data.art_kit);
+            }
+            if mask & 0x0008_0000 != 0 {
+                val_buf.write_uint32(data.custom_param);
+            }
+        }
+    }
+
+    let val_data = val_buf.into_data();
+    buf.write_uint32(val_data.len() as u32);
+    buf.write_bytes(&val_data);
+}
+
+fn write_chr_customization_choice_values_update(
+    buf: &mut WorldPacket,
+    choice: &ChrCustomizationChoiceValuesUpdate,
+) {
+    buf.write_uint32(choice.option_id);
+    buf.write_uint32(choice.choice_id);
+}
+
+fn write_corpse_values_update_block(
+    buf: &mut WorldPacket,
+    guid: &ObjectGuid,
+    data: &CorpseDataValuesUpdate,
+) {
+    buf.write_uint8(UpdateType::Values as u8);
+    buf.write_packed_guid(guid);
+
+    let mut val_buf = WorldPacket::new_empty();
+    val_buf.write_uint32(data.changed_object_type_mask);
+
+    if data.changed_object_type_mask & VALUES_TYPE_OBJECT != 0 {
+        if let Some(object_data) = data.object_data {
+            write_object_data_values_update_section(&mut val_buf, object_data);
+        } else {
+            write_object_data_values_update_section(
+                &mut val_buf,
+                ObjectDataValuesUpdate {
+                    changed_object_type_mask: VALUES_TYPE_OBJECT,
+                    object_data_mask: 0,
+                    entry_id: 0,
+                    dynamic_flags: 0,
+                    scale: 0.0,
+                },
+            );
+        }
+    }
+
+    if data.changed_object_type_mask & VALUES_TYPE_CORPSE != 0 {
+        let mask = data.corpse_data_mask;
+        val_buf.write_bits(mask, 32);
+
+        if mask & 0x0000_0001 != 0 && mask & 0x0000_0002 != 0 {
+            write_dynamic_field_update_mask(
+                &mut val_buf,
+                data.customizations.len(),
+                data.customizations_update_mask.as_deref(),
+            );
+        }
+        val_buf.flush_bits();
+
+        if mask & 0x0000_0001 != 0 {
+            if mask & 0x0000_0002 != 0 {
+                for (index, customization) in data.customizations.iter().enumerate() {
+                    if dynamic_mask_has_index(data.customizations_update_mask.as_deref(), index) {
+                        write_chr_customization_choice_values_update(&mut val_buf, customization);
+                    }
+                }
+            }
+            if mask & 0x0000_0004 != 0 {
+                val_buf.write_uint32(data.dynamic_flags);
+            }
+            if mask & 0x0000_0008 != 0 {
+                val_buf.write_packed_guid(&data.owner);
+            }
+            if mask & 0x0000_0010 != 0 {
+                val_buf.write_packed_guid(&data.party_guid);
+            }
+            if mask & 0x0000_0020 != 0 {
+                val_buf.write_packed_guid(&data.guild_guid);
+            }
+            if mask & 0x0000_0040 != 0 {
+                val_buf.write_uint32(data.display_id);
+            }
+            if mask & 0x0000_0080 != 0 {
+                val_buf.write_uint8(data.race_id);
+            }
+            if mask & 0x0000_0100 != 0 {
+                val_buf.write_uint8(data.sex);
+            }
+            if mask & 0x0000_0200 != 0 {
+                val_buf.write_uint8(data.class);
+            }
+            if mask & 0x0000_0400 != 0 {
+                val_buf.write_uint32(data.flags);
+            }
+            if mask & 0x0000_0800 != 0 {
+                val_buf.write_int32(data.faction_template);
+            }
+        }
+
+        if mask & 0x0000_1000 != 0 {
+            for (index, item) in data.items.iter().enumerate() {
+                if mask & (1 << (13 + index)) != 0 {
+                    val_buf.write_uint32(*item);
+                }
+            }
+        }
+    }
+
+    let val_data = val_buf.into_data();
+    buf.write_uint32(val_data.len() as u32);
+    buf.write_bytes(&val_data);
+}
+
+fn write_scale_curve_values_update(buf: &mut WorldPacket, data: &ScaleCurveValuesUpdate) {
+    let mask = data.scale_curve_mask & 0x7F;
+    buf.write_bits(mask, 7);
+
+    if mask & 0x01 != 0 && mask & 0x02 != 0 {
+        buf.write_bit(data.override_active);
+    }
+    buf.flush_bits();
+
+    if mask & 0x01 != 0 {
+        if mask & 0x04 != 0 {
+            buf.write_uint32(data.start_time_offset);
+        }
+        if mask & 0x08 != 0 {
+            buf.write_uint32(data.parameter_curve);
+        }
+    }
+
+    if mask & 0x10 != 0 {
+        for (index, point) in data.points.iter().enumerate() {
+            if mask & (1 << (5 + index)) != 0 {
+                buf.write_float(point.0);
+                buf.write_float(point.1);
+            }
+        }
+    }
+    buf.flush_bits();
+}
+
+fn write_visual_anim_values_update(buf: &mut WorldPacket, data: &VisualAnimValuesUpdate) {
+    let mask = data.visual_anim_mask & 0x1F;
+    buf.write_bits(mask, 5);
+
+    if mask & 0x01 != 0 && mask & 0x02 != 0 {
+        buf.write_bit(data.field_c);
+    }
+    buf.flush_bits();
+
+    if mask & 0x01 != 0 {
+        if mask & 0x04 != 0 {
+            buf.write_uint32(data.animation_data_id);
+        }
+        if mask & 0x08 != 0 {
+            buf.write_uint32(data.anim_kit_id);
+        }
+        if mask & 0x10 != 0 {
+            buf.write_uint32(data.anim_progress);
+        }
+    }
+    buf.flush_bits();
+}
+
+fn write_area_trigger_values_update_block(
+    buf: &mut WorldPacket,
+    guid: &ObjectGuid,
+    data: &AreaTriggerDataValuesUpdate,
+) {
+    buf.write_uint8(UpdateType::Values as u8);
+    buf.write_packed_guid(guid);
+
+    let mut val_buf = WorldPacket::new_empty();
+    val_buf.write_uint32(data.changed_object_type_mask);
+
+    if data.changed_object_type_mask & VALUES_TYPE_OBJECT != 0 {
+        if let Some(object_data) = data.object_data {
+            write_object_data_values_update_section(&mut val_buf, object_data);
+        } else {
+            write_object_data_values_update_section(
+                &mut val_buf,
+                ObjectDataValuesUpdate {
+                    changed_object_type_mask: VALUES_TYPE_OBJECT,
+                    object_data_mask: 0,
+                    entry_id: 0,
+                    dynamic_flags: 0,
+                    scale: 0.0,
+                },
+            );
+        }
+    }
+
+    if data.changed_object_type_mask & VALUES_TYPE_AREA_TRIGGER != 0 {
+        let mask = data.area_trigger_data_mask & 0x000F_FFFF;
+        val_buf.write_bits(mask, 20);
+        val_buf.flush_bits();
+
+        if mask & 0x0000_0001 != 0 {
+            if mask & 0x0000_0002 != 0 {
+                write_scale_curve_values_update(&mut val_buf, &data.override_scale_curve);
+            }
+            if mask & 0x0000_0040 != 0 {
+                val_buf.write_packed_guid(&data.caster);
+            }
+            if mask & 0x0000_0080 != 0 {
+                val_buf.write_uint32(data.duration);
+            }
+            if mask & 0x0000_0100 != 0 {
+                val_buf.write_uint32(data.time_to_target);
+            }
+            if mask & 0x0000_0200 != 0 {
+                val_buf.write_uint32(data.time_to_target_scale);
+            }
+            if mask & 0x0000_0400 != 0 {
+                val_buf.write_uint32(data.time_to_target_extra_scale);
+            }
+            if mask & 0x0000_0800 != 0 {
+                val_buf.write_uint32(data.time_to_target_pos);
+            }
+            if mask & 0x0000_1000 != 0 {
+                val_buf.write_int32(data.spell_id);
+            }
+            if mask & 0x0000_2000 != 0 {
+                val_buf.write_int32(data.spell_for_visuals);
+            }
+            if mask & 0x0000_4000 != 0 {
+                val_buf.write_int32(data.spell_visual_id);
+            }
+            if mask & 0x0000_8000 != 0 {
+                val_buf.write_float(data.bounds_radius_2d);
+            }
+            if mask & 0x0001_0000 != 0 {
+                val_buf.write_uint32(data.decal_properties_id);
+            }
+            if mask & 0x0002_0000 != 0 {
+                val_buf.write_packed_guid(&data.creating_effect_guid);
+            }
+            if mask & 0x0004_0000 != 0 {
+                val_buf.write_packed_guid(&data.orbit_path_target);
+            }
+            if mask & 0x0000_0004 != 0 {
+                write_scale_curve_values_update(&mut val_buf, &data.extra_scale_curve);
+            }
+            if mask & 0x0000_0008 != 0 {
+                write_scale_curve_values_update(&mut val_buf, &data.override_move_curve_x);
+            }
+            if mask & 0x0000_0010 != 0 {
+                write_scale_curve_values_update(&mut val_buf, &data.override_move_curve_y);
+            }
+            if mask & 0x0000_0020 != 0 {
+                write_scale_curve_values_update(&mut val_buf, &data.override_move_curve_z);
+            }
+            if mask & 0x0008_0000 != 0 {
+                write_visual_anim_values_update(&mut val_buf, &data.visual_anim);
             }
         }
     }
@@ -3719,6 +4286,171 @@ mod tests {
         );
         assert_eq!(i32::from_le_bytes(bytes[48..52].try_into().unwrap()), 777);
         assert_eq!(bytes.len(), 52);
+    }
+
+    #[test]
+    fn game_object_values_update_block_matches_cpp_gameobjectdata_delta_shape() {
+        let mut block = WorldPacket::new_empty();
+        write_game_object_values_update_block(
+            &mut block,
+            &ObjectGuid::EMPTY,
+            &GameObjectDataValuesUpdate {
+                changed_object_type_mask: VALUES_TYPE_GAME_OBJECT,
+                object_data: None,
+                game_object_data_mask: 0x0003_8011,
+                state_world_effect_ids: Vec::new(),
+                enable_doodad_sets: Vec::new(),
+                enable_doodad_sets_update_mask: None,
+                world_effects: Vec::new(),
+                world_effects_update_mask: None,
+                display_id: 123,
+                spell_visual_id: 0,
+                state_spell_visual_id: 0,
+                spawn_tracking_state_anim_id: 0,
+                spawn_tracking_state_anim_kit_id: 0,
+                created_by: ObjectGuid::EMPTY,
+                guild_guid: ObjectGuid::EMPTY,
+                flags: 0,
+                parent_rotation: [0.0; 4],
+                faction_template: 0,
+                level: 0,
+                state: -1,
+                type_id: 5,
+                percent_health: 90,
+                art_kit: 0,
+                custom_param: 0,
+            },
+        );
+
+        let bytes = block.into_data();
+        assert_eq!(bytes[0], UpdateType::Values as u8);
+        assert_eq!(&bytes[1..3], &[0, 0]);
+        assert_eq!(u32::from_le_bytes(bytes[3..7].try_into().unwrap()), 14);
+        assert_eq!(
+            u32::from_le_bytes(bytes[7..11].try_into().unwrap()),
+            VALUES_TYPE_GAME_OBJECT
+        );
+        assert_eq!(&bytes[11..14], &[0x38, 0x01, 0x10]);
+        assert_eq!(i32::from_le_bytes(bytes[14..18].try_into().unwrap()), 123);
+        assert_eq!(&bytes[18..21], &[0xFF, 5, 90]);
+        assert_eq!(bytes.len(), 21);
+    }
+
+    #[test]
+    fn corpse_values_update_block_matches_cpp_corpse_data_delta_shape() {
+        let mut items = [0u32; 19];
+        items[0] = 0xAABB_CCDD;
+
+        let mut block = WorldPacket::new_empty();
+        write_corpse_values_update_block(
+            &mut block,
+            &ObjectGuid::EMPTY,
+            &CorpseDataValuesUpdate {
+                changed_object_type_mask: VALUES_TYPE_CORPSE,
+                object_data: None,
+                corpse_data_mask: 0x0000_3007,
+                customizations: vec![ChrCustomizationChoiceValuesUpdate {
+                    option_id: 11,
+                    choice_id: 22,
+                }],
+                customizations_update_mask: None,
+                dynamic_flags: 0x44,
+                owner: ObjectGuid::EMPTY,
+                party_guid: ObjectGuid::EMPTY,
+                guild_guid: ObjectGuid::EMPTY,
+                display_id: 0,
+                race_id: 0,
+                sex: 0,
+                class: 0,
+                flags: 0,
+                faction_template: 0,
+                items,
+            },
+        );
+
+        let bytes = block.into_data();
+        assert_eq!(bytes[0], UpdateType::Values as u8);
+        assert_eq!(&bytes[1..3], &[0, 0]);
+        assert_eq!(u32::from_le_bytes(bytes[3..7].try_into().unwrap()), 29);
+        assert_eq!(
+            u32::from_le_bytes(bytes[7..11].try_into().unwrap()),
+            VALUES_TYPE_CORPSE
+        );
+        assert_eq!(&bytes[11..15], &[0x00, 0x00, 0x30, 0x07]);
+        assert_eq!(&bytes[15..20], &[0x00, 0x00, 0x00, 0x01, 0x80]);
+        assert_eq!(u32::from_le_bytes(bytes[20..24].try_into().unwrap()), 11);
+        assert_eq!(u32::from_le_bytes(bytes[24..28].try_into().unwrap()), 22);
+        assert_eq!(u32::from_le_bytes(bytes[28..32].try_into().unwrap()), 0x44);
+        assert_eq!(
+            u32::from_le_bytes(bytes[32..36].try_into().unwrap()),
+            0xAABB_CCDD
+        );
+        assert_eq!(bytes.len(), 36);
+    }
+
+    #[test]
+    fn area_trigger_values_update_block_matches_cpp_areatriggerdata_delta_shape() {
+        let empty_curve = ScaleCurveValuesUpdate {
+            scale_curve_mask: 0,
+            override_active: false,
+            start_time_offset: 0,
+            parameter_curve: 0,
+            points: [(0.0, 0.0); 2],
+        };
+
+        let mut block = WorldPacket::new_empty();
+        write_area_trigger_values_update_block(
+            &mut block,
+            &ObjectGuid::EMPTY,
+            &AreaTriggerDataValuesUpdate {
+                changed_object_type_mask: VALUES_TYPE_AREA_TRIGGER,
+                object_data: None,
+                area_trigger_data_mask: 0x0008_1081,
+                override_scale_curve: empty_curve,
+                extra_scale_curve: empty_curve,
+                override_move_curve_x: empty_curve,
+                override_move_curve_y: empty_curve,
+                override_move_curve_z: empty_curve,
+                caster: ObjectGuid::EMPTY,
+                duration: 12_000,
+                time_to_target: 0,
+                time_to_target_scale: 0,
+                time_to_target_extra_scale: 0,
+                time_to_target_pos: 0,
+                spell_id: 99,
+                spell_for_visuals: 0,
+                spell_visual_id: 0,
+                bounds_radius_2d: 0.0,
+                decal_properties_id: 0,
+                creating_effect_guid: ObjectGuid::EMPTY,
+                orbit_path_target: ObjectGuid::EMPTY,
+                visual_anim: VisualAnimValuesUpdate {
+                    visual_anim_mask: 0b0_0111,
+                    field_c: true,
+                    animation_data_id: 77,
+                    anim_kit_id: 0,
+                    anim_progress: 0,
+                },
+            },
+        );
+
+        let bytes = block.into_data();
+        assert_eq!(bytes[0], UpdateType::Values as u8);
+        assert_eq!(&bytes[1..3], &[0, 0]);
+        assert_eq!(u32::from_le_bytes(bytes[3..7].try_into().unwrap()), 20);
+        assert_eq!(
+            u32::from_le_bytes(bytes[7..11].try_into().unwrap()),
+            VALUES_TYPE_AREA_TRIGGER
+        );
+        assert_eq!(&bytes[11..14], &[0x81, 0x08, 0x10]);
+        assert_eq!(
+            u32::from_le_bytes(bytes[14..18].try_into().unwrap()),
+            12_000
+        );
+        assert_eq!(i32::from_le_bytes(bytes[18..22].try_into().unwrap()), 99);
+        assert_eq!(bytes[22], 0x3C);
+        assert_eq!(u32::from_le_bytes(bytes[23..27].try_into().unwrap()), 77);
+        assert_eq!(bytes.len(), 27);
     }
 
     #[test]
