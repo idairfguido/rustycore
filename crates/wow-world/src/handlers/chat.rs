@@ -430,8 +430,8 @@ impl WorldSession {
     // ── Helpers ──────────────────────────────────────────────────
 
     fn player_name_and_guid(&self) -> (wow_core::ObjectGuid, String) {
-        let guid = self.player_guid.unwrap_or(wow_core::ObjectGuid::EMPTY);
-        let name = self.player_name.clone().unwrap_or_default();
+        let guid = self.player_guid().unwrap_or(wow_core::ObjectGuid::EMPTY);
+        let name = self.player_name_like_cpp().unwrap_or_default().to_string();
         (guid, name)
     }
 
@@ -449,9 +449,9 @@ impl WorldSession {
             None => return,
         };
 
-        let sender_guid = self.player_guid.unwrap_or(ObjectGuid::EMPTY);
-        let sender_pos = self.player_position;
-        let sender_map = self.current_map_id;
+        let sender_guid = self.player_guid().unwrap_or(ObjectGuid::EMPTY);
+        let sender_pos = self.player_position_like_cpp();
+        let sender_map = self.player_map_id_like_cpp();
         let range_sq = range * range;
 
         for entry in registry.iter() {
