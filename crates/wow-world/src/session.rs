@@ -696,6 +696,16 @@ pub struct WorldSession {
     pub(crate) in_combat: bool,
     /// Represented `Player::IsAlive()` state for handler guards that need C++ ordering.
     player_alive_like_cpp: bool,
+    /// Represented player health used by movement/environmental side effects.
+    player_health_like_cpp: u32,
+    /// Represented player max health used by movement/environmental side effects.
+    player_max_health_like_cpp: u32,
+    /// C++ `Player::m_lastFallTime`.
+    last_fall_time_like_cpp: u32,
+    /// C++ `Player::m_lastFallZ`.
+    last_fall_z_like_cpp: f32,
+    /// Recorded fall damage events until combat log/update packet runtime is complete.
+    fall_damage_events_like_cpp: Vec<MovementFallDamageEvent>,
     /// Represented stand state used by movement side effects until UnitData owns it.
     player_stand_state_like_cpp: UnitStandStateType,
     /// Count of C++ temporary pet unsummon side effects requested by movement.
@@ -906,6 +916,13 @@ pub(crate) const SPELL_AURA_INTERRUPT_FLAG_LOOTING_LIKE_CPP: u32 = 0x0000_0800;
 pub(crate) const SPELL_AURA_INTERRUPT_FLAG_LANDING_OR_FLIGHT_LIKE_CPP: u32 = 0x0200_0000;
 pub(crate) const SPELL_AURA_INTERRUPT_FLAG2_JUMP_LIKE_CPP: u32 = 0x0000_0020;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct MovementFallDamageEvent {
+    pub z_diff: f32,
+    pub damage: u32,
+    pub final_damage: u32,
+}
+
 /// Parameters for spawning nearby creatures after login.
 pub struct PendingCreatureSpawn {
     pub map_id: u16,
@@ -1071,6 +1088,11 @@ impl WorldSession {
             combat_target: None,
             in_combat: false,
             player_alive_like_cpp: true,
+            player_health_like_cpp: 100,
+            player_max_health_like_cpp: 100,
+            last_fall_time_like_cpp: 0,
+            last_fall_z_like_cpp: 0.0,
+            fall_damage_events_like_cpp: Vec::new(),
             player_stand_state_like_cpp: UnitStandStateType::Stand,
             temporary_pet_unsummon_requests_like_cpp: 0,
             movement_jump_proc_requests_like_cpp: 0,
@@ -5491,10 +5513,88 @@ impl WorldSession {
 
     pub fn set_player_alive_like_cpp(&mut self, alive: bool) {
         self.player_alive_like_cpp = alive;
+        if !alive {
+            self.player_health_like_cpp = 0;
+        } else if self.player_health_like_cpp == 0 {
+            self.player_health_like_cpp = self.player_max_health_like_cpp.max(1);
+        }
     }
 
     pub(crate) fn player_is_alive_like_cpp(&self) -> bool {
         self.player_alive_like_cpp
+    }
+
+    pub(crate) fn set_player_health_like_cpp(&mut self, health: u32, max_health: u32) {
+        self.player_max_health_like_cpp = max_health.max(1);
+        self.player_health_like_cpp = health.min(self.player_max_health_like_cpp);
+        self.player_alive_like_cpp = self.player_health_like_cpp > 0;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn player_health_like_cpp(&self) -> u32 {
+        self.player_health_like_cpp
+    }
+
+    pub(crate) fn set_fall_information_like_cpp(&mut self, time: u32, z: f32) {
+        self.last_fall_time_like_cpp = time;
+        self.last_fall_z_like_cpp = z;
+    }
+
+    pub(crate) fn update_fall_information_if_needed_like_cpp(
+        &mut self,
+        movement_info: &wow_packet::packets::movement::MovementInfo,
+        is_fall_land: bool,
+    ) {
+        if self.last_fall_time_like_cpp >= movement_info.jump.fall_time
+            || self.last_fall_z_like_cpp <= movement_info.position.z
+            || is_fall_land
+        {
+            self.set_fall_information_like_cpp(
+                movement_info.jump.fall_time,
+                movement_info.position.z,
+            );
+        }
+    }
+
+    pub(crate) fn handle_fall_like_cpp(
+        &mut self,
+        movement_info: &wow_packet::packets::movement::MovementInfo,
+    ) -> Option<MovementFallDamageEvent> {
+        let z_diff = self.last_fall_z_like_cpp - movement_info.position.z;
+        if z_diff < 14.57 || !self.player_alive_like_cpp {
+            return None;
+        }
+
+        let damage_percent = 0.018 * z_diff - 0.2426;
+        if damage_percent <= 0.0 {
+            return None;
+        }
+
+        let mut damage = (damage_percent * self.player_max_health_like_cpp as f32) as u32;
+        damage = damage.min(self.player_max_health_like_cpp);
+        if damage == 0 {
+            return None;
+        }
+
+        let original_health = self.player_health_like_cpp;
+        let final_damage = damage.min(original_health);
+        self.player_health_like_cpp = self.player_health_like_cpp.saturating_sub(final_damage);
+        if self.player_health_like_cpp == 0 {
+            self.player_alive_like_cpp = false;
+        }
+
+        let event = MovementFallDamageEvent {
+            z_diff,
+            damage,
+            final_damage,
+        };
+        self.fall_damage_events_like_cpp.push(event);
+        Some(event)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fall_damage_events_like_cpp(&self) -> &[MovementFallDamageEvent] {
+        &self.fall_damage_events_like_cpp
     }
 
     pub(crate) fn set_player_stand_state_like_cpp(&mut self, state: UnitStandStateType) {

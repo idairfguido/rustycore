@@ -207,6 +207,10 @@ impl WorldSession {
         opcode: Option<ClientOpcodes>,
         info: &MovementInfo,
     ) {
+        if matches!(opcode, Some(ClientOpcodes::MoveFallLand)) {
+            self.handle_fall_like_cpp(info);
+        }
+
         match opcode {
             Some(ClientOpcodes::MoveFallLand)
             | Some(ClientOpcodes::MoveStartSwim)
@@ -241,6 +245,11 @@ impl WorldSession {
             );
             self.request_jump_proc_like_cpp();
         }
+
+        self.update_fall_information_if_needed_like_cpp(
+            info,
+            matches!(opcode, Some(ClientOpcodes::MoveFallLand)),
+        );
     }
 
     /// Handle CMSG_SET_ACTIVE_MOVER — client sets which unit is currently being moved.
@@ -369,6 +378,30 @@ mod tests {
             UnitStandStateType::Stand
         );
         assert_eq!(session.temporary_pet_unsummon_requests_like_cpp(), 1);
+    }
+
+    #[test]
+    fn movement_fall_land_applies_cpp_base_fall_damage_and_updates_fall_info() {
+        let mut session = make_session();
+        session.set_player_health_like_cpp(1_000, 1_000);
+        session.set_fall_information_like_cpp(1_200, 120.0);
+        let mut info = MovementInfo::default();
+        info.position.z = 100.0;
+        info.jump.fall_time = 1_500;
+
+        session.apply_movement_side_effects_like_cpp(Some(ClientOpcodes::MoveFallLand), &info);
+
+        let events = session.fall_damage_events_like_cpp();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].damage, 117);
+        assert_eq!(events[0].final_damage, 117);
+        assert_eq!(session.player_health_like_cpp(), 883);
+
+        let mut harmless = MovementInfo::default();
+        harmless.position.z = 99.0;
+        harmless.jump.fall_time = 1_600;
+        session.apply_movement_side_effects_like_cpp(Some(ClientOpcodes::MoveFallLand), &harmless);
+        assert_eq!(session.fall_damage_events_like_cpp().len(), 1);
     }
 }
 

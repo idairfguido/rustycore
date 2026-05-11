@@ -474,7 +474,7 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
   - [x] **#A06.5** Portar `AdjustClientMovementTime`: cola circular de 6 muestras, pendientes por sequence, delta filtrado por latencia y ajuste de `MovementInfo.time` antes de rebroadcast.
   - [ ] **#A06.6** Separar side effects C++ de movement: fall damage, aura interrupts, pet unsummon, sit-to-stand, under-map damage y jump procs.
     - [x] **#A06.6.1** Portar side effects representables hoy: remover auras `LandingOrFlight`/`Jump`, sentar-a-stand en movimiento y registrar hooks de unsummon temporal de pet / jump proc.
-    - [ ] **#A06.6.2** Portar `Player::HandleFall` / `UpdateFallInformationIfNeed` con cálculo de fall damage autoritativo.
+    - [x] **#A06.6.2** Portar base de `Player::HandleFall` / `UpdateFallInformationIfNeed`: `m_lastFallTime/Z`, umbral 14.57, fórmula C++ de daño, clamp a max health y aplicación al estado representado de salud/vida; modificadores de aura quedan en `#A06.6.4`.
     - [ ] **#A06.6.3** Portar under-map damage cuando exista `Map::GetMinHeight`/Battleground hook real.
     - [ ] **#A06.6.4** Conectar hooks registrados a Pet runtime y Proc/Aura runtime completos.
   - [ ] **#A06.7** Portar efectos de `MoveInitActiveMoverComplete`: local flag, transport server time y visibility update.

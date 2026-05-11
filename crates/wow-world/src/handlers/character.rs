@@ -7679,6 +7679,10 @@ impl WorldSession {
             level,
             sex,
         ));
+        self.set_player_health_like_cpp(
+            combat.health.max(0).min(u32::MAX as i64) as u32,
+            combat.max_health.max(1).min(u32::MAX as i64) as u32,
+        );
         self.login_time = Some(std::time::Instant::now());
         // Clear per-session loot/visibility state for fresh login. Creatures
         // remain map-owned, matching C++ Map ownership.
