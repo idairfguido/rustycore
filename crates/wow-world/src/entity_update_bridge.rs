@@ -1,14 +1,22 @@
 use wow_entities::{
-    ActivePlayerDataUpdate, BagValuesUpdate, ContainerDataUpdate, ItemDataUpdate, ItemValuesUpdate,
-    ObjectDataUpdate, PlayerDataUpdate, PlayerValuesUpdate, TYPEID_ACTIVE_PLAYER, TYPEID_CONTAINER,
-    TYPEID_ITEM, TYPEID_OBJECT, TYPEID_PLAYER, TYPEID_UNIT, UnitDataUpdate, UnitValuesUpdate,
+    ActivePlayerDataUpdate, AreaTriggerDataUpdate, AreaTriggerValuesUpdate, BagValuesUpdate,
+    ContainerDataUpdate, ConversationDataUpdate, ConversationValuesUpdate, CorpseDataUpdate,
+    CorpseValuesUpdate, DynamicObjectDataUpdate, DynamicObjectValuesUpdate, GameObjectDataUpdate,
+    GameObjectValuesUpdate, ItemDataUpdate, ItemValuesUpdate, ObjectDataUpdate, PlayerDataUpdate,
+    PlayerValuesUpdate, SceneObjectDataUpdate, SceneObjectValuesUpdate, TYPEID_ACTIVE_PLAYER,
+    TYPEID_AREA_TRIGGER, TYPEID_CONTAINER, TYPEID_CONVERSATION, TYPEID_CORPSE,
+    TYPEID_DYNAMIC_OBJECT, TYPEID_GAME_OBJECT, TYPEID_ITEM, TYPEID_OBJECT, TYPEID_PLAYER,
+    TYPEID_SCENE_OBJECT, TYPEID_UNIT, UnitDataUpdate, UnitValuesUpdate,
 };
 use wow_packet::packets::update::{
-    ActivePlayerDataValuesUpdate as PacketActivePlayerDataValuesUpdate, ContainerDataValuesUpdate,
-    ItemBonusKeyValuesUpdate, ItemDataValuesDeltaUpdate, ItemEnchantmentValuesUpdate,
-    ItemModListValuesUpdate, ItemModValuesUpdate, ObjectDataValuesUpdate,
-    PlayerDataValuesDeltaUpdate, SocketedGemValuesUpdate, UnitDataValuesDeltaUpdate, UpdateObject,
-    VisibleItemValuesUpdate,
+    ActivePlayerDataValuesUpdate as PacketActivePlayerDataValuesUpdate,
+    AreaTriggerDataValuesUpdate, ContainerDataValuesUpdate, ConversationActorValuesUpdate,
+    ConversationDataValuesUpdate, ConversationLineValuesUpdate, CorpseDataValuesUpdate,
+    DynamicObjectDataValuesUpdate, GameObjectDataValuesUpdate, ItemBonusKeyValuesUpdate,
+    ItemDataValuesDeltaUpdate, ItemEnchantmentValuesUpdate, ItemModListValuesUpdate,
+    ItemModValuesUpdate, ObjectDataValuesUpdate, PlayerDataValuesDeltaUpdate,
+    ScaleCurveValuesUpdate, SceneObjectDataValuesUpdate, SocketedGemValuesUpdate,
+    UnitDataValuesDeltaUpdate, UpdateObject, VisibleItemValuesUpdate, VisualAnimValuesUpdate,
 };
 
 const VISIBLE_ITEM_FULL_UPDATE_MASK: u32 = 0x0F;
@@ -152,6 +160,151 @@ pub fn bag_values_update_to_update_object(
 ) -> Option<UpdateObject> {
     bag_values_update_to_packet(update)
         .map(|packet_update| UpdateObject::container_values_update(guid, map_id, packet_update))
+}
+
+pub fn game_object_values_update_to_packet(
+    update: &GameObjectValuesUpdate,
+) -> Option<GameObjectDataValuesUpdate> {
+    let mut packet_update = update
+        .game_object_data
+        .as_ref()
+        .map(game_object_data_update_to_packet)
+        .unwrap_or_else(empty_game_object_values_update);
+    packet_update.changed_object_type_mask = update.changed_object_type_mask;
+    if let Some(object_data) = &update.object_data {
+        packet_update.object_data = Some(object_data_update_to_packet(object_data));
+    }
+    update.has_data().then_some(packet_update)
+}
+
+pub fn game_object_values_update_to_update_object(
+    guid: wow_core::ObjectGuid,
+    map_id: u16,
+    update: &GameObjectValuesUpdate,
+) -> Option<UpdateObject> {
+    game_object_values_update_to_packet(update)
+        .map(|packet_update| UpdateObject::game_object_values_update(guid, map_id, packet_update))
+}
+
+pub fn dynamic_object_values_update_to_packet(
+    update: &DynamicObjectValuesUpdate,
+) -> Option<DynamicObjectDataValuesUpdate> {
+    let mut packet_update = update
+        .dynamic_object_data
+        .as_ref()
+        .map(dynamic_object_data_update_to_packet)
+        .unwrap_or_else(empty_dynamic_object_values_update);
+    packet_update.changed_object_type_mask = update.changed_object_type_mask;
+    if let Some(object_data) = &update.object_data {
+        packet_update.object_data = Some(object_data_update_to_packet(object_data));
+    }
+    update.has_data().then_some(packet_update)
+}
+
+pub fn dynamic_object_values_update_to_update_object(
+    guid: wow_core::ObjectGuid,
+    map_id: u16,
+    update: &DynamicObjectValuesUpdate,
+) -> Option<UpdateObject> {
+    dynamic_object_values_update_to_packet(update).map(|packet_update| {
+        UpdateObject::dynamic_object_values_update(guid, map_id, packet_update)
+    })
+}
+
+pub fn corpse_values_update_to_packet(
+    update: &CorpseValuesUpdate,
+) -> Option<CorpseDataValuesUpdate> {
+    let mut packet_update = update
+        .corpse_data
+        .as_ref()
+        .map(corpse_data_update_to_packet)
+        .unwrap_or_else(empty_corpse_values_update);
+    packet_update.changed_object_type_mask = update.changed_object_type_mask;
+    if let Some(object_data) = &update.object_data {
+        packet_update.object_data = Some(object_data_update_to_packet(object_data));
+    }
+    update.has_data().then_some(packet_update)
+}
+
+pub fn corpse_values_update_to_update_object(
+    guid: wow_core::ObjectGuid,
+    map_id: u16,
+    update: &CorpseValuesUpdate,
+) -> Option<UpdateObject> {
+    corpse_values_update_to_packet(update)
+        .map(|packet_update| UpdateObject::corpse_values_update(guid, map_id, packet_update))
+}
+
+pub fn area_trigger_values_update_to_packet(
+    update: &AreaTriggerValuesUpdate,
+) -> Option<AreaTriggerDataValuesUpdate> {
+    let mut packet_update = update
+        .area_trigger_data
+        .as_ref()
+        .map(area_trigger_data_update_to_packet)
+        .unwrap_or_else(empty_area_trigger_values_update);
+    packet_update.changed_object_type_mask = update.changed_object_type_mask;
+    if let Some(object_data) = &update.object_data {
+        packet_update.object_data = Some(object_data_update_to_packet(object_data));
+    }
+    update.has_data().then_some(packet_update)
+}
+
+pub fn area_trigger_values_update_to_update_object(
+    guid: wow_core::ObjectGuid,
+    map_id: u16,
+    update: &AreaTriggerValuesUpdate,
+) -> Option<UpdateObject> {
+    area_trigger_values_update_to_packet(update)
+        .map(|packet_update| UpdateObject::area_trigger_values_update(guid, map_id, packet_update))
+}
+
+pub fn scene_object_values_update_to_packet(
+    update: &SceneObjectValuesUpdate,
+) -> Option<SceneObjectDataValuesUpdate> {
+    let mut packet_update = update
+        .scene_object_data
+        .as_ref()
+        .map(scene_object_data_update_to_packet)
+        .unwrap_or_else(empty_scene_object_values_update);
+    packet_update.changed_object_type_mask = update.changed_object_type_mask;
+    if let Some(object_data) = &update.object_data {
+        packet_update.object_data = Some(object_data_update_to_packet(object_data));
+    }
+    update.has_data().then_some(packet_update)
+}
+
+pub fn scene_object_values_update_to_update_object(
+    guid: wow_core::ObjectGuid,
+    map_id: u16,
+    update: &SceneObjectValuesUpdate,
+) -> Option<UpdateObject> {
+    scene_object_values_update_to_packet(update)
+        .map(|packet_update| UpdateObject::scene_object_values_update(guid, map_id, packet_update))
+}
+
+pub fn conversation_values_update_to_packet(
+    update: &ConversationValuesUpdate,
+) -> Option<ConversationDataValuesUpdate> {
+    let mut packet_update = update
+        .conversation_data
+        .as_ref()
+        .map(conversation_data_update_to_packet)
+        .unwrap_or_else(empty_conversation_values_update);
+    packet_update.changed_object_type_mask = update.changed_object_type_mask;
+    if let Some(object_data) = &update.object_data {
+        packet_update.object_data = Some(object_data_update_to_packet(object_data));
+    }
+    update.has_data().then_some(packet_update)
+}
+
+pub fn conversation_values_update_to_update_object(
+    guid: wow_core::ObjectGuid,
+    map_id: u16,
+    update: &ConversationValuesUpdate,
+) -> Option<UpdateObject> {
+    conversation_values_update_to_packet(update)
+        .map(|packet_update| UpdateObject::conversation_values_update(guid, map_id, packet_update))
 }
 
 fn object_data_update_to_packet(update: &ObjectDataUpdate) -> ObjectDataValuesUpdate {
@@ -384,6 +537,288 @@ fn container_data_update_to_packet(update: &ContainerDataUpdate) -> ContainerDat
     }
 }
 
+fn game_object_data_update_to_packet(update: &GameObjectDataUpdate) -> GameObjectDataValuesUpdate {
+    GameObjectDataValuesUpdate {
+        changed_object_type_mask: 1 << TYPEID_GAME_OBJECT,
+        object_data: None,
+        game_object_data_mask: update.mask.blocks().first().copied().unwrap_or(0),
+        state_world_effect_ids: Vec::new(),
+        enable_doodad_sets: Vec::new(),
+        enable_doodad_sets_update_mask: None,
+        world_effects: Vec::new(),
+        world_effects_update_mask: None,
+        display_id: update.values.display_id,
+        spell_visual_id: 0,
+        state_spell_visual_id: 0,
+        spawn_tracking_state_anim_id: 0,
+        spawn_tracking_state_anim_kit_id: 0,
+        created_by: wow_core::ObjectGuid::EMPTY,
+        guild_guid: wow_core::ObjectGuid::EMPTY,
+        flags: update.values.flags,
+        parent_rotation: [0.0; 4],
+        faction_template: update.values.faction_template,
+        level: update.values.level,
+        state: update.values.state,
+        type_id: update.values.type_id,
+        percent_health: update.values.percent_health,
+        art_kit: update.values.art_kit,
+        custom_param: update.values.custom_param,
+    }
+}
+
+fn empty_game_object_values_update() -> GameObjectDataValuesUpdate {
+    GameObjectDataValuesUpdate {
+        changed_object_type_mask: 0,
+        object_data: None,
+        game_object_data_mask: 0,
+        state_world_effect_ids: Vec::new(),
+        enable_doodad_sets: Vec::new(),
+        enable_doodad_sets_update_mask: None,
+        world_effects: Vec::new(),
+        world_effects_update_mask: None,
+        display_id: 0,
+        spell_visual_id: 0,
+        state_spell_visual_id: 0,
+        spawn_tracking_state_anim_id: 0,
+        spawn_tracking_state_anim_kit_id: 0,
+        created_by: wow_core::ObjectGuid::EMPTY,
+        guild_guid: wow_core::ObjectGuid::EMPTY,
+        flags: 0,
+        parent_rotation: [0.0; 4],
+        faction_template: 0,
+        level: 0,
+        state: 0,
+        type_id: 0,
+        percent_health: 0,
+        art_kit: 0,
+        custom_param: 0,
+    }
+}
+
+fn dynamic_object_data_update_to_packet(
+    update: &DynamicObjectDataUpdate,
+) -> DynamicObjectDataValuesUpdate {
+    DynamicObjectDataValuesUpdate {
+        changed_object_type_mask: 1 << TYPEID_DYNAMIC_OBJECT,
+        object_data: None,
+        dynamic_object_data_mask: update.mask.blocks().first().copied().unwrap_or(0),
+        caster: update.values.caster,
+        dynamic_object_type: update.values.dynamic_object_type,
+        spell_visual_id: update.values.spell_visual_id,
+        spell_id: update.values.spell_id,
+        radius: update.values.radius,
+        cast_time_ms: update.values.cast_time_ms,
+    }
+}
+
+fn empty_dynamic_object_values_update() -> DynamicObjectDataValuesUpdate {
+    DynamicObjectDataValuesUpdate {
+        changed_object_type_mask: 0,
+        object_data: None,
+        dynamic_object_data_mask: 0,
+        caster: wow_core::ObjectGuid::EMPTY,
+        dynamic_object_type: 0,
+        spell_visual_id: 0,
+        spell_id: 0,
+        radius: 0.0,
+        cast_time_ms: 0,
+    }
+}
+
+fn corpse_data_update_to_packet(update: &CorpseDataUpdate) -> CorpseDataValuesUpdate {
+    CorpseDataValuesUpdate {
+        changed_object_type_mask: 1 << TYPEID_CORPSE,
+        object_data: None,
+        corpse_data_mask: update.mask.blocks().first().copied().unwrap_or(0),
+        customizations: Vec::new(),
+        customizations_update_mask: None,
+        dynamic_flags: update.values.dynamic_flags,
+        owner: update.values.owner,
+        party_guid: update.values.party_guid,
+        guild_guid: update.values.guild_guid,
+        display_id: update.values.display_id,
+        race_id: update.values.race_id,
+        sex: update.values.sex,
+        class: update.values.class,
+        flags: update.values.flags,
+        faction_template: update.values.faction_template,
+        items: update.values.items,
+    }
+}
+
+fn empty_corpse_values_update() -> CorpseDataValuesUpdate {
+    CorpseDataValuesUpdate {
+        changed_object_type_mask: 0,
+        object_data: None,
+        corpse_data_mask: 0,
+        customizations: Vec::new(),
+        customizations_update_mask: None,
+        dynamic_flags: 0,
+        owner: wow_core::ObjectGuid::EMPTY,
+        party_guid: wow_core::ObjectGuid::EMPTY,
+        guild_guid: wow_core::ObjectGuid::EMPTY,
+        display_id: 0,
+        race_id: 0,
+        sex: 0,
+        class: 0,
+        flags: 0,
+        faction_template: 0,
+        items: [0; 19],
+    }
+}
+
+fn area_trigger_data_update_to_packet(
+    update: &AreaTriggerDataUpdate,
+) -> AreaTriggerDataValuesUpdate {
+    AreaTriggerDataValuesUpdate {
+        changed_object_type_mask: 1 << TYPEID_AREA_TRIGGER,
+        object_data: None,
+        area_trigger_data_mask: update.mask.blocks().first().copied().unwrap_or(0),
+        override_scale_curve: scale_curve_values_update(update.values.override_scale_curve),
+        extra_scale_curve: scale_curve_values_update(update.values.extra_scale_curve),
+        override_move_curve_x: scale_curve_values_update(update.values.override_move_curve_x),
+        override_move_curve_y: scale_curve_values_update(update.values.override_move_curve_y),
+        override_move_curve_z: scale_curve_values_update(update.values.override_move_curve_z),
+        caster: update.values.caster,
+        duration: update.values.duration,
+        time_to_target: update.values.time_to_target,
+        time_to_target_scale: update.values.time_to_target_scale,
+        time_to_target_extra_scale: update.values.time_to_target_extra_scale,
+        time_to_target_pos: update.values.time_to_target_pos,
+        spell_id: update.values.spell_id,
+        spell_for_visuals: update.values.spell_for_visuals,
+        spell_visual_id: update.values.spell_visual_id,
+        bounds_radius_2d: update.values.bounds_radius_2d,
+        decal_properties_id: update.values.decal_properties_id,
+        creating_effect_guid: update.values.creating_effect_guid,
+        orbit_path_target: update.values.orbit_path_target,
+        visual_anim: VisualAnimValuesUpdate {
+            visual_anim_mask: 0x1F,
+            field_c: update.values.visual_anim.field_c,
+            animation_data_id: update.values.visual_anim.animation_data_id,
+            anim_kit_id: update.values.visual_anim.anim_kit_id,
+            anim_progress: update.values.visual_anim.anim_progress,
+        },
+    }
+}
+
+fn empty_area_trigger_values_update() -> AreaTriggerDataValuesUpdate {
+    AreaTriggerDataValuesUpdate {
+        changed_object_type_mask: 0,
+        object_data: None,
+        area_trigger_data_mask: 0,
+        override_scale_curve: scale_curve_values_update(wow_entities::ScaleCurveValues::default()),
+        extra_scale_curve: scale_curve_values_update(wow_entities::ScaleCurveValues::default()),
+        override_move_curve_x: scale_curve_values_update(wow_entities::ScaleCurveValues::default()),
+        override_move_curve_y: scale_curve_values_update(wow_entities::ScaleCurveValues::default()),
+        override_move_curve_z: scale_curve_values_update(wow_entities::ScaleCurveValues::default()),
+        caster: wow_core::ObjectGuid::EMPTY,
+        duration: 0,
+        time_to_target: 0,
+        time_to_target_scale: 0,
+        time_to_target_extra_scale: 0,
+        time_to_target_pos: 0,
+        spell_id: 0,
+        spell_for_visuals: 0,
+        spell_visual_id: 0,
+        bounds_radius_2d: 0.0,
+        decal_properties_id: 0,
+        creating_effect_guid: wow_core::ObjectGuid::EMPTY,
+        orbit_path_target: wow_core::ObjectGuid::EMPTY,
+        visual_anim: VisualAnimValuesUpdate {
+            visual_anim_mask: 0,
+            field_c: false,
+            animation_data_id: 0,
+            anim_kit_id: 0,
+            anim_progress: 0,
+        },
+    }
+}
+
+fn scale_curve_values_update(values: wow_entities::ScaleCurveValues) -> ScaleCurveValuesUpdate {
+    ScaleCurveValuesUpdate {
+        scale_curve_mask: 0x0F,
+        override_active: values.override_active,
+        start_time_offset: values.start_time_offset,
+        parameter_curve: values.parameter_curve,
+        points: [(0.0, 0.0); 2],
+    }
+}
+
+fn scene_object_data_update_to_packet(
+    update: &SceneObjectDataUpdate,
+) -> SceneObjectDataValuesUpdate {
+    SceneObjectDataValuesUpdate {
+        changed_object_type_mask: 1 << TYPEID_SCENE_OBJECT,
+        object_data: None,
+        scene_object_data_mask: update.mask.blocks().first().copied().unwrap_or(0),
+        script_package_id: update.values.script_package_id,
+        rnd_seed_val: update.values.rnd_seed_val,
+        created_by: update.values.created_by,
+        scene_type: update.values.scene_type,
+    }
+}
+
+fn empty_scene_object_values_update() -> SceneObjectDataValuesUpdate {
+    SceneObjectDataValuesUpdate {
+        changed_object_type_mask: 0,
+        object_data: None,
+        scene_object_data_mask: 0,
+        script_package_id: 0,
+        rnd_seed_val: 0,
+        created_by: wow_core::ObjectGuid::EMPTY,
+        scene_type: 0,
+    }
+}
+
+fn conversation_data_update_to_packet(
+    update: &ConversationDataUpdate,
+) -> ConversationDataValuesUpdate {
+    ConversationDataValuesUpdate {
+        changed_object_type_mask: 1 << TYPEID_CONVERSATION,
+        object_data: None,
+        conversation_data_mask: update.mask.blocks().first().copied().unwrap_or(0),
+        lines: update
+            .values
+            .lines
+            .iter()
+            .map(|line| ConversationLineValuesUpdate {
+                conversation_line_id: line.conversation_line_id,
+                start_time: line.start_time,
+                ui_camera_id: line.ui_camera_id,
+                actor_index: line.actor_index,
+                flags: line.flags,
+            })
+            .collect(),
+        actors: update
+            .values
+            .actors
+            .iter()
+            .map(|actor| ConversationActorValuesUpdate {
+                actor_type: actor.actor_type,
+                id: actor.id,
+                creature_id: actor.creature_id,
+                creature_display_info_id: actor.creature_display_info_id,
+                actor_guid: actor.actor_guid,
+            })
+            .collect(),
+        actor_update_mask: None,
+        last_line_end_time: update.values.last_line_end_time,
+    }
+}
+
+fn empty_conversation_values_update() -> ConversationDataValuesUpdate {
+    ConversationDataValuesUpdate {
+        changed_object_type_mask: 0,
+        object_data: None,
+        conversation_data_mask: 0,
+        lines: Vec::new(),
+        actors: Vec::new(),
+        actor_update_mask: None,
+        last_line_end_time: 0,
+    }
+}
+
 fn active_player_data_update_to_packet(
     update: &ActivePlayerDataUpdate,
 ) -> PacketActivePlayerDataValuesUpdate {
@@ -425,10 +860,16 @@ mod tests {
     use super::*;
     use wow_core::ObjectGuid;
     use wow_entities::{
-        ACTIVE_PLAYER_DATA_COINAGE_BIT, ACTIVE_PLAYER_DATA_PARENT_BIT, Bag,
-        CONTAINER_DATA_NUM_SLOTS_BIT, ITEM_DATA_STACK_COUNT_BIT, Item, PLAYER_DATA_FLAGS_BIT,
-        PLAYER_DATA_PARENT_BIT, Player, UNIT_DATA_HEALTH_BIT, UNIT_DATA_PARENT_BIT,
-        UNIT_DATA_VIRTUAL_ITEMS_FIRST_BIT, UNIT_DATA_VIRTUAL_ITEMS_PARENT_BIT, VisibleItemValues,
+        ACTIVE_PLAYER_DATA_COINAGE_BIT, ACTIVE_PLAYER_DATA_PARENT_BIT,
+        AREA_TRIGGER_DATA_DURATION_BIT, AREA_TRIGGER_DATA_PARENT_BIT, Bag,
+        CONTAINER_DATA_NUM_SLOTS_BIT, CONVERSATION_DATA_LAST_LINE_END_TIME_BIT,
+        CONVERSATION_DATA_PARENT_BIT, CORPSE_DATA_DISPLAY_ID_BIT, CORPSE_DATA_PARENT_BIT, Corpse,
+        CorpseType, DYNAMIC_OBJECT_DATA_PARENT_BIT, DYNAMIC_OBJECT_DATA_RADIUS_BIT, DynamicObject,
+        GAME_OBJECT_DATA_DISPLAY_ID_BIT, GAME_OBJECT_DATA_PARENT_BIT, GameObject,
+        ITEM_DATA_STACK_COUNT_BIT, Item, PLAYER_DATA_FLAGS_BIT, PLAYER_DATA_PARENT_BIT, Player,
+        SCENE_OBJECT_DATA_PARENT_BIT, SCENE_OBJECT_DATA_SCRIPT_PACKAGE_ID_BIT, SceneObject,
+        UNIT_DATA_HEALTH_BIT, UNIT_DATA_PARENT_BIT, UNIT_DATA_VIRTUAL_ITEMS_FIRST_BIT,
+        UNIT_DATA_VIRTUAL_ITEMS_PARENT_BIT, VisibleItemValues,
     };
     use wow_packet::ServerPacket;
 
@@ -609,6 +1050,145 @@ mod tests {
             CONTAINER_DATA_NUM_SLOTS_BIT
         ));
         assert_eq!(packet_update.num_slots, 16);
+    }
+
+    #[test]
+    fn bridges_game_object_values_with_object_prefix() {
+        let mut go = GameObject::new();
+        go.world_mut().object_mut().set_entry(1001);
+        go.set_display_id(22);
+
+        let packet_update = game_object_values_update_to_packet(&go.values_update()).unwrap();
+
+        assert_eq!(
+            packet_update.changed_object_type_mask,
+            (1 << TYPEID_OBJECT) | (1 << TYPEID_GAME_OBJECT)
+        );
+        assert_eq!(packet_update.object_data.unwrap().entry_id, 1001);
+        assert!(mask_has_u64(
+            packet_update.game_object_data_mask as u64,
+            GAME_OBJECT_DATA_PARENT_BIT
+        ));
+        assert!(mask_has_u64(
+            packet_update.game_object_data_mask as u64,
+            GAME_OBJECT_DATA_DISPLAY_ID_BIT
+        ));
+        assert_eq!(packet_update.display_id, 22);
+    }
+
+    #[test]
+    fn bridges_dynamic_object_values_with_cpp_field_order_data() {
+        let mut dyn_object = DynamicObject::new(true);
+        dyn_object.set_radius(7.5);
+
+        let packet_update =
+            dynamic_object_values_update_to_packet(&dyn_object.values_update()).unwrap();
+
+        assert_eq!(
+            packet_update.changed_object_type_mask,
+            1 << TYPEID_DYNAMIC_OBJECT
+        );
+        assert!(mask_has_u64(
+            packet_update.dynamic_object_data_mask as u64,
+            DYNAMIC_OBJECT_DATA_PARENT_BIT
+        ));
+        assert!(mask_has_u64(
+            packet_update.dynamic_object_data_mask as u64,
+            DYNAMIC_OBJECT_DATA_RADIUS_BIT
+        ));
+        assert_eq!(packet_update.radius, 7.5);
+    }
+
+    #[test]
+    fn bridges_corpse_values_and_items_mask() {
+        let mut corpse = Corpse::new(CorpseType::Bones);
+        corpse.set_display_id(123);
+
+        let packet_update = corpse_values_update_to_packet(&corpse.values_update()).unwrap();
+
+        assert_eq!(packet_update.changed_object_type_mask, 1 << TYPEID_CORPSE);
+        assert!(mask_has_u64(
+            packet_update.corpse_data_mask as u64,
+            CORPSE_DATA_PARENT_BIT
+        ));
+        assert!(mask_has_u64(
+            packet_update.corpse_data_mask as u64,
+            CORPSE_DATA_DISPLAY_ID_BIT
+        ));
+        assert_eq!(packet_update.display_id, 123);
+    }
+
+    #[test]
+    fn bridges_area_trigger_values_with_nested_full_masks() {
+        let mut area_trigger = wow_entities::AreaTrigger::new();
+        area_trigger.set_duration(4000);
+        area_trigger.set_override_scale_constant(2.0);
+
+        let packet_update =
+            area_trigger_values_update_to_packet(&area_trigger.values_update()).unwrap();
+
+        assert_eq!(
+            packet_update.changed_object_type_mask,
+            1 << TYPEID_AREA_TRIGGER
+        );
+        assert!(mask_has_u64(
+            packet_update.area_trigger_data_mask as u64,
+            AREA_TRIGGER_DATA_PARENT_BIT
+        ));
+        assert!(mask_has_u64(
+            packet_update.area_trigger_data_mask as u64,
+            AREA_TRIGGER_DATA_DURATION_BIT
+        ));
+        assert_eq!(packet_update.duration, 4000);
+        assert_eq!(packet_update.override_scale_curve.scale_curve_mask, 0x0F);
+    }
+
+    #[test]
+    fn bridges_scene_object_values() {
+        let mut scene = SceneObject::new();
+        scene.set_script_package_id(77);
+
+        let packet_update = scene_object_values_update_to_packet(&scene.values_update()).unwrap();
+
+        assert_eq!(
+            packet_update.changed_object_type_mask,
+            1 << TYPEID_SCENE_OBJECT
+        );
+        assert!(mask_has_u64(
+            packet_update.scene_object_data_mask as u64,
+            SCENE_OBJECT_DATA_PARENT_BIT
+        ));
+        assert!(mask_has_u64(
+            packet_update.scene_object_data_mask as u64,
+            SCENE_OBJECT_DATA_SCRIPT_PACKAGE_ID_BIT
+        ));
+        assert_eq!(packet_update.script_package_id, 77);
+    }
+
+    #[test]
+    fn bridges_conversation_values_with_full_actor_mask() {
+        let mut conversation = wow_entities::Conversation::new();
+        conversation.set_last_line_end_time(1234);
+        conversation.add_actor_world_object(9, 0, ObjectGuid::new(1, 55));
+
+        let packet_update =
+            conversation_values_update_to_packet(&conversation.values_update()).unwrap();
+
+        assert_eq!(
+            packet_update.changed_object_type_mask,
+            1 << TYPEID_CONVERSATION
+        );
+        assert!(mask_has_u64(
+            packet_update.conversation_data_mask as u64,
+            CONVERSATION_DATA_PARENT_BIT
+        ));
+        assert!(mask_has_u64(
+            packet_update.conversation_data_mask as u64,
+            CONVERSATION_DATA_LAST_LINE_END_TIME_BIT
+        ));
+        assert_eq!(packet_update.last_line_end_time, 1234);
+        assert_eq!(packet_update.actors.len(), 1);
+        assert!(packet_update.actor_update_mask.is_none());
     }
 
     #[test]
