@@ -231,6 +231,7 @@ NOTE: `InstanceSaveMgr` no longer exists as a separate class in this WoLK 3.4.3 
 - `#NEXT.R8.INSTANCES.013` adds pure C++ `InstanceScript::SetBossState` transition planning: `TO_BE_DECIDED` load initialization, unchanged/no-regression guards, alive world-boss-minion DONE guard, combat-res/start/end/player-notify flags, encounter-id derived update-lock/criteria/boss-kill/LFG flags, and door/minion/spawn-group follow-up flag.
 - `#NEXT.R8.INSTANCES.014` adds pure C++ combat-resurrection tracker behavior: player-count interval calculation, initialize/reset, timer update, charge gain event, and use-charge event matching the already ported combat-resurrection packets.
 - `#NEXT.R8.INSTANCES.015` adds base C++ entrance-location behavior: fixed entrance id, temporary entrance override, `SetEntranceLocation` clearing temporary entrance, and default encounter-lock completed-mask resolver returning no override.
+- `#NEXT.R8.INSTANCES.016` adds C++ `InstanceScript` area-trigger completion tracking: mark, reset, and query over an idempotent `unordered_set`-equivalent set.
 
 **What's implemented:**
 - `crates/wow-world/src/map_manager.rs` (per the active WIP commits) provides a `MapManager` global stub with placeholder for `GenerateInstanceId` (must verify), but no lock store and no script dispatch. (See WIP commit `f83c48d82`.)
@@ -348,7 +349,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [x] **#INST.29** Implement combat-resurrection tracker (`InitializeCombatResurrections`, `Use`, `Reset`, `GetCombatResurrectionChargeInterval`, `Update`) (M)
 - [x] **#INST.30** Implement entrance-location resolver (`SetEntranceLocation`, `Get`, `ComputeEntranceLocationForCompletedEncounters`) (M)
 - [~] **#INST.31** Implement `PersistentInstanceScriptValue<T>` (i64 / f64 variant) w/ change-notify (M) — numeric value registration/save/load done; change-notify event into `InstanceMap::UpdateInstanceLock(UpdateAdditionalSaveDataEvent)` pending.
-- [ ] **#INST.32** Implement `MarkAreaTriggerDone` / `IsAreaTriggerDone` set tracking (L)
+- [x] **#INST.32** Implement `MarkAreaTriggerDone` / `IsAreaTriggerDone` set tracking (L)
 - [ ] **#INST.33** Implement `UpdateLfgEncounterState` integration (depends on `wow-lfg` doc) (M)
 - [ ] **#INST.34** Implement `UpdatePhasing` integration (depends on `phasing.md`) (M)
 - [~] **#INST.35** Implement `Player::SendRaidInfo` → `SMSG_INSTANCE_INFO` builder (M) — C++ packet layout, empty `CMSG_REQUEST_RAID_INFO` fallback, pure `InstanceLockMgr` raid-info view, session/shared-manager read path, DB2 resolver, and startup population done; gameplay call-sites that create/update/reset real locks still pending.

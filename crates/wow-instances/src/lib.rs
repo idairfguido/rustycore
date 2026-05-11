@@ -6,7 +6,7 @@
 //! C++ `game/Instances` foundation.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, RwLock, Weak},
 };
 
@@ -1343,6 +1343,7 @@ pub struct InstanceScriptBase {
     combat_resurrections: CombatResurrectionTracker,
     entrance_id: u32,
     temporary_entrance_id: u32,
+    activated_area_triggers: HashSet<u32>,
 }
 
 impl InstanceScriptBase {
@@ -1355,6 +1356,7 @@ impl InstanceScriptBase {
             combat_resurrections: CombatResurrectionTracker::default(),
             entrance_id: 0,
             temporary_entrance_id: 0,
+            activated_area_triggers: HashSet::new(),
         }
     }
 
@@ -1527,6 +1529,18 @@ impl InstanceScriptBase {
         }
 
         self.compute_entrance_location_for_completed_encounters_like_cpp(completed_encounters_mask)
+    }
+
+    pub fn mark_area_trigger_done_like_cpp(&mut self, id: u32) {
+        self.activated_area_triggers.insert(id);
+    }
+
+    pub fn reset_area_trigger_done_like_cpp(&mut self, id: u32) {
+        self.activated_area_triggers.remove(&id);
+    }
+
+    pub fn is_area_trigger_done_like_cpp(&self, id: u32) -> bool {
+        self.activated_area_triggers.contains(&id)
     }
 
     pub fn get_save_data_like_cpp(&self) -> String {
@@ -2893,6 +2907,19 @@ mod tests {
             script.entrance_location_for_completed_encounters_like_cpp(true, 0xFF),
             None
         );
+    }
+
+    #[test]
+    fn area_trigger_done_set_matches_cpp_mark_reset_query() {
+        let mut script = InstanceScriptBase::new(4, 1);
+
+        assert!(!script.is_area_trigger_done_like_cpp(7));
+        script.mark_area_trigger_done_like_cpp(7);
+        script.mark_area_trigger_done_like_cpp(7);
+        assert!(script.is_area_trigger_done_like_cpp(7));
+
+        script.reset_area_trigger_done_like_cpp(7);
+        assert!(!script.is_area_trigger_done_like_cpp(7));
     }
 
     #[test]
