@@ -7,7 +7,9 @@ use wow_constants::WeaponAttackType;
 use wow_constants::movement::MovementFlag;
 use wow_core::{ObjectGuid, Position};
 use wow_entities::{Creature, CreatureAiState};
-use wow_movement::{MoveSpline, MoveSplineInit, MoveSplineLaunchInput};
+use wow_movement::{
+    MoveSpline, MoveSplineInit, MoveSplineLaunchInput, MoveSplineStopInput, MoveSplineStopResult,
+};
 use wow_packet::packets::update::CreatureCreateData;
 
 /// Size of a grid cell in yards (64x64 yards like TrinityCore).
@@ -461,6 +463,46 @@ impl WorldCreature {
             self.active_move_spline = Some(spline);
         }
         finalized
+    }
+
+    pub fn stop_move_spline_like_cpp(&mut self) -> Option<MoveSplineStopResult> {
+        let mut spline = self.active_move_spline.take()?;
+        if spline.finalized() {
+            return None;
+        }
+
+        let elapsed_ms = self
+            .now_ms()
+            .saturating_sub(self.creature.ai_ownership().move_start_ms)
+            .min(i32::MAX as u64) as i32;
+        let diff_ms = elapsed_ms.saturating_sub(spline.time_passed_ms());
+        if diff_ms > 0 {
+            spline.update_state(diff_ms);
+        }
+        if spline.finalized() {
+            return None;
+        }
+
+        let stop_position = spline.compute_position().unwrap_or_else(|| self.position());
+        let mut init = MoveSplineInit::new(self.spline_id().saturating_add(1));
+        let stop = init.stop(
+            &mut spline,
+            MoveSplineStopInput {
+                current_position: self.position(),
+                active_spline_position: Some(stop_position),
+                on_transport: false,
+            },
+        )?;
+
+        self.creature.set_ai_position(stop.position);
+        let ai = self.creature.ai_ownership_mut();
+        ai.move_target = None;
+        ai.move_duration_ms = 0;
+        ai.spline_id = stop.spline_id;
+        let motion = &mut self.creature.unit_mut().subsystems_mut().motion;
+        motion.finalize_spline();
+        motion.spline.spline_id = stop.spline_id;
+        Some(stop)
     }
 
     pub fn finish_move(&mut self) {
@@ -1398,6 +1440,50 @@ mod tests {
         assert!(!motion_spline.enabled);
         assert!(motion_spline.finalized);
         assert_eq!(motion_spline.progress_ms, motion_spline.duration_ms);
+    }
+
+    #[test]
+    fn world_creature_stop_move_spline_emits_cpp_stop_state_before_arrival() {
+        let guid = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 1, 54322);
+        let mut creature = WorldCreature::new(
+            guid,
+            1,
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            50,
+            2,
+            5,
+            10,
+            20.0,
+            100,
+            14,
+            0,
+            0,
+        );
+        creature.clock_started_at = Instant::now() - Duration::from_secs(10);
+        let dst = Position::new(20.0, 10.0, 0.0, 0.0);
+        let (_, spline) = creature
+            .begin_move_spline_like_cpp(dst)
+            .expect("valid two-point spline");
+        let duration_ms = spline.duration_ms() as u32;
+        let now_ms = creature.now_ms();
+        creature.creature.ai_ownership_mut().move_start_ms =
+            now_ms.saturating_sub(u64::from(duration_ms / 2));
+
+        let stop = creature
+            .stop_move_spline_like_cpp()
+            .expect("active spline stops");
+
+        assert_eq!(stop.spline_id, 3);
+        assert_eq!(stop.stop_distance_tolerance, 2);
+        assert!(stop.position.x > 10.0 && stop.position.x < 20.0);
+        assert_eq!(creature.position(), stop.position);
+        assert!(creature.active_move_spline.is_none());
+        assert_eq!(creature.move_target(), None);
+        let motion_spline = &creature.creature.unit().subsystems().motion.spline;
+        assert!(!motion_spline.enabled);
+        assert!(motion_spline.finalized);
+        assert_eq!(motion_spline.spline_id, stop.spline_id);
+        assert!(creature.stop_move_spline_like_cpp().is_none());
     }
 
     #[test]

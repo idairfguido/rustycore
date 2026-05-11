@@ -7469,6 +7469,7 @@ impl WorldSession {
     pub(crate) fn tick_combat_sync(&mut self) {
         use wow_packet::ServerPacket;
         use wow_packet::packets::combat::{AttackerStateUpdate, SAttackStop, VICTIM_STATE_HIT};
+        use wow_packet::packets::movement::MonsterMoveStop;
 
         let (player_guid, combat_target) = match (self.player_guid(), self.combat_target) {
             (Some(pg), Some(ct)) => (pg, ct),
@@ -7485,7 +7486,7 @@ impl WorldSession {
 
         // Gather combat data from the canonical map-owned creature before
         // emitting combat packets.
-        let Some((dmg, target_level, now_dead)) = self
+        let Some((dmg, target_level, now_dead, move_stop)) = self
             .mutate_world_creature(combat_target, |creature| {
                 if !creature.is_alive() {
                     return None;
@@ -7499,8 +7500,20 @@ impl WorldSession {
                 let dmg = creature.roll_damage().max(1);
                 let level = creature.level();
                 let died = creature.take_damage(dmg);
+                let move_stop = if died {
+                    creature.stop_move_spline_like_cpp().map(|stop| {
+                        MonsterMoveStop {
+                            mover_guid: combat_target,
+                            current_pos: stop.position,
+                            spline_id: stop.spline_id,
+                        }
+                        .to_bytes()
+                    })
+                } else {
+                    None
+                };
                 creature.record_swing();
-                Some((dmg, level, died))
+                Some((dmg, level, died, move_stop))
             })
             .flatten()
         else {
@@ -7528,6 +7541,9 @@ impl WorldSession {
         // (temporarily disabled to prevent client crash from malformed packet)
 
         if now_dead {
+            if let Some(bytes) = move_stop {
+                let _ = self.send_tx.send(bytes);
+            }
             let stop = SAttackStop {
                 attacker: player_guid,
                 victim: combat_target,
@@ -7931,6 +7947,9 @@ impl WorldSession {
         target_guid: ObjectGuid,
         damage_amount: u32,
     ) -> Result<(), &'static str> {
+        use wow_packet::ServerPacket;
+        use wow_packet::packets::movement::MonsterMoveStop;
+
         let _player_guid = self.player_guid().ok_or("No player GUID")?;
         let account_id = self.account_id;
 
@@ -7951,7 +7970,15 @@ impl WorldSession {
                         target_guid,
                         creature.entry()
                     );
-                    Some((creature.entry(), target_guid))
+                    let move_stop = creature.stop_move_spline_like_cpp().map(|stop| {
+                        MonsterMoveStop {
+                            mover_guid: target_guid,
+                            current_pos: stop.position,
+                            spline_id: stop.spline_id,
+                        }
+                        .to_bytes()
+                    });
+                    Some((creature.entry(), target_guid, move_stop))
                 } else {
                     None
                 }
@@ -7959,7 +7986,10 @@ impl WorldSession {
             .ok_or("Target creature not found")?;
 
         // Process creature death outside the mutable borrow
-        if let Some((entry, guid)) = kill_info {
+        if let Some((entry, guid, move_stop)) = kill_info {
+            if let Some(bytes) = move_stop {
+                let _ = self.send_tx.send(bytes);
+            }
             // Give XP for the kill
             let mob_level = self
                 .mutate_world_creature(guid, |creature| creature.level())
@@ -8737,6 +8767,46 @@ mod tests {
         let manager = manager.read().unwrap();
         let world_creature = manager.find_creature(0, 0, guid).unwrap();
         assert_eq!(world_creature.current_hp(), 33);
+    }
+
+    #[tokio::test]
+    async fn killing_moving_creature_sends_cpp_like_monster_move_stop() {
+        let (mut session, _, send_rx) = make_session();
+        let manager = shared_map_manager();
+        let guid = test_creature_guid(18_202);
+        session.player_guid = Some(ObjectGuid::create_player(1, 202));
+        register_test_creature(&mut session, manager.clone(), guid, 40);
+        session
+            .mutate_world_creature(guid, |creature| {
+                creature
+                    .begin_move_spline_like_cpp(Position::new(20.0, 10.0, 0.0, 0.0))
+                    .expect("valid represented spline");
+            })
+            .unwrap();
+
+        session.apply_damage(guid, 40).await.unwrap();
+
+        let sent = send_rx.try_recv().unwrap();
+        let opcode = u16::from_le_bytes([sent[0], sent[1]]);
+        assert_eq!(opcode, ServerOpcodes::OnMonsterMove as u16);
+        let mut pkt = WorldPacket::from_bytes(&sent[2..]);
+        assert_eq!(pkt.read_packed_guid().unwrap(), guid);
+        assert_eq!(pkt.read_float().unwrap(), 10.0);
+        assert_eq!(pkt.read_float().unwrap(), 10.0);
+        assert_eq!(pkt.read_float().unwrap(), 0.0);
+        assert_eq!(pkt.read_uint32().unwrap(), 3);
+        assert_eq!(pkt.read_float().unwrap(), 0.0);
+        assert_eq!(pkt.read_float().unwrap(), 0.0);
+        assert_eq!(pkt.read_float().unwrap(), 0.0);
+        assert!(!pkt.has_bit().unwrap());
+        assert_eq!(pkt.read_bits(3).unwrap(), 2);
+        assert_eq!(pkt.read_uint32().unwrap(), 0);
+        assert_eq!(pkt.read_int32().unwrap(), 0);
+        assert_eq!(pkt.read_uint32().unwrap(), 0);
+        assert_eq!(pkt.read_uint32().unwrap(), 0);
+        assert_eq!(pkt.read_uint8().unwrap(), 0);
+        assert_eq!(pkt.read_packed_guid().unwrap(), ObjectGuid::EMPTY);
+        assert_eq!(pkt.read_int8().unwrap(), -1);
     }
 
     #[test]
