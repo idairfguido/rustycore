@@ -112,7 +112,7 @@ inventory::submit! {
 inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::LoadingScreenNotify,
-        status: SessionStatus::LoggedIn,
+        status: SessionStatus::Authed,
         processing: PacketProcessing::Inplace,
         handler_name: "handle_loading_screen_notify",
     }
@@ -346,9 +346,45 @@ inventory::submit! {
 inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::GetAccountCharacterList,
-        status: SessionStatus::LoggedIn,
+        status: SessionStatus::Authed,
         processing: PacketProcessing::Inplace,
         handler_name: "handle_get_account_character_list",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::CancelTrade,
+        status: SessionStatus::LoggedInOrRecentlyLogout,
+        processing: PacketProcessing::ThreadUnsafe,
+        handler_name: "handle_cancel_trade",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::ReportClientVariables,
+        status: SessionStatus::Authed,
+        processing: PacketProcessing::ThreadUnsafe,
+        handler_name: "handle_report_client_variables",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::ReportEnabledAddons,
+        status: SessionStatus::Authed,
+        processing: PacketProcessing::ThreadUnsafe,
+        handler_name: "handle_report_enabled_addons",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::ReportKeybindingExecutionCounts,
+        status: SessionStatus::Authed,
+        processing: PacketProcessing::ThreadUnsafe,
+        handler_name: "handle_report_keybinding_execution_counts",
     }
 }
 
@@ -681,6 +717,8 @@ impl crate::session::WorldSession {
         &mut self,
         _pkt: wow_packet::WorldPacket,
     ) {
+        self.registered_addon_prefixes.clear();
+        self.filter_addon_messages = false;
     }
     pub async fn handle_set_action_bar_toggles(&mut self, _pkt: wow_packet::WorldPacket) {}
     pub async fn handle_save_cuf_profiles(&mut self, _pkt: wow_packet::WorldPacket) {}
@@ -965,6 +1003,17 @@ impl crate::session::WorldSession {
     pub async fn handle_request_lfg_list_blacklist(&mut self, _pkt: wow_packet::WorldPacket) {}
     pub async fn handle_lfg_list_get_status(&mut self, _pkt: wow_packet::WorldPacket) {}
     pub async fn handle_get_account_character_list(&mut self, _pkt: wow_packet::WorldPacket) {}
+    pub async fn handle_cancel_trade(&mut self, _pkt: wow_packet::WorldPacket) {
+        // C++ calls Player::TradeCancel(true) only when a player is present.
+        // Full trade state is not ported yet; no active trade means no response.
+    }
+    pub async fn handle_report_client_variables(&mut self, _pkt: wow_packet::WorldPacket) {}
+    pub async fn handle_report_enabled_addons(&mut self, _pkt: wow_packet::WorldPacket) {}
+    pub async fn handle_report_keybinding_execution_counts(
+        &mut self,
+        _pkt: wow_packet::WorldPacket,
+    ) {
+    }
     pub async fn handle_request_countdown_timer(&mut self, _pkt: wow_packet::WorldPacket) {}
     pub async fn handle_calendar_get(&mut self, _pkt: wow_packet::WorldPacket) {}
 

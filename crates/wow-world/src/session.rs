@@ -441,6 +441,11 @@ pub struct WorldSession {
     /// Cached character name for chat messages.
     pub(crate) player_name: Option<String>,
 
+    // Addon chat filtering state. Mirrors C++ WorldSession::_registeredAddonPrefixes
+    // and _filterAddonMessages.
+    pub(crate) registered_addon_prefixes: Vec<String>,
+    pub(crate) filter_addon_messages: bool,
+
     // ── Creature AI tracking ──────────────────────────────────────
     /// All creatures visible/tracked by this session, keyed by GUID.
     /// Legacy per-session storage. New code should prefer `MapManager` access
@@ -819,6 +824,8 @@ impl WorldSession {
             realm_send_tx: None,
             player_position: None,
             player_name: None,
+            registered_addon_prefixes: Vec::new(),
+            filter_addon_messages: false,
             creatures: std::collections::HashMap::new(),
             vendor_item_counts: HashMap::new(),
             creature_tick: 0,
@@ -3884,6 +3891,12 @@ impl WorldSession {
             ClientOpcodes::ChatMessageEmote => {
                 self.handle_chat_emote(pkt).await;
             }
+            ClientOpcodes::ChatRegisterAddonPrefixes => {
+                self.handle_chat_register_addon_prefixes(pkt).await;
+            }
+            ClientOpcodes::ChatAddonMessage => {
+                self.handle_chat_addon_message(pkt).await;
+            }
 
             // ── Spell cast ────────────────────────────────────────────────────
             ClientOpcodes::CastSpell => {
@@ -3989,6 +4002,18 @@ impl WorldSession {
             }
             ClientOpcodes::GetAccountCharacterList => {
                 self.handle_get_account_character_list(pkt).await;
+            }
+            ClientOpcodes::CancelTrade => {
+                self.handle_cancel_trade(pkt).await;
+            }
+            ClientOpcodes::ReportClientVariables => {
+                self.handle_report_client_variables(pkt).await;
+            }
+            ClientOpcodes::ReportEnabledAddons => {
+                self.handle_report_enabled_addons(pkt).await;
+            }
+            ClientOpcodes::ReportKeybindingExecutionCounts => {
+                self.handle_report_keybinding_execution_counts(pkt).await;
             }
             ClientOpcodes::QueryCountdownTimer => {
                 self.handle_request_countdown_timer(pkt).await;
