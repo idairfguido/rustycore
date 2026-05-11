@@ -6,7 +6,9 @@ use tracing::{debug, info, warn};
 use wow_constants::movement::MovementFlag;
 use wow_constants::{UnitState, WeaponAttackType};
 use wow_core::{ObjectGuid, Position};
-use wow_entities::{Creature, CreatureAiState};
+use wow_entities::{
+    Creature, CreatureAiState, EVENT_CHARGE_PREPATH, MovementGeneratorKind, PointMovementAction,
+};
 use wow_movement::{
     MoveSpline, MoveSplineInit, MoveSplineLaunchInput, MoveSplineStopInput, MoveSplineStopResult,
 };
@@ -428,6 +430,55 @@ impl WorldCreature {
             .add_unit_state(UnitState::ROAMING_MOVE.bits());
         self.active_move_spline = Some(spline.clone());
         Some((launch.real_position, spline))
+    }
+
+    pub fn begin_point_movement_like_cpp(
+        &mut self,
+        movement_id: u32,
+        dst: Position,
+        can_move: bool,
+    ) -> Option<(Position, MoveSpline)> {
+        if movement_id == EVENT_CHARGE_PREPATH {
+            self.creature
+                .unit_mut()
+                .subsystems_mut()
+                .motion
+                .move_charge(movement_id);
+        } else {
+            self.creature
+                .unit_mut()
+                .subsystems_mut()
+                .motion
+                .move_point(movement_id);
+        }
+
+        let action = {
+            let motion = &mut self.creature.unit_mut().subsystems_mut().motion;
+            let generator = motion.active_generators.iter_mut().find(|generator| {
+                generator.kind == MovementGeneratorKind::Point
+                    && generator.movement_id == movement_id
+            })?;
+            generator.initialize_point_like_cpp(can_move)
+        };
+
+        match action {
+            PointMovementAction::LaunchSpline => self.begin_move_spline_like_cpp(dst),
+            PointMovementAction::MarkRoamingMove => {
+                self.creature
+                    .unit_mut()
+                    .add_unit_state(UnitState::ROAMING_MOVE.bits());
+                None
+            }
+            PointMovementAction::StopMoving => {
+                self.creature
+                    .unit_mut()
+                    .subsystems_mut()
+                    .motion
+                    .stop_moving();
+                None
+            }
+            _ => None,
+        }
     }
 
     pub fn update_move_spline_like_cpp(&mut self) -> bool {
@@ -1464,6 +1515,108 @@ mod tests {
                 .unit()
                 .has_unit_state(UnitState::ROAMING_MOVE.bits())
         );
+    }
+
+    #[test]
+    fn world_creature_begin_point_movement_uses_point_lifecycle_and_real_spline() {
+        let guid = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 1, 54323);
+        let mut creature = WorldCreature::new(
+            guid,
+            1,
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            50,
+            2,
+            5,
+            10,
+            20.0,
+            100,
+            14,
+            0,
+            0,
+        );
+        creature.clock_started_at = Instant::now() - Duration::from_secs(10);
+        let dst = Position::new(14.0, 10.0, 0.0, 0.0);
+
+        let (from, spline) = creature
+            .begin_point_movement_like_cpp(42, dst, true)
+            .expect("point movement starts direct spline");
+
+        assert_eq!(from, Position::new(10.0, 10.0, 0.0, 0.0));
+        assert!(creature.active_move_spline.is_some());
+        assert_eq!(creature.move_target(), Some(dst));
+        assert!(
+            creature
+                .creature
+                .unit()
+                .has_unit_state(UnitState::ROAMING_MOVE.bits())
+        );
+        let motion = &creature.creature.unit().subsystems().motion;
+        let generator = motion.current_movement_generator();
+        assert_eq!(generator.kind, MovementGeneratorKind::Point);
+        assert_eq!(generator.movement_id, 42);
+        assert!(generator.has_flag(wow_entities::MOVEMENTGENERATOR_FLAG_INITIALIZED));
+        assert!(!generator.has_flag(wow_entities::MOVEMENTGENERATOR_FLAG_INITIALIZATION_PENDING));
+        assert!(motion.spline.enabled);
+        assert_eq!(motion.spline.spline_id, spline.id());
+        assert_eq!(motion.spline.final_destination, Some((14, 10, 0)));
+    }
+
+    #[test]
+    fn world_creature_begin_point_movement_handles_blocked_and_prepath_branches() {
+        let guid = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 1, 54324);
+        let mut creature = WorldCreature::new(
+            guid,
+            1,
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            50,
+            2,
+            5,
+            10,
+            20.0,
+            100,
+            14,
+            0,
+            0,
+        );
+        creature.clock_started_at = Instant::now() - Duration::from_secs(10);
+        let dst = Position::new(14.0, 10.0, 0.0, 0.0);
+
+        assert!(
+            creature
+                .begin_point_movement_like_cpp(43, dst, false)
+                .is_none()
+        );
+        assert!(creature.active_move_spline.is_none());
+        let generator = creature
+            .creature
+            .unit()
+            .subsystems()
+            .motion
+            .current_movement_generator();
+        assert!(generator.has_flag(wow_entities::MOVEMENTGENERATOR_FLAG_INTERRUPTED));
+        assert!(creature.creature.unit().subsystems().motion.stopped);
+
+        assert!(
+            creature
+                .begin_point_movement_like_cpp(EVENT_CHARGE_PREPATH, dst, true)
+                .is_none()
+        );
+        assert!(creature.active_move_spline.is_none());
+        assert!(
+            creature
+                .creature
+                .unit()
+                .has_unit_state(UnitState::ROAMING_MOVE.bits())
+        );
+        let generator = creature
+            .creature
+            .unit()
+            .subsystems()
+            .motion
+            .current_movement_generator();
+        assert_eq!(generator.kind, MovementGeneratorKind::Point);
+        assert_eq!(generator.movement_id, EVENT_CHARGE_PREPATH);
+        assert_eq!(generator.base_unit_state, UnitState::CHARGING.bits());
     }
 
     #[test]

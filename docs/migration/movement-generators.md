@@ -24,7 +24,8 @@ Current Rust status:
 - `#A06.8h.3e.4` ports represented `MotionMaster::LaunchMoveSpline`, `MoveJump` and `MoveJumpWithGravity` wrapper semantics: invalid generator type rejection, generic effect movement creation, highest jump priority, `UNIT_STATE_JUMPING`, arrival-spell metadata and gravity-jump persist-on-death.
 - `#A06.8h.3e.5` ports represented `MoveKnockbackFrom` and `MoveFall` wrapper semantics: player/speed/height/root guards, generic effect movement creation, highest priority, knockback persist-on-death and player fall-info branch.
 - `#A06.8h.3e.6` ports represented `PointMovementGenerator` lifecycle semantics: initialization/blocked movement/interruption/speed-update/finalize flags, `UNIT_STATE_ROAMING_MOVE` actions, and `EVENT_CHARGE_PREPATH` informing scripts as `EVENT_CHARGE`.
-- Still missing: executable generator behavior against a real `Unit`, pathgen-backed destinations, real `MovementInform` dispatch, follow/chase/flee/random/waypoint/taxi/spline-chain runtime logic, and generic MotionMaster delayed-action semantics.
+- `#A06.8h.3e.7` connects direct non-pathgen point movement to the represented `WorldCreature` runtime: initialize a point generator, mark `UNIT_STATE_ROAMING_MOVE`, launch the existing real `MoveSplineInit` bridge for direct destinations, and preserve the C++ `EVENT_CHARGE_PREPATH` no-launch branch.
+- Still missing: generalized executable generator behavior against a real `Unit`, pathgen-backed destinations, real `MovementInform` dispatch, follow/chase/flee/random/waypoint/taxi/spline-chain runtime logic, and generic MotionMaster delayed-action semantics.
 
 ---
 
@@ -528,7 +529,7 @@ Numbered for cross-reference from `MIGRATION_ROADMAP.md` §5. Complexity: **L** 
 - [ ] **#MOVE-GEN.8** Implement `MotionMaster` core: stack per slot (`Vec<Box<dyn MovementGenerator>>`), `update(diff)` with delayed-action draining. (H)
 - [ ] **#MOVE-GEN.9** Wire `MotionMaster::add/remove/clear` + flag-gated deferral. (M)
 - [ ] **#MOVE-GEN.10** `IdleMovementGenerator` + `RotateMovementGenerator` + `DistractMovementGenerator` + `AssistanceDistractMovementGenerator`. (M)
-- [ ] **#MOVE-GEN.11** `PointMovementGenerator` (single-target move + `MovementInform(POINT, id)` callback). Represented lifecycle/flags/inform mapping are ported; remaining work is executable destination/path generation, final orientation/facing target, spell-effect extras, `SignalFormationMovement`, real `CreatureAI::MovementInform`, and `AssistanceMovementGenerator`. (M)
+- [ ] **#MOVE-GEN.11** `PointMovementGenerator` (single-target move + `MovementInform(POINT, id)` callback). Represented lifecycle/flags/inform mapping are ported, and direct no-pathgen creature point movement now launches a real `MoveSpline` through `WorldCreature`. Remaining work is pathgen, close-enough, final orientation/facing target, spell-effect extras, `SignalFormationMovement`, real `CreatureAI::MovementInform`, `AssistanceMovementGenerator`, and generalized `MotionMaster::Update`. (M)
 - [ ] **#MOVE-GEN.12** `RandomMovementGenerator` (wander radius + delay + water/oxygen check). (H)
 - [ ] **#MOVE-GEN.13** `AbstractFollower` helper + `FollowMovementGenerator`. (M)
 - [ ] **#MOVE-GEN.14** `ChaseMovementGenerator` (combat reposition + `ChaseRange`/`ChaseAngle`). (H)
