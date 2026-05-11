@@ -701,30 +701,40 @@ impl ServerPacket for MoveUpdate {
 
 /// Server moves a creature/NPC along a spline path.
 ///
-/// Simplified version: single straight-line move with one destination point.
-///
-/// Wire format (simplified, no cyclic/uncompressed):
-/// ```text
-/// PackedGuid  mover_guid
-/// Vector3     current_pos (f32 x3)
-/// u32         spline_id
-/// u32         move_time_ms
-/// u32         spline_flags
-/// u8          face_type  (0=none)
-/// f32         face_direction (if face_type == 4)
-/// i32         points_count  (count of dest points)
-/// Vector3     destination point (last point, then packed deltas)
-/// i32         packed_deltas_count (0 for single point)
-/// ```
+/// Mirrors C++ `WorldPackets::Movement::MonsterMove`:
+/// `MoverGUID`, current XYZ position, then `MovementMonsterSpline`.
 #[derive(Debug, Clone)]
 pub struct MonsterMove {
     pub mover_guid: ObjectGuid,
     pub current_pos: Position,
-    pub spline_id: u32,
-    pub move_time_ms: u32,
-    /// SplineFlag: 0x400 = UncompressedPath, 0x800 = Cyclic, default 0
-    pub spline_flags: u32,
-    pub destination: Position,
+    pub spline: MovementMonsterSpline,
+}
+
+impl MonsterMove {
+    pub fn single_destination(
+        mover_guid: ObjectGuid,
+        current_pos: Position,
+        spline_id: u32,
+        move_time_ms: u32,
+        spline_flags: u32,
+        destination: Position,
+    ) -> Self {
+        Self {
+            mover_guid,
+            current_pos,
+            spline: MovementMonsterSpline {
+                id: spline_id,
+                destination,
+                movement: MovementSpline {
+                    flags: spline_flags,
+                    move_time: move_time_ms,
+                    points: vec![destination],
+                    ..MovementSpline::default()
+                },
+                ..MovementMonsterSpline::default()
+            },
+        }
+    }
 }
 
 impl ServerPacket for MonsterMove {
@@ -732,33 +742,139 @@ impl ServerPacket for MonsterMove {
 
     fn write(&self, pkt: &mut WorldPacket) {
         pkt.write_packed_guid(&self.mover_guid);
-        // current position
-        pkt.write_float(self.current_pos.x);
-        pkt.write_float(self.current_pos.y);
-        pkt.write_float(self.current_pos.z);
-        // spline id
-        pkt.write_uint32(self.spline_id);
-        // MovementMonsterSpline::Write
-        // move time
-        pkt.write_uint32(self.move_time_ms);
-        // spline flags (0 = default linear)
-        pkt.write_uint32(self.spline_flags);
-        // face type (0 = none/direction)
-        pkt.write_uint8(0u8);
-        // face direction (written when face_type == 4, FACE_ANGLE)
-        // For face_type 0 we skip face data.
+        write_xyz(pkt, self.current_pos);
+        self.spline.write(pkt);
+    }
+}
 
-        // No AnimTierTransition (spline flags don't have Animation)
-        // No JumpExtraData
-        // No FadeObjectTime
+#[derive(Debug, Clone)]
+pub struct MovementMonsterSpline {
+    pub id: u32,
+    pub destination: Position,
+    pub crz_teleport: bool,
+    pub stop_distance_tolerance: u8,
+    pub movement: MovementSpline,
+}
 
-        // Points (uncompressed path = false, so last point + packed deltas)
-        // For a single-destination move: 1 destination point, 0 packed deltas
-        pkt.write_int32(1i32); // points count
-        pkt.write_float(self.destination.x);
-        pkt.write_float(self.destination.y);
-        pkt.write_float(self.destination.z);
-        pkt.write_int32(0i32); // packed deltas count
+impl Default for MovementMonsterSpline {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            destination: Position::ZERO,
+            crz_teleport: false,
+            stop_distance_tolerance: 0,
+            movement: MovementSpline::default(),
+        }
+    }
+}
+
+impl MovementMonsterSpline {
+    pub fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_uint32(self.id);
+        write_xyz(pkt, self.destination);
+        pkt.write_bit(self.crz_teleport);
+        pkt.write_bits(u32::from(self.stop_distance_tolerance & 0x07), 3);
+        self.movement.write(pkt);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MovementSpline {
+    pub flags: u32,
+    pub face: MonsterMoveFace,
+    pub elapsed: i32,
+    pub move_time: u32,
+    pub fade_object_time: u32,
+    pub points: Vec<Position>,
+    pub mode: u8,
+    pub vehicle_exit_voluntary: bool,
+    pub interpolate: bool,
+    pub transport_guid: ObjectGuid,
+    pub vehicle_seat: i8,
+    pub packed_deltas: Vec<[f32; 3]>,
+}
+
+impl Default for MovementSpline {
+    fn default() -> Self {
+        Self {
+            flags: 0,
+            face: MonsterMoveFace::Normal,
+            elapsed: 0,
+            move_time: 0,
+            fade_object_time: 0,
+            points: Vec::new(),
+            mode: 0,
+            vehicle_exit_voluntary: false,
+            interpolate: false,
+            transport_guid: ObjectGuid::EMPTY,
+            vehicle_seat: -1,
+            packed_deltas: Vec::new(),
+        }
+    }
+}
+
+impl MovementSpline {
+    pub fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_uint32(self.flags);
+        pkt.write_int32(self.elapsed);
+        pkt.write_uint32(self.move_time);
+        pkt.write_uint32(self.fade_object_time);
+        pkt.write_uint8(self.mode);
+        pkt.write_packed_guid(&self.transport_guid);
+        pkt.write_int8(self.vehicle_seat);
+        pkt.write_bits(u32::from(self.face.kind()), 2);
+        pkt.write_bits(self.points.len() as u32, 16);
+        pkt.write_bit(self.vehicle_exit_voluntary);
+        pkt.write_bit(self.interpolate);
+        pkt.write_bits(self.packed_deltas.len() as u32, 16);
+        pkt.write_bit(false); // SplineFilter
+        pkt.write_bit(false); // SpellEffectExtraData
+        pkt.write_bit(false); // JumpExtraData
+        pkt.write_bit(false); // AnimTierTransition
+        pkt.flush_bits();
+
+        match self.face {
+            MonsterMoveFace::Normal => {}
+            MonsterMoveFace::FacingSpot(pos) => write_xyz(pkt, pos),
+            MonsterMoveFace::FacingTarget {
+                direction,
+                target_guid,
+            } => {
+                pkt.write_float(direction);
+                pkt.write_packed_guid(&target_guid);
+            }
+            MonsterMoveFace::FacingAngle(direction) => pkt.write_float(direction),
+        }
+
+        for point in &self.points {
+            write_xyz(pkt, *point);
+        }
+
+        for [x, y, z] in &self.packed_deltas {
+            pkt.write_packed_xyz(*x, *y, *z);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MonsterMoveFace {
+    Normal,
+    FacingSpot(Position),
+    FacingTarget {
+        direction: f32,
+        target_guid: ObjectGuid,
+    },
+    FacingAngle(f32),
+}
+
+impl MonsterMoveFace {
+    fn kind(self) -> u8 {
+        match self {
+            MonsterMoveFace::Normal => 0,
+            MonsterMoveFace::FacingSpot(_) => 1,
+            MonsterMoveFace::FacingTarget { .. } => 2,
+            MonsterMoveFace::FacingAngle(_) => 3,
+        }
     }
 }
 
@@ -776,19 +892,23 @@ impl ServerPacket for MonsterMoveStop {
     const OPCODE: ServerOpcodes = ServerOpcodes::OnMonsterMove;
 
     fn write(&self, pkt: &mut WorldPacket) {
-        pkt.write_packed_guid(&self.mover_guid);
-        pkt.write_float(self.current_pos.x);
-        pkt.write_float(self.current_pos.y);
-        pkt.write_float(self.current_pos.z);
-        pkt.write_uint32(self.spline_id);
-        // move_time = 0 → stop
-        pkt.write_uint32(0u32);
-        // SplineFlag::Done = 0x100
-        pkt.write_uint32(0x100u32);
-        pkt.write_uint8(0u8); // face_type = none
-        pkt.write_int32(0i32); // no points
-        pkt.write_int32(0i32); // no packed deltas
+        MonsterMove {
+            mover_guid: self.mover_guid,
+            current_pos: self.current_pos,
+            spline: MovementMonsterSpline {
+                id: self.spline_id,
+                stop_distance_tolerance: 2,
+                ..MovementMonsterSpline::default()
+            },
+        }
+        .write(pkt);
     }
+}
+
+fn write_xyz(pkt: &mut WorldPacket, position: Position) {
+    pkt.write_float(position.x);
+    pkt.write_float(position.y);
+    pkt.write_float(position.z);
 }
 
 // ── SetActiveMover (CMSG 0x3A3C) ──────────────────────────────────
@@ -1115,5 +1235,149 @@ mod tests {
         let decoded_info = MovementInfo::read(&mut pkt).unwrap();
         assert_eq!(decoded_info.guid, guid);
         assert_eq!(pkt.read_float().unwrap(), 1.25);
+    }
+
+    #[test]
+    fn monster_move_single_destination_writes_cpp_spline_order() {
+        let mover = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 9, 88);
+        let packet = MonsterMove::single_destination(
+            mover,
+            Position::new(1.0, 2.0, 3.0, 0.0),
+            77,
+            1_500,
+            0x0040_0000,
+            Position::new(10.0, 20.0, 30.0, 0.0),
+        );
+        let bytes = packet.to_bytes();
+        let mut pkt = WorldPacket::from_bytes(&bytes[2..]);
+
+        assert_eq!(pkt.read_packed_guid().unwrap(), mover);
+        assert_eq!(pkt.read_float().unwrap(), 1.0);
+        assert_eq!(pkt.read_float().unwrap(), 2.0);
+        assert_eq!(pkt.read_float().unwrap(), 3.0);
+        assert_eq!(pkt.read_uint32().unwrap(), 77);
+        assert_eq!(pkt.read_float().unwrap(), 10.0);
+        assert_eq!(pkt.read_float().unwrap(), 20.0);
+        assert_eq!(pkt.read_float().unwrap(), 30.0);
+        assert!(!pkt.has_bit().unwrap());
+        assert_eq!(pkt.read_bits(3).unwrap(), 0);
+        assert_eq!(pkt.read_uint32().unwrap(), 0x0040_0000);
+        assert_eq!(pkt.read_int32().unwrap(), 0);
+        assert_eq!(pkt.read_uint32().unwrap(), 1_500);
+        assert_eq!(pkt.read_uint32().unwrap(), 0);
+        assert_eq!(pkt.read_uint8().unwrap(), 0);
+        assert_eq!(pkt.read_packed_guid().unwrap(), ObjectGuid::EMPTY);
+        assert_eq!(pkt.read_int8().unwrap(), -1);
+        assert_eq!(pkt.read_bits(2).unwrap(), 0);
+        assert_eq!(pkt.read_bits(16).unwrap(), 1);
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert_eq!(pkt.read_bits(16).unwrap(), 0);
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert_eq!(pkt.read_float().unwrap(), 10.0);
+        assert_eq!(pkt.read_float().unwrap(), 20.0);
+        assert_eq!(pkt.read_float().unwrap(), 30.0);
+        assert!(pkt.is_empty());
+    }
+
+    #[test]
+    fn monster_move_stop_writes_cpp_stop_tolerance_without_done_flag() {
+        let mover = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 9, 88);
+        let packet = MonsterMoveStop {
+            mover_guid: mover,
+            current_pos: Position::new(1.0, 2.0, 3.0, 0.0),
+            spline_id: 78,
+        };
+        let bytes = packet.to_bytes();
+        let mut pkt = WorldPacket::from_bytes(&bytes[2..]);
+
+        assert_eq!(pkt.read_packed_guid().unwrap(), mover);
+        assert_eq!(pkt.read_float().unwrap(), 1.0);
+        assert_eq!(pkt.read_float().unwrap(), 2.0);
+        assert_eq!(pkt.read_float().unwrap(), 3.0);
+        assert_eq!(pkt.read_uint32().unwrap(), 78);
+        assert_eq!(pkt.read_float().unwrap(), 0.0);
+        assert_eq!(pkt.read_float().unwrap(), 0.0);
+        assert_eq!(pkt.read_float().unwrap(), 0.0);
+        assert!(!pkt.has_bit().unwrap());
+        assert_eq!(pkt.read_bits(3).unwrap(), 2);
+        assert_eq!(pkt.read_uint32().unwrap(), 0);
+        assert_eq!(pkt.read_int32().unwrap(), 0);
+        assert_eq!(pkt.read_uint32().unwrap(), 0);
+        assert_eq!(pkt.read_uint32().unwrap(), 0);
+        assert_eq!(pkt.read_uint8().unwrap(), 0);
+        assert_eq!(pkt.read_packed_guid().unwrap(), ObjectGuid::EMPTY);
+        assert_eq!(pkt.read_int8().unwrap(), -1);
+        assert_eq!(pkt.read_bits(2).unwrap(), 0);
+        assert_eq!(pkt.read_bits(16).unwrap(), 0);
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert_eq!(pkt.read_bits(16).unwrap(), 0);
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert!(pkt.is_empty());
+    }
+
+    #[test]
+    fn monster_move_writes_cpp_face_angle_and_packed_deltas() {
+        let mover = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 9, 88);
+        let packet = MonsterMove {
+            mover_guid: mover,
+            current_pos: Position::new(0.0, 0.0, 0.0, 0.0),
+            spline: MovementMonsterSpline {
+                id: 79,
+                destination: Position::new(12.0, 0.0, 0.0, 0.0),
+                movement: MovementSpline {
+                    face: MonsterMoveFace::FacingAngle(1.25),
+                    points: vec![Position::new(12.0, 0.0, 0.0, 0.0)],
+                    packed_deltas: vec![[1.0, -2.0, 3.0]],
+                    ..MovementSpline::default()
+                },
+                ..MovementMonsterSpline::default()
+            },
+        };
+        let bytes = packet.to_bytes();
+        let mut pkt = WorldPacket::from_bytes(&bytes[2..]);
+
+        assert_eq!(pkt.read_packed_guid().unwrap(), mover);
+        for _ in 0..3 {
+            pkt.read_float().unwrap();
+        }
+        assert_eq!(pkt.read_uint32().unwrap(), 79);
+        for _ in 0..3 {
+            pkt.read_float().unwrap();
+        }
+        assert!(!pkt.has_bit().unwrap());
+        assert_eq!(pkt.read_bits(3).unwrap(), 0);
+        assert_eq!(pkt.read_uint32().unwrap(), 0);
+        assert_eq!(pkt.read_int32().unwrap(), 0);
+        assert_eq!(pkt.read_uint32().unwrap(), 0);
+        assert_eq!(pkt.read_uint32().unwrap(), 0);
+        assert_eq!(pkt.read_uint8().unwrap(), 0);
+        assert_eq!(pkt.read_packed_guid().unwrap(), ObjectGuid::EMPTY);
+        assert_eq!(pkt.read_int8().unwrap(), -1);
+        assert_eq!(pkt.read_bits(2).unwrap(), 3);
+        assert_eq!(pkt.read_bits(16).unwrap(), 1);
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert_eq!(pkt.read_bits(16).unwrap(), 1);
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert_eq!(pkt.read_float().unwrap(), 1.25);
+        assert_eq!(pkt.read_float().unwrap(), 12.0);
+        assert_eq!(pkt.read_float().unwrap(), 0.0);
+        assert_eq!(pkt.read_float().unwrap(), 0.0);
+        let expected_packed = ((1.0f32 / 0.25) as i32 as u32 & 0x7ff)
+            | (((-2.0f32 / 0.25) as i32 as u32 & 0x7ff) << 11)
+            | (((3.0f32 / 0.25) as i32 as u32 & 0x3ff) << 22);
+        assert_eq!(pkt.read_uint32().unwrap(), expected_packed);
+        assert!(pkt.is_empty());
     }
 }

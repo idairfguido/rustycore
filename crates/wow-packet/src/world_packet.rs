@@ -319,6 +319,14 @@ impl WorldPacket {
         self.write_uint32(v.to_bits());
     }
 
+    /// Write TrinityCore's packed XYZ format used by `SMSG_ON_MONSTER_MOVE`.
+    pub fn write_packed_xyz(&mut self, x: f32, y: f32, z: f32) {
+        let packed = ((x / 0.25) as i32 as u32 & 0x7ff)
+            | (((y / 0.25) as i32 as u32 & 0x7ff) << 11)
+            | (((z / 0.25) as i32 as u32 & 0x3ff) << 22);
+        self.write_uint32(packed);
+    }
+
     pub fn write_bytes(&mut self, data: &[u8]) {
         self.flush_bits();
         self.data.put_slice(data);
