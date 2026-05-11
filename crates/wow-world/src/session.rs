@@ -7210,7 +7210,7 @@ impl WorldSession {
     /// Advances creature movement state and sends MonsterMove packets.
     pub(crate) fn tick_creatures_sync(&mut self) {
         use wow_packet::ServerPacket;
-        use wow_packet::packets::movement::MonsterMove;
+        use wow_packet::packets::movement::{MonsterMove, MovementMonsterSpline};
 
         // Collect packets to send (avoids borrow conflict with send_packet)
         let mut to_send: Vec<Vec<u8>> = Vec::new();
@@ -7372,23 +7372,29 @@ impl WorldSession {
                             }
                             if creature.should_wander() {
                                 let dst = creature.pick_wander_destination();
-                                let from = creature.position();
-                                let dist = from.distance(&dst);
-                                let dur = (((dist / 2.5) * 1000.0) as u32).max(500);
-                                creature.begin_move(dst);
-                                let sid = creature.spline_id();
-                                creature
-                                    .creature
-                                    .set_ai_state(wow_entities::CreatureAiState::WalkingRandom);
-                                creature.reset_wander_timer();
-                                let pkt =
-                                    MonsterMove::single_destination(guid, from, sid, dur, 0, dst);
-                                to_send.push(pkt.to_bytes());
+                                if let Some((from, move_spline)) =
+                                    creature.begin_move_spline_like_cpp(dst)
+                                {
+                                    creature
+                                        .creature
+                                        .set_ai_state(wow_entities::CreatureAiState::WalkingRandom);
+                                    creature.reset_wander_timer();
+                                    let pkt = MonsterMove {
+                                        mover_guid: guid,
+                                        current_pos: from,
+                                        spline: MovementMonsterSpline::from_move_spline(
+                                            &move_spline,
+                                        ),
+                                    };
+                                    to_send.push(pkt.to_bytes());
+                                } else {
+                                    creature.reset_wander_timer();
+                                }
                             }
                         }
                     }
                     wow_entities::CreatureAiState::WalkingRandom => {
-                        if creature.movement_finished() {
+                        if creature.update_move_spline_like_cpp() || creature.movement_finished() {
                             creature.finish_move();
                             creature
                                 .creature
@@ -8393,7 +8399,7 @@ mod tests {
     }
 
     #[test]
-    fn tick_creatures_sync_sends_cpp_like_monster_move_for_represented_wander() {
+    fn tick_creatures_sync_launches_real_move_spline_for_represented_wander() {
         let (mut session, _, send_rx) = make_session();
         let manager = shared_map_manager();
         let guid = test_creature_guid(77);
@@ -8428,7 +8434,8 @@ mod tests {
         assert_eq!(pkt.read_bits(3).unwrap(), 0);
         assert_eq!(pkt.read_uint32().unwrap(), 0);
         assert_eq!(pkt.read_int32().unwrap(), 0);
-        assert!(pkt.read_uint32().unwrap() >= 500);
+        let move_time = pkt.read_uint32().unwrap();
+        assert!(move_time > 0);
         assert_eq!(pkt.read_uint32().unwrap(), 0);
         assert_eq!(pkt.read_uint8().unwrap(), 0);
         assert_eq!(pkt.read_packed_guid().unwrap(), ObjectGuid::EMPTY);
@@ -8447,6 +8454,28 @@ mod tests {
         assert_eq!(pkt.read_float().unwrap(), destination.z);
         assert!(pkt.is_empty());
         assert!(send_rx.try_recv().is_err());
+
+        session
+            .mutate_world_creature(guid, |creature| {
+                let motion_spline = &creature.creature.unit().subsystems().motion.spline;
+                assert!(motion_spline.enabled);
+                assert!(!motion_spline.finalized);
+                assert_eq!(motion_spline.spline_id, 2);
+                assert_eq!(motion_spline.duration_ms, move_time);
+                assert_eq!(
+                    motion_spline.final_destination,
+                    Some((
+                        destination.x as i32,
+                        destination.y as i32,
+                        destination.z as i32
+                    ))
+                );
+                assert_eq!(
+                    creature.state(),
+                    wow_entities::CreatureAiState::WalkingRandom
+                );
+            })
+            .unwrap();
     }
 
     fn install_stackable_test_item_template(

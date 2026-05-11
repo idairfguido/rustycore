@@ -349,7 +349,7 @@ Numbered for cross-reference from `MIGRATION_ROADMAP.md` §5. Complexity: **L** 
 - [ ] **#MOVE-SPL.17** Port `SplineChainLink` + `SplineChainResumeInfo` POD. (L)
 - [x] **#MOVE-SPL.18** Extend `crates/wow-packet/src/packets/movement.rs` `SMSG_ON_MONSTER_MOVE` writer to emit: facing types (`MONSTER_MOVE_FACING_SPOT/TARGET/ANGLE`), packed deltas vs `UncompressedPath`, `Cyclic`/`Enter_Cycle` packet flags, `SplineFilter`, spell visual extra data, jump extra data, anim-transition extra and fade-time. Covered by `#A06.8h.3c.1`; runtime Unit hookup remains under `#MOVE-SPL.20`. (XL — split per feature)
 - [ ] **#MOVE-SPL.19** Round-trip test: serialize a `MoveSpline` via writer + decode bytes against a captured packet from a real client session. (M)
-- [ ] **#MOVE-SPL.20** Hook `MoveSpline::updateState(diff)` into the per-Unit tick (consumed by `MotionMaster::Update`); produce `Unit::Relocate` calls each segment. (H)
+- [ ] **#MOVE-SPL.20** Hook `MoveSpline::updateState(diff)` into the per-Unit tick (consumed by `MotionMaster::Update`); produce `Unit::Relocate` calls each segment. First partial bridge is done for represented creature wander only: `WorldCreature` stores an active `MoveSpline`, advances it in the world tick, synchronizes represented `MoveSplineState`, and broadcasts via `MovementMonsterSpline::from_move_spline`. Full `Unit::UpdateSplineMovement` parity remains open. (H)
 
 ---
 

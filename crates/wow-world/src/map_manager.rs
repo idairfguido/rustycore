@@ -6,6 +6,7 @@ use tracing::{debug, info, warn};
 use wow_constants::WeaponAttackType;
 use wow_core::{ObjectGuid, Position};
 use wow_entities::{Creature, CreatureAiState};
+use wow_movement::{MoveSpline, MoveSplineInitArgs};
 use wow_packet::packets::update::CreatureCreateData;
 
 /// Size of a grid cell in yards (64x64 yards like TrinityCore).
@@ -23,6 +24,10 @@ pub const DEFAULT_GRID_UNLOAD_TIME: Duration = Duration::from_secs(300);
 /// the fallback here lets movement preserve the C++ under-map branch without
 /// inventing terrain values.
 pub const DEFAULT_MIN_HEIGHT_LIKE_CPP: f32 = -500.0;
+
+fn position_to_i32_tuple(position: Position) -> (i32, i32, i32) {
+    (position.x as i32, position.y as i32, position.z as i32)
+}
 
 /// Coordinate of a grid cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -62,6 +67,11 @@ pub struct WorldCreature {
     pub creature: Creature,
     /// Packet-create bridge retained for update-object construction.
     pub create_data: CreatureCreateData,
+    /// Active movement spline for the represented world tick.
+    ///
+    /// This is the first runtime bridge toward C++ `Unit::movespline`; the full
+    /// `MoveSplineInit`/`MotionMaster` port still owns generalized launch/stop.
+    active_move_spline: Option<MoveSpline>,
     clock_started_at: Instant,
 }
 
@@ -149,6 +159,7 @@ impl WorldCreature {
         Self {
             creature,
             create_data,
+            active_move_spline: None,
             clock_started_at: Instant::now(),
         }
     }
@@ -312,6 +323,9 @@ impl WorldCreature {
     }
 
     pub fn movement_finished(&self) -> bool {
+        if let Some(spline) = &self.active_move_spline {
+            return spline.finalized();
+        }
         self.creature
             .ai_ownership()
             .move_target
@@ -356,11 +370,96 @@ impl WorldCreature {
         ai.spline_id = ai.spline_id.saturating_add(1);
     }
 
+    pub fn begin_move_spline_like_cpp(&mut self, dst: Position) -> Option<(Position, MoveSpline)> {
+        let from = self.position();
+        let spline_id = self.spline_id().saturating_add(1);
+        let args = MoveSplineInitArgs {
+            path: vec![from, dst],
+            velocity: 2.5,
+            spline_id,
+            initial_orientation: from.orientation,
+            has_velocity: true,
+            ..MoveSplineInitArgs::default()
+        };
+        let mut spline = MoveSpline::new();
+        if spline.initialize(&args).is_err() {
+            return None;
+        }
+
+        let now_ms = self.now_ms();
+        let duration_ms = spline.duration_ms().max(1) as u32;
+        {
+            let ai = self.creature.ai_ownership_mut();
+            ai.move_target = Some(dst);
+            ai.move_start_ms = now_ms;
+            ai.move_duration_ms = duration_ms;
+            ai.spline_id = spline_id;
+        }
+        self.creature
+            .unit_mut()
+            .subsystems_mut()
+            .motion
+            .launch_spline(
+                spline_id,
+                duration_ms,
+                position_to_i32_tuple(dst),
+                false,
+                false,
+                None,
+            );
+        self.active_move_spline = Some(spline.clone());
+        Some((from, spline))
+    }
+
+    pub fn update_move_spline_like_cpp(&mut self) -> bool {
+        let Some(mut spline) = self.active_move_spline.take() else {
+            return self.movement_finished();
+        };
+
+        if !spline.finalized() {
+            let elapsed_ms = self
+                .now_ms()
+                .saturating_sub(self.creature.ai_ownership().move_start_ms)
+                .min(i32::MAX as u64) as i32;
+            let diff_ms = elapsed_ms.saturating_sub(spline.time_passed_ms());
+            if diff_ms > 0 {
+                spline.update_state(diff_ms);
+            }
+            if let Some(pos) = spline.compute_position() {
+                self.creature.set_ai_position(pos);
+            }
+            let progress_ms = spline.time_passed_ms().max(0) as u32;
+            self.creature
+                .unit_mut()
+                .subsystems_mut()
+                .motion
+                .set_spline_progress(progress_ms);
+        }
+
+        let finalized = spline.finalized();
+        if finalized {
+            self.creature
+                .unit_mut()
+                .subsystems_mut()
+                .motion
+                .finalize_spline();
+        } else {
+            self.active_move_spline = Some(spline);
+        }
+        finalized
+    }
+
     pub fn finish_move(&mut self) {
         if let Some(dst) = self.creature.ai_ownership_mut().move_target.take() {
             self.creature.set_ai_position(dst);
         }
         self.creature.ai_ownership_mut().move_duration_ms = 0;
+        self.active_move_spline = None;
+        self.creature
+            .unit_mut()
+            .subsystems_mut()
+            .motion
+            .finalize_spline();
     }
 
     pub fn can_swing(&self) -> bool {
@@ -1221,6 +1320,70 @@ mod tests {
             .expect("canonical creature stored");
         assert_eq!(stored.current_hp(), 25);
         assert_eq!(stored.creature.unit().data().health, 25);
+    }
+
+    #[test]
+    fn world_creature_move_spline_bridge_advances_and_finalizes_like_cpp_unit_tick() {
+        let guid = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 1, 54321);
+        let mut creature = WorldCreature::new(
+            guid,
+            1,
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            50,
+            2,
+            5,
+            10,
+            20.0,
+            100,
+            14,
+            0,
+            0,
+        );
+        creature.clock_started_at = Instant::now() - Duration::from_secs(10);
+        let dst = Position::new(15.0, 10.0, 0.0, 0.0);
+
+        let (from, spline) = creature
+            .begin_move_spline_like_cpp(dst)
+            .expect("valid two-point spline");
+
+        assert_eq!(from, Position::new(10.0, 10.0, 0.0, 0.0));
+        assert!(creature.active_move_spline.is_some());
+        assert_eq!(creature.spline_id(), 2);
+        let motion_spline = &creature.creature.unit().subsystems().motion.spline;
+        assert!(motion_spline.enabled);
+        assert!(!motion_spline.finalized);
+        assert_eq!(motion_spline.spline_id, spline.id());
+        assert_eq!(motion_spline.duration_ms, spline.duration_ms() as u32);
+        assert_eq!(motion_spline.final_destination, Some((15, 10, 0)));
+
+        let duration_ms = spline.duration_ms() as u32;
+        let now_ms = creature.now_ms();
+        creature.creature.ai_ownership_mut().move_start_ms =
+            now_ms.saturating_sub(u64::from(duration_ms / 2));
+        assert!(!creature.update_move_spline_like_cpp());
+        let mid = creature.position();
+        assert!(mid.x > 10.0 && mid.x < 15.0, "mid position was {mid:?}");
+        assert_eq!(
+            creature
+                .creature
+                .unit()
+                .subsystems()
+                .motion
+                .spline
+                .progress_ms,
+            duration_ms / 2
+        );
+
+        let now_ms = creature.now_ms();
+        creature.creature.ai_ownership_mut().move_start_ms =
+            now_ms.saturating_sub(u64::from(duration_ms));
+        assert!(creature.update_move_spline_like_cpp());
+        assert!(creature.active_move_spline.is_none());
+        assert_eq!(creature.position(), dst);
+        let motion_spline = &creature.creature.unit().subsystems().motion.spline;
+        assert!(!motion_spline.enabled);
+        assert!(motion_spline.finalized);
+        assert_eq!(motion_spline.progress_ms, motion_spline.duration_ms);
     }
 
     #[test]
