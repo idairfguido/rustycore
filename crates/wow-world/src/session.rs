@@ -8165,6 +8165,7 @@ mod tests {
         AccessorObjectRef, BANK_SLOT_BAG_START, EQUIPMENT_SLOT_CHEST, INVENTORY_SLOT_BAG_START,
         REAGENT_BAG_SLOT_START, SendNewItemInstancePlan, SendNewItemModifier,
     };
+    use wow_movement::MoveSplineFlag;
     use wow_network::{GroupInfo, PlayerBroadcastInfo};
     use wow_packet::ServerPacket;
     use wow_packet::packets::loot::{
@@ -8432,7 +8433,10 @@ mod tests {
         );
         assert!(!pkt.has_bit().unwrap());
         assert_eq!(pkt.read_bits(3).unwrap(), 0);
-        assert_eq!(pkt.read_uint32().unwrap(), 0);
+        assert_eq!(
+            pkt.read_uint32().unwrap(),
+            MoveSplineFlag::SMOOTH_GROUND_PATH.bits()
+        );
         assert_eq!(pkt.read_int32().unwrap(), 0);
         let move_time = pkt.read_uint32().unwrap();
         assert!(move_time > 0);

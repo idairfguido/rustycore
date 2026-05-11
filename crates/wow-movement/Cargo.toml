@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 bitflags = { workspace = true }
+wow-constants = { workspace = true }
 wow-core = { workspace = true }
 
 [lints]

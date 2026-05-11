@@ -4,9 +4,10 @@ use std::time::{Duration, Instant};
 
 use tracing::{debug, info, warn};
 use wow_constants::WeaponAttackType;
+use wow_constants::movement::MovementFlag;
 use wow_core::{ObjectGuid, Position};
 use wow_entities::{Creature, CreatureAiState};
-use wow_movement::{MoveSpline, MoveSplineInitArgs};
+use wow_movement::{MoveSpline, MoveSplineInit, MoveSplineLaunchInput};
 use wow_packet::packets::update::CreatureCreateData;
 
 /// Size of a grid cell in yards (64x64 yards like TrinityCore).
@@ -371,23 +372,36 @@ impl WorldCreature {
     }
 
     pub fn begin_move_spline_like_cpp(&mut self, dst: Position) -> Option<(Position, MoveSpline)> {
-        let from = self.position();
         let spline_id = self.spline_id().saturating_add(1);
-        let args = MoveSplineInitArgs {
-            path: vec![from, dst],
-            velocity: 2.5,
-            spline_id,
-            initial_orientation: from.orientation,
-            has_velocity: true,
-            ..MoveSplineInitArgs::default()
-        };
-        let mut spline = MoveSpline::new();
-        if spline.initialize(&args).is_err() {
-            return None;
-        }
+        let active_spline_position = self
+            .active_move_spline
+            .as_ref()
+            .filter(|spline| !spline.finalized() && !spline.on_transport)
+            .and_then(MoveSpline::compute_position);
+        let mut init = MoveSplineInit::new(spline_id);
+        init.set_velocity(2.5);
+        init.move_to(dst);
 
         let now_ms = self.now_ms();
-        let duration_ms = spline.duration_ms().max(1) as u32;
+        let mut spline = self
+            .active_move_spline
+            .take()
+            .unwrap_or_else(MoveSpline::new);
+        let launch = init
+            .launch(
+                &mut spline,
+                MoveSplineLaunchInput {
+                    current_position: self.position(),
+                    active_spline_position,
+                    movement_flags: MovementFlag::NONE,
+                    selected_speed: 2.5,
+                    run_speed: 2.5,
+                    assistance_speed_factor: 1.0,
+                    on_transport: false,
+                },
+            )
+            .ok()?;
+        let duration_ms = launch.duration_ms.max(1) as u32;
         {
             let ai = self.creature.ai_ownership_mut();
             ai.move_target = Some(dst);
@@ -408,7 +422,7 @@ impl WorldCreature {
                 None,
             );
         self.active_move_spline = Some(spline.clone());
-        Some((from, spline))
+        Some((launch.real_position, spline))
     }
 
     pub fn update_move_spline_like_cpp(&mut self) -> bool {

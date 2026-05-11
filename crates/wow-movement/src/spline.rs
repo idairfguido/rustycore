@@ -4,6 +4,7 @@
 use std::f32::consts::PI;
 
 use bitflags::bitflags;
+use wow_constants::movement::MovementFlag;
 use wow_core::{ObjectGuid, Position};
 
 pub const GRAVITY_LIKE_CPP: f32 = 19.291_105;
@@ -234,6 +235,246 @@ impl MoveSplineInitArgs {
             }
         }
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MoveSplineLaunchInput {
+    pub current_position: Position,
+    pub active_spline_position: Option<Position>,
+    pub movement_flags: MovementFlag,
+    pub selected_speed: f32,
+    pub run_speed: f32,
+    pub assistance_speed_factor: f32,
+    pub on_transport: bool,
+}
+
+impl MoveSplineLaunchInput {
+    #[must_use]
+    pub const fn new(current_position: Position) -> Self {
+        Self {
+            current_position,
+            active_spline_position: None,
+            movement_flags: MovementFlag::NONE,
+            selected_speed: 0.0,
+            run_speed: 0.0,
+            assistance_speed_factor: 1.0,
+            on_transport: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MoveSplineLaunchResult {
+    pub real_position: Position,
+    pub movement_flags: MovementFlag,
+    pub duration_ms: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MoveSplineStopInput {
+    pub current_position: Position,
+    pub active_spline_position: Option<Position>,
+    pub on_transport: bool,
+}
+
+impl MoveSplineStopInput {
+    #[must_use]
+    pub const fn new(current_position: Position) -> Self {
+        Self {
+            current_position,
+            active_spline_position: None,
+            on_transport: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MoveSplineStopResult {
+    pub position: Position,
+    pub spline_id: u32,
+    pub stop_distance_tolerance: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoveSplineLaunchError {
+    EmptyPath,
+    Validation(MoveSplineValidationError),
+}
+
+impl From<MoveSplineValidationError> for MoveSplineLaunchError {
+    fn from(value: MoveSplineValidationError) -> Self {
+        Self::Validation(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MoveSplineInit {
+    pub args: MoveSplineInitArgs,
+}
+
+impl MoveSplineInit {
+    #[must_use]
+    pub fn new(spline_id: u32) -> Self {
+        Self {
+            args: MoveSplineInitArgs {
+                spline_id,
+                transform_for_transport: false,
+                flags: MoveSplineFlag::SMOOTH_GROUND_PATH,
+                ..MoveSplineInitArgs::default()
+            },
+        }
+    }
+
+    pub fn move_by_path<I>(&mut self, controls: I, path_offset: i32)
+    where
+        I: IntoIterator<Item = Position>,
+    {
+        self.args.path_idx_offset = path_offset;
+        self.args.path.clear();
+        self.args.path.extend(controls);
+    }
+
+    pub fn move_to(&mut self, destination: Position) {
+        self.args.path_idx_offset = 0;
+        self.args.path.resize(2, Position::new(0.0, 0.0, 0.0, 0.0));
+        self.args.path[1] = destination;
+    }
+
+    pub fn set_velocity(&mut self, velocity: f32) {
+        self.args.velocity = velocity;
+        self.args.has_velocity = true;
+    }
+
+    pub fn set_walk(&mut self, enable: bool) {
+        self.args.walk = enable;
+    }
+
+    pub fn set_smooth(&mut self) {
+        self.args.flags.enable_catmull_rom();
+    }
+
+    pub fn set_uncompressed(&mut self) {
+        self.args.flags.insert(MoveSplineFlag::UNCOMPRESSED_PATH);
+    }
+
+    pub fn set_cyclic(&mut self) {
+        self.args.flags.insert(MoveSplineFlag::CYCLIC);
+    }
+
+    pub fn set_fly(&mut self) {
+        self.args.flags.enable_flying();
+    }
+
+    pub fn set_backward(&mut self) {
+        self.args.flags.insert(MoveSplineFlag::BACKWARD);
+    }
+
+    pub fn set_unlimited_speed(&mut self) {
+        self.args.flags.insert(MoveSplineFlag::UNLIMITED_SPEED);
+    }
+
+    pub fn set_orientation_fixed(&mut self, enable: bool) {
+        self.args
+            .flags
+            .set(MoveSplineFlag::ORIENTATION_FIXED, enable);
+    }
+
+    pub fn set_fall(&mut self, falling_slow: bool) {
+        self.args.flags.enable_falling();
+        self.args
+            .flags
+            .set(MoveSplineFlag::FALLING_SLOW, falling_slow);
+    }
+
+    pub fn launch(
+        &mut self,
+        move_spline: &mut MoveSpline,
+        input: MoveSplineLaunchInput,
+    ) -> Result<MoveSplineLaunchResult, MoveSplineLaunchError> {
+        let real_position = input
+            .active_spline_position
+            .unwrap_or(input.current_position);
+
+        if self.args.path.is_empty() {
+            return Err(MoveSplineLaunchError::EmptyPath);
+        }
+
+        self.args.path[0] = real_position;
+        self.args.initial_orientation = real_position.orientation;
+        self.args.flags.set(
+            MoveSplineFlag::ENTER_CYCLE,
+            self.args.flags.contains(MoveSplineFlag::CYCLIC),
+        );
+        move_spline.on_transport = input.on_transport;
+
+        let mut movement_flags = input.movement_flags;
+        if self.args.flags.contains(MoveSplineFlag::BACKWARD) {
+            movement_flags.remove(MovementFlag::FORWARD);
+            movement_flags.insert(MovementFlag::BACKWARD);
+        } else {
+            movement_flags.remove(MovementFlag::BACKWARD);
+            movement_flags.insert(MovementFlag::FORWARD);
+        }
+
+        if movement_flags.contains(MovementFlag::ROOT) {
+            movement_flags.remove(MovementFlag::MASK_MOVING);
+        }
+
+        if !self.args.has_velocity {
+            self.args.velocity = input.selected_speed * input.assistance_speed_factor;
+        }
+
+        self.args.velocity = self.args.velocity.min(self.speed_limit(input.run_speed));
+        move_spline.initialize(&self.args)?;
+
+        Ok(MoveSplineLaunchResult {
+            real_position,
+            movement_flags,
+            duration_ms: move_spline.duration_ms(),
+        })
+    }
+
+    pub fn stop(
+        &mut self,
+        move_spline: &mut MoveSpline,
+        input: MoveSplineStopInput,
+    ) -> Option<MoveSplineStopResult> {
+        if move_spline.finalized() {
+            return None;
+        }
+
+        let position = input
+            .active_spline_position
+            .unwrap_or(input.current_position);
+        self.args.flags = MoveSplineFlag::DONE;
+        move_spline.on_transport = input.on_transport;
+        if move_spline.initialize(&self.args).is_err() {
+            return None;
+        }
+
+        Some(MoveSplineStopResult {
+            position,
+            spline_id: move_spline.id(),
+            stop_distance_tolerance: 2,
+        })
+    }
+
+    fn speed_limit(&self, run_speed: f32) -> f32 {
+        if self.args.flags.contains(MoveSplineFlag::UNLIMITED_SPEED) {
+            return f32::MAX;
+        }
+
+        if self.args.flags.intersects(
+            MoveSplineFlag::FALLING
+                | MoveSplineFlag::CATMULLROM
+                | MoveSplineFlag::FLYING
+                | MoveSplineFlag::PARABOLIC,
+        ) {
+            return 50.0;
+        }
+
+        28.0_f32.max(run_speed * 4.0)
     }
 }
 
@@ -1076,6 +1317,108 @@ mod tests {
 
         args.facing.kind = MonsterMoveType::FacingAngle;
         assert_eq!(args.validate(), Ok(()));
+    }
+
+    #[test]
+    fn move_spline_init_launch_corrects_path_flags_and_speed_like_cpp() {
+        let mut init = MoveSplineInit::new(77);
+        init.move_to(Position::xyz(100.0, 0.0, 0.0));
+
+        let mut spline = MoveSpline::new();
+        let result = init
+            .launch(
+                &mut spline,
+                MoveSplineLaunchInput {
+                    current_position: Position::new(10.0, 0.0, 0.0, 1.25),
+                    active_spline_position: None,
+                    movement_flags: MovementFlag::BACKWARD,
+                    selected_speed: 80.0,
+                    run_speed: 7.0,
+                    assistance_speed_factor: 1.0,
+                    on_transport: false,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(result.real_position, Position::new(10.0, 0.0, 0.0, 1.25));
+        assert_eq!(result.movement_flags, MovementFlag::FORWARD);
+        assert_eq!(spline.id(), 77);
+        assert_eq!(spline.flags(), MoveSplineFlag::SMOOTH_GROUND_PATH);
+        assert_eq!(spline.velocity(), 28.0);
+        assert_eq!(spline.compute_position().unwrap().x, 10.0);
+        assert_eq!(result.duration_ms, spline.duration_ms());
+    }
+
+    #[test]
+    fn move_spline_init_launch_uses_active_spline_position_and_root_mask_like_cpp() {
+        let mut init = MoveSplineInit::new(78);
+        init.set_backward();
+        init.set_velocity(5.0);
+        init.move_to(Position::xyz(15.0, 0.0, 0.0));
+
+        let mut spline = MoveSpline::new();
+        let result = init
+            .launch(
+                &mut spline,
+                MoveSplineLaunchInput {
+                    current_position: Position::xyz(0.0, 0.0, 0.0),
+                    active_spline_position: Some(Position::new(5.0, 0.0, 0.0, 0.5)),
+                    movement_flags: MovementFlag::ROOT | MovementFlag::FORWARD,
+                    selected_speed: 80.0,
+                    run_speed: 7.0,
+                    assistance_speed_factor: 1.0,
+                    on_transport: true,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(result.real_position, Position::new(5.0, 0.0, 0.0, 0.5));
+        assert_eq!(result.movement_flags, MovementFlag::ROOT);
+        assert!(spline.on_transport);
+        assert!(spline.flags().contains(MoveSplineFlag::BACKWARD));
+        assert_eq!(spline.velocity(), 5.0);
+        assert_eq!(spline.compute_position().unwrap().x, 5.0);
+    }
+
+    #[test]
+    fn move_spline_init_stop_reinitializes_done_spline_like_cpp() {
+        let mut init = MoveSplineInit::new(79);
+        init.set_velocity(5.0);
+        init.move_to(Position::xyz(10.0, 0.0, 0.0));
+
+        let mut spline = MoveSpline::new();
+        init.launch(
+            &mut spline,
+            MoveSplineLaunchInput {
+                current_position: Position::ZERO,
+                selected_speed: 5.0,
+                run_speed: 7.0,
+                assistance_speed_factor: 1.0,
+                ..MoveSplineLaunchInput::new(Position::ZERO)
+            },
+        )
+        .unwrap();
+
+        let stop = init
+            .stop(
+                &mut spline,
+                MoveSplineStopInput {
+                    current_position: Position::ZERO,
+                    active_spline_position: Some(Position::new(3.0, 0.0, 0.0, 0.0)),
+                    on_transport: false,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(stop.position, Position::new(3.0, 0.0, 0.0, 0.0));
+        assert_eq!(stop.spline_id, 79);
+        assert_eq!(stop.stop_distance_tolerance, 2);
+        assert!(spline.finalized());
+        assert_eq!(spline.flags(), MoveSplineFlag::DONE);
+        assert!(
+            init.stop(&mut spline, MoveSplineStopInput::new(Position::ZERO))
+                .is_none()
+        );
     }
 
     #[test]

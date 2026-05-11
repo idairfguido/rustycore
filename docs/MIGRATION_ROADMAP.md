@@ -505,6 +505,7 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
           - [ ] **#A06.8h.3c.2** Sustituir el `MoveSplineState` representado de `Unit`/criaturas por `wow_movement::MoveSpline` real y usar el mapper anterior en broadcasts.
           - [ ] **#A06.8h.3c.3** Portar `SMSG_FLIGHT_SPLINE_SYNC` y el sync cíclico asociado.
         - [ ] **#A06.8h.3d** Implementar `MoveSplineInit::Launch/Stop`: current-position chaining, sustitución de `path[0]`, selección/clamp de velocidad, flags de movimiento, transport-local transform, `MonsterMove` broadcast y stop con tolerancia 2.
+          - [x] **#A06.8h.3d.1** Portar el núcleo reutilizable de `MoveSplineInit::Launch/Stop` en `wow-movement`: builder inicial, `MoveTo/MovebyPath`, corrección de `path[0]` con posición real o spline activo, `initialOrientation`, `enter_cycle`, flags forward/backward/root, selección/clamp de velocidad, `MoveSpline::Initialize`, resultado de duración y stop `Done` con tolerancia 2. El wander representado ya usa este builder.
         - [ ] **#A06.8h.3e** Implementar `MotionMaster` real y primeros generators (`Generic`, `Point`, `MoveJump`, `MoveCharge`, `MoveFall`, `MoveCirclePath`) antes de pathgen completo.
         - [ ] **#A06.8h.3f** Implementar pathgen/Detour o política de fallback explícita contrastada con `PathGenerator.cpp`; no cerrar `#A06.8h.3` mientras `wow-recastdetour` siga vacío.
 - [ ] **#A07** Auditar **Combat** (`wow-combat` + handlers) vs `src/server/game/Combat/`. Damage roll, miss tables, hit info.
