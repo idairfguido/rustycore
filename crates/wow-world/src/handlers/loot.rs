@@ -7096,6 +7096,7 @@ mod tests {
                 stack_count: 1,
                 aura_flags: 0x0000_0001,
                 aura_interrupt_flags,
+                aura_interrupt_flags2: 0,
                 applied_at: std::time::Instant::now(),
             },
         );

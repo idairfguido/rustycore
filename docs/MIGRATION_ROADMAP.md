@@ -473,6 +473,10 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
   - [x] **#A06.4** Validar transport sin integración `TransportBase` completa: offset ±75, distancia > grid tras teleport y world coord con transport. El reset/add-remove real de passenger queda para Transport/Map runtime.
   - [x] **#A06.5** Portar `AdjustClientMovementTime`: cola circular de 6 muestras, pendientes por sequence, delta filtrado por latencia y ajuste de `MovementInfo.time` antes de rebroadcast.
   - [ ] **#A06.6** Separar side effects C++ de movement: fall damage, aura interrupts, pet unsummon, sit-to-stand, under-map damage y jump procs.
+    - [x] **#A06.6.1** Portar side effects representables hoy: remover auras `LandingOrFlight`/`Jump`, sentar-a-stand en movimiento y registrar hooks de unsummon temporal de pet / jump proc.
+    - [ ] **#A06.6.2** Portar `Player::HandleFall` / `UpdateFallInformationIfNeed` con cálculo de fall damage autoritativo.
+    - [ ] **#A06.6.3** Portar under-map damage cuando exista `Map::GetMinHeight`/Battleground hook real.
+    - [ ] **#A06.6.4** Conectar hooks registrados a Pet runtime y Proc/Aura runtime completos.
   - [ ] **#A06.7** Portar efectos de `MoveInitActiveMoverComplete`: local flag, transport server time y visibility update.
   - [ ] **#A06.8** Inventariar y portar ACK movement opcodes (`KnockBack`, speed, force, collision height, spline done, time skipped).
 - [ ] **#A07** Auditar **Combat** (`wow-combat` + handlers) vs `src/server/game/Combat/`. Damage roll, miss tables, hit info.

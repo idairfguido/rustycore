@@ -15,7 +15,7 @@ use tracing::{debug, info, trace, warn};
 
 use crate::entity_update_bridge::player_values_update_to_update_object;
 use wow_constants::item::{CurrencyTypes, CurrencyTypesFlags};
-use wow_constants::unit::Team;
+use wow_constants::unit::{Team, UnitStandStateType};
 use wow_constants::{
     BagFamilyMask, BuyResult, ClientOpcodes, InventoryResult, InventoryType, ItemBondingType,
     ItemClass, ItemContext, ItemEnchantmentType, ItemFlags, ItemFlags2, ItemQuality, SellResult,
@@ -696,6 +696,12 @@ pub struct WorldSession {
     pub(crate) in_combat: bool,
     /// Represented `Player::IsAlive()` state for handler guards that need C++ ordering.
     player_alive_like_cpp: bool,
+    /// Represented stand state used by movement side effects until UnitData owns it.
+    player_stand_state_like_cpp: UnitStandStateType,
+    /// Count of C++ temporary pet unsummon side effects requested by movement.
+    temporary_pet_unsummon_requests_like_cpp: u32,
+    /// Count of C++ jump proc side effects requested by movement.
+    movement_jump_proc_requests_like_cpp: u32,
 
     // ── Aura system ───────────────────────────────────────────────
     /// All visible auras on the player: slot (0-254) → AuraApplication
@@ -890,11 +896,15 @@ pub struct AuraApplication {
     pub aura_flags: u32,
     /// Trinity SpellAuraInterruptFlags bitmask used by represented removal paths.
     pub aura_interrupt_flags: u32,
+    /// Trinity SpellAuraInterruptFlags2 bitmask used by represented removal paths.
+    pub aura_interrupt_flags2: u32,
     /// Monotonic timestamp when this aura was applied — used for expiry checks.
     pub applied_at: Instant,
 }
 
 pub(crate) const SPELL_AURA_INTERRUPT_FLAG_LOOTING_LIKE_CPP: u32 = 0x0000_0800;
+pub(crate) const SPELL_AURA_INTERRUPT_FLAG_LANDING_OR_FLIGHT_LIKE_CPP: u32 = 0x0200_0000;
+pub(crate) const SPELL_AURA_INTERRUPT_FLAG2_JUMP_LIKE_CPP: u32 = 0x0000_0020;
 
 /// Parameters for spawning nearby creatures after login.
 pub struct PendingCreatureSpawn {
@@ -1061,6 +1071,9 @@ impl WorldSession {
             combat_target: None,
             in_combat: false,
             player_alive_like_cpp: true,
+            player_stand_state_like_cpp: UnitStandStateType::Stand,
+            temporary_pet_unsummon_requests_like_cpp: 0,
+            movement_jump_proc_requests_like_cpp: 0,
             visible_auras: HashMap::new(),
             spell_store: None,
             quest_store: None,
@@ -3730,6 +3743,7 @@ impl WorldSession {
             stack_count: 1,
             aura_flags,
             aura_interrupt_flags: 0,
+            aura_interrupt_flags2: 0,
             applied_at: Instant::now(),
         };
 
@@ -3754,11 +3768,23 @@ impl WorldSession {
     }
 
     pub(crate) fn remove_auras_with_looting_interrupt_flags_like_cpp(&mut self) -> usize {
+        self.remove_auras_with_interrupt_flags_like_cpp(
+            SPELL_AURA_INTERRUPT_FLAG_LOOTING_LIKE_CPP,
+            0,
+        )
+    }
+
+    pub(crate) fn remove_auras_with_interrupt_flags_like_cpp(
+        &mut self,
+        flags: u32,
+        flags2: u32,
+    ) -> usize {
         let slots: Vec<u8> = self
             .visible_auras
             .values()
             .filter(|aura| {
-                aura.aura_interrupt_flags & SPELL_AURA_INTERRUPT_FLAG_LOOTING_LIKE_CPP != 0
+                (flags != 0 && aura.aura_interrupt_flags & flags != 0)
+                    || (flags2 != 0 && aura.aura_interrupt_flags2 & flags2 != 0)
             })
             .map(|aura| aura.slot)
             .collect();
@@ -5469,6 +5495,47 @@ impl WorldSession {
 
     pub(crate) fn player_is_alive_like_cpp(&self) -> bool {
         self.player_alive_like_cpp
+    }
+
+    pub(crate) fn set_player_stand_state_like_cpp(&mut self, state: UnitStandStateType) {
+        self.player_stand_state_like_cpp = state;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn player_stand_state_like_cpp(&self) -> UnitStandStateType {
+        self.player_stand_state_like_cpp
+    }
+
+    pub(crate) fn player_is_sit_state_like_cpp(&self) -> bool {
+        matches!(
+            self.player_stand_state_like_cpp,
+            UnitStandStateType::Sit
+                | UnitStandStateType::SitChair
+                | UnitStandStateType::SitLowChair
+                | UnitStandStateType::SitMediumChair
+                | UnitStandStateType::SitHighChair
+        )
+    }
+
+    pub(crate) fn request_temporary_pet_unsummon_like_cpp(&mut self) {
+        self.temporary_pet_unsummon_requests_like_cpp = self
+            .temporary_pet_unsummon_requests_like_cpp
+            .saturating_add(1);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn temporary_pet_unsummon_requests_like_cpp(&self) -> u32 {
+        self.temporary_pet_unsummon_requests_like_cpp
+    }
+
+    pub(crate) fn request_jump_proc_like_cpp(&mut self) {
+        self.movement_jump_proc_requests_like_cpp =
+            self.movement_jump_proc_requests_like_cpp.saturating_add(1);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn movement_jump_proc_requests_like_cpp(&self) -> u32 {
+        self.movement_jump_proc_requests_like_cpp
     }
 
     pub(crate) fn interrupt_non_melee_spell_cast_for_loot_like_cpp(&mut self) -> bool {

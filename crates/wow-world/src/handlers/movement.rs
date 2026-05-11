@@ -16,13 +16,18 @@
 use tracing::{trace, warn};
 
 use wow_constants::ClientOpcodes;
+use wow_constants::movement::MovementFlag;
+use wow_constants::unit::UnitStandStateType;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::ServerPacket;
 use wow_packet::packets::movement::{
-    ClientPlayerMovement, MoveInitActiveMoverComplete, MoveUpdate, SetActiveMover,
+    ClientPlayerMovement, MoveInitActiveMoverComplete, MoveUpdate, MovementInfo, SetActiveMover,
 };
 
-use crate::session::WorldSession;
+use crate::session::{
+    SPELL_AURA_INTERRUPT_FLAG_LANDING_OR_FLIGHT_LIKE_CPP, SPELL_AURA_INTERRUPT_FLAG2_JUMP_LIKE_CPP,
+    WorldSession,
+};
 
 // ── Handler registrations ─────────────────────────────────────────
 // All CMSG_MOVE_* share the same handler (ThreadSafe in C#).
@@ -77,6 +82,7 @@ impl WorldSession {
     /// Parses MovementInfo, validates it, updates player position,
     /// and queues a broadcast to nearby players.
     pub async fn handle_movement(&mut self, mut pkt: wow_packet::WorldPacket) {
+        let opcode = pkt.client_opcode();
         let mut info = match ClientPlayerMovement::read(&mut pkt) {
             Ok(m) => m,
             Err(e) => {
@@ -149,6 +155,7 @@ impl WorldSession {
             }
         }
 
+        self.apply_movement_side_effects_like_cpp(opcode, &info.info);
         info.info.time = self.adjust_client_movement_time_like_cpp(info.info.time);
 
         // Update server-side player position.
@@ -195,6 +202,47 @@ impl WorldSession {
         }
     }
 
+    fn apply_movement_side_effects_like_cpp(
+        &mut self,
+        opcode: Option<ClientOpcodes>,
+        info: &MovementInfo,
+    ) {
+        match opcode {
+            Some(ClientOpcodes::MoveFallLand)
+            | Some(ClientOpcodes::MoveStartSwim)
+            | Some(ClientOpcodes::MoveSetFly) => {
+                self.remove_auras_with_interrupt_flags_like_cpp(
+                    SPELL_AURA_INTERRUPT_FLAG_LANDING_OR_FLIGHT_LIKE_CPP,
+                    0,
+                );
+            }
+            _ => {}
+        }
+
+        if matches!(
+            opcode,
+            Some(ClientOpcodes::MoveSetFly) | Some(ClientOpcodes::MoveSetAdvFly)
+        ) {
+            self.request_temporary_pet_unsummon_like_cpp();
+        }
+
+        if self.player_is_sit_state_like_cpp()
+            && info
+                .flags
+                .intersects(MovementFlag::MASK_MOVING | MovementFlag::MASK_TURNING)
+        {
+            self.set_player_stand_state_like_cpp(UnitStandStateType::Stand);
+        }
+
+        if matches!(opcode, Some(ClientOpcodes::MoveJump)) {
+            self.remove_auras_with_interrupt_flags_like_cpp(
+                0,
+                SPELL_AURA_INTERRUPT_FLAG2_JUMP_LIKE_CPP,
+            );
+            self.request_jump_proc_like_cpp();
+        }
+    }
+
     /// Handle CMSG_SET_ACTIVE_MOVER — client sets which unit is currently being moved.
     ///
     /// The client sends this after login to establish the active mover GUID.
@@ -236,6 +284,91 @@ impl WorldSession {
         );
         // TODO: Set player local flags and transport server time when transport system exists.
         // For now, do nothing — the client expects no response.
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::AuraApplication;
+    use wow_core::ObjectGuid;
+
+    fn make_session() -> WorldSession {
+        let (_pkt_tx, pkt_rx) = flume::bounded(8);
+        let (send_tx, _send_rx) = flume::bounded(8);
+        WorldSession::new(
+            1,
+            "MovementTest".into(),
+            0,
+            2,
+            9,
+            54261,
+            vec![0; 40],
+            "esES".into(),
+            pkt_rx,
+            send_tx,
+        )
+    }
+
+    fn visible_aura(slot: u8, flags: u32, flags2: u32) -> AuraApplication {
+        AuraApplication {
+            spell_id: 1000 + i32::from(slot),
+            caster_guid: ObjectGuid::EMPTY,
+            slot,
+            duration_total: 30_000,
+            duration_remaining: 30_000,
+            stack_count: 1,
+            aura_flags: 0x1,
+            aura_interrupt_flags: flags,
+            aura_interrupt_flags2: flags2,
+            applied_at: std::time::Instant::now(),
+        }
+    }
+
+    #[test]
+    fn movement_landing_and_jump_remove_cpp_interruptible_auras() {
+        let mut session = make_session();
+        session.visible_auras.insert(
+            1,
+            visible_aura(1, SPELL_AURA_INTERRUPT_FLAG_LANDING_OR_FLIGHT_LIKE_CPP, 0),
+        );
+        session.visible_auras.insert(
+            2,
+            visible_aura(2, 0, SPELL_AURA_INTERRUPT_FLAG2_JUMP_LIKE_CPP),
+        );
+        session.visible_auras.insert(3, visible_aura(3, 0, 0));
+
+        session.apply_movement_side_effects_like_cpp(
+            Some(ClientOpcodes::MoveFallLand),
+            &MovementInfo::default(),
+        );
+        assert!(!session.visible_auras.contains_key(&1));
+        assert!(session.visible_auras.contains_key(&2));
+        assert!(session.visible_auras.contains_key(&3));
+
+        session.apply_movement_side_effects_like_cpp(
+            Some(ClientOpcodes::MoveJump),
+            &MovementInfo::default(),
+        );
+        assert!(!session.visible_auras.contains_key(&2));
+        assert!(session.visible_auras.contains_key(&3));
+        assert_eq!(session.movement_jump_proc_requests_like_cpp(), 1);
+    }
+
+    #[test]
+    fn movement_stands_sitting_player_and_records_flying_pet_unsummon() {
+        let mut session = make_session();
+        session.set_player_stand_state_like_cpp(UnitStandStateType::SitChair);
+        let mut info = MovementInfo::default();
+        info.flags = MovementFlag::FORWARD;
+
+        session.apply_movement_side_effects_like_cpp(Some(ClientOpcodes::MoveSetFly), &info);
+
+        assert_eq!(
+            session.player_stand_state_like_cpp(),
+            UnitStandStateType::Stand
+        );
+        assert_eq!(session.temporary_pet_unsummon_requests_like_cpp(), 1);
     }
 }
 
