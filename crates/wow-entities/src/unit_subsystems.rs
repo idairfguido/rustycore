@@ -1555,6 +1555,9 @@ pub struct MovementGeneratorRef {
     pub target_guid: Option<ObjectGuid>,
     pub movement_id: u32,
     pub duration_ms: Option<u32>,
+    pub elapsed_ms: u32,
+    pub arrival_spell_id: u32,
+    pub arrival_spell_target_guid: ObjectGuid,
 }
 
 impl MovementGeneratorRef {
@@ -1569,6 +1572,9 @@ impl MovementGeneratorRef {
             target_guid: None,
             movement_id: 0,
             duration_ms: None,
+            elapsed_ms: 0,
+            arrival_spell_id: 0,
+            arrival_spell_target_guid: ObjectGuid::EMPTY,
         }
     }
 
@@ -1607,9 +1613,84 @@ impl MovementGeneratorRef {
         self
     }
 
+    pub const fn with_arrival_spell(mut self, spell_id: u32, target_guid: ObjectGuid) -> Self {
+        self.arrival_spell_id = spell_id;
+        self.arrival_spell_target_guid = target_guid;
+        self
+    }
+
     pub const fn has_flag(&self, flag: u16) -> bool {
         (self.flags & flag) != 0
     }
+
+    pub fn initialize_generic_like_cpp(&mut self) {
+        if self.has_flag(MOVEMENTGENERATOR_FLAG_DEACTIVATED)
+            && !self.has_flag(MOVEMENTGENERATOR_FLAG_INITIALIZATION_PENDING)
+        {
+            self.flags &= !MOVEMENTGENERATOR_FLAG_DEACTIVATED;
+            self.flags |= MOVEMENTGENERATOR_FLAG_FINALIZED;
+            return;
+        }
+
+        self.flags &=
+            !(MOVEMENTGENERATOR_FLAG_INITIALIZATION_PENDING | MOVEMENTGENERATOR_FLAG_DEACTIVATED);
+        self.flags |= MOVEMENTGENERATOR_FLAG_INITIALIZED;
+        self.elapsed_ms = 0;
+    }
+
+    pub fn update_generic_like_cpp(
+        &mut self,
+        diff_ms: u32,
+        spline_cyclic: bool,
+        spline_finalized: bool,
+    ) -> bool {
+        if self.has_flag(MOVEMENTGENERATOR_FLAG_FINALIZED) {
+            return false;
+        }
+
+        if !spline_cyclic {
+            self.elapsed_ms = self.elapsed_ms.saturating_add(diff_ms);
+        }
+
+        if self
+            .duration_ms
+            .is_some_and(|duration_ms| self.elapsed_ms >= duration_ms)
+            || spline_finalized
+        {
+            self.flags |= MOVEMENTGENERATOR_FLAG_INFORM_ENABLED;
+            return false;
+        }
+        true
+    }
+
+    pub fn deactivate_generic_like_cpp(&mut self) {
+        self.flags |= MOVEMENTGENERATOR_FLAG_DEACTIVATED;
+    }
+
+    pub fn finalize_generic_like_cpp(
+        &mut self,
+        movement_inform: bool,
+    ) -> Option<GenericMovementInform> {
+        self.flags |= MOVEMENTGENERATOR_FLAG_FINALIZED;
+        if movement_inform && self.has_flag(MOVEMENTGENERATOR_FLAG_INFORM_ENABLED) {
+            return Some(GenericMovementInform {
+                kind: self.kind,
+                movement_id: self.movement_id,
+                arrival_spell_id: (self.arrival_spell_id != 0).then_some(self.arrival_spell_id),
+                arrival_spell_target_guid: (self.arrival_spell_id != 0)
+                    .then_some(self.arrival_spell_target_guid),
+            });
+        }
+        None
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GenericMovementInform {
+    pub kind: MovementGeneratorKind,
+    pub movement_id: u32,
+    pub arrival_spell_id: Option<u32>,
+    pub arrival_spell_target_guid: Option<ObjectGuid>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1835,6 +1916,25 @@ impl MotionSubsystem {
                 .with_target_guid(target_guid);
         if let Some(duration_ms) = duration_ms {
             generator = generator.with_duration_ms(duration_ms);
+        }
+        self.add_generator(generator);
+    }
+
+    pub fn launch_generic_movement(
+        &mut self,
+        kind: MovementGeneratorKind,
+        movement_id: u32,
+        duration_ms: u32,
+        arrival_spell: Option<(u32, ObjectGuid)>,
+    ) {
+        let mut generator = MovementGeneratorRef::new(kind, MovementSlot::Active)
+            .with_priority(MovementGeneratorPriority::Normal)
+            .with_flags(MOVEMENTGENERATOR_FLAG_INITIALIZATION_PENDING)
+            .with_base_unit_state(UnitState::ROAMING.bits())
+            .with_movement_id(movement_id)
+            .with_duration_ms(duration_ms);
+        if let Some((spell_id, target_guid)) = arrival_spell {
+            generator = generator.with_arrival_spell(spell_id, target_guid);
         }
         self.add_generator(generator);
     }
@@ -2897,6 +2997,76 @@ mod unit_subsystems_tests {
             motion.base_unit_states.get(&UnitState::ROAMING.bits()),
             None
         );
+    }
+
+    #[test]
+    fn generic_movement_generator_lifecycle_matches_cpp_shape() {
+        let mut motion = MotionSubsystem::default();
+        let target = guid(88);
+
+        motion.launch_generic_movement(
+            MovementGeneratorKind::Effect,
+            42,
+            1_000,
+            Some((1234, target)),
+        );
+
+        let mut generator = motion.current_movement_generator();
+        assert_eq!(generator.kind, MovementGeneratorKind::Effect);
+        assert_eq!(generator.priority, MovementGeneratorPriority::Normal);
+        assert_eq!(
+            generator.flags,
+            MOVEMENTGENERATOR_FLAG_INITIALIZATION_PENDING
+        );
+        assert_eq!(generator.base_unit_state, UnitState::ROAMING.bits());
+        assert_eq!(generator.movement_id, 42);
+        assert_eq!(generator.duration_ms, Some(1_000));
+        assert_eq!(generator.arrival_spell_id, 1234);
+        assert_eq!(generator.arrival_spell_target_guid, target);
+        assert_eq!(
+            motion.base_unit_states.get(&UnitState::ROAMING.bits()),
+            Some(&1)
+        );
+
+        generator.initialize_generic_like_cpp();
+        assert!(generator.has_flag(MOVEMENTGENERATOR_FLAG_INITIALIZED));
+        assert!(!generator.has_flag(MOVEMENTGENERATOR_FLAG_INITIALIZATION_PENDING));
+
+        assert!(generator.update_generic_like_cpp(999, false, false));
+        assert_eq!(generator.elapsed_ms, 999);
+        assert!(!generator.has_flag(MOVEMENTGENERATOR_FLAG_INFORM_ENABLED));
+
+        assert!(!generator.update_generic_like_cpp(1, false, false));
+        assert!(generator.has_flag(MOVEMENTGENERATOR_FLAG_INFORM_ENABLED));
+        let inform = generator
+            .finalize_generic_like_cpp(true)
+            .expect("inform enabled");
+        assert_eq!(
+            inform,
+            GenericMovementInform {
+                kind: MovementGeneratorKind::Effect,
+                movement_id: 42,
+                arrival_spell_id: Some(1234),
+                arrival_spell_target_guid: Some(target),
+            }
+        );
+        assert!(generator.has_flag(MOVEMENTGENERATOR_FLAG_FINALIZED));
+
+        let mut cyclic =
+            MovementGeneratorRef::new(MovementGeneratorKind::Effect, MovementSlot::Active)
+                .with_flags(MOVEMENTGENERATOR_FLAG_INITIALIZED)
+                .with_duration_ms(10);
+        assert!(cyclic.update_generic_like_cpp(100, true, false));
+        assert_eq!(cyclic.elapsed_ms, 0);
+        assert!(!cyclic.update_generic_like_cpp(0, true, true));
+        assert!(cyclic.has_flag(MOVEMENTGENERATOR_FLAG_INFORM_ENABLED));
+
+        let mut deactivated =
+            MovementGeneratorRef::new(MovementGeneratorKind::Effect, MovementSlot::Active)
+                .with_flags(MOVEMENTGENERATOR_FLAG_DEACTIVATED);
+        deactivated.initialize_generic_like_cpp();
+        assert!(deactivated.has_flag(MOVEMENTGENERATOR_FLAG_FINALIZED));
+        assert!(!deactivated.has_flag(MOVEMENTGENERATOR_FLAG_DEACTIVATED));
     }
 
     #[test]
