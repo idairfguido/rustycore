@@ -23,8 +23,8 @@ use wow_core::ObjectGuid;
 use wow_core::guid::HighGuid;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::packets::chat::{
-    CTextEmote, ChatMessage, ChatMessageEmote, ChatMessageWhisper, ChatMsg, ChatPkt, EmoteClient,
-    EmoteMessage, STextEmote,
+    CTextEmote, ChatAddonMessage, ChatMessage, ChatMessageEmote, ChatMessageWhisper, ChatMsg,
+    ChatPkt, ChatRegisterAddonPrefixes, EmoteClient, EmoteMessage, STextEmote,
 };
 use wow_packet::{ClientPacket, ServerPacket};
 
@@ -133,6 +133,24 @@ inventory::submit! {
         status: SessionStatus::LoggedIn,
         processing: PacketProcessing::Inplace,
         handler_name: "handle_text_emote",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::ChatRegisterAddonPrefixes,
+        status: SessionStatus::LoggedIn,
+        processing: PacketProcessing::ThreadUnsafe,
+        handler_name: "handle_chat_register_addon_prefixes",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::ChatAddonMessage,
+        status: SessionStatus::LoggedIn,
+        processing: PacketProcessing::ThreadUnsafe,
+        handler_name: "handle_chat_addon_message",
     }
 }
 
@@ -358,11 +376,62 @@ impl WorldSession {
         self.broadcast_raw_packet(anim_emote.to_bytes(), RANGE_EMOTE);
     }
 
+    /// CMSG_CHAT_REGISTER_ADDON_PREFIXES.
+    ///
+    /// C++ ref: `WorldSession::HandleAddonRegisteredPrefixesOpcode`.
+    pub async fn handle_chat_register_addon_prefixes(&mut self, mut pkt: wow_packet::WorldPacket) {
+        let packet = match ChatRegisterAddonPrefixes::read(&mut pkt) {
+            Ok(packet) => packet,
+            Err(e) => {
+                tracing::warn!(account = self.account_id, "Bad addon prefix packet: {e}");
+                return;
+            }
+        };
+
+        self.registered_addon_prefixes.extend(packet.prefixes);
+        self.filter_addon_messages =
+            self.registered_addon_prefixes.len() <= ChatRegisterAddonPrefixes::MAX_PREFIXES;
+        debug!(
+            account = self.account_id,
+            prefixes = self.registered_addon_prefixes.len(),
+            filter = self.filter_addon_messages,
+            "Registered addon prefixes"
+        );
+    }
+
+    /// CMSG_CHAT_ADDON_MESSAGE.
+    ///
+    /// C++ ref: `WorldSession::HandleChatAddonMessageOpcode`.
+    /// Until guild/channel addon routing is ported, parse and validate the C++
+    /// packet shape then drop unsupported traffic. This matches disabled addon
+    /// channel behavior and prevents unknown-opcode noise during login.
+    pub async fn handle_chat_addon_message(&mut self, mut pkt: wow_packet::WorldPacket) {
+        let packet = match ChatAddonMessage::read(&mut pkt) {
+            Ok(packet) => packet,
+            Err(e) => {
+                tracing::warn!(account = self.account_id, "Bad addon chat packet: {e}");
+                return;
+            }
+        };
+
+        if packet.prefix.is_empty() || packet.prefix.len() > 16 || packet.text.len() > 255 {
+            return;
+        }
+
+        debug!(
+            account = self.account_id,
+            ty = packet.msg_type,
+            prefix = %packet.prefix,
+            logged = packet.is_logged,
+            "Addon chat message ignored until addon routing is ported"
+        );
+    }
+
     // ── Helpers ──────────────────────────────────────────────────
 
     fn player_name_and_guid(&self) -> (wow_core::ObjectGuid, String) {
-        let guid = self.player_guid.unwrap_or(wow_core::ObjectGuid::EMPTY);
-        let name = self.player_name.clone().unwrap_or_default();
+        let guid = self.player_guid().unwrap_or(wow_core::ObjectGuid::EMPTY);
+        let name = self.player_name_like_cpp().unwrap_or_default().to_string();
         (guid, name)
     }
 
@@ -380,9 +449,9 @@ impl WorldSession {
             None => return,
         };
 
-        let sender_guid = self.player_guid.unwrap_or(ObjectGuid::EMPTY);
-        let sender_pos = self.player_position;
-        let sender_map = self.current_map_id;
+        let sender_guid = self.player_guid().unwrap_or(ObjectGuid::EMPTY);
+        let sender_pos = self.player_position_like_cpp();
+        let sender_map = self.player_map_id_like_cpp();
         let range_sq = range * range;
 
         for entry in registry.iter() {

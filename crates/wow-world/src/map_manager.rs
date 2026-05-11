@@ -17,6 +17,13 @@ pub const VISIBILITY_RADIUS: f32 = 100.0;
 /// Default time before a grid unloads if no players are nearby (5 minutes).
 pub const DEFAULT_GRID_UNLOAD_TIME: Duration = Duration::from_secs(300);
 
+/// TrinityCore `TerrainInfo::GetMinHeight` fallback when no terrain grid is loaded.
+///
+/// Real grid-backed min-height data belongs to the terrain/map-data port; exposing
+/// the fallback here lets movement preserve the C++ under-map branch without
+/// inventing terrain values.
+pub const DEFAULT_MIN_HEIGHT_LIKE_CPP: f32 = -500.0;
+
 /// Coordinate of a grid cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GridCoord {
@@ -207,6 +214,26 @@ impl WorldCreature {
 
     pub fn max_dmg(&self) -> u32 {
         self.creature.ai_ownership().max_damage
+    }
+
+    pub fn loot_id(&self) -> u32 {
+        self.creature.ai_ownership().loot_id
+    }
+
+    pub fn gold_min(&self) -> u32 {
+        self.creature.ai_ownership().gold_min
+    }
+
+    pub fn gold_max(&self) -> u32 {
+        self.creature.ai_ownership().gold_max
+    }
+
+    pub fn boss_id(&self) -> Option<u32> {
+        self.creature.ai_ownership().boss_id
+    }
+
+    pub fn dungeon_encounter_id(&self) -> u32 {
+        self.creature.ai_ownership().dungeon_encounter_id
     }
 
     pub fn state(&self) -> CreatureAiState {
@@ -551,19 +578,94 @@ impl MapInstance {
     pub fn is_grid_loaded(&self, x: i16, y: i16) -> bool {
         self.get_grid(x, y).is_some()
     }
+
+    pub fn min_height_like_cpp(&self, _x: f32, _y: f32) -> f32 {
+        DEFAULT_MIN_HEIGHT_LIKE_CPP
+    }
 }
 
 /// Global map manager containing all map instances.
 #[derive(Debug)]
 pub struct MapManager {
     maps: HashMap<(u16, u32), MapInstance>, // (map_id, instance_id) -> MapInstance
+    free_instance_ids: Vec<bool>,
+    next_instance_id: u32,
 }
 
 impl MapManager {
     pub fn new() -> Self {
-        Self {
+        let mut manager = Self {
             maps: HashMap::new(),
+            free_instance_ids: Vec::new(),
+            next_instance_id: 1,
+        };
+        manager.init_instance_ids_from_max(0);
+        manager
+    }
+
+    pub fn init_instance_ids_from_max(&mut self, max_existing_instance_id: u32) {
+        self.next_instance_id = 1;
+        self.free_instance_ids = vec![true; max_existing_instance_id.saturating_add(2) as usize];
+        self.free_instance_ids[0] = false;
+    }
+
+    pub fn register_instance_id(&mut self, instance_id: u32) {
+        let index = instance_id as usize;
+        if index >= self.free_instance_ids.len() {
+            self.free_instance_ids.resize(index.saturating_add(2), true);
         }
+
+        self.free_instance_ids[index] = false;
+
+        if self.next_instance_id == instance_id {
+            self.next_instance_id = self.next_instance_id.saturating_add(1);
+        }
+    }
+
+    pub fn generate_instance_id(&mut self) -> Option<u32> {
+        if self.next_instance_id == u32::MAX {
+            return None;
+        }
+
+        let new_instance_id = self.next_instance_id;
+        let index = new_instance_id as usize;
+        if index >= self.free_instance_ids.len() {
+            self.free_instance_ids.resize(index.saturating_add(1), true);
+        }
+        self.free_instance_ids[index] = false;
+
+        let search_start = self.next_instance_id.saturating_add(1) as usize;
+        if let Some(next_free_offset) = self.free_instance_ids[search_start..]
+            .iter()
+            .position(|is_free| *is_free)
+        {
+            self.next_instance_id = (search_start + next_free_offset) as u32;
+        } else {
+            self.next_instance_id = self.free_instance_ids.len() as u32;
+            self.free_instance_ids.push(true);
+        }
+
+        Some(new_instance_id)
+    }
+
+    pub fn free_instance_id(&mut self, instance_id: u32) {
+        if instance_id == 0 {
+            if self.free_instance_ids.is_empty() {
+                self.init_instance_ids_from_max(0);
+            } else {
+                self.free_instance_ids[0] = false;
+            }
+            return;
+        }
+
+        let index = instance_id as usize;
+        if index >= self.free_instance_ids.len() {
+            self.free_instance_ids.resize(index.saturating_add(2), true);
+        }
+
+        self.next_instance_id = self.next_instance_id.min(instance_id);
+        self.free_instance_ids[index] = true;
+        self.free_instance_ids[0] = false;
     }
 
     pub fn get_or_create_map(&mut self, map_id: u16, instance_id: u32) -> &mut MapInstance {
@@ -684,6 +786,17 @@ impl MapManager {
         map.grids
             .values_mut()
             .find_map(|grid| grid.get_creature_mut(guid))
+    }
+
+    pub fn creature_guids(&self, map_id: u16, instance_id: u32) -> Vec<ObjectGuid> {
+        self.get_map(map_id, instance_id)
+            .map(|map| {
+                map.grids
+                    .values()
+                    .flat_map(|grid| grid.creatures.keys().copied())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub fn remove_creature_any(
@@ -839,6 +952,12 @@ impl MapManager {
         self.get_map(map_id, instance_id)
             .map(|m| m.is_grid_loaded(x, y))
             .unwrap_or(false)
+    }
+
+    pub fn min_height_like_cpp(&self, map_id: u16, instance_id: u32, x: f32, y: f32) -> f32 {
+        self.get_map(map_id, instance_id)
+            .map(|m| m.min_height_like_cpp(x, y))
+            .unwrap_or(DEFAULT_MIN_HEIGHT_LIKE_CPP)
     }
 
     pub fn create_grid(&mut self, map_id: u16, instance_id: u32, x: i16, y: i16) -> &mut Grid {
@@ -1005,6 +1124,42 @@ mod tests {
         let map = manager.get_or_create_map(0, 0);
         assert_eq!(map.map_id, 0);
         assert_eq!(map.instance_id, 0);
+    }
+
+    #[test]
+    fn instance_id_allocator_generates_lowest_free_id_like_cpp() {
+        let mut manager = MapManager::new();
+
+        assert_eq!(manager.generate_instance_id(), Some(1));
+        assert_eq!(manager.generate_instance_id(), Some(2));
+        assert_eq!(manager.generate_instance_id(), Some(3));
+
+        manager.free_instance_id(2);
+        assert_eq!(manager.generate_instance_id(), Some(2));
+        assert_eq!(manager.generate_instance_id(), Some(4));
+    }
+
+    #[test]
+    fn instance_id_allocator_registers_loaded_ids_in_order_like_cpp() {
+        let mut manager = MapManager::new();
+        manager.init_instance_ids_from_max(5);
+
+        manager.register_instance_id(1);
+        manager.register_instance_id(2);
+        manager.register_instance_id(4);
+
+        assert_eq!(manager.generate_instance_id(), Some(3));
+        assert_eq!(manager.generate_instance_id(), Some(5));
+        assert_eq!(manager.generate_instance_id(), Some(6));
+    }
+
+    #[test]
+    fn instance_id_allocator_keeps_zero_reserved_like_cpp() {
+        let mut manager = MapManager::new();
+
+        manager.free_instance_id(0);
+
+        assert_eq!(manager.generate_instance_id(), Some(1));
     }
 
     #[test]

@@ -2960,6 +2960,7 @@ dependencies = [
  "wow-data",
  "wow-database",
  "wow-handler",
+ "wow-instances",
  "wow-logging",
  "wow-loot",
  "wow-map",
@@ -3119,7 +3120,10 @@ dependencies = [
 name = "wow-instances"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
+ "wow-core",
  "wow-data",
+ "wow-database",
 ]
 
 [[package]]
@@ -3162,6 +3166,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "wow-movement"
+version = "0.1.0"
+dependencies = [
+ "bitflags",
+ "wow-core",
+]
+
+[[package]]
 name = "wow-network"
 version = "0.1.0"
 dependencies = [
@@ -3180,6 +3192,7 @@ dependencies = [
  "wow-crypto",
  "wow-data",
  "wow-database",
+ "wow-instances",
  "wow-loot",
  "wow-packet",
 ]
@@ -3195,6 +3208,7 @@ dependencies = [
  "tracing",
  "wow-constants",
  "wow-core",
+ "wow-movement",
 ]
 
 [[package]]
@@ -3280,6 +3294,7 @@ dependencies = [
  "wow-ecs",
  "wow-entities",
  "wow-handler",
+ "wow-instances",
  "wow-logging",
  "wow-loot",
  "wow-network",

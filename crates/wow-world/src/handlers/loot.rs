@@ -7,7 +7,7 @@
 //!
 //! Reference: C# Game/Handlers/LootHandler.cs
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -25,8 +25,9 @@ use wow_core::{ObjectGuid, guid::HighGuid};
 use wow_data::{ItemRandomEnchantmentTemplateEntry, ItemRandomPropertyTemplateEntry};
 use wow_database::{CharStatements, SqlTransaction, WorldStatements};
 use wow_entities::{
-    GameObjectLootSource, INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_END,
-    INVENTORY_SLOT_ITEM_START, Item, ItemPosCount, make_item_pos,
+    GO_DYNFLAG_LO_NO_INTERACT, GameObjectLootSource, GatheringNodeUseSource, GoState,
+    INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_END,
+    INVENTORY_SLOT_ITEM_START, Item, ItemPosCount, LootState, make_item_pos,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_loot::{
@@ -63,7 +64,8 @@ use wow_packet::packets::update::{ItemCreateData, UpdateObject};
 use wow_packet::{ClientPacket, ServerPacket};
 
 use crate::session::{
-    InventoryItem, RepresentedLootRollState, RepresentedLootRollVote, WorldSession,
+    InventoryItem, RepresentedGameObjectUseEffect, RepresentedLootRollState,
+    RepresentedLootRollVote, WorldSession,
 };
 
 const LOOT_METHOD_MASTER_LIKE_CPP: u8 = 2;
@@ -174,7 +176,7 @@ impl WorldSession {
             }
         };
 
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
@@ -190,21 +192,24 @@ impl WorldSession {
         }
 
         // Check creature exists and is dead.
-        let creature = match self.creatures.get(&req.unit) {
-            Some(c) => c,
+        let (creature_alive, creature_position) = match self
+            .mutate_world_creature(req.unit, |creature| {
+                (creature.is_alive(), creature.position())
+            }) {
+            Some(state) => state,
             None => {
                 warn!("LootUnit: creature {:?} not found", req.unit);
                 return;
             }
         };
 
-        if creature.is_alive {
+        if creature_alive {
             return;
         }
 
         if self
-            .player_position
-            .is_some_and(|player| !player.is_within_dist(&creature.current_pos, 30.0))
+            .player_position_like_cpp()
+            .is_some_and(|player| !player.is_within_dist(&creature_position, 30.0))
         {
             return;
         }
@@ -260,7 +265,7 @@ impl WorldSession {
         gameobject_guid: ObjectGuid,
         source: GameObjectLootSource,
     ) {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return;
         };
         if !self.player_is_alive_like_cpp() {
@@ -271,35 +276,62 @@ impl WorldSession {
             return;
         }
 
-        if source.should_autostore_push_loot_like_cpp()
-            && !self
-                .represented_unique_gameobject_uses
-                .contains(&gameobject_guid)
-        {
+        let is_first_represented_unique_use = !self
+            .represented_unique_gameobject_uses
+            .contains(&gameobject_guid);
+        if source.loot_id == 0 && is_first_represented_unique_use {
             self.represented_unique_gameobject_uses
                 .insert(gameobject_guid);
-            self.autostore_represented_gameobject_chest_push_loot_like_cpp(gameobject_guid, source)
+            if source.should_autostore_push_loot_like_cpp() {
+                self.autostore_represented_gameobject_chest_push_loot_like_cpp(
+                    gameobject_guid,
+                    source,
+                )
                 .await;
+            }
+            self.record_represented_gameobject_use_effects_like_cpp(
+                gameobject_guid,
+                player_guid,
+                source.triggered_event_id,
+                source.linked_trap_entry,
+            );
         }
+        self.set_represented_gameobject_loot_state_activated_like_cpp(gameobject_guid, player_guid);
         if !source.has_open_loot_like_cpp() {
             return;
         }
 
+        let should_record_generation_effects =
+            source.loot_id != 0 && !self.loot_table.contains_key(&gameobject_guid);
         self.ensure_represented_gameobject_chest_loot_like_cpp(
             gameobject_guid,
             player_guid,
             source,
         )
         .await;
+        if should_record_generation_effects && self.loot_table.contains_key(&gameobject_guid) {
+            self.record_represented_gameobject_use_effects_like_cpp(
+                gameobject_guid,
+                player_guid,
+                source.triggered_event_id,
+                source.linked_trap_entry,
+            );
+        }
 
-        if let Some(loot) = self.loot_table.get_mut(&gameobject_guid) {
+        if !source.is_personal_encounter_loot_like_cpp()
+            && let Some(loot) = self.loot_table.get_mut(&gameobject_guid)
+        {
             mark_loot_allowed_for_player_like_cpp(loot, player_guid);
         }
 
         let Some(loot) = self.loot_table.get(&gameobject_guid) else {
             return;
         };
-        if !loot_can_be_opened_by_player_like_cpp(loot, player_guid) {
+        if !self.represented_loot_can_be_opened_by_player_like_cpp(
+            gameobject_guid,
+            loot,
+            player_guid,
+        ) {
             return;
         }
 
@@ -310,7 +342,11 @@ impl WorldSession {
             acquire_reason: loot_type_for_client_like_cpp(loot.loot_type),
             loot_method: loot.loot_method,
             threshold: 2,
-            coins: loot.coins,
+            coins: self.represented_loot_money_for_player_like_cpp(
+                gameobject_guid,
+                loot,
+                player_guid,
+            ),
             items: represented_loot_response_items_like_cpp(loot, player_guid),
             currencies: vec![],
             acquired: true,
@@ -342,15 +378,157 @@ impl WorldSession {
     pub(crate) async fn open_represented_gathering_node_like_cpp(
         &mut self,
         gameobject_guid: ObjectGuid,
-        loot_id: u32,
+        source: GatheringNodeUseSource,
     ) {
+        let Some(player_guid) = self.player_guid() else {
+            return;
+        };
+        if !self.player_is_alive_like_cpp() {
+            return;
+        }
+        if !gameobject_guid.is_game_object() || !self.visible_gameobjects.contains(&gameobject_guid)
+        {
+            return;
+        }
+
+        let is_first_represented_use = !self
+            .represented_unique_gameobject_uses
+            .contains(&gameobject_guid);
+        if is_first_represented_use {
+            self.represented_unique_gameobject_uses
+                .insert(gameobject_guid);
+        }
+
         self.open_represented_gameobject_personal_loot_like_cpp(
             gameobject_guid,
-            loot_id,
+            source.loot_id,
             LOOT_TYPE_CHEST_LIKE_CPP,
             false,
         )
         .await;
+
+        if is_first_represented_use {
+            let xp = self.represented_gathering_node_xp_like_cpp(source.xp_difficulty);
+            if xp != 0 {
+                self.give_xp(xp, ObjectGuid::EMPTY, false).await;
+            }
+            self.record_represented_gameobject_use_effects_like_cpp(
+                gameobject_guid,
+                player_guid,
+                source.triggered_event_id,
+                source.linked_trap_entry,
+            );
+        }
+        self.record_represented_gathering_node_runtime_state_like_cpp(
+            gameobject_guid,
+            player_guid,
+            source,
+            is_first_represented_use,
+        );
+    }
+
+    fn set_represented_gameobject_loot_state_activated_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    ) -> bool {
+        let state = self
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        if state.loot_state == Some(LootState::Activated) {
+            return false;
+        }
+
+        state.loot_state = Some(LootState::Activated);
+        state.loot_state_unit_guid = player_guid;
+        true
+    }
+
+    fn record_represented_gathering_node_runtime_state_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        source: GatheringNodeUseSource,
+        is_first_represented_use: bool,
+    ) {
+        {
+            let state = self
+                .represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default();
+            if is_first_represented_use {
+                state.personal_loot_uses = state.personal_loot_uses.saturating_add(1);
+            }
+            if state.personal_loot_uses >= source.max_loots {
+                state.go_state = Some(GoState::Active);
+                state.dynamic_flags |= GO_DYNFLAG_LO_NO_INTERACT;
+            }
+        }
+
+        let activated_now = self
+            .set_represented_gameobject_loot_state_activated_like_cpp(gameobject_guid, player_guid);
+        if activated_now && source.despawn_delay_secs != 0 {
+            if let Some(state) = self
+                .represented_gameobject_use_states
+                .get_mut(&gameobject_guid)
+            {
+                state.despawn_delay_secs = Some(source.despawn_delay_secs);
+            }
+        }
+
+        if is_first_represented_use && source.spell_id != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::CastSpell {
+                    gameobject_guid,
+                    player_guid,
+                    spell_id: source.spell_id,
+                },
+            );
+        }
+    }
+
+    fn record_represented_gameobject_use_effects_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        triggered_event_id: u32,
+        linked_trap_entry: u32,
+    ) {
+        if triggered_event_id != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: triggered_event_id,
+                },
+            );
+        }
+        if linked_trap_entry != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::TriggerLinkedTrap {
+                    gameobject_guid,
+                    player_guid,
+                    trap_entry: linked_trap_entry,
+                },
+            );
+        }
+    }
+
+    fn represented_gathering_node_xp_like_cpp(&self, xp_difficulty: u32) -> u32 {
+        if xp_difficulty == 0 || xp_difficulty >= 10 {
+            return 0;
+        }
+
+        self.quest_xp_store
+            .as_ref()
+            .map(|store| {
+                store.player_level_difficulty_xp_like_cpp(
+                    self.player_level_like_cpp(),
+                    xp_difficulty,
+                )
+            })
+            .unwrap_or(0)
     }
 
     async fn open_represented_gameobject_personal_loot_like_cpp(
@@ -360,7 +538,7 @@ impl WorldSession {
         loot_type: u8,
         replace_existing: bool,
     ) {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return;
         };
         if loot_id == 0 || !self.player_is_alive_like_cpp() {
@@ -410,7 +588,11 @@ impl WorldSession {
         let Some(loot) = self.loot_table.get(&gameobject_guid) else {
             return;
         };
-        if !loot_can_be_opened_by_player_like_cpp(loot, player_guid) {
+        if !self.represented_loot_can_be_opened_by_player_like_cpp(
+            gameobject_guid,
+            loot,
+            player_guid,
+        ) {
             return;
         }
 
@@ -446,7 +628,7 @@ impl WorldSession {
             }
         };
 
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
@@ -475,7 +657,9 @@ impl WorldSession {
             }
 
             if owner_guid.is_creature_or_vehicle() {
-                let Some(creature) = self.creatures.get(&owner_guid) else {
+                let Some(creature_position) =
+                    self.mutate_world_creature(owner_guid, |creature| creature.position())
+                else {
                     self.send_loot_error_like_cpp(
                         loot_req.object,
                         owner_guid,
@@ -485,8 +669,8 @@ impl WorldSession {
                 };
 
                 if self
-                    .player_position
-                    .is_some_and(|player| !player.is_within_dist(&creature.current_pos, 30.0))
+                    .player_position_like_cpp()
+                    .is_some_and(|player| !player.is_within_dist(&creature_position, 30.0))
                 {
                     self.send_loot_error_like_cpp(
                         loot_req.object,
@@ -619,7 +803,7 @@ impl WorldSession {
             }
         };
 
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(guid) => guid,
             None => return,
         };
@@ -644,9 +828,17 @@ impl WorldSession {
         let money_by_loot: Vec<(ObjectGuid, ObjectGuid, u32)> = active_owners
             .into_iter()
             .filter_map(|loot_guid| {
-                self.loot_table
-                    .get(&loot_guid)
-                    .map(|loot| (loot_guid, loot.loot_guid, loot.coins))
+                self.loot_table.get(&loot_guid).map(|loot| {
+                    (
+                        loot_guid,
+                        loot.loot_guid,
+                        self.represented_loot_money_for_player_like_cpp(
+                            loot_guid,
+                            loot,
+                            player_guid,
+                        ),
+                    )
+                })
             })
             .collect();
 
@@ -683,8 +875,14 @@ impl WorldSession {
                 }
             }
 
+            let personal_money_owner = self.represented_personal_loot_owners.contains(loot_guid);
             if let Some(loot) = self.loot_table.get_mut(loot_guid) {
-                loot.coins = 0;
+                if personal_money_owner {
+                    self.represented_personal_loot_money
+                        .insert((*loot_guid, player_guid), 0);
+                } else {
+                    loot.coins = 0;
+                }
 
                 if loot_guid.is_item() && loot_is_looted_like_cpp(loot) {
                     item_release.push(*loot_guid);
@@ -692,7 +890,10 @@ impl WorldSession {
             }
         }
 
-        self.player_gold = self.player_gold.saturating_add(player_money_delta);
+        self.set_player_gold_like_cpp(
+            self.player_gold_like_cpp()
+                .saturating_add(player_money_delta),
+        );
         self.save_player_gold().await;
 
         for (loot_guid, _, _) in &money_by_loot {
@@ -715,7 +916,7 @@ impl WorldSession {
     }
 
     fn represented_loot_money_recipients_like_cpp(&self, loot_guid: ObjectGuid) -> Vec<ObjectGuid> {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return Vec::new();
         };
 
@@ -735,7 +936,7 @@ impl WorldSession {
             return vec![player_guid];
         };
 
-        let source_position = self.player_position.unwrap_or_default();
+        let source_position = self.player_position_like_cpp().unwrap_or_default();
         let mut recipients = Vec::new();
 
         for member_guid in &group.members {
@@ -752,7 +953,7 @@ impl WorldSession {
                 continue;
             };
 
-            if member.map_id != self.current_map_id {
+            if member.map_id != self.player_map_id_like_cpp() {
                 continue;
             }
 
@@ -766,6 +967,36 @@ impl WorldSession {
         }
 
         recipients
+    }
+
+    fn represented_loot_money_for_player_like_cpp(
+        &self,
+        loot_guid: ObjectGuid,
+        loot: &CreatureLoot,
+        player_guid: ObjectGuid,
+    ) -> u32 {
+        if self.represented_personal_loot_owners.contains(&loot_guid) {
+            return self
+                .represented_personal_loot_money
+                .get(&(loot_guid, player_guid))
+                .copied()
+                .unwrap_or(0);
+        }
+
+        loot.coins
+    }
+
+    fn represented_loot_can_be_opened_by_player_like_cpp(
+        &self,
+        loot_guid: ObjectGuid,
+        loot: &CreatureLoot,
+        player_guid: ObjectGuid,
+    ) -> bool {
+        if self.represented_loot_money_for_player_like_cpp(loot_guid, loot, player_guid) > 0 {
+            return true;
+        }
+
+        loot_can_be_opened_by_player_like_cpp(loot, player_guid)
     }
 
     fn represented_loot_money_allowed_for_member_like_cpp(
@@ -806,7 +1037,7 @@ impl WorldSession {
 
         debug!(account = self.account_id, unit = ?req.unit, "CMSG_LOOT_RELEASE");
 
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
@@ -822,7 +1053,7 @@ impl WorldSession {
     /// represented handler preserves the current wire behavior without emitting
     /// synthetic errors.
     pub async fn handle_loot_roll(&mut self, roll: LootRoll) {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return;
         };
 
@@ -861,7 +1092,7 @@ impl WorldSession {
             if *owner.key() == player_guid {
                 continue;
             }
-            if owner.map_id != self.current_map_id {
+            if owner.map_id != self.player_map_id_like_cpp() {
                 continue;
             }
             if owner.active_loot_rolls.contains(&roll_key) {
@@ -1244,7 +1475,7 @@ impl WorldSession {
         packet: &P,
         target: ObjectGuid,
     ) {
-        if self.player_guid == Some(target) {
+        if self.player_guid() == Some(target) {
             self.send_packet(packet);
             return;
         }
@@ -1255,7 +1486,7 @@ impl WorldSession {
         let Some(player) = registry.get(&target) else {
             return;
         };
-        if player.map_id != self.current_map_id {
+        if player.map_id != self.player_map_id_like_cpp() {
             return;
         }
 
@@ -1268,7 +1499,7 @@ impl WorldSession {
         entry: &LootEntry,
         except: Option<ObjectGuid>,
     ) {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return;
         };
 
@@ -1289,7 +1520,7 @@ impl WorldSession {
             let Some(player) = registry.get(looter) else {
                 continue;
             };
-            if player.map_id != self.current_map_id {
+            if player.map_id != self.player_map_id_like_cpp() {
                 continue;
             }
 
@@ -1312,7 +1543,7 @@ impl WorldSession {
                 continue;
             }
 
-            if self.player_guid == Some(*player_guid) {
+            if self.player_guid() == Some(*player_guid) {
                 self.send_packet(packet);
                 continue;
             }
@@ -1323,7 +1554,7 @@ impl WorldSession {
             let Some(player) = registry.get(player_guid) else {
                 continue;
             };
-            if player.map_id != self.current_map_id {
+            if player.map_id != self.player_map_id_like_cpp() {
                 continue;
             }
 
@@ -1338,7 +1569,7 @@ impl WorldSession {
     /// loot method `MASTER_LOOT` and the stored master-looter GUID matching the
     /// current player.
     pub async fn handle_master_loot_item(&mut self, master_loot_item: MasterLootItem) {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return;
         };
 
@@ -1499,7 +1730,7 @@ impl WorldSession {
         dungeon_encounter_id: u32,
         entry: LootEntry,
     ) -> MasterLootGiveResult {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return MasterLootGiveResult::TargetMismatch;
         };
         let Some(registry) = self.player_registry() else {
@@ -1586,7 +1817,7 @@ impl WorldSession {
             .unwrap_or_else(|| entry.clone());
         store_entry.roll_winner = winner_guid;
 
-        if self.player_guid == Some(winner_guid) {
+        if self.player_guid() == Some(winner_guid) {
             if self
                 .store_direct_loot_item_like_cpp(&store_entry, dungeon_encounter_id)
                 .await
@@ -1676,7 +1907,7 @@ impl WorldSession {
             return false;
         }
 
-        if self.player_guid == Some(winner_guid) {
+        if self.player_guid() == Some(winner_guid) {
             for disenchant_entry in &disenchant_entries {
                 if !self
                     .store_direct_loot_item_like_cpp(disenchant_entry, dungeon_encounter_id)
@@ -2036,7 +2267,7 @@ impl WorldSession {
         &mut self,
         command: MasterLootGiveCommand,
     ) {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             let _ = command.result_tx.send(MasterLootGiveResult::TargetMismatch);
             return;
         };
@@ -2087,7 +2318,7 @@ impl WorldSession {
         &mut self,
         command: LootRollStoreWinnerCommand,
     ) {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             let _ = command.result_tx.send(MasterLootGiveResult::TargetMismatch);
             return;
         };
@@ -2169,12 +2400,12 @@ impl WorldSession {
     /// C++ accepts non-zero values only when `sChrSpecializationStore` has the
     /// row and its `ClassID` matches the player's class; `SpecID == 0` clears.
     pub async fn handle_set_loot_specialization(&mut self, packet: SetLootSpecialization) {
-        if self.player_guid.is_none() {
+        if self.player_guid().is_none() {
             return;
         }
 
         if packet.spec_id == 0 {
-            self.loot_specialization_id = 0;
+            self.set_loot_specialization_id_like_cpp(0);
             return;
         }
 
@@ -2184,21 +2415,21 @@ impl WorldSession {
         let Some(spec) = store.get(packet.spec_id) else {
             return;
         };
-        if spec.class_id != self.player_class {
+        if spec.class_id != self.player_class_like_cpp() {
             return;
         }
 
-        self.loot_specialization_id = packet.spec_id;
+        self.set_loot_specialization_id_like_cpp(packet.spec_id);
     }
 
     fn represented_master_loot_target_exists_like_cpp(&self, target: ObjectGuid) -> bool {
-        if self.player_guid == Some(target) {
+        if self.player_guid() == Some(target) {
             return true;
         }
 
         self.player_registry()
             .and_then(|registry| registry.get(&target))
-            .is_some_and(|target_info| target_info.map_id == self.current_map_id)
+            .is_some_and(|target_info| target_info.map_id == self.player_map_id_like_cpp())
     }
 
     fn represented_master_loot_target_eligible_like_cpp(&self, target: ObjectGuid) -> bool {
@@ -2221,7 +2452,7 @@ impl WorldSession {
         item_id: u32,
         count: u32,
     ) -> Option<u8> {
-        if self.player_guid != Some(target) {
+        if self.player_guid() != Some(target) {
             return None;
         }
 
@@ -2237,38 +2468,37 @@ impl WorldSession {
         main_loot_target: ObjectGuid,
         player_guid: ObjectGuid,
     ) -> Vec<ObjectGuid> {
-        let Some(player_position) = self.player_position else {
+        let Some(player_position) = self.player_position_like_cpp() else {
             return Vec::new();
         };
 
         let mut candidates: Vec<ObjectGuid> = self
-            .creatures
-            .iter()
-            .filter_map(|(guid, creature)| {
-                if *guid == main_loot_target
-                    || !guid.is_creature_or_vehicle()
-                    || creature.is_alive
-                    || !player_position.is_within_dist(&creature.current_pos, 30.0)
-                {
-                    return None;
+            .world_creature_guids()
+            .into_iter()
+            .filter(|guid| {
+                if *guid == main_loot_target || !guid.is_creature_or_vehicle() {
+                    return false;
                 }
-
-                Some(*guid)
+                self.mutate_world_creature(*guid, |creature| {
+                    !creature.is_alive()
+                        && player_position.is_within_dist(&creature.position(), 30.0)
+                })
+                .unwrap_or(false)
             })
             .collect();
         candidates.sort_by_key(|guid| (guid.high_value(), guid.low_value()));
 
         let mut result = Vec::new();
         for owner_guid in candidates {
-            let Some((level, entry, loot_id, gold_min, gold_max, dungeon_encounter_id)) =
-                self.creatures.get(&owner_guid).map(|creature| {
+            let Some((level, entry, loot_id, gold_min, gold_max, dungeon_encounter_id)) = self
+                .mutate_world_creature(owner_guid, |creature| {
                     (
-                        creature.level,
-                        creature.entry,
-                        creature.loot_id,
-                        creature.gold_min,
-                        creature.gold_max,
-                        creature.dungeon_encounter_id,
+                        creature.level(),
+                        creature.entry(),
+                        creature.loot_id(),
+                        creature.gold_min(),
+                        creature.gold_max(),
+                        creature.dungeon_encounter_id(),
                     )
                 })
             else {
@@ -2290,11 +2520,13 @@ impl WorldSession {
                 mark_loot_allowed_for_player_like_cpp(loot, player_guid);
             }
 
-            if self
-                .loot_table
-                .get(&owner_guid)
-                .is_some_and(|loot| loot_can_be_opened_by_player_like_cpp(loot, player_guid))
-            {
+            if self.loot_table.get(&owner_guid).is_some_and(|loot| {
+                self.represented_loot_can_be_opened_by_player_like_cpp(
+                    owner_guid,
+                    loot,
+                    player_guid,
+                )
+            }) {
                 result.push(owner_guid);
             }
         }
@@ -2308,15 +2540,15 @@ impl WorldSession {
         player_guid: ObjectGuid,
         ae_looting: bool,
     ) -> Option<LootResponse> {
-        let (level, entry, loot_id, gold_min, gold_max, dungeon_encounter_id) =
-            self.creatures.get(&owner_guid).map(|creature| {
+        let (level, entry, loot_id, gold_min, gold_max, dungeon_encounter_id) = self
+            .mutate_world_creature(owner_guid, |creature| {
                 (
-                    creature.level,
-                    creature.entry,
-                    creature.loot_id,
-                    creature.gold_min,
-                    creature.gold_max,
-                    creature.dungeon_encounter_id,
+                    creature.level(),
+                    creature.entry(),
+                    creature.loot_id(),
+                    creature.gold_min(),
+                    creature.gold_max(),
+                    creature.dungeon_encounter_id(),
                 )
             })?;
         self.ensure_represented_creature_loot_like_cpp(
@@ -2336,7 +2568,7 @@ impl WorldSession {
         }
 
         let loot = self.loot_table.get(&owner_guid)?;
-        if !loot_can_be_opened_by_player_like_cpp(loot, player_guid) {
+        if !self.represented_loot_can_be_opened_by_player_like_cpp(owner_guid, loot, player_guid) {
             return None;
         }
 
@@ -2347,7 +2579,7 @@ impl WorldSession {
             acquire_reason: loot_type_for_client_like_cpp(loot.loot_type),
             loot_method: loot.loot_method,
             threshold: 2,
-            coins: loot.coins,
+            coins: self.represented_loot_money_for_player_like_cpp(owner_guid, loot, player_guid),
             items: represented_loot_response_items_like_cpp(loot, player_guid),
             currencies: vec![],
             acquired: true,
@@ -2426,7 +2658,7 @@ impl WorldSession {
         let bytes = packet.to_bytes();
 
         for allowed_looter in &loot.allowed_looters {
-            if Some(*allowed_looter) == self.player_guid {
+            if Some(*allowed_looter) == self.player_guid() {
                 self.send_packet(&packet);
                 continue;
             }
@@ -2437,7 +2669,7 @@ impl WorldSession {
             let Some(player) = registry.get(allowed_looter) else {
                 continue;
             };
-            if player.map_id != self.current_map_id {
+            if player.map_id != self.player_map_id_like_cpp() {
                 continue;
             }
 
@@ -2485,7 +2717,7 @@ impl WorldSession {
                 continue;
             }
 
-            if Some(*looter) == self.player_guid {
+            if Some(*looter) == self.player_guid() {
                 self.send_packet(&packet);
                 continue;
             }
@@ -2496,7 +2728,7 @@ impl WorldSession {
             let Some(player) = registry.get(looter) else {
                 continue;
             };
-            if player.map_id != self.current_map_id {
+            if player.map_id != self.player_map_id_like_cpp() {
                 continue;
             }
 
@@ -2515,7 +2747,7 @@ impl WorldSession {
         let bytes = packet.to_bytes();
 
         for looter in &loot.players_looting {
-            if Some(*looter) == self.player_guid {
+            if Some(*looter) == self.player_guid() {
                 self.send_packet(&packet);
                 continue;
             }
@@ -2526,7 +2758,7 @@ impl WorldSession {
             let Some(player) = registry.get(looter) else {
                 continue;
             };
-            if player.map_id != self.current_map_id {
+            if player.map_id != self.player_map_id_like_cpp() {
                 continue;
             }
 
@@ -2539,7 +2771,7 @@ impl WorldSession {
         owner_guid: ObjectGuid,
         player_guid: ObjectGuid,
     ) {
-        let current_map_id = self.current_map_id;
+        let current_map_id = self.player_map_id_like_cpp();
         let player_registry = self.player_registry().cloned();
         let mut packets = Vec::new();
         let mut auto_pass_packets = Vec::new();
@@ -2701,7 +2933,7 @@ impl WorldSession {
             let Some(player) = registry.get(&looter) else {
                 continue;
             };
-            if player.map_id != self.current_map_id {
+            if player.map_id != self.player_map_id_like_cpp() {
                 continue;
             }
 
@@ -2714,7 +2946,7 @@ impl WorldSession {
     }
 
     fn publish_represented_loot_roll_ownership_like_cpp(&self) {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return;
         };
         let Some(registry) = self.player_registry() else {
@@ -2884,7 +3116,7 @@ impl WorldSession {
     }
 
     async fn generate_represented_gameobject_chest_loot_like_cpp(
-        &self,
+        &mut self,
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
         source: GameObjectLootSource,
@@ -2895,19 +3127,23 @@ impl WorldSession {
                 player_guid,
             );
         let loot_id = source.open_loot_id_like_cpp();
-        let items = self
-            .generate_represented_gameobject_loot_items_like_cpp(loot_id)
-            .await
-            .unwrap_or_else(|| {
-                if loot_id != 0 {
-                    debug!(
-                        loot_id,
-                        gameobject = ?gameobject_guid,
-                        "gameobject loot template unavailable for represented chest"
-                    );
-                }
-                Vec::new()
-            });
+        let personal_encounter = source.is_personal_encounter_loot_like_cpp();
+        let items = if personal_encounter {
+            Vec::new()
+        } else {
+            self.generate_represented_gameobject_loot_items_like_cpp(loot_id)
+                .await
+                .unwrap_or_else(|| {
+                    if loot_id != 0 {
+                        debug!(
+                            loot_id,
+                            gameobject = ?gameobject_guid,
+                            "gameobject loot template unavailable for represented chest"
+                        );
+                    }
+                    Vec::new()
+                })
+        };
         let (min_money, max_money) = self
             .load_gameobject_template_addon_money_loot_like_cpp(gameobject_guid.entry())
             .await;
@@ -2918,7 +3154,7 @@ impl WorldSession {
             &mut rand::thread_rng(),
         );
 
-        CreatureLoot {
+        let mut loot = CreatureLoot {
             loot_guid: represented_loot_object_guid_like_cpp(gameobject_guid),
             coins,
             unlooted_count: 0,
@@ -2932,7 +3168,113 @@ impl WorldSession {
             allowed_looters: Vec::new(),
             items,
             looted_by_player: false,
+        };
+
+        if personal_encounter {
+            loot.coins = 0;
+            self.represented_personal_loot_owners
+                .insert(gameobject_guid);
+            self.represented_personal_loot_money
+                .retain(|(owner, _), _| *owner != gameobject_guid);
+            let represented_tappers = self
+                .represented_gameobject_personal_encounter_tappers_like_cpp(
+                    gameobject_guid,
+                    player_guid,
+                    source.dungeon_encounter_id,
+                );
+            for tapper in &represented_tappers {
+                if !loot.allowed_looters.contains(tapper) {
+                    loot.allowed_looters.push(*tapper);
+                }
+                let tapper_money = generate_money_loot_with_rate_like_cpp(
+                    min_money,
+                    max_money,
+                    self.loot_drop_rates_like_cpp().money,
+                    &mut rand::thread_rng(),
+                );
+                self.represented_personal_loot_money
+                    .insert((gameobject_guid, *tapper), tapper_money);
+            }
+            loot.items = self
+                .generate_represented_gameobject_personal_loot_items_like_cpp(
+                    loot_id,
+                    &represented_tappers,
+                )
+                .await
+                .unwrap_or_else(|| {
+                    if loot_id != 0 {
+                        debug!(
+                            loot_id,
+                            gameobject = ?gameobject_guid,
+                            "gameobject personal loot template unavailable for represented chest"
+                        );
+                    }
+                    Vec::new()
+                });
+            rebuild_represented_personal_loot_counts_like_cpp(&mut loot);
+            if represented_tappers.is_empty() {
+                self.represented_personal_loot_owners
+                    .remove(&gameobject_guid);
+            }
         }
+
+        loot
+    }
+
+    fn represented_gameobject_personal_encounter_tappers_like_cpp(
+        &self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        dungeon_encounter_id: u32,
+    ) -> Vec<ObjectGuid> {
+        let Some(tappers) = self.represented_gameobject_tap_lists.get(&gameobject_guid) else {
+            return self
+                .represented_player_unlocked_for_dungeon_encounter_like_cpp(
+                    player_guid,
+                    dungeon_encounter_id,
+                )
+                .into_iter()
+                .collect();
+        };
+        let mut represented_tappers = tappers
+            .iter()
+            .copied()
+            .filter(|guid| guid.is_player())
+            .collect::<Vec<_>>();
+        represented_tappers.sort_unstable_by_key(|guid| (guid.high_value(), guid.low_value()));
+        represented_tappers.dedup();
+        if represented_tappers.is_empty() {
+            represented_tappers.push(player_guid);
+        }
+        represented_tappers.retain(|guid| {
+            self.represented_player_is_unlocked_for_dungeon_encounter_like_cpp(
+                *guid,
+                dungeon_encounter_id,
+            )
+        });
+        represented_tappers
+    }
+
+    fn represented_player_unlocked_for_dungeon_encounter_like_cpp(
+        &self,
+        player_guid: ObjectGuid,
+        dungeon_encounter_id: u32,
+    ) -> Option<ObjectGuid> {
+        self.represented_player_is_unlocked_for_dungeon_encounter_like_cpp(
+            player_guid,
+            dungeon_encounter_id,
+        )
+        .then_some(player_guid)
+    }
+
+    fn represented_player_is_unlocked_for_dungeon_encounter_like_cpp(
+        &self,
+        player_guid: ObjectGuid,
+        dungeon_encounter_id: u32,
+    ) -> bool {
+        !self
+            .represented_locked_dungeon_encounters
+            .contains(&(player_guid, dungeon_encounter_id))
     }
 
     fn represented_gameobject_chest_group_state_like_cpp(
@@ -3033,6 +3375,96 @@ impl WorldSession {
                         .copied()
                         .unwrap_or_default();
                     generated_creature_loot_item_to_entry_like_cpp(item, metadata)
+                })
+                .collect(),
+        )
+    }
+
+    async fn generate_represented_gameobject_personal_loot_items_like_cpp(
+        &self,
+        loot_id: u32,
+        tappers: &[ObjectGuid],
+    ) -> Option<Vec<LootEntry>> {
+        if loot_id == 0 || tappers.is_empty() {
+            return Some(Vec::new());
+        }
+
+        let stores = self.loot_stores()?;
+        let store = stores.get(&LootStoreKind::Gameobject)?;
+        let rates = self.loot_drop_rates_like_cpp();
+        let condition_ids =
+            store.condition_ids_for_fill_like_cpp(loot_id, LootStoreKind::Gameobject, stores);
+        let condition_rows = self
+            .load_represented_creature_loot_condition_rows_like_cpp(&condition_ids)
+            .await;
+        let condition_references = self
+            .load_represented_creature_loot_condition_reference_rows_like_cpp(&condition_rows)
+            .await;
+        let addon_metadata = self
+            .load_item_template_addon_loot_metadata_for_item_ids_like_cpp(
+                condition_ids.iter().map(|id| id.source_entry),
+            )
+            .await;
+        let generated = {
+            let mut rng = rand::thread_rng();
+            store
+                .fill_personal_loot_with_context_like_cpp(
+                    loot_id,
+                    LootStoreKind::Gameobject,
+                    stores,
+                    LootFillOptions {
+                        loot_mode: LOOT_MODE_DEFAULT_LIKE_CPP,
+                        rates_allowed: true,
+                        referenced_amount_rate: rates.item_referenced_amount,
+                        item_context: ItemContext::None as u8,
+                    },
+                    tappers,
+                    &mut rng,
+                    |item_id| {
+                        self.item_storage_template(item_id).map(|template| {
+                            LootItemTemplateMetadata {
+                                max_stack: template.max_stack_size.max(1),
+                                has_multi_drop_flag: template.flags.contains(ItemFlags::MULTI_DROP),
+                                has_follow_loot_rules_flag: false,
+                            }
+                        })
+                    },
+                    |item| self.item_drop_rate_like_cpp(item.item_id),
+                    |context, looter| {
+                        self.represented_creature_loot_item_allowed_for_player_like_cpp(
+                            context,
+                            looter,
+                            &condition_rows,
+                            &condition_references,
+                            &addon_metadata,
+                        )
+                    },
+                    |item_id| {
+                        let random_properties =
+                            self.generate_loot_store_random_properties_like_cpp(item_id);
+                        LootItemRandomProperties {
+                            id: random_properties.id,
+                            seed: random_properties.seed,
+                        }
+                    },
+                )
+                .ok()?
+        };
+
+        Some(
+            generated
+                .into_iter()
+                .map(|personal_item| {
+                    let metadata = addon_metadata
+                        .get(&personal_item.item.item_id)
+                        .copied()
+                        .unwrap_or_default();
+                    let mut entry = generated_creature_loot_item_to_entry_like_cpp(
+                        personal_item.item,
+                        metadata,
+                    );
+                    entry.add_allowed_looter_like_cpp(personal_item.looter);
+                    entry
                 })
                 .collect(),
         )
@@ -3386,12 +3818,33 @@ impl WorldSession {
         condition_references: &HashMap<u32, Vec<LootConditionRowLikeCpp>>,
         addon_metadata: &HashMap<u32, ItemTemplateAddonLootMetadataLikeCpp>,
     ) -> bool {
+        self.represented_creature_loot_item_allowed_for_player_like_cpp(
+            context,
+            self.player_guid().unwrap_or(ObjectGuid::EMPTY),
+            condition_rows,
+            condition_references,
+            addon_metadata,
+        )
+    }
+
+    fn represented_creature_loot_item_allowed_for_player_like_cpp(
+        &self,
+        context: LootStoreItemContext,
+        player_guid: ObjectGuid,
+        condition_rows: &HashMap<LootConditionId, Vec<LootConditionRowLikeCpp>>,
+        condition_references: &HashMap<u32, Vec<LootConditionRowLikeCpp>>,
+        addon_metadata: &HashMap<u32, ItemTemplateAddonLootMetadataLikeCpp>,
+    ) -> bool {
         let Some(template) = self.item_storage_template(context.item.item_id) else {
+            return false;
+        };
+        let Some(player_context) = self.represented_loot_player_context_like_cpp(player_guid)
+        else {
             return false;
         };
 
         let flags2 = self.item_template_flags2_like_cpp(context.item.item_id);
-        if represented_item_faction_flags_block_player_like_cpp(flags2, self.player_race) {
+        if represented_item_faction_flags_block_player_like_cpp(flags2, player_context.race) {
             return false;
         }
 
@@ -3408,7 +3861,12 @@ impl WorldSession {
                 .map(Vec::as_slice)
                 .unwrap_or(&[]),
             condition_references,
-            |condition| self.evaluate_creature_loot_condition_like_cpp_representable(condition),
+            |condition| {
+                self.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                    condition,
+                    &player_context,
+                )
+            },
         ) {
             return false;
         }
@@ -3417,11 +3875,84 @@ impl WorldSession {
             .get(&context.item.item_id)
             .copied()
             .unwrap_or_default();
-        self.item_loot_quest_status_allows_like_cpp(
+        self.item_loot_quest_status_allows_for_player_like_cpp(
             context.item.item_id,
             context.item.needs_quest,
             addon,
+            &player_context,
         ) && template.max_stack_size != 0
+    }
+
+    fn item_loot_quest_status_allows_for_player_like_cpp(
+        &self,
+        item_id: u32,
+        needs_quest: bool,
+        addon_metadata: ItemTemplateAddonLootMetadataLikeCpp,
+        player_context: &RepresentedLootPlayerContext,
+    ) -> bool {
+        if player_context.is_current {
+            return self.item_loot_quest_status_allows_like_cpp(
+                item_id,
+                needs_quest,
+                addon_metadata,
+            );
+        }
+
+        if addon_metadata.ignores_quest_status() {
+            return true;
+        }
+
+        let start_quest_id = self.item_template_start_quest_id(item_id).unwrap_or(0);
+        let has_non_none_start_quest_status = u32::try_from(start_quest_id)
+            .ok()
+            .is_some_and(|quest_id| quest_id != 0 && player_context.quest_status(quest_id) != 0);
+        let has_quest_for_item =
+            self.represented_has_quest_for_item_like_cpp(item_id, addon_metadata, player_context);
+
+        (!needs_quest && !has_non_none_start_quest_status) || has_quest_for_item
+    }
+
+    fn represented_loot_player_context_like_cpp(
+        &self,
+        player_guid: ObjectGuid,
+    ) -> Option<RepresentedLootPlayerContext> {
+        if Some(player_guid) == self.player_guid() {
+            return Some(RepresentedLootPlayerContext {
+                race: self.player_race_like_cpp(),
+                class: self.player_class_like_cpp(),
+                gender: self.player_gender_like_cpp(),
+                level: self.player_level_like_cpp(),
+                known_spells: self.known_spells_like_cpp().to_vec(),
+                active_quest_statuses: self
+                    .player_quests
+                    .iter()
+                    .map(|(quest_id, status)| (*quest_id, status.status))
+                    .collect(),
+                active_quest_objective_counts: self
+                    .player_quests
+                    .iter()
+                    .map(|(quest_id, status)| (*quest_id, status.objective_counts.clone()))
+                    .collect(),
+                rewarded_quests: self.rewarded_quests.clone(),
+                inventory_item_counts: self.represented_inventory_item_counts_like_cpp(),
+                is_current: true,
+            });
+        }
+
+        let registry = self.player_registry()?;
+        let player = registry.get(&player_guid)?;
+        Some(RepresentedLootPlayerContext {
+            race: player.race,
+            class: player.class,
+            gender: player.sex,
+            level: player.level,
+            known_spells: player.known_spells.clone(),
+            active_quest_statuses: player.active_quest_statuses.clone(),
+            active_quest_objective_counts: player.active_quest_objective_counts.clone(),
+            rewarded_quests: player.rewarded_quests.clone(),
+            inventory_item_counts: player.inventory_item_counts.clone(),
+            is_current: false,
+        })
     }
 
     fn item_template_flags2_like_cpp(&self, item_id: u32) -> Option<u32> {
@@ -3539,18 +4070,134 @@ impl WorldSession {
         })
     }
 
-    fn direct_inventory_item_count_like_cpp(&self, item_id: u32) -> u32 {
-        self.inventory_items
-            .values()
-            .filter(|inventory_item| inventory_item.entry_id == item_id)
-            .filter_map(|inventory_item| self.inventory_item_objects.get(&inventory_item.guid))
-            .filter(|item| !item.is_in_trade())
-            .fold(0_u32, |total, item| total.saturating_add(item.count()))
+    fn represented_has_quest_for_item_like_cpp(
+        &self,
+        item_id: u32,
+        addon_metadata: ItemTemplateAddonLootMetadataLikeCpp,
+        player_context: &RepresentedLootPlayerContext,
+    ) -> bool {
+        if player_context.is_current {
+            return self.has_incomplete_quest_objective_for_item_like_cpp(item_id)
+                || (addon_metadata.quest_log_item_id != 0
+                    && self.has_incomplete_quest_objective_for_object_id_like_cpp(
+                        addon_metadata.quest_log_item_id,
+                    ))
+                || self.has_incomplete_quest_item_drop_for_item_like_cpp(item_id);
+        }
+
+        let Ok(item_object_id) = i32::try_from(item_id) else {
+            return false;
+        };
+        self.remote_has_incomplete_quest_objective_for_object_id_like_cpp(
+            item_object_id,
+            player_context,
+        ) || (addon_metadata.quest_log_item_id != 0
+            && self.remote_has_incomplete_quest_objective_for_object_id_like_cpp(
+                addon_metadata.quest_log_item_id,
+                player_context,
+            ))
+            || self.remote_has_incomplete_quest_item_drop_for_item_like_cpp(item_id, player_context)
     }
 
-    fn evaluate_creature_loot_condition_like_cpp_representable(
+    fn remote_has_incomplete_quest_objective_for_object_id_like_cpp(
+        &self,
+        item_object_id: i32,
+        player_context: &RepresentedLootPlayerContext,
+    ) -> bool {
+        let Some(quest_store) = &self.quest_store else {
+            return false;
+        };
+
+        player_context
+            .active_quest_objective_counts
+            .iter()
+            .any(|(quest_id, objective_counts)| {
+                if player_context.quest_status(*quest_id) != 1 {
+                    return false;
+                }
+
+                let Some(quest) = quest_store.get(*quest_id) else {
+                    return false;
+                };
+
+                quest
+                    .objectives
+                    .iter()
+                    .enumerate()
+                    .any(|(fallback_index, objective)| {
+                        if objective.obj_type != 1 || objective.object_id != item_object_id {
+                            return false;
+                        }
+
+                        let storage_index = usize::try_from(objective.storage_index)
+                            .ok()
+                            .unwrap_or(fallback_index);
+                        let current = objective_counts.get(storage_index).copied().unwrap_or(0);
+                        current < objective.amount.max(1)
+                    })
+            })
+    }
+
+    fn remote_has_incomplete_quest_item_drop_for_item_like_cpp(
+        &self,
+        item_id: u32,
+        player_context: &RepresentedLootPlayerContext,
+    ) -> bool {
+        let Some(quest_store) = &self.quest_store else {
+            return false;
+        };
+
+        player_context
+            .active_quest_statuses
+            .iter()
+            .any(|(quest_id, status)| {
+                if *status != 1 {
+                    return false;
+                }
+
+                let Some(quest) = quest_store.get(*quest_id) else {
+                    return false;
+                };
+
+                quest
+                    .item_drop
+                    .iter()
+                    .enumerate()
+                    .any(|(index, drop_item_id)| {
+                        if *drop_item_id != item_id {
+                            return false;
+                        }
+
+                        let Some(template) = self.item_storage_template(item_id) else {
+                            return false;
+                        };
+
+                        let quantity = quest.item_drop_quantity[index];
+                        let mut max_allowed_count = if quantity != 0 {
+                            quantity
+                        } else {
+                            template.max_stack_size
+                        };
+                        if template.max_count > 0 {
+                            max_allowed_count = max_allowed_count.min(template.max_count as u32);
+                        }
+
+                        player_context.inventory_item_count(item_id) < max_allowed_count
+                    })
+            })
+    }
+
+    fn direct_inventory_item_count_like_cpp(&self, item_id: u32) -> u32 {
+        self.represented_inventory_item_counts_like_cpp()
+            .get(&item_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn evaluate_creature_loot_condition_for_player_like_cpp_representable(
         &self,
         condition: &LootConditionRowLikeCpp,
+        player_context: &RepresentedLootPlayerContext,
     ) -> Option<bool> {
         match condition.condition_type_or_reference {
             0 => Some(true),
@@ -3558,57 +4205,61 @@ impl WorldSession {
                 if condition.value3 != 0 {
                     return None;
                 }
-                Some(
-                    self.direct_inventory_item_count_like_cpp(condition.value1) >= condition.value2,
-                )
+                let item_count = if player_context.is_current {
+                    self.direct_inventory_item_count_like_cpp(condition.value1)
+                } else {
+                    player_context.inventory_item_count(condition.value1)
+                };
+                Some(item_count >= condition.value2)
             }
-            6 => Some(player_team_for_race_cpp_representable(self.player_race) == condition.value1),
-            8 => Some(self.rewarded_quests.contains(&condition.value1)),
-            9 => Some(
-                self.player_quests
-                    .get(&condition.value1)
-                    .is_some_and(|status| status.status == 1),
+            6 => Some(
+                player_team_for_race_cpp_representable(player_context.race) == condition.value1,
             ),
-            14 => Some(
-                !self.player_quests.contains_key(&condition.value1)
-                    && !self.rewarded_quests.contains(&condition.value1),
-            ),
+            8 => Some(player_context.rewarded_quests.contains(&condition.value1)),
+            9 => Some(player_context.quest_status(condition.value1) == 1),
+            14 => Some(player_context.quest_status(condition.value1) == 0),
             15 => Some(
-                player_class_mask_like_cpp(self.player_class)
+                player_class_mask_like_cpp(player_context.class)
                     .is_some_and(|mask| mask & condition.value1 != 0),
             ),
             16 => Some(
-                player_race_mask_like_cpp(self.player_race)
+                player_race_mask_like_cpp(player_context.race)
                     .is_some_and(|mask| mask & condition.value1 != 0),
             ),
-            20 => Some(u32::from(self.player_gender) == condition.value1),
+            20 => Some(u32::from(player_context.gender) == condition.value1),
             25 => i32::try_from(condition.value1)
                 .ok()
-                .map(|spell_id| self.known_spells.contains(&spell_id)),
+                .map(|spell_id| player_context.known_spells.contains(&spell_id)),
             27 => condition_compare_values_like_cpp(
                 condition.value2,
-                u32::from(self.player_level),
+                u32::from(player_context.level),
                 condition.value1,
             ),
             28 => Some(
-                self.player_quests
-                    .get(&condition.value1)
-                    .is_some_and(|status| status.status == 2)
-                    && !self.rewarded_quests.contains(&condition.value1),
+                player_context.quest_status(condition.value1) == 2
+                    && !player_context.rewarded_quests.contains(&condition.value1),
             ),
             47 => Some(
                 player_quest_status_mask_like_cpp(
-                    self.player_quests
+                    player_context
+                        .active_quest_statuses
                         .get(&condition.value1)
-                        .map(|status| status.status),
-                    self.rewarded_quests.contains(&condition.value1),
+                        .copied(),
+                    player_context.rewarded_quests.contains(&condition.value1),
                 ) & condition.value2
                     != 0,
             ),
-            48 => Some(
-                self.player_quest_objective_progress_like_cpp(condition.value1)
-                    == Some(condition.value3 as i32),
-            ),
+            48 => {
+                let progress = if player_context.is_current {
+                    self.player_quest_objective_progress_like_cpp(condition.value1)
+                } else {
+                    self.remote_player_quest_objective_progress_like_cpp(
+                        condition.value1,
+                        player_context,
+                    )
+                };
+                Some(progress == Some(condition.value3 as i32))
+            }
             CONDITION_OBJECT_ENTRY_GUID_LIKE_CPP => {
                 Some(condition.value1 == TYPEID_PLAYER_LIKE_CPP)
             }
@@ -3640,6 +4291,32 @@ impl WorldSession {
                     .copied()
                     .unwrap_or(0),
             );
+        }
+
+        None
+    }
+
+    fn remote_player_quest_objective_progress_like_cpp(
+        &self,
+        objective_id: u32,
+        player_context: &RepresentedLootPlayerContext,
+    ) -> Option<i32> {
+        let quest_store = self.quest_store.as_ref()?;
+
+        for (quest_id, objective_counts) in &player_context.active_quest_objective_counts {
+            let Some(quest) = quest_store.get(*quest_id) else {
+                continue;
+            };
+            let Some((_, objective)) = quest
+                .objectives
+                .iter()
+                .enumerate()
+                .find(|(_, objective)| objective.id == objective_id)
+            else {
+                continue;
+            };
+            let objective_index = objective.storage_index.max(0) as usize;
+            return Some(objective_counts.get(objective_index).copied().unwrap_or(0));
         }
 
         None
@@ -3744,6 +4421,26 @@ impl WorldSession {
         }
     }
 
+    pub(crate) fn close_active_loot_windows_like_cpp(&mut self, player_guid: ObjectGuid) {
+        let mut active_owners: Vec<ObjectGuid> =
+            self.active_loot_view_owners.iter().copied().collect();
+        if active_owners.is_empty() && !self.active_loot_guid.is_empty() {
+            active_owners.push(self.active_loot_guid);
+        }
+        active_owners.sort_by_key(|guid| (guid.high_value(), guid.low_value()));
+
+        for owner_guid in active_owners {
+            if let Some(loot) = self.loot_table.get_mut(&owner_guid) {
+                loot.players_looting.retain(|looter| *looter != player_guid);
+            }
+            self.send_packet(&SLootRelease {
+                loot_obj: owner_guid,
+                owner: player_guid,
+            });
+            self.clear_active_loot_guid_if(owner_guid);
+        }
+    }
+
     async fn do_loot_release_owner_like_cpp(
         &mut self,
         owner_guid: ObjectGuid,
@@ -3809,12 +4506,13 @@ impl WorldSession {
         // C# uses `RateCorpseDecayLooted` config × `m_corpseDelay` (default 60s).
         // We use a simple 30s fixed decay.
         let marked = self
-            .mutate_legacy_creature_and_sync(owner_guid, |creature| {
-                if !creature.is_alive && creature.corpse_despawn_at.is_none() {
+            .mutate_world_creature(owner_guid, |creature| {
+                if !creature.is_alive() && creature.corpse_despawn_at().is_none() {
                     const CORPSE_DECAY_SECS: u64 = 30;
-                    creature.corpse_despawn_at =
-                        Some(Instant::now() + Duration::from_secs(CORPSE_DECAY_SECS));
-                    Some((creature.entry, CORPSE_DECAY_SECS))
+                    creature.set_corpse_despawn_at(Some(
+                        Instant::now() + Duration::from_secs(CORPSE_DECAY_SECS),
+                    ));
+                    Some((creature.entry(), CORPSE_DECAY_SECS))
                 } else {
                     None
                 }
@@ -3882,7 +4580,7 @@ impl WorldSession {
     ) -> bool {
         let item_id = loot_entry.item_id;
         let count = loot_entry.quantity;
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return false;
         };
         let Some(char_db) = self.char_db().map(Arc::clone) else {
@@ -3905,17 +4603,20 @@ impl WorldSession {
             let bag = (dest.pos >> 8) as u8;
             let slot = (dest.pos & 0x00FF) as u8;
             bag == u8::from(INVENTORY_SLOT_BAG_0)
-                && self.inventory_items.get(&slot).is_some_and(|existing| {
-                    self.inventory_item_objects
-                        .get(&existing.guid)
-                        .is_some_and(|item| {
-                            !loot_store_data_can_stack_with_item(
-                                loot_entry,
-                                store_random_properties,
-                                item,
-                            )
-                        })
-                })
+                && self
+                    .inventory_items_like_cpp()
+                    .get(&slot)
+                    .is_some_and(|existing| {
+                        self.inventory_item_objects_like_cpp()
+                            .get(&existing.guid)
+                            .is_some_and(|item| {
+                                !loot_store_data_can_stack_with_item(
+                                    loot_entry,
+                                    store_random_properties,
+                                    item,
+                                )
+                            })
+                    })
         }) {
             let Some(compatible_dest) = self.plan_direct_loot_item_preserving_cpp_store_metadata(
                 loot_entry,
@@ -3944,8 +4645,10 @@ impl WorldSession {
                 .unwrap_or(1)
                 .max(1);
 
-            if let Some(existing) = self.inventory_items.get(&slot) {
-                let Some(existing_object) = self.inventory_item_objects.get(&existing.guid) else {
+            if let Some(existing) = self.inventory_items_like_cpp().get(&slot) {
+                let Some(existing_object) =
+                    self.inventory_item_objects_like_cpp().get(&existing.guid)
+                else {
                     self.send_equip_error(InventoryResult::ItemNotFound, None, None, 0, 0);
                     return false;
                 };
@@ -4063,13 +4766,13 @@ impl WorldSession {
         }
 
         for &(_, item_guid, _, new_count, _) in &planned_existing_counts {
-            if let Some(item) = self.inventory_item_objects.get_mut(&item_guid) {
+            self.update_inventory_item_object_like_cpp(item_guid, |item| {
                 item.set_count(new_count);
-            }
+            });
         }
 
         for (stack, db_guid, item_guid) in &created_new_stacks {
-            self.inventory_items.insert(
+            self.insert_inventory_item_like_cpp(
                 stack.slot,
                 InventoryItem {
                     guid: *item_guid,
@@ -4097,7 +4800,7 @@ impl WorldSession {
         }
         self.sync_object_accessor_player();
 
-        let map_id = self.current_map_id;
+        let map_id = self.player_map_id_like_cpp();
         if !created_new_stacks.is_empty() {
             let item_creates = created_new_stacks
                 .iter()
@@ -4151,18 +4854,14 @@ impl WorldSession {
         }
 
         if !created_new_stacks.is_empty() {
-            self.send_packet(&UpdateObject::player_values_update(
-                player_guid,
-                map_id,
-                created_new_stacks
-                    .iter()
-                    .map(|(stack, _, item_guid)| (stack.slot, *item_guid))
-                    .collect(),
-                Vec::new(),
-                Vec::new(),
-            ));
+            let changed_slots: Vec<_> = created_new_stacks
+                .iter()
+                .map(|(stack, _, item_guid)| (stack.slot, *item_guid))
+                .collect();
+            self.send_player_values_update_from_entity_bridge(&changed_slots, &[], &[], &[], None);
         }
 
+        self.sync_player_registry_state_like_cpp();
         true
     }
 
@@ -4179,16 +4878,17 @@ impl WorldSession {
         let mut remaining = loot_entry.quantity;
         let mut dest = Vec::new();
 
-        let mut existing_slots: Vec<u8> = self.inventory_items.keys().copied().collect();
+        let mut existing_slots: Vec<u8> = self.inventory_items_like_cpp().keys().copied().collect();
         existing_slots.sort_unstable();
         for slot in existing_slots {
             if remaining == 0 {
                 break;
             }
-            let Some(existing) = self.inventory_items.get(&slot) else {
+            let Some(existing) = self.inventory_items_like_cpp().get(&slot) else {
                 continue;
             };
-            let Some(existing_object) = self.inventory_item_objects.get(&existing.guid) else {
+            let Some(existing_object) = self.inventory_item_objects_like_cpp().get(&existing.guid)
+            else {
                 continue;
             };
             if existing.entry_id != loot_entry.item_id
@@ -4220,7 +4920,7 @@ impl WorldSession {
             if remaining == 0 {
                 break;
             }
-            if self.inventory_items.contains_key(&slot) {
+            if self.inventory_items_like_cpp().contains_key(&slot) {
                 continue;
             }
             let quantity = max_stack.min(remaining);
@@ -4281,12 +4981,15 @@ impl WorldSession {
     }
 
     async fn destroy_fully_looted_direct_item(&mut self, item_guid: ObjectGuid) {
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(guid) => guid,
             None => return,
         };
 
-        let runtime_item = self.inventory_item_objects.get(&item_guid).cloned();
+        let runtime_item = self
+            .inventory_item_objects_like_cpp()
+            .get(&item_guid)
+            .cloned();
         let (bag, slot) = match runtime_item.as_ref() {
             Some(item) => (item.bag_slot(), item.slot()),
             None => return,
@@ -4344,13 +5047,13 @@ impl WorldSession {
                 virtual_item_changes.push((slot - 15, 0i32, 0u16, 0u16));
             }
 
-            self.send_packet(&UpdateObject::player_values_update(
-                player_guid,
-                self.current_map_id,
-                vec![(slot, ObjectGuid::EMPTY)],
-                visible_item_changes,
-                virtual_item_changes,
-            ));
+            self.send_player_values_update_from_entity_bridge(
+                &[(slot, ObjectGuid::EMPTY)],
+                &visible_item_changes,
+                &virtual_item_changes,
+                &[],
+                None,
+            );
 
             if slot < 19 {
                 self.send_stat_update();
@@ -4380,6 +5083,39 @@ fn generate_legacy_creature_coin_fallback_like_cpp(creature_guid: ObjectGuid, le
 struct ItemTemplateAddonLootMetadataLikeCpp {
     flags_cu: u32,
     quest_log_item_id: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RepresentedLootPlayerContext {
+    race: u8,
+    class: u8,
+    gender: u8,
+    level: u8,
+    known_spells: Vec<i32>,
+    active_quest_statuses: HashMap<u32, u8>,
+    active_quest_objective_counts: HashMap<u32, Vec<i32>>,
+    rewarded_quests: HashSet<u32>,
+    inventory_item_counts: HashMap<u32, u32>,
+    is_current: bool,
+}
+
+impl RepresentedLootPlayerContext {
+    fn quest_status(&self, quest_id: u32) -> u8 {
+        if self.rewarded_quests.contains(&quest_id) {
+            return 3;
+        }
+        self.active_quest_statuses
+            .get(&quest_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn inventory_item_count(&self, item_id: u32) -> u32 {
+        self.inventory_item_counts
+            .get(&item_id)
+            .copied()
+            .unwrap_or(0)
+    }
 }
 
 impl ItemTemplateAddonLootMetadataLikeCpp {
@@ -4551,6 +5287,66 @@ fn mark_loot_allowed_for_player_like_cpp(loot: &mut CreatureLoot, player_guid: O
         {
             Some((_, existing)) => existing.extend(ffa_items),
             None => loot.player_ffa_items.push((player_guid, ffa_items)),
+        }
+    }
+}
+
+#[cfg(test)]
+fn assign_represented_personal_loot_items_like_cpp<R: Rng + ?Sized>(
+    loot: &mut CreatureLoot,
+    tappers: &[ObjectGuid],
+    rng: &mut R,
+) {
+    if tappers.is_empty() {
+        return;
+    }
+
+    loot.unlooted_count = 0;
+    loot.player_ffa_items.clear();
+
+    for entry in &mut loot.items {
+        entry.allowed_looters.clear();
+        entry.flags.counted = false;
+
+        let chosen_tapper = tappers[rng.gen_range(0..tappers.len())];
+        entry.add_allowed_looter_like_cpp(chosen_tapper);
+    }
+
+    rebuild_represented_personal_loot_counts_like_cpp(loot);
+}
+
+fn rebuild_represented_personal_loot_counts_like_cpp(loot: &mut CreatureLoot) {
+    loot.unlooted_count = 0;
+    loot.player_ffa_items.clear();
+
+    for entry in &mut loot.items {
+        entry.ffa_looted_by.clear();
+        entry.flags.counted = false;
+
+        if entry.flags.freeforall {
+            for looter in &entry.allowed_looters {
+                match loot
+                    .player_ffa_items
+                    .iter_mut()
+                    .find(|(player, _)| player == looter)
+                {
+                    Some((_, existing)) => existing.push(NotNormalLootItem {
+                        loot_list_id: entry.loot_list_id,
+                        is_looted: false,
+                    }),
+                    None => loot.player_ffa_items.push((
+                        *looter,
+                        vec![NotNormalLootItem {
+                            loot_list_id: entry.loot_list_id,
+                            is_looted: false,
+                        }],
+                    )),
+                }
+                loot.unlooted_count = loot.unlooted_count.saturating_add(1);
+            }
+        } else if !entry.allowed_looters.is_empty() {
+            entry.flags.counted = true;
+            loot.unlooted_count = loot.unlooted_count.saturating_add(1);
         }
     }
 }
@@ -5145,23 +5941,28 @@ mod tests {
         LOOT_SLOT_TYPE_ROLL_ONGOING_LIKE_CPP, LootStoreRandomProperties,
         ROLL_ALL_TYPE_NO_DISENCHANT_LIKE_CPP, ROLL_FLAG_TYPE_NEED_LIKE_CPP,
         ROLL_VOTE_GREED_LIKE_CPP, ROLL_VOTE_NEED_LIKE_CPP, ROLL_VOTE_NOT_EMITTED_YET_LIKE_CPP,
-        ROLL_VOTE_NOT_VALID_LIKE_CPP, ROLL_VOTE_PASS_LIKE_CPP,
+        ROLL_VOTE_NOT_VALID_LIKE_CPP, ROLL_VOTE_PASS_LIKE_CPP, RepresentedLootPlayerContext,
+        assign_represented_personal_loot_items_like_cpp,
         generated_creature_loot_item_to_entry_like_cpp, loot_is_looted_like_cpp, loot_item_context,
         loot_store_data_can_stack_with_item, loot_type_for_client_like_cpp,
         mark_loot_allowed_for_player_like_cpp, mark_loot_item_looted_for_player_like_cpp,
         represented_loot_object_guid_like_cpp, represented_loot_response_items_like_cpp,
         select_weighted_random_enchantment_like_cpp, start_loot_roll_packet_like_cpp,
     };
-    use crate::session::RepresentedLootRollCriteriaEvent;
+    use crate::session::{RepresentedGameObjectUseEffect, RepresentedLootRollCriteriaEvent};
     use rand::{SeedableRng, rngs::StdRng};
-    use std::sync::Arc;
     use std::time::{Duration, Instant};
+    use std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    };
     use wow_ai::CreatureAI;
     use wow_constants::{
         InventoryResult, InventoryType, ItemBondingType, ItemClass, ItemContext, ItemFlags2,
         ItemQuality,
     };
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
+    use wow_data::quest::{QuestObjective, QuestStore, QuestTemplate};
     use wow_data::{
         ChrSpecializationEntry, ChrSpecializationStore, ItemDisenchantLootEntry,
         ItemDisenchantLootStore, ItemRandomEnchantmentTemplateEntry,
@@ -5171,8 +5972,13 @@ mod tests {
         RandPropPointsStore,
     };
     use wow_database::{CharStatements, StatementDef};
-    use wow_entities::{GameObjectLootSource, Item, ItemCreateInfo, MAX_ITEM_SPELLS};
-    use wow_loot::{GeneratedLootItem, LOOT_SLOT_TYPE_OWNER_LIKE_CPP, LootStoreItem};
+    use wow_entities::{
+        GO_DYNFLAG_LO_NO_INTERACT, GameObjectLootSource, GatheringNodeUseSource, GoState, Item,
+        ItemCreateInfo, LootState, MAX_ITEM_SPELLS,
+    };
+    use wow_loot::{
+        GeneratedLootItem, LOOT_SLOT_TYPE_OWNER_LIKE_CPP, LootConditionRowLikeCpp, LootStoreItem,
+    };
     use wow_network::{
         GroupInfo, GroupRegistry, LootDropRatesLikeCpp, LootRollVoteCommand, PendingInvites,
         PlayerBroadcastInfo, PlayerRegistry, SessionCommand,
@@ -5744,6 +6550,11 @@ mod tests {
             active_loot_rolls: Vec::new(),
             pass_on_group_loot: false,
             enchanting_skill: 0,
+            known_spells: Vec::new(),
+            active_quest_statuses: Default::default(),
+            active_quest_objective_counts: Default::default(),
+            rewarded_quests: Default::default(),
+            inventory_item_counts: Default::default(),
             player_name: format!("Player{}", guid.counter()),
             account_id: guid.counter() as u32,
             race: 1,
@@ -5753,6 +6564,360 @@ mod tests {
             display_id: 49,
             visible_items: [(0, 0, 0); 19],
         }
+    }
+
+    fn loot_condition(
+        condition_type_or_reference: i32,
+        value1: u32,
+        value2: u32,
+        value3: u32,
+    ) -> LootConditionRowLikeCpp {
+        LootConditionRowLikeCpp {
+            else_group: 0,
+            condition_type_or_reference,
+            condition_target: 0,
+            value1,
+            value2,
+            value3,
+            string_value1: String::new(),
+            negative: false,
+            script_name: String::new(),
+        }
+    }
+
+    fn test_quest_template(id: u32) -> QuestTemplate {
+        QuestTemplate {
+            id,
+            quest_type: 0,
+            quest_level: 1,
+            quest_max_scaling_level: 0,
+            min_level: 1,
+            quest_sort_id: 0,
+            quest_info_id: 0,
+            suggested_group_num: 0,
+            reward_next_quest: 0,
+            reward_xp_difficulty: 0,
+            reward_xp_multiplier: 1.0,
+            reward_money_difficulty: 0,
+            reward_money_multiplier: 1.0,
+            reward_bonus_money: 0,
+            reward_display_spell: [0; 3],
+            reward_spell: 0,
+            reward_honor: 0,
+            flags: 0,
+            flags_ex: 0,
+            flags_ex2: 0,
+            reward_items: [0; 4],
+            reward_amounts: [0; 4],
+            item_drop: [0; 4],
+            item_drop_quantity: [0; 4],
+            log_title: String::new(),
+            log_description: String::new(),
+            quest_description: String::new(),
+            area_description: String::new(),
+            quest_completion_log: String::new(),
+            objectives: Vec::new(),
+            allowable_races: 0,
+            allowable_classes: 0,
+            max_level: 0,
+            prev_quest_id: 0,
+            reward_choice_items: [(0, 0); 6],
+        }
+    }
+
+    #[test]
+    fn represented_personal_loot_remote_context_uses_registry_fields_like_cpp() {
+        let (session, _) = make_session_with_send_capacity(1);
+        let remote_context = RepresentedLootPlayerContext {
+            race: 1,
+            class: 1,
+            gender: 0,
+            level: 80,
+            known_spells: Vec::new(),
+            active_quest_statuses: HashMap::new(),
+            active_quest_objective_counts: HashMap::new(),
+            rewarded_quests: HashSet::new(),
+            inventory_item_counts: HashMap::new(),
+            is_current: false,
+        };
+
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(6, 469, 0, 0),
+                &remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(15, 1, 0, 0),
+                &remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(16, 1, 0, 0),
+                &remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(20, 0, 0, 0),
+                &remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(27, 70, 3, 0),
+                &remote_context,
+            ),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn represented_personal_loot_remote_quest_and_spell_conditions_use_registry_like_cpp() {
+        let (session, _) = make_session_with_send_capacity(1);
+        let mut active_quest_statuses = HashMap::new();
+        active_quest_statuses.insert(100, 1);
+        active_quest_statuses.insert(200, 2);
+        let mut rewarded_quests = HashSet::new();
+        rewarded_quests.insert(300);
+        let remote_context = RepresentedLootPlayerContext {
+            race: 1,
+            class: 1,
+            gender: 0,
+            level: 80,
+            known_spells: vec![12_345],
+            active_quest_statuses,
+            active_quest_objective_counts: HashMap::new(),
+            rewarded_quests,
+            inventory_item_counts: HashMap::new(),
+            is_current: false,
+        };
+
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(9, 100, 0, 0),
+                &remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(28, 200, 0, 0),
+                &remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(8, 300, 0, 0),
+                &remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(14, 400, 0, 0),
+                &remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(25, 12_345, 0, 0),
+                &remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(47, 100, 0x08, 0),
+                &remote_context,
+            ),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn represented_personal_loot_remote_inventory_and_objective_conditions_use_registry_like_cpp() {
+        let (mut session, _) = make_session_with_send_capacity(1);
+        let mut quest_store = QuestStore::new();
+        let mut quest = test_quest_template(100);
+        quest.objectives.push(QuestObjective {
+            id: 11,
+            quest_id: 100,
+            obj_type: 1,
+            order: 0,
+            storage_index: 0,
+            object_id: 7001,
+            amount: 7,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        quest_store.quests.insert(100, quest);
+        session.set_quest_store(Arc::new(quest_store));
+        let mut active_quest_statuses = HashMap::new();
+        active_quest_statuses.insert(100, 1);
+        let mut active_quest_objective_counts = HashMap::new();
+        active_quest_objective_counts.insert(100, vec![5]);
+        let mut inventory_item_counts = HashMap::new();
+        inventory_item_counts.insert(9001, 2);
+        let remote_context = RepresentedLootPlayerContext {
+            race: 1,
+            class: 1,
+            gender: 0,
+            level: 80,
+            known_spells: Vec::new(),
+            active_quest_statuses,
+            active_quest_objective_counts,
+            rewarded_quests: HashSet::new(),
+            inventory_item_counts,
+            is_current: false,
+        };
+
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(2, 9001, 2, 0),
+                &remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(2, 9001, 3, 0),
+                &remote_context,
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(2, 9001, 2, 1),
+                &remote_context,
+            ),
+            None
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(48, 11, 0, 5),
+                &remote_context,
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            session.evaluate_creature_loot_condition_for_player_like_cpp_representable(
+                &loot_condition(48, 11, 0, 4),
+                &remote_context,
+            ),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn represented_personal_loot_remote_has_quest_for_item_objective_like_cpp() {
+        let (mut session, _) = make_session_with_send_capacity(1);
+        install_limited_test_item_template(&mut session, 7001, 0);
+        let mut quest_store = QuestStore::new();
+        let mut quest = test_quest_template(100);
+        quest.objectives.push(QuestObjective {
+            id: 1,
+            quest_id: 100,
+            obj_type: 1,
+            order: 0,
+            storage_index: 0,
+            object_id: 7001,
+            amount: 3,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        quest_store.quests.insert(100, quest);
+        session.set_quest_store(Arc::new(quest_store));
+
+        let mut active_quest_statuses = HashMap::new();
+        active_quest_statuses.insert(100, 1);
+        let mut active_quest_objective_counts = HashMap::new();
+        active_quest_objective_counts.insert(100, vec![2]);
+        let mut remote_context = RepresentedLootPlayerContext {
+            race: 1,
+            class: 1,
+            gender: 0,
+            level: 80,
+            known_spells: Vec::new(),
+            active_quest_statuses,
+            active_quest_objective_counts,
+            rewarded_quests: HashSet::new(),
+            inventory_item_counts: HashMap::new(),
+            is_current: false,
+        };
+
+        assert!(session.item_loot_quest_status_allows_for_player_like_cpp(
+            7001,
+            true,
+            ItemTemplateAddonLootMetadataLikeCpp::default(),
+            &remote_context,
+        ));
+
+        remote_context
+            .active_quest_objective_counts
+            .insert(100, vec![3]);
+        assert!(!session.item_loot_quest_status_allows_for_player_like_cpp(
+            7001,
+            true,
+            ItemTemplateAddonLootMetadataLikeCpp::default(),
+            &remote_context,
+        ));
+    }
+
+    #[test]
+    fn represented_personal_loot_remote_has_quest_for_item_drop_like_cpp() {
+        let (mut session, _) = make_session_with_send_capacity(1);
+        install_limited_test_item_template(&mut session, 7002, 0);
+        let mut quest_store = QuestStore::new();
+        let mut quest = test_quest_template(200);
+        quest.item_drop[0] = 7002;
+        quest.item_drop_quantity[0] = 4;
+        quest_store.quests.insert(200, quest);
+        session.set_quest_store(Arc::new(quest_store));
+
+        let mut active_quest_statuses = HashMap::new();
+        active_quest_statuses.insert(200, 1);
+        let mut inventory_item_counts = HashMap::new();
+        inventory_item_counts.insert(7002, 3);
+        let mut remote_context = RepresentedLootPlayerContext {
+            race: 1,
+            class: 1,
+            gender: 0,
+            level: 80,
+            known_spells: Vec::new(),
+            active_quest_statuses,
+            active_quest_objective_counts: HashMap::new(),
+            rewarded_quests: HashSet::new(),
+            inventory_item_counts,
+            is_current: false,
+        };
+
+        assert!(session.item_loot_quest_status_allows_for_player_like_cpp(
+            7002,
+            true,
+            ItemTemplateAddonLootMetadataLikeCpp::default(),
+            &remote_context,
+        ));
+
+        remote_context.inventory_item_counts.insert(7002, 4);
+        assert!(!session.item_loot_quest_status_allows_for_player_like_cpp(
+            7002,
+            true,
+            ItemTemplateAddonLootMetadataLikeCpp::default(),
+            &remote_context,
+        ));
     }
 
     fn install_master_loot_group(
@@ -5931,6 +7096,10 @@ mod tests {
                 stack_count: 1,
                 aura_flags: 0x0000_0001,
                 aura_interrupt_flags,
+                aura_interrupt_flags2: 0,
+                represented_effect: None,
+                represented_amount: 0,
+                represented_multiplier: 1.0,
                 applied_at: std::time::Instant::now(),
             },
         );
@@ -5983,13 +7152,15 @@ mod tests {
 
     #[tokio::test]
     async fn represented_gameobject_chest_loot_carries_cpp_source_metadata() {
-        let session = make_session();
+        let mut session = make_session();
         let source = GameObjectLootSource {
             loot_id: 0,
             use_group_loot_rules: false,
             dungeon_encounter_id: 733,
             personal_loot_id: 10_001,
             push_loot_id: 0,
+            triggered_event_id: 0,
+            linked_trap_entry: 0,
         };
 
         let loot = session
@@ -6003,6 +7174,606 @@ mod tests {
         assert_eq!(loot.loot_type, LOOT_TYPE_CHEST_LIKE_CPP);
         assert_eq!(loot.dungeon_encounter_id, 733);
         assert_eq!(loot.loot_method, 0);
+    }
+
+    #[tokio::test]
+    async fn represented_gameobject_personal_encounter_loot_uses_current_player_when_no_tap_list_like_cpp()
+     {
+        let mut session = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let gameobject_guid = test_gameobject_guid(91_008);
+        let source = GameObjectLootSource {
+            loot_id: 0,
+            use_group_loot_rules: false,
+            dungeon_encounter_id: 733,
+            personal_loot_id: 10_001,
+            push_loot_id: 0,
+            triggered_event_id: 0,
+            linked_trap_entry: 0,
+        };
+
+        let loot = session
+            .generate_represented_gameobject_chest_loot_like_cpp(
+                gameobject_guid,
+                player_guid,
+                source,
+            )
+            .await;
+
+        assert_eq!(loot.allowed_looters, vec![player_guid]);
+        assert!(
+            loot.items
+                .iter()
+                .all(|entry| entry.allowed_looters == vec![player_guid])
+        );
+        assert_eq!(loot.coins, 0);
+        assert!(
+            session
+                .represented_personal_loot_owners
+                .contains(&gameobject_guid)
+        );
+        assert!(
+            session
+                .represented_personal_loot_money
+                .contains_key(&(gameobject_guid, player_guid))
+        );
+    }
+
+    #[tokio::test]
+    async fn represented_gameobject_personal_encounter_loot_uses_tap_list_like_cpp() {
+        let mut session = make_session();
+        let first_tapper = ObjectGuid::create_player(1, 42);
+        let second_tapper = ObjectGuid::create_player(1, 77);
+        let non_player_tapper = ObjectGuid::create_item(1, 900);
+        let gameobject_guid = test_gameobject_guid(91_009);
+        session.represented_gameobject_tap_lists.insert(
+            gameobject_guid,
+            vec![
+                second_tapper,
+                non_player_tapper,
+                first_tapper,
+                second_tapper,
+            ],
+        );
+        let source = GameObjectLootSource {
+            loot_id: 0,
+            use_group_loot_rules: false,
+            dungeon_encounter_id: 733,
+            personal_loot_id: 10_001,
+            push_loot_id: 0,
+            triggered_event_id: 0,
+            linked_trap_entry: 0,
+        };
+
+        let loot = session
+            .generate_represented_gameobject_chest_loot_like_cpp(
+                gameobject_guid,
+                first_tapper,
+                source,
+            )
+            .await;
+
+        assert_eq!(loot.allowed_looters, vec![first_tapper, second_tapper]);
+        assert!(
+            loot.items
+                .iter()
+                .all(|entry| entry.allowed_looters == vec![first_tapper, second_tapper])
+        );
+        assert_eq!(loot.coins, 0);
+        assert!(
+            session
+                .represented_personal_loot_owners
+                .contains(&gameobject_guid)
+        );
+        assert!(
+            session
+                .represented_personal_loot_money
+                .contains_key(&(gameobject_guid, first_tapper))
+        );
+        assert!(
+            session
+                .represented_personal_loot_money
+                .contains_key(&(gameobject_guid, second_tapper))
+        );
+    }
+
+    #[tokio::test]
+    async fn represented_gameobject_personal_encounter_loot_skips_locked_tappers_like_cpp() {
+        let mut session = make_session();
+        let locked_tapper = ObjectGuid::create_player(1, 42);
+        let open_tapper = ObjectGuid::create_player(1, 77);
+        let gameobject_guid = test_gameobject_guid(91_010);
+        session
+            .represented_gameobject_tap_lists
+            .insert(gameobject_guid, vec![locked_tapper, open_tapper]);
+        session
+            .represented_locked_dungeon_encounters
+            .insert((locked_tapper, 733));
+        let source = GameObjectLootSource {
+            loot_id: 0,
+            use_group_loot_rules: false,
+            dungeon_encounter_id: 733,
+            personal_loot_id: 10_001,
+            push_loot_id: 0,
+            triggered_event_id: 0,
+            linked_trap_entry: 0,
+        };
+
+        let loot = session
+            .generate_represented_gameobject_chest_loot_like_cpp(
+                gameobject_guid,
+                locked_tapper,
+                source,
+            )
+            .await;
+
+        assert_eq!(loot.allowed_looters, vec![open_tapper]);
+        assert!(
+            loot.items
+                .iter()
+                .all(|entry| entry.allowed_looters == vec![open_tapper])
+        );
+    }
+
+    #[tokio::test]
+    async fn represented_gameobject_personal_encounter_open_does_not_auto_allow_non_tapper_like_cpp()
+     {
+        let (mut session, send_rx) = make_session_with_send();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let other_tapper = ObjectGuid::create_player(1, 77);
+        let gameobject_guid = test_gameobject_guid(91_011);
+        session.set_player_guid(Some(player_guid));
+        session.visible_gameobjects.insert(gameobject_guid);
+        session
+            .represented_gameobject_tap_lists
+            .insert(gameobject_guid, vec![other_tapper]);
+        let source = GameObjectLootSource {
+            loot_id: 0,
+            use_group_loot_rules: false,
+            dungeon_encounter_id: 733,
+            personal_loot_id: 10_001,
+            push_loot_id: 0,
+            triggered_event_id: 0,
+            linked_trap_entry: 0,
+        };
+
+        session
+            .open_represented_gameobject_chest_like_cpp(gameobject_guid, source)
+            .await;
+
+        assert!(send_rx.try_recv().is_err());
+        assert!(!session.is_active_loot_guid(gameobject_guid));
+        assert_eq!(
+            session
+                .loot_table
+                .get(&gameobject_guid)
+                .unwrap()
+                .allowed_looters,
+            vec![other_tapper]
+        );
+    }
+
+    #[tokio::test]
+    async fn represented_gameobject_personal_encounter_open_reads_player_money_like_cpp() {
+        let (mut session, send_rx) = make_session_with_send_capacity(4);
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let gameobject_guid = test_gameobject_guid(91_012);
+        let loot_object = represented_loot_object_guid_like_cpp(gameobject_guid);
+        session.set_player_guid(Some(player_guid));
+        session.visible_gameobjects.insert(gameobject_guid);
+        session.loot_table.insert(
+            gameobject_guid,
+            CreatureLoot {
+                loot_guid: loot_object,
+                coins: 999,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CHEST_LIKE_CPP,
+                dungeon_encounter_id: 733,
+                loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
+                allowed_looters: vec![player_guid],
+                items: Vec::new(),
+                looted_by_player: false,
+            },
+        );
+        session
+            .represented_personal_loot_owners
+            .insert(gameobject_guid);
+        session
+            .represented_personal_loot_money
+            .insert((gameobject_guid, player_guid), 123);
+        let source = GameObjectLootSource {
+            loot_id: 0,
+            use_group_loot_rules: false,
+            dungeon_encounter_id: 733,
+            personal_loot_id: 10_001,
+            push_loot_id: 0,
+            triggered_event_id: 0,
+            linked_trap_entry: 0,
+        };
+
+        session
+            .open_represented_gameobject_chest_like_cpp(gameobject_guid, source)
+            .await;
+
+        let mut response =
+            recv_packet_with_opcode(&send_rx, wow_constants::ServerOpcodes::LootResponse);
+        assert_eq!(response.read_packed_guid().unwrap(), gameobject_guid);
+        assert_eq!(response.read_packed_guid().unwrap(), loot_object);
+        assert_eq!(response.read_uint8().unwrap(), 0);
+        assert_eq!(response.read_uint8().unwrap(), LOOT_TYPE_CHEST_LIKE_CPP);
+        assert_eq!(response.read_uint8().unwrap(), 0);
+        assert_eq!(response.read_uint8().unwrap(), 2);
+        assert_eq!(response.read_uint32().unwrap(), 123);
+    }
+
+    #[tokio::test]
+    async fn represented_gameobject_personal_encounter_money_pickup_consumes_only_player_like_cpp()
+    {
+        let (mut session, send_rx) = make_session_with_send_capacity(4);
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let other_tapper = ObjectGuid::create_player(1, 77);
+        let gameobject_guid = test_gameobject_guid(91_013);
+        let loot_object = represented_loot_object_guid_like_cpp(gameobject_guid);
+        session.set_player_guid(Some(player_guid));
+        session.set_active_loot_guid(gameobject_guid);
+        session.loot_table.insert(
+            gameobject_guid,
+            CreatureLoot {
+                loot_guid: loot_object,
+                coins: 999,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CHEST_LIKE_CPP,
+                dungeon_encounter_id: 733,
+                loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
+                allowed_looters: vec![player_guid, other_tapper],
+                items: Vec::new(),
+                looted_by_player: false,
+            },
+        );
+        session
+            .represented_personal_loot_owners
+            .insert(gameobject_guid);
+        session
+            .represented_personal_loot_money
+            .insert((gameobject_guid, player_guid), 123);
+        session
+            .represented_personal_loot_money
+            .insert((gameobject_guid, other_tapper), 456);
+
+        session.handle_loot_money(loot_money_packet()).await;
+
+        let mut notify =
+            recv_packet_with_opcode(&send_rx, wow_constants::ServerOpcodes::LootMoneyNotify);
+        assert_eq!(notify.read_uint64().unwrap(), 123);
+        assert_eq!(
+            session
+                .represented_personal_loot_money
+                .get(&(gameobject_guid, player_guid)),
+            Some(&0)
+        );
+        assert_eq!(
+            session
+                .represented_personal_loot_money
+                .get(&(gameobject_guid, other_tapper)),
+            Some(&456)
+        );
+        assert_eq!(session.loot_table.get(&gameobject_guid).unwrap().coins, 999);
+    }
+
+    #[test]
+    fn represented_gameobject_personal_encounter_items_are_single_tapper_like_cpp() {
+        let first_tapper = ObjectGuid::create_player(1, 42);
+        let second_tapper = ObjectGuid::create_player(1, 77);
+        let mut loot = CreatureLoot {
+            loot_guid: represented_loot_object_guid_like_cpp(test_gameobject_guid(91_014)),
+            coins: 0,
+            unlooted_count: 0,
+            loot_type: LOOT_TYPE_CHEST_LIKE_CPP,
+            dungeon_encounter_id: 733,
+            loot_method: 0,
+            loot_master: ObjectGuid::EMPTY,
+            round_robin_player: ObjectGuid::EMPTY,
+            player_ffa_items: Vec::new(),
+            players_looting: Vec::new(),
+            allowed_looters: vec![first_tapper, second_tapper],
+            items: vec![
+                LootEntry {
+                    loot_list_id: 0,
+                    item_id: 1_001,
+                    quantity: 1,
+                    random_properties_id: 0,
+                    random_properties_seed: 0,
+                    item_context: 0,
+                    flags: LootEntryFlags::default(),
+                    allowed_looters: vec![first_tapper, second_tapper],
+                    roll_winner: ObjectGuid::EMPTY,
+                    ffa_looted_by: Vec::new(),
+                    taken: false,
+                },
+                LootEntry {
+                    loot_list_id: 1,
+                    item_id: 1_002,
+                    quantity: 1,
+                    random_properties_id: 0,
+                    random_properties_seed: 0,
+                    item_context: 0,
+                    flags: LootEntryFlags {
+                        freeforall: true,
+                        ..LootEntryFlags::default()
+                    },
+                    allowed_looters: vec![first_tapper, second_tapper],
+                    roll_winner: ObjectGuid::EMPTY,
+                    ffa_looted_by: vec![first_tapper],
+                    taken: false,
+                },
+            ],
+            looted_by_player: false,
+        };
+        let mut rng = StdRng::seed_from_u64(7);
+
+        assign_represented_personal_loot_items_like_cpp(
+            &mut loot,
+            &[first_tapper, second_tapper],
+            &mut rng,
+        );
+
+        assert_eq!(loot.unlooted_count, 2);
+        assert_eq!(loot.items[0].allowed_looters.len(), 1);
+        assert_eq!(loot.items[1].allowed_looters.len(), 1);
+        assert!([first_tapper, second_tapper].contains(&loot.items[0].allowed_looters[0]));
+        assert!([first_tapper, second_tapper].contains(&loot.items[1].allowed_looters[0]));
+        assert!(loot.items[0].flags.counted);
+        assert!(!loot.items[1].flags.counted);
+        assert_eq!(loot.items[1].ffa_looted_by, Vec::<ObjectGuid>::new());
+        assert_eq!(loot.player_ffa_items.len(), 1);
+        assert_eq!(loot.player_ffa_items[0].1[0].loot_list_id, 1);
+    }
+
+    #[tokio::test]
+    async fn represented_gameobject_chest_first_generation_records_use_effects_like_cpp() {
+        let mut session = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let gameobject_guid = test_gameobject_guid(91_002);
+        session.set_player_guid(Some(player_guid));
+        session.visible_gameobjects.insert(gameobject_guid);
+
+        let source = GameObjectLootSource {
+            loot_id: 55,
+            use_group_loot_rules: false,
+            dungeon_encounter_id: 0,
+            personal_loot_id: 0,
+            push_loot_id: 0,
+            triggered_event_id: 777,
+            linked_trap_entry: 888,
+        };
+
+        session
+            .open_represented_gameobject_chest_like_cpp(gameobject_guid, source)
+            .await;
+        session
+            .open_represented_gameobject_chest_like_cpp(gameobject_guid, source)
+            .await;
+
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: 777,
+                },
+                RepresentedGameObjectUseEffect::TriggerLinkedTrap {
+                    gameobject_guid,
+                    player_guid,
+                    trap_entry: 888,
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn represented_gameobject_chest_push_unique_use_records_effects_like_cpp() {
+        let mut session = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let gameobject_guid = test_gameobject_guid(91_004);
+        session.set_player_guid(Some(player_guid));
+        session.visible_gameobjects.insert(gameobject_guid);
+
+        let source = GameObjectLootSource {
+            loot_id: 0,
+            use_group_loot_rules: false,
+            dungeon_encounter_id: 0,
+            personal_loot_id: 0,
+            push_loot_id: 99,
+            triggered_event_id: 321,
+            linked_trap_entry: 654,
+        };
+
+        session
+            .open_represented_gameobject_chest_like_cpp(gameobject_guid, source)
+            .await;
+        session
+            .open_represented_gameobject_chest_like_cpp(gameobject_guid, source)
+            .await;
+
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: 321,
+                },
+                RepresentedGameObjectUseEffect::TriggerLinkedTrap {
+                    gameobject_guid,
+                    player_guid,
+                    trap_entry: 654,
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn represented_gameobject_chest_no_loot_unique_use_records_effects_like_cpp() {
+        let mut session = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let gameobject_guid = test_gameobject_guid(91_005);
+        session.set_player_guid(Some(player_guid));
+        session.visible_gameobjects.insert(gameobject_guid);
+
+        let source = GameObjectLootSource {
+            loot_id: 0,
+            use_group_loot_rules: false,
+            dungeon_encounter_id: 0,
+            personal_loot_id: 0,
+            push_loot_id: 0,
+            triggered_event_id: 901,
+            linked_trap_entry: 902,
+        };
+
+        session
+            .open_represented_gameobject_chest_like_cpp(gameobject_guid, source)
+            .await;
+        session
+            .open_represented_gameobject_chest_like_cpp(gameobject_guid, source)
+            .await;
+
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: 901,
+                },
+                RepresentedGameObjectUseEffect::TriggerLinkedTrap {
+                    gameobject_guid,
+                    player_guid,
+                    trap_entry: 902,
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn represented_gameobject_chest_use_sets_activated_loot_state_like_cpp() {
+        let mut session = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let gameobject_guid = test_gameobject_guid(91_006);
+        session.set_player_guid(Some(player_guid));
+        session.visible_gameobjects.insert(gameobject_guid);
+
+        session
+            .open_represented_gameobject_chest_like_cpp(
+                gameobject_guid,
+                GameObjectLootSource::default(),
+            )
+            .await;
+
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .expect("represented chest use records GO loot state");
+        assert_eq!(state.loot_state, Some(LootState::Activated));
+        assert_eq!(state.loot_state_unit_guid, player_guid);
+    }
+
+    #[tokio::test]
+    async fn represented_gathering_node_first_use_records_effects_like_cpp() {
+        let mut session = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let gameobject_guid = test_gameobject_guid(91_003);
+        session.set_player_guid(Some(player_guid));
+        session.visible_gameobjects.insert(gameobject_guid);
+
+        let source = GatheringNodeUseSource {
+            loot_id: 0,
+            despawn_delay_secs: 0,
+            triggered_event_id: 123,
+            xp_difficulty: 0,
+            spell_id: 0,
+            max_loots: 10,
+            linked_trap_entry: 456,
+        };
+
+        session
+            .open_represented_gathering_node_like_cpp(gameobject_guid, source)
+            .await;
+        session
+            .open_represented_gathering_node_like_cpp(gameobject_guid, source)
+            .await;
+
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: 123,
+                },
+                RepresentedGameObjectUseEffect::TriggerLinkedTrap {
+                    gameobject_guid,
+                    player_guid,
+                    trap_entry: 456,
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn represented_gathering_node_runtime_state_matches_cpp_side_effects() {
+        let mut session = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let gameobject_guid = test_gameobject_guid(91_007);
+        session.set_player_guid(Some(player_guid));
+        session.visible_gameobjects.insert(gameobject_guid);
+
+        let source = GatheringNodeUseSource {
+            loot_id: 0,
+            despawn_delay_secs: 15,
+            triggered_event_id: 0,
+            xp_difficulty: 0,
+            spell_id: 777,
+            max_loots: 1,
+            linked_trap_entry: 0,
+        };
+
+        session
+            .open_represented_gathering_node_like_cpp(gameobject_guid, source)
+            .await;
+        session
+            .open_represented_gathering_node_like_cpp(gameobject_guid, source)
+            .await;
+
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .expect("represented gathering use records GO state");
+        assert_eq!(state.personal_loot_uses, 1);
+        assert_eq!(state.go_state, Some(GoState::Active));
+        assert_eq!(
+            state.dynamic_flags & GO_DYNFLAG_LO_NO_INTERACT,
+            GO_DYNFLAG_LO_NO_INTERACT
+        );
+        assert_eq!(state.loot_state, Some(LootState::Activated));
+        assert_eq!(state.loot_state_unit_guid, player_guid);
+        assert_eq!(state.despawn_delay_secs, Some(15));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::CastSpell {
+                gameobject_guid,
+                player_guid,
+                spell_id: 777,
+            }]
+        );
     }
 
     #[tokio::test]
@@ -7884,7 +9655,7 @@ mod tests {
         let player_guid = ObjectGuid::create_player(1, 42);
         let loot_guid = test_creature_guid(19_016);
         session.set_player_guid(Some(player_guid));
-        session.player_position = Some(Position::ZERO);
+        session.set_player_position_like_cpp(Position::ZERO);
         let mut creature = test_creature(loot_guid, false);
         creature.current_pos = Position::new(31.0, 0.0, 0.0, 0.0);
         session.creatures.insert(loot_guid, creature);
@@ -7935,7 +9706,7 @@ mod tests {
         let secondary_guid = test_creature_guid(19_032);
         session.set_player_guid(Some(player_guid));
         session.set_enable_ae_loot_like_cpp(true);
-        session.player_position = Some(Position::ZERO);
+        session.set_player_position_like_cpp(Position::ZERO);
         session
             .creatures
             .insert(main_guid, test_creature(main_guid, false));
@@ -8266,7 +10037,7 @@ mod tests {
         assert_eq!(sent.read_uint64().unwrap(), 0);
         assert_eq!(sent.read_uint64().unwrap(), 0);
         assert!(sent.read_bit().unwrap());
-        assert_eq!(session.player_gold, 0);
+        assert_eq!(session.player_gold_like_cpp(), 0);
         assert!(session.is_active_loot_guid(loot_guid));
     }
 
@@ -8390,7 +10161,7 @@ mod tests {
             wow_constants::ServerOpcodes::LootMoneyNotify as u16
         );
         assert_eq!(sent.read_uint64().unwrap(), 7);
-        assert_eq!(session.player_gold, 10);
+        assert_eq!(session.player_gold_like_cpp(), 10);
         assert_eq!(session.loot_table.get(&owner_one).unwrap().coins, 0);
         assert_eq!(session.loot_table.get(&owner_two).unwrap().coins, 0);
         assert!(session.active_loot_view_owners.contains(&owner_one));
@@ -8413,7 +10184,7 @@ mod tests {
         player_registry.insert(other_guid, broadcast_info(other_guid, other_tx));
 
         session.set_player_guid(Some(player_guid));
-        session.player_position = Some(Position::ZERO);
+        session.set_player_position_like_cpp(Position::ZERO);
         session.group_guid = Some(group_guid);
         session.set_player_registry(player_registry);
         session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
@@ -8478,7 +10249,7 @@ mod tests {
         assert_eq!(sent.read_uint64().unwrap(), 4);
         assert_eq!(sent.read_uint64().unwrap(), 0);
         assert!(!sent.read_bit().unwrap());
-        assert_eq!(session.player_gold, 4);
+        assert_eq!(session.player_gold_like_cpp(), 4);
         assert_eq!(session.loot_table.get(&loot_guid).unwrap().coins, 0);
     }
 
@@ -8489,7 +10260,7 @@ mod tests {
         let loot_guid = test_creature_guid(19_003);
         session.set_player_guid(Some(player_guid));
         session.set_active_loot_guid(loot_guid);
-        session.player_position = Some(Position::ZERO);
+        session.set_player_position_like_cpp(Position::ZERO);
         session
             .creatures
             .insert(loot_guid, test_creature(loot_guid, false));
@@ -8550,7 +10321,7 @@ mod tests {
         let loot_guid = test_creature_guid(19_004);
         session.set_player_guid(Some(player_guid));
         session.set_active_loot_guid(loot_guid);
-        session.player_position = Some(Position::ZERO);
+        session.set_player_position_like_cpp(Position::ZERO);
         session
             .creatures
             .insert(loot_guid, test_creature(loot_guid, false));
@@ -8608,7 +10379,7 @@ mod tests {
         let loot_guid = test_creature_guid(19_005);
         session.set_player_guid(Some(player_guid));
         session.set_active_loot_guid(loot_guid);
-        session.player_position = Some(Position::ZERO);
+        session.set_player_position_like_cpp(Position::ZERO);
         session
             .creatures
             .insert(loot_guid, test_creature(loot_guid, false));
@@ -8678,7 +10449,7 @@ mod tests {
     async fn set_loot_specialization_matches_cpp_class_validation() {
         let (mut session, send_rx) = make_session_with_send();
         session.set_player_guid(Some(ObjectGuid::create_player(1, 42)));
-        session.player_class = 2;
+        session.set_player_class_like_cpp(2);
         session.set_chr_specialization_store(Arc::new(ChrSpecializationStore::from_entries([
             ChrSpecializationEntry {
                 id: 65,
@@ -8693,29 +10464,29 @@ mod tests {
         session
             .handle_set_loot_specialization(SetLootSpecialization { spec_id: 65 })
             .await;
-        assert_eq!(session.loot_specialization_id, 65);
+        assert_eq!(session.loot_specialization_id_like_cpp(), 65);
 
         session
             .handle_set_loot_specialization(SetLootSpecialization { spec_id: 71 })
             .await;
-        assert_eq!(session.loot_specialization_id, 65);
+        assert_eq!(session.loot_specialization_id_like_cpp(), 65);
 
         session
             .handle_set_loot_specialization(SetLootSpecialization { spec_id: 999 })
             .await;
-        assert_eq!(session.loot_specialization_id, 65);
+        assert_eq!(session.loot_specialization_id_like_cpp(), 65);
 
         session
             .handle_set_loot_specialization(SetLootSpecialization { spec_id: 0 })
             .await;
-        assert_eq!(session.loot_specialization_id, 0);
+        assert_eq!(session.loot_specialization_id_like_cpp(), 0);
         assert!(send_rx.try_recv().is_err());
     }
 
     #[tokio::test]
     async fn set_loot_specialization_without_loaded_player_is_ignored_like_cpp_status_guard() {
         let (mut session, _send_rx) = make_session_with_send();
-        session.player_class = 2;
+        session.set_player_class_like_cpp(2);
         session.set_chr_specialization_store(Arc::new(ChrSpecializationStore::from_entries([
             ChrSpecializationEntry {
                 id: 65,
@@ -8727,7 +10498,7 @@ mod tests {
             .handle_set_loot_specialization(SetLootSpecialization { spec_id: 65 })
             .await;
 
-        assert_eq!(session.loot_specialization_id, 0);
+        assert_eq!(session.loot_specialization_id_like_cpp(), 0);
     }
 
     #[tokio::test]
@@ -9085,7 +10856,7 @@ mod tests {
         session.set_player_guid(Some(master_guid));
         session.set_active_loot_guid(loot_owner);
         install_limited_test_item_template(&mut session, 700, 1);
-        session.inventory_items.insert(
+        session.insert_inventory_item_like_cpp(
             35,
             InventoryItem {
                 guid: item_guid,
@@ -9286,7 +11057,7 @@ mod tests {
 
         target_session.set_player_guid(Some(target_guid));
         install_limited_test_item_template(&mut target_session, 701, 1);
-        target_session.inventory_items.insert(
+        target_session.insert_inventory_item_like_cpp(
             35,
             InventoryItem {
                 guid: existing_item_guid,
@@ -9426,7 +11197,7 @@ mod tests {
         let player_guid = ObjectGuid::create_player(1, 42);
         let loot_guid = test_creature_guid(19_008);
         session.set_player_guid(Some(player_guid));
-        session.player_position = Some(Position::ZERO);
+        session.set_player_position_like_cpp(Position::ZERO);
         session.set_active_loot_guid(loot_guid);
 
         let mut creature = test_creature(loot_guid, false);

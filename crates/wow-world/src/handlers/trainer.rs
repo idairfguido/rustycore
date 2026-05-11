@@ -29,12 +29,11 @@ use wow_constants::ClientOpcodes;
 use wow_database::statements::character::CharStatements;
 use wow_database::statements::world::WorldStatements;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
+use wow_packet::ClientPacket;
 use wow_packet::packets::trainer::{
     LearnedSpells, TrainerBuyFailed, TrainerBuySpellRequest, TrainerListPacket, TrainerListRequest,
     TrainerListSpell,
 };
-use wow_packet::packets::update::UpdateObject;
-use wow_packet::{ClientPacket, ServerPacket};
 
 use crate::session::WorldSession;
 
@@ -79,8 +78,8 @@ impl WorldSession {
         };
 
         // ── Resolve creature entry ─────────────────────────────────────────
-        let entry = match self.creatures.get(&trainer_guid) {
-            Some(ai) => ai.entry,
+        let entry = match self.mutate_world_creature(trainer_guid, |creature| creature.entry()) {
+            Some(entry) => entry,
             None => {
                 // Fallback: query DB by spawn GUID
                 let mut stmt = world_db.prepare(WorldStatements::SEL_CREATURE_ENTRY_BY_GUID);
@@ -184,7 +183,7 @@ impl WorldSession {
                 }
             };
 
-        let player_level = self.player_level;
+        let player_level = self.player_level_like_cpp();
         let mut spells: Vec<TrainerListSpell> = Vec::new();
 
         if !ts_result.is_empty() {
@@ -200,7 +199,7 @@ impl WorldSession {
 
                 // Determine usability:
                 // 2 = already known, 1 = available (level ok), 0 = unavailable (too low level)
-                let usable: u8 = if self.known_spells.contains(&spell_id) {
+                let usable: u8 = if self.known_spells_like_cpp().contains(&spell_id) {
                     2
                 } else if player_level >= req_level {
                     1
@@ -267,7 +266,7 @@ impl WorldSession {
             "CMSG_TRAINER_BUY_SPELL"
         );
 
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(g) => g,
             None => {
                 warn!(
@@ -279,7 +278,7 @@ impl WorldSession {
         };
 
         // ── Already known? ─────────────────────────────────────────────────
-        if self.known_spells.contains(&spell_id) {
+        if self.known_spells_like_cpp().contains(&spell_id) {
             warn!(
                 account = self.account_id,
                 spell_id = spell_id,
@@ -354,11 +353,11 @@ impl WorldSession {
         }
 
         // ── Validate level ─────────────────────────────────────────────────
-        if self.player_level < req_level {
+        if self.player_level_like_cpp() < req_level {
             warn!(
                 account = self.account_id,
                 spell_id = spell_id,
-                player_level = self.player_level,
+                player_level = self.player_level_like_cpp(),
                 req_level = req_level,
                 "Player level too low for spell"
             );
@@ -371,11 +370,11 @@ impl WorldSession {
         }
 
         // ── Validate gold ──────────────────────────────────────────────────
-        if self.player_gold < money_cost as u64 {
+        if self.player_gold_like_cpp() < money_cost as u64 {
             warn!(
                 account = self.account_id,
                 spell_id = spell_id,
-                player_gold = self.player_gold,
+                player_gold = self.player_gold_like_cpp(),
                 money_cost = money_cost,
                 "Player doesn't have enough gold for spell"
             );
@@ -392,12 +391,10 @@ impl WorldSession {
             None => return,
         };
 
-        let map_id = self.current_map_id;
-
         // ── Deduct gold ────────────────────────────────────────────────────
-        self.player_gold -= money_cost as u64;
+        self.set_player_gold_like_cpp(self.player_gold_like_cpp() - money_cost as u64);
         let mut upd_money = char_db.prepare(CharStatements::UPD_CHAR_MONEY);
-        upd_money.set_u64(0, self.player_gold);
+        upd_money.set_u64(0, self.player_gold_like_cpp());
         upd_money.set_u64(1, player_guid.counter() as u64);
         if let Err(e) = char_db.execute(&upd_money).await {
             warn!(
@@ -419,24 +416,26 @@ impl WorldSession {
         }
 
         // ── Update in-memory state ─────────────────────────────────────────
-        self.known_spells.push(spell_id);
+        self.learn_known_spell_like_cpp(spell_id);
+        self.sync_player_registry_state_like_cpp();
 
         info!(
             account = self.account_id,
             player_guid = ?player_guid,
             spell_id = spell_id,
             money_cost = money_cost,
-            remaining_gold = self.player_gold,
+            remaining_gold = self.player_gold_like_cpp(),
             "Player learned spell from trainer"
         );
 
         // ── Send gold update to client ─────────────────────────────────────
-        self.send_packet(&UpdateObject::player_money_update(
-            player_guid,
-            map_id,
-            self.player_gold,
-            None,
-        ));
+        self.send_player_values_update_from_entity_bridge(
+            &[],
+            &[],
+            &[],
+            &[],
+            Some(self.player_gold_like_cpp()),
+        );
 
         // ── Send SMSG_LEARNED_SPELLS ───────────────────────────────────────
         self.send_packet(&LearnedSpells::single(spell_id));

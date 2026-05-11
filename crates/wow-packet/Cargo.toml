@@ -12,4 +12,5 @@ num-traits = { workspace = true }
 tracing = { workspace = true }
 wow-core = { workspace = true }
 wow-constants = { workspace = true }
+wow-movement = { workspace = true }
 thiserror = { workspace = true }

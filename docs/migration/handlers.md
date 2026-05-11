@@ -447,7 +447,12 @@ Rust: `attack_swing`, `attack_stop`. Faltan duel-related (5).
   Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
   Acceptance: Rust target compiles; behavior and public contracts are checked against the listed C++ file; unit/golden/integration tests are added or marked n/a with reason; divergences are recorded before closing.
   Notes: `needs_split`; C++ file has 813 lines; split by public API, state model, persistence, runtime behavior and tests before implementation. Assignment basis: prefix.
-- [ ] **#HANDLERS.WBS.020** Cerrar la migracion auditada de `game/Handlers/HotfixHandler.cpp`
+- [x] **#HANDLERS.WBS.020a** Migrar flujo inicial de `game/Handlers/HotfixHandler.cpp`: `HandleDBQueryBulk`, `SendAvailableHotfixes`, `HandleHotfixRequest`
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/HotfixHandler.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/HotfixPackets.cpp`
+  Rust target: `crates/wow-world/src/handlers/character.rs`, `crates/wow-packet/src/packets/misc.rs`, `crates/wow-data/src/hotfix_cache.rs`
+  Acceptance: `cargo fmt --check`; `cargo test -p wow-packet hotfix -- --nocapture`; `cargo test -p wow-data hotfix -- --nocapture`; `cargo test -p wow-world dispatch_table -- --nocapture`; `cargo build -p world-server --release`
+  Notes: closed as interim blob-cache parity for live client startup. Remaining full parity is tracked in `datastores.md` as typed `DB2Manager`, per-table hotfix overlay, optional-data allowlist enforcement, and runtime `SMSG_HOTFIX_PUSH`.
+- [ ] **#HANDLERS.WBS.020** Cerrar la migracion auditada completa de `game/Handlers/HotfixHandler.cpp`
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/HotfixHandler.cpp`
   Rust target: `crates/wow-world/src/handlers`, `crates/wow-handler`
   Depends on: #REFINE.020, #REFINE.021; execution order finalized by #REFINE.040
@@ -914,4 +919,3 @@ Original §9 ordered sub-tasks by C++ family. Re-ordered by impact (player-facin
 8. Stubs for legion+/MoP+ handlers (Adventure*, BattlePet, BlackMarket,
    Garrison, Scene, Token, Transmog, VoidStorage) stay at the bottom; not
    relevant for WoLK 3.4.3 client.
-

@@ -167,6 +167,8 @@ pub struct AreaTrigger {
     template_flags: u32,
     inside_units: HashSet<ObjectGuid>,
     ai_initialized: bool,
+    grid_unload_cleanup_before_delete_count: u32,
+    grid_unload_delete_requested: bool,
 }
 
 impl AreaTrigger {
@@ -205,6 +207,8 @@ impl AreaTrigger {
             template_flags: 0,
             inside_units: HashSet::new(),
             ai_initialized: false,
+            grid_unload_cleanup_before_delete_count: 0,
+            grid_unload_delete_requested: false,
         }
     }
 
@@ -226,6 +230,29 @@ impl AreaTrigger {
 
     pub fn clear_area_trigger_data_changes(&mut self) {
         self.area_trigger_data_changes.reset_all();
+    }
+
+    pub const fn cleanup_before_delete_count(&self) -> u32 {
+        self.grid_unload_cleanup_before_delete_count
+    }
+
+    pub const fn grid_unload_delete_requested(&self) -> bool {
+        self.grid_unload_delete_requested
+    }
+
+    pub fn set_destroyed_object(&mut self, destroyed: bool) {
+        self.world.object_mut().set_destroyed_object(destroyed);
+    }
+
+    pub fn cleanup_before_delete(&mut self) {
+        self.grid_unload_cleanup_before_delete_count = self
+            .grid_unload_cleanup_before_delete_count
+            .saturating_add(1);
+    }
+
+    pub fn request_delete_from_grid_unload(&mut self) {
+        self.grid_unload_delete_requested = true;
+        self.world.clear_current_cell();
     }
 
     pub const fn spawn_id(&self) -> u64 {

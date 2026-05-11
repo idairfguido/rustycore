@@ -64,15 +64,18 @@ impl ItemDisenchantLootStore {
 
         let mut ordered_entries = Vec::with_capacity(reader.total_count());
         for (id, idx) in reader.iter_records() {
+            let class_id = reader
+                .get_relationship_id(idx)
+                .with_context(|| format!("missing WDC4 relationship Class for record {id}"))?;
             ordered_entries.push(ItemDisenchantLootEntry {
                 id,
-                subclass: reader.get_field_i8(idx, 1),
-                quality: reader.get_field_u8(idx, 2),
-                min_level: reader.get_field_u16(idx, 3),
-                max_level: reader.get_field_u16(idx, 4),
-                skill_required: reader.get_field_u16(idx, 5),
-                expansion_id: reader.get_field_i8(idx, 6),
-                class_id: reader.get_field_u32(idx, 7),
+                subclass: reader.get_field_i8(idx, 0),
+                quality: reader.get_field_u8(idx, 1),
+                min_level: reader.get_field_u16(idx, 2),
+                max_level: reader.get_field_u16(idx, 3),
+                skill_required: reader.get_field_u16(idx, 4),
+                expansion_id: reader.get_field_i8(idx, 5),
+                class_id,
             });
         }
 

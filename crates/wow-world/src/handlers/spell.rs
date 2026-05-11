@@ -46,7 +46,6 @@ use wow_packet::packets::loot::{
 use wow_packet::packets::spell::{
     CastFailed, CastSpellRequest, OpenItem, SpellCastVisual, SpellStartPkt, SpellTargetData,
 };
-use wow_packet::packets::update::UpdateObject;
 
 use crate::session::WorldSession;
 
@@ -113,7 +112,7 @@ impl WorldSession {
     /// 3. If cast_time > 0: initiate cast (SMSG_SPELL_START), wait for tick_active_spell_cast().
     /// 4. If instant: execute immediately.
     pub async fn handle_cast_spell(&mut self, mut pkt: wow_packet::WorldPacket) {
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(g) => g,
             None => {
                 warn!("handle_cast_spell: no player_guid");
@@ -144,7 +143,7 @@ impl WorldSession {
         );
 
         // ── Validation: Known spell ─────────────────────────────────────
-        if !self.known_spells.contains(&spell_id) {
+        if !self.known_spells_like_cpp().contains(&spell_id) {
             warn!(
                 account = self.account_id,
                 spell_id = spell_id,
@@ -354,7 +353,7 @@ impl WorldSession {
         };
 
         let is_wrapped = self
-            .inventory_item_objects
+            .inventory_item_objects_like_cpp()
             .get(&item.guid)
             .is_some_and(|runtime_item| runtime_item.is_wrapped());
 
@@ -377,7 +376,7 @@ impl WorldSession {
             }
 
             let item_is_locked = self
-                .inventory_item_objects
+                .inventory_item_objects_like_cpp()
                 .get(&item.guid)
                 .map_or(true, |item_object| item_object.is_locked());
             if item_is_locked {
@@ -392,7 +391,7 @@ impl WorldSession {
             return;
         }
 
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return;
         };
 
@@ -451,9 +450,9 @@ impl WorldSession {
             );
         }
 
-        if let Some(item_object) = self.inventory_item_objects.get_mut(&item.guid) {
+        self.update_inventory_item_object_like_cpp(item.guid, |item_object| {
             item_object.set_loot_generated(true);
-        }
+        });
 
         let Some(loot) = self.loot_table.get(&item.guid) else {
             self.send_equip_error(
@@ -539,23 +538,24 @@ impl WorldSession {
 
         let max_durability = self.item_template_max_durability(entry);
         let inventory_type = self.item_template_inventory_type(entry);
-        let item_object = self.inventory_item_objects.get_mut(&item_guid)?;
-        if !item_object.is_wrapped() || item_object.object().guid() != item_guid {
+        let mut durability = None;
+        let updated = self.update_inventory_item_object_like_cpp(item_guid, |item_object| {
+            if item_object.is_wrapped() && item_object.object().guid() == item_guid {
+                durability = Some(apply_wrapped_gift_transform_like_cpp(
+                    item_object,
+                    entry,
+                    flags,
+                    max_durability,
+                ));
+            }
+        });
+        if !updated {
             return None;
         }
-
-        let durability =
-            apply_wrapped_gift_transform_like_cpp(item_object, entry, flags, max_durability);
+        let durability = durability?;
 
         if bag == INVENTORY_SLOT_BAG_0 {
-            if let Some(inventory_item) = self
-                .inventory_items
-                .get_mut(&slot)
-                .filter(|inventory_item| inventory_item.guid == item_guid)
-            {
-                inventory_item.entry_id = entry;
-                inventory_item.inventory_type = inventory_type;
-            }
+            self.update_inventory_item_metadata_like_cpp(slot, item_guid, entry, inventory_type);
         }
 
         Some(durability)
@@ -587,7 +587,7 @@ impl WorldSession {
         slot: u8,
         item_guid: ObjectGuid,
     ) {
-        let Some(player_guid) = self.player_guid else {
+        let Some(player_guid) = self.player_guid() else {
             return;
         };
         let Some(item) = self.get_inventory_item_by_pos(bag, slot) else {
@@ -600,7 +600,10 @@ impl WorldSession {
             return;
         };
 
-        let runtime_item = self.inventory_item_objects.get(&item_guid).cloned();
+        let runtime_item = self
+            .inventory_item_objects_like_cpp()
+            .get(&item_guid)
+            .cloned();
         let should_expire_refund = runtime_item
             .as_ref()
             .is_some_and(|item_object| item_object.is_refundable());
@@ -648,13 +651,13 @@ impl WorldSession {
                 virtual_item_changes.push((slot - 15, 0i32, 0u16, 0u16));
             }
 
-            self.send_packet(&UpdateObject::player_values_update(
-                player_guid,
-                self.current_map_id,
-                vec![(slot, ObjectGuid::EMPTY)],
-                visible_item_changes,
-                virtual_item_changes,
-            ));
+            self.send_player_values_update_from_entity_bridge(
+                &[(slot, ObjectGuid::EMPTY)],
+                &visible_item_changes,
+                &virtual_item_changes,
+                &[],
+                None,
+            );
 
             if slot < 19 {
                 self.send_stat_update();
@@ -1279,10 +1282,13 @@ impl WorldSession {
     }
 
     fn direct_inventory_item_count_like_cpp_representable(&self, item_id: u32) -> u32 {
-        self.inventory_items
+        self.inventory_items_like_cpp()
             .values()
             .filter(|inventory_item| inventory_item.entry_id == item_id)
-            .filter_map(|inventory_item| self.inventory_item_objects.get(&inventory_item.guid))
+            .filter_map(|inventory_item| {
+                self.inventory_item_objects_like_cpp()
+                    .get(&inventory_item.guid)
+            })
             .filter(|item| !item.is_in_trade())
             .fold(0_u32, |total, item| total.saturating_add(item.count()))
     }
@@ -1314,7 +1320,10 @@ impl WorldSession {
                         >= condition.value2,
                 )
             }
-            6 => Some(player_team_for_race_cpp_representable(self.player_race) == condition.value1),
+            6 => Some(
+                player_team_for_race_cpp_representable(self.player_race_like_cpp())
+                    == condition.value1,
+            ),
             8 => Some(self.rewarded_quests.contains(&condition.value1)),
             9 => Some(
                 self.player_quests
@@ -1326,20 +1335,20 @@ impl WorldSession {
                     && !self.rewarded_quests.contains(&condition.value1),
             ),
             15 => Some(
-                player_class_mask_like_cpp(self.player_class)
+                player_class_mask_like_cpp(self.player_class_like_cpp())
                     .is_some_and(|mask| mask & condition.value1 != 0),
             ),
             16 => Some(
-                player_race_mask_like_cpp(self.player_race)
+                player_race_mask_like_cpp(self.player_race_like_cpp())
                     .is_some_and(|mask| mask & condition.value1 != 0),
             ),
-            20 => Some(u32::from(self.player_gender) == condition.value1),
+            20 => Some(u32::from(self.player_gender_like_cpp()) == condition.value1),
             25 => i32::try_from(condition.value1)
                 .ok()
-                .map(|spell_id| self.known_spells.contains(&spell_id)),
+                .map(|spell_id| self.known_spells_like_cpp().contains(&spell_id)),
             27 => condition_compare_values_like_cpp(
                 condition.value2,
-                u32::from(self.player_level),
+                u32::from(self.player_level_like_cpp()),
                 condition.value1,
             ),
             28 => Some(

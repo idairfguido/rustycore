@@ -17,14 +17,14 @@ use wow_constants::{
 use wow_core::guid::HighGuid;
 use wow_core::{ObjectGuid, Position};
 use wow_crypto::rsa_sign::rsa_sign_connect_to;
-use wow_data::{CurrencyTypesStore, ItemExtendedCostStore};
+use wow_data::{CurrencyTypesStore, HotfixRecordStatus, ItemExtendedCostStore, hotfix_locale_mask};
 use wow_database::{
     CharStatements, CharacterDatabase, LoginStatements, SqlTransaction, WorldDatabase,
     WorldStatements,
 };
 use wow_entities::{
-    BANK_SLOT_BAG_END, BANK_SLOT_BAG_START, BUYBACK_SLOT_COUNT, BUYBACK_SLOT_START,
-    INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_BAG_END, INVENTORY_SLOT_BAG_START,
+    BANK_SLOT_BAG_END, BANK_SLOT_BAG_START, BUYBACK_SLOT_START, INVENTORY_DEFAULT_SIZE,
+    INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_BAG_END, INVENTORY_SLOT_BAG_START,
     INVENTORY_SLOT_ITEM_START, MAX_BAG_SIZE, NULL_BAG, NULL_SLOT, REAGENT_BAG_SLOT_END,
     REAGENT_BAG_SLOT_START, is_equipment_pos, is_inventory_pos,
 };
@@ -1923,13 +1923,22 @@ impl WorldSession {
         for record_id in &query.queries {
             if let Some(ref c) = cache {
                 if let Some(blob) = c.get(query.table_hash, *record_id) {
+                    let mut data = blob.to_vec();
+                    if let Some(optional_entries) =
+                        c.get_optional_data(query.table_hash, *record_id, &self.locale)
+                    {
+                        for optional_data in optional_entries {
+                            data.extend_from_slice(&optional_data.key.to_le_bytes());
+                            data.extend_from_slice(&optional_data.data);
+                        }
+                    }
                     info!(
                         "DbQueryBulk: FOUND blob table=0x{:08X} record={} ({} bytes)",
                         query.table_hash,
                         record_id,
-                        blob.len()
+                        data.len()
                     );
-                    self.send_packet(&DBReply::found(query.table_hash, *record_id, blob.to_vec()));
+                    self.send_packet(&DBReply::found(query.table_hash, *record_id, data));
                     continue;
                 }
             }
@@ -1946,8 +1955,6 @@ impl WorldSession {
     }
 
     /// Handle CMSG_HOTFIX_REQUEST — client requests hotfix data.
-    ///
-    /// We have no hotfixes, so we respond with an empty HotfixConnect.
     pub async fn handle_hotfix_request(&mut self, req: wow_packet::packets::misc::HotfixRequest) {
         debug!(
             "HotfixRequest: client_build={}, data_build={}, {} hotfixes for account {}",
@@ -1956,7 +1963,67 @@ impl WorldSession {
             req.hotfixes.len(),
             self.account_id
         );
-        self.send_packet(&HotfixConnect);
+
+        let Some(cache) = self.hotfix_blob_cache().map(Arc::clone) else {
+            self.send_packet(&HotfixConnect::empty());
+            return;
+        };
+
+        let mut response = HotfixConnect::empty();
+        let locale_mask = hotfix_locale_mask(&self.locale);
+        for push_id in &req.hotfixes {
+            let Some(push) = cache.hotfix_push(*push_id) else {
+                continue;
+            };
+
+            for record in &push.records {
+                if record.available_locales_mask & locale_mask == 0 {
+                    continue;
+                }
+
+                let mut status = record.status as u8;
+                let mut size = 0u32;
+
+                if record.status == HotfixRecordStatus::Valid {
+                    if let Some(blob) = cache.get(record.table_hash, record.record_id) {
+                        let start = response.content.len();
+                        response.content.extend_from_slice(blob);
+                        if let Some(optional_entries) = cache.get_optional_data(
+                            record.table_hash,
+                            record.record_id,
+                            &self.locale,
+                        ) {
+                            for optional_data in optional_entries {
+                                response
+                                    .content
+                                    .extend_from_slice(&optional_data.key.to_le_bytes());
+                                response.content.extend_from_slice(&optional_data.data);
+                            }
+                        }
+                        size = (response.content.len() - start) as u32;
+                    } else {
+                        status = if cache.has_table(record.table_hash) {
+                            HotfixRecordStatus::RecordRemoved as u8
+                        } else {
+                            HotfixRecordStatus::Invalid as u8
+                        };
+                    }
+                }
+
+                response.hotfixes.push(HotfixConnectData {
+                    id: HotfixId {
+                        push_id: record.id.push_id,
+                        unique_id: record.id.unique_id,
+                    },
+                    table_hash: record.table_hash,
+                    record_id: record.record_id,
+                    size,
+                    status,
+                });
+            }
+        }
+
+        self.send_packet(&response);
     }
 
     /// Handle CMSG_TIME_SYNC_RESPONSE — client's response to our TimeSyncRequest.
@@ -1971,7 +2038,7 @@ impl WorldSession {
             "TimeSyncResponse: seq={}, client_time={} for account {}",
             resp.sequence_index, resp.client_time, self.account_id
         );
-        // TODO: compute clock delta for lag compensation (not needed for basic world entry)
+        self.record_time_sync_response_like_cpp(resp.sequence_index, resp.client_time);
     }
 
     /// Handle CMSG_LOGOUT_REQUEST — player wants to log out.
@@ -2004,7 +2071,7 @@ impl WorldSession {
         self.clear_buyback_on_logout().await;
 
         if let Some(player_guid) = self.player_guid() {
-            self.do_loot_release_all_like_cpp(player_guid).await;
+            self.close_active_loot_windows_like_cpp(player_guid);
         }
 
         // Mark character offline in DB
@@ -2022,13 +2089,8 @@ impl WorldSession {
         self.set_player_guid(None);
 
         // Clear inventory state
-        self.inventory_items.clear();
-        self.buyback_items.clear();
-        self.buyback_price = [0; BUYBACK_SLOT_COUNT];
-        self.buyback_timestamp = [0; BUYBACK_SLOT_COUNT];
-        self.current_buyback_slot = BUYBACK_SLOT_START;
-        self.inventory_item_objects.clear();
-        self.player_currencies.clear();
+        self.clear_all_inventory_runtime_like_cpp();
+        self.clear_player_currencies_like_cpp();
         self.set_active_loot_guid(ObjectGuid::EMPTY);
 
         // ── Restore realm socket as primary ──────────────────────────
@@ -2112,10 +2174,8 @@ impl WorldSession {
             Some(g) => g,
             None => return,
         };
-        if self.buyback_items.is_empty() {
-            self.buyback_price = [0; BUYBACK_SLOT_COUNT];
-            self.buyback_timestamp = [0; BUYBACK_SLOT_COUNT];
-            self.current_buyback_slot = BUYBACK_SLOT_START;
+        if self.buyback_items_like_cpp().is_empty() {
+            self.clear_buyback_runtime_like_cpp();
             return;
         }
 
@@ -2125,7 +2185,7 @@ impl WorldSession {
         };
 
         let mut tx = SqlTransaction::new();
-        for item in self.buyback_items.values() {
+        for item in self.buyback_items_like_cpp().values() {
             let mut del_inv = char_db.prepare(CharStatements::DEL_CHAR_INVENTORY_ITEM);
             del_inv.set_u64(0, guid.counter() as u64);
             del_inv.set_u64(1, item.db_guid);
@@ -2144,14 +2204,15 @@ impl WorldSession {
             return;
         }
 
-        let removed_guids: Vec<_> = self.buyback_items.values().map(|item| item.guid).collect();
+        let removed_guids: Vec<_> = self
+            .buyback_items_like_cpp()
+            .values()
+            .map(|item| item.guid)
+            .collect();
         for item_guid in removed_guids {
             self.remove_inventory_item_object(item_guid);
         }
-        self.buyback_items.clear();
-        self.buyback_price = [0; BUYBACK_SLOT_COUNT];
-        self.buyback_timestamp = [0; BUYBACK_SLOT_COUNT];
-        self.current_buyback_slot = BUYBACK_SLOT_START;
+        self.clear_buyback_runtime_like_cpp();
         self.sync_object_accessor_player();
     }
 
@@ -2234,7 +2295,7 @@ impl WorldSession {
 
         let name: String = result.read_string(2);
         // Store character name for chat messages.
-        self.player_name = Some(name.clone());
+        self.set_loaded_player_name_like_cpp(name.clone());
         let race: u8 = result.read(3);
         let class: u8 = result.read(4);
         let gender: u8 = result.read(5);
@@ -2253,17 +2314,16 @@ impl WorldSession {
         // Cols: 15=totaltime, 16=leveltime, 17=money (bigint unsigned).
         self.total_played_time = result.try_read::<u32>(15).unwrap_or(0);
         self.level_played_time = result.try_read::<u32>(16).unwrap_or(0);
-        self.player_gold = result.try_read::<u64>(17).unwrap_or(0);
-        self.player_xp = result.try_read::<u32>(18).unwrap_or(0);
+        self.set_player_gold_like_cpp(result.try_read::<u64>(17).unwrap_or(0));
+        self.set_player_xp_like_cpp(result.try_read::<u32>(18).unwrap_or(0));
 
         // Load equipped items for visible display + inventory objects
         let mut visible_items = [(0i32, 0u16, 0u16); 19];
         let mut inv_slots = [ObjectGuid::EMPTY; 141];
         let mut item_creates: Vec<wow_packet::packets::update::ItemCreateData> = Vec::new();
         let realm_id = self.realm_id();
-        self.inventory_items.clear();
-        self.inventory_item_objects.clear();
-        self.player_currencies.clear();
+        self.clear_inventory_items_and_objects_like_cpp();
+        self.clear_player_currencies_like_cpp();
         {
             let mut eq_stmt = char_db.prepare(CharStatements::SEL_CHAR_EQUIPMENT);
             eq_stmt.set_u64(0, guid.counter() as u64);
@@ -2334,9 +2394,9 @@ impl WorldSession {
                                 inventory_type,
                             };
                             if WorldSession::is_buyback_slot(slot) {
-                                self.buyback_items.insert(slot, inventory_item);
+                                self.insert_buyback_item_like_cpp(slot, inventory_item);
                             } else {
-                                self.inventory_items.insert(slot, inventory_item);
+                                self.insert_inventory_item_like_cpp(slot, inventory_item);
                             }
                             let mut item_object = self.make_inventory_item_object(
                                 item_guid,
@@ -2410,7 +2470,7 @@ impl WorldSession {
                                 let item_played_time = bag_result.try_read::<u32>(8).unwrap_or(0);
                                 if item_entry > 0 && is_represented_bag_slot(bag_slot) {
                                     if let Some(bag_item_guid) = self
-                                        .inventory_items
+                                        .inventory_items_like_cpp()
                                         .get(&bag_slot)
                                         .map(|bag_item| bag_item.guid)
                                     {
@@ -2458,6 +2518,7 @@ impl WorldSession {
             // inventory_type is now loaded from the canonical ItemTemplate bridge.
             // No SQL cache needed.
         }
+        self.sync_player_inventory_like_cpp();
 
         // ── Load character currencies from character_currency ──
         // C++ `Player::_LoadCurrency` skips rows not found in sCurrencyTypesStore.
@@ -2474,9 +2535,9 @@ impl WorldSession {
                                 .currency_types_store()
                                 .is_some_and(|store| store.has_record(currency_id));
                             if known_currency {
-                                self.player_currencies
-                                    .entry(currency_id)
-                                    .or_insert_with(|| crate::session::PlayerCurrency {
+                                let mut currencies = self.player_currencies_like_cpp().clone();
+                                currencies.entry(currency_id).or_insert_with(|| {
+                                    crate::session::PlayerCurrency {
                                         state: crate::session::PlayerCurrencyState::Unchanged,
                                         quantity: currency_result.try_read(1).unwrap_or(0),
                                         weekly_quantity: currency_result.try_read(2).unwrap_or(0),
@@ -2486,7 +2547,9 @@ impl WorldSession {
                                             .unwrap_or(0),
                                         earned_quantity: currency_result.try_read(5).unwrap_or(0),
                                         flags: currency_result.try_read(6).unwrap_or(0),
-                                    });
+                                    }
+                                });
+                                self.set_player_currencies_like_cpp(currencies);
                             }
                             if !currency_result.next_row() {
                                 break;
@@ -2495,9 +2558,10 @@ impl WorldSession {
                     }
                     info!(
                         "Loaded {} currencies for {:?}",
-                        self.player_currencies.len(),
+                        self.player_currencies_like_cpp().len(),
                         guid
                     );
+                    self.sync_player_currencies_like_cpp();
                 }
                 Err(e) => {
                     warn!("Failed to load currencies for {:?}: {}", guid, e);
@@ -2611,7 +2675,7 @@ impl WorldSession {
         }
 
         // Store final known_spells in session for later use (ShowTradeSkill, etc.)
-        self.known_spells = known_spells.clone();
+        self.set_known_spells_like_cpp(known_spells.clone());
 
         // ── Load action buttons from character_action ──
         // Column types: button=tinyint unsigned, action=int unsigned, type=tinyint unsigned
@@ -2651,11 +2715,7 @@ impl WorldSession {
         }
 
         // Store current map and character info for VALUES updates + stat recalculation
-        self.current_map_id = map_id as u16;
-        self.player_race = race;
-        self.player_class = class;
-        self.player_level = level;
-        self.player_gender = gender;
+        self.set_loaded_player_identity_like_cpp(map_id as u16, race, class, level, gender);
         self.refresh_next_level_xp();
         // NOTE: known_spells is stored below after DBC merge (see "Merge DBC auto-learned spells")
 
@@ -2667,7 +2727,7 @@ impl WorldSession {
                 let mut g_rap = 0i32;
                 let mut g_health = 0i32;
                 let mut g_mana = 0i32;
-                for (&slot, inv_item) in &self.inventory_items {
+                for (&slot, inv_item) in self.inventory_items_like_cpp() {
                     if slot < 19 {
                         // only equipped gear slots affect stats
                         if let Some(entry) = iss.get(inv_item.entry_id) {
@@ -3025,18 +3085,23 @@ impl WorldSession {
         }
 
         let count = blocks.len();
-        // Snapshot visible set from AI tracker (populated in loop above).
-        self.visible_creatures = self.creatures.keys().cloned().collect();
+        // Snapshot visible set from the map-owned creature store.
+        self.visible_creatures = self.world_creature_guids().into_iter().collect();
         self.last_visibility_pos = Some(*position);
         let update = UpdateObject::create_creatures(blocks, map_id);
         self.send_packet(&update);
+        let visible_guids: Vec<_> = self.visible_creatures.iter().copied().collect();
+        let mob_count = visible_guids
+            .iter()
+            .filter(|g| {
+                self.mutate_world_creature(**g, |creature| creature.npc_flags() == 0)
+                    .unwrap_or(false)
+            })
+            .count();
+        let npc_count = self.visible_creatures.len().saturating_sub(mob_count);
         debug!(
             "Sent {} creatures ({} mobs / {} npcs) to account {} on map {}",
-            count,
-            self.creatures.values().filter(|a| a.npc_flags == 0).count(),
-            self.creatures.values().filter(|a| a.npc_flags > 0).count(),
-            self.account_id,
-            map_id
+            count, mob_count, npc_count, self.account_id, map_id
         );
     }
 
@@ -3053,7 +3118,7 @@ impl WorldSession {
         use std::collections::HashSet;
 
         // ── Position & threshold check ──────────────────────────────────
-        let pos = match self.player_position {
+        let pos = match self.player_position_like_cpp() {
             Some(p) => p,
             None => return,
         };
@@ -3065,7 +3130,7 @@ impl WorldSession {
             }
         }
 
-        let map_id = self.current_map_id;
+        let map_id = self.player_map_id_like_cpp();
         let realm_id = self.realm_id();
 
         const RANGE: f32 = 800.0;
@@ -3236,9 +3301,6 @@ impl WorldSession {
                 "Visibility update: {} creatures out of range",
                 removed_creatures.len()
             );
-            for g in &removed_creatures {
-                self.creatures.remove(g);
-            }
             self.send_packet(&UpdateObject::out_of_range_objects(
                 removed_creatures,
                 map_id,
@@ -3909,16 +3971,11 @@ impl WorldSession {
 
         const GOSSIP_FLAG: u32 = 0x1;
 
-        let npc_flags = self
-            .creatures
-            .get(&hello.unit)
-            .map(|c| c.npc_flags)
-            .unwrap_or(0);
-        let entry = self
-            .creatures
-            .get(&hello.unit)
-            .map(|c| c.entry)
-            .unwrap_or(0);
+        let (npc_flags, entry) = self
+            .mutate_world_creature(hello.unit, |creature| {
+                (creature.npc_flags(), creature.entry())
+            })
+            .unwrap_or((0, 0));
 
         info!(
             "GossipHello npc_flags=0x{:X} entry={} for {:?}",
@@ -4125,9 +4182,7 @@ impl WorldSession {
         const GUILD_BANKER: u32 = 0x800000;
 
         let npc_flags = self
-            .creatures
-            .get(&hello.unit)
-            .map(|c| c.npc_flags)
+            .mutate_world_creature(hello.unit, |creature| creature.npc_flags())
             .unwrap_or(0);
 
         if npc_flags & VENDOR_MASK != 0 {
@@ -4350,9 +4405,9 @@ impl WorldSession {
             None => return,
         };
 
-        // Resolve creature entry: first from AI tracker, then fallback from DB by spawn GUID.
-        let entry = match self.creatures.get(&vendor_guid) {
-            Some(ai) => ai.entry,
+        // Resolve creature entry: first from map-owned creature state, then fallback from DB by spawn GUID.
+        let entry = match self.mutate_world_creature(vendor_guid, |creature| creature.entry()) {
+            Some(entry) => entry,
             None => {
                 let mut stmt = world_db.prepare(WorldStatements::SEL_CREATURE_ENTRY_BY_GUID);
                 stmt.set_u64(0, vendor_guid.low_value() as u64);
@@ -4515,7 +4570,7 @@ impl WorldSession {
                     if vendor_list_should_skip_allowed_class(
                         sparse_template.map(|template| template.allowable_class),
                         sparse_template.map(|template| template.bonding),
-                        self.player_class,
+                        self.player_class_like_cpp(),
                         self.security > 0,
                     ) {
                         if !result.next_row() {
@@ -4525,7 +4580,7 @@ impl WorldSession {
                     }
                     if vendor_list_should_skip_faction_flags(
                         sparse_template.map(|template| template.flags[1]),
-                        player_team_for_race_cpp(self.player_race),
+                        player_team_for_race_cpp(self.player_race_like_cpp()),
                         self.security > 0,
                     ) {
                         if !result.next_row() {
@@ -4598,7 +4653,7 @@ impl WorldSession {
         }
 
         let mut current_count = 0_u32;
-        let mut slots: Vec<_> = self.inventory_items.iter().collect();
+        let mut slots: Vec<_> = self.inventory_items_like_cpp().iter().collect();
         slots.sort_by_key(|&(slot, _)| {
             let slot = *slot;
             if slot >= 19 {
@@ -4612,7 +4667,10 @@ impl WorldSession {
             if inventory_item.entry_id != item_entry {
                 continue;
             }
-            let Some(item) = self.inventory_item_objects.get(&inventory_item.guid) else {
+            let Some(item) = self
+                .inventory_item_objects_like_cpp()
+                .get(&inventory_item.guid)
+            else {
                 continue;
             };
             if item.is_in_trade() {
@@ -4638,7 +4696,7 @@ impl WorldSession {
 
         let mut remaining = count;
         let mut changes = Vec::new();
-        let mut slots: Vec<_> = self.inventory_items.iter().collect();
+        let mut slots: Vec<_> = self.inventory_items_like_cpp().iter().collect();
         slots.sort_by_key(|&(slot, _)| {
             let slot = *slot;
             if slot >= 19 {
@@ -4652,7 +4710,10 @@ impl WorldSession {
             if inventory_item.entry_id != item_entry {
                 continue;
             }
-            let Some(item) = self.inventory_item_objects.get(&inventory_item.guid) else {
+            let Some(item) = self
+                .inventory_item_objects_like_cpp()
+                .get(&inventory_item.guid)
+            else {
                 continue;
             };
             if item.is_in_trade() {
@@ -4717,7 +4778,7 @@ impl WorldSession {
 
     fn apply_item_turnin_changes(
         &mut self,
-        player_guid: ObjectGuid,
+        _player_guid: ObjectGuid,
         map_id: u16,
         changes: &[ExtendedCostItemTurninChange],
     ) {
@@ -4733,9 +4794,9 @@ impl WorldSession {
                     new_count,
                     ..
                 } => {
-                    if let Some(item) = self.inventory_item_objects.get_mut(&item_guid) {
+                    self.update_inventory_item_object_like_cpp(item_guid, |item| {
                         item.set_count(new_count);
-                    }
+                    });
                     self.send_packet(&UpdateObject::item_stack_count_update(
                         item_guid, map_id, new_count,
                     ));
@@ -4743,7 +4804,7 @@ impl WorldSession {
                 ExtendedCostItemTurninChange::Delete {
                     slot, item_guid, ..
                 } => {
-                    self.inventory_items.remove(&slot);
+                    self.remove_inventory_item_like_cpp(slot);
                     self.remove_inventory_item_object(item_guid);
                     cleared_slots.push((slot, ObjectGuid::EMPTY));
                     if (slot as usize) < 19 {
@@ -4759,13 +4820,13 @@ impl WorldSession {
 
         if !cleared_slots.is_empty() {
             self.sync_object_accessor_player();
-            self.send_packet(&UpdateObject::player_values_update(
-                player_guid,
-                map_id,
-                cleared_slots,
-                visible_item_changes,
-                virtual_item_changes,
-            ));
+            self.send_player_values_update_from_entity_bridge(
+                &cleared_slots,
+                &visible_item_changes,
+                &virtual_item_changes,
+                &[],
+                None,
+            );
         }
         if send_stat_update {
             self.send_stat_update();
@@ -4784,20 +4845,20 @@ impl WorldSession {
             buy.item_id, buy.quantity, buy.muid, buy.vendor_guid
         );
 
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
         let realm_id = self.realm_id();
-        let map_id = self.current_map_id;
+        let map_id = self.player_map_id_like_cpp();
         let vendor_slot = match vendor_buy_muid_to_cpp_slot(buy.muid) {
             Some(slot) => slot,
             None => return,
         };
 
         // ── Get vendor NPC entry from creature GUID ──
-        let vendor_entry = match self.creatures.get(&buy.vendor_guid) {
-            Some(c) => c.entry,
+        let vendor_entry = match self.mutate_world_creature(buy.vendor_guid, |c| c.entry()) {
+            Some(entry) => entry,
             None => {
                 warn!("BuyItem: vendor {:?} not in creatures", buy.vendor_guid);
                 self.send_buy_error(
@@ -4901,18 +4962,18 @@ impl WorldSession {
                 };
                 item_turnin_changes.append(&mut changes);
             }
-            let currency_snapshot = self.player_currencies.clone();
+            let currency_snapshot = self.player_currencies_like_cpp().clone();
             let currency_gain = match self.add_currency_vendor(buy.item_id as u32, quantity) {
                 Ok(delta) => delta,
                 Err(()) => {
-                    self.player_currencies = currency_snapshot;
+                    self.set_player_currencies_like_cpp(currency_snapshot);
                     self.send_equip_error(InventoryResult::VendorMissingTurnins, None, None, 0, 0);
                     return;
                 }
             };
             for &(currency_id, amount) in &extended_cost_currency_costs {
                 if i32::try_from(amount).is_err() || !self.remove_currency(currency_id, amount) {
-                    self.player_currencies = currency_snapshot;
+                    self.set_player_currencies_like_cpp(currency_snapshot);
                     self.send_equip_error(InventoryResult::VendorMissingTurnins, None, None, 0, 0);
                     return;
                 }
@@ -4927,7 +4988,7 @@ impl WorldSession {
             );
             self.append_player_currency_save_statements(&mut tx, player_guid.counter() as u64);
             if let Err(e) = char_db.commit_transaction(tx).await {
-                self.player_currencies = currency_snapshot;
+                self.set_player_currencies_like_cpp(currency_snapshot);
                 warn!("BuyItem: currency vendor transaction failed: {e}");
                 self.send_buy_error(
                     BuyResult::CantFindItem,
@@ -5037,8 +5098,8 @@ impl WorldSession {
             allowable_class,
             bonding,
             flags2,
-            self.player_class,
-            self.player_race,
+            self.player_class_like_cpp(),
+            self.player_race_like_cpp(),
             self.security > 0,
         ) {
             match block {
@@ -5134,7 +5195,7 @@ impl WorldSession {
         );
 
         // ── Check gold ──
-        if self.player_gold < buy_price {
+        if self.player_gold_like_cpp() < buy_price {
             self.send_buy_error(
                 BuyResult::NotEnoughtMoney,
                 Some(buy.vendor_guid),
@@ -5166,7 +5227,7 @@ impl WorldSession {
 
         let needs_new_items = store_dest.iter().any(|dest| {
             let slot = (dest.pos & 0x00FF) as u8;
-            !self.inventory_items.contains_key(&slot)
+            !self.inventory_items_like_cpp().contains_key(&slot)
         });
         let mut next_item_guid = if needs_new_items {
             let max_guid_stmt = char_db.prepare(CharStatements::SEL_MAX_ITEM_GUID);
@@ -5179,7 +5240,7 @@ impl WorldSession {
         };
 
         let mut tx = SqlTransaction::new();
-        let new_gold = self.player_gold.saturating_sub(buy_price);
+        let new_gold = self.player_gold_like_cpp().saturating_sub(buy_price);
         let mut upd_money = char_db.prepare(CharStatements::UPD_CHAR_MONEY);
         upd_money.set_u64(0, new_gold);
         upd_money.set_u64(1, player_guid.counter() as u64);
@@ -5199,8 +5260,10 @@ impl WorldSession {
                 return;
             }
 
-            if let Some(inv_item) = self.inventory_items.get(&slot) {
-                let Some(existing_item) = self.inventory_item_objects.get(&inv_item.guid) else {
+            if let Some(inv_item) = self.inventory_items_like_cpp().get(&slot) {
+                let Some(existing_item) =
+                    self.inventory_item_objects_like_cpp().get(&inv_item.guid)
+                else {
                     warn!("BuyItem: missing runtime item object for slot {}", slot);
                     self.send_buy_error(
                         BuyResult::CantFindItem,
@@ -5271,10 +5334,10 @@ impl WorldSession {
             &item_turnin_changes,
         );
 
-        let currency_snapshot = self.player_currencies.clone();
+        let currency_snapshot = self.player_currencies_like_cpp().clone();
         for &(currency_id, amount) in &extended_cost_currency_costs {
             if i32::try_from(amount).is_err() || !self.remove_currency(currency_id, amount) {
-                self.player_currencies = currency_snapshot;
+                self.set_player_currencies_like_cpp(currency_snapshot);
                 self.send_equip_error(InventoryResult::VendorMissingTurnins, None, None, 0, 0);
                 return;
             }
@@ -5282,7 +5345,7 @@ impl WorldSession {
         self.append_player_currency_save_statements(&mut tx, player_guid.counter() as u64);
 
         if let Err(e) = char_db.commit_transaction(tx).await {
-            self.player_currencies = currency_snapshot;
+            self.set_player_currencies_like_cpp(currency_snapshot);
             warn!("BuyItem: store transaction failed: {e}");
             self.send_buy_error(
                 BuyResult::CantFindItem,
@@ -5292,7 +5355,7 @@ impl WorldSession {
             return;
         }
 
-        self.player_gold = new_gold;
+        self.set_player_gold_like_cpp(new_gold);
         self.apply_item_turnin_changes(player_guid, map_id, &item_turnin_changes);
         for &(currency_id, amount) in &extended_cost_currency_costs {
             let Some(quantity) = i32::try_from(self.player_currency_quantity(currency_id)).ok()
@@ -5310,14 +5373,14 @@ impl WorldSession {
         }
 
         for &(_, item_guid, new_count) in &existing_updates {
-            if let Some(item) = self.inventory_item_objects.get_mut(&item_guid) {
+            self.update_inventory_item_object_like_cpp(item_guid, |item| {
                 item.set_count(new_count);
-            }
+            });
         }
 
         let inv_type = self.item_template_inventory_type(buy.item_id as u32);
         for &(slot, db_guid, item_guid, stack_count) in &new_stacks {
-            self.inventory_items.insert(
+            self.insert_inventory_item_like_cpp(
                 slot,
                 crate::session::InventoryItem {
                     guid: item_guid,
@@ -5356,7 +5419,7 @@ impl WorldSession {
             buy.item_id,
             store_dest.len(),
             buy_price,
-            self.player_gold
+            self.player_gold_like_cpp()
         );
         let new_quantity = if vendor_item.max_count == 0 {
             -1
@@ -5404,22 +5467,13 @@ impl WorldSession {
             ));
         }
 
-        // ── Send VALUES update: new inv slots + coinage ──
-        self.send_packet(&UpdateObject::player_money_update(
-            player_guid,
-            map_id,
-            self.player_gold,
-            None,
-        ));
-        if !changed_slots.is_empty() {
-            self.send_packet(&UpdateObject::player_values_update(
-                player_guid,
-                map_id,
-                changed_slots,
-                Vec::new(),
-                Vec::new(),
-            ));
-        }
+        self.send_player_values_update_from_entity_bridge(
+            &changed_slots,
+            &[],
+            &[],
+            &[],
+            Some(self.player_gold_like_cpp()),
+        );
     }
 
     /// Handle CMSG_BUY_BACK_ITEM — player buys back an item from a vendor.
@@ -5433,12 +5487,15 @@ impl WorldSession {
             buyback.slot, buyback.vendor_guid
         );
 
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
-        let map_id = self.current_map_id;
-        if !self.creatures.contains_key(&buyback.vendor_guid) {
+        let map_id = self.player_map_id_like_cpp();
+        if self
+            .mutate_world_creature(buyback.vendor_guid, |_| ())
+            .is_none()
+        {
             self.send_sell_error(SellResult::CantFindVendor, None, ObjectGuid::EMPTY);
             return;
         }
@@ -5452,22 +5509,25 @@ impl WorldSession {
             return;
         }
 
-        let buyback_item = match self.buyback_items.get(&buyback_slot).cloned() {
+        let buyback_item = match self.buyback_items_like_cpp().get(&buyback_slot).cloned() {
             Some(item) => item,
             None => {
                 self.send_buy_error(BuyResult::CantFindItem, Some(buyback.vendor_guid), 0);
                 return;
             }
         };
-        let Some(runtime_item) = self.inventory_item_objects.get(&buyback_item.guid).cloned()
+        let Some(runtime_item) = self
+            .inventory_item_objects_like_cpp()
+            .get(&buyback_item.guid)
+            .cloned()
         else {
             self.send_buy_error(BuyResult::CantFindItem, Some(buyback.vendor_guid), 0);
             return;
         };
 
         let buyback_index = (buyback_slot - BUYBACK_SLOT_START) as usize;
-        let price = u64::from(self.buyback_price[buyback_index]);
-        if self.player_gold < price {
+        let price = u64::from(self.buyback_price_like_cpp()[buyback_index]);
+        if self.player_gold_like_cpp() < price {
             self.send_buy_error(
                 BuyResult::NotEnoughtMoney,
                 Some(buyback.vendor_guid),
@@ -5498,7 +5558,7 @@ impl WorldSession {
             None => return,
         };
         let mut tx = SqlTransaction::new();
-        let new_gold = self.player_gold.saturating_sub(price);
+        let new_gold = self.player_gold_like_cpp().saturating_sub(price);
         let mut upd_money = char_db.prepare(CharStatements::UPD_CHAR_MONEY);
         upd_money.set_u64(0, new_gold);
         upd_money.set_u64(1, player_guid.counter() as u64);
@@ -5521,8 +5581,10 @@ impl WorldSession {
                 return;
             }
 
-            if let Some(inv_item) = self.inventory_items.get(&slot) {
-                let Some(existing_item) = self.inventory_item_objects.get(&inv_item.guid) else {
+            if let Some(inv_item) = self.inventory_items_like_cpp().get(&slot) {
+                let Some(existing_item) =
+                    self.inventory_item_objects_like_cpp().get(&inv_item.guid)
+                else {
                     self.send_buy_error(BuyResult::CantFindItem, Some(buyback.vendor_guid), 0);
                     return;
                 };
@@ -5576,23 +5638,25 @@ impl WorldSession {
             return;
         }
 
-        self.player_gold = new_gold;
-        self.buyback_items.remove(&buyback_slot);
-        self.buyback_price[buyback_index] = 0;
-        self.buyback_timestamp[buyback_index] = 0;
-        if self.buyback_items.contains_key(&self.current_buyback_slot) {
-            self.current_buyback_slot = buyback_slot;
+        self.set_player_gold_like_cpp(new_gold);
+        self.remove_buyback_item_like_cpp(buyback_slot);
+        self.clear_buyback_slot_metadata_like_cpp(buyback_slot);
+        if self
+            .buyback_items_like_cpp()
+            .contains_key(&self.current_buyback_slot_like_cpp())
+        {
+            self.set_current_buyback_slot_like_cpp(buyback_slot);
         }
 
         for &(_, item_guid, new_count) in &existing_updates {
-            if let Some(item) = self.inventory_item_objects.get_mut(&item_guid) {
+            self.update_inventory_item_object_like_cpp(item_guid, |item| {
                 item.set_count(new_count);
-            }
+            });
         }
 
         let mut inv_slot_changes = vec![(buyback_slot, ObjectGuid::EMPTY)];
         if let Some(slot) = moved_slot {
-            self.inventory_items.insert(
+            self.insert_inventory_item_like_cpp(
                 slot,
                 InventoryItem {
                     guid: buyback_item.guid,
@@ -5602,9 +5666,9 @@ impl WorldSession {
                 },
             );
             self.set_inventory_item_object_slot(buyback_item.guid, slot);
-            if let Some(item_object) = self.inventory_item_objects.get_mut(&buyback_item.guid) {
+            self.update_inventory_item_object_like_cpp(buyback_item.guid, |item_object| {
                 item_object.set_count(moved_count);
-            }
+            });
             inv_slot_changes.push((slot, buyback_item.guid));
         } else {
             self.remove_inventory_item_object(buyback_item.guid);
@@ -5623,13 +5687,13 @@ impl WorldSession {
                 moved_count,
             ));
         }
-        self.send_packet(&UpdateObject::player_values_buyback_update(
-            player_guid,
-            map_id,
-            inv_slot_changes,
-            vec![(buyback_slot, 0, 0)],
-            Some(self.player_gold),
-        ));
+        self.send_player_values_update_from_entity_bridge(
+            &inv_slot_changes,
+            &[],
+            &[],
+            &[(buyback_slot, 0, 0)],
+            Some(self.player_gold_like_cpp()),
+        );
     }
 
     /// Handle CMSG_SELL_ITEM — player sells an item to a vendor.
@@ -5643,15 +5707,15 @@ impl WorldSession {
             sell.item_guid, self.account_id
         );
 
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
-        let map_id = self.current_map_id;
+        let map_id = self.player_map_id_like_cpp();
 
         // ── Find item in inventory by GUID ──
         let (slot, item) = match self
-            .inventory_items
+            .inventory_items_like_cpp()
             .iter()
             .find(|(_, item)| item.guid == sell.item_guid)
             .map(|(&s, item)| (s, item.clone()))
@@ -5683,7 +5747,11 @@ impl WorldSession {
             None => return,
         };
 
-        let Some(runtime_item) = self.inventory_item_objects.get(&item.guid).cloned() else {
+        let Some(runtime_item) = self
+            .inventory_item_objects_like_cpp()
+            .get(&item.guid)
+            .cloned()
+        else {
             self.send_sell_error(
                 SellResult::CantFindItem,
                 Some(sell.vendor_guid),
@@ -5756,10 +5824,9 @@ impl WorldSession {
         }
 
         let money = sell_price.saturating_mul(u64::from(sold_count));
-        let new_gold = self.player_gold.saturating_add(money);
+        let new_gold = self.player_gold_like_cpp().saturating_add(money);
         let buyback_slot = self.select_buyback_slot_cpp();
-        let buyback_index = (buyback_slot - BUYBACK_SLOT_START) as usize;
-        let old_buyback = self.buyback_items.get(&buyback_slot).cloned();
+        let old_buyback = self.buyback_items_like_cpp().get(&buyback_slot).cloned();
         let buyback_price = sell_price
             .saturating_mul(u64::from(sold_count))
             .min(u64::from(u32::MAX)) as u32;
@@ -5852,13 +5919,12 @@ impl WorldSession {
             return;
         }
 
-        self.player_gold = new_gold;
+        self.set_player_gold_like_cpp(new_gold);
         if let Some(old_buyback) = old_buyback {
-            self.buyback_items.remove(&buyback_slot);
+            self.remove_buyback_item_like_cpp(buyback_slot);
             self.remove_inventory_item_object(old_buyback.guid);
         }
-        self.buyback_price[buyback_index] = buyback_price;
-        self.buyback_timestamp[buyback_index] = buyback_timestamp;
+        self.set_buyback_slot_metadata_like_cpp(buyback_slot, buyback_price, buyback_timestamp);
         self.advance_buyback_slot_cpp();
 
         let mut created_buyback_item = None;
@@ -5868,11 +5934,11 @@ impl WorldSession {
             let stack_count = cloned_item.count();
             let durability = cloned_item.data().durability;
             let max_durability = cloned_item.data().max_durability;
-            if let Some(item_object) = self.inventory_item_objects.get_mut(&item.guid) {
+            self.update_inventory_item_object_like_cpp(item.guid, |item_object| {
                 item_object.set_count(remaining);
-            }
+            });
             stack_update = Some((item.guid, remaining));
-            self.buyback_items.insert(
+            self.insert_buyback_item_like_cpp(
                 buyback_slot,
                 InventoryItem {
                     guid: new_item_guid,
@@ -5885,8 +5951,8 @@ impl WorldSession {
             self.set_inventory_item_object_slot(new_item_guid, buyback_slot);
             created_buyback_item = Some((new_item_guid, stack_count, durability, max_durability));
         } else {
-            self.inventory_items.remove(&slot);
-            self.buyback_items.insert(
+            self.remove_inventory_item_like_cpp(slot);
+            self.insert_buyback_item_like_cpp(
                 buyback_slot,
                 InventoryItem {
                     guid: item.guid,
@@ -5901,7 +5967,12 @@ impl WorldSession {
 
         info!(
             "SellItem: player {:?} sold {}x item {} from slot {} for {} copper (total: {})",
-            player_guid, sold_count, item.entry_id, slot, money, self.player_gold
+            player_guid,
+            sold_count,
+            item.entry_id,
+            slot,
+            money,
+            self.player_gold_like_cpp()
         );
 
         if let Some((item_guid, stack_count, durability, max_durability)) = created_buyback_item {
@@ -5932,18 +6003,18 @@ impl WorldSession {
             inv_slot_changes.push((slot, ObjectGuid::EMPTY));
         }
         let buyback_guid = self
-            .buyback_items
+            .buyback_items_like_cpp()
             .get(&buyback_slot)
             .map(|item| item.guid)
             .unwrap_or(ObjectGuid::EMPTY);
         inv_slot_changes.push((buyback_slot, buyback_guid));
-        self.send_packet(&UpdateObject::player_values_buyback_update(
-            player_guid,
-            map_id,
-            inv_slot_changes,
-            vec![(buyback_slot, buyback_price, buyback_timestamp)],
-            Some(self.player_gold),
-        ));
+        self.send_player_values_update_from_entity_bridge(
+            &inv_slot_changes,
+            &[],
+            &[],
+            &[(buyback_slot, buyback_price, buyback_timestamp)],
+            Some(self.player_gold_like_cpp()),
+        );
     }
 
     /// Handle CMSG_ITEM_PURCHASE_REFUND.
@@ -5961,14 +6032,14 @@ impl WorldSession {
             max_durability: u32,
         }
 
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(guid) => guid,
             None => return,
         };
-        let map_id = self.current_map_id;
+        let map_id = self.player_map_id_like_cpp();
 
         let Some((refund_slot, refund_inv_item)) = self
-            .inventory_items
+            .inventory_items_like_cpp()
             .iter()
             .find(|(_, item)| item.guid == refund.item_guid)
             .map(|(&slot, item)| (slot, item.clone()))
@@ -5980,7 +6051,11 @@ impl WorldSession {
             return;
         };
 
-        let Some(refund_item) = self.inventory_item_objects.get(&refund.item_guid).cloned() else {
+        let Some(refund_item) = self
+            .inventory_item_objects_like_cpp()
+            .get(&refund.item_guid)
+            .cloned()
+        else {
             warn!(
                 "ItemPurchaseRefund: item {:?} missing runtime object",
                 refund.item_guid
@@ -6023,9 +6098,9 @@ impl WorldSession {
                 return;
             }
 
-            if let Some(item) = self.inventory_item_objects.get_mut(&refund.item_guid) {
+            self.update_inventory_item_object_like_cpp(refund.item_guid, |item| {
                 item.set_not_refundable();
-            }
+            });
             self.sync_object_accessor_player();
             self.send_packet(&ItemExpirePurchaseRefund {
                 item_guid: refund.item_guid,
@@ -6136,8 +6211,9 @@ impl WorldSession {
                     .unwrap_or(1)
                     .max(1);
 
-                if let Some(existing) = self.inventory_items.get(&slot) {
-                    let Some(existing_object) = self.inventory_item_objects.get(&existing.guid)
+                if let Some(existing) = self.inventory_items_like_cpp().get(&slot) {
+                    let Some(existing_object) =
+                        self.inventory_item_objects_like_cpp().get(&existing.guid)
                     else {
                         self.send_packet(&ItemPurchaseRefundResult {
                             item_guid: refund.item_guid,
@@ -6178,7 +6254,7 @@ impl WorldSession {
                     let backpack_end =
                         INVENTORY_SLOT_ITEM_START.saturating_add(INVENTORY_DEFAULT_SIZE);
                     let Some(alt_slot) = (INVENTORY_SLOT_ITEM_START..backpack_end).find(|slot| {
-                        !self.inventory_items.contains_key(slot)
+                        !self.inventory_items_like_cpp().contains_key(slot)
                             && !planned_new_stacks.iter().any(|stack| stack.slot == *slot)
                     }) else {
                         self.send_packet(&ItemPurchaseRefundResult {
@@ -6243,7 +6319,9 @@ impl WorldSession {
         del_item.set_u64(0, refund_inv_item.db_guid);
         tx.append(del_item);
 
-        let new_gold = self.player_gold.saturating_add(refund_item.paid_money());
+        let new_gold = self
+            .player_gold_like_cpp()
+            .saturating_add(refund_item.paid_money());
         let mut upd_money = char_db.prepare(CharStatements::UPD_CHAR_MONEY);
         upd_money.set_u64(0, new_gold);
         upd_money.set_u64(1, player_guid.counter() as u64);
@@ -6288,14 +6366,14 @@ impl WorldSession {
             }
         }
 
-        let currency_snapshot = self.player_currencies.clone();
+        let currency_snapshot = self.player_currencies_like_cpp().clone();
         let mut currency_deltas = Vec::new();
         for &(currency_id, amount) in &currency_costs {
             match self.add_currency_item_refund(currency_id, amount) {
                 Ok(Some(delta)) => currency_deltas.push(delta),
                 Ok(None) => {}
                 Err(()) => {
-                    self.player_currencies = currency_snapshot;
+                    self.set_player_currencies_like_cpp(currency_snapshot);
                     self.send_packet(&ItemPurchaseRefundResult {
                         item_guid: refund.item_guid,
                         result: REFUND_RESULT_ERR_GENERIC,
@@ -6308,7 +6386,7 @@ impl WorldSession {
         self.append_player_currency_save_statements(&mut tx, player_guid.counter() as u64);
 
         if let Err(e) = char_db.commit_transaction(tx).await {
-            self.player_currencies = currency_snapshot;
+            self.set_player_currencies_like_cpp(currency_snapshot);
             warn!("ItemPurchaseRefund: refund transaction failed: {e}");
             self.send_packet(&ItemPurchaseRefundResult {
                 item_guid: refund.item_guid,
@@ -6318,18 +6396,18 @@ impl WorldSession {
             return;
         }
 
-        self.player_gold = new_gold;
-        self.inventory_items.remove(&refund_slot);
+        self.set_player_gold_like_cpp(new_gold);
+        self.remove_inventory_item_like_cpp(refund_slot);
         self.remove_inventory_item_object(refund.item_guid);
 
         for &(item_guid, _, new_count) in planned_existing_counts.values() {
-            if let Some(item) = self.inventory_item_objects.get_mut(&item_guid) {
+            self.update_inventory_item_object_like_cpp(item_guid, |item| {
                 item.set_count(new_count);
-            }
+            });
         }
 
         for (stack, db_guid, item_guid) in &created_new_stacks {
-            self.inventory_items.insert(
+            self.insert_inventory_item_like_cpp(
                 stack.slot,
                 InventoryItem {
                     guid: *item_guid,
@@ -6412,13 +6490,6 @@ impl WorldSession {
             ));
         }
 
-        self.send_packet(&UpdateObject::player_money_update(
-            player_guid,
-            map_id,
-            self.player_gold,
-            None,
-        ));
-
         let mut changed_slots = Vec::new();
         changed_slots.push((refund_slot, ObjectGuid::EMPTY));
         changed_slots.extend(
@@ -6426,13 +6497,13 @@ impl WorldSession {
                 .iter()
                 .map(|(stack, _, item_guid)| (stack.slot, *item_guid)),
         );
-        self.send_packet(&UpdateObject::player_values_update(
-            player_guid,
-            map_id,
-            changed_slots,
-            Vec::new(),
-            Vec::new(),
-        ));
+        self.send_player_values_update_from_entity_bridge(
+            &changed_slots,
+            &[],
+            &[],
+            &[],
+            Some(self.player_gold_like_cpp()),
+        );
 
         if refund_slot < 19 {
             self.send_stat_update();
@@ -6474,7 +6545,7 @@ impl WorldSession {
 
     /// Handle CMSG_SWAP_INV_ITEM: drag-and-drop item between two inventory slots.
     pub async fn handle_swap_inv_item(&mut self, swap: SwapInvItem) {
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(g) => g,
             None => {
                 warn!("handle_swap_inv_item: no player_guid");
@@ -6502,8 +6573,8 @@ impl WorldSession {
             return;
         }
 
-        let src_item = self.inventory_items.get(&src).cloned();
-        let dst_item = self.inventory_items.get(&dst).cloned();
+        let src_item = self.inventory_items_like_cpp().get(&src).cloned();
+        let dst_item = self.inventory_items_like_cpp().get(&dst).cloned();
 
         // At least one slot must have an item
         if src_item.is_none() && dst_item.is_none() {
@@ -6518,16 +6589,16 @@ impl WorldSession {
 
         // Perform the swap in memory
         if let Some(ref item) = src_item {
-            self.inventory_items.insert(dst, item.clone());
+            self.insert_inventory_item_like_cpp(dst, item.clone());
             self.set_inventory_item_object_slot(item.guid, dst);
         } else {
-            self.inventory_items.remove(&dst);
+            self.remove_inventory_item_like_cpp(dst);
         }
         if let Some(ref item) = dst_item {
-            self.inventory_items.insert(src, item.clone());
+            self.insert_inventory_item_like_cpp(src, item.clone());
             self.set_inventory_item_object_slot(item.guid, src);
         } else {
-            self.inventory_items.remove(&src);
+            self.remove_inventory_item_like_cpp(src);
         }
         self.sync_object_accessor_player();
 
@@ -6583,7 +6654,7 @@ impl WorldSession {
         // VisibleItems: equipment slots 0-18
         for &slot in &[src, dst] {
             if (slot as usize) < 19 {
-                let (item_id, app, vis) = match self.inventory_items.get(&slot) {
+                let (item_id, app, vis) = match self.inventory_items_like_cpp().get(&slot) {
                     Some(item) => (item.entry_id as i32, 0u16, 0u16),
                     None => (0, 0, 0),
                 };
@@ -6595,7 +6666,7 @@ impl WorldSession {
         for &slot in &[src, dst] {
             if slot >= 15 && slot <= 17 {
                 let idx = slot - 15;
-                let (item_id, app, vis) = match self.inventory_items.get(&slot) {
+                let (item_id, app, vis) = match self.inventory_items_like_cpp().get(&slot) {
                     Some(item) => (item.entry_id as i32, 0u16, 0u16),
                     None => (0, 0, 0),
                 };
@@ -6603,14 +6674,13 @@ impl WorldSession {
             }
         }
 
-        let update = UpdateObject::player_values_update(
-            player_guid,
-            self.current_map_id,
-            inv_slot_changes,
-            visible_item_changes,
-            virtual_item_changes,
+        self.send_player_values_update_from_entity_bridge(
+            &inv_slot_changes,
+            &visible_item_changes,
+            &virtual_item_changes,
+            &[],
+            None,
         );
-        self.send_packet(&update);
 
         // If any affected slot is a gear slot (0-18), recalculate and send stats
         if src < 19 || dst < 19 {
@@ -6625,7 +6695,7 @@ impl WorldSession {
 
     /// Handle CMSG_AUTO_EQUIP_ITEM: right-click to auto-equip/unequip an item.
     pub async fn handle_auto_equip_item(&mut self, equip: AutoEquipItem) {
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
@@ -6636,7 +6706,7 @@ impl WorldSession {
             src_slot, equip.pack_slot, player_guid
         );
 
-        let src_item = match self.inventory_items.get(&src_slot).cloned() {
+        let src_item = match self.inventory_items_like_cpp().get(&src_slot).cloned() {
             Some(item) => item,
             None => {
                 self.send_packet(&InventoryChangeFailure::error(InventoryResult::SlotEmpty));
@@ -6671,7 +6741,7 @@ impl WorldSession {
             };
             // Build occupied map from currently equipped gear and bag slots.
             let occupied: std::collections::HashMap<u8, ()> = self
-                .inventory_items
+                .inventory_items_like_cpp()
                 .keys()
                 .filter(|&&s| s < 19 || (30..34).contains(&s))
                 .map(|&s| (s, ()))
@@ -6706,7 +6776,7 @@ impl WorldSession {
     /// ContainerSlot=255 means player's direct inventory.
     /// For simplicity, we only support 255 (player inventory) for now.
     pub async fn handle_swap_item(&mut self, swap: wow_packet::packets::item::SwapItem) {
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
@@ -6742,7 +6812,7 @@ impl WorldSession {
         &mut self,
         store: wow_packet::packets::item::AutoStoreBagItem,
     ) {
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
@@ -6764,7 +6834,7 @@ impl WorldSession {
         let src_slot = store.slot_a;
 
         // Check source has an item
-        if !self.inventory_items.contains_key(&src_slot) {
+        if !self.inventory_items_like_cpp().contains_key(&src_slot) {
             self.send_packet(&InventoryChangeFailure::error(InventoryResult::SlotEmpty));
             return;
         }
@@ -6792,7 +6862,7 @@ impl WorldSession {
         &mut self,
         destroy: wow_packet::packets::item::DestroyItemPkt,
     ) {
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
@@ -6812,7 +6882,7 @@ impl WorldSession {
         }
 
         let slot = destroy.slot_num;
-        let item = match self.inventory_items.get(&slot).cloned() {
+        let item = match self.inventory_items_like_cpp().get(&slot).cloned() {
             Some(item) => item,
             None => {
                 self.send_packet(&InventoryChangeFailure::error(InventoryResult::SlotEmpty));
@@ -6820,7 +6890,10 @@ impl WorldSession {
             }
         };
 
-        let runtime_item = self.inventory_item_objects.get(&item.guid).cloned();
+        let runtime_item = self
+            .inventory_item_objects_like_cpp()
+            .get(&item.guid)
+            .cloned();
         let item_proto = self.item_storage_template(item.entry_id);
         let unequip_result = self.can_destroy_direct_item_like_cpp(
             slot,
@@ -6871,13 +6944,13 @@ impl WorldSession {
                 return;
             }
 
-            if let Some(item_object) = self.inventory_item_objects.get_mut(&item.guid) {
+            self.update_inventory_item_object_like_cpp(item.guid, |item_object| {
                 item_object.set_count(new_count);
-            }
+            });
             self.sync_object_accessor_player();
             self.send_packet(&UpdateObject::item_stack_count_update(
                 item.guid,
-                self.current_map_id,
+                self.player_map_id_like_cpp(),
                 new_count,
             ));
             info!(
@@ -6914,7 +6987,7 @@ impl WorldSession {
             return;
         }
 
-        self.inventory_items.remove(&slot);
+        self.remove_inventory_item_like_cpp(slot);
         self.remove_inventory_item_object(item.guid);
         self.sync_object_accessor_player();
 
@@ -6936,14 +7009,13 @@ impl WorldSession {
             virtual_item_changes.push((slot - 15, 0i32, 0u16, 0u16));
         }
 
-        let update = UpdateObject::player_values_update(
-            player_guid,
-            self.current_map_id,
-            inv_slot_changes,
-            visible_item_changes,
-            virtual_item_changes,
+        self.send_player_values_update_from_entity_bridge(
+            &inv_slot_changes,
+            &visible_item_changes,
+            &virtual_item_changes,
+            &[],
+            None,
         );
-        self.send_packet(&update);
 
         // If destroyed item was in a gear slot (0-18), recalculate stats
         if slot < 19 {
@@ -6961,7 +7033,7 @@ impl WorldSession {
     /// C# InventorySlots: ItemStart=35, ItemEnd=59 (24 backpack slots).
     fn find_free_backpack_slot(&self) -> Option<u8> {
         for slot in 35..59u8 {
-            if !self.inventory_items.contains_key(&slot) {
+            if !self.inventory_items_like_cpp().contains_key(&slot) {
                 return Some(slot);
             }
         }
@@ -6972,14 +7044,14 @@ impl WorldSession {
     ///
     /// Called after equip/desequip changes to gear slots (0-18).
     pub(crate) fn send_stat_update(&self) {
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
 
-        let race = self.player_race;
-        let class = self.player_class;
-        let level = self.player_level;
+        let race = self.player_race_like_cpp();
+        let class = self.player_class_like_cpp();
+        let level = self.player_level_like_cpp();
 
         if race == 0 || class == 0 || level == 0 {
             return; // Not fully logged in yet
@@ -7004,7 +7076,7 @@ impl WorldSession {
             let mut g_cr = [0i32; 25];
             let mut g_sp = 0i32;
             let mut g_armor = 0i32;
-            for (&slot, inv_item) in &self.inventory_items {
+            for (&slot, inv_item) in self.inventory_items_like_cpp() {
                 if slot < 19 {
                     if let Some(entry) = iss.get(inv_item.entry_id) {
                         let [s, a, st, i, sp] = entry.base_stat_bonuses();
@@ -7303,7 +7375,8 @@ impl WorldSession {
             spirit_regen
         );
 
-        let update = UpdateObject::player_stat_update(player_guid, self.current_map_id, changes);
+        let update =
+            UpdateObject::player_stat_update(player_guid, self.player_map_id_like_cpp(), changes);
         self.send_packet(&update);
     }
 
@@ -7403,7 +7476,7 @@ impl WorldSession {
 
         // 6. TimeSyncRequest (critical — client needs time sync)
         //    Also initializes the periodic timer (5s first, then 10s).
-        self.time_sync_next_counter = 0;
+        self.reset_time_sync_like_cpp();
         self.send_time_sync();
 
         // 7. ContactList (social/friends — empty)
@@ -7538,7 +7611,7 @@ impl WorldSession {
                 inv_slots,
                 combat,
                 skill_info,
-                self.player_gold,
+                self.player_gold_like_cpp(),
                 quest_log,
             );
 
@@ -7594,12 +7667,26 @@ impl WorldSession {
 
         // 30. Set session state to LoggedIn, store player GUID and initial position.
         self.set_state(crate::session::SessionState::LoggedIn);
-        self.set_player_guid(Some(guid));
+        self.attach_player_controller_like_cpp(crate::session::SessionPlayerController::new(
+            guid,
+            self.player_name_like_cpp()
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| format!("Player{}", guid.counter())),
+            *position,
+            map_id as u16,
+            race,
+            class,
+            level,
+            sex,
+        ));
+        self.set_player_health_like_cpp(
+            combat.health.max(0).min(u32::MAX as i64) as u32,
+            combat.max_health.max(1).min(u32::MAX as i64) as u32,
+        );
         self.login_time = Some(std::time::Instant::now());
-        // Store initial position for aggro checks / movement tracking.
-        self.player_position = Some(*position);
-        // Clear creature/loot state for fresh login.
-        self.creatures.clear();
+        // Clear per-session loot/visibility state for fresh login. Creatures
+        // remain map-owned, matching C++ Map ownership.
+        self.visible_creatures.clear();
         self.loot_table.clear();
         self.set_active_loot_guid(ObjectGuid::EMPTY);
         self.combat_target = None;
@@ -7643,13 +7730,13 @@ impl WorldSession {
         use wow_packet::packets::misc::ShowTradeSkillResponse;
 
         let skill_id = show.skill_id;
-        let level = self.player_level;
+        let level = self.player_level_like_cpp();
 
         let skill_rank = (level as i32) * 5;
         let skill_max_rank = skill_rank;
 
         let known = if let Some(store) = self.skill_store() {
-            store.trade_skill_spells(skill_id, &self.known_spells)
+            store.trade_skill_spells(skill_id, &self.known_spells_like_cpp())
         } else {
             Vec::new()
         };
@@ -8170,11 +8257,11 @@ mod tests {
             send_tx,
         );
         let player_guid = ObjectGuid::create_player(1, 1);
-        session.player_guid = Some(player_guid);
+        session.set_player_guid(Some(player_guid));
 
         for (slot, db_guid, count) in [(35, 10_u64, 4_u32), (36, 11_u64, 5_u32)] {
             let item_guid = ObjectGuid::create_item(1, db_guid as i64);
-            session.inventory_items.insert(
+            session.insert_inventory_item_like_cpp(
                 slot,
                 InventoryItem {
                     guid: item_guid,

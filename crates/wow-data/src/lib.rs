@@ -24,6 +24,7 @@ pub mod item_random_properties;
 pub mod item_random_suffix;
 pub mod item_stats;
 pub mod lock;
+pub mod map;
 pub mod player_power;
 pub mod player_stats;
 pub mod quest;
@@ -40,7 +41,10 @@ pub use area_trigger::{
 pub use chr_specialization::{ChrSpecializationEntry, ChrSpecializationStore};
 pub use currency::{CurrencyTypesEntry, CurrencyTypesStore};
 pub use dungeon_encounter::{DungeonEncounterEntry, DungeonEncounterStore};
-pub use hotfix_cache::{HotfixBlobCache, build_hotfix_blob_cache};
+pub use hotfix_cache::{
+    HotfixBlobCache, HotfixId, HotfixRecord, HotfixRecordStatus, build_hotfix_blob_cache,
+    hotfix_locale_mask,
+};
 pub use import_price::{
     ImportPriceArmorEntry, ImportPriceArmorStore, ImportPriceQualityEntry, ImportPriceQualityStore,
     ImportPriceShieldEntry, ImportPriceShieldStore, ImportPriceStores, ImportPriceWeaponEntry,
@@ -66,6 +70,7 @@ pub use item_stats::{
     ItemRandomPropertyTemplateEntry, ItemSparseTemplateEntry, ItemStatEntry, ItemStatsStore,
 };
 pub use lock::{LockEntry, LockStore};
+pub use map::{MapDifficultyEntry, MapDifficultyStore, MapEntry, MapStore};
 pub use player_power::{
     ClassPowerIndexRecord, Db2PlayerPowerIndexResolver, PlayerClassPowerIndexStore,
 };

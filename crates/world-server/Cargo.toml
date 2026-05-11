@@ -24,6 +24,7 @@ wow-loot = { workspace = true }
 wow-network = { workspace = true }
 wow-world = { workspace = true }
 wow-handler = { workspace = true }
+wow-instances = { workspace = true }
 wow-packet = { workspace = true }
 wow-constants = { workspace = true }
 wow-crypto = { workspace = true }

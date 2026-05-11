@@ -63,6 +63,7 @@ pub struct SessionResources {
     pub login_db: Option<Arc<wow_database::LoginDatabase>>,
     pub world_db: Option<Arc<wow_database::WorldDatabase>>,
     pub guid_generator: Option<Arc<wow_core::ObjectGuidGenerator>>,
+    pub instance_lock_mgr: Option<Arc<std::sync::RwLock<wow_instances::InstanceLockMgr>>>,
     pub currency_types_store: Option<Arc<wow_data::CurrencyTypesStore>>,
     pub import_price_stores: Option<Arc<wow_data::ImportPriceStores>>,
     pub item_class_store: Option<Arc<wow_data::ItemClassStore>>,
@@ -89,6 +90,8 @@ pub struct SessionResources {
     pub area_trigger_store: Option<Arc<wow_data::AreaTriggerStore>>,
     pub chr_specialization_store: Option<Arc<wow_data::ChrSpecializationStore>>,
     pub dungeon_encounter_store: Option<Arc<wow_data::DungeonEncounterStore>>,
+    pub map_store: Option<Arc<wow_data::MapStore>>,
+    pub map_difficulty_store: Option<Arc<wow_data::MapDifficultyStore>>,
     pub quest_store: Option<Arc<wow_data::quest::QuestStore>>,
     pub quest_xp_store: Option<Arc<wow_data::quest_xp::QuestXpStore>>,
     /// XP required per level: index = level (1-based), value = xp_needed.

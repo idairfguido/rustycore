@@ -1,15 +1,14 @@
 [package]
-name = "wow-instances"
+name = "wow-movement"
+description = "Movement spline and MotionMaster runtime ported from TrinityCore"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+bitflags = { workspace = true }
 wow-core = { workspace = true }
-wow-data = { workspace = true }
-wow-database = { workspace = true }
-serde_json = { workspace = true }
 
 [lints]
 workspace = true

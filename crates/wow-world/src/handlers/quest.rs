@@ -299,9 +299,9 @@ impl WorldSession {
                 warn!(
                     account = self.account_id,
                     quest_id,
-                    race = self.player_race,
-                    class = self.player_class,
-                    level = self.player_level,
+                    race = self.player_race_like_cpp(),
+                    class = self.player_class_like_cpp(),
+                    level = self.player_level_like_cpp(),
                     "AcceptQuest: player does not meet requirements (CanTakeQuest failed)"
                 );
                 return;
@@ -330,6 +330,7 @@ impl WorldSession {
 
         // Save to DB
         self.save_quest_to_db(quest_id, 1).await;
+        self.sync_player_registry_state_like_cpp();
 
         info!(account = self.account_id, quest_id, "Quest accepted");
 
@@ -357,6 +358,7 @@ impl WorldSession {
         if let Some(qid) = quest_id {
             self.player_quests.remove(&qid);
             self.delete_quest_from_db(qid).await;
+            self.sync_player_registry_state_like_cpp();
             info!(
                 account = self.account_id,
                 quest_id = qid,
@@ -678,7 +680,7 @@ impl WorldSession {
         // Give gold reward
         let money = quest.reward_money_difficulty;
         if money > 0 {
-            self.player_gold = self.player_gold.saturating_add(money as u64);
+            self.set_player_gold_like_cpp(self.player_gold_like_cpp().saturating_add(money as u64));
             self.save_player_gold().await;
         }
 
@@ -695,6 +697,7 @@ impl WorldSession {
         } else {
             self.delete_quest_from_db(quest_id).await;
         }
+        self.sync_player_registry_state_like_cpp();
 
         info!(
             account = self.account_id,
@@ -719,7 +722,9 @@ impl WorldSession {
 
         // Give XP reward — C# Player.RewardQuest → GiveXP
         if xp > 0 {
-            let player_guid = self.player_guid.unwrap_or(wow_core::ObjectGuid::new(0, 0));
+            let player_guid = self
+                .player_guid()
+                .unwrap_or(wow_core::ObjectGuid::new(0, 0));
             self.give_xp(xp, player_guid, false).await;
         }
     }
@@ -819,14 +824,18 @@ impl WorldSession {
         }
 
         // SatisfyQuestRace + SatisfyQuestClass + SatisfyQuestLevel
-        quest.is_available_for(self.player_race, self.player_class, self.player_level)
+        quest.is_available_for(
+            self.player_race_like_cpp(),
+            self.player_class_like_cpp(),
+            self.player_level_like_cpp(),
+        )
     }
 
     /// Save quest status to the characters database.
     async fn save_quest_to_db(&self, quest_id: u32, status: u8) {
         use wow_database::CharStatements;
 
-        let guid = match self.player_guid {
+        let guid = match self.player_guid() {
             Some(g) => g.counter() as u32,
             None => return,
         };
@@ -854,7 +863,7 @@ impl WorldSession {
     async fn delete_quest_from_db(&self, quest_id: u32) {
         use wow_database::CharStatements;
 
-        let guid = match self.player_guid {
+        let guid = match self.player_guid() {
             Some(g) => g.counter() as u32,
             None => return,
         };
@@ -879,7 +888,7 @@ impl WorldSession {
     pub(crate) async fn load_player_quests(&mut self) {
         use wow_database::CharStatements;
 
-        let guid = match self.player_guid {
+        let guid = match self.player_guid() {
             Some(g) => g.counter() as u32,
             None => return,
         };

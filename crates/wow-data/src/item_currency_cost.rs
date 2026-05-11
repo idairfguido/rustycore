@@ -60,7 +60,7 @@ impl ItemCurrencyCostStore {
         for (id, idx) in reader.iter_records() {
             let entry = ItemCurrencyCostEntry {
                 id,
-                item_id: reader.get_field_i32(idx, 1),
+                item_id: reader.get_field_i32(idx, 0),
             };
             if let Ok(item_id) = u32::try_from(entry.item_id) {
                 items_with_currency_cost.insert(item_id);

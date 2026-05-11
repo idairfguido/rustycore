@@ -3178,10 +3178,26 @@ impl Player {
         }
     }
 
+    pub fn mark_visible_item_slot_changed(&mut self, slot: u8) {
+        if slot >= EQUIPMENT_SLOT_END {
+            return;
+        }
+
+        self.mark_player_data_array(
+            PLAYER_DATA_VISIBLE_ITEMS_PARENT_BIT,
+            PLAYER_DATA_VISIBLE_ITEMS_FIRST_BIT,
+            slot as usize,
+        );
+    }
+
     pub fn set_money(&mut self, value: u64) {
         self.set_active_u64(ACTIVE_PLAYER_DATA_COINAGE_BIT, value, |data| {
             &mut data.coinage
         });
+    }
+
+    pub fn mark_money_changed(&mut self) {
+        self.mark_active_player_data(ACTIVE_PLAYER_DATA_COINAGE_BIT);
     }
 
     pub fn modify_money(&mut self, amount: i64) -> bool {
@@ -3237,6 +3253,18 @@ impl Player {
         }
 
         self.active_data.inv_slots[slot] = guid;
+        self.mark_active_player_data_array(
+            ACTIVE_PLAYER_DATA_INV_SLOTS_PARENT_BIT,
+            ACTIVE_PLAYER_DATA_INV_SLOTS_FIRST_BIT,
+            slot,
+        );
+    }
+
+    pub fn mark_inv_slot_changed(&mut self, slot: usize) {
+        if slot >= PLAYER_SLOT_END {
+            return;
+        }
+
         self.mark_active_player_data_array(
             ACTIVE_PLAYER_DATA_INV_SLOTS_PARENT_BIT,
             ACTIVE_PLAYER_DATA_INV_SLOTS_FIRST_BIT,
@@ -6592,12 +6620,36 @@ impl Player {
         );
     }
 
+    pub fn mark_buyback_price_changed(&mut self, slot: usize) {
+        if slot >= BUYBACK_SLOT_COUNT {
+            return;
+        }
+
+        self.mark_active_player_data_array(
+            ACTIVE_PLAYER_DATA_BUYBACK_PARENT_BIT,
+            ACTIVE_PLAYER_DATA_BUYBACK_PRICE_FIRST_BIT,
+            slot,
+        );
+    }
+
     pub fn set_buyback_timestamp(&mut self, slot: usize, timestamp: i64) {
         if slot >= BUYBACK_SLOT_COUNT || self.active_data.buyback_timestamp[slot] == timestamp {
             return;
         }
 
         self.active_data.buyback_timestamp[slot] = timestamp;
+        self.mark_active_player_data_array(
+            ACTIVE_PLAYER_DATA_BUYBACK_PARENT_BIT,
+            ACTIVE_PLAYER_DATA_BUYBACK_TIMESTAMP_FIRST_BIT,
+            slot,
+        );
+    }
+
+    pub fn mark_buyback_timestamp_changed(&mut self, slot: usize) {
+        if slot >= BUYBACK_SLOT_COUNT {
+            return;
+        }
+
         self.mark_active_player_data_array(
             ACTIVE_PLAYER_DATA_BUYBACK_PARENT_BIT,
             ACTIVE_PLAYER_DATA_BUYBACK_TIMESTAMP_FIRST_BIT,
@@ -11826,6 +11878,57 @@ mod tests {
             player
                 .player_data_changes_mask()
                 .is_set(PLAYER_DATA_VISIBLE_ITEMS_FIRST_BIT + 15)
+        );
+    }
+
+    #[test]
+    fn explicit_markers_force_default_value_deltas_like_cpp_live_object_masks() {
+        let mut player = Player::new(None, false);
+        player.clear_data_changes();
+
+        player.mark_inv_slot_changed(0);
+        player.mark_visible_item_slot_changed(0);
+        player.mark_buyback_price_changed(0);
+        player.mark_buyback_timestamp_changed(0);
+
+        assert_eq!(player.active_data().inv_slots[0], ObjectGuid::EMPTY);
+        assert_eq!(player.data().visible_items[0], VisibleItemValues::default());
+        assert_eq!(player.active_data().buyback_price[0], 0);
+        assert_eq!(player.active_data().buyback_timestamp[0], 0);
+        assert!(
+            player
+                .active_player_data_changes_mask()
+                .is_set(ACTIVE_PLAYER_DATA_INV_SLOTS_PARENT_BIT)
+        );
+        assert!(
+            player
+                .active_player_data_changes_mask()
+                .is_set(ACTIVE_PLAYER_DATA_INV_SLOTS_FIRST_BIT)
+        );
+        assert!(
+            player
+                .player_data_changes_mask()
+                .is_set(PLAYER_DATA_VISIBLE_ITEMS_PARENT_BIT)
+        );
+        assert!(
+            player
+                .player_data_changes_mask()
+                .is_set(PLAYER_DATA_VISIBLE_ITEMS_FIRST_BIT)
+        );
+        assert!(
+            player
+                .active_player_data_changes_mask()
+                .is_set(ACTIVE_PLAYER_DATA_BUYBACK_PARENT_BIT)
+        );
+        assert!(
+            player
+                .active_player_data_changes_mask()
+                .is_set(ACTIVE_PLAYER_DATA_BUYBACK_PRICE_FIRST_BIT)
+        );
+        assert!(
+            player
+                .active_player_data_changes_mask()
+                .is_set(ACTIVE_PLAYER_DATA_BUYBACK_TIMESTAMP_FIRST_BIT)
         );
     }
 

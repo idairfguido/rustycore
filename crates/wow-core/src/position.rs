@@ -10,6 +10,10 @@ pub struct Position {
 }
 
 impl Position {
+    pub const GRID_SIZE_LIKE_CPP: f32 = 533.3333;
+    pub const MAP_SIZE_LIKE_CPP: f32 = 533.3333 * 64.0;
+    pub const MAP_HALFSIZE_LIKE_CPP: f32 = Self::MAP_SIZE_LIKE_CPP / 2.0;
+
     pub const ZERO: Self = Self {
         x: 0.0,
         y: 0.0,
@@ -108,6 +112,19 @@ impl Position {
             self.orientation,
         )
     }
+
+    /// C++ ref: Grids/GridDefines.h `Trinity::IsValidMapCoord(x, y, z, o)`.
+    #[inline]
+    pub fn is_valid_map_coord_like_cpp(&self) -> bool {
+        fn valid_coord(c: f32) -> bool {
+            c.is_finite() && c.abs() <= Position::MAP_HALFSIZE_LIKE_CPP - 0.5
+        }
+
+        valid_coord(self.x)
+            && valid_coord(self.y)
+            && valid_coord(self.z)
+            && self.orientation.is_finite()
+    }
 }
 
 /// Normalize an angle to [0, 2*PI).
@@ -186,5 +203,14 @@ mod tests {
         assert_eq!(p.y, 0.0);
         assert_eq!(p.z, 0.0);
         assert_eq!(p.orientation, 0.0);
+    }
+
+    #[test]
+    fn valid_map_coord_matches_cpp_grid_bounds() {
+        let limit = Position::MAP_HALFSIZE_LIKE_CPP - 0.5;
+        assert!(Position::new(limit, -limit, 100.0, 0.0).is_valid_map_coord_like_cpp());
+        assert!(!Position::new(limit + 0.01, 0.0, 0.0, 0.0).is_valid_map_coord_like_cpp());
+        assert!(!Position::new(0.0, 0.0, 0.0, f32::NAN).is_valid_map_coord_like_cpp());
+        assert!(!Position::new(0.0, f32::INFINITY, 0.0, 0.0).is_valid_map_coord_like_cpp());
     }
 }

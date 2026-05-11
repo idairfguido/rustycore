@@ -332,18 +332,29 @@ impl ServerPacket for ClientCacheVersion {
 
 // ── AvailableHotfixes (SMSG 0x290f) ────────────────────────────────
 
-/// Available hotfixes sent during session init. Empty for minimal login.
+/// C++ `DB2Manager::HotfixId`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct HotfixId {
+    pub push_id: i32,
+    pub unique_id: u32,
+}
+
+/// Available hotfixes sent during session init.
 pub struct AvailableHotfixes {
     pub virtual_realm_address: u32,
+    pub hotfixes: Vec<HotfixId>,
 }
 
 impl ServerPacket for AvailableHotfixes {
     const OPCODE: ServerOpcodes = ServerOpcodes::AvailableHotfixes;
 
     fn write(&self, pkt: &mut WorldPacket) {
-        // C# order: VRA first, then Count (HotfixPackets.cs:AvailableHotfixes.Write)
         pkt.write_uint32(self.virtual_realm_address);
-        pkt.write_int32(0); // Hotfixes.Count = 0
+        pkt.write_uint32(self.hotfixes.len() as u32);
+        for hotfix_id in &self.hotfixes {
+            pkt.write_int32(hotfix_id.push_id);
+            pkt.write_uint32(hotfix_id.unique_id);
+        }
     }
 }
 
@@ -1315,15 +1326,48 @@ impl ClientPacket for HotfixRequest {
 
 // ── HotfixConnect (SMSG 0x2911) ───────────────────────────────────
 
-/// Response to [`HotfixRequest`]. Empty when server has no hotfix data.
-pub struct HotfixConnect;
+/// One C++ `WorldPackets::Hotfix::HotfixConnect::HotfixData` header.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HotfixConnectData {
+    pub id: HotfixId,
+    pub table_hash: u32,
+    pub record_id: i32,
+    pub size: u32,
+    pub status: u8,
+}
+
+/// Response to [`HotfixRequest`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HotfixConnect {
+    pub hotfixes: Vec<HotfixConnectData>,
+    pub content: Vec<u8>,
+}
+
+impl HotfixConnect {
+    pub fn empty() -> Self {
+        Self::default()
+    }
+}
 
 impl ServerPacket for HotfixConnect {
     const OPCODE: ServerOpcodes = ServerOpcodes::HotfixConnect;
 
     fn write(&self, pkt: &mut WorldPacket) {
-        pkt.write_int32(0); // Hotfixes.Count
-        pkt.write_uint32(0); // HotfixContent size
+        pkt.write_uint32(self.hotfixes.len() as u32);
+        for hotfix in &self.hotfixes {
+            pkt.write_int32(hotfix.id.push_id);
+            pkt.write_uint32(hotfix.id.unique_id);
+            pkt.write_uint32(hotfix.table_hash);
+            pkt.write_int32(hotfix.record_id);
+            pkt.write_uint32(hotfix.size);
+            pkt.write_bits(u32::from(hotfix.status), 3);
+            pkt.flush_bits();
+        }
+
+        pkt.write_uint32(self.content.len() as u32);
+        if !self.content.is_empty() {
+            pkt.write_bytes(&self.content);
+        }
     }
 }
 
@@ -2339,12 +2383,42 @@ mod tests {
     fn available_hotfixes_empty_serializes() {
         let pkt = AvailableHotfixes {
             virtual_realm_address: 1,
+            hotfixes: Vec::new(),
         };
         let bytes = pkt.to_bytes();
         // opcode(2) + uint32(4) + int32(4) = 10
         assert_eq!(bytes.len(), 10);
         let opcode = u16::from_le_bytes([bytes[0], bytes[1]]);
         assert_eq!(opcode, 0x290f);
+    }
+
+    #[test]
+    fn available_hotfixes_serializes_ids() {
+        let pkt = AvailableHotfixes {
+            virtual_realm_address: 0x1122_3344,
+            hotfixes: vec![HotfixId {
+                push_id: 7,
+                unique_id: 9,
+            }],
+        };
+        let bytes = pkt.to_bytes();
+        assert_eq!(bytes.len(), 18);
+        assert_eq!(
+            u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]),
+            0x1122_3344
+        );
+        assert_eq!(
+            u32::from_le_bytes([bytes[6], bytes[7], bytes[8], bytes[9]]),
+            1
+        );
+        assert_eq!(
+            i32::from_le_bytes([bytes[10], bytes[11], bytes[12], bytes[13]]),
+            7
+        );
+        assert_eq!(
+            u32::from_le_bytes([bytes[14], bytes[15], bytes[16], bytes[17]]),
+            9
+        );
     }
 
     #[test]
@@ -2715,7 +2789,7 @@ mod tests {
 
     #[test]
     fn hotfix_connect_empty() {
-        let pkt = HotfixConnect;
+        let pkt = HotfixConnect::empty();
         let bytes = pkt.to_bytes();
         // opcode(2) + i32(4) + u32(4) = 10
         assert_eq!(bytes.len(), 10);
@@ -2727,6 +2801,55 @@ mod tests {
         // content size = 0
         let size = u32::from_le_bytes([bytes[6], bytes[7], bytes[8], bytes[9]]);
         assert_eq!(size, 0);
+    }
+
+    #[test]
+    fn hotfix_connect_serializes_headers_and_content() {
+        let pkt = HotfixConnect {
+            hotfixes: vec![HotfixConnectData {
+                id: HotfixId {
+                    push_id: 11,
+                    unique_id: 12,
+                },
+                table_hash: 0xDF2F_53CF,
+                record_id: 67,
+                size: 3,
+                status: 1,
+            }],
+            content: vec![1, 2, 3],
+        };
+        let bytes = pkt.to_bytes();
+        assert_eq!(u16::from_le_bytes([bytes[0], bytes[1]]), 0x2911);
+        assert_eq!(
+            u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]),
+            1
+        );
+        assert_eq!(
+            i32::from_le_bytes([bytes[6], bytes[7], bytes[8], bytes[9]]),
+            11
+        );
+        assert_eq!(
+            u32::from_le_bytes([bytes[10], bytes[11], bytes[12], bytes[13]]),
+            12
+        );
+        assert_eq!(
+            u32::from_le_bytes([bytes[14], bytes[15], bytes[16], bytes[17]]),
+            0xDF2F_53CF
+        );
+        assert_eq!(
+            i32::from_le_bytes([bytes[18], bytes[19], bytes[20], bytes[21]]),
+            67
+        );
+        assert_eq!(
+            u32::from_le_bytes([bytes[22], bytes[23], bytes[24], bytes[25]]),
+            3
+        );
+        assert_eq!(bytes[26] >> 5, 1);
+        assert_eq!(
+            u32::from_le_bytes([bytes[27], bytes[28], bytes[29], bytes[30]]),
+            3
+        );
+        assert_eq!(&bytes[31..34], &[1, 2, 3]);
     }
 
     #[test]

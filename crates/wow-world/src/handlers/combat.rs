@@ -63,8 +63,8 @@ impl WorldSession {
             }
         };
 
-        let player_guid = match &self.player_guid {
-            Some(g) => g.clone(),
+        let player_guid = match self.player_guid() {
+            Some(g) => g,
             None => return,
         };
 
@@ -76,9 +76,7 @@ impl WorldSession {
 
         // Check the creature exists and is alive.
         let creature_alive = self
-            .creatures
-            .get(&swing.victim)
-            .map(|c| c.is_alive)
+            .mutate_world_creature(swing.victim, |c| c.is_alive())
             .unwrap_or(false);
 
         if !creature_alive {
@@ -92,9 +90,8 @@ impl WorldSession {
             return;
         }
 
-        // Start combat with the creature and immediately mirror the legacy
-        // compatibility cache into canonical map state when available.
-        let _ = self.mutate_legacy_creature_and_sync(swing.victim, |creature| {
+        // Start combat with the canonical map-owned creature.
+        let _ = self.mutate_world_creature(swing.victim, |creature| {
             creature.enter_combat(player_guid.clone());
         });
 
@@ -112,8 +109,8 @@ impl WorldSession {
 
     /// CMSG_ATTACK_STOP — client stops attacking.
     pub async fn handle_attack_stop(&mut self, _pkt: wow_packet::WorldPacket) {
-        let player_guid = match &self.player_guid {
-            Some(g) => g.clone(),
+        let player_guid = match self.player_guid() {
+            Some(g) => g,
             None => return,
         };
 
@@ -122,9 +119,9 @@ impl WorldSession {
         if let Some(target) = self.combat_target.take() {
             self.in_combat = false;
 
-            // Reset creature combat if it was fighting us and sync canonical map state.
-            let _ = self.mutate_legacy_creature_and_sync(target, |creature| {
-                if creature.state == wow_ai::CreatureState::InCombat {
+            // Reset creature combat if it was fighting us.
+            let _ = self.mutate_world_creature(target, |creature| {
+                if creature.state() == wow_entities::CreatureAiState::InCombat {
                     creature.reset_combat();
                 }
             });

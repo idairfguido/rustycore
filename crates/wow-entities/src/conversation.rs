@@ -90,6 +90,8 @@ pub struct Conversation {
     line_start_times: HashMap<(u8, i32), i32>,
     last_line_end_times: Vec<i32>,
     is_removed: bool,
+    grid_unload_cleanup_before_delete_count: u32,
+    grid_unload_delete_requested: bool,
 }
 
 impl Conversation {
@@ -115,6 +117,8 @@ impl Conversation {
             line_start_times: HashMap::new(),
             last_line_end_times: Vec::new(),
             is_removed: false,
+            grid_unload_cleanup_before_delete_count: 0,
+            grid_unload_delete_requested: false,
         }
     }
 
@@ -136,6 +140,29 @@ impl Conversation {
 
     pub fn clear_conversation_data_changes(&mut self) {
         self.conversation_data_changes.reset_all();
+    }
+
+    pub const fn cleanup_before_delete_count(&self) -> u32 {
+        self.grid_unload_cleanup_before_delete_count
+    }
+
+    pub const fn grid_unload_delete_requested(&self) -> bool {
+        self.grid_unload_delete_requested
+    }
+
+    pub fn set_destroyed_object(&mut self, destroyed: bool) {
+        self.world.object_mut().set_destroyed_object(destroyed);
+    }
+
+    pub fn cleanup_before_delete(&mut self) {
+        self.grid_unload_cleanup_before_delete_count = self
+            .grid_unload_cleanup_before_delete_count
+            .saturating_add(1);
+    }
+
+    pub fn request_delete_from_grid_unload(&mut self) {
+        self.grid_unload_delete_requested = true;
+        self.world.clear_current_cell();
     }
 
     pub const fn stationary_position(&self) -> Position {

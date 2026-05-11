@@ -171,6 +171,64 @@ impl ClientPacket for ChatMessageEmote {
     }
 }
 
+// ── CMSG_CHAT_REGISTER_ADDON_PREFIXES / CMSG_CHAT_ADDON_MESSAGE ──────────────
+
+/// CMSG_CHAT_REGISTER_ADDON_PREFIXES.
+///
+/// C++ ref: `WorldPackets::Chat::ChatRegisterAddonPrefixes::Read`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatRegisterAddonPrefixes {
+    pub prefixes: Vec<String>,
+}
+
+impl ChatRegisterAddonPrefixes {
+    pub const MAX_PREFIXES: usize = 64;
+}
+
+impl ClientPacket for ChatRegisterAddonPrefixes {
+    const OPCODE: ClientOpcodes = ClientOpcodes::ChatRegisterAddonPrefixes;
+
+    fn read(pkt: &mut WorldPacket) -> Result<Self, PacketError> {
+        let count = pkt.read_uint32()? as usize;
+        let mut prefixes = Vec::with_capacity(count);
+        for _ in 0..count {
+            let len = pkt.read_bits(5)? as usize;
+            prefixes.push(pkt.read_string(len)?);
+        }
+        Ok(Self { prefixes })
+    }
+}
+
+/// CMSG_CHAT_ADDON_MESSAGE payload.
+///
+/// C++ ref: `operator>>(ByteBuffer&, ChatAddonMessageParams&)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatAddonMessage {
+    pub msg_type: i32,
+    pub prefix: String,
+    pub text: String,
+    pub is_logged: bool,
+}
+
+impl ClientPacket for ChatAddonMessage {
+    const OPCODE: ClientOpcodes = ClientOpcodes::ChatAddonMessage;
+
+    fn read(pkt: &mut WorldPacket) -> Result<Self, PacketError> {
+        let prefix_len = pkt.read_bits(5)? as usize;
+        let text_len = pkt.read_bits(8)? as usize;
+        let is_logged = pkt.read_bit()?;
+        let msg_type = pkt.read_int32()?;
+        let prefix = pkt.read_string(prefix_len)?;
+        let text = pkt.read_string(text_len)?;
+        Ok(Self {
+            msg_type,
+            prefix,
+            text,
+            is_logged,
+        })
+    }
+}
+
 // ── SMSG_CHAT ─────────────────────────────────────────────────────
 
 /// Server sends this to broadcast a chat message to nearby players.
@@ -355,5 +413,42 @@ impl ServerPacket for EmoteMessage {
         for &id in &self.spell_visual_kit_ids {
             pkt.write_int32(id);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chat_register_addon_prefixes_reads_cpp_layout() {
+        let mut writer = WorldPacket::new_empty();
+        writer.write_uint32(2);
+        writer.write_bits(3, 5);
+        writer.write_string("ABC");
+        writer.write_bits(4, 5);
+        writer.write_string("DEFG");
+
+        let mut reader = WorldPacket::from_bytes(writer.data());
+        let packet = ChatRegisterAddonPrefixes::read(&mut reader).unwrap();
+        assert_eq!(packet.prefixes, vec!["ABC", "DEFG"]);
+    }
+
+    #[test]
+    fn chat_addon_message_reads_cpp_layout() {
+        let mut writer = WorldPacket::new_empty();
+        writer.write_bits(3, 5);
+        writer.write_bits(5, 8);
+        writer.write_bit(true);
+        writer.write_int32(ChatMsg::Guild as i32);
+        writer.write_string("ABC");
+        writer.write_string("hello");
+
+        let mut reader = WorldPacket::from_bytes(writer.data());
+        let packet = ChatAddonMessage::read(&mut reader).unwrap();
+        assert_eq!(packet.msg_type, ChatMsg::Guild as i32);
+        assert_eq!(packet.prefix, "ABC");
+        assert_eq!(packet.text, "hello");
+        assert!(packet.is_logged);
     }
 }

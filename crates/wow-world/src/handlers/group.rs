@@ -223,7 +223,7 @@ impl WorldSession {
         info!(account = self.account_id, target_name = %target_name, "PartyInvite parsed");
 
         // — setup —
-        let my_guid = match self.player_guid {
+        let my_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
@@ -299,7 +299,7 @@ impl WorldSession {
         pending.insert(real_target_guid, my_guid);
 
         // 6. Send invite dialog to the target.
-        let inviter_name = self.player_name.clone().unwrap_or_default();
+        let inviter_name = self.player_name_like_cpp().unwrap_or_default().to_string();
         let vra = self.virtual_realm_address();
 
         if let Some(target_entry) = registry.get(&real_target_guid) {
@@ -347,11 +347,11 @@ impl WorldSession {
         }
 
         // — setup —
-        let my_guid = match self.player_guid {
+        let my_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
-        let my_name = self.player_name.clone().unwrap_or_default();
+        let my_name = self.player_name_like_cpp().unwrap_or_default().to_string();
 
         // Clone Arcs immediately so we hold no borrow on `self` later.
         let pending = match self.pending_invites() {
@@ -429,7 +429,7 @@ impl WorldSession {
         }
 
         // — setup —
-        let my_guid = match self.player_guid {
+        let my_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
@@ -528,7 +528,7 @@ impl WorldSession {
             }
         };
 
-        if self.player_guid.is_none() {
+        if self.player_guid().is_none() {
             if opt_out.pass_on_loot {
                 warn!("CMSG_OPT_OUT_OF_LOOT value<>0 for not-loaded character");
             }
@@ -563,6 +563,11 @@ mod tests {
             active_loot_rolls: Vec::new(),
             pass_on_group_loot: false,
             enchanting_skill: 0,
+            known_spells: Vec::new(),
+            active_quest_statuses: Default::default(),
+            active_quest_objective_counts: Default::default(),
+            rewarded_quests: Default::default(),
+            inventory_item_counts: Default::default(),
             player_name: format!("Player{}", guid.low_value()),
             account_id: 1,
             race: 1,
@@ -694,7 +699,7 @@ mod tests {
     #[tokio::test]
     async fn opt_out_of_loot_sets_pass_on_group_loot_like_cpp() {
         let (mut session, send_rx) = make_session_with_send();
-        session.player_guid = Some(ObjectGuid::create_player(1, 42));
+        session.set_player_guid(Some(ObjectGuid::create_player(1, 42)));
         assert!(!session.pass_on_group_loot);
 
         session

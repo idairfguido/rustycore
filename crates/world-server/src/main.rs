@@ -16,13 +16,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use tracing::info;
+use tracing::{info, warn};
 use wow_config::{DatabaseInfo, LoadReport, WorldConfigSet};
 use wow_core::{ObjectGuidGenerator, guid::HighGuid};
 use wow_database::{
     CharStatements, CharacterDatabase, HotfixDatabase, LoginDatabase, LoginStatements,
     WorldDatabase, WorldStatements, build_connection_string,
 };
+use wow_instances::{InstanceLockMgr, MapDb2Entries, MapDifficultyResetInterval};
 use wow_loot::{
     LootConditionId, LootConditionLinkReport, LootConditionReferenceUseLikeCpp,
     LootReferenceCheckReport, LootStore, LootStoreKind, LootStores, LootTemplateRow,
@@ -436,6 +437,22 @@ async fn main() -> Result<()> {
         dungeon_encounter_store.len()
     );
 
+    // Load Map.db2 + MapDifficulty.db2 for C++ InstanceLockMgr MapDb2Entries resolution.
+    let map_store = Arc::new(
+        wow_data::MapStore::load(&data_dir, &locale)
+            .context("Failed to load Map.db2 — check DataDir and DBC.Locale config")?,
+    );
+    info!("Loaded {} maps from Map.db2", map_store.len());
+
+    let map_difficulty_store = Arc::new(
+        wow_data::MapDifficultyStore::load(&data_dir, &locale)
+            .context("Failed to load MapDifficulty.db2 — check DataDir and DBC.Locale config")?,
+    );
+    info!(
+        "Loaded {} map difficulties from MapDifficulty.db2",
+        map_difficulty_store.len()
+    );
+
     // Load ItemAppearance.db2 for item display-info resolution.
     let item_appearance_store = Arc::new(
         wow_data::ItemAppearanceStore::load(&data_dir, &locale)
@@ -570,20 +587,6 @@ async fn main() -> Result<()> {
     }
     let hotfix_blob_cache = Arc::new(hotfix_blob_cache);
 
-    // Diagnostic: check if known problem items exist in cache
-    for item_id in [58256i32, 58274, 58257] {
-        let has = hotfix_blob_cache.get(0x919BE54E, item_id); // ItemSparse table hash
-        info!(
-            "HotfixBlobCache check: ItemSparse record {} → {}",
-            item_id,
-            if let Some(b) = has {
-                format!("FOUND ({} bytes)", b.len())
-            } else {
-                "NOT FOUND".into()
-            }
-        );
-    }
-
     // Load SkillLineAbility.db2 + SkillRaceClassInfo.db2 for auto-learned spells
     let skill_store = Arc::new(
         wow_data::SkillStore::load(&data_dir, &locale)
@@ -717,8 +720,32 @@ async fn main() -> Result<()> {
     // Shared world state (creatures/grids visible to every session on the same map).
     // Each session gets a clone of this Arc on creation.
     let shared_map: SharedMapManager = Arc::new(std::sync::RwLock::new(LegacyMapManager::new()));
+    let mut loaded_instance_lock_mgr = InstanceLockMgr::default();
+    let instance_lock_load_issues = loaded_instance_lock_mgr
+        .load_from_database_like_cpp(&char_db, |map_id, difficulty_id| {
+            map_db2_entries_from_stores(&map_store, &map_difficulty_store, map_id, difficulty_id)
+        })
+        .await
+        .context("Failed to load instance locks from character database")?;
+    for issue in &instance_lock_load_issues {
+        warn!("Instance lock load issue: {issue:?}");
+    }
+    let instance_lock_stats = loaded_instance_lock_mgr.statistics();
+    info!(
+        "Loaded instance locks: {} shared instances, {} players, {} issues",
+        instance_lock_stats.instance_count,
+        instance_lock_stats.player_count,
+        instance_lock_load_issues.len()
+    );
+    let registered_instance_ids = loaded_instance_lock_mgr.registered_instance_ids_like_cpp_order();
+    let instance_lock_mgr = Arc::new(std::sync::RwLock::new(loaded_instance_lock_mgr));
 
     let canonical_map_manager = Arc::new(Mutex::new(create_canonical_map_manager(&world_configs)));
+    register_loaded_instance_ids(
+        &shared_map,
+        canonical_map_manager.as_ref(),
+        &registered_instance_ids,
+    );
 
     // Build session resources
     let session_resources = Arc::new(SessionResources {
@@ -726,6 +753,7 @@ async fn main() -> Result<()> {
         login_db: Some(Arc::clone(&login_db)),
         world_db: Some(Arc::clone(&world_db)),
         guid_generator: Some(Arc::clone(&guid_generator)),
+        instance_lock_mgr: Some(Arc::clone(&instance_lock_mgr)),
         currency_types_store: Some(Arc::clone(&currency_types_store)),
         import_price_stores: Some(Arc::clone(&import_price_stores)),
         item_class_store: Some(Arc::clone(&item_class_store)),
@@ -753,6 +781,8 @@ async fn main() -> Result<()> {
         area_trigger_store: Some(Arc::clone(&area_trigger_store)),
         chr_specialization_store: Some(Arc::clone(&chr_specialization_store)),
         dungeon_encounter_store: Some(Arc::clone(&dungeon_encounter_store)),
+        map_store: Some(Arc::clone(&map_store)),
+        map_difficulty_store: Some(Arc::clone(&map_difficulty_store)),
         quest_store: Some(Arc::clone(&quest_store)),
         quest_xp_store: Some(Arc::clone(&quest_xp_store)),
         player_xp_table: Some(Arc::clone(&player_xp_table)),
@@ -837,9 +867,11 @@ async fn main() -> Result<()> {
     let map_update_handle =
         spawn_canonical_map_update_loop(Arc::clone(&canonical_map_manager), map_update_interval_ms);
 
+    set_realm_online(&login_db, realm_id).await?;
+
     // Wait for shutdown signal
     tokio::select! {
-        _ = tokio::signal::ctrl_c() => {
+        _ = shutdown_signal() => {
             info!("Shutdown signal received, stopping...");
         }
         result = realm_handle => {
@@ -859,8 +891,57 @@ async fn main() -> Result<()> {
         }
     }
 
+    if let Err(e) = set_realm_offline(&login_db, realm_id).await {
+        tracing::error!("Failed to mark realm {realm_id} offline: {e}");
+    }
+
     info!("World server stopped.");
     Ok(())
+}
+
+async fn set_realm_online(login_db: &LoginDatabase, realm_id: u16) -> Result<()> {
+    const REALM_FLAG_OFFLINE: u8 = 0x02;
+
+    login_db
+        .direct_execute(&format!(
+            "UPDATE realmlist SET flag = flag & ~{REALM_FLAG_OFFLINE}, population = 0 WHERE id = {realm_id}"
+        ))
+        .await
+        .context("Failed to mark realm online")?;
+
+    info!("Realm {realm_id} marked online");
+    Ok(())
+}
+
+async fn set_realm_offline(login_db: &LoginDatabase, realm_id: u16) -> Result<()> {
+    const REALM_FLAG_OFFLINE: u8 = 0x02;
+
+    login_db
+        .direct_execute(&format!(
+            "UPDATE realmlist SET flag = flag | {REALM_FLAG_OFFLINE} WHERE id = {realm_id}"
+        ))
+        .await
+        .context("Failed to mark realm offline")?;
+
+    info!("Realm {realm_id} marked offline");
+    Ok(())
+}
+
+#[cfg(unix)]
+async fn shutdown_signal() {
+    use tokio::signal::unix::{SignalKind, signal};
+
+    let mut terminate = signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = terminate.recv() => {}
+    }
+}
+
+#[cfg(not(unix))]
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
 }
 
 fn load_world_config() -> Result<LoadReport> {
@@ -1192,6 +1273,67 @@ fn create_canonical_map_manager(configs: &WorldConfigSet) -> wow_map::MapManager
     manager
 }
 
+fn map_db2_entries_from_stores(
+    map_store: &wow_data::MapStore,
+    map_difficulty_store: &wow_data::MapDifficultyStore,
+    map_id: u32,
+    difficulty_id: u8,
+) -> Option<MapDb2Entries> {
+    let map = map_store.get(map_id)?;
+    let map_difficulty = map_difficulty_store.get(map_id, difficulty_id)?;
+
+    Some(MapDb2Entries {
+        map_id,
+        difficulty_id,
+        lock_id: u32::from(map_difficulty.lock_id),
+        reset_interval: match map_difficulty.reset_interval {
+            1 => MapDifficultyResetInterval::Daily,
+            2 => MapDifficultyResetInterval::Weekly,
+            _ => MapDifficultyResetInterval::Anytime,
+        },
+        is_flex_locking: map.is_flex_locking(),
+        is_using_encounter_locks: map_difficulty.is_using_encounter_locks(),
+    })
+}
+
+fn register_loaded_instance_ids(
+    legacy_map_manager: &SharedMapManager,
+    canonical_map_manager: &Mutex<wow_map::MapManager>,
+    instance_ids: &[u32],
+) {
+    let Some(max_instance_id) = instance_ids.iter().copied().max() else {
+        return;
+    };
+
+    match legacy_map_manager.write() {
+        Ok(mut manager) => {
+            manager.init_instance_ids_from_max(max_instance_id);
+            for &instance_id in instance_ids {
+                manager.register_instance_id(instance_id);
+            }
+        }
+        Err(_) => warn!("Legacy MapManager lock poisoned; persisted instance ids not registered"),
+    }
+
+    match canonical_map_manager.lock() {
+        Ok(mut manager) => {
+            manager.init_instance_ids(u64::from(max_instance_id));
+            for &instance_id in instance_ids {
+                manager.register_instance_id(instance_id);
+            }
+        }
+        Err(_) => {
+            warn!("Canonical MapManager lock poisoned; persisted instance ids not registered")
+        }
+    }
+
+    info!(
+        "Registered {} persisted instance ids with MapManager, max_instance_id={}",
+        instance_ids.len(),
+        max_instance_id
+    );
+}
+
 fn spawn_canonical_map_update_loop(
     map_manager: SharedCanonicalMapManager,
     tick_interval_ms: u32,
@@ -1336,6 +1478,9 @@ async fn create_session(
     if let Some(ref generator) = resources.guid_generator {
         session.set_guid_generator(Arc::clone(generator));
     }
+    if let Some(ref mgr) = resources.instance_lock_mgr {
+        session.set_instance_lock_mgr(Arc::clone(mgr));
+    }
     if let Some(ref db) = resources.world_db {
         session.set_world_db(Arc::clone(db));
     }
@@ -1413,6 +1558,12 @@ async fn create_session(
     }
     if let Some(ref store) = resources.dungeon_encounter_store {
         session.set_dungeon_encounter_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.map_store {
+        session.set_map_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.map_difficulty_store {
+        session.set_map_difficulty_store(Arc::clone(store));
     }
     if let Some(ref store) = resources.quest_store {
         session.set_quest_store(Arc::clone(store));

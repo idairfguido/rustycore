@@ -146,7 +146,7 @@ encryption is enabled:
 | 2 | `SMSG_SET_TIME_ZONE_INFORMATION` | SetTimeZoneInformation | Timezone strings (UTC) |
 | 3 | `SMSG_FEATURE_SYSTEM_STATUS_GLUE_SCREEN` | FeatureSystemStatusGlueScreen | Char select features (NOT in-game version) |
 | 4 | `SMSG_CLIENT_CACHE_VERSION` | ClientCacheVersion | Cache ID = 24081 |
-| 5 | `SMSG_AVAILABLE_HOTFIXES` | AvailableHotfixes | Empty (no hotfixes) |
+| 5 | `SMSG_AVAILABLE_HOTFIXES` | AvailableHotfixes | Announces loaded `hotfix_data` push IDs for the active locale |
 | 6 | `SMSG_ACCOUNT_DATA_TIMES` | AccountDataTimes | Global (empty GUID), 15 timestamps |
 | 7 | `SMSG_TUTORIAL_FLAGS` | TutorialFlags | 8x u32 (all 0xFFFFFFFF = all shown) |
 | 8 | `SMSG_CONNECTION_STATUS` | ConnectionStatus | State=1, SuppressNotification=true |

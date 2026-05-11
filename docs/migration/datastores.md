@@ -272,7 +272,7 @@ Plus the ~783 per-table statements registered through `DB2LoadInfo::Instance.Sta
 
 **Files in `/home/server/rustycore`:**
 - `crates/wow-data/src/wdc4.rs` — 915 lines — generic WDC4 binary reader (covers shared layer; see `shared-datastores.md`).
-- `crates/wow-data/src/hotfix_cache.rs` — 111 lines — pre-loads `Item.db2` + `ItemSparse.db2` raw bytes for `SMSG_DB_REPLY`. **Not** the equivalent of `DB2Manager::LoadHotfixBlob` despite the similar name — this caches *file* bytes, not *DB hotfix* bytes.
+- `crates/wow-data/src/hotfix_cache.rs` — pre-loads all `.db2` raw record bytes for the active locale, reads the three C++ hotfix control tables (`hotfix_data`, `hotfix_blob`, `hotfix_optional_data`), and serves `SMSG_DB_REPLY` / `SMSG_HOTFIX_CONNECT` content. This is still not a full `DB2Manager`: it is a blob-serving bridge without typed `Storage<T>` overlays or generated DB2 structs.
 - `crates/wow-data/src/item.rs` — 123 lines — `ItemRecord` (6 fields) + `ItemStore` (HashMap loader).
 - `crates/wow-data/src/item_stats.rs` — 424 lines — `ItemStatEntry` from ItemSparse.db2 (~30 hand-picked fields out of ~135).
 - `crates/wow-data/src/player_stats.rs` — 307 lines — wraps ChrClassUIDisplay-equivalent? No — wraps the `gtChanceToMeleeCrit*.txt` family (a `GameTable`-equivalent for WoLK 3.4.3 base stats per class+level). Hand-rolled.
@@ -285,8 +285,9 @@ Plus the ~783 per-table statements registered through `DB2LoadInfo::Instance.Sta
 - world-server `main.rs` calls `wow_data::build_hotfix_blob_cache(&data_dir, &locale)` once at startup.
 
 **What's implemented:**
-- Direct binary reads of 8 specific DB2 tables (Item, ItemSparse, AreaTrigger, Spell-partial, Skill*, Quest, QuestXP, plus the GameTable-style ChrClass per-level stats).
-- Raw blob serving for two tables (Item, ItemSparse) on `CMSG_DB_QUERY_BULK`.
+- Direct binary reads of all `.db2` files for the active locale into a table-hash/record-id blob cache for `CMSG_DB_QUERY_BULK`.
+- `hotfix_data`, `hotfix_blob`, and `hotfix_optional_data` control-table reads, plus wire support for `SMSG_AVAILABLE_HOTFIXES`, `CMSG_HOTFIX_REQUEST`, `SMSG_HOTFIX_CONNECT`, and `SMSG_DB_REPLY`.
+- Hand-written typed readers still exist for the gameplay stores currently consumed by Rust (Item, ItemSparse, AreaTrigger, Spell-partial, Skill*, Quest, QuestXP, GameTable-style player stats, etc.).
 
 **What's missing vs C++:**
 1. **`DB2Manager` singleton** — does not exist. There is no global `sDB2Manager` and no `_stores` registry mapping `table_hash -> &dyn Storage`.
@@ -295,9 +296,9 @@ Plus the ~783 per-table statements registered through `DB2LoadInfo::Instance.Sta
 4. **Auto-generated meta** — `DB2Metadata.h` (12067 LoC, 788 structs) — none.
 5. **Auto-generated load info** — `DB2LoadInfo.h` (6357 LoC, 325 structs) — none.
 6. **`DBCEnums.h`** — no central place for `Difficulty`, `Powers`, `MapType`, `BattlegroundBracketId`, `LevelLimit`. These are scattered or hard-coded. (`wow-constants` may have a few.)
-7. **Hotfix-DB overlay** — `LoadHotfixData`, `LoadHotfixBlob`, `LoadHotfixOptionalData` have no analogue. The `HotfixStatements` enum is a stub. The 783 per-table prepared statements are not registered. Three control tables (`hotfix_data`, `hotfix_blob`, `hotfix_optional_data`) are not read.
+7. **Hotfix-DB typed overlay** — the three control-table reads exist, but the generated per-DB2 hotfix table statements and typed `Storage<T>` merge path are still missing. Runtime `RecordRemoved` is approximated through blob-cache table presence until real `DB2Manager` storage exists.
 8. **`DB2HotfixGenerator`** — runtime in-memory record patcher; no analogue.
-9. **`SMSG_AVAILABLE_HOTFIXES` / `SMSG_HOTFIX_PUSH` / `CMSG_HOTFIX_REQUEST`** flow — likely stubbed or absent.
+9. **`SMSG_HOTFIX_PUSH`** flow — `SMSG_AVAILABLE_HOTFIXES` and `CMSG_HOTFIX_REQUEST`/`SMSG_HOTFIX_CONNECT` are wired; runtime push queue from `DB2HotfixGeneratorBase::AddClientHotfix` is still absent.
 10. **Most `DB2Manager` accessor helpers** — `GetCurveValueAt`, `EvaluateExpectedStat`, `GetMapDifficultyData`, `GetTalentsByPosition`, `GetPhasesForGroup`, `GetUiMapPosition`, `Map2ZoneCoordinates`, `GetWMOAreaTable`, `IsInArea`, `GetBroadcastTextValue`, `ValidateName` — none.
 11. **GameTables** — sixteen TSV files (`gtBaseMP`, `gtCombatRatings`, `gtSpellScaling`, `gtHpPerSta`, `gtRegen*`, `gtShieldBlockRegular`, …) — `player_stats.rs` covers a subset of one of them; the rest are absent.
 12. **M2 cinematic camera parser** — no analogue. Cinematic opcodes will be unable to send fly-by data.
@@ -412,10 +413,14 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [ ] **#GDS.4** Generate `crates/wow-data/src/generated/meta.rs` from `DB2Metadata.h` (788 structs). One `pub static <NAME>_META: TableMeta = …` per table. (complexity: **H**)
 - [ ] **#GDS.5** Generate `crates/wow-data/src/generated/load_info.rs` from `DB2LoadInfo.h` (325 structs). One `pub static <NAME>_LOAD_INFO: LoadInfo = …` per table; references both the meta and the `HotfixStatements` enum. (complexity: **H**)
 - [ ] **#GDS.6** Define ~261 `pub static <NAME>_STORE: OnceLock<Arc<Storage<XEntry>>>` globals (or expose them via `DB2Manager::store::<XEntry>()`) and the load-order in `DB2Manager::load_stores(data_path, default_locale)`. Mirror `DB2Stores.cpp:593-1100` LOAD_DB2 sequence. (complexity: **XL**, splitter — first cut just the 25 stores actually consumed by current Rust code.)
-- [ ] **#GDS.7** Implement `DB2Manager::load_hotfix_data(locale_mask)`. Mirror `DB2Stores.cpp:1539-1607`. Includes the post-loop pass that calls `store.erase_record(record_id)` for `Status::RecordRemoved`. (complexity: **M**)
-- [ ] **#GDS.8** Implement `DB2Manager::load_hotfix_blob(locale_mask)`. Mirror `DB2Stores.cpp:1609-1654`. (complexity: **L**)
-- [ ] **#GDS.9** Implement `DB2Manager::load_hotfix_optional_data(locale_mask)`. Includes the per-table allowlist (BroadcastText → TactKey). Mirror `DB2Stores.cpp:1661-1736`. (complexity: **M**)
-- [ ] **#GDS.10** Wire `SMSG_AVAILABLE_HOTFIXES` and `SMSG_HOTFIX_PUSH` packet builders consuming `DB2Manager::hotfix_data`. (complexity: **M**)
+- [x] **#GDS.7a** Interim `HotfixBlobCache::load_hotfix_data_from_db(locale)` bridge for `hotfix_data`, contrasted with `DB2Stores.cpp:1539-1607`. Remaining full task: typed `DB2Manager::load_hotfix_data(locale_mask)` with real `store.erase_record(record_id)` for `Status::RecordRemoved`. (closed by `5916cbd` + current Hotfix handshake change)
+- [x] **#GDS.8a** Interim `HotfixBlobCache::load_hotfix_blobs_from_db(locale)` bridge for `hotfix_blob`, contrasted with `DB2Stores.cpp:1609-1654`. Remaining full task: real `DB2Manager::load_hotfix_blob(locale_mask)` over typed stores. (closed by `5916cbd`)
+- [x] **#GDS.9a** Interim `HotfixBlobCache::load_hotfix_optional_data_from_db(locale)` bridge for `hotfix_optional_data` and appending optional blobs to `DBReply`/`HotfixConnect`, contrasted with `DB2Stores.cpp:1661-1736` and `HotfixHandler.cpp`. Remaining full task: enforce the C++ per-table allowlist once typed BroadcastText/TactKey stores exist. (closed by current Hotfix handshake change)
+- [x] **#GDS.10a** Wire `SMSG_AVAILABLE_HOTFIXES` and `CMSG_HOTFIX_REQUEST`/`SMSG_HOTFIX_CONNECT` packet builders consuming loaded hotfix data, contrasted with `HotfixHandler.cpp` and `HotfixPackets.cpp`. Remaining full task: `SMSG_HOTFIX_PUSH` runtime queue. (closed by current Hotfix handshake change)
+- [ ] **#GDS.7** Implement full typed `DB2Manager::load_hotfix_data(locale_mask)`. Mirror `DB2Stores.cpp:1539-1607`. Includes the post-loop pass that calls `store.erase_record(record_id)` for `Status::RecordRemoved`. (complexity: **M**)
+- [ ] **#GDS.8** Implement full typed `DB2Manager::load_hotfix_blob(locale_mask)`. Mirror `DB2Stores.cpp:1609-1654`. (complexity: **L**)
+- [ ] **#GDS.9** Implement full typed `DB2Manager::load_hotfix_optional_data(locale_mask)`. Includes the per-table allowlist (BroadcastText → TactKey). Mirror `DB2Stores.cpp:1661-1736`. (complexity: **M**)
+- [ ] **#GDS.10** Wire `SMSG_HOTFIX_PUSH` packet builders consuming runtime DB2 hotfix generation queue. (complexity: **M**)
 - [ ] **#GDS.11** Implement `DB2HotfixGenerator<T>` — runtime in-memory patcher. API: `DB2Manager::patch::<XEntry>(id, |entry| { entry.field = …; }, notify_client: bool)`. Notify-client routes through `DB2HotfixGeneratorBase::add_client_hotfix(table_hash, id)` which appends to a queue flushed by `WorldSession`. (complexity: **M**)
 - [ ] **#GDS.12** Port the curve interpolator: `DB2Manager::curve_value_at(curve_id, x)`. Linear, cosine, cubic-spline modes. Used everywhere — XP, item-level, content tuning. (complexity: **M**)
 - [ ] **#GDS.13** Port `DB2Manager::evaluate_expected_stat(stat, level, expansion, content_tuning_id, class)`. Reads `ExpectedStat.db2` + `ExpectedStatMod.db2`. (complexity: **M**)

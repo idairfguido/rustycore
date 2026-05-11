@@ -66,9 +66,9 @@ impl ItemClassStore {
         for (id, idx) in reader.iter_records() {
             let entry = ItemClassEntry {
                 id,
-                class_id: reader.get_field_i8(idx, 2),
-                price_modifier: f32::from_bits(reader.get_field_u32(idx, 3)),
-                flags: reader.get_field_u8(idx, 4),
+                class_id: reader.get_field_i8(idx, 1),
+                price_modifier: f32::from_bits(reader.get_field_u32(idx, 2)),
+                flags: reader.get_field_u8(idx, 3),
             };
             if let Ok(class_id) = u32::try_from(entry.class_id) {
                 by_old_enum.insert(class_id, entry);

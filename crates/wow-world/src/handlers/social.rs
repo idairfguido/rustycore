@@ -81,7 +81,7 @@ impl WorldSession {
             Err(_) => String::new(),
         };
 
-        let my_guid = match self.player_guid {
+        let my_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
@@ -225,7 +225,7 @@ impl WorldSession {
         // VirtualRealmAddress — ignored
         let _ = pkt.read_uint32();
 
-        let my_guid = match self.player_guid {
+        let my_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
@@ -268,7 +268,7 @@ impl WorldSession {
             }
         };
 
-        let my_guid = match self.player_guid {
+        let my_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };

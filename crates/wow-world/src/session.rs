@@ -6,15 +6,17 @@
 //! `WorldSession` — per-player session that receives packets from the
 //! [`WorldSocket`](wow_network::WorldSocket) and dispatches them to handlers.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use parking_lot::RwLock;
 use tracing::{debug, info, trace, warn};
 
+use crate::entity_update_bridge::player_values_update_to_update_object;
 use wow_constants::item::{CurrencyTypes, CurrencyTypesFlags};
-use wow_constants::unit::Team;
+use wow_constants::movement::MovementFlag;
+use wow_constants::unit::{Team, UnitFlags, UnitStandStateType};
 use wow_constants::{
     BagFamilyMask, BuyResult, ClientOpcodes, InventoryResult, InventoryType, ItemBondingType,
     ItemClass, ItemContext, ItemEnchantmentType, ItemFlags, ItemFlags2, ItemQuality, SellResult,
@@ -27,8 +29,8 @@ use wow_data::{
     ItemCurrencyCostStore, ItemDisenchantLootStore, ItemExtendedCostStore,
     ItemModifiedAppearanceStore, ItemPriceBaseStore, ItemRandomEnchantmentTemplateStore,
     ItemRandomPropertiesStore, ItemRandomPropertyTemplateEntry, ItemRandomSuffixStore,
-    ItemStatsStore, ItemStore, LockStore, PlayerStatsStore, RandPropPointsStore, SkillStore,
-    SpellItemEnchantmentStore, SpellStore,
+    ItemStatsStore, ItemStore, LockStore, MapDifficultyStore, MapStore, PlayerStatsStore,
+    RandPropPointsStore, SkillStore, SpellItemEnchantmentStore, SpellStore,
 };
 use wow_database::{
     CharStatements, CharacterDatabase, LoginDatabase, PreparedStatement, SqlTransaction,
@@ -42,8 +44,8 @@ use wow_entities::{
     ItemPosCount, ItemSlotRef, ItemStorageRef, ItemStorageTemplate, MAX_ITEM_SPELLS, NULL_BAG,
     NULL_SLOT, ObjectAccessor, PLAYER_SLOT_END, Player, PlayerEnchantTimeUpdate,
     PlayerInventoryStorage, PlayerItemTimeUpdate, REAGENT_BAG_SLOT_END, REAGENT_BAG_SLOT_START,
-    SendNewItemDelivery, SendNewItemDisplayText, SendNewItemPlan, WorldObject, is_bag_pos,
-    is_equipment_packed_pos, make_item_pos,
+    SendNewItemDelivery, SendNewItemDisplayText, SendNewItemPlan, VisibleItemValues, WorldObject,
+    is_bag_pos, is_equipment_packed_pos, make_item_pos,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus, build_dispatch_table};
 use wow_loot::LootStores;
@@ -57,6 +59,20 @@ use wow_packet::packets::item::{
     ItemPushResult, ItemPushResultDisplayType, ItemTimeUpdate,
 };
 use wow_packet::packets::misc::{BuyFailed, SellResponse};
+
+fn rounded_median_u32(sorted_values: &[u32]) -> u32 {
+    debug_assert!(!sorted_values.is_empty());
+    let mid = sorted_values.len() / 2;
+    if sorted_values.len() % 2 == 1 {
+        sorted_values[mid]
+    } else {
+        ((f64::from(sorted_values[mid - 1]) + f64::from(sorted_values[mid])) / 2.0).round() as u32
+    }
+}
+
+fn set_active_player_update_bit_like_cpp(mask: &mut [u32; 48], bit: usize) {
+    mask[bit / 32] |= 1 << (bit % 32);
+}
 use wow_packet::{ClientPacket, WorldPacket};
 
 /// Maximum number of packets processed per `update()` call.
@@ -74,6 +90,177 @@ pub(crate) struct RepresentedLootRollState {
     pub loot_list_id: u8,
     pub end_time: Instant,
     pub voters: HashMap<ObjectGuid, RepresentedLootRollVote>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepresentedGameObjectUseEffect {
+    TriggerGameEvent {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        event_id: u32,
+    },
+    TriggerLinkedTrap {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        trap_entry: u32,
+    },
+    CastSpell {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        spell_id: u32,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepresentedPendingBind {
+    pub instance_id: u32,
+    pub time_until_lock_ms: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepresentedGameObjectUseState {
+    pub loot_state: Option<wow_entities::LootState>,
+    pub loot_state_unit_guid: wow_core::ObjectGuid,
+    pub go_state: Option<wow_entities::GoState>,
+    pub dynamic_flags: u32,
+    pub despawn_delay_secs: Option<u32>,
+    pub personal_loot_uses: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct MovementAckEventLikeCpp {
+    pub opcode: ClientOpcodes,
+    pub mover_guid: ObjectGuid,
+    pub ack_index: Option<i32>,
+    pub movement_force_id: Option<ObjectGuid>,
+    pub movement_force_type: Option<u8>,
+    pub adjusted_time: Option<u32>,
+    pub speed: Option<f32>,
+    pub time_skipped: Option<u32>,
+    pub spline_id: Option<i32>,
+    pub accepted: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MoveSplineDoneTaxiActionLikeCpp {
+    InvalidMovement,
+    InProgressNoFlightGenerator,
+    InProgressNoTeleport,
+    TeleportRequested,
+    FinalCleanup,
+    IgnoredUnexpectedFinalPath,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RepresentedTaxiFlightNodeLikeCpp {
+    pub map_id: u16,
+    pub position: wow_core::Position,
+    pub teleport_flag: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct MoveSplineDoneTaxiEventLikeCpp {
+    pub spline_id: i32,
+    pub action: MoveSplineDoneTaxiActionLikeCpp,
+    pub destination_node_id: Option<u32>,
+    pub teleport_map_id: Option<u16>,
+    pub teleport_position: Option<wow_core::Position>,
+    pub honorless_target_cast: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MoveTeleportAckActionLikeCpp {
+    NotBeingTeleportedNear,
+    WrongMover,
+    MissingDestination,
+    Accepted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct MoveTeleportAckEventLikeCpp {
+    pub mover_guid: ObjectGuid,
+    pub ack_index: i32,
+    pub move_time: i32,
+    pub action: MoveTeleportAckActionLikeCpp,
+    pub destination_map_id: Option<u16>,
+    pub destination_position: Option<wow_core::Position>,
+    pub old_zone_id: Option<u32>,
+    pub new_zone_id: Option<u32>,
+    pub new_area_id: Option<u32>,
+    pub honorless_target_cast: bool,
+    pub pvp_disabled: bool,
+    pub pet_resummon_requested: bool,
+    pub delayed_operations_processed: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RepresentedTaxiFlightStateLikeCpp {
+    current_node: RepresentedTaxiFlightNodeLikeCpp,
+    node_after_teleport: Option<RepresentedTaxiFlightNodeLikeCpp>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MovementSpeedAckActionLikeCpp {
+    Accepted,
+    SkippedPending,
+    Corrected,
+    Kicked,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UnitMoveTypeLikeCpp {
+    Walk = 0,
+    Run = 1,
+    RunBack = 2,
+    Swim = 3,
+    SwimBack = 4,
+    TurnRate = 5,
+    Flight = 6,
+    FlightBack = 7,
+    PitchRate = 8,
+}
+
+impl UnitMoveTypeLikeCpp {
+    pub(crate) const COUNT: usize = 9;
+
+    pub(crate) fn index(self) -> usize {
+        self as usize
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct MovementSpeedAckEventLikeCpp {
+    pub opcode: ClientOpcodes,
+    pub move_type: Option<UnitMoveTypeLikeCpp>,
+    pub ack_speed: f32,
+    pub expected_speed: Option<f32>,
+    pub remaining_forced_changes: Option<u8>,
+    pub action: MovementSpeedAckActionLikeCpp,
+}
+
+const PLAYER_BASE_MOVE_SPEED_LIKE_CPP: [f32; UnitMoveTypeLikeCpp::COUNT] = [
+    2.5,      // MOVE_WALK
+    7.0,      // MOVE_RUN
+    4.5,      // MOVE_RUN_BACK
+    4.722222, // MOVE_SWIM
+    2.5,      // MOVE_SWIM_BACK
+    3.141594, // MOVE_TURN_RATE
+    7.0,      // MOVE_FLIGHT
+    4.5,      // MOVE_FLIGHT_BACK
+    3.14,     // MOVE_PITCH_RATE
+];
+
+impl Default for RepresentedGameObjectUseState {
+    fn default() -> Self {
+        Self {
+            loot_state: None,
+            loot_state_unit_guid: wow_core::ObjectGuid::EMPTY,
+            go_state: None,
+            dynamic_flags: 0,
+            despawn_delay_secs: None,
+            personal_loot_uses: 0,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -107,6 +294,213 @@ pub type SharedObjectAccessor = Arc<RwLock<ObjectAccessor>>;
 
 pub fn new_shared_object_accessor() -> SharedObjectAccessor {
     Arc::new(RwLock::new(ObjectAccessor::default()))
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SessionPlayerController {
+    guid: ObjectGuid,
+    name: String,
+    position: wow_core::Position,
+    map_id: u16,
+    race: u8,
+    class: u8,
+    level: u8,
+    gender: u8,
+    gold: u64,
+    xp: u32,
+    next_level_xp: u32,
+    selection_guid: Option<ObjectGuid>,
+    known_spells: Vec<i32>,
+    currencies: HashMap<u32, PlayerCurrency>,
+    inventory: SessionPlayerInventoryRuntime,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SessionPlayerInventoryRuntime {
+    inventory_items: HashMap<u8, InventoryItem>,
+    buyback_items: HashMap<u8, InventoryItem>,
+    buyback_price: [u32; BUYBACK_SLOT_COUNT],
+    buyback_timestamp: [i64; BUYBACK_SLOT_COUNT],
+    current_buyback_slot: u8,
+    item_objects: HashMap<ObjectGuid, Item>,
+}
+
+impl Default for SessionPlayerInventoryRuntime {
+    fn default() -> Self {
+        Self {
+            inventory_items: HashMap::new(),
+            buyback_items: HashMap::new(),
+            buyback_price: [0; BUYBACK_SLOT_COUNT],
+            buyback_timestamp: [0; BUYBACK_SLOT_COUNT],
+            current_buyback_slot: BUYBACK_SLOT_START,
+            item_objects: HashMap::new(),
+        }
+    }
+}
+
+impl SessionPlayerController {
+    pub(crate) fn new(
+        guid: ObjectGuid,
+        name: String,
+        position: wow_core::Position,
+        map_id: u16,
+        race: u8,
+        class: u8,
+        level: u8,
+        gender: u8,
+    ) -> Self {
+        Self {
+            guid,
+            name,
+            position,
+            map_id,
+            race,
+            class,
+            level,
+            gender,
+            gold: 0,
+            xp: 0,
+            next_level_xp: 400,
+            selection_guid: None,
+            known_spells: Vec::new(),
+            currencies: HashMap::new(),
+            inventory: SessionPlayerInventoryRuntime::default(),
+        }
+    }
+
+    pub(crate) fn guid(&self) -> ObjectGuid {
+        self.guid
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn position(&self) -> wow_core::Position {
+        self.position
+    }
+
+    pub(crate) fn map_id(&self) -> u16 {
+        self.map_id
+    }
+
+    pub(crate) fn race(&self) -> u8 {
+        self.race
+    }
+
+    pub(crate) fn class(&self) -> u8 {
+        self.class
+    }
+
+    pub(crate) fn level(&self) -> u8 {
+        self.level
+    }
+
+    pub(crate) fn gender(&self) -> u8 {
+        self.gender
+    }
+
+    pub(crate) fn gold(&self) -> u64 {
+        self.gold
+    }
+
+    pub(crate) fn xp(&self) -> u32 {
+        self.xp
+    }
+
+    pub(crate) fn next_level_xp(&self) -> u32 {
+        self.next_level_xp
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn selection_guid(&self) -> Option<ObjectGuid> {
+        self.selection_guid
+    }
+
+    pub(crate) fn known_spells(&self) -> &[i32] {
+        &self.known_spells
+    }
+
+    pub(crate) fn currencies(&self) -> &HashMap<u32, PlayerCurrency> {
+        &self.currencies
+    }
+
+    pub(crate) fn inventory(&self) -> &SessionPlayerInventoryRuntime {
+        &self.inventory
+    }
+
+    fn inventory_mut(&mut self) -> &mut SessionPlayerInventoryRuntime {
+        &mut self.inventory
+    }
+
+    fn set_map_position(&mut self, map_id: u16, position: wow_core::Position) {
+        self.map_id = map_id;
+        self.position = position;
+    }
+
+    fn set_level(&mut self, level: u8) {
+        self.level = level;
+    }
+
+    fn set_gold(&mut self, gold: u64) {
+        self.gold = gold;
+    }
+
+    fn set_xp(&mut self, xp: u32) {
+        self.xp = xp;
+    }
+
+    fn set_next_level_xp(&mut self, xp: u32) {
+        self.next_level_xp = xp;
+    }
+
+    fn set_selection_guid(&mut self, guid: Option<ObjectGuid>) {
+        self.selection_guid = guid;
+    }
+
+    fn set_known_spells(&mut self, spells: Vec<i32>) {
+        self.known_spells = spells;
+    }
+
+    fn learn_spell(&mut self, spell_id: i32) {
+        if !self.known_spells.contains(&spell_id) {
+            self.known_spells.push(spell_id);
+        }
+    }
+
+    fn set_currencies(&mut self, currencies: HashMap<u32, PlayerCurrency>) {
+        self.currencies = currencies;
+    }
+
+    fn set_inventory(&mut self, inventory: SessionPlayerInventoryRuntime) {
+        self.inventory = inventory;
+    }
+}
+
+impl SessionPlayerInventoryRuntime {
+    pub(crate) fn inventory_items(&self) -> &HashMap<u8, InventoryItem> {
+        &self.inventory_items
+    }
+
+    pub(crate) fn buyback_items(&self) -> &HashMap<u8, InventoryItem> {
+        &self.buyback_items
+    }
+
+    pub(crate) fn buyback_price(&self) -> &[u32; BUYBACK_SLOT_COUNT] {
+        &self.buyback_price
+    }
+
+    pub(crate) fn buyback_timestamp(&self) -> &[i64; BUYBACK_SLOT_COUNT] {
+        &self.buyback_timestamp
+    }
+
+    pub(crate) fn current_buyback_slot(&self) -> u8 {
+        self.current_buyback_slot
+    }
+
+    pub(crate) fn item_objects(&self) -> &HashMap<ObjectGuid, Item> {
+        &self.item_objects
+    }
 }
 
 /// Current state of the session.
@@ -256,6 +650,10 @@ pub struct WorldSession {
     // DungeonEncounter store (instance encounter lock/loot metadata)
     dungeon_encounter_store: Option<Arc<DungeonEncounterStore>>,
 
+    // Map stores (Map.db2 + MapDifficulty.db2)
+    map_store: Option<Arc<MapStore>>,
+    map_difficulty_store: Option<Arc<MapDifficultyStore>>,
+
     // Shared player registry for broadcasting to nearby sessions
     player_registry: Option<Arc<PlayerRegistry>>,
 
@@ -313,6 +711,12 @@ pub struct WorldSession {
 
     /// Time remaining until next TimeSyncRequest (in ms).
     pub(crate) time_sync_timer_ms: u32,
+    /// Time sync requests sent to the client: sequence index -> server send time.
+    pub(crate) time_sync_pending_requests: HashMap<u32, u32>,
+    /// Last Trinity-style clock delta samples, `(clock_delta, round_trip_duration)`.
+    pub(crate) time_sync_clock_delta_queue: VecDeque<(i64, u32)>,
+    /// Server-client clock delta used to translate movement times.
+    pub(crate) time_sync_clock_delta: i64,
 
     // ── Logout ──────────────────────────────────────────────────────
     /// When set, the session is counting down to logout (20s timer).
@@ -326,15 +730,17 @@ pub struct WorldSession {
     pub(crate) level_played_time: u32,
     /// Player's current money in copper (1 gold = 10,000 copper).
     /// Loaded from `characters.money` on login; saved on logout + buy/sell.
-    pub(crate) player_gold: u64,
-    pub(crate) player_xp: u32,
+    player_gold: u64,
+    player_xp: u32,
     /// XP required to reach next level, cached from player_xp_for_level.
-    pub(crate) player_next_level_xp: u32,
+    player_next_level_xp: u32,
     /// Currently selected target GUID (SetSelection).
-    pub(crate) selection_guid: Option<wow_core::ObjectGuid>,
+    selection_guid: Option<wow_core::ObjectGuid>,
 
     /// GUID of the character currently logged in (set after login completes).
-    pub(crate) player_guid: Option<ObjectGuid>,
+    player_guid: Option<ObjectGuid>,
+    /// Attached player controller, mirroring C++ `WorldSession::_player` ownership.
+    player_controller: Option<SessionPlayerController>,
 
     /// Pending creature spawn request (set during login, processed async).
     pub(crate) pending_creature_spawn: Option<PendingCreatureSpawn>,
@@ -342,35 +748,35 @@ pub struct WorldSession {
     pub(crate) respawn_queue: Vec<PendingRespawn>,
 
     /// In-memory inventory: slot → (item ObjectGuid, entry_id, db_guid).
-    pub(crate) inventory_items: HashMap<u8, InventoryItem>,
+    inventory_items: HashMap<u8, InventoryItem>,
 
     /// In-memory buyback slots, kept separate from normal inventory like C++ `GetItemByGuid`.
-    pub(crate) buyback_items: HashMap<u8, InventoryItem>,
-    pub(crate) buyback_price: [u32; BUYBACK_SLOT_COUNT],
-    pub(crate) buyback_timestamp: [i64; BUYBACK_SLOT_COUNT],
-    pub(crate) current_buyback_slot: u8,
+    buyback_items: HashMap<u8, InventoryItem>,
+    buyback_price: [u32; BUYBACK_SLOT_COUNT],
+    buyback_timestamp: [i64; BUYBACK_SLOT_COUNT],
+    current_buyback_slot: u8,
 
     /// C++ `_currencyStorage`, keyed by CurrencyTypes.db2 ID.
-    pub(crate) player_currencies: HashMap<u32, PlayerCurrency>,
+    player_currencies: HashMap<u32, PlayerCurrency>,
 
     /// In-memory item objects keyed by item GUID, mirroring C++ `Player::m_items` ownership.
-    pub(crate) inventory_item_objects: HashMap<ObjectGuid, Item>,
+    inventory_item_objects: HashMap<ObjectGuid, Item>,
 
     /// Current map ID for VALUES update packets.
-    pub(crate) current_map_id: u16,
+    current_map_id: u16,
 
     /// Race of the currently logged-in character (set at login).
-    pub(crate) player_race: u8,
+    player_race: u8,
     /// Class of the currently logged-in character (set at login).
-    pub(crate) player_class: u8,
+    player_class: u8,
     /// Level of the currently logged-in character (set at login).
-    pub(crate) player_level: u8,
+    player_level: u8,
     /// Gender of the currently logged-in character (set at login).
-    pub(crate) player_gender: u8,
+    player_gender: u8,
     /// C++ ActivePlayerData::LootSpecID represented session state.
-    pub(crate) loot_specialization_id: u32,
+    loot_specialization_id: u32,
     /// All known spell IDs for the logged-in character (DB + DBC merged).
-    pub(crate) known_spells: Vec<i32>,
+    known_spells: Vec<i32>,
 
     // ── Dual-connection (realm + instance) ───────────────────────
     // After ConnectTo completes, the session uses the instance socket for
@@ -384,27 +790,31 @@ pub struct WorldSession {
 
     // ── Movement & World position ─────────────────────────────────
     /// Server-side position of the player (updated from CMSG_MOVE_*).
-    pub(crate) player_position: Option<wow_core::Position>,
+    player_position: Option<wow_core::Position>,
 
     /// Cached character name for chat messages.
-    pub(crate) player_name: Option<String>,
+    player_name: Option<String>,
+
+    // Addon chat filtering state. Mirrors C++ WorldSession::_registeredAddonPrefixes
+    // and _filterAddonMessages.
+    pub(crate) registered_addon_prefixes: Vec<String>,
+    pub(crate) filter_addon_messages: bool,
 
     // ── Creature AI tracking ──────────────────────────────────────
-    /// All creatures visible/tracked by this session, keyed by GUID.
-    /// Legacy per-session storage. New code should prefer `MapManager` access
-    /// (see `map_manager` field) which is shared across sessions on the same map.
+    /// Tick counter for creature movement (throttle to every N ticks).
+    pub(crate) creature_tick: u32,
+    #[cfg(test)]
     pub(crate) creatures: std::collections::HashMap<wow_core::ObjectGuid, wow_ai::CreatureAI>,
     /// Per-session finite vendor stock state, mirroring Creature::m_vendorItemCounts
     /// until vendor ownership moves into the shared creature model.
     pub(crate) vendor_item_counts: HashMap<(wow_core::ObjectGuid, u32), VendorItemCount>,
 
-    /// Tick counter for creature movement (throttle to every N ticks).
-    pub(crate) creature_tick: u32,
-
     /// Shared, server-wide map state. When `Some`, creature reads/writes can
     /// route through here so all sessions on the same map see the same world.
     /// `None` until the world server injects the manager (see `set_map_manager`).
     pub(crate) map_manager: Option<crate::map_manager::SharedMapManager>,
+    /// Shared C++ `InstanceLockMgr` analogue used by raid-info and instance entry paths.
+    pub(crate) instance_lock_mgr: Option<Arc<std::sync::RwLock<wow_instances::InstanceLockMgr>>>,
 
     // ── Combat state ─────────────────────────────────────────────
     /// Current auto-attack target (None if not in combat).
@@ -414,6 +824,89 @@ pub struct WorldSession {
     pub(crate) in_combat: bool,
     /// Represented `Player::IsAlive()` state for handler guards that need C++ ordering.
     player_alive_like_cpp: bool,
+    /// Represented `Player::IsGameMaster()` movement/fall guard.
+    player_game_master_like_cpp: bool,
+    /// Represented `CHEAT_GOD` movement/fall guard.
+    player_cheat_god_like_cpp: bool,
+    /// Represented `IsImmunedToDamage(SPELL_SCHOOL_MASK_NORMAL)` fall guard.
+    player_normal_damage_immune_like_cpp: bool,
+    /// Represented `IsImmuneToEnvironmentalDamage()` guard inside EnvironmentalDamage.
+    player_environmental_damage_immune_like_cpp: bool,
+    /// Represented player health used by movement/environmental side effects.
+    player_health_like_cpp: u32,
+    /// Represented player max health used by movement/environmental side effects.
+    player_max_health_like_cpp: u32,
+    /// Represented `Unit::m_movementInfo.time` for client movement ACK side effects.
+    player_movement_time_like_cpp: u32,
+    /// C++ `Player::m_lastFallTime`.
+    last_fall_time_like_cpp: u32,
+    /// C++ `Player::m_lastFallZ`.
+    last_fall_z_like_cpp: f32,
+    /// Recorded fall damage events until combat log/update packet runtime is complete.
+    fall_damage_events_like_cpp: Vec<MovementFallDamageEvent>,
+    /// C++ `PLAYER_FLAGS_IS_OUT_OF_BOUNDS` represented state.
+    player_out_of_bounds_like_cpp: bool,
+    /// Recorded `DAMAGE_FALL_TO_VOID` events until environmental damage packets are complete.
+    under_map_damage_events_like_cpp: Vec<MovementUnderMapDamageEvent>,
+    /// Represented stand state used by movement side effects until UnitData owns it.
+    player_stand_state_like_cpp: UnitStandStateType,
+    /// Count of C++ temporary pet unsummon side effects requested by movement.
+    temporary_pet_unsummon_requests_like_cpp: u32,
+    /// Count of C++ jump proc side effects requested by movement.
+    movement_jump_proc_requests_like_cpp: u32,
+    /// Represented `ActivePlayerData::LocalFlags`.
+    active_player_local_flags_like_cpp: u32,
+    /// Represented `ActivePlayerData::TransportServerTime`.
+    active_player_transport_server_time_like_cpp: i32,
+    /// Count of visibility refreshes requested by movement initialization.
+    movement_visibility_refresh_requests_like_cpp: u32,
+    /// ACKs accepted by represented movement handling until full Unit movement runtime/broadcasts exist.
+    movement_ack_events_like_cpp: Vec<MovementAckEventLikeCpp>,
+    /// Represented `PlayerTaxi::m_TaxiDestinations` until PlayerTaxi/MotionMaster runtime is canonical.
+    taxi_destinations_like_cpp: Vec<u32>,
+    /// Minimal TaxiNodes.db2 map lookup used by represented `MoveSplineDone` taxi transitions.
+    taxi_node_map_ids_like_cpp: HashMap<u32, u16>,
+    /// Represented active `FlightPathMovementGenerator`, if any.
+    taxi_flight_state_like_cpp: Option<RepresentedTaxiFlightStateLikeCpp>,
+    /// Represented unit flags touched by `CleanupAfterTaxiFlight`.
+    taxi_unit_flags_like_cpp: UnitFlags,
+    /// Represented mount state touched by `CleanupAfterTaxiFlight`.
+    taxi_mounted_like_cpp: bool,
+    /// Represented `pvpInfo.IsHostile` branch for Honorless Target after taxi landing.
+    player_pvp_hostile_like_cpp: bool,
+    /// Represented `Player::IsPvP()` branch for friendly-area near teleport handling.
+    player_pvp_enabled_like_cpp: bool,
+    /// Represented `PLAYER_FLAGS_IN_PVP` branch for friendly-area near teleport handling.
+    player_in_pvp_flag_like_cpp: bool,
+    /// Current represented zone/area ids until Map/Terrain runtime can calculate them.
+    player_zone_id_like_cpp: u32,
+    player_area_id_like_cpp: u32,
+    /// `MoveSplineDone` taxi decisions recorded until full Taxi/MotionMaster runtime exists.
+    move_spline_done_taxi_events_like_cpp: Vec<MoveSplineDoneTaxiEventLikeCpp>,
+    /// C++ `Player::mSemaphoreTeleport_Near` represented state.
+    near_teleport_pending_like_cpp: bool,
+    /// C++ `Player::m_teleport_dest` represented state for near teleports.
+    near_teleport_destination_like_cpp: Option<(u16, wow_core::Position)>,
+    /// Represented zone/area for the pending near-teleport destination.
+    near_teleport_destination_zone_area_like_cpp: Option<(u32, u32)>,
+    /// Near teleport ACK side-effect audit events.
+    move_teleport_ack_events_like_cpp: Vec<MoveTeleportAckEventLikeCpp>,
+    /// Count of C++ `ResummonPetTemporaryUnSummonedIfAny` calls after near teleport ACK.
+    temporary_pet_resummon_requests_like_cpp: u32,
+    /// Count of C++ `ProcessDelayedOperations` calls after successful near teleport ACK.
+    delayed_operations_processed_like_cpp: u32,
+    /// C++ `Player::m_forced_speed_changes[MAX_MOVE_TYPE]` represented state.
+    forced_speed_changes_like_cpp: [u8; UnitMoveTypeLikeCpp::COUNT],
+    /// C++ `Unit::m_speed_rate[MAX_MOVE_TYPE]` represented state for player-controlled movers.
+    movement_speed_rates_like_cpp: [f32; UnitMoveTypeLikeCpp::COUNT],
+    /// Represented transport guard for speed ACK anticheat; C++ skips speed mismatch while on transport.
+    player_on_transport_like_cpp: bool,
+    /// C++ `Player::m_movementForceModMagnitudeChanges` represented state.
+    movement_force_mod_magnitude_changes_like_cpp: u8,
+    /// C++ `MovementForces::GetModMagnitude()` represented value; default is 1.0 when no force container exists.
+    movement_force_mod_magnitude_like_cpp: f32,
+    /// Speed ACK outcomes recorded until full Unit speed runtime owns this state.
+    movement_speed_ack_events_like_cpp: Vec<MovementSpeedAckEventLikeCpp>,
 
     // ── Aura system ───────────────────────────────────────────────
     /// All visible auras on the player: slot (0-254) → AuraApplication
@@ -460,6 +953,28 @@ pub struct WorldSession {
     enable_ae_loot_like_cpp: bool,
     /// Session-local representation of `GameObject::m_unique_users` for no-GetLootId chest uses.
     pub(crate) represented_unique_gameobject_uses: std::collections::HashSet<wow_core::ObjectGuid>,
+    /// Represented C++ `GameEvents::Trigger` and `TriggeringLinkedGameObject` hook points.
+    pub(crate) represented_gameobject_use_effects: Vec<RepresentedGameObjectUseEffect>,
+    /// Session-local represented `GameObject` use state until canonical GO runtime ownership lands.
+    pub(crate) represented_gameobject_use_states:
+        std::collections::HashMap<wow_core::ObjectGuid, RepresentedGameObjectUseState>,
+    /// C++ `Player::SetPendingBind` represented until `InstanceMap` owns real bind confirmation.
+    pub(crate) pending_bind: Option<RepresentedPendingBind>,
+    /// Confirmed pending bind ids, used by represented `CMSG_INSTANCE_LOCK_RESPONSE`.
+    pub(crate) represented_confirmed_pending_binds: Vec<u32>,
+    /// Count of represented `Player::RepopAtGraveyard` calls from rejected pending binds.
+    pub(crate) represented_repop_at_graveyard_count: u32,
+    /// Session-local representation of `GameObject::m_tapList` for personal encounter loot.
+    pub(crate) represented_gameobject_tap_lists:
+        std::collections::HashMap<wow_core::ObjectGuid, Vec<wow_core::ObjectGuid>>,
+    /// Session-local representation of `Player::IsLockedToDungeonEncounter` for encounter loot.
+    pub(crate) represented_locked_dungeon_encounters:
+        std::collections::HashSet<(wow_core::ObjectGuid, u32)>,
+    /// Session-local per-player money for represented personal encounter loot.
+    pub(crate) represented_personal_loot_money:
+        std::collections::HashMap<(wow_core::ObjectGuid, wow_core::ObjectGuid), u32>,
+    /// Owners whose money must be read from `represented_personal_loot_money`.
+    pub(crate) represented_personal_loot_owners: std::collections::HashSet<wow_core::ObjectGuid>,
 
     // ── Dynamic visibility tracking ───────────────────────────────
     /// GUIDs of all creatures currently visible to this client.
@@ -586,11 +1101,48 @@ pub struct AuraApplication {
     pub aura_flags: u32,
     /// Trinity SpellAuraInterruptFlags bitmask used by represented removal paths.
     pub aura_interrupt_flags: u32,
+    /// Trinity SpellAuraInterruptFlags2 bitmask used by represented removal paths.
+    pub aura_interrupt_flags2: u32,
+    /// Represented Trinity aura effect queried directly by movement/fall handlers.
+    pub represented_effect: Option<RepresentedAuraEffectLikeCpp>,
+    /// C++ `GetTotalAuraModifier` amount for represented integer aura effects.
+    pub represented_amount: i32,
+    /// C++ `GetTotalAuraMultiplier` factor for represented multiplier aura effects.
+    pub represented_multiplier: f32,
     /// Monotonic timestamp when this aura was applied — used for expiry checks.
     pub applied_at: Instant,
 }
 
 pub(crate) const SPELL_AURA_INTERRUPT_FLAG_LOOTING_LIKE_CPP: u32 = 0x0000_0800;
+pub(crate) const SPELL_AURA_INTERRUPT_FLAG_LANDING_OR_FLIGHT_LIKE_CPP: u32 = 0x0200_0000;
+pub(crate) const SPELL_AURA_INTERRUPT_FLAG2_JUMP_LIKE_CPP: u32 = 0x0000_0020;
+pub(crate) const PLAYER_LOCAL_FLAG_OVERRIDE_TRANSPORT_SERVER_TIME_LIKE_CPP: u32 = 0x0000_8000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepresentedAuraEffectLikeCpp {
+    FeatherFall,
+    Hover,
+    SafeFall,
+    Fly,
+    Ghost,
+    MountedFlightSpeed,
+    ModifyFallDamagePct,
+    WaterWalk,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct MovementFallDamageEvent {
+    pub z_diff: f32,
+    pub damage: u32,
+    pub final_damage: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct MovementUnderMapDamageEvent {
+    pub z: f32,
+    pub min_height: f32,
+    pub damage: u32,
+}
 
 /// Parameters for spawning nearby creatures after login.
 pub struct PendingCreatureSpawn {
@@ -691,6 +1243,8 @@ impl WorldSession {
             area_trigger_store: None,
             chr_specialization_store: None,
             dungeon_encounter_store: None,
+            map_store: None,
+            map_difficulty_store: None,
             player_registry: None,
             object_accessor: None,
             group_registry: None,
@@ -711,6 +1265,9 @@ impl WorldSession {
             instance_link_rx: None,
             time_sync_next_counter: 0,
             time_sync_timer_ms: 0,
+            time_sync_pending_requests: HashMap::new(),
+            time_sync_clock_delta_queue: VecDeque::with_capacity(6),
+            time_sync_clock_delta: 0,
             logout_time: None,
             login_time: None,
             total_played_time: 0,
@@ -721,6 +1278,7 @@ impl WorldSession {
             player_xp_table: None,
             selection_guid: None,
             player_guid: None,
+            player_controller: None,
             pending_creature_spawn: None,
             respawn_queue: Vec::new(),
             inventory_items: HashMap::new(),
@@ -741,13 +1299,58 @@ impl WorldSession {
             realm_send_tx: None,
             player_position: None,
             player_name: None,
+            registered_addon_prefixes: Vec::new(),
+            filter_addon_messages: false,
+            creature_tick: 0,
+            #[cfg(test)]
             creatures: std::collections::HashMap::new(),
             vendor_item_counts: HashMap::new(),
-            creature_tick: 0,
             map_manager: None,
             combat_target: None,
             in_combat: false,
             player_alive_like_cpp: true,
+            player_game_master_like_cpp: false,
+            player_cheat_god_like_cpp: false,
+            player_normal_damage_immune_like_cpp: false,
+            player_environmental_damage_immune_like_cpp: false,
+            player_health_like_cpp: 100,
+            player_max_health_like_cpp: 100,
+            player_movement_time_like_cpp: 0,
+            last_fall_time_like_cpp: 0,
+            last_fall_z_like_cpp: 0.0,
+            fall_damage_events_like_cpp: Vec::new(),
+            player_out_of_bounds_like_cpp: false,
+            under_map_damage_events_like_cpp: Vec::new(),
+            player_stand_state_like_cpp: UnitStandStateType::Stand,
+            temporary_pet_unsummon_requests_like_cpp: 0,
+            movement_jump_proc_requests_like_cpp: 0,
+            active_player_local_flags_like_cpp: 0,
+            active_player_transport_server_time_like_cpp: 0,
+            movement_visibility_refresh_requests_like_cpp: 0,
+            movement_ack_events_like_cpp: Vec::new(),
+            taxi_destinations_like_cpp: Vec::new(),
+            taxi_node_map_ids_like_cpp: HashMap::new(),
+            taxi_flight_state_like_cpp: None,
+            taxi_unit_flags_like_cpp: UnitFlags::empty(),
+            taxi_mounted_like_cpp: false,
+            player_pvp_hostile_like_cpp: false,
+            player_pvp_enabled_like_cpp: false,
+            player_in_pvp_flag_like_cpp: false,
+            player_zone_id_like_cpp: 0,
+            player_area_id_like_cpp: 0,
+            move_spline_done_taxi_events_like_cpp: Vec::new(),
+            near_teleport_pending_like_cpp: false,
+            near_teleport_destination_like_cpp: None,
+            near_teleport_destination_zone_area_like_cpp: None,
+            move_teleport_ack_events_like_cpp: Vec::new(),
+            temporary_pet_resummon_requests_like_cpp: 0,
+            delayed_operations_processed_like_cpp: 0,
+            forced_speed_changes_like_cpp: [0; UnitMoveTypeLikeCpp::COUNT],
+            movement_speed_rates_like_cpp: [1.0; UnitMoveTypeLikeCpp::COUNT],
+            player_on_transport_like_cpp: false,
+            movement_force_mod_magnitude_changes_like_cpp: 0,
+            movement_force_mod_magnitude_like_cpp: 1.0,
+            movement_speed_ack_events_like_cpp: Vec::new(),
             visible_auras: HashMap::new(),
             spell_store: None,
             quest_store: None,
@@ -766,6 +1369,15 @@ impl WorldSession {
             loot_drop_rates: LootDropRatesLikeCpp::default(),
             enable_ae_loot_like_cpp: false,
             represented_unique_gameobject_uses: std::collections::HashSet::new(),
+            represented_gameobject_use_effects: Vec::new(),
+            represented_gameobject_use_states: std::collections::HashMap::new(),
+            pending_bind: None,
+            represented_confirmed_pending_binds: Vec::new(),
+            represented_repop_at_graveyard_count: 0,
+            represented_gameobject_tap_lists: std::collections::HashMap::new(),
+            represented_locked_dungeon_encounters: std::collections::HashSet::new(),
+            represented_personal_loot_money: std::collections::HashMap::new(),
+            represented_personal_loot_owners: std::collections::HashSet::new(),
             visible_creatures: std::collections::HashSet::new(),
             visible_gameobjects: std::collections::HashSet::new(),
             last_visibility_pos: None,
@@ -774,6 +1386,7 @@ impl WorldSession {
             active_area_trigger: None,
             pending_teleport: None,
             creature_query_cache: std::collections::HashSet::new(),
+            instance_lock_mgr: None,
         }
     }
 
@@ -785,6 +1398,14 @@ impl WorldSession {
     /// Inject the shared map manager. Call once at session creation, before login.
     pub fn set_map_manager(&mut self, mgr: crate::map_manager::SharedMapManager) {
         self.map_manager = Some(mgr);
+    }
+
+    /// Inject the shared C++ `InstanceLockMgr` analogue.
+    pub fn set_instance_lock_mgr(
+        &mut self,
+        mgr: Arc<std::sync::RwLock<wow_instances::InstanceLockMgr>>,
+    ) {
+        self.instance_lock_mgr = Some(mgr);
     }
 
     /// Set the realm ID for GUID creation.
@@ -838,6 +1459,11 @@ impl WorldSession {
                         creature.configure_ai_runtime(position, aggro_radius, 5.0, 30);
                         creature.ai_ownership_mut().min_damage = min_dmg;
                         creature.ai_ownership_mut().max_damage = max_dmg;
+                        creature.ai_ownership_mut().loot_id = loot_id;
+                        creature.ai_ownership_mut().gold_min = gold_min;
+                        creature.ai_ownership_mut().gold_max = gold_max;
+                        creature.ai_ownership_mut().boss_id = boss_id;
+                        creature.ai_ownership_mut().dungeon_encounter_id = dungeon_encounter_id;
                         creature
                     },
                     create_data.clone(),
@@ -845,86 +1471,72 @@ impl WorldSession {
                 manager.add_creature(map_id, 0, grid_x, grid_y, world_creature);
             }
         }
-
-        self.creatures.insert(
-            guid,
-            wow_ai::CreatureAI::new(
-                guid,
-                entry,
-                position,
-                hp,
-                level,
-                min_dmg,
-                max_dmg,
-                aggro_radius,
-                display_id,
-                faction,
-                npc_flags,
-                unit_flags,
-                loot_id,
-                gold_min,
-                gold_max,
-                boss_id,
-                dungeon_encounter_id,
-            ),
-        );
     }
 
-    pub(crate) fn remove_world_creature(&mut self, guid: ObjectGuid) -> Option<wow_ai::CreatureAI> {
+    pub(crate) fn remove_world_creature(
+        &mut self,
+        guid: ObjectGuid,
+    ) -> Option<crate::map_manager::WorldCreature> {
+        let manager = self.map_manager.as_ref()?;
+        let mut manager = manager
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        manager.remove_creature_any(self.player_map_id_like_cpp(), 0, guid)
+    }
+
+    pub(crate) fn mutate_world_creature<F, R>(&mut self, guid: ObjectGuid, f: F) -> Option<R>
+    where
+        F: FnOnce(&mut crate::map_manager::WorldCreature) -> R,
+    {
         if let Some(manager) = &self.map_manager {
             let mut manager = manager
                 .write()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let _ = manager.remove_creature_any(self.current_map_id, 0, guid);
+            if let Some(creature) =
+                manager.find_creature_mut(self.player_map_id_like_cpp(), 0, guid)
+            {
+                return Some(f(creature));
+            }
         }
-        self.creatures.remove(&guid)
-    }
 
-    pub(crate) fn sync_legacy_creature_to_map(&mut self, guid: ObjectGuid) {
-        let (Some(manager), Some(legacy)) =
-            (self.map_manager.clone(), self.creatures.get(&guid).cloned())
-        else {
-            return;
-        };
-        let mut manager = manager
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-
-        if manager
-            .find_creature(self.current_map_id, 0, guid)
-            .is_none()
+        #[cfg(test)]
         {
-            let (grid_x, grid_y) = crate::map_manager::world_to_grid_coords(
-                legacy.current_pos.x,
-                legacy.current_pos.y,
-            );
-            let world_creature = Self::world_creature_from_legacy(self.current_map_id, &legacy);
-            manager.add_creature(self.current_map_id, 0, grid_x, grid_y, world_creature);
+            let mut legacy = self.creatures.remove(&guid)?;
+            let mut creature =
+                Self::test_world_creature_from_legacy(self.player_map_id_like_cpp(), &legacy);
+            let result = f(&mut creature);
+            Self::sync_test_world_creature_to_legacy(&creature, &mut legacy);
+            self.creatures.insert(guid, legacy);
+            return Some(result);
         }
 
-        let Some(world_creature) = manager.find_creature_mut(self.current_map_id, 0, guid) else {
-            return;
-        };
-        Self::sync_legacy_creature_to_world_creature(world_creature, &legacy);
+        #[cfg(not(test))]
+        {
+            None
+        }
     }
 
-    pub(crate) fn mutate_legacy_creature_and_sync<F, R>(
-        &mut self,
-        guid: ObjectGuid,
-        f: F,
-    ) -> Option<R>
-    where
-        F: FnOnce(&mut wow_ai::CreatureAI) -> R,
-    {
-        let result = {
-            let creature = self.creatures.get_mut(&guid)?;
-            f(creature)
-        };
-        self.sync_legacy_creature_to_map(guid);
-        Some(result)
+    pub(crate) fn world_creature_guids(&self) -> Vec<ObjectGuid> {
+        if let Some(manager) = &self.map_manager {
+            return manager
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .creature_guids(self.player_map_id_like_cpp(), 0);
+        }
+
+        #[cfg(test)]
+        {
+            return self.creatures.keys().copied().collect();
+        }
+
+        #[cfg(not(test))]
+        {
+            Vec::new()
+        }
     }
 
-    fn world_creature_from_legacy(
+    #[cfg(test)]
+    fn test_world_creature_from_legacy(
         map_id: u16,
         legacy: &wow_ai::CreatureAI,
     ) -> crate::map_manager::WorldCreature {
@@ -959,120 +1571,103 @@ impl WorldSession {
         );
         {
             let ai = creature.ai_ownership_mut();
-            ai.min_damage = legacy.min_dmg;
-            ai.max_damage = legacy.max_dmg;
-            ai.swing_timer_ms = legacy.swing_timer_ms;
-            ai.spline_id = legacy.spline_id;
-        }
-
-        let create_data = wow_packet::packets::update::CreatureCreateData {
-            guid: legacy.guid,
-            entry: legacy.entry,
-            display_id: legacy.display_id,
-            native_display_id: legacy.display_id,
-            health: legacy.max_hp as i64,
-            max_health: legacy.max_hp as i64,
-            level: legacy.level,
-            faction_template: legacy.faction as i32,
-            npc_flags: legacy.npc_flags as u64,
-            unit_flags: legacy.unit_flags,
-            unit_flags2: 0,
-            unit_flags3: 0,
-            scale: 1.0,
-            unit_class: 1,
-            base_attack_time: 2000,
-            ranged_attack_time: 0,
-            zone_id: 0,
-            speed_walk_rate: 1.0,
-            speed_run_rate: 1.14286,
-        };
-
-        crate::map_manager::WorldCreature::from_canonical(creature, create_data)
-    }
-
-    fn sync_legacy_creature_to_world_creature(
-        world_creature: &mut crate::map_manager::WorldCreature,
-        legacy: &wow_ai::CreatureAI,
-    ) {
-        world_creature.creature.set_ai_position(legacy.current_pos);
-        world_creature
-            .creature
-            .set_ai_home_position(legacy.home_pos);
-        world_creature
-            .creature
-            .unit_mut()
-            .set_max_health(u64::from(legacy.max_hp));
-        world_creature
-            .creature
-            .unit_mut()
-            .set_health(u64::from(legacy.hp));
-        world_creature.creature.ai_ownership_mut().state = match legacy.state {
-            wow_ai::CreatureState::Idle => wow_entities::CreatureAiState::Idle,
-            wow_ai::CreatureState::WalkingRandom => wow_entities::CreatureAiState::WalkingRandom,
-            wow_ai::CreatureState::WalkingWaypoint => {
-                wow_entities::CreatureAiState::WalkingWaypoint
-            }
-            wow_ai::CreatureState::InCombat => wow_entities::CreatureAiState::InCombat,
-            wow_ai::CreatureState::Dead => wow_entities::CreatureAiState::Dead,
-            wow_ai::CreatureState::Returning => wow_entities::CreatureAiState::Returning,
-        };
-        let now_ms = world_creature.now_ms();
-        let move_start_ms = now_ms.saturating_sub(
-            legacy
-                .move_start
-                .elapsed()
-                .as_millis()
-                .min(u128::from(u64::MAX)) as u64,
-        );
-        let last_swing_ms = now_ms.saturating_sub(
-            legacy
-                .last_swing
-                .elapsed()
-                .as_millis()
-                .min(u128::from(u64::MAX)) as u64,
-        );
-        {
-            let ai = world_creature.creature.ai_ownership_mut();
+            ai.state = match legacy.state {
+                wow_ai::CreatureState::Idle => wow_entities::CreatureAiState::Idle,
+                wow_ai::CreatureState::WalkingRandom => {
+                    wow_entities::CreatureAiState::WalkingRandom
+                }
+                wow_ai::CreatureState::WalkingWaypoint => {
+                    wow_entities::CreatureAiState::WalkingWaypoint
+                }
+                wow_ai::CreatureState::InCombat => wow_entities::CreatureAiState::InCombat,
+                wow_ai::CreatureState::Dead => wow_entities::CreatureAiState::Dead,
+                wow_ai::CreatureState::Returning => wow_entities::CreatureAiState::Returning,
+            };
             ai.move_target = legacy.move_target;
-            ai.move_start_ms = move_start_ms;
             ai.move_duration_ms = legacy.move_duration_ms;
             ai.combat_target = legacy.combat_target;
-            ai.last_swing_ms = last_swing_ms;
             ai.min_damage = legacy.min_dmg;
             ai.max_damage = legacy.max_dmg;
-            ai.aggro_radius = legacy.aggro_radius;
-            ai.wander_radius = legacy.wander_radius;
-            ai.respawn_time_secs = legacy.respawn_time_secs;
-            ai.npc_flags = legacy.npc_flags;
-            ai.unit_flags = legacy.unit_flags;
-            ai.display_id = legacy.display_id;
-            ai.faction = legacy.faction;
-            ai.spline_id = legacy.spline_id;
             ai.swing_timer_ms = legacy.swing_timer_ms;
+            ai.spline_id = legacy.spline_id;
+            ai.loot_id = legacy.loot_id;
+            ai.gold_min = legacy.gold_min;
+            ai.gold_max = legacy.gold_max;
+            ai.boss_id = legacy.boss_id;
+            ai.dungeon_encounter_id = legacy.dungeon_encounter_id;
         }
-        world_creature.set_corpse_despawn_at(legacy.corpse_despawn_at);
         if !legacy.is_alive {
-            let legacy_death_ms = legacy.death_time.map(|death_time| {
-                now_ms.saturating_sub(
-                    death_time.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
-                )
-            });
-            let death_time_ms = world_creature
-                .creature
-                .ai_ownership()
-                .death_time_ms
-                .or(legacy_death_ms)
-                .unwrap_or(now_ms);
-            world_creature.creature.mark_ai_dead(death_time_ms);
-        } else {
-            let ai = world_creature.creature.ai_ownership_mut();
-            ai.death_time_ms = None;
-            ai.corpse_despawn_at_ms = None;
-            world_creature
-                .creature
-                .unit_mut()
-                .set_death_state(wow_constants::unit::DeathState::Alive);
+            creature.mark_ai_dead(0);
         }
+
+        crate::map_manager::WorldCreature::from_canonical(
+            creature,
+            wow_packet::packets::update::CreatureCreateData {
+                guid: legacy.guid,
+                entry: legacy.entry,
+                display_id: legacy.display_id,
+                native_display_id: legacy.display_id,
+                health: legacy.max_hp as i64,
+                max_health: legacy.max_hp as i64,
+                level: legacy.level,
+                faction_template: legacy.faction as i32,
+                npc_flags: legacy.npc_flags as u64,
+                unit_flags: legacy.unit_flags,
+                unit_flags2: 0,
+                unit_flags3: 0,
+                scale: 1.0,
+                unit_class: 1,
+                base_attack_time: 2000,
+                ranged_attack_time: 0,
+                zone_id: 0,
+                speed_walk_rate: 1.0,
+                speed_run_rate: 1.14286,
+            },
+        )
+    }
+
+    #[cfg(test)]
+    fn sync_test_world_creature_to_legacy(
+        creature: &crate::map_manager::WorldCreature,
+        legacy: &mut wow_ai::CreatureAI,
+    ) {
+        legacy.current_pos = creature.position();
+        legacy.home_pos = creature.home_position();
+        legacy.hp = creature.current_hp();
+        legacy.max_hp = creature.max_hp();
+        legacy.level = creature.level();
+        legacy.state = match creature.state() {
+            wow_entities::CreatureAiState::Idle => wow_ai::CreatureState::Idle,
+            wow_entities::CreatureAiState::WalkingRandom => wow_ai::CreatureState::WalkingRandom,
+            wow_entities::CreatureAiState::WalkingWaypoint => {
+                wow_ai::CreatureState::WalkingWaypoint
+            }
+            wow_entities::CreatureAiState::InCombat => wow_ai::CreatureState::InCombat,
+            wow_entities::CreatureAiState::Dead => wow_ai::CreatureState::Dead,
+            wow_entities::CreatureAiState::Returning => wow_ai::CreatureState::Returning,
+        };
+        let ai = creature.creature.ai_ownership();
+        legacy.move_target = ai.move_target;
+        legacy.move_duration_ms = ai.move_duration_ms;
+        legacy.combat_target = ai.combat_target;
+        legacy.min_dmg = ai.min_damage;
+        legacy.max_dmg = ai.max_damage;
+        legacy.aggro_radius = ai.aggro_radius;
+        legacy.wander_radius = ai.wander_radius;
+        legacy.respawn_time_secs = ai.respawn_time_secs;
+        legacy.npc_flags = ai.npc_flags;
+        legacy.unit_flags = ai.unit_flags;
+        legacy.display_id = ai.display_id;
+        legacy.faction = ai.faction;
+        legacy.spline_id = ai.spline_id;
+        legacy.swing_timer_ms = ai.swing_timer_ms;
+        legacy.loot_id = ai.loot_id;
+        legacy.gold_min = ai.gold_min;
+        legacy.gold_max = ai.gold_max;
+        legacy.boss_id = ai.boss_id;
+        legacy.dungeon_encounter_id = ai.dungeon_encounter_id;
+        legacy.is_alive = creature.is_alive();
+        legacy.corpse_despawn_at = creature.corpse_despawn_at();
     }
 
     pub fn set_realm_id(&mut self, realm_id: u16) {
@@ -1415,7 +2010,7 @@ impl WorldSession {
 
     /// C++ `Player::GetCurrencyQuantity`.
     pub(crate) fn player_currency_quantity(&self, currency_id: u32) -> u32 {
-        self.player_currencies
+        self.player_currencies_like_cpp()
             .get(&currency_id)
             .map(|currency| currency.quantity)
             .unwrap_or(0)
@@ -1445,7 +2040,7 @@ impl WorldSession {
             return Err(());
         };
 
-        let player_team = player_team_for_race_cpp(self.player_race);
+        let player_team = player_team_for_race_cpp(self.player_race_like_cpp());
         if (entry.is_alliance() && player_team != Team::Alliance)
             || (entry.is_horde() && player_team != Team::Horde)
         {
@@ -1459,18 +2054,16 @@ impl WorldSession {
             return Err(());
         }
 
-        let currency = self
-            .player_currencies
-            .entry(currency_id)
-            .or_insert(PlayerCurrency {
-                state: PlayerCurrencyState::New,
-                quantity: 0,
-                weekly_quantity: 0,
-                tracked_quantity: 0,
-                increased_cap_quantity: 0,
-                earned_quantity: 0,
-                flags: 0,
-            });
+        let mut currencies = self.player_currencies_like_cpp().clone();
+        let currency = currencies.entry(currency_id).or_insert(PlayerCurrency {
+            state: PlayerCurrencyState::New,
+            quantity: 0,
+            weekly_quantity: 0,
+            tracked_quantity: 0,
+            increased_cap_quantity: 0,
+            earned_quantity: 0,
+            flags: 0,
+        });
 
         let weekly_cap = entry.max_earnable_per_week;
         let mut applied = amount;
@@ -1502,7 +2095,7 @@ impl WorldSession {
         }
 
         let scaler = entry.scaler().max(1) as u32;
-        Ok(Some(PlayerCurrencyDelta {
+        let delta = PlayerCurrencyDelta {
             currency_id,
             quantity: currency.quantity,
             amount: applied,
@@ -1511,7 +2104,9 @@ impl WorldSession {
             max_quantity: (max_quantity != 0).then_some(max_quantity),
             total_earned: entry.has_total_earned().then_some(currency.earned_quantity),
             suppress_chat_log: entry.is_suppressing_chat_log(false),
-        }))
+        };
+        self.set_player_currencies_like_cpp(currencies);
+        Ok(Some(delta))
     }
 
     /// C++ `Player::AddCurrency(..., CurrencyGainSource::ItemRefund)`.
@@ -1533,7 +2128,7 @@ impl WorldSession {
             return Err(());
         };
 
-        let player_team = player_team_for_race_cpp(self.player_race);
+        let player_team = player_team_for_race_cpp(self.player_race_like_cpp());
         if (entry.is_alliance() && player_team != Team::Alliance)
             || (entry.is_horde() && player_team != Team::Horde)
         {
@@ -1547,18 +2142,16 @@ impl WorldSession {
             return Ok(None);
         }
 
-        let currency = self
-            .player_currencies
-            .entry(currency_id)
-            .or_insert(PlayerCurrency {
-                state: PlayerCurrencyState::New,
-                quantity: 0,
-                weekly_quantity: 0,
-                tracked_quantity: 0,
-                increased_cap_quantity: 0,
-                earned_quantity: 0,
-                flags: 0,
-            });
+        let mut currencies = self.player_currencies_like_cpp().clone();
+        let currency = currencies.entry(currency_id).or_insert(PlayerCurrency {
+            state: PlayerCurrencyState::New,
+            quantity: 0,
+            weekly_quantity: 0,
+            tracked_quantity: 0,
+            increased_cap_quantity: 0,
+            earned_quantity: 0,
+            flags: 0,
+        });
 
         if currency.state != PlayerCurrencyState::New {
             currency.state = PlayerCurrencyState::Changed;
@@ -1567,7 +2160,7 @@ impl WorldSession {
 
         let scaler = entry.scaler().max(1) as u32;
         let max_quantity = currency_max_quantity_cpp(&entry, currency);
-        Ok(Some(PlayerCurrencyDelta {
+        let delta = PlayerCurrencyDelta {
             currency_id,
             quantity: currency.quantity,
             amount,
@@ -1576,7 +2169,9 @@ impl WorldSession {
             max_quantity: (max_quantity != 0).then_some(max_quantity),
             total_earned: entry.has_total_earned().then_some(currency.earned_quantity),
             suppress_chat_log: entry.is_suppressing_chat_log(false),
-        }))
+        };
+        self.set_player_currencies_like_cpp(currencies);
+        Ok(Some(delta))
     }
 
     /// C++ `Player::RemoveCurrency` underflow guard for vendor costs.
@@ -1585,7 +2180,8 @@ impl WorldSession {
             return true;
         }
 
-        let Some(currency) = self.player_currencies.get_mut(&currency_id) else {
+        let mut currencies = self.player_currencies_like_cpp().clone();
+        let Some(currency) = currencies.get_mut(&currency_id) else {
             return false;
         };
         if currency.quantity == 0 {
@@ -1597,6 +2193,7 @@ impl WorldSession {
         if currency.state != PlayerCurrencyState::New {
             currency.state = PlayerCurrencyState::Changed;
         }
+        self.set_player_currencies_like_cpp(currencies);
         true
     }
 
@@ -1609,7 +2206,8 @@ impl WorldSession {
         let Some(store) = self.currency_types_store.as_ref() else {
             return;
         };
-        for (&currency_id, currency) in &mut self.player_currencies {
+        let mut currencies = self.player_currencies_like_cpp().clone();
+        for (&currency_id, currency) in &mut currencies {
             if !store.has_record(currency_id) {
                 continue;
             }
@@ -1649,6 +2247,7 @@ impl WorldSession {
                 PlayerCurrencyState::Unchanged | PlayerCurrencyState::Removed => {}
             }
         }
+        self.set_player_currencies_like_cpp(currencies);
     }
 
     /// Set the item appearance store for this session.
@@ -1885,18 +2484,140 @@ impl WorldSession {
     }
 
     pub(crate) fn insert_inventory_item_object(&mut self, item: Item) -> Option<Item> {
-        self.inventory_item_objects
-            .insert(item.object().guid(), item)
+        let item_guid = item.object().guid();
+        self.mutate_player_inventory_runtime_like_cpp(|inventory| {
+            inventory.item_objects.insert(item_guid, item)
+        })
+    }
+
+    pub(crate) fn update_inventory_item_object_like_cpp(
+        &mut self,
+        item_guid: ObjectGuid,
+        update: impl FnOnce(&mut Item),
+    ) -> bool {
+        let mut update = Some(update);
+        self.mutate_player_inventory_runtime_like_cpp(|inventory| {
+            let Some(item) = inventory.item_objects.get_mut(&item_guid) else {
+                return false;
+            };
+            if let Some(update) = update.take() {
+                update(item);
+            }
+            true
+        })
     }
 
     pub(crate) fn remove_inventory_item_object(&mut self, item_guid: ObjectGuid) -> Option<Item> {
-        self.inventory_item_objects.remove(&item_guid)
+        self.mutate_player_inventory_runtime_like_cpp(|inventory| {
+            inventory.item_objects.remove(&item_guid)
+        })
     }
 
     pub(crate) fn set_inventory_item_object_slot(&mut self, item_guid: ObjectGuid, slot: u8) {
-        if let Some(item) = self.inventory_item_objects.get_mut(&item_guid) {
+        self.update_inventory_item_object_like_cpp(item_guid, |item| {
             item.set_slot(slot);
+        });
+    }
+
+    pub(crate) fn clear_inventory_items_and_objects_like_cpp(&mut self) {
+        self.mutate_player_inventory_runtime_like_cpp(|inventory| {
+            inventory.inventory_items.clear();
+            inventory.item_objects.clear();
+        });
+    }
+
+    pub(crate) fn clear_all_inventory_runtime_like_cpp(&mut self) {
+        self.mutate_player_inventory_runtime_like_cpp(|inventory| {
+            *inventory = SessionPlayerInventoryRuntime::default();
+        });
+    }
+
+    pub(crate) fn clear_buyback_runtime_like_cpp(&mut self) {
+        self.mutate_player_inventory_runtime_like_cpp(|inventory| {
+            inventory.buyback_items.clear();
+            inventory.buyback_price = [0; BUYBACK_SLOT_COUNT];
+            inventory.buyback_timestamp = [0; BUYBACK_SLOT_COUNT];
+            inventory.current_buyback_slot = BUYBACK_SLOT_START;
+        });
+    }
+
+    pub(crate) fn insert_inventory_item_like_cpp(
+        &mut self,
+        slot: u8,
+        item: InventoryItem,
+    ) -> Option<InventoryItem> {
+        self.mutate_player_inventory_runtime_like_cpp(|inventory| {
+            inventory.inventory_items.insert(slot, item)
+        })
+    }
+
+    pub(crate) fn remove_inventory_item_like_cpp(&mut self, slot: u8) -> Option<InventoryItem> {
+        self.mutate_player_inventory_runtime_like_cpp(|inventory| {
+            inventory.inventory_items.remove(&slot)
+        })
+    }
+
+    pub(crate) fn insert_buyback_item_like_cpp(
+        &mut self,
+        slot: u8,
+        item: InventoryItem,
+    ) -> Option<InventoryItem> {
+        self.mutate_player_inventory_runtime_like_cpp(|inventory| {
+            inventory.buyback_items.insert(slot, item)
+        })
+    }
+
+    pub(crate) fn remove_buyback_item_like_cpp(&mut self, slot: u8) -> Option<InventoryItem> {
+        self.mutate_player_inventory_runtime_like_cpp(|inventory| {
+            inventory.buyback_items.remove(&slot)
+        })
+    }
+
+    pub(crate) fn set_current_buyback_slot_like_cpp(&mut self, slot: u8) {
+        self.mutate_player_inventory_runtime_like_cpp(|inventory| {
+            inventory.current_buyback_slot = slot;
+        });
+    }
+
+    pub(crate) fn set_buyback_slot_metadata_like_cpp(
+        &mut self,
+        slot: u8,
+        price: u32,
+        timestamp: i64,
+    ) {
+        if !(BUYBACK_SLOT_START..BUYBACK_SLOT_END).contains(&slot) {
+            return;
         }
+        let index = (slot - BUYBACK_SLOT_START) as usize;
+        self.mutate_player_inventory_runtime_like_cpp(|inventory| {
+            inventory.buyback_price[index] = price;
+            inventory.buyback_timestamp[index] = timestamp;
+        });
+    }
+
+    pub(crate) fn clear_buyback_slot_metadata_like_cpp(&mut self, slot: u8) {
+        self.set_buyback_slot_metadata_like_cpp(slot, 0, 0);
+    }
+
+    pub(crate) fn update_inventory_item_metadata_like_cpp(
+        &mut self,
+        slot: u8,
+        item_guid: ObjectGuid,
+        entry_id: u32,
+        inventory_type: Option<u8>,
+    ) -> bool {
+        self.mutate_player_inventory_runtime_like_cpp(|inventory| {
+            let Some(inventory_item) = inventory
+                .inventory_items
+                .get_mut(&slot)
+                .filter(|inventory_item| inventory_item.guid == item_guid)
+            else {
+                return false;
+            };
+            inventory_item.entry_id = entry_id;
+            inventory_item.inventory_type = inventory_type;
+            true
+        })
     }
 
     pub(crate) fn is_buyback_slot(slot: u8) -> bool {
@@ -1912,14 +2633,36 @@ impl WorldSession {
     ) {
         if bag == INVENTORY_SLOT_BAG_0
             && self
-                .inventory_items
+                .inventory_items_like_cpp()
                 .get(&slot)
                 .is_some_and(|item| item.guid == item_guid)
         {
-            self.inventory_items.remove(&slot);
+            self.remove_inventory_item_like_cpp(slot);
         }
         self.remove_inventory_item_object(item_guid);
         self.sync_object_accessor_player();
+        self.sync_player_registry_state_like_cpp();
+    }
+
+    pub(crate) fn represented_inventory_item_counts_like_cpp(&self) -> HashMap<u32, u32> {
+        let inventory_items = self.inventory_items_like_cpp();
+        let item_objects = self.inventory_item_objects_like_cpp();
+        inventory_items
+            .values()
+            .filter_map(|inventory_item| item_objects.get(&inventory_item.guid))
+            .chain(item_objects.values().filter(|item| {
+                !item.container_guid().is_empty()
+                    && item_objects.contains_key(&item.container_guid())
+            }))
+            .filter(|item| !item.is_in_trade())
+            .fold(HashMap::new(), |mut counts, item| {
+                let entry_id = item.object().entry();
+                counts
+                    .entry(entry_id)
+                    .and_modify(|count| *count = count.saturating_add(item.count()))
+                    .or_insert(item.count());
+                counts
+            })
     }
 
     /// Resolve an inventory item by (bag, slot) following C++ Player::GetItemByPos.
@@ -1931,12 +2674,12 @@ impl WorldSession {
             if (slot as usize) >= PLAYER_SLOT_END || Self::is_buyback_slot(slot) {
                 return None;
             }
-            self.inventory_items.get(&slot).cloned()
+            self.inventory_items_like_cpp().get(&slot).cloned()
         } else if is_represented_bag_slot(bag) {
-            let bag_item = self.inventory_items.get(&bag)?;
+            let bag_item = self.inventory_items_like_cpp().get(&bag)?;
             let bag_guid = bag_item.guid;
             let nested = self
-                .inventory_item_objects
+                .inventory_item_objects_like_cpp()
                 .values()
                 .find(|item| item.container_guid() == bag_guid && item.slot() == slot)?;
             let guid = nested.object().guid();
@@ -1953,18 +2696,20 @@ impl WorldSession {
     }
 
     pub(crate) fn select_buyback_slot_cpp(&self) -> u8 {
-        let mut slot = self.current_buyback_slot;
-        if self.buyback_items.contains_key(&slot) {
+        let buyback_items = self.buyback_items_like_cpp();
+        let buyback_timestamp = self.buyback_timestamp_like_cpp();
+        let mut slot = self.current_buyback_slot_like_cpp();
+        if buyback_items.contains_key(&slot) {
             let mut oldest_slot = BUYBACK_SLOT_START;
-            let mut oldest_time = self.buyback_timestamp[0];
+            let mut oldest_time = buyback_timestamp[0];
 
             for candidate in BUYBACK_SLOT_START + 1..BUYBACK_SLOT_END {
                 let candidate_index = (candidate - BUYBACK_SLOT_START) as usize;
-                if !self.buyback_items.contains_key(&candidate) {
+                if !buyback_items.contains_key(&candidate) {
                     oldest_slot = candidate;
                     break;
                 }
-                let candidate_time = self.buyback_timestamp[candidate_index];
+                let candidate_time = buyback_timestamp[candidate_index];
                 if oldest_time > candidate_time {
                     oldest_time = candidate_time;
                     oldest_slot = candidate;
@@ -1978,13 +2723,15 @@ impl WorldSession {
     }
 
     pub(crate) fn advance_buyback_slot_cpp(&mut self) {
-        if self.current_buyback_slot < BUYBACK_SLOT_END - 1 {
-            self.current_buyback_slot += 1;
-        }
+        self.mutate_player_inventory_runtime_like_cpp(|inventory| {
+            if inventory.current_buyback_slot < BUYBACK_SLOT_END - 1 {
+                inventory.current_buyback_slot += 1;
+            }
+        });
     }
 
     fn direct_inventory_player_snapshot(&self) -> Option<Player> {
-        let player_guid = self.player_guid?;
+        let player_guid = self.player_guid()?;
         let mut player = Player::new(None, false);
         player
             .unit_mut()
@@ -1993,13 +2740,123 @@ impl WorldSession {
             .create(player_guid);
         player.set_inventory_slot_count(INVENTORY_DEFAULT_SIZE);
 
-        for (&slot, item) in &self.inventory_items {
+        for (&slot, item) in self.inventory_items_like_cpp() {
             if (slot as usize) < PLAYER_SLOT_END && !Self::is_buyback_slot(slot) {
                 let _ = player.store_top_level_item(slot, item.guid);
             }
         }
 
         Some(player)
+    }
+
+    fn player_values_update_snapshot(&self) -> Option<Player> {
+        let mut player = self.direct_inventory_player_snapshot()?;
+        player.set_money(self.player_gold_like_cpp());
+        let inventory_items = self.inventory_items_like_cpp();
+        let buyback_items = self.buyback_items_like_cpp();
+        let buyback_price = self.buyback_price_like_cpp();
+        let buyback_timestamp = self.buyback_timestamp_like_cpp();
+
+        for slot in 0..19u8 {
+            let visible = inventory_items.get(&slot).map(|item| VisibleItemValues {
+                item_id: item.entry_id as i32,
+                item_appearance_mod_id: 0,
+                item_visual: 0,
+            });
+            player.set_visible_item_slot(slot, visible);
+        }
+
+        for slot in 15..=17u8 {
+            let visible = inventory_items.get(&slot).map(|item| VisibleItemValues {
+                item_id: item.entry_id as i32,
+                item_appearance_mod_id: 0,
+                item_visual: 0,
+            });
+            player
+                .unit_mut()
+                .set_virtual_item((slot - 15) as usize, visible);
+        }
+
+        for (&slot, item) in buyback_items {
+            if (slot as usize) < PLAYER_SLOT_END {
+                player.set_inv_slot(slot as usize, item.guid);
+            }
+        }
+        for index in 0..BUYBACK_SLOT_COUNT {
+            player.set_buyback_price(index, buyback_price[index]);
+            player.set_buyback_timestamp(index, buyback_timestamp[index]);
+        }
+
+        player.clear_data_changes();
+        Some(player)
+    }
+
+    pub(crate) fn send_player_values_update_from_entity_bridge(
+        &self,
+        inv_slot_changes: &[(u8, ObjectGuid)],
+        visible_item_changes: &[(u8, i32, u16, u16)],
+        virtual_item_changes: &[(u8, i32, u16, u16)],
+        buyback_changes: &[(u8, u32, i64)],
+        coinage: Option<u64>,
+    ) {
+        let Some(guid) = self.player_guid() else {
+            return;
+        };
+        let Some(mut player) = self.player_values_update_snapshot() else {
+            return;
+        };
+
+        if let Some(coinage) = coinage {
+            player.set_money(coinage);
+            player.mark_money_changed();
+        }
+
+        for &(slot, item_guid) in inv_slot_changes {
+            player.set_inv_slot(slot as usize, item_guid);
+            player.mark_inv_slot_changed(slot as usize);
+        }
+
+        for &(slot, item_id, appearance_mod_id, item_visual) in visible_item_changes {
+            let visible = (item_id != 0 || appearance_mod_id != 0 || item_visual != 0).then_some(
+                VisibleItemValues {
+                    item_id,
+                    item_appearance_mod_id: appearance_mod_id,
+                    item_visual,
+                },
+            );
+            player.set_visible_item_slot(slot, visible);
+            player.mark_visible_item_slot_changed(slot);
+        }
+
+        for &(index, item_id, appearance_mod_id, item_visual) in virtual_item_changes {
+            let visible = (item_id != 0 || appearance_mod_id != 0 || item_visual != 0).then_some(
+                VisibleItemValues {
+                    item_id,
+                    item_appearance_mod_id: appearance_mod_id,
+                    item_visual,
+                },
+            );
+            player.unit_mut().set_virtual_item(index as usize, visible);
+            player.unit_mut().mark_virtual_item_changed(index as usize);
+        }
+
+        for &(slot, price, timestamp) in buyback_changes {
+            if !(BUYBACK_SLOT_START..BUYBACK_SLOT_END).contains(&slot) {
+                continue;
+            }
+            let index = (slot - BUYBACK_SLOT_START) as usize;
+            player.set_buyback_price(index, price);
+            player.mark_buyback_price_changed(index);
+            player.set_buyback_timestamp(index, timestamp);
+            player.mark_buyback_timestamp_changed(index);
+        }
+
+        let update = player.values_update(true);
+        if let Some(packet) =
+            player_values_update_to_update_object(guid, self.player_map_id_like_cpp(), &update)
+        {
+            self.send_packet(&packet);
+        }
     }
 
     pub(crate) fn can_destroy_direct_item_like_cpp(
@@ -2031,7 +2888,7 @@ impl WorldSession {
     }
 
     pub(crate) fn direct_item_contains_items(&self, item_guid: ObjectGuid) -> bool {
-        self.inventory_item_objects
+        self.inventory_item_objects_like_cpp()
             .values()
             .any(|item| item.container_guid() == item_guid)
     }
@@ -2044,7 +2901,7 @@ impl WorldSession {
             return false;
         }
 
-        self.inventory_item_objects.values().any(|item| {
+        self.inventory_item_objects_like_cpp().values().any(|item| {
             item.container_guid() == bag_guid
                 && self.active_loot_view_owners.contains(&item.object().guid())
                 && self.loot_table.contains_key(&item.object().guid())
@@ -2097,8 +2954,10 @@ impl WorldSession {
     ) -> Option<(InventoryResult, Vec<ItemPosCount>, Option<u32>)> {
         let player = self.direct_inventory_player_snapshot()?;
         let proto = self.item_storage_template(entry_id);
+        let inventory_items = self.inventory_items_like_cpp();
+        let item_objects = self.inventory_item_objects_like_cpp();
         let mut template_cache = HashMap::new();
-        for (&slot, item) in &self.inventory_items {
+        for (&slot, item) in inventory_items {
             if Self::is_buyback_slot(slot) {
                 continue;
             }
@@ -2109,11 +2968,11 @@ impl WorldSession {
 
         let mut slot_items = Vec::new();
         let mut stored_items = Vec::new();
-        for (&slot, inventory_item) in &self.inventory_items {
+        for (&slot, inventory_item) in inventory_items {
             if Self::is_buyback_slot(slot) {
                 continue;
             }
-            let Some(item) = self.inventory_item_objects.get(&inventory_item.guid) else {
+            let Some(item) = item_objects.get(&inventory_item.guid) else {
                 continue;
             };
             slot_items.push(ItemSlotRef::new(INVENTORY_SLOT_BAG_0, slot, item));
@@ -2355,6 +3214,22 @@ impl WorldSession {
         self.dungeon_encounter_store.as_ref()
     }
 
+    pub fn set_map_store(&mut self, store: Arc<MapStore>) {
+        self.map_store = Some(store);
+    }
+
+    pub(crate) fn map_store(&self) -> Option<&Arc<MapStore>> {
+        self.map_store.as_ref()
+    }
+
+    pub fn set_map_difficulty_store(&mut self, store: Arc<MapDifficultyStore>) {
+        self.map_difficulty_store = Some(store);
+    }
+
+    pub(crate) fn map_difficulty_store(&self) -> Option<&Arc<MapDifficultyStore>> {
+        self.map_difficulty_store.as_ref()
+    }
+
     /// Set the skill store for this session.
     pub fn set_skill_store(&mut self, store: Arc<SkillStore>) {
         self.skill_store = Some(store);
@@ -2383,7 +3258,7 @@ impl WorldSession {
     /// Save current player gold to the characters DB.
     pub(crate) async fn save_player_gold(&self) {
         use wow_database::CharStatements;
-        let guid = match self.player_guid {
+        let guid = match self.player_guid() {
             Some(g) => g.counter() as u32,
             None => return,
         };
@@ -2392,7 +3267,7 @@ impl WorldSession {
             None => return,
         };
         let mut stmt = char_db.prepare(CharStatements::UPD_CHAR_MONEY);
-        stmt.set_u64(0, self.player_gold);
+        stmt.set_u64(0, self.player_gold_like_cpp());
         stmt.set_u32(1, guid);
         let _ = char_db.execute(&stmt).await;
     }
@@ -2406,7 +3281,7 @@ impl WorldSession {
         if xp == 0 {
             return;
         }
-        if self.player_level >= 80 {
+        if self.player_level_like_cpp() >= 80 {
             return;
         } // max level
 
@@ -2419,12 +3294,16 @@ impl WorldSession {
             group_bonus: 1.0,
         });
 
-        self.player_xp = self.player_xp.saturating_add(xp);
+        self.set_player_xp_like_cpp(self.player_xp_like_cpp().saturating_add(xp));
 
         // Level up loop — C# while (newXP >= nextLvlXP && !IsMaxLevel())
-        while self.player_xp >= self.player_next_level_xp && self.player_level < 80 {
-            self.player_xp -= self.player_next_level_xp;
-            let new_level = self.player_level + 1;
+        while self.player_xp_like_cpp() >= self.player_next_level_xp_like_cpp()
+            && self.player_level_like_cpp() < 80
+        {
+            self.set_player_xp_like_cpp(
+                self.player_xp_like_cpp() - self.player_next_level_xp_like_cpp(),
+            );
+            let new_level = self.player_level_like_cpp() + 1;
 
             info!(account = self.account_id, new_level, "Player leveled up");
 
@@ -2439,17 +3318,17 @@ impl WorldSession {
                 num_new_talents: 0,
             });
 
-            self.player_level = new_level;
+            self.set_player_level_like_cpp(new_level);
             self.refresh_next_level_xp();
 
             // Persist new level to DB
-            if let Some(guid) = self.player_guid {
+            if let Some(guid) = self.player_guid() {
                 let char_db = self.char_db().map(Arc::clone);
                 if let Some(db) = char_db {
                     use wow_database::CharStatements;
                     let mut stmt = db.prepare(CharStatements::UPD_CHAR_LEVEL);
-                    stmt.set_u8(0, self.player_level);
-                    stmt.set_u32(1, self.player_xp);
+                    stmt.set_u8(0, self.player_level_like_cpp());
+                    stmt.set_u32(1, self.player_xp_like_cpp());
                     stmt.set_u32(2, guid.counter() as u32);
                     let _ = db.execute(&stmt).await;
                 }
@@ -2457,12 +3336,12 @@ impl WorldSession {
         }
 
         // Persist current XP
-        if let Some(guid) = self.player_guid {
+        if let Some(guid) = self.player_guid() {
             let char_db = self.char_db().map(Arc::clone);
             if let Some(db) = char_db {
                 use wow_database::CharStatements;
                 let mut stmt = db.prepare(CharStatements::UPD_CHAR_XP);
-                stmt.set_u32(0, self.player_xp);
+                stmt.set_u32(0, self.player_xp_like_cpp());
                 stmt.set_u32(1, guid.counter() as u32);
                 let _ = db.execute(&stmt).await;
             }
@@ -2472,7 +3351,7 @@ impl WorldSession {
     /// XP reward for killing a creature.
     /// C# ref: Formulas.XPGain / Formulas.BaseGain
     pub(crate) fn creature_kill_xp(&self, mob_level: u8) -> u32 {
-        let pl = self.player_level as i32;
+        let pl = self.player_level_like_cpp() as i32;
         let ml = mob_level as i32;
 
         // nBaseExp by content level (WotLK = 71-80 content)
@@ -2620,6 +3499,7 @@ impl WorldSession {
                 );
             }
         }
+        self.sync_player_registry_state_like_cpp();
     }
 
     /// Set the QuestXP store (loaded from QuestXP.db2).
@@ -2636,8 +3516,8 @@ impl WorldSession {
     /// Update player_next_level_xp from the table based on current level.
     pub(crate) fn refresh_next_level_xp(&mut self) {
         if let Some(table) = &self.player_xp_table {
-            let lvl = self.player_level as usize;
-            self.player_next_level_xp = table.get(lvl).copied().unwrap_or(u32::MAX);
+            let lvl = self.player_level_like_cpp() as usize;
+            self.set_player_next_level_xp_like_cpp(table.get(lvl).copied().unwrap_or(u32::MAX));
         }
     }
 
@@ -2645,7 +3525,7 @@ impl WorldSession {
     /// C# ref: Quest::XPValue(player, questLevel, xpDifficulty, xpMultiplier)
     pub(crate) fn calculate_quest_xp(&self, difficulty: u32, quest_level: i32) -> u32 {
         if let Some(store) = &self.quest_xp_store {
-            store.calculate_xp(quest_level, self.player_level, difficulty)
+            store.calculate_xp(quest_level, self.player_level_like_cpp(), difficulty)
         } else {
             // Fallback if DB2 not loaded
             const XP_TABLE: [u32; 10] = [0, 50, 100, 200, 400, 650, 1000, 1500, 2500, 4000];
@@ -2701,6 +3581,24 @@ impl WorldSession {
         self.player_registry.as_ref()
     }
 
+    pub(crate) fn broadcast_to_movement_set_like_cpp(&self, bytes: Vec<u8>, include_self: bool) {
+        let (Some(guid), Some(registry)) = (self.player_guid(), self.player_registry()) else {
+            return;
+        };
+        let current_map_id = self.player_map_id_like_cpp();
+
+        for entry in registry.iter() {
+            let (other_guid, other_info): (&ObjectGuid, &PlayerBroadcastInfo) = entry.pair();
+            if !include_self && *other_guid == guid {
+                continue;
+            }
+            if other_info.map_id != current_map_id {
+                continue;
+            }
+            let _ = other_info.send_tx.send(bytes.clone());
+        }
+    }
+
     /// Set the shared group registry and pending invites.
     pub fn set_group_registry(&mut self, reg: Arc<GroupRegistry>, invites: Arc<PendingInvites>) {
         self.group_registry = Some(reg);
@@ -2722,15 +3620,20 @@ impl WorldSession {
     pub(crate) fn register_in_player_registry(&self) {
         use crate::handlers::character::default_display_id;
         let (Some(guid), Some(pos), Some(name), Some(reg)) = (
-            self.player_guid,
-            self.player_position,
-            &self.player_name,
+            self.player_guid(),
+            self.player_position_like_cpp(),
+            self.player_name_like_cpp(),
             &self.player_registry,
         ) else {
             return;
         };
+        let map_id = self.player_map_id_like_cpp();
+        let race = self.player_race_like_cpp();
+        let class = self.player_class_like_cpp();
+        let gender = self.player_gender_like_cpp();
+        let level = self.player_level_like_cpp();
         let mut visible_items = [(0i32, 0u16, 0u16); 19];
-        for (slot, item) in &self.inventory_items {
+        for (slot, item) in self.inventory_items_like_cpp() {
             if (*slot as usize) < 19 {
                 visible_items[*slot as usize] = (item.entry_id as i32, 0u16, 0u16);
             }
@@ -2738,7 +3641,7 @@ impl WorldSession {
         reg.insert(
             guid,
             PlayerBroadcastInfo {
-                map_id: self.current_map_id,
+                map_id,
                 position: pos,
                 send_tx: self.send_tx.clone(),
                 command_tx: self.session_command_tx.clone(),
@@ -2749,33 +3652,79 @@ impl WorldSession {
                     .collect(),
                 pass_on_group_loot: self.pass_on_group_loot,
                 enchanting_skill: self.represented_enchanting_skill,
-                player_name: name.clone(),
+                known_spells: self.known_spells_like_cpp().to_vec(),
+                active_quest_statuses: self
+                    .player_quests
+                    .iter()
+                    .map(|(quest_id, status)| (*quest_id, status.status))
+                    .collect(),
+                active_quest_objective_counts: self
+                    .player_quests
+                    .iter()
+                    .map(|(quest_id, status)| (*quest_id, status.objective_counts.clone()))
+                    .collect(),
+                rewarded_quests: self.rewarded_quests.clone(),
+                inventory_item_counts: self.represented_inventory_item_counts_like_cpp(),
+                player_name: name.to_string(),
                 account_id: self.account_id,
-                race: self.player_race,
-                class: self.player_class,
-                sex: self.player_gender,
-                level: self.player_level,
-                display_id: default_display_id(self.player_race, self.player_gender),
+                race,
+                class,
+                sex: gender,
+                level,
+                display_id: default_display_id(race, gender),
                 visible_items,
             },
         );
         debug!(
             "Registered player {:?} ({}) in broadcast registry (map {})",
-            guid, name, self.current_map_id
+            guid, name, map_id
         );
     }
 
+    pub(crate) fn sync_player_registry_state_like_cpp(&self) {
+        let (Some(guid), Some(registry)) = (self.player_guid(), &self.player_registry) else {
+            return;
+        };
+        if let Some(mut info) = registry.get_mut(&guid) {
+            info.active_loot_rolls = self
+                .represented_loot_rolls
+                .keys()
+                .map(|key| (key.0, key.1))
+                .collect();
+            info.pass_on_group_loot = self.pass_on_group_loot;
+            info.enchanting_skill = self.represented_enchanting_skill;
+            info.known_spells = self.known_spells_like_cpp().to_vec();
+            info.active_quest_statuses = self
+                .player_quests
+                .iter()
+                .map(|(quest_id, status)| (*quest_id, status.status))
+                .collect();
+            info.active_quest_objective_counts = self
+                .player_quests
+                .iter()
+                .map(|(quest_id, status)| (*quest_id, status.objective_counts.clone()))
+                .collect();
+            info.rewarded_quests = self.rewarded_quests.clone();
+            info.inventory_item_counts = self.represented_inventory_item_counts_like_cpp();
+        }
+    }
+
     fn object_accessor_player_object(&self) -> Option<WorldObject> {
-        let (Some(guid), Some(pos), Some(name)) =
-            (self.player_guid, self.player_position, &self.player_name)
-        else {
+        let (Some(guid), Some(pos), Some(name)) = (
+            self.player_guid(),
+            self.player_position_like_cpp(),
+            self.player_name_like_cpp(),
+        ) else {
             return None;
         };
 
         let mut object = WorldObject::new(true, TypeId::Player, TypeMask::PLAYER);
         object.object_mut().create(guid);
         object.set_name(name);
-        if object.set_map(u32::from(self.current_map_id), 0).is_err() {
+        if object
+            .set_map(u32::from(self.player_map_id_like_cpp()), 0)
+            .is_err()
+        {
             return None;
         }
         object.relocate(pos);
@@ -2785,7 +3734,7 @@ impl WorldSession {
 
     fn object_accessor_inventory_snapshot(&self) -> PlayerInventoryStorage {
         let mut inventory = PlayerInventoryStorage::default();
-        for (&slot, item) in &self.inventory_items {
+        for (&slot, item) in self.inventory_items_like_cpp() {
             if (slot as usize) < PLAYER_SLOT_END {
                 inventory.items[slot as usize] = Some(item.guid);
             }
@@ -2800,12 +3749,12 @@ impl WorldSession {
         let Some(object) = self.object_accessor_player_object() else {
             return;
         };
-        let Some(name) = &self.player_name else {
+        let Some(name) = self.player_name_like_cpp() else {
             return;
         };
 
         let inventory = self.object_accessor_inventory_snapshot();
-        let items = self.inventory_item_objects.values().cloned();
+        let items = self.inventory_item_objects_like_cpp().values().cloned();
         if let Err(err) = accessor
             .write()
             .add_player_with_inventory_and_items(name, object, inventory, items)
@@ -2815,7 +3764,7 @@ impl WorldSession {
     }
 
     pub(crate) fn unregister_from_object_accessor(&self) {
-        let (Some(guid), Some(accessor)) = (self.player_guid, &self.object_accessor) else {
+        let (Some(guid), Some(accessor)) = (self.player_guid(), &self.object_accessor) else {
             return;
         };
         accessor.write().remove_player(guid);
@@ -2824,15 +3773,14 @@ impl WorldSession {
     pub fn cleanup_shared_runtime_state(&mut self) {
         self.unregister_from_player_registry();
         self.unregister_from_object_accessor();
-        self.inventory_items.clear();
-        self.inventory_item_objects.clear();
+        self.clear_inventory_items_and_objects_like_cpp();
     }
 
     pub async fn cleanup_shared_runtime_state_on_disconnect_like_cpp(&mut self) {
-        if let Some(player_guid) = self.player_guid
+        if let Some(player_guid) = self.player_guid()
             && !self.active_loot_guid.is_empty()
         {
-            self.do_loot_release_all_like_cpp(player_guid).await;
+            self.close_active_loot_windows_like_cpp(player_guid);
         }
         self.cleanup_shared_runtime_state();
     }
@@ -2840,7 +3788,7 @@ impl WorldSession {
     /// Remove this session from the player registry.
     /// Called on logout or disconnect.
     pub(crate) fn unregister_from_player_registry(&self) {
-        let (Some(guid), Some(reg)) = (self.player_guid, &self.player_registry) else {
+        let (Some(guid), Some(reg)) = (self.player_guid(), &self.player_registry) else {
             return;
         };
         reg.remove(&guid);
@@ -2851,19 +3799,20 @@ impl WorldSession {
     /// Called whenever `player_position` changes.
     pub(crate) fn update_registry_position(&self) {
         let (Some(guid), Some(pos), Some(reg)) = (
-            self.player_guid,
-            self.player_position,
+            self.player_guid(),
+            self.player_position_like_cpp(),
             &self.player_registry,
         ) else {
             return;
         };
+        let map_id = self.player_map_id_like_cpp();
         if let Some(mut entry) = reg.get_mut(&guid) {
             entry.position = pos;
-            entry.map_id = self.current_map_id;
+            entry.map_id = map_id;
         }
         if let Some(accessor) = &self.object_accessor {
             if let Some(object) = accessor.write().player_object_mut(guid) {
-                object.world_relocate(u32::from(self.current_map_id), pos);
+                object.world_relocate(u32::from(map_id), pos);
             }
         }
     }
@@ -3089,6 +4038,10 @@ impl WorldSession {
             stack_count: 1,
             aura_flags,
             aura_interrupt_flags: 0,
+            aura_interrupt_flags2: 0,
+            represented_effect: None,
+            represented_amount: 0,
+            represented_multiplier: 1.0,
             applied_at: Instant::now(),
         };
 
@@ -3113,11 +4066,23 @@ impl WorldSession {
     }
 
     pub(crate) fn remove_auras_with_looting_interrupt_flags_like_cpp(&mut self) -> usize {
+        self.remove_auras_with_interrupt_flags_like_cpp(
+            SPELL_AURA_INTERRUPT_FLAG_LOOTING_LIKE_CPP,
+            0,
+        )
+    }
+
+    pub(crate) fn remove_auras_with_interrupt_flags_like_cpp(
+        &mut self,
+        flags: u32,
+        flags2: u32,
+    ) -> usize {
         let slots: Vec<u8> = self
             .visible_auras
             .values()
             .filter(|aura| {
-                aura.aura_interrupt_flags & SPELL_AURA_INTERRUPT_FLAG_LOOTING_LIKE_CPP != 0
+                (flags != 0 && aura.aura_interrupt_flags & flags != 0)
+                    || (flags2 != 0 && aura.aura_interrupt_flags2 & flags2 != 0)
             })
             .map(|aura| aura.slot)
             .collect();
@@ -3176,7 +4141,7 @@ impl WorldSession {
         use wow_packet::packets::aura::{AuraData, AuraUpdate};
 
         let update = AuraUpdate {
-            target_guid: self.player_guid.unwrap_or(ObjectGuid::EMPTY),
+            target_guid: self.player_guid().unwrap_or(ObjectGuid::EMPTY),
             updated_auras: vec![AuraData {
                 slot,
                 spell_id,
@@ -3196,7 +4161,7 @@ impl WorldSession {
         use wow_packet::packets::aura::AuraUpdate;
 
         let update = AuraUpdate {
-            target_guid: self.player_guid.unwrap_or(ObjectGuid::EMPTY),
+            target_guid: self.player_guid().unwrap_or(ObjectGuid::EMPTY),
             updated_auras: vec![],
             removed_aura_slots: vec![slot],
         };
@@ -3206,20 +4171,118 @@ impl WorldSession {
     /// Send a TimeSyncRequest and schedule the next one.
     pub(crate) fn send_time_sync(&mut self) {
         use wow_packet::packets::misc::TimeSyncRequest;
-        self.send_packet(&TimeSyncRequest {
-            sequence_index: self.time_sync_next_counter,
-        });
+        let sequence_index = self.time_sync_next_counter;
+        self.send_packet(&TimeSyncRequest { sequence_index });
         trace!(
             "Sent TimeSyncRequest(seq={}) for account {}",
-            self.time_sync_next_counter, self.account_id
+            sequence_index, self.account_id
         );
-        // First 2 syncs are 5s apart, then every 10s (matches C#)
-        self.time_sync_timer_ms = if self.time_sync_next_counter <= 1 {
+        self.time_sync_pending_requests
+            .insert(sequence_index, Self::game_time_ms_like_cpp());
+        // C++ uses 5s for the first request, then 10s.
+        self.time_sync_timer_ms = if self.time_sync_next_counter == 0 {
             5000
         } else {
             10000
         };
         self.time_sync_next_counter += 1;
+    }
+
+    /// Monotonic millisecond counter matching TrinityCore's `getMSTime()` scale.
+    pub(crate) fn game_time_ms_like_cpp() -> u32 {
+        static SERVER_START: OnceLock<Instant> = OnceLock::new();
+        let start = SERVER_START.get_or_init(Instant::now);
+        start.elapsed().as_millis() as u32
+    }
+
+    pub(crate) fn reset_time_sync_like_cpp(&mut self) {
+        self.time_sync_next_counter = 0;
+        self.time_sync_pending_requests.clear();
+    }
+
+    pub(crate) fn record_time_sync_response_like_cpp(
+        &mut self,
+        sequence_index: u32,
+        client_time: u32,
+    ) {
+        let Some(server_time_at_sent) = self.time_sync_pending_requests.remove(&sequence_index)
+        else {
+            return;
+        };
+
+        let received_time = Self::game_time_ms_like_cpp();
+        let round_trip_duration = received_time.wrapping_sub(server_time_at_sent);
+        let lag_delay = round_trip_duration / 2;
+        let clock_delta =
+            i64::from(server_time_at_sent) + i64::from(lag_delay) - i64::from(client_time);
+
+        if self.time_sync_clock_delta_queue.len() == 6 {
+            self.time_sync_clock_delta_queue.pop_front();
+        }
+        self.time_sync_clock_delta_queue
+            .push_back((clock_delta, round_trip_duration));
+        self.compute_new_clock_delta_like_cpp();
+    }
+
+    fn compute_new_clock_delta_like_cpp(&mut self) {
+        if self.time_sync_clock_delta_queue.is_empty() {
+            return;
+        }
+
+        let mut latencies: Vec<u32> = self
+            .time_sync_clock_delta_queue
+            .iter()
+            .map(|(_, round_trip_duration)| *round_trip_duration)
+            .collect();
+        latencies.sort_unstable();
+        let latency_median = rounded_median_u32(&latencies);
+        let latency_mean =
+            latencies.iter().map(|v| f64::from(*v)).sum::<f64>() / latencies.len() as f64;
+        let latency_variance = latencies
+            .iter()
+            .map(|v| {
+                let diff = f64::from(*v) - latency_mean;
+                diff * diff
+            })
+            .sum::<f64>()
+            / latencies.len() as f64;
+        let latency_standard_deviation = latency_variance.sqrt().round() as u32;
+
+        let latency_threshold = latency_standard_deviation.saturating_add(latency_median);
+        let mut clock_delta_sum = 0i64;
+        let mut sample_size_after_filtering = 0u32;
+        for (clock_delta, round_trip_duration) in &self.time_sync_clock_delta_queue {
+            if *round_trip_duration < latency_threshold {
+                clock_delta_sum += *clock_delta;
+                sample_size_after_filtering += 1;
+            }
+        }
+
+        if sample_size_after_filtering != 0 {
+            let mean_clock_delta =
+                (clock_delta_sum as f64 / f64::from(sample_size_after_filtering)).round() as i64;
+            if (mean_clock_delta - self.time_sync_clock_delta).abs() > 25 {
+                self.time_sync_clock_delta = mean_clock_delta;
+            }
+        } else if self.time_sync_clock_delta == 0 {
+            self.time_sync_clock_delta = self
+                .time_sync_clock_delta_queue
+                .back()
+                .map(|(clock_delta, _)| *clock_delta)
+                .unwrap_or_default();
+        }
+    }
+
+    pub(crate) fn adjust_client_movement_time_like_cpp(&self, time: u32) -> u32 {
+        let movement_time = i64::from(time) + self.time_sync_clock_delta;
+        if self.time_sync_clock_delta == 0 || !(0..=i64::from(u32::MAX)).contains(&movement_time) {
+            warn!(
+                "The computed movement time using clockDelta is erroneous. Using fallback instead"
+            );
+            Self::game_time_ms_like_cpp()
+        } else {
+            movement_time as u32
+        }
     }
 
     /// Process pending packets asynchronously. Call after `update()`.
@@ -3401,9 +4464,6 @@ impl WorldSession {
             }
             ClientOpcodes::ChatJoinChannel => {
                 self.handle_chat_join_channel(pkt).await;
-            }
-            ClientOpcodes::MoveTimeSkipped => {
-                self.handle_move_time_skipped(pkt).await;
             }
             ClientOpcodes::DbQueryBulk => {
                 match wow_packet::packets::misc::DbQueryBulk::read(&mut pkt) {
@@ -3628,6 +4688,86 @@ impl WorldSession {
                     Err(e) => warn!("Failed to read MoveInitActiveMoverComplete: {e}"),
                 }
             }
+            ClientOpcodes::MoveCollisionDisableAck
+            | ClientOpcodes::MoveCollisionEnableAck
+            | ClientOpcodes::MoveEnableDoubleJumpAck
+            | ClientOpcodes::MoveEnableSwimToFlyTransAck
+            | ClientOpcodes::MoveFeatherFallAck
+            | ClientOpcodes::MoveForceRootAck
+            | ClientOpcodes::MoveForceUnrootAck
+            | ClientOpcodes::MoveGravityDisableAck
+            | ClientOpcodes::MoveGravityEnableAck
+            | ClientOpcodes::MoveHoverAck
+            | ClientOpcodes::MoveInertiaDisableAck
+            | ClientOpcodes::MoveInertiaEnableAck
+            | ClientOpcodes::MoveSetCanFlyAck
+            | ClientOpcodes::MoveSetCanTurnWhileFallingAck
+            | ClientOpcodes::MoveSetIgnoreMovementForcesAck
+            | ClientOpcodes::MoveWaterWalkAck => {
+                let opcode = pkt.client_opcode().unwrap_or(opcode);
+                match wow_packet::packets::movement::MovementAckMessage::read(&mut pkt) {
+                    Ok(ack) => self.handle_movement_ack_message(opcode, ack).await,
+                    Err(e) => warn!("Failed to read MovementAckMessage: {e}"),
+                }
+            }
+            ClientOpcodes::MoveForceWalkSpeedChangeAck
+            | ClientOpcodes::MoveForceRunSpeedChangeAck
+            | ClientOpcodes::MoveForceRunBackSpeedChangeAck
+            | ClientOpcodes::MoveForceSwimSpeedChangeAck
+            | ClientOpcodes::MoveForceSwimBackSpeedChangeAck
+            | ClientOpcodes::MoveForceTurnRateChangeAck
+            | ClientOpcodes::MoveForceFlightSpeedChangeAck
+            | ClientOpcodes::MoveForceFlightBackSpeedChangeAck
+            | ClientOpcodes::MoveForcePitchRateChangeAck
+            | ClientOpcodes::MoveSetModMovementForceMagnitudeAck => {
+                let opcode = pkt.client_opcode().unwrap_or(opcode);
+                match wow_packet::packets::movement::MovementSpeedAck::read(&mut pkt) {
+                    Ok(ack) => self.handle_movement_speed_ack(opcode, ack).await,
+                    Err(e) => warn!("Failed to read MovementSpeedAck: {e}"),
+                }
+            }
+            ClientOpcodes::MoveKnockBackAck => {
+                match wow_packet::packets::movement::MoveKnockBackAck::read(&mut pkt) {
+                    Ok(ack) => self.handle_move_knock_back_ack(ack).await,
+                    Err(e) => warn!("Failed to read MoveKnockBackAck: {e}"),
+                }
+            }
+            ClientOpcodes::MoveSetCollisionHeightAck => {
+                match wow_packet::packets::movement::MoveSetCollisionHeightAck::read(&mut pkt) {
+                    Ok(ack) => self.handle_move_set_collision_height_ack(ack).await,
+                    Err(e) => warn!("Failed to read MoveSetCollisionHeightAck: {e}"),
+                }
+            }
+            ClientOpcodes::MoveApplyMovementForceAck => {
+                match wow_packet::packets::movement::MoveApplyMovementForceAck::read(&mut pkt) {
+                    Ok(ack) => self.handle_move_apply_movement_force_ack(ack).await,
+                    Err(e) => warn!("Failed to read MoveApplyMovementForceAck: {e}"),
+                }
+            }
+            ClientOpcodes::MoveRemoveMovementForceAck => {
+                match wow_packet::packets::movement::MoveRemoveMovementForceAck::read(&mut pkt) {
+                    Ok(ack) => self.handle_move_remove_movement_force_ack(ack).await,
+                    Err(e) => warn!("Failed to read MoveRemoveMovementForceAck: {e}"),
+                }
+            }
+            ClientOpcodes::MoveTimeSkipped => {
+                match wow_packet::packets::movement::MoveTimeSkipped::read(&mut pkt) {
+                    Ok(skipped) => self.handle_move_time_skipped(skipped).await,
+                    Err(e) => warn!("Failed to read MoveTimeSkipped: {e}"),
+                }
+            }
+            ClientOpcodes::MoveSplineDone => {
+                match wow_packet::packets::movement::MoveSplineDone::read(&mut pkt) {
+                    Ok(done) => self.handle_move_spline_done(done).await,
+                    Err(e) => warn!("Failed to read MoveSplineDone: {e}"),
+                }
+            }
+            ClientOpcodes::MoveTeleportAck => {
+                match wow_packet::packets::movement::MoveTeleportAck::read(&mut pkt) {
+                    Ok(ack) => self.handle_move_teleport_ack(ack).await,
+                    Err(e) => warn!("Failed to read MoveTeleportAck: {e}"),
+                }
+            }
 
             // ── Combat opcodes ──────────────────────────────────────
             ClientOpcodes::AttackSwing => {
@@ -3707,6 +4847,12 @@ impl WorldSession {
             }
             ClientOpcodes::ChatMessageEmote => {
                 self.handle_chat_emote(pkt).await;
+            }
+            ClientOpcodes::ChatRegisterAddonPrefixes => {
+                self.handle_chat_register_addon_prefixes(pkt).await;
+            }
+            ClientOpcodes::ChatAddonMessage => {
+                self.handle_chat_addon_message(pkt).await;
             }
 
             // ── Spell cast ────────────────────────────────────────────────────
@@ -3796,6 +4942,12 @@ impl WorldSession {
             ClientOpcodes::RequestRaidInfo => {
                 self.handle_request_raid_info(pkt).await;
             }
+            ClientOpcodes::ResetInstances => {
+                self.handle_reset_instances(pkt).await;
+            }
+            ClientOpcodes::InstanceLockResponse => {
+                self.handle_instance_lock_response(pkt).await;
+            }
             ClientOpcodes::RequestConquestFormulaConstants => {
                 self.handle_request_conquest_formula_constants(pkt).await;
             }
@@ -3807,6 +4959,18 @@ impl WorldSession {
             }
             ClientOpcodes::GetAccountCharacterList => {
                 self.handle_get_account_character_list(pkt).await;
+            }
+            ClientOpcodes::CancelTrade => {
+                self.handle_cancel_trade(pkt).await;
+            }
+            ClientOpcodes::ReportClientVariables => {
+                self.handle_report_client_variables(pkt).await;
+            }
+            ClientOpcodes::ReportEnabledAddons => {
+                self.handle_report_enabled_addons(pkt).await;
+            }
+            ClientOpcodes::ReportKeybindingExecutionCounts => {
+                self.handle_report_keybinding_execution_counts(pkt).await;
             }
             ClientOpcodes::QueryCountdownTimer => {
                 self.handle_request_countdown_timer(pkt).await;
@@ -3926,13 +5090,15 @@ impl WorldSession {
     /// - Entry: when player enters a trigger (was not in one)
     /// - Exit: when player leaves a trigger (was in one, no longer is)
     pub async fn check_area_triggers(&mut self) {
-        let (Some(pos), Some(store)) = (self.player_position, self.area_trigger_store.as_ref())
-        else {
+        let (Some(pos), Some(store)) = (
+            self.player_position_like_cpp(),
+            self.area_trigger_store.as_ref(),
+        ) else {
             return;
         };
 
         // Get all triggers at the current position on the player's current map
-        let triggers = store.get_triggers_at_position(self.current_map_id, &pos);
+        let triggers = store.get_triggers_at_position(self.player_map_id_like_cpp(), &pos);
 
         // Check if we've exited the previous trigger
         if let Some(prev_trigger_id) = self.active_area_trigger {
@@ -3993,7 +5159,7 @@ impl WorldSession {
             return;
         }
 
-        let Some(current_pos) = self.player_position else {
+        let Some(current_pos) = self.player_position_like_cpp() else {
             warn!(
                 "Cannot teleport account {}: no current position",
                 self.account_id
@@ -4003,7 +5169,7 @@ impl WorldSession {
 
         info!(
             account = self.account_id,
-            old_map = self.current_map_id,
+            old_map = self.player_map_id_like_cpp(),
             new_map = new_map,
             old_pos = format!(
                 "({:.2}, {:.2}, {:.2})",
@@ -4040,7 +5206,7 @@ impl WorldSession {
         info!(
             account = self.account_id,
             "Teleport initiated: map {} → {} dest ({:.2}, {:.2}, {:.2}); awaiting WorldPortResponse",
-            self.current_map_id,
+            self.player_map_id_like_cpp(),
             new_map,
             new_pos.x,
             new_pos.y,
@@ -4253,7 +5419,7 @@ impl WorldSession {
     /// 2. SetTimeZoneInformation
     /// 3. FeatureSystemStatusGlueScreen (NOT the in-game FeatureSystemStatus!)
     /// 4. ClientCacheVersion
-    /// 5. AvailableHotfixes (empty)
+    /// 5. AvailableHotfixes
     /// 6. AccountDataTimes (global)
     /// 7. TutorialFlags
     /// 8. ConnectionStatus (State=1)
@@ -4310,9 +5476,25 @@ impl WorldSession {
             cache_version: 24081,
         });
 
-        // 5. AvailableHotfixes (empty — no hotfixes)
+        let hotfixes = self
+            .hotfix_blob_cache
+            .as_ref()
+            .map(|cache| {
+                cache
+                    .available_hotfix_ids(&self.locale)
+                    .into_iter()
+                    .map(|id| HotfixId {
+                        push_id: id.push_id,
+                        unique_id: id.unique_id,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // 5. AvailableHotfixes
         self.send_packet(&AvailableHotfixes {
             virtual_realm_address: vra,
+            hotfixes,
         });
 
         // 6. AccountDataTimes (global)
@@ -4339,14 +5521,1604 @@ impl WorldSession {
     /// Set the logged-in player GUID.
     pub fn set_player_guid(&mut self, guid: Option<ObjectGuid>) {
         self.player_guid = guid;
+        if guid.is_none() {
+            self.player_controller = None;
+        }
+    }
+
+    pub(crate) fn set_loaded_player_name_like_cpp(&mut self, name: String) {
+        self.player_name = Some(name);
+    }
+
+    pub(crate) fn set_loaded_player_identity_like_cpp(
+        &mut self,
+        map_id: u16,
+        race: u8,
+        class: u8,
+        level: u8,
+        gender: u8,
+    ) {
+        self.current_map_id = map_id;
+        self.player_race = race;
+        self.player_class = class;
+        self.player_level = level;
+        self.player_gender = gender;
+        if let Some(controller) = &mut self.player_controller {
+            controller.map_id = map_id;
+            controller.race = race;
+            controller.class = class;
+            controller.set_level(level);
+            controller.gender = gender;
+        }
+    }
+
+    pub(crate) fn attach_player_controller_like_cpp(
+        &mut self,
+        mut controller: SessionPlayerController,
+    ) {
+        controller.set_gold(self.player_gold);
+        controller.set_xp(self.player_xp);
+        controller.set_next_level_xp(self.player_next_level_xp);
+        controller.set_selection_guid(self.selection_guid);
+        controller.set_known_spells(self.known_spells.clone());
+        controller.set_currencies(self.player_currencies.clone());
+        controller.set_inventory(self.session_player_inventory_runtime_like_cpp());
+        self.player_guid = Some(controller.guid());
+        self.player_name = Some(controller.name().to_string());
+        self.player_position = Some(controller.position());
+        self.current_map_id = controller.map_id();
+        self.player_race = controller.race();
+        self.player_class = controller.class();
+        self.player_level = controller.level();
+        self.player_gender = controller.gender();
+        self.player_controller = Some(controller);
+    }
+
+    pub(crate) fn set_player_map_position_like_cpp(
+        &mut self,
+        map_id: u16,
+        position: wow_core::Position,
+    ) {
+        self.current_map_id = map_id;
+        self.player_position = Some(position);
+        if let Some(controller) = &mut self.player_controller {
+            controller.set_map_position(map_id, position);
+        }
+    }
+
+    pub(crate) fn set_player_position_like_cpp(&mut self, position: wow_core::Position) {
+        self.set_player_map_position_like_cpp(self.current_map_id, position);
+    }
+
+    pub(crate) fn set_player_movement_time_like_cpp(&mut self, time: u32) {
+        self.player_movement_time_like_cpp = time;
+    }
+
+    pub(crate) fn set_player_level_like_cpp(&mut self, level: u8) {
+        self.player_level = level;
+        if let Some(controller) = &mut self.player_controller {
+            controller.set_level(level);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_player_class_like_cpp(&mut self, class: u8) {
+        self.player_class = class;
+        if let Some(controller) = &mut self.player_controller {
+            controller.class = class;
+        }
+    }
+
+    pub(crate) fn set_player_gold_like_cpp(&mut self, gold: u64) {
+        self.player_gold = gold;
+        if let Some(controller) = &mut self.player_controller {
+            controller.set_gold(gold);
+        }
+    }
+
+    pub(crate) fn set_player_xp_like_cpp(&mut self, xp: u32) {
+        self.player_xp = xp;
+        if let Some(controller) = &mut self.player_controller {
+            controller.set_xp(xp);
+        }
+    }
+
+    pub(crate) fn set_player_next_level_xp_like_cpp(&mut self, xp: u32) {
+        self.player_next_level_xp = xp;
+        if let Some(controller) = &mut self.player_controller {
+            controller.set_next_level_xp(xp);
+        }
+    }
+
+    pub(crate) fn set_selection_guid_like_cpp(&mut self, guid: Option<ObjectGuid>) {
+        self.selection_guid = guid;
+        if let Some(controller) = &mut self.player_controller {
+            controller.set_selection_guid(guid);
+        }
+    }
+
+    pub(crate) fn set_known_spells_like_cpp(&mut self, spells: Vec<i32>) {
+        self.known_spells = spells.clone();
+        if let Some(controller) = &mut self.player_controller {
+            controller.set_known_spells(spells);
+        }
+    }
+
+    pub(crate) fn learn_known_spell_like_cpp(&mut self, spell_id: i32) {
+        if !self.known_spells.contains(&spell_id) {
+            self.known_spells.push(spell_id);
+        }
+        if let Some(controller) = &mut self.player_controller {
+            controller.learn_spell(spell_id);
+        }
+    }
+
+    pub(crate) fn sync_player_currencies_like_cpp(&mut self) {
+        if let Some(controller) = &mut self.player_controller {
+            controller.set_currencies(self.player_currencies.clone());
+        }
+    }
+
+    pub(crate) fn set_player_currencies_like_cpp(
+        &mut self,
+        currencies: HashMap<u32, PlayerCurrency>,
+    ) {
+        self.player_currencies = currencies.clone();
+        if let Some(controller) = &mut self.player_controller {
+            controller.set_currencies(currencies);
+        }
+    }
+
+    pub(crate) fn clear_player_currencies_like_cpp(&mut self) {
+        self.set_player_currencies_like_cpp(HashMap::new());
+    }
+
+    pub(crate) fn session_player_inventory_runtime_like_cpp(
+        &self,
+    ) -> SessionPlayerInventoryRuntime {
+        SessionPlayerInventoryRuntime {
+            inventory_items: self.inventory_items.clone(),
+            buyback_items: self.buyback_items.clone(),
+            buyback_price: self.buyback_price,
+            buyback_timestamp: self.buyback_timestamp,
+            current_buyback_slot: self.current_buyback_slot,
+            item_objects: self.inventory_item_objects.clone(),
+        }
+    }
+
+    pub(crate) fn sync_player_inventory_like_cpp(&mut self) {
+        let inventory = self.session_player_inventory_runtime_like_cpp();
+        if let Some(controller) = &mut self.player_controller {
+            controller.set_inventory(inventory);
+        }
+    }
+
+    fn mirror_player_inventory_runtime_to_legacy_like_cpp(
+        &mut self,
+        inventory: &SessionPlayerInventoryRuntime,
+    ) {
+        self.inventory_items = inventory.inventory_items.clone();
+        self.buyback_items = inventory.buyback_items.clone();
+        self.buyback_price = inventory.buyback_price;
+        self.buyback_timestamp = inventory.buyback_timestamp;
+        self.current_buyback_slot = inventory.current_buyback_slot;
+        self.inventory_item_objects = inventory.item_objects.clone();
+    }
+
+    pub(crate) fn mutate_player_inventory_runtime_like_cpp<R>(
+        &mut self,
+        update: impl FnOnce(&mut SessionPlayerInventoryRuntime) -> R,
+    ) -> R {
+        if self.player_controller.is_some() {
+            let (result, inventory) = {
+                let controller = self.player_controller.as_mut().expect("checked above");
+                let result = update(controller.inventory_mut());
+                (result, controller.inventory().clone())
+            };
+            self.mirror_player_inventory_runtime_to_legacy_like_cpp(&inventory);
+            result
+        } else {
+            let mut inventory = self.session_player_inventory_runtime_like_cpp();
+            let result = update(&mut inventory);
+            self.mirror_player_inventory_runtime_to_legacy_like_cpp(&inventory);
+            result
+        }
+    }
+
+    pub(crate) fn player_name_like_cpp(&self) -> Option<&str> {
+        self.player_controller
+            .as_ref()
+            .map(SessionPlayerController::name)
+            .or(self.player_name.as_deref())
+    }
+
+    pub(crate) fn player_position_like_cpp(&self) -> Option<wow_core::Position> {
+        self.player_controller
+            .as_ref()
+            .map(SessionPlayerController::position)
+            .or(self.player_position)
+    }
+
+    pub(crate) fn player_map_id_like_cpp(&self) -> u16 {
+        self.player_controller
+            .as_ref()
+            .map(SessionPlayerController::map_id)
+            .unwrap_or(self.current_map_id)
+    }
+
+    pub(crate) fn player_race_like_cpp(&self) -> u8 {
+        self.player_controller
+            .as_ref()
+            .map(SessionPlayerController::race)
+            .unwrap_or(self.player_race)
+    }
+
+    pub(crate) fn player_class_like_cpp(&self) -> u8 {
+        self.player_controller
+            .as_ref()
+            .map(SessionPlayerController::class)
+            .unwrap_or(self.player_class)
+    }
+
+    pub(crate) fn player_level_like_cpp(&self) -> u8 {
+        self.player_controller
+            .as_ref()
+            .map(SessionPlayerController::level)
+            .unwrap_or(self.player_level)
+    }
+
+    pub(crate) fn player_gender_like_cpp(&self) -> u8 {
+        self.player_controller
+            .as_ref()
+            .map(SessionPlayerController::gender)
+            .unwrap_or(self.player_gender)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn loot_specialization_id_like_cpp(&self) -> u32 {
+        self.loot_specialization_id
+    }
+
+    pub(crate) fn set_loot_specialization_id_like_cpp(&mut self, spec_id: u32) {
+        self.loot_specialization_id = spec_id;
+    }
+
+    pub(crate) fn player_gold_like_cpp(&self) -> u64 {
+        self.player_controller
+            .as_ref()
+            .map(SessionPlayerController::gold)
+            .unwrap_or(self.player_gold)
+    }
+
+    pub(crate) fn player_xp_like_cpp(&self) -> u32 {
+        self.player_controller
+            .as_ref()
+            .map(SessionPlayerController::xp)
+            .unwrap_or(self.player_xp)
+    }
+
+    pub(crate) fn player_next_level_xp_like_cpp(&self) -> u32 {
+        self.player_controller
+            .as_ref()
+            .map(SessionPlayerController::next_level_xp)
+            .unwrap_or(self.player_next_level_xp)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn selection_guid_like_cpp(&self) -> Option<ObjectGuid> {
+        self.player_controller
+            .as_ref()
+            .and_then(SessionPlayerController::selection_guid)
+            .or(self.selection_guid)
+    }
+
+    pub(crate) fn known_spells_like_cpp(&self) -> &[i32] {
+        self.player_controller
+            .as_ref()
+            .map(SessionPlayerController::known_spells)
+            .unwrap_or(&self.known_spells)
+    }
+
+    pub(crate) fn player_currencies_like_cpp(&self) -> &HashMap<u32, PlayerCurrency> {
+        self.player_controller
+            .as_ref()
+            .map(SessionPlayerController::currencies)
+            .unwrap_or(&self.player_currencies)
+    }
+
+    pub(crate) fn player_inventory_like_cpp(&self) -> Option<&SessionPlayerInventoryRuntime> {
+        self.player_controller
+            .as_ref()
+            .map(SessionPlayerController::inventory)
+    }
+
+    pub(crate) fn inventory_items_like_cpp(&self) -> &HashMap<u8, InventoryItem> {
+        self.player_inventory_like_cpp()
+            .map(SessionPlayerInventoryRuntime::inventory_items)
+            .unwrap_or(&self.inventory_items)
+    }
+
+    pub(crate) fn buyback_items_like_cpp(&self) -> &HashMap<u8, InventoryItem> {
+        self.player_inventory_like_cpp()
+            .map(SessionPlayerInventoryRuntime::buyback_items)
+            .unwrap_or(&self.buyback_items)
+    }
+
+    pub(crate) fn buyback_price_like_cpp(&self) -> &[u32; BUYBACK_SLOT_COUNT] {
+        self.player_inventory_like_cpp()
+            .map(SessionPlayerInventoryRuntime::buyback_price)
+            .unwrap_or(&self.buyback_price)
+    }
+
+    pub(crate) fn buyback_timestamp_like_cpp(&self) -> &[i64; BUYBACK_SLOT_COUNT] {
+        self.player_inventory_like_cpp()
+            .map(SessionPlayerInventoryRuntime::buyback_timestamp)
+            .unwrap_or(&self.buyback_timestamp)
+    }
+
+    pub(crate) fn current_buyback_slot_like_cpp(&self) -> u8 {
+        self.player_inventory_like_cpp()
+            .map(SessionPlayerInventoryRuntime::current_buyback_slot)
+            .unwrap_or(self.current_buyback_slot)
+    }
+
+    pub(crate) fn inventory_item_objects_like_cpp(&self) -> &HashMap<ObjectGuid, Item> {
+        self.player_inventory_like_cpp()
+            .map(SessionPlayerInventoryRuntime::item_objects)
+            .unwrap_or(&self.inventory_item_objects)
     }
 
     pub fn set_player_alive_like_cpp(&mut self, alive: bool) {
         self.player_alive_like_cpp = alive;
+        if !alive {
+            self.player_health_like_cpp = 0;
+        } else if self.player_health_like_cpp == 0 {
+            self.player_health_like_cpp = self.player_max_health_like_cpp.max(1);
+        }
     }
 
     pub(crate) fn player_is_alive_like_cpp(&self) -> bool {
         self.player_alive_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_player_game_master_like_cpp(&mut self, is_game_master: bool) {
+        self.player_game_master_like_cpp = is_game_master;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_player_cheat_god_like_cpp(&mut self, enabled: bool) {
+        self.player_cheat_god_like_cpp = enabled;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_player_normal_damage_immune_like_cpp(&mut self, immune: bool) {
+        self.player_normal_damage_immune_like_cpp = immune;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_player_environmental_damage_immune_like_cpp(&mut self, immune: bool) {
+        self.player_environmental_damage_immune_like_cpp = immune;
+    }
+
+    pub(crate) fn set_player_health_like_cpp(&mut self, health: u32, max_health: u32) {
+        self.player_max_health_like_cpp = max_health.max(1);
+        self.player_health_like_cpp = health.min(self.player_max_health_like_cpp);
+        self.player_alive_like_cpp = self.player_health_like_cpp > 0;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn player_health_like_cpp(&self) -> u32 {
+        self.player_health_like_cpp
+    }
+
+    pub(crate) fn set_fall_information_like_cpp(&mut self, time: u32, z: f32) {
+        self.last_fall_time_like_cpp = time;
+        self.last_fall_z_like_cpp = z;
+    }
+
+    pub(crate) fn update_fall_information_if_needed_like_cpp(
+        &mut self,
+        movement_info: &wow_packet::packets::movement::MovementInfo,
+        is_fall_land: bool,
+    ) {
+        if self.last_fall_time_like_cpp >= movement_info.jump.fall_time
+            || self.last_fall_z_like_cpp <= movement_info.position.z
+            || is_fall_land
+        {
+            self.set_fall_information_like_cpp(
+                movement_info.jump.fall_time,
+                movement_info.position.z,
+            );
+        }
+    }
+
+    pub(crate) fn handle_fall_like_cpp(
+        &mut self,
+        movement_info: &wow_packet::packets::movement::MovementInfo,
+    ) -> Option<MovementFallDamageEvent> {
+        let z_diff = self.last_fall_z_like_cpp - movement_info.position.z;
+        if z_diff < 14.57
+            || !self.player_alive_like_cpp
+            || self.player_game_master_like_cpp
+            || self.has_represented_aura_effect_like_cpp(RepresentedAuraEffectLikeCpp::Hover)
+            || self.has_represented_aura_effect_like_cpp(RepresentedAuraEffectLikeCpp::FeatherFall)
+            || self.has_represented_aura_effect_like_cpp(RepresentedAuraEffectLikeCpp::Fly)
+            || self.player_normal_damage_immune_like_cpp
+        {
+            return None;
+        }
+
+        let safe_fall =
+            self.total_represented_aura_modifier_like_cpp(RepresentedAuraEffectLikeCpp::SafeFall);
+        let damage_percent = 0.018 * (z_diff - safe_fall as f32) - 0.2426;
+        if damage_percent <= 0.0 {
+            return None;
+        }
+
+        let mut damage = (damage_percent * self.player_max_health_like_cpp as f32) as u32;
+        if self.player_cheat_god_like_cpp {
+            damage = 0;
+        }
+        damage = (damage as f32
+            * self.total_represented_aura_multiplier_like_cpp(
+                RepresentedAuraEffectLikeCpp::ModifyFallDamagePct,
+            )) as u32;
+        if self
+            .visible_auras
+            .values()
+            .any(|aura| aura.spell_id == 43_621)
+        {
+            damage = self.player_max_health_like_cpp / 2;
+        }
+        damage = damage.min(self.player_max_health_like_cpp);
+        if damage == 0 {
+            return None;
+        }
+
+        let original_health = self.player_health_like_cpp;
+        let final_damage = if self.player_environmental_damage_immune_like_cpp {
+            0
+        } else {
+            damage.min(original_health)
+        };
+        self.player_health_like_cpp = self.player_health_like_cpp.saturating_sub(final_damage);
+        if self.player_health_like_cpp == 0 {
+            self.player_alive_like_cpp = false;
+        }
+
+        let event = MovementFallDamageEvent {
+            z_diff,
+            damage,
+            final_damage,
+        };
+        self.fall_damage_events_like_cpp.push(event);
+        Some(event)
+    }
+
+    fn has_represented_aura_effect_like_cpp(&self, effect: RepresentedAuraEffectLikeCpp) -> bool {
+        self.visible_auras
+            .values()
+            .any(|aura| aura.represented_effect == Some(effect))
+    }
+
+    fn total_represented_aura_modifier_like_cpp(
+        &self,
+        effect: RepresentedAuraEffectLikeCpp,
+    ) -> i32 {
+        self.visible_auras
+            .values()
+            .filter(|aura| aura.represented_effect == Some(effect))
+            .map(|aura| aura.represented_amount)
+            .sum()
+    }
+
+    fn total_represented_aura_multiplier_like_cpp(
+        &self,
+        effect: RepresentedAuraEffectLikeCpp,
+    ) -> f32 {
+        self.visible_auras
+            .values()
+            .filter(|aura| aura.represented_effect == Some(effect))
+            .fold(1.0, |acc, aura| acc * aura.represented_multiplier)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fall_damage_events_like_cpp(&self) -> &[MovementFallDamageEvent] {
+        &self.fall_damage_events_like_cpp
+    }
+
+    pub(crate) fn player_min_height_like_cpp(&self, position: wow_core::Position) -> f32 {
+        let map_id = self.player_map_id_like_cpp();
+        self.map_manager
+            .as_ref()
+            .and_then(|manager| {
+                manager
+                    .read()
+                    .ok()
+                    .map(|manager| manager.min_height_like_cpp(map_id, 0, position.x, position.y))
+            })
+            .unwrap_or(crate::map_manager::DEFAULT_MIN_HEIGHT_LIKE_CPP)
+    }
+
+    pub(crate) fn handle_under_map_like_cpp(
+        &mut self,
+        movement_info: &wow_packet::packets::movement::MovementInfo,
+    ) -> Option<MovementUnderMapDamageEvent> {
+        let min_height = self.player_min_height_like_cpp(movement_info.position);
+        if movement_info.position.z >= min_height {
+            self.player_out_of_bounds_like_cpp = false;
+            return None;
+        }
+
+        if !self.player_alive_like_cpp {
+            return None;
+        }
+
+        self.player_out_of_bounds_like_cpp = true;
+        let damage = self.player_max_health_like_cpp;
+        self.player_health_like_cpp = self.player_health_like_cpp.saturating_sub(damage);
+        if self.player_health_like_cpp == 0 {
+            self.player_alive_like_cpp = false;
+        }
+
+        // C++ calls KillPlayer if EnvironmentalDamage did not kill due to GM/immunity.
+        if self.player_alive_like_cpp {
+            self.set_player_alive_like_cpp(false);
+        }
+
+        let event = MovementUnderMapDamageEvent {
+            z: movement_info.position.z,
+            min_height,
+            damage,
+        };
+        self.under_map_damage_events_like_cpp.push(event);
+        Some(event)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn under_map_damage_events_like_cpp(&self) -> &[MovementUnderMapDamageEvent] {
+        &self.under_map_damage_events_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn player_out_of_bounds_like_cpp(&self) -> bool {
+        self.player_out_of_bounds_like_cpp
+    }
+
+    pub(crate) fn set_player_stand_state_like_cpp(&mut self, state: UnitStandStateType) {
+        self.player_stand_state_like_cpp = state;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn player_stand_state_like_cpp(&self) -> UnitStandStateType {
+        self.player_stand_state_like_cpp
+    }
+
+    pub(crate) fn player_is_sit_state_like_cpp(&self) -> bool {
+        matches!(
+            self.player_stand_state_like_cpp,
+            UnitStandStateType::Sit
+                | UnitStandStateType::SitChair
+                | UnitStandStateType::SitLowChair
+                | UnitStandStateType::SitMediumChair
+                | UnitStandStateType::SitHighChair
+        )
+    }
+
+    pub(crate) fn request_temporary_pet_unsummon_like_cpp(&mut self) {
+        self.temporary_pet_unsummon_requests_like_cpp = self
+            .temporary_pet_unsummon_requests_like_cpp
+            .saturating_add(1);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn temporary_pet_unsummon_requests_like_cpp(&self) -> u32 {
+        self.temporary_pet_unsummon_requests_like_cpp
+    }
+
+    pub(crate) fn request_jump_proc_like_cpp(&mut self) {
+        self.movement_jump_proc_requests_like_cpp =
+            self.movement_jump_proc_requests_like_cpp.saturating_add(1);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn movement_jump_proc_requests_like_cpp(&self) -> u32 {
+        self.movement_jump_proc_requests_like_cpp
+    }
+
+    pub(crate) fn apply_move_init_active_mover_complete_like_cpp(&mut self, ticks: u32) {
+        self.active_player_local_flags_like_cpp |=
+            PLAYER_LOCAL_FLAG_OVERRIDE_TRANSPORT_SERVER_TIME_LIKE_CPP;
+        self.active_player_transport_server_time_like_cpp =
+            Self::game_time_ms_like_cpp().saturating_sub(ticks) as i32;
+        self.movement_visibility_refresh_requests_like_cpp = self
+            .movement_visibility_refresh_requests_like_cpp
+            .saturating_add(1);
+        self.send_active_player_transport_server_time_update_like_cpp();
+    }
+
+    fn send_active_player_transport_server_time_update_like_cpp(&self) {
+        let Some(guid) = self.player_guid() else {
+            return;
+        };
+
+        use wow_packet::packets::update::{ActivePlayerDataValuesUpdate, UpdateObject};
+
+        let mut data = ActivePlayerDataValuesUpdate::default();
+        set_active_player_update_bit_like_cpp(&mut data.active_player_data_mask, 38);
+        set_active_player_update_bit_like_cpp(&mut data.active_player_data_mask, 69);
+        set_active_player_update_bit_like_cpp(&mut data.active_player_data_mask, 70);
+        set_active_player_update_bit_like_cpp(&mut data.active_player_data_mask, 118);
+        data.local_flags = self.active_player_local_flags_like_cpp;
+        data.transport_server_time = self.active_player_transport_server_time_like_cpp;
+        self.send_packet(&UpdateObject::full_active_player_values_update(
+            guid,
+            self.player_map_id_like_cpp(),
+            data,
+        ));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active_player_local_flags_like_cpp(&self) -> u32 {
+        self.active_player_local_flags_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active_player_transport_server_time_like_cpp(&self) -> i32 {
+        self.active_player_transport_server_time_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn movement_visibility_refresh_requests_like_cpp(&self) -> u32 {
+        self.movement_visibility_refresh_requests_like_cpp
+    }
+
+    pub(crate) fn validate_movement_ack_status_like_cpp(
+        &self,
+        status: &wow_packet::packets::movement::MovementInfo,
+    ) -> bool {
+        let Some(player_guid) = self.player_guid() else {
+            return false;
+        };
+
+        status.guid == player_guid && status.position.is_valid_map_coord_like_cpp()
+    }
+
+    pub(crate) fn validate_and_sanitize_movement_ack_status_represented_like_cpp(
+        &self,
+        status: &mut wow_packet::packets::movement::MovementInfo,
+    ) -> bool {
+        if !self.validate_movement_ack_status_like_cpp(status) {
+            return false;
+        }
+
+        self.sanitize_movement_info_flags_represented_like_cpp(status);
+        true
+    }
+
+    pub(crate) fn sanitize_movement_info_flags_represented_like_cpp(
+        &self,
+        movement_info: &mut wow_packet::packets::movement::MovementInfo,
+    ) -> MovementFlag {
+        let mut removed = MovementFlag::empty();
+        let remove_flags = |movement_info: &mut wow_packet::packets::movement::MovementInfo,
+                            removed: &mut MovementFlag,
+                            flags: MovementFlag| {
+            movement_info.flags.remove(flags);
+            *removed |= flags;
+        };
+
+        let root_allowed_by_fixed_vehicle_like_cpp = false;
+        if movement_info.flags.contains(MovementFlag::ROOT) {
+            if root_allowed_by_fixed_vehicle_like_cpp {
+                if movement_info.flags.intersects(MovementFlag::MASK_MOVING) {
+                    remove_flags(movement_info, &mut removed, MovementFlag::MASK_MOVING);
+                }
+            } else {
+                remove_flags(movement_info, &mut removed, MovementFlag::ROOT);
+            }
+        }
+
+        if movement_info.flags.contains(MovementFlag::HOVER)
+            && !self.has_represented_aura_effect_like_cpp(RepresentedAuraEffectLikeCpp::Hover)
+        {
+            remove_flags(movement_info, &mut removed, MovementFlag::HOVER);
+        }
+
+        if movement_info
+            .flags
+            .contains(MovementFlag::ASCENDING | MovementFlag::DESCENDING)
+        {
+            remove_flags(
+                movement_info,
+                &mut removed,
+                MovementFlag::ASCENDING | MovementFlag::DESCENDING,
+            );
+        }
+
+        if movement_info
+            .flags
+            .contains(MovementFlag::LEFT | MovementFlag::RIGHT)
+        {
+            remove_flags(
+                movement_info,
+                &mut removed,
+                MovementFlag::LEFT | MovementFlag::RIGHT,
+            );
+        }
+
+        if movement_info
+            .flags
+            .contains(MovementFlag::STRAFE_LEFT | MovementFlag::STRAFE_RIGHT)
+        {
+            remove_flags(
+                movement_info,
+                &mut removed,
+                MovementFlag::STRAFE_LEFT | MovementFlag::STRAFE_RIGHT,
+            );
+        }
+
+        if movement_info
+            .flags
+            .contains(MovementFlag::PITCH_UP | MovementFlag::PITCH_DOWN)
+        {
+            remove_flags(
+                movement_info,
+                &mut removed,
+                MovementFlag::PITCH_UP | MovementFlag::PITCH_DOWN,
+            );
+        }
+
+        if movement_info
+            .flags
+            .contains(MovementFlag::FORWARD | MovementFlag::BACKWARD)
+        {
+            remove_flags(
+                movement_info,
+                &mut removed,
+                MovementFlag::FORWARD | MovementFlag::BACKWARD,
+            );
+        }
+
+        if movement_info.flags.contains(MovementFlag::WATER_WALK)
+            && !self.has_represented_aura_effect_like_cpp(RepresentedAuraEffectLikeCpp::WaterWalk)
+            && !self.has_represented_aura_effect_like_cpp(RepresentedAuraEffectLikeCpp::Ghost)
+        {
+            remove_flags(movement_info, &mut removed, MovementFlag::WATER_WALK);
+        }
+
+        if movement_info.flags.contains(MovementFlag::FALLING_SLOW)
+            && !self.has_represented_aura_effect_like_cpp(RepresentedAuraEffectLikeCpp::FeatherFall)
+        {
+            remove_flags(movement_info, &mut removed, MovementFlag::FALLING_SLOW);
+        }
+
+        if movement_info
+            .flags
+            .intersects(MovementFlag::FLYING | MovementFlag::CAN_FLY)
+            && !self.player_game_master_like_cpp
+            && !self.has_represented_aura_effect_like_cpp(RepresentedAuraEffectLikeCpp::Fly)
+            && !self.has_represented_aura_effect_like_cpp(
+                RepresentedAuraEffectLikeCpp::MountedFlightSpeed,
+            )
+        {
+            remove_flags(
+                movement_info,
+                &mut removed,
+                MovementFlag::FLYING | MovementFlag::CAN_FLY,
+            );
+        }
+
+        if movement_info
+            .flags
+            .intersects(MovementFlag::DISABLE_GRAVITY | MovementFlag::CAN_FLY)
+            && movement_info.flags.contains(MovementFlag::FALLING)
+        {
+            remove_flags(movement_info, &mut removed, MovementFlag::FALLING);
+        }
+
+        let has_step_up_elevation_like_cpp =
+            movement_info.step_up_start_elevation.abs() > f32::EPSILON;
+        if movement_info.flags.contains(MovementFlag::SPLINE_ELEVATION)
+            && !has_step_up_elevation_like_cpp
+        {
+            remove_flags(movement_info, &mut removed, MovementFlag::SPLINE_ELEVATION);
+        }
+
+        if has_step_up_elevation_like_cpp {
+            movement_info.flags.insert(MovementFlag::SPLINE_ELEVATION);
+        }
+
+        removed
+    }
+
+    pub(crate) fn record_movement_ack_event_like_cpp(&mut self, event: MovementAckEventLikeCpp) {
+        self.movement_ack_events_like_cpp.push(event);
+    }
+
+    pub(crate) fn apply_knock_back_ack_like_cpp(
+        &mut self,
+        opcode: ClientOpcodes,
+        ack: &mut wow_packet::packets::movement::MovementAck,
+    ) -> bool {
+        if !self.validate_and_sanitize_movement_ack_status_represented_like_cpp(&mut ack.status) {
+            self.record_movement_ack_event_like_cpp(MovementAckEventLikeCpp {
+                opcode,
+                mover_guid: ack.status.guid,
+                ack_index: Some(ack.ack_index),
+                movement_force_id: None,
+                movement_force_type: None,
+                adjusted_time: None,
+                speed: None,
+                time_skipped: None,
+                spline_id: None,
+                accepted: false,
+            });
+            return false;
+        }
+
+        let mut status = ack.status.clone();
+        status.time = self.adjust_client_movement_time_like_cpp(status.time);
+        self.player_movement_time_like_cpp = status.time;
+        self.set_player_position_like_cpp(status.position);
+        self.record_movement_ack_event_like_cpp(MovementAckEventLikeCpp {
+            opcode,
+            mover_guid: status.guid,
+            ack_index: Some(ack.ack_index),
+            movement_force_id: None,
+            movement_force_type: None,
+            adjusted_time: Some(status.time),
+            speed: None,
+            time_skipped: None,
+            spline_id: None,
+            accepted: true,
+        });
+        true
+    }
+
+    pub(crate) fn apply_move_time_skipped_like_cpp(
+        &mut self,
+        mover_guid: ObjectGuid,
+        time_skipped: u32,
+    ) -> bool {
+        let accepted = self.player_guid() == Some(mover_guid);
+        if accepted {
+            self.player_movement_time_like_cpp = self
+                .player_movement_time_like_cpp
+                .saturating_add(time_skipped);
+        }
+
+        self.record_movement_ack_event_like_cpp(MovementAckEventLikeCpp {
+            opcode: ClientOpcodes::MoveTimeSkipped,
+            mover_guid,
+            ack_index: None,
+            movement_force_id: None,
+            movement_force_type: None,
+            adjusted_time: accepted.then_some(self.player_movement_time_like_cpp),
+            speed: None,
+            time_skipped: Some(time_skipped),
+            spline_id: None,
+            accepted,
+        });
+        accepted
+    }
+
+    pub(crate) fn record_validated_movement_ack_like_cpp(
+        &mut self,
+        opcode: ClientOpcodes,
+        ack: &mut wow_packet::packets::movement::MovementAck,
+        speed: Option<f32>,
+    ) -> bool {
+        let accepted =
+            self.validate_and_sanitize_movement_ack_status_represented_like_cpp(&mut ack.status);
+        self.record_movement_ack_event_like_cpp(MovementAckEventLikeCpp {
+            opcode,
+            mover_guid: ack.status.guid,
+            ack_index: Some(ack.ack_index),
+            movement_force_id: None,
+            movement_force_type: None,
+            adjusted_time: None,
+            speed,
+            time_skipped: None,
+            spline_id: None,
+            accepted,
+        });
+        accepted
+    }
+
+    pub(crate) fn record_apply_movement_force_ack_like_cpp(
+        &mut self,
+        ack: &mut wow_packet::packets::movement::MovementAck,
+        force: &wow_packet::packets::movement::MovementForce,
+    ) -> bool {
+        if !self.validate_and_sanitize_movement_ack_status_represented_like_cpp(&mut ack.status) {
+            self.record_movement_ack_event_like_cpp(MovementAckEventLikeCpp {
+                opcode: ClientOpcodes::MoveApplyMovementForceAck,
+                mover_guid: ack.status.guid,
+                ack_index: Some(ack.ack_index),
+                movement_force_id: Some(force.id),
+                movement_force_type: Some(force.force_type.to_wire()),
+                adjusted_time: None,
+                speed: None,
+                time_skipped: None,
+                spline_id: None,
+                accepted: false,
+            });
+            return false;
+        }
+
+        let adjusted_time = self.adjust_client_movement_time_like_cpp(ack.status.time);
+        self.record_movement_ack_event_like_cpp(MovementAckEventLikeCpp {
+            opcode: ClientOpcodes::MoveApplyMovementForceAck,
+            mover_guid: ack.status.guid,
+            ack_index: Some(ack.ack_index),
+            movement_force_id: Some(force.id),
+            movement_force_type: Some(force.force_type.to_wire()),
+            adjusted_time: Some(adjusted_time),
+            speed: None,
+            time_skipped: None,
+            spline_id: None,
+            accepted: true,
+        });
+        true
+    }
+
+    pub(crate) fn record_remove_movement_force_ack_like_cpp(
+        &mut self,
+        ack: &mut wow_packet::packets::movement::MovementAck,
+        force_id: ObjectGuid,
+    ) -> bool {
+        if !self.validate_and_sanitize_movement_ack_status_represented_like_cpp(&mut ack.status) {
+            self.record_movement_ack_event_like_cpp(MovementAckEventLikeCpp {
+                opcode: ClientOpcodes::MoveRemoveMovementForceAck,
+                mover_guid: ack.status.guid,
+                ack_index: Some(ack.ack_index),
+                movement_force_id: Some(force_id),
+                movement_force_type: None,
+                adjusted_time: None,
+                speed: None,
+                time_skipped: None,
+                spline_id: None,
+                accepted: false,
+            });
+            return false;
+        }
+
+        let adjusted_time = self.adjust_client_movement_time_like_cpp(ack.status.time);
+        self.record_movement_ack_event_like_cpp(MovementAckEventLikeCpp {
+            opcode: ClientOpcodes::MoveRemoveMovementForceAck,
+            mover_guid: ack.status.guid,
+            ack_index: Some(ack.ack_index),
+            movement_force_id: Some(force_id),
+            movement_force_type: None,
+            adjusted_time: Some(adjusted_time),
+            speed: None,
+            time_skipped: None,
+            spline_id: None,
+            accepted: true,
+        });
+        true
+    }
+
+    pub(crate) fn record_move_spline_done_like_cpp(
+        &mut self,
+        status: &mut wow_packet::packets::movement::MovementInfo,
+        spline_id: i32,
+    ) -> bool {
+        let accepted = self.validate_and_sanitize_movement_ack_status_represented_like_cpp(status);
+        self.record_movement_ack_event_like_cpp(MovementAckEventLikeCpp {
+            opcode: ClientOpcodes::MoveSplineDone,
+            mover_guid: status.guid,
+            ack_index: None,
+            movement_force_id: None,
+            movement_force_type: None,
+            adjusted_time: None,
+            speed: None,
+            time_skipped: None,
+            spline_id: Some(spline_id),
+            accepted,
+        });
+        accepted
+    }
+
+    pub(crate) fn handle_move_spline_done_taxi_like_cpp(
+        &mut self,
+        status: &mut wow_packet::packets::movement::MovementInfo,
+        spline_id: i32,
+    ) -> MoveSplineDoneTaxiActionLikeCpp {
+        if !self.record_move_spline_done_like_cpp(status, spline_id) {
+            return self.record_move_spline_done_taxi_event_like_cpp(
+                spline_id,
+                MoveSplineDoneTaxiActionLikeCpp::InvalidMovement,
+                None,
+                None,
+                None,
+                false,
+            );
+        }
+
+        let current_destination = self.taxi_destinations_like_cpp.get(1).copied();
+        if let Some(destination_node_id) = current_destination {
+            let Some(flight) = self.taxi_flight_state_like_cpp else {
+                return self.record_move_spline_done_taxi_event_like_cpp(
+                    spline_id,
+                    MoveSplineDoneTaxiActionLikeCpp::InProgressNoFlightGenerator,
+                    Some(destination_node_id),
+                    None,
+                    None,
+                    false,
+                );
+            };
+
+            let destination_map_id = self
+                .taxi_node_map_ids_like_cpp
+                .get(&destination_node_id)
+                .copied();
+            let should_teleport = destination_map_id
+                .map(|map_id| map_id != self.player_map_id_like_cpp())
+                .unwrap_or(false)
+                || flight.current_node.teleport_flag;
+
+            if should_teleport {
+                if let (Some(map_id), Some(node)) = (destination_map_id, flight.node_after_teleport)
+                {
+                    self.taxi_flight_state_like_cpp = Some(RepresentedTaxiFlightStateLikeCpp {
+                        current_node: node,
+                        node_after_teleport: None,
+                    });
+                    self.set_player_map_position_like_cpp(map_id, node.position);
+                    return self.record_move_spline_done_taxi_event_like_cpp(
+                        spline_id,
+                        MoveSplineDoneTaxiActionLikeCpp::TeleportRequested,
+                        Some(destination_node_id),
+                        Some(map_id),
+                        Some(node.position),
+                        false,
+                    );
+                }
+            }
+
+            return self.record_move_spline_done_taxi_event_like_cpp(
+                spline_id,
+                MoveSplineDoneTaxiActionLikeCpp::InProgressNoTeleport,
+                Some(destination_node_id),
+                None,
+                None,
+                false,
+            );
+        }
+
+        if self.taxi_destinations_like_cpp.len() != 1 {
+            return self.record_move_spline_done_taxi_event_like_cpp(
+                spline_id,
+                MoveSplineDoneTaxiActionLikeCpp::IgnoredUnexpectedFinalPath,
+                None,
+                None,
+                None,
+                false,
+            );
+        }
+
+        self.taxi_destinations_like_cpp.clear();
+        self.taxi_flight_state_like_cpp = None;
+        self.taxi_mounted_like_cpp = false;
+        self.taxi_unit_flags_like_cpp
+            .remove(UnitFlags::REMOVE_CLIENT_CONTROL | UnitFlags::ON_TAXI);
+        let current_z = self
+            .player_position_like_cpp()
+            .map(|position| position.z)
+            .unwrap_or(status.position.z);
+        self.set_fall_information_like_cpp(0, current_z);
+        let honorless_target_cast = self.player_pvp_hostile_like_cpp;
+
+        self.record_move_spline_done_taxi_event_like_cpp(
+            spline_id,
+            MoveSplineDoneTaxiActionLikeCpp::FinalCleanup,
+            None,
+            None,
+            None,
+            honorless_target_cast,
+        )
+    }
+
+    fn record_move_spline_done_taxi_event_like_cpp(
+        &mut self,
+        spline_id: i32,
+        action: MoveSplineDoneTaxiActionLikeCpp,
+        destination_node_id: Option<u32>,
+        teleport_map_id: Option<u16>,
+        teleport_position: Option<wow_core::Position>,
+        honorless_target_cast: bool,
+    ) -> MoveSplineDoneTaxiActionLikeCpp {
+        self.move_spline_done_taxi_events_like_cpp
+            .push(MoveSplineDoneTaxiEventLikeCpp {
+                spline_id,
+                action,
+                destination_node_id,
+                teleport_map_id,
+                teleport_position,
+                honorless_target_cast,
+            });
+        action
+    }
+
+    pub(crate) fn record_move_teleport_ack_like_cpp(
+        &mut self,
+        mover_guid: ObjectGuid,
+        ack_index: i32,
+        move_time: i32,
+    ) -> bool {
+        let accepted = self.player_guid() == Some(mover_guid);
+        self.record_movement_ack_event_like_cpp(MovementAckEventLikeCpp {
+            opcode: ClientOpcodes::MoveTeleportAck,
+            mover_guid,
+            ack_index: Some(ack_index),
+            movement_force_id: None,
+            movement_force_type: None,
+            adjusted_time: (move_time >= 0).then_some(move_time as u32),
+            speed: None,
+            time_skipped: None,
+            spline_id: None,
+            accepted,
+        });
+        accepted
+    }
+
+    pub(crate) fn handle_move_teleport_ack_like_cpp(
+        &mut self,
+        mover_guid: ObjectGuid,
+        ack_index: i32,
+        move_time: i32,
+    ) -> MoveTeleportAckActionLikeCpp {
+        let accepted = self.record_move_teleport_ack_like_cpp(mover_guid, ack_index, move_time);
+        if !self.near_teleport_pending_like_cpp {
+            return self.record_move_teleport_ack_event_like_cpp(
+                mover_guid,
+                ack_index,
+                move_time,
+                MoveTeleportAckActionLikeCpp::NotBeingTeleportedNear,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                false,
+                false,
+                false,
+            );
+        }
+
+        if !accepted {
+            return self.record_move_teleport_ack_event_like_cpp(
+                mover_guid,
+                ack_index,
+                move_time,
+                MoveTeleportAckActionLikeCpp::WrongMover,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                false,
+                false,
+                false,
+            );
+        }
+
+        let Some((map_id, destination)) = self.near_teleport_destination_like_cpp else {
+            return self.record_move_teleport_ack_event_like_cpp(
+                mover_guid,
+                ack_index,
+                move_time,
+                MoveTeleportAckActionLikeCpp::MissingDestination,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                false,
+                false,
+                false,
+            );
+        };
+
+        self.near_teleport_pending_like_cpp = false;
+        let old_zone = self.player_zone_id_like_cpp;
+        self.set_player_map_position_like_cpp(map_id, destination);
+        self.update_registry_position();
+        self.set_fall_information_like_cpp(0, destination.z);
+
+        let (new_zone, new_area) = self
+            .near_teleport_destination_zone_area_like_cpp
+            .unwrap_or((self.player_zone_id_like_cpp, self.player_area_id_like_cpp));
+        self.player_zone_id_like_cpp = new_zone;
+        self.player_area_id_like_cpp = new_area;
+
+        let zone_changed = old_zone != new_zone;
+        let honorless_target_cast = zone_changed && self.player_pvp_hostile_like_cpp;
+        let pvp_disabled = zone_changed
+            && !self.player_pvp_hostile_like_cpp
+            && self.player_pvp_enabled_like_cpp
+            && !self.player_in_pvp_flag_like_cpp;
+        if pvp_disabled {
+            self.player_pvp_enabled_like_cpp = false;
+        }
+
+        self.temporary_pet_resummon_requests_like_cpp = self
+            .temporary_pet_resummon_requests_like_cpp
+            .saturating_add(1);
+        self.delayed_operations_processed_like_cpp =
+            self.delayed_operations_processed_like_cpp.saturating_add(1);
+
+        self.record_move_teleport_ack_event_like_cpp(
+            mover_guid,
+            ack_index,
+            move_time,
+            MoveTeleportAckActionLikeCpp::Accepted,
+            Some(map_id),
+            Some(destination),
+            Some(old_zone),
+            Some(new_zone),
+            Some(new_area),
+            honorless_target_cast,
+            pvp_disabled,
+            true,
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_move_teleport_ack_event_like_cpp(
+        &mut self,
+        mover_guid: ObjectGuid,
+        ack_index: i32,
+        move_time: i32,
+        action: MoveTeleportAckActionLikeCpp,
+        destination_map_id: Option<u16>,
+        destination_position: Option<wow_core::Position>,
+        old_zone_id: Option<u32>,
+        new_zone_id: Option<u32>,
+        new_area_id: Option<u32>,
+        honorless_target_cast: bool,
+        pvp_disabled: bool,
+        pet_resummon_requested: bool,
+        delayed_operations_processed: bool,
+    ) -> MoveTeleportAckActionLikeCpp {
+        self.move_teleport_ack_events_like_cpp
+            .push(MoveTeleportAckEventLikeCpp {
+                mover_guid,
+                ack_index,
+                move_time,
+                action,
+                destination_map_id,
+                destination_position,
+                old_zone_id,
+                new_zone_id,
+                new_area_id,
+                honorless_target_cast,
+                pvp_disabled,
+                pet_resummon_requested,
+                delayed_operations_processed,
+            });
+        action
+    }
+
+    #[cfg(test)]
+    pub(crate) fn movement_ack_events_like_cpp(&self) -> &[MovementAckEventLikeCpp] {
+        &self.movement_ack_events_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_taxi_destinations_like_cpp(&mut self, destinations: Vec<u32>) {
+        self.taxi_destinations_like_cpp = destinations;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn taxi_destinations_like_cpp(&self) -> &[u32] {
+        &self.taxi_destinations_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_taxi_node_map_id_like_cpp(&mut self, node_id: u32, map_id: u16) {
+        self.taxi_node_map_ids_like_cpp.insert(node_id, map_id);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_taxi_flight_state_like_cpp(
+        &mut self,
+        current_node: RepresentedTaxiFlightNodeLikeCpp,
+        node_after_teleport: Option<RepresentedTaxiFlightNodeLikeCpp>,
+    ) {
+        self.taxi_flight_state_like_cpp = Some(RepresentedTaxiFlightStateLikeCpp {
+            current_node,
+            node_after_teleport,
+        });
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_taxi_cleanup_state_like_cpp(&mut self, unit_flags: UnitFlags, mounted: bool) {
+        self.taxi_unit_flags_like_cpp = unit_flags;
+        self.taxi_mounted_like_cpp = mounted;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn taxi_unit_flags_like_cpp(&self) -> UnitFlags {
+        self.taxi_unit_flags_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn taxi_mounted_like_cpp(&self) -> bool {
+        self.taxi_mounted_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_player_pvp_hostile_like_cpp(&mut self, hostile: bool) {
+        self.player_pvp_hostile_like_cpp = hostile;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fall_information_like_cpp(&self) -> (u32, f32) {
+        (self.last_fall_time_like_cpp, self.last_fall_z_like_cpp)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn move_spline_done_taxi_events_like_cpp(
+        &self,
+    ) -> &[MoveSplineDoneTaxiEventLikeCpp] {
+        &self.move_spline_done_taxi_events_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_player_zone_area_like_cpp(&mut self, zone_id: u32, area_id: u32) {
+        self.player_zone_id_like_cpp = zone_id;
+        self.player_area_id_like_cpp = area_id;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn player_zone_area_like_cpp(&self) -> (u32, u32) {
+        (self.player_zone_id_like_cpp, self.player_area_id_like_cpp)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_player_pvp_state_like_cpp(
+        &mut self,
+        hostile: bool,
+        pvp_enabled: bool,
+        in_pvp_flag: bool,
+    ) {
+        self.player_pvp_hostile_like_cpp = hostile;
+        self.player_pvp_enabled_like_cpp = pvp_enabled;
+        self.player_in_pvp_flag_like_cpp = in_pvp_flag;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_near_teleport_pending_like_cpp(
+        &mut self,
+        pending: bool,
+        destination: Option<(u16, wow_core::Position)>,
+        zone_area: Option<(u32, u32)>,
+    ) {
+        self.near_teleport_pending_like_cpp = pending;
+        self.near_teleport_destination_like_cpp = destination;
+        self.near_teleport_destination_zone_area_like_cpp = zone_area;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn near_teleport_pending_like_cpp(&self) -> bool {
+        self.near_teleport_pending_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn move_teleport_ack_events_like_cpp(&self) -> &[MoveTeleportAckEventLikeCpp] {
+        &self.move_teleport_ack_events_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn temporary_pet_resummon_requests_like_cpp(&self) -> u32 {
+        self.temporary_pet_resummon_requests_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn delayed_operations_processed_like_cpp(&self) -> u32 {
+        self.delayed_operations_processed_like_cpp
+    }
+
+    pub(crate) fn player_movement_time_like_cpp(&self) -> u32 {
+        self.player_movement_time_like_cpp
+    }
+
+    pub(crate) fn latest_movement_ack_adjusted_time_like_cpp(&self) -> Option<u32> {
+        self.movement_ack_events_like_cpp
+            .last()
+            .and_then(|event| event.adjusted_time)
+    }
+
+    pub(crate) fn movement_speed_ack_move_type_like_cpp(
+        opcode: ClientOpcodes,
+    ) -> Option<UnitMoveTypeLikeCpp> {
+        match opcode {
+            ClientOpcodes::MoveForceWalkSpeedChangeAck => Some(UnitMoveTypeLikeCpp::Walk),
+            ClientOpcodes::MoveForceRunSpeedChangeAck => Some(UnitMoveTypeLikeCpp::Run),
+            ClientOpcodes::MoveForceRunBackSpeedChangeAck => Some(UnitMoveTypeLikeCpp::RunBack),
+            ClientOpcodes::MoveForceSwimSpeedChangeAck => Some(UnitMoveTypeLikeCpp::Swim),
+            ClientOpcodes::MoveForceSwimBackSpeedChangeAck => Some(UnitMoveTypeLikeCpp::SwimBack),
+            ClientOpcodes::MoveForceTurnRateChangeAck => Some(UnitMoveTypeLikeCpp::TurnRate),
+            ClientOpcodes::MoveForceFlightSpeedChangeAck => Some(UnitMoveTypeLikeCpp::Flight),
+            ClientOpcodes::MoveForceFlightBackSpeedChangeAck => {
+                Some(UnitMoveTypeLikeCpp::FlightBack)
+            }
+            ClientOpcodes::MoveForcePitchRateChangeAck => Some(UnitMoveTypeLikeCpp::PitchRate),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn player_movement_speed_like_cpp(&self, move_type: UnitMoveTypeLikeCpp) -> f32 {
+        PLAYER_BASE_MOVE_SPEED_LIKE_CPP[move_type.index()]
+            * self.movement_speed_rates_like_cpp[move_type.index()]
+    }
+
+    pub(crate) fn handle_force_speed_change_ack_like_cpp(
+        &mut self,
+        opcode: ClientOpcodes,
+        ack: &mut wow_packet::packets::movement::MovementAck,
+        speed: f32,
+    ) -> bool {
+        let Some(move_type) = Self::movement_speed_ack_move_type_like_cpp(opcode) else {
+            self.movement_speed_ack_events_like_cpp
+                .push(MovementSpeedAckEventLikeCpp {
+                    opcode,
+                    move_type: None,
+                    ack_speed: speed,
+                    expected_speed: None,
+                    remaining_forced_changes: None,
+                    action: MovementSpeedAckActionLikeCpp::Kicked,
+                });
+            return false;
+        };
+
+        if !self.record_validated_movement_ack_like_cpp(opcode, ack, Some(speed)) {
+            self.movement_speed_ack_events_like_cpp
+                .push(MovementSpeedAckEventLikeCpp {
+                    opcode,
+                    move_type: Some(move_type),
+                    ack_speed: speed,
+                    expected_speed: None,
+                    remaining_forced_changes: None,
+                    action: MovementSpeedAckActionLikeCpp::Kicked,
+                });
+            return false;
+        }
+
+        let index = move_type.index();
+        if self.forced_speed_changes_like_cpp[index] > 0 {
+            self.forced_speed_changes_like_cpp[index] =
+                self.forced_speed_changes_like_cpp[index].saturating_sub(1);
+            if self.forced_speed_changes_like_cpp[index] > 0 {
+                self.movement_speed_ack_events_like_cpp
+                    .push(MovementSpeedAckEventLikeCpp {
+                        opcode,
+                        move_type: Some(move_type),
+                        ack_speed: speed,
+                        expected_speed: Some(self.player_movement_speed_like_cpp(move_type)),
+                        remaining_forced_changes: Some(self.forced_speed_changes_like_cpp[index]),
+                        action: MovementSpeedAckActionLikeCpp::SkippedPending,
+                    });
+                return true;
+            }
+        }
+
+        let expected_speed = self.player_movement_speed_like_cpp(move_type);
+        let action = if !self.player_on_transport_like_cpp && (expected_speed - speed).abs() > 0.01
+        {
+            if expected_speed > speed {
+                // C++ calls SetSpeedRate(GetSpeedRate()) to force the client back to the server value.
+                MovementSpeedAckActionLikeCpp::Corrected
+            } else {
+                self.kick("WorldSession::HandleForceSpeedChangeAck Incorrect speed");
+                MovementSpeedAckActionLikeCpp::Kicked
+            }
+        } else {
+            MovementSpeedAckActionLikeCpp::Accepted
+        };
+
+        self.movement_speed_ack_events_like_cpp
+            .push(MovementSpeedAckEventLikeCpp {
+                opcode,
+                move_type: Some(move_type),
+                ack_speed: speed,
+                expected_speed: Some(expected_speed),
+                remaining_forced_changes: Some(self.forced_speed_changes_like_cpp[index]),
+                action,
+            });
+        !matches!(action, MovementSpeedAckActionLikeCpp::Kicked)
+    }
+
+    pub(crate) fn handle_movement_force_mod_magnitude_ack_like_cpp(
+        &mut self,
+        opcode: ClientOpcodes,
+        ack: &mut wow_packet::packets::movement::MovementAck,
+        speed: f32,
+    ) -> bool {
+        if !self.record_validated_movement_ack_like_cpp(opcode, ack, Some(speed)) {
+            self.movement_speed_ack_events_like_cpp
+                .push(MovementSpeedAckEventLikeCpp {
+                    opcode,
+                    move_type: None,
+                    ack_speed: speed,
+                    expected_speed: None,
+                    remaining_forced_changes: None,
+                    action: MovementSpeedAckActionLikeCpp::Kicked,
+                });
+            return false;
+        }
+
+        let mut action = MovementSpeedAckActionLikeCpp::Accepted;
+        if self.movement_force_mod_magnitude_changes_like_cpp > 0 {
+            self.movement_force_mod_magnitude_changes_like_cpp = self
+                .movement_force_mod_magnitude_changes_like_cpp
+                .saturating_sub(1);
+            if self.movement_force_mod_magnitude_changes_like_cpp == 0
+                && (self.movement_force_mod_magnitude_like_cpp - speed).abs() > 0.01
+            {
+                self.kick(
+                    "WorldSession::HandleMoveSetModMovementForceMagnitudeAck Incorrect magnitude",
+                );
+                action = MovementSpeedAckActionLikeCpp::Kicked;
+            }
+        }
+
+        self.movement_speed_ack_events_like_cpp
+            .push(MovementSpeedAckEventLikeCpp {
+                opcode,
+                move_type: None,
+                ack_speed: speed,
+                expected_speed: Some(self.movement_force_mod_magnitude_like_cpp),
+                remaining_forced_changes: Some(self.movement_force_mod_magnitude_changes_like_cpp),
+                action,
+            });
+        !matches!(action, MovementSpeedAckActionLikeCpp::Kicked)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_forced_speed_changes_like_cpp(
+        &mut self,
+        move_type: UnitMoveTypeLikeCpp,
+        count: u8,
+    ) {
+        self.forced_speed_changes_like_cpp[move_type.index()] = count;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_player_movement_speed_rate_like_cpp(
+        &mut self,
+        move_type: UnitMoveTypeLikeCpp,
+        rate: f32,
+    ) {
+        self.movement_speed_rates_like_cpp[move_type.index()] = rate.max(0.01);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_player_on_transport_like_cpp(&mut self, on_transport: bool) {
+        self.player_on_transport_like_cpp = on_transport;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_movement_force_mod_magnitude_changes_like_cpp(&mut self, count: u8) {
+        self.movement_force_mod_magnitude_changes_like_cpp = count;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_movement_force_mod_magnitude_like_cpp(&mut self, magnitude: f32) {
+        self.movement_force_mod_magnitude_like_cpp = magnitude;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn movement_speed_ack_events_like_cpp(&self) -> &[MovementSpeedAckEventLikeCpp] {
+        &self.movement_speed_ack_events_like_cpp
     }
 
     pub(crate) fn interrupt_non_melee_spell_cast_for_loot_like_cpp(&mut self) -> bool {
@@ -4355,7 +7127,10 @@ impl WorldSession {
 
     /// Get the logged-in player GUID.
     pub fn player_guid(&self) -> Option<ObjectGuid> {
-        self.player_guid
+        self.player_controller
+            .as_ref()
+            .map(SessionPlayerController::guid)
+            .or(self.player_guid)
     }
 
     /// Complete the logout: send LogoutComplete and mark session for disconnect.
@@ -4364,7 +7139,7 @@ impl WorldSession {
 
         info!("Logout complete for account {}", self.account_id);
         self.send_packet(&LogoutComplete);
-        self.player_guid = None;
+        self.set_player_guid(None);
         self.state = SessionState::Authed;
     }
 
@@ -4440,7 +7215,7 @@ impl WorldSession {
         // Collect packets to send (avoids borrow conflict with send_packet)
         let mut to_send: Vec<Vec<u8>> = Vec::new();
 
-        let guids: Vec<wow_core::ObjectGuid> = self.creatures.keys().cloned().collect();
+        let guids = self.world_creature_guids();
 
         // ── Corpse despawn ─────────────────────────────────────────────────
         // C# ref: `Creature.RemoveCorpse` / `AllLootRemovedFromCorpse`.
@@ -4450,10 +7225,10 @@ impl WorldSession {
         let despawn_guids: Vec<wow_core::ObjectGuid> = guids
             .iter()
             .filter(|g| {
-                self.creatures
-                    .get(g)
-                    .map(|c| !c.is_alive && c.corpse_despawn_at.map(|t| now >= t).unwrap_or(false))
-                    .unwrap_or(false)
+                self.mutate_world_creature(**g, |c| {
+                    !c.is_alive() && c.corpse_despawn_at().map(|t| now >= t).unwrap_or(false)
+                })
+                .unwrap_or(false)
             })
             .copied()
             .collect();
@@ -4462,25 +7237,28 @@ impl WorldSession {
             use wow_packet::ServerPacket;
             use wow_packet::packets::update::{CreatureCreateData, UpdateObject};
 
-            let map_id = self.current_map_id;
+            let map_id = self.player_map_id_like_cpp();
             for g in &despawn_guids {
                 // Before removing, save data needed for respawn.
                 if let Some(c) = self.remove_world_creature(*g) {
                     // C# ref: AllLootRemovedFromCorpse → m_respawnTime = corpseRemoveTime + respawnDelay
-                    let respawn_at = now + std::time::Duration::from_secs(c.respawn_time_secs);
+                    let respawn_at = now
+                        + std::time::Duration::from_secs(
+                            c.creature.ai_ownership().respawn_time_secs,
+                        );
                     // Build CreatureCreateData from saved AI fields (with sensible defaults
                     // for fields not stored in CreatureAI: scale, unit_class, timers, speeds).
                     let create_data = CreatureCreateData {
-                        guid: c.guid,
-                        entry: c.entry,
-                        display_id: c.display_id,
-                        native_display_id: c.display_id,
-                        health: c.max_hp as i64,
-                        max_health: c.max_hp as i64,
-                        level: c.level,
-                        faction_template: c.faction as i32,
-                        npc_flags: c.npc_flags as u64,
-                        unit_flags: c.unit_flags,
+                        guid: c.guid(),
+                        entry: c.entry(),
+                        display_id: c.display_id(),
+                        native_display_id: c.display_id(),
+                        health: c.max_hp() as i64,
+                        max_health: c.max_hp() as i64,
+                        level: c.level(),
+                        faction_template: c.faction() as i32,
+                        npc_flags: c.npc_flags() as u64,
+                        unit_flags: c.unit_flags(),
                         unit_flags2: 0,
                         unit_flags3: 0,
                         scale: 1.0,
@@ -4493,27 +7271,27 @@ impl WorldSession {
                     };
                     self.respawn_queue.push(PendingRespawn {
                         respawn_at,
-                        home_pos: c.home_pos,
+                        home_pos: c.home_position(),
                         create_data,
-                        max_hp: c.max_hp,
-                        level: c.level,
-                        min_dmg: c.min_dmg,
-                        max_dmg: c.max_dmg,
-                        aggro_radius: c.aggro_radius,
-                        npc_flags: c.npc_flags,
-                        unit_flags: c.unit_flags,
+                        max_hp: c.max_hp(),
+                        level: c.level(),
+                        min_dmg: c.min_dmg(),
+                        max_dmg: c.max_dmg(),
+                        aggro_radius: c.creature.ai_ownership().aggro_radius,
+                        npc_flags: c.npc_flags(),
+                        unit_flags: c.unit_flags(),
                         map_id,
-                        loot_id: c.loot_id,
-                        gold_min: c.gold_min,
-                        gold_max: c.gold_max,
-                        boss_id: c.boss_id,
-                        dungeon_encounter_id: c.dungeon_encounter_id,
+                        loot_id: c.loot_id(),
+                        gold_min: c.gold_min(),
+                        gold_max: c.gold_max(),
+                        boss_id: c.boss_id(),
+                        dungeon_encounter_id: c.dungeon_encounter_id(),
                     });
                     tracing::info!(
                         "Corpse despawned: {:?} (entry {}) — respawn in {}s",
                         g,
-                        c.entry,
-                        c.respawn_time_secs
+                        c.entry(),
+                        c.creature.ai_ownership().respawn_time_secs
                     );
                 }
                 self.visible_creatures.remove(g);
@@ -4559,8 +7337,7 @@ impl WorldSession {
                 tracing::warn!("Failed to send respawn packet: {e}");
             }
 
-            // Recreate canonical map state when available, keeping legacy AI
-            // as a compatibility cache for the remaining session tick paths.
+            // Recreate canonical map state.
             self.register_world_creature(
                 r.map_id,
                 r.home_pos,
@@ -4579,67 +7356,59 @@ impl WorldSession {
         // ──────────────────────────────────────────────────────────────────
 
         for guid in guids {
-            let mut changed = false;
-            {
-                let creature = match self.creatures.get_mut(&guid) {
-                    Some(c) => c,
-                    None => continue,
-                };
-
-                if !creature.is_alive {
+            let _ = self.mutate_world_creature(guid, |creature| {
+                if !creature.is_alive() {
                     if creature.should_respawn() {
                         creature.respawn();
-                        changed = true;
                     }
-                } else {
-                    match creature.state {
-                        wow_ai::CreatureState::Idle => {
-                            if creature.movement_finished() {
-                                if creature.move_target.is_some() {
-                                    creature.finish_move();
-                                    changed = true;
-                                }
-                                if creature.should_wander() {
-                                    let dst = creature.pick_wander_destination();
-                                    let from = creature.current_pos;
-                                    let sid = creature.spline_id;
-                                    let dist = from.distance(&dst);
-                                    let dur = ((dist / 2.5) * 1000.0) as u32;
-                                    creature.begin_move(dst);
-                                    creature.state = wow_ai::CreatureState::WalkingRandom;
-                                    creature.reset_wander_timer();
-                                    changed = true;
-                                    // TODO: verify MonsterMove wire format before enabling
-                                    // let pkt = MonsterMove { ... };
-                                    // to_send.push(pkt.to_bytes());
-                                    let _ = (guid, from, sid, dur, dst);
-                                }
-                            }
-                        }
-                        wow_ai::CreatureState::WalkingRandom => {
-                            if creature.movement_finished() {
-                                creature.finish_move();
-                                creature.state = wow_ai::CreatureState::Idle;
-                                creature.reset_wander_timer();
-                                changed = true;
-                            }
-                        }
-                        wow_ai::CreatureState::Returning => {
-                            if creature.movement_finished() {
-                                creature.finish_move();
-                                creature.state = wow_ai::CreatureState::Idle;
-                                changed = true;
-                            }
-                        }
-                        wow_ai::CreatureState::InCombat
-                        | wow_ai::CreatureState::Dead
-                        | wow_ai::CreatureState::WalkingWaypoint => {}
-                    }
+                    return;
                 }
-            }
-            if changed {
-                self.sync_legacy_creature_to_map(guid);
-            }
+
+                match creature.state() {
+                    wow_entities::CreatureAiState::Idle => {
+                        if creature.movement_finished() {
+                            if creature.move_target().is_some() {
+                                creature.finish_move();
+                            }
+                            if creature.should_wander() {
+                                let dst = creature.pick_wander_destination();
+                                let from = creature.position();
+                                let dist = from.distance(&dst);
+                                let dur = (((dist / 2.5) * 1000.0) as u32).max(500);
+                                creature.begin_move(dst);
+                                let sid = creature.spline_id();
+                                creature
+                                    .creature
+                                    .set_ai_state(wow_entities::CreatureAiState::WalkingRandom);
+                                creature.reset_wander_timer();
+                                let pkt =
+                                    MonsterMove::single_destination(guid, from, sid, dur, 0, dst);
+                                to_send.push(pkt.to_bytes());
+                            }
+                        }
+                    }
+                    wow_entities::CreatureAiState::WalkingRandom => {
+                        if creature.movement_finished() {
+                            creature.finish_move();
+                            creature
+                                .creature
+                                .set_ai_state(wow_entities::CreatureAiState::Idle);
+                            creature.reset_wander_timer();
+                        }
+                    }
+                    wow_entities::CreatureAiState::Returning => {
+                        if creature.movement_finished() {
+                            creature.finish_move();
+                            creature
+                                .creature
+                                .set_ai_state(wow_entities::CreatureAiState::Idle);
+                        }
+                    }
+                    wow_entities::CreatureAiState::InCombat
+                    | wow_entities::CreatureAiState::Dead
+                    | wow_entities::CreatureAiState::WalkingWaypoint => {}
+                }
+            });
         }
 
         // Send all movement packets
@@ -4695,34 +7464,34 @@ impl WorldSession {
         use wow_packet::ServerPacket;
         use wow_packet::packets::combat::{AttackerStateUpdate, SAttackStop, VICTIM_STATE_HIT};
 
-        let (player_guid, combat_target) = match (self.player_guid, self.combat_target) {
+        let (player_guid, combat_target) = match (self.player_guid(), self.combat_target) {
             (Some(pg), Some(ct)) => (pg, ct),
             _ => return,
         };
 
         // Check if target still exists
-        let creature_exists = self.creatures.contains_key(&combat_target);
+        let creature_exists = self.mutate_world_creature(combat_target, |_| ()).is_some();
         if !creature_exists {
             self.combat_target = None;
             self.in_combat = false;
             return;
         }
 
-        // Gather combat data, mutate legacy compatibility cache, then mirror it
-        // into the canonical shared map state before emitting combat packets.
+        // Gather combat data from the canonical map-owned creature before
+        // emitting combat packets.
         let Some((dmg, target_level, now_dead)) = self
-            .mutate_legacy_creature_and_sync(combat_target, |creature| {
-                if !creature.is_alive {
+            .mutate_world_creature(combat_target, |creature| {
+                if !creature.is_alive() {
                     return None;
                 }
-                if creature.state != wow_ai::CreatureState::InCombat {
+                if creature.state() != wow_entities::CreatureAiState::InCombat {
                     creature.enter_combat(player_guid);
                 }
                 if !creature.can_swing() {
                     return None;
                 }
                 let dmg = creature.roll_damage().max(1);
-                let level = creature.level;
+                let level = creature.level();
                 let died = creature.take_damage(dmg);
                 creature.record_swing();
                 Some((dmg, level, died))
@@ -4775,17 +7544,24 @@ impl WorldSession {
         use wow_packet::ServerPacket;
         use wow_packet::packets::update::{PlayerCombatStats, UpdateObject};
 
-        let Some(guid) = self.player_guid else { return };
+        let Some(guid) = self.player_guid() else {
+            return;
+        };
         let Some(registry) = &self.player_registry else {
             return;
         };
-        let Some(pos) = self.player_position else {
+        let Some(pos) = self.player_position_like_cpp() else {
             return;
         };
+        let map_id = self.player_map_id_like_cpp();
+        let race = self.player_race_like_cpp();
+        let class = self.player_class_like_cpp();
+        let gender = self.player_gender_like_cpp();
+        let level = self.player_level_like_cpp();
 
         // Build visible_items from this player's equipped inventory.
         let mut visible_items = [(0i32, 0u16, 0u16); 19];
-        for (slot, item) in &self.inventory_items {
+        for (slot, item) in self.inventory_items_like_cpp() {
             if (*slot as usize) < 19 {
                 visible_items[*slot as usize] = (item.entry_id as i32, 0u16, 0u16);
             }
@@ -4797,20 +7573,20 @@ impl WorldSession {
         use crate::handlers::character::default_display_id;
         let update = UpdateObject::create_player(
             guid,
-            self.player_race,
-            self.player_class,
-            self.player_gender,
-            self.player_level,
-            default_display_id(self.player_race, self.player_gender),
+            race,
+            class,
+            gender,
+            level,
+            default_display_id(race, gender),
             &pos,
-            self.current_map_id,
+            map_id,
             0,     // zone_id (would need to track)
             false, // is_self: other players see this as a regular player, not ActivePlayer
             visible_items,
             empty_inv_slots,
             PlayerCombatStats::default(), // other players don't need detailed combat stats
             empty_skills,
-            self.player_gold,
+            self.player_gold_like_cpp(),
             vec![], // quest_log — not sent to other players
         );
 
@@ -4828,7 +7604,7 @@ impl WorldSession {
                 continue;
             }
             // Only send to players on the same map
-            if broadcast_info.map_id != self.current_map_id {
+            if broadcast_info.map_id != map_id {
                 continue;
             }
 
@@ -4844,7 +7620,7 @@ impl WorldSession {
         if broadcast_count > 0 {
             info!(
                 "Broadcasted CreatePlayer for {:?} to {} players on map {}",
-                guid, broadcast_count, self.current_map_id
+                guid, broadcast_count, map_id
             );
         }
     }
@@ -4854,12 +7630,15 @@ impl WorldSession {
         use wow_packet::ServerPacket;
         use wow_packet::packets::update::UpdateObject;
 
-        let Some(guid) = self.player_guid else { return };
+        let Some(guid) = self.player_guid() else {
+            return;
+        };
         let Some(registry) = &self.player_registry else {
             return;
         };
+        let map_id = self.player_map_id_like_cpp();
 
-        let destroy = UpdateObject::destroy_objects(vec![guid], self.current_map_id);
+        let destroy = UpdateObject::destroy_objects(vec![guid], map_id);
         let bytes = destroy.to_bytes();
 
         let mut count = 0usize;
@@ -4868,7 +7647,7 @@ impl WorldSession {
             if *other_guid == guid {
                 continue;
             }
-            if info.map_id != self.current_map_id {
+            if info.map_id != map_id {
                 continue;
             }
             if info.send_tx.send(bytes.clone()).is_ok() {
@@ -4890,10 +7669,13 @@ impl WorldSession {
     pub(crate) fn receive_other_players_on_map(&self) {
         use wow_packet::packets::update::{PlayerCombatStats, UpdateObject};
 
-        let Some(guid) = self.player_guid else { return };
+        let Some(guid) = self.player_guid() else {
+            return;
+        };
         let Some(registry) = &self.player_registry else {
             return;
         };
+        let map_id = self.player_map_id_like_cpp();
 
         let empty_inv_slots = [ObjectGuid::EMPTY; 141];
         let empty_skills = Vec::new();
@@ -4906,7 +7688,7 @@ impl WorldSession {
             let (other_guid, broadcast_info) = entry.pair();
 
             // Skip self and players on different maps
-            if *other_guid == guid || broadcast_info.map_id != self.current_map_id {
+            if *other_guid == guid || broadcast_info.map_id != map_id {
                 continue;
             }
 
@@ -4942,7 +7724,7 @@ impl WorldSession {
         if player_count > 0 {
             info!(
                 "Received CREATE blocks from {} other players on map {} for {:?}",
-                player_count, self.current_map_id, guid
+                player_count, map_id, guid
             );
         }
     }
@@ -4957,34 +7739,35 @@ impl WorldSession {
             return;
         }
 
-        let player_pos = match self.player_position {
+        let player_pos = match self.player_position_like_cpp() {
             Some(p) => p,
             None => return,
         };
-        let player_guid = match self.player_guid {
+        let player_guid = match self.player_guid() {
             Some(g) => g,
             None => return,
         };
 
-        let guids: Vec<wow_core::ObjectGuid> = self.creatures.keys().cloned().collect();
+        let guids = self.world_creature_guids();
         let mut aggro_guid: Option<wow_core::ObjectGuid> = None;
 
         for guid in guids {
-            let creature = match self.creatures.get_mut(&guid) {
-                Some(c) => c,
-                None => continue,
-            };
-            if !creature.is_alive || creature.aggro_radius <= 0.0 {
-                continue;
-            }
-            if creature.try_aggro(player_guid, &player_pos) {
+            let aggroed = self
+                .mutate_world_creature(guid, |creature| {
+                    if !creature.is_alive() || creature.creature.ai_ownership().aggro_radius <= 0.0
+                    {
+                        return false;
+                    }
+                    creature.try_aggro(player_guid, &player_pos)
+                })
+                .unwrap_or(false);
+            if aggroed {
                 aggro_guid = Some(guid);
                 break;
             }
         }
 
         if let Some(guid) = aggro_guid {
-            self.sync_legacy_creature_to_map(guid);
             let start = AttackStart {
                 attacker: guid,
                 victim: player_guid,
@@ -5029,7 +7812,7 @@ impl WorldSession {
         cast_id: ObjectGuid,
         spell_visual: wow_packet::packets::spell::SpellCastVisual,
     ) -> Result<(), &'static str> {
-        let player_guid = self.player_guid.ok_or("No player GUID")?;
+        let player_guid = self.player_guid().ok_or("No player GUID")?;
 
         // Obtener SpellInfo
         let spell_info = self
@@ -5110,7 +7893,7 @@ impl WorldSession {
         target_guid: ObjectGuid,
         heal_amount: u32,
     ) -> Result<(), &'static str> {
-        let player_guid = self.player_guid.ok_or("No player GUID")?;
+        let player_guid = self.player_guid().ok_or("No player GUID")?;
 
         // Si target es el mismo jugador
         if target_guid == player_guid {
@@ -5122,7 +7905,7 @@ impl WorldSession {
         }
 
         // Si target es otra criatura/jugador
-        if let Some(_creature) = self.creatures.get(&target_guid) {
+        if self.mutate_world_creature(target_guid, |_| ()).is_some() {
             info!(
                 account = self.account_id,
                 creature = ?target_guid,
@@ -5142,13 +7925,12 @@ impl WorldSession {
         target_guid: ObjectGuid,
         damage_amount: u32,
     ) -> Result<(), &'static str> {
-        let _player_guid = self.player_guid.ok_or("No player GUID")?;
+        let _player_guid = self.player_guid().ok_or("No player GUID")?;
         let account_id = self.account_id;
 
-        // Si target es otra criatura — mutate legacy compatibility cache and
-        // immediately mirror health/death into canonical shared map state.
+        // Si target es otra criatura — mutate canonical shared map state.
         let kill_info = self
-            .mutate_legacy_creature_and_sync(target_guid, |creature| {
+            .mutate_world_creature(target_guid, |creature| {
                 info!(
                     account = account_id,
                     creature = ?target_guid,
@@ -5158,8 +7940,12 @@ impl WorldSession {
 
                 let died = creature.take_damage(damage_amount);
                 if died {
-                    info!("Creature {} (entry={}) killed", target_guid, creature.entry);
-                    Some((creature.entry, target_guid))
+                    info!(
+                        "Creature {} (entry={}) killed",
+                        target_guid,
+                        creature.entry()
+                    );
+                    Some((creature.entry(), target_guid))
                 } else {
                     None
                 }
@@ -5170,9 +7956,7 @@ impl WorldSession {
         if let Some((entry, guid)) = kill_info {
             // Give XP for the kill
             let mob_level = self
-                .creatures
-                .get(&guid)
-                .map(|c| c.level as u8)
+                .mutate_world_creature(guid, |creature| creature.level())
                 .unwrap_or(1);
             let xp = self.creature_kill_xp(mob_level);
             if xp > 0 {
@@ -5405,12 +8189,156 @@ mod tests {
         (session, pkt_tx, send_rx)
     }
 
+    #[test]
+    fn time_sync_response_sets_initial_clock_delta_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let sent_time = WorldSession::game_time_ms_like_cpp().wrapping_sub(20);
+        session.time_sync_pending_requests.insert(7, sent_time);
+
+        session.record_time_sync_response_like_cpp(7, sent_time.wrapping_sub(1_000));
+
+        assert!(session.time_sync_pending_requests.is_empty());
+        assert_eq!(session.time_sync_clock_delta_queue.len(), 1);
+        assert!(
+            session.time_sync_clock_delta >= 1_000,
+            "expected initial fallback delta from first sample"
+        );
+    }
+
+    #[test]
+    fn adjust_client_movement_time_uses_clock_delta_or_cpp_fallback() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        session.time_sync_clock_delta = 250;
+        assert_eq!(session.adjust_client_movement_time_like_cpp(1_000), 1_250);
+
+        session.time_sync_clock_delta = 0;
+        let adjusted = session.adjust_client_movement_time_like_cpp(1_000);
+        assert_ne!(adjusted, 1_000);
+    }
+
+    #[test]
+    fn send_time_sync_uses_cpp_timer_sequence() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+
+        session.send_time_sync();
+        assert_eq!(session.time_sync_next_counter, 1);
+        assert_eq!(session.time_sync_timer_ms, 5_000);
+        assert!(session.time_sync_pending_requests.contains_key(&0));
+
+        session.send_time_sync();
+        assert_eq!(session.time_sync_next_counter, 2);
+        assert_eq!(session.time_sync_timer_ms, 10_000);
+        assert!(session.time_sync_pending_requests.contains_key(&1));
+    }
+
     fn shared_map_manager() -> crate::map_manager::SharedMapManager {
         Arc::new(std::sync::RwLock::new(crate::map_manager::MapManager::new()))
     }
 
     fn test_creature_guid(counter: i64) -> ObjectGuid {
         ObjectGuid::create_world_object(wow_core::guid::HighGuid::Creature, 0, 1, 0, 0, 1, counter)
+    }
+
+    #[test]
+    fn session_player_controller_tracks_cpp_attached_player_identity() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let guid = ObjectGuid::create_player(1, 42);
+        let start = Position::new(1.0, 2.0, 3.0, 4.0);
+        session.set_player_gold_like_cpp(1234);
+        session.set_player_xp_like_cpp(55);
+        session.set_player_next_level_xp_like_cpp(4000);
+        session.set_selection_guid_like_cpp(Some(test_creature_guid(77)));
+        session.set_known_spells_like_cpp(vec![118, 133]);
+        session.player_currencies.insert(
+            395,
+            PlayerCurrency {
+                state: PlayerCurrencyState::Unchanged,
+                quantity: 9,
+                weekly_quantity: 0,
+                tracked_quantity: 0,
+                increased_cap_quantity: 0,
+                earned_quantity: 9,
+                flags: 0,
+            },
+        );
+        let item_guid = ObjectGuid::create_item(1, 500);
+        session.inventory_items.insert(
+            23,
+            InventoryItem {
+                guid: item_guid,
+                entry_id: 700,
+                db_guid: 500,
+                inventory_type: None,
+            },
+        );
+        let item_object =
+            session.make_inventory_item_object(item_guid, 700, guid, 2, 0, ItemContext::None, 23);
+        session
+            .inventory_item_objects
+            .insert(item_guid, item_object);
+
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            guid,
+            "Jaina".to_string(),
+            start,
+            571,
+            1,
+            8,
+            70,
+            0,
+        ));
+
+        assert_eq!(session.player_guid(), Some(guid));
+        assert_eq!(session.player_name_like_cpp(), Some("Jaina"));
+        assert_eq!(session.player_position_like_cpp(), Some(start));
+        assert_eq!(session.player_map_id_like_cpp(), 571);
+        assert_eq!(session.player_race_like_cpp(), 1);
+        assert_eq!(session.player_class_like_cpp(), 8);
+        assert_eq!(session.player_level_like_cpp(), 70);
+        assert_eq!(session.player_gender_like_cpp(), 0);
+        assert_eq!(session.player_gold_like_cpp(), 1234);
+        assert_eq!(session.player_xp_like_cpp(), 55);
+        assert_eq!(session.player_next_level_xp_like_cpp(), 4000);
+        assert_eq!(
+            session.selection_guid_like_cpp(),
+            Some(test_creature_guid(77))
+        );
+        assert_eq!(session.known_spells_like_cpp(), &[118, 133]);
+        assert_eq!(session.player_currency_quantity(395), 9);
+        assert_eq!(session.inventory_items_like_cpp()[&23].guid, item_guid);
+        assert_eq!(
+            session.inventory_item_objects_like_cpp()[&item_guid].count(),
+            2
+        );
+        assert_eq!(session.player_guid, Some(guid));
+        assert_eq!(session.player_name.as_deref(), Some("Jaina"));
+        assert_eq!(session.player_position, Some(start));
+        assert_eq!(session.current_map_id, 571);
+
+        let moved = Position::new(5.0, 6.0, 7.0, 8.0);
+        session.set_player_map_position_like_cpp(1, moved);
+        session.set_player_level_like_cpp(71);
+        session.set_player_gold_like_cpp(2000);
+        session.set_player_xp_like_cpp(66);
+        session.learn_known_spell_like_cpp(116);
+        session.inventory_items.remove(&23);
+        assert!(session.inventory_items_like_cpp().contains_key(&23));
+        session.remove_inventory_item_like_cpp(23);
+
+        assert_eq!(session.player_position_like_cpp(), Some(moved));
+        assert_eq!(session.player_map_id_like_cpp(), 1);
+        assert_eq!(session.player_level_like_cpp(), 71);
+        assert_eq!(session.player_gold_like_cpp(), 2000);
+        assert_eq!(session.player_xp_like_cpp(), 66);
+        assert!(session.known_spells_like_cpp().contains(&116));
+        assert!(!session.inventory_items_like_cpp().contains_key(&23));
+        assert_eq!(session.player_position, Some(moved));
+        assert_eq!(session.current_map_id, 1);
+        assert_eq!(session.player_level, 71);
+
+        session.set_player_guid(None);
+        assert_eq!(session.player_guid(), None);
+        assert!(session.player_controller.is_none());
     }
 
     fn test_creature_create_data(
@@ -5462,6 +8390,63 @@ mod tests {
             None,
             0,
         );
+    }
+
+    #[test]
+    fn tick_creatures_sync_sends_cpp_like_monster_move_for_represented_wander() {
+        let (mut session, _, send_rx) = make_session();
+        let manager = shared_map_manager();
+        let guid = test_creature_guid(77);
+        register_test_creature(&mut session, manager, guid, 25);
+        session
+            .mutate_world_creature(guid, |creature| {
+                let ai = creature.creature.ai_ownership_mut();
+                ai.wander_delay_ms = 0;
+                ai.move_start_ms = 0;
+                ai.wander_radius = 3.0;
+            })
+            .unwrap();
+
+        session.tick_creatures_sync();
+
+        let sent = send_rx.try_recv().unwrap();
+        let opcode = u16::from_le_bytes([sent[0], sent[1]]);
+        assert_eq!(opcode, ServerOpcodes::OnMonsterMove as u16);
+        let mut pkt = WorldPacket::from_bytes(&sent[2..]);
+        assert_eq!(pkt.read_packed_guid().unwrap(), guid);
+        assert_eq!(pkt.read_float().unwrap(), 10.0);
+        assert_eq!(pkt.read_float().unwrap(), 10.0);
+        assert_eq!(pkt.read_float().unwrap(), 0.0);
+        assert_eq!(pkt.read_uint32().unwrap(), 2);
+        let destination = Position::new(
+            pkt.read_float().unwrap(),
+            pkt.read_float().unwrap(),
+            pkt.read_float().unwrap(),
+            0.0,
+        );
+        assert!(!pkt.has_bit().unwrap());
+        assert_eq!(pkt.read_bits(3).unwrap(), 0);
+        assert_eq!(pkt.read_uint32().unwrap(), 0);
+        assert_eq!(pkt.read_int32().unwrap(), 0);
+        assert!(pkt.read_uint32().unwrap() >= 500);
+        assert_eq!(pkt.read_uint32().unwrap(), 0);
+        assert_eq!(pkt.read_uint8().unwrap(), 0);
+        assert_eq!(pkt.read_packed_guid().unwrap(), ObjectGuid::EMPTY);
+        assert_eq!(pkt.read_int8().unwrap(), -1);
+        assert_eq!(pkt.read_bits(2).unwrap(), 0);
+        assert_eq!(pkt.read_bits(16).unwrap(), 1);
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert_eq!(pkt.read_bits(16).unwrap(), 0);
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert_eq!(pkt.read_float().unwrap(), destination.x);
+        assert_eq!(pkt.read_float().unwrap(), destination.y);
+        assert_eq!(pkt.read_float().unwrap(), destination.z);
+        assert!(pkt.is_empty());
+        assert!(send_rx.try_recv().is_err());
     }
 
     fn install_stackable_test_item_template(
@@ -5556,6 +8541,11 @@ mod tests {
             active_loot_rolls: Vec::new(),
             pass_on_group_loot: false,
             enchanting_skill: 0,
+            known_spells: Vec::new(),
+            active_quest_statuses: Default::default(),
+            active_quest_objective_counts: Default::default(),
+            rewarded_quests: Default::default(),
+            inventory_item_counts: Default::default(),
             player_name: format!("Player{}", guid.counter()),
             account_id: guid.counter() as u32,
             race: 1,
@@ -5565,6 +8555,107 @@ mod tests {
             display_id: 49,
             visible_items: [(0, 0, 0); 19],
         }
+    }
+
+    #[test]
+    fn player_registry_publishes_loot_condition_state_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let guid = ObjectGuid::create_player(1, 42);
+        let registry = Arc::new(PlayerRegistry::default());
+        session.set_player_guid(Some(guid));
+        session.player_position = Some(Position::ZERO);
+        session.player_name = Some("Tester".to_string());
+        session.known_spells = vec![12_345];
+        session.player_quests.insert(
+            100,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id: 100,
+                status: 1,
+                explored: false,
+                objective_counts: vec![2, 3],
+            },
+        );
+        session.rewarded_quests.insert(200);
+        let item_guid = ObjectGuid::create_item(1, 500);
+        session.inventory_items.insert(
+            0,
+            InventoryItem {
+                guid: item_guid,
+                entry_id: 9001,
+                db_guid: 500,
+                inventory_type: Some(0),
+            },
+        );
+        session.insert_inventory_item_object(session.make_inventory_item_object(
+            item_guid,
+            9001,
+            guid,
+            4,
+            0,
+            ItemContext::None,
+            0,
+        ));
+        let bag_guid = ObjectGuid::create_item(1, 501);
+        session.inventory_items.insert(
+            1,
+            InventoryItem {
+                guid: bag_guid,
+                entry_id: 8000,
+                db_guid: 501,
+                inventory_type: Some(18),
+            },
+        );
+        session.insert_inventory_item_object(session.make_inventory_item_object(
+            bag_guid,
+            8000,
+            guid,
+            1,
+            0,
+            ItemContext::None,
+            1,
+        ));
+        let child_guid = ObjectGuid::create_item(1, 502);
+        let mut child_item =
+            session.make_inventory_item_object(child_guid, 9001, guid, 2, 0, ItemContext::None, 0);
+        child_item.set_container_guid_and_slot(bag_guid, 0);
+        session.insert_inventory_item_object(child_item);
+        session.set_player_registry(Arc::clone(&registry));
+
+        session.register_in_player_registry();
+        {
+            let info = registry.get(&guid).expect("registered player");
+            assert_eq!(info.known_spells, vec![12_345]);
+            assert_eq!(info.active_quest_statuses.get(&100), Some(&1));
+            assert_eq!(
+                info.active_quest_objective_counts.get(&100),
+                Some(&vec![2, 3])
+            );
+            assert!(info.rewarded_quests.contains(&200));
+            assert_eq!(info.inventory_item_counts.get(&9001), Some(&6));
+        }
+
+        session.known_spells.push(54_321);
+        session.player_quests.insert(
+            300,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id: 300,
+                status: 2,
+                explored: false,
+                objective_counts: vec![7],
+            },
+        );
+        session.rewarded_quests.insert(400);
+        if let Some(item) = session.inventory_item_objects.get_mut(&item_guid) {
+            item.set_count(6);
+        }
+        session.sync_player_registry_state_like_cpp();
+
+        let info = registry.get(&guid).expect("synced player");
+        assert!(info.known_spells.contains(&54_321));
+        assert_eq!(info.active_quest_statuses.get(&300), Some(&2));
+        assert_eq!(info.active_quest_objective_counts.get(&300), Some(&vec![7]));
+        assert!(info.rewarded_quests.contains(&400));
+        assert_eq!(info.inventory_item_counts.get(&9001), Some(&8));
     }
 
     #[test]
@@ -5585,9 +8676,11 @@ mod tests {
             let world_creature = manager.find_creature_mut(0, 0, guid).unwrap();
             world_creature.creature.mark_ai_dead(1_234);
         }
-        session.creatures.get_mut(&guid).unwrap().take_damage(40);
-
-        session.sync_legacy_creature_to_map(guid);
+        session
+            .mutate_world_creature(guid, |creature| {
+                creature.take_damage(40);
+            })
+            .unwrap();
 
         let manager = manager.read().unwrap();
         let world_creature = manager.find_creature(0, 0, guid).unwrap();
@@ -5623,9 +8716,13 @@ mod tests {
         session.combat_target = Some(guid);
         session.in_combat = true;
         register_test_creature(&mut session, manager.clone(), guid, 40);
-        let legacy = session.creatures.get_mut(&guid).unwrap();
-        legacy.enter_combat(player);
-        legacy.last_swing = Instant::now() - std::time::Duration::from_secs(5);
+        session
+            .mutate_world_creature(guid, |creature| {
+                creature.enter_combat(player);
+                creature.creature.ai_ownership_mut().last_swing_ms = 0;
+                creature.creature.ai_ownership_mut().swing_timer_ms = 0;
+            })
+            .unwrap();
 
         session.tick_combat_sync();
 
@@ -5645,7 +8742,7 @@ mod tests {
         session.in_combat = true;
         register_test_creature(&mut session, manager.clone(), guid, 40);
         session
-            .mutate_legacy_creature_and_sync(guid, |creature| creature.enter_combat(player))
+            .mutate_world_creature(guid, |creature| creature.enter_combat(player))
             .unwrap();
 
         session
@@ -5670,9 +8767,9 @@ mod tests {
         let despawn_at = Instant::now() + std::time::Duration::from_secs(30);
 
         session
-            .mutate_legacy_creature_and_sync(guid, |creature| {
+            .mutate_world_creature(guid, |creature| {
                 creature.take_damage(40);
-                creature.corpse_despawn_at = Some(despawn_at);
+                creature.set_corpse_despawn_at(Some(despawn_at));
             })
             .unwrap();
 

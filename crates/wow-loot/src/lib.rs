@@ -110,6 +110,12 @@ pub struct GeneratedLootItem {
     pub is_counted: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GeneratedPersonalLootItem {
+    pub looter: ObjectGuid,
+    pub item: GeneratedLootItem,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct LootItemRandomProperties {
     pub id: i32,
@@ -1062,6 +1068,48 @@ impl LootStore {
 
         Ok(generated)
     }
+
+    pub fn fill_personal_loot_with_context_like_cpp<R, FTemplate, FRate, FAllowed, FRandom>(
+        &self,
+        loot_id: u32,
+        store_kind: LootStoreKind,
+        stores: &LootStores,
+        options: LootFillOptions,
+        looters: &[ObjectGuid],
+        rng: &mut R,
+        mut item_template: FTemplate,
+        mut item_chance_rate: FRate,
+        mut item_allowed: FAllowed,
+        mut random_properties: FRandom,
+    ) -> Result<Vec<GeneratedPersonalLootItem>, LootFillError>
+    where
+        R: Rng + ?Sized,
+        FTemplate: FnMut(u32) -> Option<LootItemTemplateMetadata>,
+        FRate: FnMut(LootStoreItem) -> f32,
+        FAllowed: FnMut(LootStoreItemContext, ObjectGuid) -> bool,
+        FRandom: FnMut(u32) -> LootItemRandomProperties,
+    {
+        let Some(template) = self.get_loot_for(loot_id) else {
+            return Err(LootFillError::MissingLootTemplate { loot_id });
+        };
+
+        let mut generated = Vec::with_capacity(MAX_NR_LOOT_ITEMS_LIKE_CPP);
+        template.process_personal_like_cpp(
+            stores,
+            &options,
+            looters,
+            rng,
+            &mut generated,
+            &mut item_template,
+            &mut item_chance_rate,
+            &mut item_allowed,
+            &mut random_properties,
+            store_kind,
+            loot_id,
+        );
+
+        Ok(generated)
+    }
 }
 
 impl LootStoreItem {
@@ -1349,6 +1397,288 @@ impl LootTemplate {
             );
         }
     }
+
+    #[allow(clippy::too_many_arguments)]
+    fn process_personal_like_cpp<R, FTemplate, FRate, FAllowed, FRandom>(
+        &self,
+        stores: &LootStores,
+        options: &LootFillOptions,
+        looters: &[ObjectGuid],
+        rng: &mut R,
+        generated: &mut Vec<GeneratedPersonalLootItem>,
+        item_template: &mut FTemplate,
+        item_chance_rate: &mut FRate,
+        item_allowed: &mut FAllowed,
+        random_properties: &mut FRandom,
+        store_kind: LootStoreKind,
+        entry: u32,
+    ) where
+        R: Rng + ?Sized,
+        FTemplate: FnMut(u32) -> Option<LootItemTemplateMetadata>,
+        FRate: FnMut(LootStoreItem) -> f32,
+        FAllowed: FnMut(LootStoreItemContext, ObjectGuid) -> bool,
+        FRandom: FnMut(u32) -> LootItemRandomProperties,
+    {
+        for item in &self.entries {
+            if generated.len() >= MAX_NR_LOOT_ITEMS_LIKE_CPP {
+                return;
+            }
+
+            if item.loot_mode & options.loot_mode == 0 {
+                continue;
+            }
+
+            let chance_rate = if options.rates_allowed {
+                item_chance_rate(*item)
+            } else {
+                1.0
+            };
+
+            if !item.roll_like_cpp(rng, chance_rate) {
+                continue;
+            }
+
+            if item.reference > 0 {
+                let Some(reference_store) = stores.get(&LootStoreKind::Reference) else {
+                    continue;
+                };
+                let Some(reference_template) = reference_store.get_loot_for(item.reference) else {
+                    continue;
+                };
+
+                let max_count =
+                    ((f32::from(item.max_count)) * options.referenced_amount_rate) as u32;
+                let mut got_loot = Vec::new();
+                for _ in 0..max_count {
+                    let eligible = reference_template.personal_looters_for_template_like_cpp(
+                        stores,
+                        LootStoreKind::Reference,
+                        item.reference,
+                        item.group_id,
+                        looters,
+                        item_allowed,
+                    );
+                    if eligible.is_empty() {
+                        break;
+                    }
+
+                    let not_yet_looted = eligible
+                        .iter()
+                        .copied()
+                        .filter(|looter| !got_loot.contains(looter))
+                        .collect::<Vec<_>>();
+                    let candidates = if not_yet_looted.is_empty() {
+                        got_loot.clear();
+                        eligible
+                    } else {
+                        not_yet_looted
+                    };
+                    let chosen_looter = candidates[rng.gen_range(0..candidates.len())];
+                    reference_template.process_for_personal_looter_like_cpp(
+                        stores,
+                        options,
+                        rng,
+                        generated,
+                        item_template,
+                        item_chance_rate,
+                        item_allowed,
+                        random_properties,
+                        LootStoreKind::Reference,
+                        item.reference,
+                        item.group_id,
+                        chosen_looter,
+                    );
+                    got_loot.push(chosen_looter);
+                }
+            } else {
+                let candidates = looters
+                    .iter()
+                    .copied()
+                    .filter(|looter| {
+                        item_allowed(
+                            LootStoreItemContext {
+                                store_kind,
+                                entry,
+                                item: *item,
+                            },
+                            *looter,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                if candidates.is_empty() {
+                    continue;
+                }
+
+                let chosen_looter = candidates[rng.gen_range(0..candidates.len())];
+                add_generated_personal_loot_item_like_cpp(
+                    generated,
+                    chosen_looter,
+                    *item,
+                    options.item_context,
+                    rng,
+                    item_template,
+                    random_properties,
+                );
+            }
+        }
+
+        for group in &self.groups {
+            if generated.len() >= MAX_NR_LOOT_ITEMS_LIKE_CPP {
+                return;
+            }
+
+            let candidates = looters
+                .iter()
+                .copied()
+                .filter(|looter| {
+                    group.has_drop_for_personal_looter_like_cpp(
+                        store_kind,
+                        entry,
+                        *looter,
+                        item_allowed,
+                    )
+                })
+                .collect::<Vec<_>>();
+            if candidates.is_empty() {
+                continue;
+            }
+
+            let chosen_looter = candidates[rng.gen_range(0..candidates.len())];
+            group.process_personal_root_like_cpp(
+                options.loot_mode,
+                rng,
+                generated,
+                item_template,
+                random_properties,
+                options.item_context,
+                chosen_looter,
+            );
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn process_for_personal_looter_like_cpp<R, FTemplate, FRate, FAllowed, FRandom>(
+        &self,
+        stores: &LootStores,
+        options: &LootFillOptions,
+        rng: &mut R,
+        generated: &mut Vec<GeneratedPersonalLootItem>,
+        item_template: &mut FTemplate,
+        item_chance_rate: &mut FRate,
+        item_allowed: &mut FAllowed,
+        random_properties: &mut FRandom,
+        store_kind: LootStoreKind,
+        entry: u32,
+        group_id: u8,
+        looter: ObjectGuid,
+    ) where
+        R: Rng + ?Sized,
+        FTemplate: FnMut(u32) -> Option<LootItemTemplateMetadata>,
+        FRate: FnMut(LootStoreItem) -> f32,
+        FAllowed: FnMut(LootStoreItemContext, ObjectGuid) -> bool,
+        FRandom: FnMut(u32) -> LootItemRandomProperties,
+    {
+        let mut generated_for_looter = Vec::new();
+        self.process_like_cpp(
+            stores,
+            options,
+            rng,
+            &mut generated_for_looter,
+            item_template,
+            item_chance_rate,
+            &mut |context| item_allowed(context, looter),
+            random_properties,
+            store_kind,
+            entry,
+            group_id,
+        );
+        for mut item in generated_for_looter {
+            item.loot_list_id = generated.len() as u32;
+            generated.push(GeneratedPersonalLootItem { looter, item });
+        }
+    }
+
+    fn personal_looters_for_template_like_cpp<FAllowed>(
+        &self,
+        stores: &LootStores,
+        store_kind: LootStoreKind,
+        entry: u32,
+        group_id: u8,
+        looters: &[ObjectGuid],
+        item_allowed: &mut FAllowed,
+    ) -> Vec<ObjectGuid>
+    where
+        FAllowed: FnMut(LootStoreItemContext, ObjectGuid) -> bool,
+    {
+        looters
+            .iter()
+            .copied()
+            .filter(|looter| {
+                self.has_drop_for_personal_looter_like_cpp(
+                    stores,
+                    store_kind,
+                    entry,
+                    group_id,
+                    *looter,
+                    item_allowed,
+                )
+            })
+            .collect()
+    }
+
+    fn has_drop_for_personal_looter_like_cpp<FAllowed>(
+        &self,
+        stores: &LootStores,
+        store_kind: LootStoreKind,
+        entry: u32,
+        group_id: u8,
+        looter: ObjectGuid,
+        item_allowed: &mut FAllowed,
+    ) -> bool
+    where
+        FAllowed: FnMut(LootStoreItemContext, ObjectGuid) -> bool,
+    {
+        if group_id > 0 {
+            let index = usize::from(group_id - 1);
+            return self.groups.get(index).is_some_and(|group| {
+                group.has_drop_for_personal_looter_like_cpp(store_kind, entry, looter, item_allowed)
+            });
+        }
+
+        for item in &self.entries {
+            if item.reference > 0 {
+                let Some(reference_store) = stores.get(&LootStoreKind::Reference) else {
+                    continue;
+                };
+                let Some(reference_template) = reference_store.get_loot_for(item.reference) else {
+                    continue;
+                };
+                if reference_template.has_drop_for_personal_looter_like_cpp(
+                    stores,
+                    LootStoreKind::Reference,
+                    item.reference,
+                    item.group_id,
+                    looter,
+                    item_allowed,
+                ) {
+                    return true;
+                }
+            } else if item_allowed(
+                LootStoreItemContext {
+                    store_kind,
+                    entry,
+                    item: *item,
+                },
+                looter,
+            ) {
+                return true;
+            }
+        }
+
+        self.groups.iter().any(|group| {
+            group.has_drop_for_personal_looter_like_cpp(store_kind, entry, looter, item_allowed)
+        })
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -1523,6 +1853,60 @@ impl LootGroup {
             );
         }
     }
+
+    fn has_drop_for_personal_looter_like_cpp<FAllowed>(
+        &self,
+        store_kind: LootStoreKind,
+        entry: u32,
+        looter: ObjectGuid,
+        item_allowed: &mut FAllowed,
+    ) -> bool
+    where
+        FAllowed: FnMut(LootStoreItemContext, ObjectGuid) -> bool,
+    {
+        self.explicitly_chanced
+            .iter()
+            .chain(self.equal_chanced.iter())
+            .any(|item| {
+                item_allowed(
+                    LootStoreItemContext {
+                        store_kind,
+                        entry,
+                        item: *item,
+                    },
+                    looter,
+                )
+            })
+    }
+
+    fn process_personal_root_like_cpp<R, FTemplate, FRandom>(
+        &self,
+        loot_mode: u16,
+        rng: &mut R,
+        generated: &mut Vec<GeneratedPersonalLootItem>,
+        item_template: &mut FTemplate,
+        random_properties: &mut FRandom,
+        item_context: u8,
+        looter: ObjectGuid,
+    ) where
+        R: Rng + ?Sized,
+        FTemplate: FnMut(u32) -> Option<LootItemTemplateMetadata>,
+        FRandom: FnMut(u32) -> LootItemRandomProperties,
+    {
+        if let Some(item) =
+            self.roll_with_context_like_cpp(loot_mode, rng, |_| true, LootStoreKind::Creature, 0)
+        {
+            add_generated_personal_loot_item_like_cpp(
+                generated,
+                looter,
+                item,
+                item_context,
+                rng,
+                item_template,
+                random_properties,
+            );
+        }
+    }
 }
 
 fn add_generated_loot_item_like_cpp<R, FTemplate, FRandom>(
@@ -1569,6 +1953,59 @@ fn add_generated_loot_item_like_cpp<R, FTemplate, FRandom>(
             is_blocked: false,
             is_under_threshold: false,
             is_counted: false,
+        });
+        count = count.saturating_sub(max_stack);
+    }
+}
+
+fn add_generated_personal_loot_item_like_cpp<R, FTemplate, FRandom>(
+    generated: &mut Vec<GeneratedPersonalLootItem>,
+    looter: ObjectGuid,
+    item: LootStoreItem,
+    item_context: u8,
+    rng: &mut R,
+    item_template: &mut FTemplate,
+    random_properties: &mut FRandom,
+) where
+    R: Rng + ?Sized,
+    FTemplate: FnMut(u32) -> Option<LootItemTemplateMetadata>,
+    FRandom: FnMut(u32) -> LootItemRandomProperties,
+{
+    let Some(metadata) = item_template(item.item_id) else {
+        return;
+    };
+    let max_stack = metadata.max_stack;
+    if max_stack == 0 {
+        return;
+    }
+
+    let mut count = rng.gen_range(u32::from(item.min_count)..=u32::from(item.max_count));
+    let stacks = count / max_stack + u32::from(count % max_stack != 0);
+
+    for _ in 0..stacks {
+        if generated.len() >= MAX_NR_LOOT_ITEMS_LIKE_CPP {
+            return;
+        }
+
+        let stack_count = count.min(max_stack);
+        let random_properties = random_properties(item.item_id);
+        generated.push(GeneratedPersonalLootItem {
+            looter,
+            item: GeneratedLootItem {
+                item_id: item.item_id,
+                count: stack_count,
+                loot_list_id: generated.len() as u32,
+                random_properties_id: random_properties.id,
+                random_properties_seed: random_properties.seed,
+                context: item_context,
+                free_for_all: metadata.has_multi_drop_flag,
+                follow_loot_rules: !item.needs_quest || metadata.has_follow_loot_rules_flag,
+                needs_quest: item.needs_quest,
+                is_looted: false,
+                is_blocked: false,
+                is_under_threshold: false,
+                is_counted: false,
+            },
         });
         count = count.saturating_sub(max_stack);
     }
@@ -2444,6 +2881,123 @@ mod tests {
                 generated_item(27, 1, 1),
                 generated_item(26, 1, 2),
             ]
+        );
+    }
+
+    #[test]
+    fn fill_personal_loot_assigns_plain_entries_to_one_looter_like_cpp() {
+        let mut creature = LootStore::for_kind_like_cpp(LootStoreKind::Creature);
+        creature
+            .load_rows_like_cpp(
+                [
+                    LootTemplateRow {
+                        entry: 100,
+                        item: item(25, 0, 100.0, 0),
+                    },
+                    LootTemplateRow {
+                        entry: 100,
+                        item: item(26, 0, 100.0, 0),
+                    },
+                ],
+                |item_id| matches!(item_id, 25 | 26),
+            )
+            .unwrap();
+
+        let mut stores = LootStores::new();
+        stores.insert(LootStoreKind::Creature, creature);
+
+        let looters = [guid(42), guid(77)];
+        let mut rng = StdRng::seed_from_u64(7);
+        let generated = stores[&LootStoreKind::Creature]
+            .fill_personal_loot_with_context_like_cpp(
+                100,
+                LootStoreKind::Creature,
+                &stores,
+                LootFillOptions::default(),
+                &looters,
+                &mut rng,
+                |_| Some(item_metadata(20)),
+                |_| 1.0,
+                |_, _| true,
+                random_properties,
+            )
+            .unwrap();
+
+        assert_eq!(generated.len(), 2);
+        assert!(generated.iter().all(|item| looters.contains(&item.looter)));
+        assert!(generated.iter().all(|item| item.item.loot_list_id < 2));
+        assert_eq!(
+            generated
+                .iter()
+                .map(|item| item.item.item_id)
+                .collect::<Vec<_>>(),
+            vec![25, 26]
+        );
+    }
+
+    #[test]
+    fn fill_personal_loot_reference_cycles_looters_like_cpp() {
+        let mut creature = LootStore::for_kind_like_cpp(LootStoreKind::Creature);
+        let mut reference_item = item(0, 700, 100.0, 0);
+        reference_item.max_count = 2;
+        creature
+            .load_rows_like_cpp(
+                [LootTemplateRow {
+                    entry: 100,
+                    item: reference_item,
+                }],
+                |_| true,
+            )
+            .unwrap();
+
+        let mut reference = LootStore::for_kind_like_cpp(LootStoreKind::Reference);
+        reference
+            .load_rows_like_cpp(
+                [LootTemplateRow {
+                    entry: 700,
+                    item: item(27, 0, 100.0, 0),
+                }],
+                |item_id| item_id == 27,
+            )
+            .unwrap();
+
+        let mut stores = LootStores::new();
+        stores.insert(LootStoreKind::Creature, creature);
+        stores.insert(LootStoreKind::Reference, reference);
+
+        let looters = [guid(42), guid(77)];
+        let mut rng = StdRng::seed_from_u64(3);
+        let generated = stores[&LootStoreKind::Creature]
+            .fill_personal_loot_with_context_like_cpp(
+                100,
+                LootStoreKind::Creature,
+                &stores,
+                LootFillOptions::default(),
+                &looters,
+                &mut rng,
+                |_| Some(item_metadata(20)),
+                |_| 1.0,
+                |_, _| true,
+                random_properties,
+            )
+            .unwrap();
+
+        let mut assigned = generated.iter().map(|item| item.looter).collect::<Vec<_>>();
+        assigned.sort_by_key(|guid| guid.counter());
+        assert_eq!(assigned, looters);
+        assert_eq!(
+            generated
+                .iter()
+                .map(|item| item.item.item_id)
+                .collect::<Vec<_>>(),
+            vec![27, 27]
+        );
+        assert_eq!(
+            generated
+                .iter()
+                .map(|item| item.item.loot_list_id)
+                .collect::<Vec<_>>(),
+            vec![0, 1]
         );
     }
 
