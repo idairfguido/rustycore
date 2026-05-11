@@ -7373,18 +7373,17 @@ impl WorldSession {
                             if creature.should_wander() {
                                 let dst = creature.pick_wander_destination();
                                 let from = creature.position();
-                                let sid = creature.spline_id();
                                 let dist = from.distance(&dst);
-                                let dur = ((dist / 2.5) * 1000.0) as u32;
+                                let dur = (((dist / 2.5) * 1000.0) as u32).max(500);
                                 creature.begin_move(dst);
+                                let sid = creature.spline_id();
                                 creature
                                     .creature
                                     .set_ai_state(wow_entities::CreatureAiState::WalkingRandom);
                                 creature.reset_wander_timer();
-                                // TODO: verify MonsterMove wire format before enabling
-                                // let pkt = MonsterMove { ... };
-                                // to_send.push(pkt.to_bytes());
-                                let _ = (guid, from, sid, dur, dst);
+                                let pkt =
+                                    MonsterMove::single_destination(guid, from, sid, dur, 0, dst);
+                                to_send.push(pkt.to_bytes());
                             }
                         }
                     }
@@ -8391,6 +8390,63 @@ mod tests {
             None,
             0,
         );
+    }
+
+    #[test]
+    fn tick_creatures_sync_sends_cpp_like_monster_move_for_represented_wander() {
+        let (mut session, _, send_rx) = make_session();
+        let manager = shared_map_manager();
+        let guid = test_creature_guid(77);
+        register_test_creature(&mut session, manager, guid, 25);
+        session
+            .mutate_world_creature(guid, |creature| {
+                let ai = creature.creature.ai_ownership_mut();
+                ai.wander_delay_ms = 0;
+                ai.move_start_ms = 0;
+                ai.wander_radius = 3.0;
+            })
+            .unwrap();
+
+        session.tick_creatures_sync();
+
+        let sent = send_rx.try_recv().unwrap();
+        let opcode = u16::from_le_bytes([sent[0], sent[1]]);
+        assert_eq!(opcode, ServerOpcodes::OnMonsterMove as u16);
+        let mut pkt = WorldPacket::from_bytes(&sent[2..]);
+        assert_eq!(pkt.read_packed_guid().unwrap(), guid);
+        assert_eq!(pkt.read_float().unwrap(), 10.0);
+        assert_eq!(pkt.read_float().unwrap(), 10.0);
+        assert_eq!(pkt.read_float().unwrap(), 0.0);
+        assert_eq!(pkt.read_uint32().unwrap(), 2);
+        let destination = Position::new(
+            pkt.read_float().unwrap(),
+            pkt.read_float().unwrap(),
+            pkt.read_float().unwrap(),
+            0.0,
+        );
+        assert!(!pkt.has_bit().unwrap());
+        assert_eq!(pkt.read_bits(3).unwrap(), 0);
+        assert_eq!(pkt.read_uint32().unwrap(), 0);
+        assert_eq!(pkt.read_int32().unwrap(), 0);
+        assert!(pkt.read_uint32().unwrap() >= 500);
+        assert_eq!(pkt.read_uint32().unwrap(), 0);
+        assert_eq!(pkt.read_uint8().unwrap(), 0);
+        assert_eq!(pkt.read_packed_guid().unwrap(), ObjectGuid::EMPTY);
+        assert_eq!(pkt.read_int8().unwrap(), -1);
+        assert_eq!(pkt.read_bits(2).unwrap(), 0);
+        assert_eq!(pkt.read_bits(16).unwrap(), 1);
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert_eq!(pkt.read_bits(16).unwrap(), 0);
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert!(!pkt.has_bit().unwrap());
+        assert_eq!(pkt.read_float().unwrap(), destination.x);
+        assert_eq!(pkt.read_float().unwrap(), destination.y);
+        assert_eq!(pkt.read_float().unwrap(), destination.z);
+        assert!(pkt.is_empty());
+        assert!(send_rx.try_recv().is_err());
     }
 
     fn install_stackable_test_item_template(
