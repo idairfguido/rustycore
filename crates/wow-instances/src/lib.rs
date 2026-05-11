@@ -17,6 +17,10 @@ use wow_database::{
     StatementDef,
 };
 
+const INSTANCE_SCRIPT_HEADER_KEY: &str = "Header";
+const INSTANCE_SCRIPT_BOSS_STATES_KEY: &str = "BossStates";
+const INSTANCE_SCRIPT_ADDITIONAL_DATA_KEY: &str = "AdditionalData";
+
 /// C++ `MAX_DUNGEON_ENCOUNTERS_PER_BOSS`.
 pub const MAX_DUNGEON_ENCOUNTERS_PER_BOSS: usize = 4;
 /// C++ `INSTANCE_ID_HIGH_MASK`.
@@ -1099,6 +1103,65 @@ impl Default for EncounterState {
     }
 }
 
+impl EncounterState {
+    fn from_i64_like_cpp(value: i64) -> Option<Self> {
+        match value {
+            0 => Some(Self::NotStarted),
+            1 => Some(Self::InProgress),
+            2 => Some(Self::Fail),
+            3 => Some(Self::Done),
+            4 => Some(Self::Special),
+            5 => Some(Self::ToBeDecided),
+            _ => None,
+        }
+    }
+
+    const fn save_load_normalized_like_cpp(self) -> Self {
+        match self {
+            Self::InProgress | Self::Fail | Self::Special => Self::NotStarted,
+            other => other,
+        }
+    }
+}
+
+/// Numeric values persisted by C++ `PersistentInstanceScriptValue<T>`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PersistentInstanceScriptValue {
+    I64(i64),
+    F64(f64),
+}
+
+impl PersistentInstanceScriptValue {
+    fn to_json_value(&self) -> serde_json::Value {
+        match self {
+            Self::I64(value) => serde_json::Value::from(*value),
+            Self::F64(value) => serde_json::Value::from(*value),
+        }
+    }
+
+    fn from_json_number_like_cpp(value: &serde_json::Value) -> Option<Self> {
+        value
+            .as_i64()
+            .map(Self::I64)
+            .or_else(|| value.as_f64().map(Self::F64))
+    }
+}
+
+/// C++ `InstanceScriptDataReader::Result`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstanceScriptDataLoadError {
+    MalformedJson,
+    RootIsNotAnObject,
+    MissingHeader,
+    UnexpectedHeader,
+    MissingBossStates,
+    BossStatesIsNotAnArray,
+    UnknownBoss,
+    BossStateIsNotANumber,
+    AdditionalDataIsNotAnObject,
+    AdditionalDataUnexpectedValueType,
+}
+
 /// C++ `DungeonEncounterData`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DungeonEncounterData {
@@ -1164,22 +1227,34 @@ impl BossInfo {
 }
 
 /// Minimal C++ `InstanceScript` base data for encounter metadata lookup.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct InstanceScriptBase {
     difficulty_id: u32,
+    header: String,
     bosses: Vec<BossInfo>,
+    persistent_values: Vec<(String, PersistentInstanceScriptValue)>,
 }
 
 impl InstanceScriptBase {
     pub fn new(difficulty_id: u32, boss_count: usize) -> Self {
         Self {
             difficulty_id,
+            header: String::new(),
             bosses: vec![BossInfo::default(); boss_count],
+            persistent_values: Vec::new(),
         }
     }
 
     pub fn difficulty_id(&self) -> u32 {
         self.difficulty_id
+    }
+
+    pub fn set_header(&mut self, header: impl Into<String>) {
+        self.header = header.into();
+    }
+
+    pub fn header(&self) -> &str {
+        &self.header
     }
 
     pub fn boss_count(&self) -> usize {
@@ -1188,6 +1263,134 @@ impl InstanceScriptBase {
 
     pub fn boss(&self, boss_id: u32) -> Option<&BossInfo> {
         self.bosses.get(boss_id as usize)
+    }
+
+    pub fn boss_state(&self, boss_id: u32) -> EncounterState {
+        self.boss(boss_id)
+            .map(|boss| boss.state)
+            .unwrap_or(EncounterState::ToBeDecided)
+    }
+
+    pub fn set_boss_state_like_cpp(&mut self, boss_id: u32, state: EncounterState) -> bool {
+        let Some(boss) = self.bosses.get_mut(boss_id as usize) else {
+            return false;
+        };
+        boss.state = state;
+        true
+    }
+
+    pub fn create_like_cpp(&mut self) {
+        for boss_id in 0..self.bosses.len() {
+            self.set_boss_state_like_cpp(boss_id as u32, EncounterState::NotStarted);
+        }
+    }
+
+    pub fn register_persistent_value_like_cpp(
+        &mut self,
+        name: impl Into<String>,
+        value: PersistentInstanceScriptValue,
+    ) {
+        self.persistent_values.push((name.into(), value));
+    }
+
+    pub fn persistent_value(&self, name: &str) -> Option<&PersistentInstanceScriptValue> {
+        self.persistent_values
+            .iter()
+            .find_map(|(key, value)| (key == name).then_some(value))
+    }
+
+    pub fn get_save_data_like_cpp(&self) -> String {
+        let header = serde_json::to_string(&self.header).unwrap();
+        let boss_states = self
+            .bosses
+            .iter()
+            .map(|boss| (boss.state as u8).to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut data = format!(
+            "{{\"{}\":{},\"{}\":[{}]",
+            INSTANCE_SCRIPT_HEADER_KEY, header, INSTANCE_SCRIPT_BOSS_STATES_KEY, boss_states
+        );
+        if !self.persistent_values.is_empty() {
+            let additional = self
+                .persistent_values
+                .iter()
+                .map(|(name, value)| {
+                    format!(
+                        "{}:{}",
+                        serde_json::to_string(name).unwrap(),
+                        value.to_json_value()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            data.push_str(&format!(
+                ",\"{}\":{{{}}}",
+                INSTANCE_SCRIPT_ADDITIONAL_DATA_KEY, additional
+            ));
+        }
+        data.push('}');
+        data
+    }
+
+    pub fn load_save_data_like_cpp(
+        &mut self,
+        data: &str,
+    ) -> Result<(), InstanceScriptDataLoadError> {
+        let doc: serde_json::Value =
+            serde_json::from_str(data).map_err(|_| InstanceScriptDataLoadError::MalformedJson)?;
+        let root = doc
+            .as_object()
+            .ok_or(InstanceScriptDataLoadError::RootIsNotAnObject)?;
+
+        let header = root
+            .get(INSTANCE_SCRIPT_HEADER_KEY)
+            .ok_or(InstanceScriptDataLoadError::MissingHeader)?;
+        if header.as_str() != Some(self.header()) {
+            return Err(InstanceScriptDataLoadError::UnexpectedHeader);
+        }
+
+        let boss_states = root
+            .get(INSTANCE_SCRIPT_BOSS_STATES_KEY)
+            .ok_or(InstanceScriptDataLoadError::MissingBossStates)?
+            .as_array()
+            .ok_or(InstanceScriptDataLoadError::BossStatesIsNotAnArray)?;
+
+        for (boss_id, boss_state) in boss_states.iter().enumerate() {
+            if boss_id >= self.bosses.len() {
+                return Err(InstanceScriptDataLoadError::UnknownBoss);
+            }
+
+            let state_value = boss_state
+                .as_i64()
+                .ok_or(InstanceScriptDataLoadError::BossStateIsNotANumber)?;
+            let Some(state) = EncounterState::from_i64_like_cpp(state_value) else {
+                continue;
+            };
+            let state = state.save_load_normalized_like_cpp();
+            if state != EncounterState::ToBeDecided {
+                self.set_boss_state_like_cpp(boss_id as u32, state);
+            }
+        }
+
+        let Some(additional_data) = root.get(INSTANCE_SCRIPT_ADDITIONAL_DATA_KEY) else {
+            return Ok(());
+        };
+        let additional_data = additional_data
+            .as_object()
+            .ok_or(InstanceScriptDataLoadError::AdditionalDataIsNotAnObject)?;
+        for (name, value) in &mut self.persistent_values {
+            let Some(saved_value) = additional_data.get(name) else {
+                continue;
+            };
+            if saved_value.is_null() {
+                continue;
+            }
+            *value = PersistentInstanceScriptValue::from_json_number_like_cpp(saved_value)
+                .ok_or(InstanceScriptDataLoadError::AdditionalDataUnexpectedValueType)?;
+        }
+
+        Ok(())
     }
 
     /// C++ `InstanceScript::LoadDungeonEncounterData(uint32, array<uint32, 4>)`.
@@ -2048,6 +2251,142 @@ mod tests {
 
         assert_eq!(mgr.player_lock_map_difficulties(player(1)), vec![(631, 4)]);
         assert!(mgr.player_lock_map_difficulties(player(2)).is_empty());
+    }
+
+    #[test]
+    fn instance_script_create_sets_all_bosses_not_started_like_cpp() {
+        let mut script = InstanceScriptBase::new(4, 3);
+
+        script.create_like_cpp();
+
+        assert_eq!(script.boss_state(0), EncounterState::NotStarted);
+        assert_eq!(script.boss_state(1), EncounterState::NotStarted);
+        assert_eq!(script.boss_state(2), EncounterState::NotStarted);
+    }
+
+    #[test]
+    fn instance_script_save_data_matches_cpp_json_shape() {
+        let mut script = InstanceScriptBase::new(4, 2);
+        script.set_header("TEST");
+        script.set_boss_state_like_cpp(0, EncounterState::Done);
+        script.set_boss_state_like_cpp(1, EncounterState::InProgress);
+        script.register_persistent_value_like_cpp("Kills", PersistentInstanceScriptValue::I64(7));
+        script.register_persistent_value_like_cpp("Ratio", PersistentInstanceScriptValue::F64(2.5));
+
+        assert_eq!(
+            script.get_save_data_like_cpp(),
+            "{\"Header\":\"TEST\",\"BossStates\":[3,1],\"AdditionalData\":{\"Kills\":7,\"Ratio\":2.5}}"
+        );
+    }
+
+    #[test]
+    fn instance_script_load_normalizes_transient_boss_states_like_cpp() {
+        let mut script = InstanceScriptBase::new(4, 5);
+        script.set_header("TEST");
+        script.create_like_cpp();
+
+        script
+            .load_save_data_like_cpp(
+                "{\"Header\":\"TEST\",\"BossStates\":[1,2,3,4,5],\"AdditionalData\":{}}",
+            )
+            .unwrap();
+
+        assert_eq!(script.boss_state(0), EncounterState::NotStarted);
+        assert_eq!(script.boss_state(1), EncounterState::NotStarted);
+        assert_eq!(script.boss_state(2), EncounterState::Done);
+        assert_eq!(script.boss_state(3), EncounterState::NotStarted);
+        assert_eq!(script.boss_state(4), EncounterState::NotStarted);
+    }
+
+    #[test]
+    fn instance_script_load_persistent_values_like_cpp() {
+        let mut script = InstanceScriptBase::new(4, 1);
+        script.set_header("TEST");
+        script.register_persistent_value_like_cpp("Kills", PersistentInstanceScriptValue::I64(0));
+        script.register_persistent_value_like_cpp("Ratio", PersistentInstanceScriptValue::F64(0.0));
+
+        script
+            .load_save_data_like_cpp(
+                "{\"Header\":\"TEST\",\"BossStates\":[0],\"AdditionalData\":{\"Kills\":9,\"Ratio\":1.25}}",
+            )
+            .unwrap();
+
+        assert_eq!(
+            script.persistent_value("Kills"),
+            Some(&PersistentInstanceScriptValue::I64(9))
+        );
+        assert_eq!(
+            script.persistent_value("Ratio"),
+            Some(&PersistentInstanceScriptValue::F64(1.25))
+        );
+    }
+
+    #[test]
+    fn instance_script_load_rejects_cpp_error_cases() {
+        let mut script = InstanceScriptBase::new(4, 1);
+        script.set_header("TEST");
+        script.register_persistent_value_like_cpp("Kills", PersistentInstanceScriptValue::I64(0));
+
+        assert_eq!(
+            script.load_save_data_like_cpp("{").unwrap_err(),
+            InstanceScriptDataLoadError::MalformedJson
+        );
+        assert_eq!(
+            script.load_save_data_like_cpp("[]").unwrap_err(),
+            InstanceScriptDataLoadError::RootIsNotAnObject
+        );
+        assert_eq!(
+            script
+                .load_save_data_like_cpp("{\"BossStates\":[0]}")
+                .unwrap_err(),
+            InstanceScriptDataLoadError::MissingHeader
+        );
+        assert_eq!(
+            script
+                .load_save_data_like_cpp("{\"Header\":\"BAD\",\"BossStates\":[0]}")
+                .unwrap_err(),
+            InstanceScriptDataLoadError::UnexpectedHeader
+        );
+        assert_eq!(
+            script
+                .load_save_data_like_cpp("{\"Header\":\"TEST\"}")
+                .unwrap_err(),
+            InstanceScriptDataLoadError::MissingBossStates
+        );
+        assert_eq!(
+            script
+                .load_save_data_like_cpp("{\"Header\":\"TEST\",\"BossStates\":{}}")
+                .unwrap_err(),
+            InstanceScriptDataLoadError::BossStatesIsNotAnArray
+        );
+        assert_eq!(
+            script
+                .load_save_data_like_cpp("{\"Header\":\"TEST\",\"BossStates\":[0,0]}")
+                .unwrap_err(),
+            InstanceScriptDataLoadError::UnknownBoss
+        );
+        assert_eq!(
+            script
+                .load_save_data_like_cpp("{\"Header\":\"TEST\",\"BossStates\":[\"x\"]}")
+                .unwrap_err(),
+            InstanceScriptDataLoadError::BossStateIsNotANumber
+        );
+        assert_eq!(
+            script
+                .load_save_data_like_cpp(
+                    "{\"Header\":\"TEST\",\"BossStates\":[0],\"AdditionalData\":[]}"
+                )
+                .unwrap_err(),
+            InstanceScriptDataLoadError::AdditionalDataIsNotAnObject
+        );
+        assert_eq!(
+            script
+                .load_save_data_like_cpp(
+                    "{\"Header\":\"TEST\",\"BossStates\":[0],\"AdditionalData\":{\"Kills\":\"x\"}}"
+                )
+                .unwrap_err(),
+            InstanceScriptDataLoadError::AdditionalDataUnexpectedValueType
+        );
     }
 
     #[test]

@@ -226,6 +226,7 @@ NOTE: `InstanceSaveMgr` no longer exists as a separate class in this WoLK 3.4.3 
 - `#NEXT.R8.INSTANCES.008` corrects the respawn-storage plan against this C++ fork and adds the real `CHAR_SEL_RESPAWNS`, `CHAR_REP_RESPAWN`, `CHAR_DEL_RESPAWN`, and `CHAR_DEL_ALL_RESPAWNS` SQL plus a Rust `CHAR_DEL_ALL_RESPAWNS` builder for `(mapId, instanceId)` purge.
 - `#NEXT.R8.INSTANCES.009` adds the C++ `SMSG_RAID_INSTANCE_MESSAGE` packet builder and `RaidInstanceResetWarningType` values (`WARNING_HOURS` through `EXPIRED`) with byte-order/bit-order coverage.
 - `#NEXT.R8.INSTANCES.010` adds C++ packet builders for `SMSG_INSTANCE_ENCOUNTER_ENGAGE_UNIT`, `_DISENGAGE_UNIT`, `_CHANGE_PRIORITY`, `_START`, `_END`, `_IN_COMBAT_RESURRECTION`, `_GAIN_COMBAT_RESURRECTION_CHARGE`, and `SMSG_BOSS_KILL`, including packed-guid and empty-payload coverage.
+- `#NEXT.R8.INSTANCES.011` adds the pure C++ `InstanceScript::Create`, `InstanceScriptDataReader::Load`, `InstanceScriptDataWriter::FillData/GetString`, and numeric `PersistentInstanceScriptValue` save/load core: header check, boss-state array, transient-state normalization, strict error cases, and compact C++-ordered JSON output.
 
 **What's implemented:**
 - `crates/wow-world/src/map_manager.rs` (per the active WIP commits) provides a `MapManager` global stub with placeholder for `GenerateInstanceId` (must verify), but no lock store and no script dispatch. (See WIP commit `f83c48d82`.)
@@ -332,7 +333,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [~] **#INST.18** Implement `account_instance_times` rate-limit (5 per hour) check (M) — C++ load/delete/insert statements registered; player-side rate-limit behavior pending.
 - [ ] **#INST.19** Port `BossInfo`, `DoorData`, `DoorInfo`, `MinionData`, `MinionInfo`, `ObjectData`, `DungeonEncounterData`, `BossBoundaryEntry` (M)
 - [ ] **#INST.20** Define `InstanceScript` trait + default impl struct (`bosses`, `doors`, `minions`, `_creature_info`, `_go_info`, `_object_guids`, `_persistent_values`, `_entrance_id`, `_combat_res_*`) (H)
-- [ ] **#INST.21** Implement `Create`, `Load(json)`, `GetSaveData()` w/ `serde_json` mirroring `InstanceScriptData.cpp` (header + bosses[] + persistent) (H)
+- [~] **#INST.21** Implement `Create`, `Load(json)`, `GetSaveData()` w/ `serde_json` mirroring `InstanceScriptData.cpp` (header + bosses[] + persistent) (H) — pure C++ JSON reader/writer, transient-state normalization, and numeric persistent values done; `AfterDataLoad`, spawn-group updates, and map call-sites pending.
 - [ ] **#INST.22** Implement `SetBossState(id, state)` w/ door/minion/spawn-group/LFG hooks + save-trigger + `InstanceMap::UpdateInstanceLock` (H)
 - [ ] **#INST.23** Implement `OnCreatureCreate/Remove` and `OnGameObjectCreate/Remove` w/ `_creature_info` + `_go_info` lookups (M)
 - [ ] **#INST.24** Implement `IsEncounterInProgress`, `IsEncounterCompleted`, `IsEncounterCompletedInMaskByBossId`, `GetEncounterCount` (L)
@@ -342,7 +343,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [ ] **#INST.28** Implement `DoUpdateWorldState`, `DoCastSpellOnPlayers`, `DoRemoveAurasDueToSpellOnPlayers`, `DoUpdateCriteria`, `DoSendNotifyToInstance` (M)
 - [~] **#INST.29** Implement combat-resurrection tracker (`InitializeCombatResurrections`, `Use`, `Reset`, `GetCombatResurrectionChargeInterval`, `Update`) (M) — C++ combat-resurrection packets done; tracker/state machine pending.
 - [ ] **#INST.30** Implement entrance-location resolver (`SetEntranceLocation`, `Get`, `ComputeEntranceLocationForCompletedEncounters`) (M)
-- [ ] **#INST.31** Implement `PersistentInstanceScriptValue<T>` (i64 / f64 variant) w/ change-notify (M)
+- [~] **#INST.31** Implement `PersistentInstanceScriptValue<T>` (i64 / f64 variant) w/ change-notify (M) — numeric value registration/save/load done; change-notify event into `InstanceMap::UpdateInstanceLock(UpdateAdditionalSaveDataEvent)` pending.
 - [ ] **#INST.32** Implement `MarkAreaTriggerDone` / `IsAreaTriggerDone` set tracking (L)
 - [ ] **#INST.33** Implement `UpdateLfgEncounterState` integration (depends on `wow-lfg` doc) (M)
 - [ ] **#INST.34** Implement `UpdatePhasing` integration (depends on `phasing.md`) (M)
@@ -383,7 +384,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [ ] Test: `extended=true` lets player join a lock that is past `_expiryTime` but not past `effectiveExpiryTime` (= next reset).
 - [ ] Test: `ResetInstanceLocksForPlayer` skips locks where `IsInUse()` (active map) and reports them in `locksFailedToReset`.
 - [ ] Test: `InstanceScript::SetBossState(id, DONE)` flips door states per `EncounterDoorBehavior` and updates `completedEncountersMask`.
-- [ ] Test: `Load(GetSaveData())` round-trips boss states + persistent values losslessly (JSON stable).
+- [~] Test: `Load(GetSaveData())` round-trips boss states + persistent values losslessly (JSON stable) — JSON shape, load normalization, persistent numeric load, and C++ error cases covered; full InstanceMap integration pending.
 - [ ] Test: `IsEncounterInProgress()` returns true iff any boss in `IN_PROGRESS`.
 - [ ] Test: `account_instance_times` blocks the 6th distinct enter within 1 hour.
 - [ ] Test: shared-state instance lock — two players in same group see the same `completedEncountersMask` even if one lock row is older.
