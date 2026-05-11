@@ -5411,15 +5411,22 @@ fn write_player_data_values_update(
     buf.flush_bits();
 }
 
-/// ActivePlayerData VALUES update: InvSlots[141] + combat stats.
+/// ActivePlayerData VALUES update for the runtime paths currently emitted by
+/// RustyCore: InvSlots[141], buyback, coinage and combat stats.
 ///
-/// C# ActivePlayerData.WriteUpdate format:
+/// C++ `UF::ActivePlayerData::WriteUpdate` format:
 ///   WriteUInt32(blocksMask group 0) — byte-aligned u32 for first 32 blocks
 ///   WriteBits(blocksMask group 1, 16) — 16 bits for remaining 16 blocks
 ///   for each active block: WriteBits(block, 32)
-///   [bit fields and dynamic arrays if their blocks are active]
+///   FlushBits()
+///   [second dynamic-mask pass for parent-0 fields 4..19]
 ///   FlushBits()
 ///   [field values]
+///
+/// This writer intentionally does not cover the full 1525-bit
+/// ActivePlayerData surface yet. `#026i` tracks the remaining generic writer
+/// work: SkillInfo, quest/title/toy/transmog/trait dynamics, research,
+/// PVP/rest/profession/bag flags, quest completed and glyph arrays.
 ///
 /// InvSlots: parent=124, elements=125-265. Span multiple blocks.
 ///
@@ -5429,7 +5436,9 @@ fn write_player_data_values_update(
 ///   ModDamageDonePos[7]: parent=269, bits=277-283 → block 8 bits 13,21-27
 ///   CombatRatings[32]:   parent=574, bits=575-606 → block 17 bits 30-31, block 18 bits 0-30
 ///
-/// C# WriteUpdate order: parent 0 → parent 38 → InvSlots(124) → ModDamageDone(269) → CombatRatings(574)
+/// C++ WriteUpdate order for these fields:
+/// parent 0 → parent 38 → InvSlots(124) → SpellCrit/ModDamageDone(269)
+/// → Buyback(549) → CombatRatings(574).
 fn write_active_player_data_values_update(
     buf: &mut WorldPacket,
     inv_slot_changes: &[(u8, ObjectGuid)],
@@ -5524,7 +5533,13 @@ fn write_active_player_data_values_update(
         }
     }
 
-    // No dynamic arrays (bit 0 not set) — two FlushBits per C# WriteUpdate structure
+    // First C++ FlushBits point. The supported runtime paths do not emit any
+    // early bit payloads here (SortBags/InsertItems/KnownTitles/research).
+    buf.flush_bits();
+
+    // Second C++ dynamic-mask pass for parent-0 fields 4..19. Those fields are
+    // outside this runtime writer, so no bits are emitted; keep this explicit
+    // so future ActivePlayerData work does not collapse the C++ phases.
     buf.flush_bits();
 
     // ── Field values in C# WriteUpdate order ──
@@ -6448,6 +6463,121 @@ mod tests {
         assert_eq!(i64::from_le_bytes(tail[4..12].try_into().unwrap()), 456);
         assert_eq!(u32::from_le_bytes(tail[12..16].try_into().unwrap()), 789);
         assert_eq!(i64::from_le_bytes(tail[16..24].try_into().unwrap()), 101112);
+    }
+
+    #[test]
+    fn active_player_coinage_values_update_matches_cpp_mask_shape() {
+        let mut values = WorldPacket::new_empty();
+        write_active_player_data_values_update(&mut values, &[], &[], None, Some(1234));
+
+        let bytes = values.into_data();
+        assert_eq!(&bytes[0..4], &[0x01, 0x00, 0x00, 0x00]); // group 0: block 0
+        assert_eq!(&bytes[4..6], &[0x00, 0x00]); // group 1: no blocks 32..47
+        assert_eq!(&bytes[6..10], &[0x10, 0x00, 0x00, 0x00]); // block 0: bit 28
+        assert_eq!(u64::from_le_bytes(bytes[10..18].try_into().unwrap()), 1234);
+        assert_eq!(bytes.len(), 18);
+    }
+
+    #[test]
+    fn active_player_stats_values_update_matches_cpp_common_runtime_masks() {
+        let mut combat_ratings = [0; 32];
+        combat_ratings[0] = 11;
+        combat_ratings[31] = 99;
+
+        let stats = PlayerStatChanges {
+            health: 0,
+            max_health: 0,
+            min_damage: 0.0,
+            max_damage: 0.0,
+            base_mana: 0,
+            base_health: 0,
+            attack_power: 0,
+            ranged_attack_power: 0,
+            min_ranged_damage: 0.0,
+            max_ranged_damage: 0.0,
+            power0: 0,
+            max_power0: 0,
+            stats: [0; 5],
+            stat_pos_buff: [0; 5],
+            armor: 0,
+            combat_ratings,
+            spell_power: 123,
+            block_pct: 1.0,
+            dodge_pct: 2.0,
+            parry_pct: 3.0,
+            crit_pct: 4.0,
+            ranged_crit_pct: 5.0,
+            spell_crit_pct: [6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0],
+            mana_regen: 0.0,
+            mana_regen_combat: 0.0,
+            mana_regen_mp5: 0.0,
+            mainhand_expertise: 13.0,
+            offhand_expertise: 14.0,
+            ranged_expertise: 15.0,
+            combat_rating_expertise: 16.0,
+            dodge_from_attr: 17.0,
+            parry_from_attr: 18.0,
+            offhand_crit_pct: 19.0,
+            shield_block: 20,
+            shield_block_crit_pct: 21.0,
+            mod_healing_pct: 1.0,
+            mod_healing_done_pct: 1.0,
+            mod_periodic_healing_pct: 1.0,
+            mod_spell_power_pct: 1.0,
+        };
+
+        let mut values = WorldPacket::new_empty();
+        write_active_player_data_values_update(&mut values, &[], &[], Some(&stats), None);
+
+        let bytes = values.into_data();
+        assert_eq!(&bytes[0..4], &[0x07, 0x01, 0x06, 0x00]); // blocks 0,1,2,8,17,18
+        assert_eq!(&bytes[4..6], &[0x00, 0x00]);
+        assert_eq!(&bytes[6..10], &[0x00, 0x00, 0x00, 0x01]);
+        assert_eq!(&bytes[10..14], &[0xFF, 0xFF, 0xFF, 0xF0]);
+        assert_eq!(&bytes[14..18], &[0x00, 0x00, 0x00, 0x3F]);
+        assert_eq!(&bytes[18..22], &[0x0F, 0xFF, 0xE0, 0x00]);
+        assert_eq!(&bytes[22..26], &[0xC0, 0x00, 0x00, 0x00]);
+        assert_eq!(&bytes[26..30], &[0x7F, 0xFF, 0xFF, 0xFF]);
+
+        let expertise = 13.0f32.to_le_bytes();
+        let values_start = bytes
+            .windows(4)
+            .position(|window| window == expertise)
+            .expect("mainhand expertise value must be present after ActivePlayerData masks");
+        let mut offset = values_start;
+        assert_eq!(
+            f32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()),
+            13.0
+        );
+        offset += 4;
+        assert_eq!(
+            f32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()),
+            14.0
+        );
+        offset += 4;
+        offset += 31 * 4;
+
+        for expected in [6.0f32, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0] {
+            assert_eq!(
+                f32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()),
+                expected
+            );
+            offset += 4;
+            offset += 4; // ModDamageDonePos for the same school.
+        }
+
+        assert_eq!(
+            i32::from_le_bytes(
+                bytes[bytes.len() - 128..bytes.len() - 124]
+                    .try_into()
+                    .unwrap()
+            ),
+            11
+        );
+        assert_eq!(
+            i32::from_le_bytes(bytes[bytes.len() - 4..].try_into().unwrap()),
+            99
+        );
     }
 
     #[test]
