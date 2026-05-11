@@ -1,5 +1,6 @@
 use wow_constants::{
-    DeathState, Gender, PowerType, SpellState, TypeId, TypeMask, UnitState, WeaponAttackType,
+    DeathState, Gender, PowerType, SpellState, TypeId, TypeMask, UnitStandStateType, UnitState,
+    WeaponAttackType,
 };
 use wow_core::ObjectGuid;
 
@@ -33,6 +34,7 @@ pub const UNIT_DATA_COMBAT_REACH_BIT: usize = 47;
 pub const UNIT_DATA_DISPLAY_SCALE_BIT: usize = 48;
 pub const UNIT_DATA_NATIVE_DISPLAY_ID_BIT: usize = 49;
 pub const UNIT_DATA_NATIVE_DISPLAY_SCALE_BIT: usize = 50;
+pub const UNIT_DATA_STAND_STATE_BIT: usize = 56;
 pub const UNIT_DATA_TARGET_BIT: usize = 19;
 pub const UNIT_DATA_RACE_BIT: usize = 24;
 pub const UNIT_DATA_CLASS_ID_BIT: usize = 25;
@@ -68,6 +70,7 @@ pub struct UnitDataValues {
     pub display_scale: f32,
     pub native_display_id: i32,
     pub native_display_scale: f32,
+    pub stand_state: u8,
     pub power: [i32; MAX_POWERS_PER_CLASS],
     pub max_power: [i32; MAX_POWERS_PER_CLASS],
     pub virtual_items: [VisibleItemValues; MAX_ATTACK],
@@ -95,6 +98,7 @@ impl Default for UnitDataValues {
             display_scale: 0.0,
             native_display_id: 0,
             native_display_scale: 0.0,
+            stand_state: UnitStandStateType::Stand as u8,
             power: [0; MAX_POWERS_PER_CLASS],
             max_power: [0; MAX_POWERS_PER_CLASS],
             virtual_items: [VisibleItemValues::default(); MAX_ATTACK],
@@ -463,6 +467,41 @@ impl Unit {
 
     pub fn set_gender(&mut self, gender: Gender) {
         self.set_u8_field(UNIT_DATA_SEX_BIT, gender as u8, |data| &mut data.sex);
+    }
+
+    pub fn stand_state_like_cpp(&self) -> UnitStandStateType {
+        match self.data.stand_state {
+            1 => UnitStandStateType::Sit,
+            2 => UnitStandStateType::SitChair,
+            3 => UnitStandStateType::Sleep,
+            4 => UnitStandStateType::SitLowChair,
+            5 => UnitStandStateType::SitMediumChair,
+            6 => UnitStandStateType::SitHighChair,
+            7 => UnitStandStateType::Dead,
+            8 => UnitStandStateType::Kneel,
+            9 => UnitStandStateType::Submerged,
+            10 => UnitStandStateType::Max,
+            _ => UnitStandStateType::Stand,
+        }
+    }
+
+    pub fn is_stand_state_like_cpp(&self) -> bool {
+        !matches!(
+            self.stand_state_like_cpp(),
+            UnitStandStateType::Sit
+                | UnitStandStateType::SitChair
+                | UnitStandStateType::SitLowChair
+                | UnitStandStateType::SitMediumChair
+                | UnitStandStateType::SitHighChair
+                | UnitStandStateType::Sleep
+                | UnitStandStateType::Kneel
+        )
+    }
+
+    pub fn set_stand_state_like_cpp(&mut self, state: UnitStandStateType) {
+        self.set_u8_field(UNIT_DATA_STAND_STATE_BIT, state as u8, |data| {
+            &mut data.stand_state
+        });
     }
 
     pub fn set_health(&mut self, mut value: u64) {
@@ -1018,6 +1057,31 @@ mod tests {
         unit.set_death_state(DeathState::Corpse);
         unit.set_health(30);
         assert_eq!(unit.data().health, 0);
+    }
+
+    #[test]
+    fn stand_state_helpers_match_cpp_sit_sleep_kneel_rules() {
+        let mut unit = Unit::new(true);
+        assert_eq!(unit.stand_state_like_cpp(), UnitStandStateType::Stand);
+        assert!(unit.is_stand_state_like_cpp());
+
+        unit.clear_unit_data_changes();
+        unit.set_stand_state_like_cpp(UnitStandStateType::SitChair);
+        assert_eq!(unit.stand_state_like_cpp(), UnitStandStateType::SitChair);
+        assert!(!unit.is_stand_state_like_cpp());
+        assert!(
+            unit.unit_data_changes_mask()
+                .is_set(UNIT_DATA_STAND_STATE_BIT)
+        );
+
+        unit.set_stand_state_like_cpp(UnitStandStateType::Sleep);
+        assert!(!unit.is_stand_state_like_cpp());
+        unit.set_stand_state_like_cpp(UnitStandStateType::Kneel);
+        assert!(!unit.is_stand_state_like_cpp());
+        unit.set_stand_state_like_cpp(UnitStandStateType::Dead);
+        assert!(unit.is_stand_state_like_cpp());
+        unit.set_stand_state_like_cpp(UnitStandStateType::Submerged);
+        assert!(unit.is_stand_state_like_cpp());
     }
 
     #[test]

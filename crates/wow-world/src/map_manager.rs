@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use tracing::{debug, info, warn};
 use wow_constants::movement::MovementFlag;
-use wow_constants::{UnitState, WeaponAttackType};
+use wow_constants::{UnitStandStateType, UnitState, WeaponAttackType};
 use wow_core::{ObjectGuid, Position};
 use wow_entities::{
     Creature, CreatureAiState, DistractMovementAction, EVENT_CHARGE_PREPATH, MovementGeneratorKind,
@@ -545,7 +545,6 @@ impl WorldCreature {
         &mut self,
         timer_ms: u32,
         orientation: f32,
-        owner_is_standing: bool,
     ) -> Option<(DistractMovementAction, Position, MoveSpline)> {
         self.creature
             .unit_mut()
@@ -553,6 +552,7 @@ impl WorldCreature {
             .motion
             .move_distract_like_cpp(timer_ms);
 
+        let owner_is_standing = self.creature.unit().is_stand_state_like_cpp();
         let action = {
             let motion = &mut self.creature.unit_mut().subsystems_mut().motion;
             let generator = motion
@@ -561,6 +561,11 @@ impl WorldCreature {
                 .find(|generator| generator.kind == MovementGeneratorKind::Distract)?;
             generator.initialize_distract_like_cpp(owner_is_standing)
         };
+        if action.stand_up {
+            self.creature
+                .unit_mut()
+                .set_stand_state_like_cpp(UnitStandStateType::Stand);
+        }
         let (from, spline) = self.begin_facing_spline_like_cpp(orientation)?;
         Some((action, from, spline))
     }
@@ -1778,9 +1783,13 @@ mod tests {
             0,
         );
         creature.clock_started_at = Instant::now() - Duration::from_secs(10);
+        creature
+            .creature
+            .unit_mut()
+            .set_stand_state_like_cpp(UnitStandStateType::Sit);
 
         let (action, from, spline) = creature
-            .begin_distract_movement_like_cpp(500, 1.25, false)
+            .begin_distract_movement_like_cpp(500, 1.25)
             .expect("distract launches facing spline");
 
         assert_eq!(
@@ -1791,6 +1800,10 @@ mod tests {
             }
         );
         assert_eq!(from, Position::new(10.0, 10.0, 0.0, 0.0));
+        assert_eq!(
+            creature.creature.unit().stand_state_like_cpp(),
+            UnitStandStateType::Stand
+        );
         assert_eq!(
             spline.facing().kind,
             wow_movement::MonsterMoveType::FacingAngle

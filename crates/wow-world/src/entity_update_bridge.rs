@@ -372,6 +372,7 @@ fn unit_data_update_to_packet(update: &UnitDataUpdate) -> UnitDataValuesDeltaUpd
     packet_update.display_scale = update.values.display_scale;
     packet_update.native_display_id = update.values.native_display_id;
     packet_update.native_display_scale = update.values.native_display_scale;
+    packet_update.stand_state = update.values.stand_state;
     packet_update.power = update.values.power;
     packet_update.max_power = update.values.max_power;
 
@@ -868,8 +869,8 @@ mod tests {
         GAME_OBJECT_DATA_DISPLAY_ID_BIT, GAME_OBJECT_DATA_PARENT_BIT, GameObject,
         ITEM_DATA_STACK_COUNT_BIT, Item, PLAYER_DATA_FLAGS_BIT, PLAYER_DATA_PARENT_BIT, Player,
         SCENE_OBJECT_DATA_PARENT_BIT, SCENE_OBJECT_DATA_SCRIPT_PACKAGE_ID_BIT, SceneObject,
-        UNIT_DATA_HEALTH_BIT, UNIT_DATA_PARENT_BIT, UNIT_DATA_VIRTUAL_ITEMS_FIRST_BIT,
-        UNIT_DATA_VIRTUAL_ITEMS_PARENT_BIT, VisibleItemValues,
+        UNIT_DATA_HEALTH_BIT, UNIT_DATA_PARENT_BIT, UNIT_DATA_STAND_STATE_BIT,
+        UNIT_DATA_VIRTUAL_ITEMS_FIRST_BIT, UNIT_DATA_VIRTUAL_ITEMS_PARENT_BIT, VisibleItemValues,
     };
     use wow_packet::ServerPacket;
 
@@ -989,6 +990,7 @@ mod tests {
         unit.world_mut().object_mut().set_entry(99);
         unit.set_max_health(123);
         unit.set_health(123);
+        unit.set_stand_state_like_cpp(wow_constants::UnitStandStateType::Sit);
 
         let update = unit.values_update();
         let packet_update = unit_values_update_to_packet(&update).unwrap();
@@ -1006,7 +1008,15 @@ mod tests {
             &packet_update.unit_data_mask,
             UNIT_DATA_HEALTH_BIT
         ));
+        assert!(mask_has(
+            &packet_update.unit_data_mask,
+            UNIT_DATA_STAND_STATE_BIT
+        ));
         assert_eq!(packet_update.health, 123);
+        assert_eq!(
+            packet_update.stand_state,
+            wow_constants::UnitStandStateType::Sit as u8
+        );
     }
 
     #[test]
