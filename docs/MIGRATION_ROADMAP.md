@@ -231,7 +231,7 @@ Leyenda:
 
 | Módulo C++ | Crate Rust | Estado | Pendiente |
 |---|---|---|---|
-| `Movement/MovementInfo` | wow-packet | ✅ | parsing OK |
+| `Movement/MovementInfo` | wow-packet | ⚠️ | lectura base cercana a C++; writer fall-data y campos opcionales pendientes (#A06) |
 | `Movement/MoveSpline` | (no existe) | ❌ | spline real con control points |
 | `Movement/MovementGenerator` | (no existe) | ❌ | random/waypoint/follow/escort |
 | `Movement/PathGenerator` (Detour) | wow-recastdetour | ❌ | crate scaffold, FFI no conectado |
@@ -466,7 +466,15 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
 - [ ] **#A03** Auditar **Crypto** (`wow-crypto`) vs `src/server/shared/Cryptography/`. SRP6 idéntico al usado por cliente, AES-GCM nonce construction, HMAC-SHA256 keys.
 - [ ] **#A04** Auditar **Database** (`wow-database`) vs `src/server/database/`. Statements registrados, prepared, transacciones, escapeo.
 - [ ] **#A05** Auditar **Foundation** (`wow-core`) vs `src/server/game/Globals/` + `src/server/shared/`. GUID encoding, Position math, Time.
-- [ ] **#A06** Auditar **Movement parsing** (`wow-packet/movement.rs`, handlers/movement.rs) vs `src/server/game/Movement/PacketBuilder` + handlers.
+- [x] **#A06** Auditar **Movement parsing** (`wow-packet/movement.rs`, handlers/movement.rs) vs `src/server/game/Server/Packets/MovementPackets.*`, `Entities/Object/MovementInfo.h` y `Handlers/MovementHandler.cpp`. Resultado: `docs/audits/movement.md`; `MovementInfo::read` está cerca del wire C++, pero el writer y handler quedan en ⚠️ con subtareas:
+  - [x] **#A06.1** Corregir `MovementInfo::write` para que `hasFallData = falling flags || fallTime != 0` y `hasFallDirection = falling flags`, como `MovementPackets.cpp`.
+  - [ ] **#A06.2** Representar `standingOnGameObjectGUID` e `inertia` en `MovementInfo`; no descartarlos al leer ni forzarlos a `false` al escribir.
+  - [ ] **#A06.3** Endurecer validación de `handle_movement`: GUID no vacío y exactamente mover actual, orientación/coordenadas válidas, guard de teleport/movespline cuando existan equivalentes.
+  - [ ] **#A06.4** Validar/normalizar transport: offset ±75, distancia > grid tras teleport, world coord con transport, reset si no existe transport/vehicle.
+  - [ ] **#A06.5** Portar `AdjustClientMovementTime` o puente temporal documentado con time-sync antes de rebroadcast.
+  - [ ] **#A06.6** Separar side effects C++ de movement: fall damage, aura interrupts, pet unsummon, sit-to-stand, under-map damage y jump procs.
+  - [ ] **#A06.7** Portar efectos de `MoveInitActiveMoverComplete`: local flag, transport server time y visibility update.
+  - [ ] **#A06.8** Inventariar y portar ACK movement opcodes (`KnockBack`, speed, force, collision height, spline done, time skipped).
 - [ ] **#A07** Auditar **Combat** (`wow-combat` + handlers) vs `src/server/game/Combat/`. Damage roll, miss tables, hit info.
 - [ ] **#A08** Auditar **Spells** (`wow-spell`) vs `src/server/game/Spells/`. Spell flow, casting, effects subset.
 - [ ] **#A09** Auditar **Quests** (handlers/quest.rs, wow-data/quest) vs `src/server/game/Quests/`. Eligibility, kill credit, completion, reward.

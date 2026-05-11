@@ -245,7 +245,10 @@ impl MovementInfo {
     /// Write movement info to a packet (for MoveUpdate broadcasts).
     pub fn write(&self, pkt: &mut WorldPacket) {
         let has_transport = self.transport.is_some();
-        let has_fall = self.jump.fall_time != 0;
+        let has_fall_direction = self
+            .flags
+            .intersects(MovementFlag::FALLING | MovementFlag::FALLING_FAR);
+        let has_fall = has_fall_direction || self.jump.fall_time != 0;
         let has_adv_flying = self.adv_flying.is_some();
 
         pkt.write_packed_guid(&self.guid);
@@ -300,9 +303,9 @@ impl MovementInfo {
         if has_fall {
             pkt.write_uint32(self.jump.fall_time);
             pkt.write_float(self.jump.z_speed);
-            pkt.write_bit(self.jump.has_direction);
+            pkt.write_bit(has_fall_direction);
             pkt.flush_bits();
-            if self.jump.has_direction {
+            if has_fall_direction {
                 pkt.write_float(self.jump.sin_angle);
                 pkt.write_float(self.jump.cos_angle);
                 pkt.write_float(self.jump.xy_speed);
@@ -482,5 +485,51 @@ impl ClientPacket for MoveInitActiveMoverComplete {
     fn read(pkt: &mut WorldPacket) -> Result<Self, PacketError> {
         let ticks = pkt.read_uint32()?;
         Ok(Self { ticks })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world_packet::WorldPacket;
+
+    #[test]
+    fn movement_info_write_includes_fall_data_when_falling_flag_is_set_like_cpp() {
+        let mut info = MovementInfo {
+            guid: ObjectGuid::create_player(1, 42),
+            flags: MovementFlag::FALLING,
+            time: 1234,
+            position: Position::new(1.0, 2.0, 3.0, 4.0),
+            jump: JumpInfo {
+                fall_time: 0,
+                z_speed: 5.0,
+                has_direction: false,
+                sin_angle: 0.25,
+                cos_angle: 0.75,
+                xy_speed: 6.0,
+            },
+            ..MovementInfo::default()
+        };
+
+        let mut pkt = WorldPacket::new_empty();
+        info.write(&mut pkt);
+
+        let mut pkt = WorldPacket::from_bytes(pkt.data());
+        let decoded = MovementInfo::read(&mut pkt).unwrap();
+        assert_eq!(decoded.flags, MovementFlag::FALLING);
+        assert_eq!(decoded.jump.fall_time, 0);
+        assert_eq!(decoded.jump.z_speed, 5.0);
+        assert!(decoded.jump.has_direction);
+        assert_eq!(decoded.jump.sin_angle, 0.25);
+        assert_eq!(decoded.jump.cos_angle, 0.75);
+        assert_eq!(decoded.jump.xy_speed, 6.0);
+
+        info.flags = MovementFlag::NONE;
+        let mut pkt = WorldPacket::new_empty();
+        info.write(&mut pkt);
+        let mut pkt = WorldPacket::from_bytes(pkt.data());
+        let decoded = MovementInfo::read(&mut pkt).unwrap();
+        assert_eq!(decoded.jump.fall_time, 0);
+        assert!(!decoded.jump.has_direction);
     }
 }
