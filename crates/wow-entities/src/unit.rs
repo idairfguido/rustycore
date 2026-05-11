@@ -1,8 +1,11 @@
-use wow_constants::{DeathState, Gender, PowerType, TypeId, TypeMask, WeaponAttackType};
+use wow_constants::{
+    DeathState, Gender, PowerType, SpellState, TypeId, TypeMask, UnitState, WeaponAttackType,
+};
 use wow_core::ObjectGuid;
 
 use crate::{
-    ObjectDataUpdate, UnitSubsystems, UpdateMask, VisibleItemValues, WorldObject,
+    CurrentSpellRef, CurrentSpellSlot, ObjectDataUpdate, UnitSubsystems, UpdateMask,
+    VisibleItemValues, WorldObject,
     update_fields::{TYPEID_UNIT, UNIT_DATA_BITS},
 };
 
@@ -13,6 +16,7 @@ pub const MAX_POWERS_PER_CLASS: usize = 10;
 pub const BASE_MINDAMAGE: f32 = 1.0;
 pub const BASE_MAXDAMAGE: f32 = 2.0;
 pub const DEFAULT_PLAYER_DISPLAY_SCALE: f32 = 1.0;
+pub const AUTO_SHOT_SPELL_ID: u32 = 75;
 
 pub const UNIT_DATA_PARENT_BIT: usize = 0;
 pub const UNIT_DATA_HEALTH_BIT: usize = 5;
@@ -207,6 +211,132 @@ impl Unit {
 
     pub fn has_unit_state(&self, flags: u32) -> bool {
         (self.unit_state & flags) != 0
+    }
+
+    pub fn set_current_cast_spell(
+        &mut self,
+        slot: CurrentSpellSlot,
+        spell: CurrentSpellRef,
+    ) -> Option<CurrentSpellRef> {
+        if self.subsystems.spells.current_spell(slot) == Some(spell) {
+            return None;
+        }
+
+        match slot {
+            CurrentSpellSlot::Generic => {
+                self.interrupt_spell(CurrentSpellSlot::Generic, false, true);
+                if self
+                    .current_spell(CurrentSpellSlot::Channeled)
+                    .is_some_and(|current| !current.allow_actions_during_channel)
+                {
+                    self.interrupt_spell(CurrentSpellSlot::Channeled, false, true);
+                }
+                if self
+                    .current_spell(CurrentSpellSlot::Autorepeat)
+                    .is_some_and(|current| current.spell_id != AUTO_SHOT_SPELL_ID)
+                {
+                    self.interrupt_spell(CurrentSpellSlot::Autorepeat, true, true);
+                }
+                if spell.cast_time_ms > 0 {
+                    self.add_unit_state(UnitState::CASTING.bits());
+                }
+            }
+            CurrentSpellSlot::Channeled => {
+                self.interrupt_spell(CurrentSpellSlot::Generic, false, true);
+                self.interrupt_spell(CurrentSpellSlot::Channeled, true, true);
+                if self
+                    .current_spell(CurrentSpellSlot::Autorepeat)
+                    .is_some_and(|current| current.spell_id != AUTO_SHOT_SPELL_ID)
+                {
+                    self.interrupt_spell(CurrentSpellSlot::Autorepeat, true, true);
+                }
+                self.add_unit_state(UnitState::CASTING.bits());
+            }
+            CurrentSpellSlot::Autorepeat => {
+                if spell.spell_id != AUTO_SHOT_SPELL_ID {
+                    self.interrupt_spell(CurrentSpellSlot::Generic, false, true);
+                    self.interrupt_spell(CurrentSpellSlot::Channeled, false, true);
+                }
+            }
+            CurrentSpellSlot::Melee => {}
+        }
+
+        self.subsystems.spells.current_spells.insert(slot, spell)
+    }
+
+    pub fn current_spell(&self, slot: CurrentSpellSlot) -> Option<CurrentSpellRef> {
+        self.subsystems.spells.current_spell(slot)
+    }
+
+    pub fn interrupt_spell(
+        &mut self,
+        slot: CurrentSpellSlot,
+        with_delayed: bool,
+        with_instant: bool,
+    ) -> Option<CurrentSpellRef> {
+        let spell = self.current_spell(slot)?;
+        if !with_delayed && spell.state == SpellState::Delayed {
+            return None;
+        }
+        if !with_instant && spell.cast_time_ms == 0 && spell.state != SpellState::Casting {
+            return None;
+        }
+        if !spell.interruptible {
+            return None;
+        }
+
+        let removed = self.subsystems.spells.clear_current_spell(slot);
+        self.sync_casting_unit_state();
+        removed
+    }
+
+    pub fn finish_spell(&mut self, slot: CurrentSpellSlot) -> Option<CurrentSpellRef> {
+        let removed = self.subsystems.spells.clear_current_spell(slot);
+        self.sync_casting_unit_state();
+        removed
+    }
+
+    pub fn interrupt_non_melee_spells(
+        &mut self,
+        spell_id: Option<u32>,
+        with_delayed: bool,
+        with_instant: bool,
+    ) -> Vec<(CurrentSpellSlot, CurrentSpellRef)> {
+        let mut removed = Vec::new();
+        for slot in [
+            CurrentSpellSlot::Generic,
+            CurrentSpellSlot::Autorepeat,
+            CurrentSpellSlot::Channeled,
+        ] {
+            let Some(spell) = self.current_spell(slot) else {
+                continue;
+            };
+            if spell_id.is_some_and(|wanted| wanted != spell.spell_id) {
+                continue;
+            }
+            let slot_with_delayed = with_delayed || slot == CurrentSpellSlot::Channeled;
+            let slot_with_instant = with_instant || slot == CurrentSpellSlot::Channeled;
+            if let Some(interrupted) =
+                self.interrupt_spell(slot, slot_with_delayed, slot_with_instant)
+            {
+                removed.push((slot, interrupted));
+            }
+        }
+        removed
+    }
+
+    pub fn find_current_spell_by_spell_id(&self, spell_id: u32) -> Option<CurrentSpellRef> {
+        self.subsystems
+            .spells
+            .find_current_spell_by_spell_id(spell_id)
+    }
+
+    fn sync_casting_unit_state(&mut self) {
+        if self.current_spell(CurrentSpellSlot::Generic).is_none()
+            && self.current_spell(CurrentSpellSlot::Channeled).is_none()
+        {
+            self.clear_unit_state(UnitState::CASTING.bits());
+        }
     }
 
     pub const fn attacking(&self) -> Option<ObjectGuid> {
@@ -666,6 +796,175 @@ mod tests {
         assert_eq!(unit.subsystems().vehicle.vehicle_guid, Some(target));
         assert_eq!(unit.subsystems().ai.active_ai.as_deref(), Some("TestAI"));
         assert!(!unit.unit_data_changes_mask().is_any_set());
+    }
+
+    #[test]
+    fn current_spell_slots_follow_cpp_ids_and_breakage_rules() {
+        assert_eq!(CurrentSpellSlot::Melee as u8, 0);
+        assert_eq!(CurrentSpellSlot::Generic as u8, 1);
+        assert_eq!(CurrentSpellSlot::Channeled as u8, 2);
+        assert_eq!(CurrentSpellSlot::Autorepeat as u8, 3);
+
+        let mut unit = Unit::new(true);
+        let caster = ObjectGuid::new(1, 1);
+        let generic = CurrentSpellRef::new(100, Some(caster), None).with_cast_time_ms(1_500);
+        let auto_shot = CurrentSpellRef::new(AUTO_SHOT_SPELL_ID, Some(caster), None);
+        let other_auto = CurrentSpellRef::new(200, Some(caster), None);
+
+        unit.set_current_cast_spell(CurrentSpellSlot::Autorepeat, auto_shot);
+        unit.set_current_cast_spell(CurrentSpellSlot::Generic, generic);
+        assert_eq!(unit.current_spell(CurrentSpellSlot::Generic), Some(generic));
+        assert_eq!(
+            unit.current_spell(CurrentSpellSlot::Autorepeat),
+            Some(auto_shot)
+        );
+        assert!(unit.has_unit_state(UnitState::CASTING.bits()));
+
+        unit.set_current_cast_spell(CurrentSpellSlot::Autorepeat, other_auto);
+        assert_eq!(unit.current_spell(CurrentSpellSlot::Generic), None);
+        assert_eq!(
+            unit.current_spell(CurrentSpellSlot::Autorepeat),
+            Some(other_auto)
+        );
+        assert!(!unit.has_unit_state(UnitState::CASTING.bits()));
+    }
+
+    #[test]
+    fn current_spell_generic_respects_channels_that_allow_actions() {
+        let mut unit = Unit::new(true);
+        let caster = ObjectGuid::new(1, 1);
+        let channel_with_actions = CurrentSpellRef::new(300, Some(caster), None)
+            .with_cast_time_ms(2_000)
+            .with_allow_actions_during_channel(true);
+        let generic = CurrentSpellRef::new(301, Some(caster), None).with_cast_time_ms(1_000);
+
+        unit.set_current_cast_spell(CurrentSpellSlot::Channeled, channel_with_actions);
+        unit.set_current_cast_spell(CurrentSpellSlot::Generic, generic);
+        assert_eq!(
+            unit.current_spell(CurrentSpellSlot::Channeled),
+            Some(channel_with_actions)
+        );
+        assert_eq!(unit.current_spell(CurrentSpellSlot::Generic), Some(generic));
+
+        let regular_channel =
+            CurrentSpellRef::new(302, Some(caster), None).with_cast_time_ms(2_000);
+        let next_generic = CurrentSpellRef::new(303, Some(caster), None).with_cast_time_ms(1_000);
+        unit.set_current_cast_spell(CurrentSpellSlot::Channeled, regular_channel);
+        unit.set_current_cast_spell(CurrentSpellSlot::Generic, next_generic);
+        assert_eq!(unit.current_spell(CurrentSpellSlot::Channeled), None);
+        assert_eq!(
+            unit.current_spell(CurrentSpellSlot::Generic),
+            Some(next_generic)
+        );
+    }
+
+    #[test]
+    fn interrupt_spell_honors_cpp_delayed_instant_and_interruptible_guards() {
+        let mut unit = Unit::new(true);
+        let caster = ObjectGuid::new(1, 1);
+        let instant = CurrentSpellRef::new(400, Some(caster), None);
+        let delayed = CurrentSpellRef::new(401, Some(caster), None)
+            .with_cast_time_ms(1_000)
+            .with_state(SpellState::Delayed);
+        let casting_instant =
+            CurrentSpellRef::new(402, Some(caster), None).with_state(SpellState::Casting);
+        let protected = CurrentSpellRef::new(403, Some(caster), None)
+            .with_cast_time_ms(1_000)
+            .with_interruptible(false);
+
+        unit.set_current_cast_spell(CurrentSpellSlot::Generic, instant);
+        assert_eq!(
+            unit.interrupt_spell(CurrentSpellSlot::Generic, true, false),
+            None
+        );
+        assert_eq!(unit.current_spell(CurrentSpellSlot::Generic), Some(instant));
+
+        unit.set_current_cast_spell(CurrentSpellSlot::Generic, delayed);
+        assert_eq!(
+            unit.interrupt_spell(CurrentSpellSlot::Generic, false, true),
+            None
+        );
+        assert_eq!(unit.current_spell(CurrentSpellSlot::Generic), Some(delayed));
+
+        unit.set_current_cast_spell(CurrentSpellSlot::Generic, casting_instant);
+        assert_eq!(
+            unit.interrupt_spell(CurrentSpellSlot::Generic, true, false),
+            Some(casting_instant)
+        );
+
+        unit.set_current_cast_spell(CurrentSpellSlot::Generic, protected);
+        assert_eq!(
+            unit.interrupt_spell(CurrentSpellSlot::Generic, true, true),
+            None
+        );
+        assert_eq!(
+            unit.current_spell(CurrentSpellSlot::Generic),
+            Some(protected)
+        );
+        assert_eq!(
+            unit.finish_spell(CurrentSpellSlot::Generic),
+            Some(protected)
+        );
+        assert_eq!(unit.current_spell(CurrentSpellSlot::Generic), None);
+    }
+
+    #[test]
+    fn interrupt_non_melee_spells_filters_and_forces_channeled_interrupts() {
+        let mut unit = Unit::new(true);
+        let caster = ObjectGuid::new(1, 1);
+        let melee = CurrentSpellRef::new(500, Some(caster), None);
+        let generic = CurrentSpellRef::new(501, Some(caster), None).with_cast_time_ms(1_000);
+        let auto = CurrentSpellRef::new(502, Some(caster), None);
+        let delayed_channel = CurrentSpellRef::new(503, Some(caster), None)
+            .with_state(SpellState::Delayed)
+            .with_cast_time_ms(1_000);
+
+        unit.subsystems_mut()
+            .spells
+            .set_current_spell(CurrentSpellSlot::Melee, melee);
+        unit.subsystems_mut()
+            .spells
+            .set_current_spell(CurrentSpellSlot::Generic, generic);
+        unit.subsystems_mut()
+            .spells
+            .set_current_spell(CurrentSpellSlot::Autorepeat, auto);
+        unit.subsystems_mut()
+            .spells
+            .set_current_spell(CurrentSpellSlot::Channeled, delayed_channel);
+
+        let removed = unit.interrupt_non_melee_spells(Some(503), false, false);
+        assert_eq!(
+            removed,
+            vec![(CurrentSpellSlot::Channeled, delayed_channel)]
+        );
+        assert_eq!(unit.current_spell(CurrentSpellSlot::Melee), Some(melee));
+        assert_eq!(unit.current_spell(CurrentSpellSlot::Generic), Some(generic));
+        assert_eq!(unit.current_spell(CurrentSpellSlot::Autorepeat), Some(auto));
+
+        let removed = unit.interrupt_non_melee_spells(None, true, true);
+        assert_eq!(
+            removed,
+            vec![
+                (CurrentSpellSlot::Generic, generic),
+                (CurrentSpellSlot::Autorepeat, auto),
+            ]
+        );
+        assert_eq!(unit.current_spell(CurrentSpellSlot::Melee), Some(melee));
+    }
+
+    #[test]
+    fn find_current_spell_by_spell_id_searches_all_cpp_slots() {
+        let mut unit = Unit::new(true);
+        let caster = ObjectGuid::new(1, 1);
+        let melee = CurrentSpellRef::new(600, Some(caster), None);
+        let channel = CurrentSpellRef::new(601, Some(caster), None).with_cast_time_ms(1_000);
+
+        unit.set_current_cast_spell(CurrentSpellSlot::Melee, melee);
+        unit.set_current_cast_spell(CurrentSpellSlot::Channeled, channel);
+
+        assert_eq!(unit.find_current_spell_by_spell_id(600), Some(melee));
+        assert_eq!(unit.find_current_spell_by_spell_id(601), Some(channel));
+        assert_eq!(unit.find_current_spell_by_spell_id(602), None);
     }
 
     #[test]

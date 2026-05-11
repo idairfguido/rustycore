@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use wow_constants::SpellState;
 use wow_core::ObjectGuid;
 
 /// Minimal bridge for TrinityCore `Unit` aura containers.
@@ -143,6 +144,10 @@ pub struct CurrentSpellRef {
     pub spell_id: u32,
     pub caster_guid: Option<ObjectGuid>,
     pub cast_id: Option<ObjectGuid>,
+    pub cast_time_ms: u32,
+    pub state: SpellState,
+    pub interruptible: bool,
+    pub allow_actions_during_channel: bool,
 }
 
 impl CurrentSpellRef {
@@ -155,7 +160,34 @@ impl CurrentSpellRef {
             spell_id,
             caster_guid,
             cast_id,
+            cast_time_ms: 0,
+            state: SpellState::None,
+            interruptible: true,
+            allow_actions_during_channel: false,
         }
+    }
+
+    pub const fn with_cast_time_ms(mut self, cast_time_ms: u32) -> Self {
+        self.cast_time_ms = cast_time_ms;
+        self
+    }
+
+    pub const fn with_state(mut self, state: SpellState) -> Self {
+        self.state = state;
+        self
+    }
+
+    pub const fn with_interruptible(mut self, interruptible: bool) -> Self {
+        self.interruptible = interruptible;
+        self
+    }
+
+    pub const fn with_allow_actions_during_channel(
+        mut self,
+        allow_actions_during_channel: bool,
+    ) -> Self {
+        self.allow_actions_during_channel = allow_actions_during_channel;
+        self
     }
 }
 
@@ -249,6 +281,13 @@ impl SpellSubsystem {
 
     pub fn clear_current_spells(&mut self) {
         self.current_spells.clear();
+    }
+
+    pub fn find_current_spell_by_spell_id(&self, spell_id: u32) -> Option<CurrentSpellRef> {
+        self.current_spells
+            .values()
+            .find(|spell| spell.spell_id == spell_id)
+            .copied()
     }
 }
 
