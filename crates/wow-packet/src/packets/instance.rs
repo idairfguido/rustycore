@@ -81,6 +81,40 @@ impl ServerPacket for InstanceResetFailed {
     }
 }
 
+/// C++ `RaidInstanceResetWarningType`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum RaidInstanceMessageType {
+    WarningHours = 1,
+    WarningMinutes = 2,
+    WarningMinutesSoon = 3,
+    Welcome = 4,
+    Expired = 5,
+}
+
+/// C++ `WorldPackets::Instance::RaidInstanceMessage` / `SMSG_RAID_INSTANCE_MESSAGE`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RaidInstanceMessage {
+    pub message_type: RaidInstanceMessageType,
+    pub map_id: u32,
+    pub difficulty_id: u32,
+    pub locked: bool,
+    pub extended: bool,
+}
+
+impl ServerPacket for RaidInstanceMessage {
+    const OPCODE: ServerOpcodes = ServerOpcodes::RaidInstanceMessage;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_uint8(self.message_type as u8);
+        pkt.write_uint32(self.map_id);
+        pkt.write_uint32(self.difficulty_id);
+        pkt.write_bit(self.locked);
+        pkt.write_bit(self.extended);
+        pkt.flush_bits();
+    }
+}
+
 /// C++ `WorldPackets::Instance::InstanceLockResponse` / `CMSG_INSTANCE_LOCK_RESPONSE`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InstanceLockResponse {
@@ -197,6 +231,30 @@ mod tests {
         .write(&mut pkt);
 
         assert_eq!(&pkt.data()[2..], &[0x77, 0x02, 0x00, 0x00, 0x40]);
+    }
+
+    #[test]
+    fn raid_instance_message_serialization_matches_cpp_order_and_bits() {
+        let mut pkt = WorldPacket::new_server(ServerOpcodes::RaidInstanceMessage);
+
+        RaidInstanceMessage {
+            message_type: RaidInstanceMessageType::Welcome,
+            map_id: 631,
+            difficulty_id: 3,
+            locked: true,
+            extended: true,
+        }
+        .write(&mut pkt);
+
+        assert_eq!(
+            &pkt.data()[2..],
+            &[
+                0x04, // Type = RAID_INSTANCE_WELCOME
+                0x77, 0x02, 0x00, 0x00, // MapID
+                0x03, 0x00, 0x00, 0x00, // DifficultyID
+                0xC0, // Locked=true, Extended=true
+            ]
+        );
     }
 
     #[test]
