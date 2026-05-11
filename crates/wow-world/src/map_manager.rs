@@ -3,8 +3,8 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use tracing::{debug, info, warn};
-use wow_constants::WeaponAttackType;
 use wow_constants::movement::MovementFlag;
+use wow_constants::{UnitState, WeaponAttackType};
 use wow_core::{ObjectGuid, Position};
 use wow_entities::{Creature, CreatureAiState};
 use wow_movement::{
@@ -423,6 +423,9 @@ impl WorldCreature {
                 false,
                 None,
             );
+        self.creature
+            .unit_mut()
+            .add_unit_state(UnitState::ROAMING_MOVE.bits());
         self.active_move_spline = Some(spline.clone());
         Some((launch.real_position, spline))
     }
@@ -459,6 +462,9 @@ impl WorldCreature {
                 .subsystems_mut()
                 .motion
                 .finalize_spline();
+            self.creature
+                .unit_mut()
+                .clear_unit_state(UnitState::ROAMING_MOVE.bits());
         } else {
             self.active_move_spline = Some(spline);
         }
@@ -502,6 +508,9 @@ impl WorldCreature {
         let motion = &mut self.creature.unit_mut().subsystems_mut().motion;
         motion.finalize_spline();
         motion.spline.spline_id = stop.spline_id;
+        self.creature
+            .unit_mut()
+            .clear_unit_state(UnitState::ROAMING_MOVE.bits());
         Some(stop)
     }
 
@@ -516,6 +525,9 @@ impl WorldCreature {
             .subsystems_mut()
             .motion
             .finalize_spline();
+        self.creature
+            .unit_mut()
+            .clear_unit_state(UnitState::ROAMING_MOVE.bits());
     }
 
     pub fn can_swing(&self) -> bool {
@@ -1405,6 +1417,12 @@ mod tests {
         assert_eq!(from, Position::new(10.0, 10.0, 0.0, 0.0));
         assert!(creature.active_move_spline.is_some());
         assert_eq!(creature.spline_id(), 2);
+        assert!(
+            creature
+                .creature
+                .unit()
+                .has_unit_state(UnitState::ROAMING_MOVE.bits())
+        );
         let motion_spline = &creature.creature.unit().subsystems().motion.spline;
         assert!(motion_spline.enabled);
         assert!(!motion_spline.finalized);
@@ -1440,6 +1458,12 @@ mod tests {
         assert!(!motion_spline.enabled);
         assert!(motion_spline.finalized);
         assert_eq!(motion_spline.progress_ms, motion_spline.duration_ms);
+        assert!(
+            !creature
+                .creature
+                .unit()
+                .has_unit_state(UnitState::ROAMING_MOVE.bits())
+        );
     }
 
     #[test]
@@ -1479,6 +1503,12 @@ mod tests {
         assert_eq!(creature.position(), stop.position);
         assert!(creature.active_move_spline.is_none());
         assert_eq!(creature.move_target(), None);
+        assert!(
+            !creature
+                .creature
+                .unit()
+                .has_unit_state(UnitState::ROAMING_MOVE.bits())
+        );
         let motion_spline = &creature.creature.unit().subsystems().motion.spline;
         assert!(!motion_spline.enabled);
         assert!(motion_spline.finalized);

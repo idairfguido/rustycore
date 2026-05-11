@@ -3,9 +3,9 @@
 > **C++ canonical path:** `src/server/game/Movement/MotionMaster.{h,cpp}` + `src/server/game/Movement/MovementGenerator.{h,cpp}` + `src/server/game/Movement/MovementGenerators/*.{h,cpp}` + `src/server/game/Movement/AbstractFollower.{h,cpp}` + `src/server/game/Movement/MovementDefines.{h,cpp}`
 > **Rust target crate(s):** future `crates/wow-movement/src/motion_master.rs` + `crates/wow-movement/src/generators/`
 > **Layer:** L5 sub-module (depends on Spline L5, PathGen L5, Entities L4, AI L6)
-> **Status:** ❌ not started — 0 of 13 generators ported, no `MotionMaster`, no trait
+> **Status:** ⚠️ partial — structural `MotionSubsystem` exists in `wow-entities`; first represented `PointMovementGenerator` state bridge exists, but executable generators are not fully ported
 > **Audited vs C++:** ✅ complete 2026-05-01
-> **Last updated:** 2026-05-01
+> **Last updated:** 2026-05-11
 
 > Sub-doc of [`movement.md`](movement.md). Cross-links: [`movement-spline.md`](movement-spline.md) (consumed by every generator that drives a `MoveSplineInit`), [`movement-pathgen.md`](movement-pathgen.md) (called by chase/follow/point/waypoint to compute walkable paths), [`common-collision.md`](common-collision.md) (height/LOS clamps used by random/wander), [`ai-base.md`](ai-base.md) (CreatureAI is the primary caller of `MotionMaster::Move*`).
 
@@ -14,6 +14,11 @@
 ## 1. Purpose
 
 Drive **what a Unit decides to do next**: idle, wander, patrol a waypoint path, chase a hostile target, follow a friendly target, flee in fear, return home after evade, fly a taxi, hop along a script-defined spline chain, anchor to a formation leader, or run a one-shot custom spline. `MotionMaster` is the per-Unit stack of `MovementGenerator` instances split into priority slots; the top-of-stack generator owns the Unit's motion until it expires or is interrupted. Every generator ultimately produces a `MoveSpline` (see [`movement-spline.md`](movement-spline.md)) and emits the matching client packet via `MoveSplineInit::Launch`.
+
+Current Rust status:
+- `crates/wow-entities/src/unit_subsystems.rs` contains a structural `MotionSubsystem` with Trinity generator ids, slots, priorities, base-unit-state accounting, `move_point`, `move_charge`, `move_follow`, stop-on-death, and represented spline progress.
+- `#A06.8h.3e.1` ports the first C++ state side effects for represented point/spline motion: `move_point` stores `POINT_MOTION_TYPE` with `UNIT_STATE_ROAMING`, and `WorldCreature` marks `UNIT_STATE_ROAMING_MOVE` while its real `wow_movement::MoveSpline` is active.
+- Still missing: concrete generator `Initialize/Update/Finalize` behavior, pathgen-backed destinations, `MovementInform`, follow/chase/flee/random/waypoint/taxi/spline-chain runtime logic, and generic MotionMaster delayed-action semantics.
 
 ---
 

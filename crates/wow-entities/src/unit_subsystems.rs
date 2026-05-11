@@ -1814,6 +1814,7 @@ impl MotionSubsystem {
         self.add_generator(
             MovementGeneratorRef::new(MovementGeneratorKind::Point, MovementSlot::Active)
                 .with_priority(MovementGeneratorPriority::Normal)
+                .with_base_unit_state(UnitState::ROAMING.bits())
                 .with_movement_id(movement_id),
         );
     }
@@ -2871,6 +2872,30 @@ mod unit_subsystems_tests {
         assert_eq!(
             motion.current_movement_generator().kind,
             MovementGeneratorKind::Follow
+        );
+    }
+
+    #[test]
+    fn motion_move_point_tracks_cpp_point_generator_base_state() {
+        let mut motion = MotionSubsystem::default();
+
+        motion.move_point(9);
+
+        let current = motion.current_movement_generator();
+        assert_eq!(current.kind, MovementGeneratorKind::Point);
+        assert_eq!(current.priority, MovementGeneratorPriority::Normal);
+        assert_eq!(current.base_unit_state, UnitState::ROAMING.bits());
+        assert_eq!(current.movement_id, 9);
+        assert_eq!(
+            motion.base_unit_states.get(&UnitState::ROAMING.bits()),
+            Some(&1)
+        );
+
+        let removed = motion.clear_by_priority(MovementGeneratorPriority::Normal);
+        assert_eq!(removed.len(), 1);
+        assert_eq!(
+            motion.base_unit_states.get(&UnitState::ROAMING.bits()),
+            None
         );
     }
 
