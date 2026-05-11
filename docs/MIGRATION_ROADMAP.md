@@ -611,6 +611,8 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
   - [ ] **#032b** Migrar runtime de jugador al controlador/player entity.
     - [x] **#032b1** Dinero, XP/NextLevelXP, selección, spells y `_currencyStorage` quedan reflejados en `SessionPlayerController` con getters/setters tipo C++ `Player::{GetMoney,SetMoney,GetXP,SetXP,SetSelection,GetSpellMap,_currencyStorage}`; login/trainer/loot/quest/registry usan la ruta canónica donde ya aplica.
     - [ ] **#032b2** Migrar `m_items`/buyback/inventory item objects al controlador/player entity sin depender de `WorldSession` como owner de inventario.
+      - [x] **#032b2a** Crear `SessionPlayerInventoryRuntime` dentro del controlador y alimentar desde login/logout/clear; snapshots de valores, `PlayerRegistry`, `ObjectAccessor`, `GetItemByPos` representado y planes directos de store/unequip leen por esta ruta canónica cuando existe.
+      - [ ] **#032b2b** Cambiar mutaciones directas de `character`/`loot`/`spell` sobre `inventory_items`, `buyback_items` e `inventory_item_objects` a métodos del controlador, hasta que `WorldSession` deje de ser owner real de inventario.
   - [ ] **#032c** Cambiar handlers directos (`character`, `loot`, `trainer`, `spell`, `quest`, `chat`, `group`) a getters/mutators del controlador, contrastando cada bloque contra `Player`/`WorldSession` C++.
   - [ ] **#032d** Retirar o hacer privados los campos heredados cuando dejen de ser fuente runtime, dejando solo puentes `cfg(test)` si aún son necesarios.
 

@@ -2095,6 +2095,7 @@ impl WorldSession {
         self.buyback_timestamp = [0; BUYBACK_SLOT_COUNT];
         self.current_buyback_slot = BUYBACK_SLOT_START;
         self.inventory_item_objects.clear();
+        self.sync_player_inventory_like_cpp();
         self.player_currencies.clear();
         self.set_active_loot_guid(ObjectGuid::EMPTY);
 
@@ -2183,6 +2184,7 @@ impl WorldSession {
             self.buyback_price = [0; BUYBACK_SLOT_COUNT];
             self.buyback_timestamp = [0; BUYBACK_SLOT_COUNT];
             self.current_buyback_slot = BUYBACK_SLOT_START;
+            self.sync_player_inventory_like_cpp();
             return;
         }
 
@@ -2219,6 +2221,7 @@ impl WorldSession {
         self.buyback_price = [0; BUYBACK_SLOT_COUNT];
         self.buyback_timestamp = [0; BUYBACK_SLOT_COUNT];
         self.current_buyback_slot = BUYBACK_SLOT_START;
+        self.sync_player_inventory_like_cpp();
         self.sync_object_accessor_player();
     }
 
@@ -2330,6 +2333,7 @@ impl WorldSession {
         let realm_id = self.realm_id();
         self.inventory_items.clear();
         self.inventory_item_objects.clear();
+        self.sync_player_inventory_like_cpp();
         self.player_currencies.clear();
         {
             let mut eq_stmt = char_db.prepare(CharStatements::SEL_CHAR_EQUIPMENT);
@@ -2525,6 +2529,7 @@ impl WorldSession {
             // inventory_type is now loaded from the canonical ItemTemplate bridge.
             // No SQL cache needed.
         }
+        self.sync_player_inventory_like_cpp();
 
         // ── Load character currencies from character_currency ──
         // C++ `Player::_LoadCurrency` skips rows not found in sCurrencyTypesStore.
