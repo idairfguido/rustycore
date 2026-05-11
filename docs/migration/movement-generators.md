@@ -18,6 +18,7 @@ Drive **what a Unit decides to do next**: idle, wander, patrol a waypoint path, 
 Current Rust status:
 - `crates/wow-entities/src/unit_subsystems.rs` contains a structural `MotionSubsystem` with Trinity generator ids, slots, priorities, base-unit-state accounting, `move_point`, `move_charge`, `move_follow`, stop-on-death, and represented spline progress.
 - `#A06.8h.3e.1` ports the first C++ state side effects for represented point/spline motion: `move_point` stores `POINT_MOTION_TYPE` with `UNIT_STATE_ROAMING`, and `WorldCreature` marks `UNIT_STATE_ROAMING_MOVE` while its real `wow_movement::MoveSpline` is active.
+- `#A06.8h.3e.2` ports the pure jump speed/parabola helpers used by `MotionMaster::MoveJump` and `MotionMaster::CalculateJumpSpeeds`; callers still need to supply real Unit speeds and movement type.
 - Still missing: concrete generator `Initialize/Update/Finalize` behavior, pathgen-backed destinations, `MovementInform`, follow/chase/flee/random/waypoint/taxi/spline-chain runtime logic, and generic MotionMaster delayed-action semantics.
 
 ---
@@ -534,7 +535,7 @@ Numbered for cross-reference from `MIGRATION_ROADMAP.md` §5. Complexity: **L** 
 - [ ] **#MOVE-GEN.20** `FlightPathMovementGenerator` + `TaxiPath.dbc`/`TaxiPathNode.dbc` integration + `SMSG_FLIGHT_SPLINE_SYNC`. (XL)
 - [ ] **#MOVE-GEN.21** `SplineChainMovementGenerator` + `script_spline_chain_*` loader + `SplineChainResumeInfo`. (H)
 - [ ] **#MOVE-GEN.22** `GenericMovementGenerator` (lambda capture for one-shot custom splines). (M)
-- [ ] **#MOVE-GEN.23** `MotionMaster::MoveJump` / `MoveCharge` / `MoveKnockbackFrom` / `MoveFall` (parabolic helpers — depend on movement-spline). (H)
+- [ ] **#MOVE-GEN.23** `MotionMaster::MoveJump` / `MoveCharge` / `MoveKnockbackFrom` / `MoveFall` (parabolic helpers — depend on movement-spline). First pure helper slice is done: Rust has C++-matched jump max-height and `CalculateJumpSpeeds` math; remaining work is real Unit speed selection, GenericMovementGenerator launch, arrival casts, pathgen charge and fall height lookup. (H)
 - [ ] **#MOVE-GEN.24** Wire `Unit::MovementInform(type, id)` AI callback (cross-link with [`ai-base.md`](ai-base.md)). (M)
 - [ ] **#MOVE-GEN.25** Wire per-Unit `MotionMaster::update(diff)` into `MapManager` creature tick. (H)
 - [ ] **#MOVE-GEN.26** Replace `wow_ai::wander` linear-tween with `RandomMovementGenerator` push at spawn time. (M)

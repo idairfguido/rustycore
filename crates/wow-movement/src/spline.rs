@@ -296,6 +296,42 @@ pub struct MoveSplineStopResult {
     pub stop_distance_tolerance: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct JumpSpeeds {
+    pub speed_xy: f32,
+    pub speed_z: f32,
+}
+
+pub fn compute_jump_max_height_like_cpp(speed_z: f32) -> f32 {
+    let move_time_half = speed_z / GRAVITY_LIKE_CPP;
+    -compute_fall_elevation(move_time_half, false, -speed_z)
+}
+
+pub fn calculate_jump_speeds_like_cpp(
+    distance: f32,
+    base_speed: f32,
+    current_speed: f32,
+    speed_multiplier: f32,
+    min_height: f32,
+    max_height: f32,
+) -> JumpSpeeds {
+    let speed_xy = (base_speed * 3.0 * speed_multiplier).min(28.0_f32.max(current_speed * 4.0));
+    let duration = distance / speed_xy;
+    let duration_sqr = duration * duration;
+    let height = if duration_sqr < min_height * 8.0 / GRAVITY_LIKE_CPP {
+        min_height
+    } else if duration_sqr > max_height * 8.0 / GRAVITY_LIKE_CPP {
+        max_height
+    } else {
+        GRAVITY_LIKE_CPP * duration_sqr / 8.0
+    };
+
+    JumpSpeeds {
+        speed_xy,
+        speed_z: (2.0 * GRAVITY_LIKE_CPP * height).sqrt(),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MoveSplineLaunchError {
     EmptyPath,
@@ -1375,6 +1411,21 @@ mod tests {
         assert!((compute_fall_time(10.0, false) - 1.018_208).abs() < 0.000_01);
         assert!((compute_fall_elevation(1.0, false, 0.0) - 9.645_553).abs() < 0.000_01);
         assert!(compute_fall_time(-1.0, false).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn jump_math_matches_cpp_motion_master_formulas() {
+        assert!((compute_jump_max_height_like_cpp(10.0) - 2.591_868).abs() < 0.000_01);
+
+        let mid = calculate_jump_speeds_like_cpp(20.0, 7.0, 7.0, 1.0, 2.0, 10.0);
+        assert_eq!(mid.speed_xy, 21.0);
+        assert!((mid.speed_z - 9.186_241).abs() < 0.000_01);
+
+        let min_clamped = calculate_jump_speeds_like_cpp(1.0, 7.0, 7.0, 1.0, 2.0, 10.0);
+        assert!((min_clamped.speed_z - 8.784_328).abs() < 0.000_01);
+
+        let max_clamped = calculate_jump_speeds_like_cpp(100.0, 7.0, 7.0, 1.0, 2.0, 10.0);
+        assert!((max_clamped.speed_z - 19.642_355).abs() < 0.000_01);
     }
 
     #[test]
