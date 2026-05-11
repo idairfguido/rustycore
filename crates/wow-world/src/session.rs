@@ -140,6 +140,57 @@ pub(crate) struct MovementAckEventLikeCpp {
     pub accepted: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MovementSpeedAckActionLikeCpp {
+    Accepted,
+    SkippedPending,
+    Corrected,
+    Kicked,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UnitMoveTypeLikeCpp {
+    Walk = 0,
+    Run = 1,
+    RunBack = 2,
+    Swim = 3,
+    SwimBack = 4,
+    TurnRate = 5,
+    Flight = 6,
+    FlightBack = 7,
+    PitchRate = 8,
+}
+
+impl UnitMoveTypeLikeCpp {
+    pub(crate) const COUNT: usize = 9;
+
+    pub(crate) fn index(self) -> usize {
+        self as usize
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct MovementSpeedAckEventLikeCpp {
+    pub opcode: ClientOpcodes,
+    pub move_type: Option<UnitMoveTypeLikeCpp>,
+    pub ack_speed: f32,
+    pub expected_speed: Option<f32>,
+    pub remaining_forced_changes: Option<u8>,
+    pub action: MovementSpeedAckActionLikeCpp,
+}
+
+const PLAYER_BASE_MOVE_SPEED_LIKE_CPP: [f32; UnitMoveTypeLikeCpp::COUNT] = [
+    2.5,      // MOVE_WALK
+    7.0,      // MOVE_RUN
+    4.5,      // MOVE_RUN_BACK
+    4.722222, // MOVE_SWIM
+    2.5,      // MOVE_SWIM_BACK
+    3.141594, // MOVE_TURN_RATE
+    7.0,      // MOVE_FLIGHT
+    4.5,      // MOVE_FLIGHT_BACK
+    3.14,     // MOVE_PITCH_RATE
+];
+
 impl Default for RepresentedGameObjectUseState {
     fn default() -> Self {
         Self {
@@ -752,6 +803,18 @@ pub struct WorldSession {
     movement_visibility_refresh_requests_like_cpp: u32,
     /// ACKs accepted by represented movement handling until full Unit movement runtime/broadcasts exist.
     movement_ack_events_like_cpp: Vec<MovementAckEventLikeCpp>,
+    /// C++ `Player::m_forced_speed_changes[MAX_MOVE_TYPE]` represented state.
+    forced_speed_changes_like_cpp: [u8; UnitMoveTypeLikeCpp::COUNT],
+    /// C++ `Unit::m_speed_rate[MAX_MOVE_TYPE]` represented state for player-controlled movers.
+    movement_speed_rates_like_cpp: [f32; UnitMoveTypeLikeCpp::COUNT],
+    /// Represented transport guard for speed ACK anticheat; C++ skips speed mismatch while on transport.
+    player_on_transport_like_cpp: bool,
+    /// C++ `Player::m_movementForceModMagnitudeChanges` represented state.
+    movement_force_mod_magnitude_changes_like_cpp: u8,
+    /// C++ `MovementForces::GetModMagnitude()` represented value; default is 1.0 when no force container exists.
+    movement_force_mod_magnitude_like_cpp: f32,
+    /// Speed ACK outcomes recorded until full Unit speed runtime owns this state.
+    movement_speed_ack_events_like_cpp: Vec<MovementSpeedAckEventLikeCpp>,
 
     // ── Aura system ───────────────────────────────────────────────
     /// All visible auras on the player: slot (0-254) → AuraApplication
@@ -1170,6 +1233,12 @@ impl WorldSession {
             active_player_transport_server_time_like_cpp: 0,
             movement_visibility_refresh_requests_like_cpp: 0,
             movement_ack_events_like_cpp: Vec::new(),
+            forced_speed_changes_like_cpp: [0; UnitMoveTypeLikeCpp::COUNT],
+            movement_speed_rates_like_cpp: [1.0; UnitMoveTypeLikeCpp::COUNT],
+            player_on_transport_like_cpp: false,
+            movement_force_mod_magnitude_changes_like_cpp: 0,
+            movement_force_mod_magnitude_like_cpp: 1.0,
+            movement_speed_ack_events_like_cpp: Vec::new(),
             visible_auras: HashMap::new(),
             spell_store: None,
             quest_store: None,
@@ -6227,6 +6296,190 @@ impl WorldSession {
         self.movement_ack_events_like_cpp
             .last()
             .and_then(|event| event.adjusted_time)
+    }
+
+    pub(crate) fn movement_speed_ack_move_type_like_cpp(
+        opcode: ClientOpcodes,
+    ) -> Option<UnitMoveTypeLikeCpp> {
+        match opcode {
+            ClientOpcodes::MoveForceWalkSpeedChangeAck => Some(UnitMoveTypeLikeCpp::Walk),
+            ClientOpcodes::MoveForceRunSpeedChangeAck => Some(UnitMoveTypeLikeCpp::Run),
+            ClientOpcodes::MoveForceRunBackSpeedChangeAck => Some(UnitMoveTypeLikeCpp::RunBack),
+            ClientOpcodes::MoveForceSwimSpeedChangeAck => Some(UnitMoveTypeLikeCpp::Swim),
+            ClientOpcodes::MoveForceSwimBackSpeedChangeAck => Some(UnitMoveTypeLikeCpp::SwimBack),
+            ClientOpcodes::MoveForceTurnRateChangeAck => Some(UnitMoveTypeLikeCpp::TurnRate),
+            ClientOpcodes::MoveForceFlightSpeedChangeAck => Some(UnitMoveTypeLikeCpp::Flight),
+            ClientOpcodes::MoveForceFlightBackSpeedChangeAck => {
+                Some(UnitMoveTypeLikeCpp::FlightBack)
+            }
+            ClientOpcodes::MoveForcePitchRateChangeAck => Some(UnitMoveTypeLikeCpp::PitchRate),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn player_movement_speed_like_cpp(&self, move_type: UnitMoveTypeLikeCpp) -> f32 {
+        PLAYER_BASE_MOVE_SPEED_LIKE_CPP[move_type.index()]
+            * self.movement_speed_rates_like_cpp[move_type.index()]
+    }
+
+    pub(crate) fn handle_force_speed_change_ack_like_cpp(
+        &mut self,
+        opcode: ClientOpcodes,
+        ack: &wow_packet::packets::movement::MovementAck,
+        speed: f32,
+    ) -> bool {
+        let Some(move_type) = Self::movement_speed_ack_move_type_like_cpp(opcode) else {
+            self.movement_speed_ack_events_like_cpp
+                .push(MovementSpeedAckEventLikeCpp {
+                    opcode,
+                    move_type: None,
+                    ack_speed: speed,
+                    expected_speed: None,
+                    remaining_forced_changes: None,
+                    action: MovementSpeedAckActionLikeCpp::Kicked,
+                });
+            return false;
+        };
+
+        if !self.record_validated_movement_ack_like_cpp(opcode, ack, Some(speed)) {
+            self.movement_speed_ack_events_like_cpp
+                .push(MovementSpeedAckEventLikeCpp {
+                    opcode,
+                    move_type: Some(move_type),
+                    ack_speed: speed,
+                    expected_speed: None,
+                    remaining_forced_changes: None,
+                    action: MovementSpeedAckActionLikeCpp::Kicked,
+                });
+            return false;
+        }
+
+        let index = move_type.index();
+        if self.forced_speed_changes_like_cpp[index] > 0 {
+            self.forced_speed_changes_like_cpp[index] =
+                self.forced_speed_changes_like_cpp[index].saturating_sub(1);
+            if self.forced_speed_changes_like_cpp[index] > 0 {
+                self.movement_speed_ack_events_like_cpp
+                    .push(MovementSpeedAckEventLikeCpp {
+                        opcode,
+                        move_type: Some(move_type),
+                        ack_speed: speed,
+                        expected_speed: Some(self.player_movement_speed_like_cpp(move_type)),
+                        remaining_forced_changes: Some(self.forced_speed_changes_like_cpp[index]),
+                        action: MovementSpeedAckActionLikeCpp::SkippedPending,
+                    });
+                return true;
+            }
+        }
+
+        let expected_speed = self.player_movement_speed_like_cpp(move_type);
+        let action = if !self.player_on_transport_like_cpp && (expected_speed - speed).abs() > 0.01
+        {
+            if expected_speed > speed {
+                // C++ calls SetSpeedRate(GetSpeedRate()) to force the client back to the server value.
+                MovementSpeedAckActionLikeCpp::Corrected
+            } else {
+                self.kick("WorldSession::HandleForceSpeedChangeAck Incorrect speed");
+                MovementSpeedAckActionLikeCpp::Kicked
+            }
+        } else {
+            MovementSpeedAckActionLikeCpp::Accepted
+        };
+
+        self.movement_speed_ack_events_like_cpp
+            .push(MovementSpeedAckEventLikeCpp {
+                opcode,
+                move_type: Some(move_type),
+                ack_speed: speed,
+                expected_speed: Some(expected_speed),
+                remaining_forced_changes: Some(self.forced_speed_changes_like_cpp[index]),
+                action,
+            });
+        !matches!(action, MovementSpeedAckActionLikeCpp::Kicked)
+    }
+
+    pub(crate) fn handle_movement_force_mod_magnitude_ack_like_cpp(
+        &mut self,
+        opcode: ClientOpcodes,
+        ack: &wow_packet::packets::movement::MovementAck,
+        speed: f32,
+    ) -> bool {
+        if !self.record_validated_movement_ack_like_cpp(opcode, ack, Some(speed)) {
+            self.movement_speed_ack_events_like_cpp
+                .push(MovementSpeedAckEventLikeCpp {
+                    opcode,
+                    move_type: None,
+                    ack_speed: speed,
+                    expected_speed: None,
+                    remaining_forced_changes: None,
+                    action: MovementSpeedAckActionLikeCpp::Kicked,
+                });
+            return false;
+        }
+
+        let mut action = MovementSpeedAckActionLikeCpp::Accepted;
+        if self.movement_force_mod_magnitude_changes_like_cpp > 0 {
+            self.movement_force_mod_magnitude_changes_like_cpp = self
+                .movement_force_mod_magnitude_changes_like_cpp
+                .saturating_sub(1);
+            if self.movement_force_mod_magnitude_changes_like_cpp == 0
+                && (self.movement_force_mod_magnitude_like_cpp - speed).abs() > 0.01
+            {
+                self.kick(
+                    "WorldSession::HandleMoveSetModMovementForceMagnitudeAck Incorrect magnitude",
+                );
+                action = MovementSpeedAckActionLikeCpp::Kicked;
+            }
+        }
+
+        self.movement_speed_ack_events_like_cpp
+            .push(MovementSpeedAckEventLikeCpp {
+                opcode,
+                move_type: None,
+                ack_speed: speed,
+                expected_speed: Some(self.movement_force_mod_magnitude_like_cpp),
+                remaining_forced_changes: Some(self.movement_force_mod_magnitude_changes_like_cpp),
+                action,
+            });
+        !matches!(action, MovementSpeedAckActionLikeCpp::Kicked)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_forced_speed_changes_like_cpp(
+        &mut self,
+        move_type: UnitMoveTypeLikeCpp,
+        count: u8,
+    ) {
+        self.forced_speed_changes_like_cpp[move_type.index()] = count;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_player_movement_speed_rate_like_cpp(
+        &mut self,
+        move_type: UnitMoveTypeLikeCpp,
+        rate: f32,
+    ) {
+        self.movement_speed_rates_like_cpp[move_type.index()] = rate.max(0.01);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_player_on_transport_like_cpp(&mut self, on_transport: bool) {
+        self.player_on_transport_like_cpp = on_transport;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_movement_force_mod_magnitude_changes_like_cpp(&mut self, count: u8) {
+        self.movement_force_mod_magnitude_changes_like_cpp = count;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_movement_force_mod_magnitude_like_cpp(&mut self, magnitude: f32) {
+        self.movement_force_mod_magnitude_like_cpp = magnitude;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn movement_speed_ack_events_like_cpp(&self) -> &[MovementSpeedAckEventLikeCpp] {
+        &self.movement_speed_ack_events_like_cpp
     }
 
     pub(crate) fn interrupt_non_melee_spell_cast_for_loot_like_cpp(&mut self) -> bool {

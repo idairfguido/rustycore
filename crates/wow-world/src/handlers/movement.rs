@@ -323,8 +323,12 @@ impl WorldSession {
             speed = pkt.speed,
             "MovementSpeedAck"
         );
-        let accepted =
-            self.record_validated_movement_ack_like_cpp(opcode, &pkt.ack, Some(pkt.speed));
+        let accepted = if matches!(opcode, ClientOpcodes::MoveSetModMovementForceMagnitudeAck) {
+            self.handle_movement_force_mod_magnitude_ack_like_cpp(opcode, &pkt.ack, pkt.speed)
+        } else {
+            self.handle_force_speed_change_ack_like_cpp(opcode, &pkt.ack, pkt.speed)
+        };
+
         if accepted && matches!(opcode, ClientOpcodes::MoveSetModMovementForceMagnitudeAck) {
             let mut status = pkt.ack.status.clone();
             status.time = self.adjust_client_movement_time_like_cpp(status.time);
@@ -464,7 +468,10 @@ impl WorldSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::{AuraApplication, RepresentedAuraEffectLikeCpp};
+    use crate::session::{
+        AuraApplication, MovementSpeedAckActionLikeCpp, RepresentedAuraEffectLikeCpp,
+        UnitMoveTypeLikeCpp,
+    };
     use wow_core::ObjectGuid;
 
     fn make_session() -> WorldSession {
@@ -812,6 +819,101 @@ mod tests {
             session.movement_ack_events_like_cpp()[1].movement_force_id,
             Some(force_guid)
         );
+    }
+
+    #[test]
+    fn movement_speed_ack_matches_cpp_counters_and_anticheat() {
+        let mut session = make_session();
+        let guid = ObjectGuid::create_player(1, 42);
+        session.set_player_guid(Some(guid));
+        let ack = wow_packet::packets::movement::MovementAck {
+            status: MovementInfo {
+                guid,
+                time: 1_000,
+                position: wow_core::Position::new(10.0, 20.0, 30.0, 1.5),
+                ..MovementInfo::default()
+            },
+            ack_index: 10,
+        };
+
+        session.set_player_movement_speed_rate_like_cpp(UnitMoveTypeLikeCpp::Run, 1.0);
+        session.set_forced_speed_changes_like_cpp(UnitMoveTypeLikeCpp::Run, 2);
+        assert!(session.handle_force_speed_change_ack_like_cpp(
+            ClientOpcodes::MoveForceRunSpeedChangeAck,
+            &ack,
+            1.0,
+        ));
+        let first = session.movement_speed_ack_events_like_cpp().last().unwrap();
+        assert_eq!(first.action, MovementSpeedAckActionLikeCpp::SkippedPending);
+        assert_eq!(first.remaining_forced_changes, Some(1));
+        assert!(!session.is_disconnecting());
+
+        assert!(session.handle_force_speed_change_ack_like_cpp(
+            ClientOpcodes::MoveForceRunSpeedChangeAck,
+            &ack,
+            6.0,
+        ));
+        let corrected = session.movement_speed_ack_events_like_cpp().last().unwrap();
+        assert_eq!(corrected.expected_speed, Some(7.0));
+        assert_eq!(corrected.action, MovementSpeedAckActionLikeCpp::Corrected);
+        assert!(!session.is_disconnecting());
+
+        session.set_player_on_transport_like_cpp(true);
+        assert!(session.handle_force_speed_change_ack_like_cpp(
+            ClientOpcodes::MoveForceRunSpeedChangeAck,
+            &ack,
+            8.0,
+        ));
+        let transport = session.movement_speed_ack_events_like_cpp().last().unwrap();
+        assert_eq!(transport.action, MovementSpeedAckActionLikeCpp::Accepted);
+        assert!(!session.is_disconnecting());
+
+        session.set_player_on_transport_like_cpp(false);
+        assert!(!session.handle_force_speed_change_ack_like_cpp(
+            ClientOpcodes::MoveForceRunSpeedChangeAck,
+            &ack,
+            8.0,
+        ));
+        let kicked = session.movement_speed_ack_events_like_cpp().last().unwrap();
+        assert_eq!(kicked.action, MovementSpeedAckActionLikeCpp::Kicked);
+        assert!(session.is_disconnecting());
+    }
+
+    #[test]
+    fn movement_force_magnitude_ack_matches_cpp_counter_validation() {
+        let mut session = make_session();
+        let guid = ObjectGuid::create_player(1, 42);
+        session.set_player_guid(Some(guid));
+        session.set_movement_force_mod_magnitude_changes_like_cpp(1);
+        session.set_movement_force_mod_magnitude_like_cpp(1.25);
+        let ack = wow_packet::packets::movement::MovementAck {
+            status: MovementInfo {
+                guid,
+                time: 1_000,
+                position: wow_core::Position::new(10.0, 20.0, 30.0, 1.5),
+                ..MovementInfo::default()
+            },
+            ack_index: 11,
+        };
+
+        assert!(session.handle_movement_force_mod_magnitude_ack_like_cpp(
+            ClientOpcodes::MoveSetModMovementForceMagnitudeAck,
+            &ack,
+            1.25,
+        ));
+        let accepted = session.movement_speed_ack_events_like_cpp().last().unwrap();
+        assert_eq!(accepted.action, MovementSpeedAckActionLikeCpp::Accepted);
+        assert_eq!(accepted.remaining_forced_changes, Some(0));
+
+        session.set_movement_force_mod_magnitude_changes_like_cpp(1);
+        assert!(!session.handle_movement_force_mod_magnitude_ack_like_cpp(
+            ClientOpcodes::MoveSetModMovementForceMagnitudeAck,
+            &ack,
+            1.5,
+        ));
+        let kicked = session.movement_speed_ack_events_like_cpp().last().unwrap();
+        assert_eq!(kicked.action, MovementSpeedAckActionLikeCpp::Kicked);
+        assert!(session.is_disconnecting());
     }
 
     fn broadcast_info(
