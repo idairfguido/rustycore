@@ -2,7 +2,7 @@ use wow_constants::{DeathState, Gender, PowerType, TypeId, TypeMask, WeaponAttac
 use wow_core::ObjectGuid;
 
 use crate::{
-    ObjectDataUpdate, UnitSubsystems, UpdateMask, WorldObject,
+    ObjectDataUpdate, UnitSubsystems, UpdateMask, VisibleItemValues, WorldObject,
     update_fields::{TYPEID_UNIT, UNIT_DATA_BITS},
 };
 
@@ -37,6 +37,8 @@ pub const UNIT_DATA_SEX_BIT: usize = 27;
 pub const UNIT_DATA_POWER_PARENT_BIT: usize = 116;
 pub const UNIT_DATA_POWER_FIRST_BIT: usize = 137;
 pub const UNIT_DATA_MAX_POWER_FIRST_BIT: usize = 147;
+pub const UNIT_DATA_VIRTUAL_ITEMS_PARENT_BIT: usize = 167;
+pub const UNIT_DATA_VIRTUAL_ITEMS_FIRST_BIT: usize = 168;
 
 pub const BASE_MOVE_SPEED: [f32; MAX_MOVE_TYPE] =
     [2.5, 7.0, 4.5, 4.722222, 2.5, 3.141594, 7.0, 4.5, 3.14];
@@ -64,6 +66,7 @@ pub struct UnitDataValues {
     pub native_display_scale: f32,
     pub power: [i32; MAX_POWERS_PER_CLASS],
     pub max_power: [i32; MAX_POWERS_PER_CLASS],
+    pub virtual_items: [VisibleItemValues; MAX_ATTACK],
 }
 
 impl Default for UnitDataValues {
@@ -90,6 +93,7 @@ impl Default for UnitDataValues {
             native_display_scale: 0.0,
             power: [0; MAX_POWERS_PER_CLASS],
             max_power: [0; MAX_POWERS_PER_CLASS],
+            virtual_items: [VisibleItemValues::default(); MAX_ATTACK],
         }
     }
 }
@@ -405,6 +409,22 @@ impl Unit {
         }
     }
 
+    pub fn set_virtual_item(&mut self, index: usize, visible: Option<VisibleItemValues>) {
+        if index >= MAX_ATTACK {
+            return;
+        }
+
+        let value = visible.unwrap_or_default();
+        if self.data.virtual_items[index] != value {
+            self.data.virtual_items[index] = value;
+            self.mark_unit_data_array(
+                UNIT_DATA_VIRTUAL_ITEMS_PARENT_BIT,
+                UNIT_DATA_VIRTUAL_ITEMS_FIRST_BIT,
+                index,
+            );
+        }
+    }
+
     pub fn changed_object_type_mask(&self) -> u32 {
         self.world.object().changed_object_type_mask()
             | if self.unit_data_changes.is_any_set() {
@@ -699,6 +719,48 @@ mod tests {
         assert!(
             unit.unit_data_changes_mask()
                 .is_set(UNIT_DATA_MAX_POWER_FIRST_BIT + 3)
+        );
+    }
+
+    #[test]
+    fn virtual_item_updates_mark_cpp_parent_and_element_bits() {
+        let mut unit = Unit::new(true);
+        unit.clear_unit_data_changes();
+
+        unit.set_virtual_item(
+            1,
+            Some(VisibleItemValues {
+                item_id: 19019,
+                item_appearance_mod_id: 2,
+                item_visual: 3,
+            }),
+        );
+
+        assert_eq!(unit.data().virtual_items[1].item_id, 19019);
+        assert!(
+            unit.unit_data_changes_mask()
+                .is_set(UNIT_DATA_VIRTUAL_ITEMS_PARENT_BIT)
+        );
+        assert!(
+            unit.unit_data_changes_mask()
+                .is_set(UNIT_DATA_VIRTUAL_ITEMS_FIRST_BIT + 1)
+        );
+        assert!(
+            !unit
+                .unit_data_changes_mask()
+                .is_set(UNIT_DATA_VIRTUAL_ITEMS_FIRST_BIT)
+        );
+
+        unit.clear_unit_data_changes();
+        unit.set_virtual_item(1, None);
+        assert_eq!(unit.data().virtual_items[1], VisibleItemValues::default());
+        assert!(
+            unit.unit_data_changes_mask()
+                .is_set(UNIT_DATA_VIRTUAL_ITEMS_PARENT_BIT)
+        );
+        assert!(
+            unit.unit_data_changes_mask()
+                .is_set(UNIT_DATA_VIRTUAL_ITEMS_FIRST_BIT + 1)
         );
     }
 

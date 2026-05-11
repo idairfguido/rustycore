@@ -1,10 +1,10 @@
 use wow_entities::{
     ActivePlayerDataUpdate, PlayerDataUpdate, PlayerValuesUpdate, TYPEID_ACTIVE_PLAYER,
-    TYPEID_PLAYER,
+    TYPEID_PLAYER, TYPEID_UNIT, UnitDataUpdate,
 };
 use wow_packet::packets::update::{
     ActivePlayerDataValuesUpdate as PacketActivePlayerDataValuesUpdate,
-    PlayerDataValuesDeltaUpdate, UpdateObject, VisibleItemValuesUpdate,
+    PlayerDataValuesDeltaUpdate, UnitDataValuesDeltaUpdate, UpdateObject, VisibleItemValuesUpdate,
 };
 
 const VISIBLE_ITEM_FULL_UPDATE_MASK: u32 = 0x0F;
@@ -20,6 +20,11 @@ pub fn player_values_update_to_packet(
     if let Some(player_data) = &update.player_data {
         packet_update.changed_object_type_mask |= 1 << TYPEID_PLAYER;
         copy_player_data_update(player_data, &mut packet_update);
+    }
+
+    if let Some(unit_data) = &update.unit_data {
+        packet_update.changed_object_type_mask |= 1 << TYPEID_UNIT;
+        packet_update.unit_data = Some(unit_data_update_to_packet(unit_data));
     }
 
     if let Some(active_player_data) = &update.active_player_data {
@@ -66,6 +71,47 @@ fn copy_player_data_update(
     }
 }
 
+fn unit_data_update_to_packet(update: &UnitDataUpdate) -> UnitDataValuesDeltaUpdate {
+    let mut packet_update = UnitDataValuesDeltaUpdate::default();
+    copy_mask_blocks(update.mask.blocks(), &mut packet_update.unit_data_mask);
+    packet_update.health = update.values.health.min(i64::MAX as u64) as i64;
+    packet_update.max_health = update.values.max_health.min(i64::MAX as u64) as i64;
+    packet_update.display_id = update.values.display_id;
+    packet_update.target = update.values.target;
+    packet_update.race = update.values.race;
+    packet_update.class_id = update.values.class_id;
+    packet_update.player_class_id = update.values.player_class_id;
+    packet_update.sex = update.values.sex;
+    packet_update.display_power = update.values.display_power;
+    packet_update.level = update.values.level;
+    packet_update.faction_template = update.values.faction_template;
+    packet_update.flags = update.values.flags;
+    packet_update.flags2 = update.values.flags2;
+    packet_update.flags3 = update.values.flags3;
+    packet_update.bounding_radius = update.values.bounding_radius;
+    packet_update.combat_reach = update.values.combat_reach;
+    packet_update.display_scale = update.values.display_scale;
+    packet_update.native_display_id = update.values.native_display_id;
+    packet_update.native_display_scale = update.values.native_display_scale;
+    packet_update.power = update.values.power;
+    packet_update.max_power = update.values.max_power;
+
+    for (dst, src) in packet_update
+        .virtual_items
+        .iter_mut()
+        .zip(update.values.virtual_items.iter())
+    {
+        *dst = VisibleItemValuesUpdate {
+            visible_item_mask: VISIBLE_ITEM_FULL_UPDATE_MASK,
+            item_id: src.item_id,
+            appearance_mod_id: src.item_appearance_mod_id,
+            item_visual: src.item_visual,
+        };
+    }
+
+    packet_update
+}
+
 fn active_player_data_update_to_packet(
     update: &ActivePlayerDataUpdate,
 ) -> PacketActivePlayerDataValuesUpdate {
@@ -98,7 +144,8 @@ mod tests {
     use wow_core::ObjectGuid;
     use wow_entities::{
         ACTIVE_PLAYER_DATA_COINAGE_BIT, ACTIVE_PLAYER_DATA_PARENT_BIT, PLAYER_DATA_FLAGS_BIT,
-        PLAYER_DATA_PARENT_BIT, Player, VisibleItemValues,
+        PLAYER_DATA_PARENT_BIT, Player, UNIT_DATA_VIRTUAL_ITEMS_FIRST_BIT,
+        UNIT_DATA_VIRTUAL_ITEMS_PARENT_BIT, VisibleItemValues,
     };
     use wow_packet::ServerPacket;
 
@@ -191,5 +238,37 @@ mod tests {
                 .windows(1234u64.to_le_bytes().len())
                 .any(|window| window == 1234u64.to_le_bytes())
         );
+    }
+
+    #[test]
+    fn bridges_unit_virtual_items_from_player_values_update() {
+        let mut player = Player::new(Some(7), false);
+        player.clear_data_changes();
+        player.unit_mut().set_virtual_item(
+            2,
+            Some(VisibleItemValues {
+                item_id: 25,
+                item_appearance_mod_id: 3,
+                item_visual: 4,
+            }),
+        );
+
+        let update = player.values_update(true);
+        let packet_update = player_values_update_to_packet(&update).unwrap();
+        let unit = packet_update.unit_data.unwrap();
+
+        assert_eq!(packet_update.changed_object_type_mask, 1 << TYPEID_UNIT);
+        assert!(mask_has(
+            &unit.unit_data_mask,
+            UNIT_DATA_VIRTUAL_ITEMS_PARENT_BIT
+        ));
+        assert!(mask_has(
+            &unit.unit_data_mask,
+            UNIT_DATA_VIRTUAL_ITEMS_FIRST_BIT + 2
+        ));
+        assert_eq!(unit.virtual_items[2].visible_item_mask, 0x0F);
+        assert_eq!(unit.virtual_items[2].item_id, 25);
+        assert_eq!(unit.virtual_items[2].appearance_mod_id, 3);
+        assert_eq!(unit.virtual_items[2].item_visual, 4);
     }
 }
