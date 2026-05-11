@@ -96,6 +96,12 @@ pub(crate) enum RepresentedGameObjectUseEffect {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepresentedPendingBind {
+    pub instance_id: u32,
+    pub time_until_lock_ms: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RepresentedGameObjectUseState {
     pub loot_state: Option<wow_entities::LootState>,
     pub loot_state_unit_guid: wow_core::ObjectGuid,
@@ -513,6 +519,12 @@ pub struct WorldSession {
     /// Session-local represented `GameObject` use state until canonical GO runtime ownership lands.
     pub(crate) represented_gameobject_use_states:
         std::collections::HashMap<wow_core::ObjectGuid, RepresentedGameObjectUseState>,
+    /// C++ `Player::SetPendingBind` represented until `InstanceMap` owns real bind confirmation.
+    pub(crate) pending_bind: Option<RepresentedPendingBind>,
+    /// Confirmed pending bind ids, used by represented `CMSG_INSTANCE_LOCK_RESPONSE`.
+    pub(crate) represented_confirmed_pending_binds: Vec<u32>,
+    /// Count of represented `Player::RepopAtGraveyard` calls from rejected pending binds.
+    pub(crate) represented_repop_at_graveyard_count: u32,
     /// Session-local representation of `GameObject::m_tapList` for personal encounter loot.
     pub(crate) represented_gameobject_tap_lists:
         std::collections::HashMap<wow_core::ObjectGuid, Vec<wow_core::ObjectGuid>>,
@@ -834,6 +846,9 @@ impl WorldSession {
             represented_unique_gameobject_uses: std::collections::HashSet::new(),
             represented_gameobject_use_effects: Vec::new(),
             represented_gameobject_use_states: std::collections::HashMap::new(),
+            pending_bind: None,
+            represented_confirmed_pending_binds: Vec::new(),
+            represented_repop_at_graveyard_count: 0,
             represented_gameobject_tap_lists: std::collections::HashMap::new(),
             represented_locked_dungeon_encounters: std::collections::HashSet::new(),
             represented_personal_loot_money: std::collections::HashMap::new(),
@@ -3959,6 +3974,9 @@ impl WorldSession {
             }
             ClientOpcodes::ResetInstances => {
                 self.handle_reset_instances(pkt).await;
+            }
+            ClientOpcodes::InstanceLockResponse => {
+                self.handle_instance_lock_response(pkt).await;
             }
             ClientOpcodes::RequestConquestFormulaConstants => {
                 self.handle_request_conquest_formula_constants(pkt).await;

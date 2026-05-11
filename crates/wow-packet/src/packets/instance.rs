@@ -5,8 +5,8 @@
 
 //! Instance packet definitions.
 
-use crate::{ServerPacket, WorldPacket};
-use wow_constants::ServerOpcodes;
+use crate::{ClientPacket, PacketError, ServerPacket, WorldPacket};
+use wow_constants::{ClientOpcodes, ServerOpcodes};
 
 /// C++ `WorldPackets::Instance::InstanceLock`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,6 +81,58 @@ impl ServerPacket for InstanceResetFailed {
     }
 }
 
+/// C++ `WorldPackets::Instance::InstanceLockResponse` / `CMSG_INSTANCE_LOCK_RESPONSE`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InstanceLockResponse {
+    pub accept_lock: bool,
+}
+
+impl ClientPacket for InstanceLockResponse {
+    const OPCODE: ClientOpcodes = ClientOpcodes::InstanceLockResponse;
+
+    fn read(pkt: &mut WorldPacket) -> Result<Self, PacketError> {
+        Ok(Self {
+            accept_lock: pkt.read_bit()?,
+        })
+    }
+}
+
+/// C++ `WorldPackets::Instance::PendingRaidLock` / `SMSG_PENDING_RAID_LOCK`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingRaidLock {
+    pub time_until_lock: i32,
+    pub completed_mask: u32,
+    pub extending: bool,
+    pub warning_only: bool,
+}
+
+impl ServerPacket for PendingRaidLock {
+    const OPCODE: ServerOpcodes = ServerOpcodes::PendingRaidLock;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_int32(self.time_until_lock);
+        pkt.write_uint32(self.completed_mask);
+        pkt.write_bit(self.extending);
+        pkt.write_bit(self.warning_only);
+        pkt.flush_bits();
+    }
+}
+
+/// C++ `WorldPackets::Instance::InstanceSaveCreated` / `SMSG_INSTANCE_SAVE_CREATED`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InstanceSaveCreated {
+    pub gm: bool,
+}
+
+impl ServerPacket for InstanceSaveCreated {
+    const OPCODE: ServerOpcodes = ServerOpcodes::InstanceSaveCreated;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_bit(self.gm);
+        pkt.flush_bits();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,5 +197,45 @@ mod tests {
         .write(&mut pkt);
 
         assert_eq!(&pkt.data()[2..], &[0x77, 0x02, 0x00, 0x00, 0x40]);
+    }
+
+    #[test]
+    fn instance_lock_response_reads_cpp_accept_bit() {
+        let mut pkt = WorldPacket::from_bytes(&[0x80]);
+
+        let response = InstanceLockResponse::read(&mut pkt).unwrap();
+
+        assert!(response.accept_lock);
+    }
+
+    #[test]
+    fn pending_raid_lock_serialization_matches_cpp() {
+        let mut pkt = WorldPacket::new_server(ServerOpcodes::PendingRaidLock);
+
+        PendingRaidLock {
+            time_until_lock: 60_000,
+            completed_mask: 0xA5,
+            extending: true,
+            warning_only: false,
+        }
+        .write(&mut pkt);
+
+        assert_eq!(
+            &pkt.data()[2..],
+            &[
+                0x60, 0xEA, 0x00, 0x00, // TimeUntilLock
+                0xA5, 0x00, 0x00, 0x00, // CompletedMask
+                0x80, // Extending=true, WarningOnly=false
+            ]
+        );
+    }
+
+    #[test]
+    fn instance_save_created_serialization_matches_cpp_gm_bit() {
+        let mut pkt = WorldPacket::new_server(ServerOpcodes::InstanceSaveCreated);
+
+        InstanceSaveCreated { gm: true }.write(&mut pkt);
+
+        assert_eq!(&pkt.data()[2..], &[0x80]);
     }
 }

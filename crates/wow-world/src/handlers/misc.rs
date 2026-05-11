@@ -17,7 +17,8 @@ use wow_entities::{
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::ClientPacket;
 use wow_packet::packets::instance::{
-    InstanceInfo, InstanceLockInfo, InstanceReset, InstanceResetFailed,
+    InstanceInfo, InstanceLockInfo, InstanceLockResponse, InstanceReset, InstanceResetFailed,
+    PendingRaidLock,
 };
 use wow_packet::packets::item::{
     GetItemPurchaseData, ItemPurchaseContents, ItemPurchaseRefundCurrency, ItemPurchaseRefundItem,
@@ -303,6 +304,15 @@ inventory::submit! {
         status: SessionStatus::LoggedIn,
         processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_reset_instances",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::InstanceLockResponse,
+        status: SessionStatus::LoggedIn,
+        processing: PacketProcessing::ThreadUnsafe,
+        handler_name: "handle_instance_lock_response",
     }
 }
 
@@ -900,6 +910,53 @@ impl crate::session::WorldSession {
         }
     }
 
+    /// C++ `WorldSession::HandleInstanceLockResponse`.
+    pub async fn handle_instance_lock_response(&mut self, mut pkt: wow_packet::WorldPacket) {
+        let Ok(response) = InstanceLockResponse::read(&mut pkt) else {
+            return;
+        };
+
+        let Some(pending_bind) = self.pending_bind.take() else {
+            info!(
+                account = self.account_id,
+                player_guid = ?self.player_guid,
+                "InstanceLockResponse without pending bind"
+            );
+            return;
+        };
+
+        if response.accept_lock {
+            self.represented_confirmed_pending_binds
+                .push(pending_bind.instance_id);
+        } else {
+            self.represented_repop_at_graveyard_count =
+                self.represented_repop_at_graveyard_count.saturating_add(1);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn send_pending_raid_lock_like_cpp(
+        &mut self,
+        instance_id: u32,
+        completed_mask: u32,
+        extending: bool,
+        warning_only: bool,
+    ) {
+        self.send_packet(&PendingRaidLock {
+            time_until_lock: 60_000,
+            completed_mask,
+            extending,
+            warning_only,
+        });
+
+        if !warning_only {
+            self.pending_bind = Some(crate::session::RepresentedPendingBind {
+                instance_id,
+                time_until_lock_ms: 60_000,
+            });
+        }
+    }
+
     pub async fn handle_request_conquest_formula_constants(
         &mut self,
         _pkt: wow_packet::WorldPacket,
@@ -1158,5 +1215,68 @@ mod tests {
                 .find_active_instance_lock_at(player_guid, &entries, now)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn send_pending_raid_lock_sets_pending_bind_like_cpp_for_stop_prompt() {
+        let (mut session, send_rx) = make_session();
+
+        session.send_pending_raid_lock_like_cpp(77, 0xA5, true, false);
+
+        let sent = send_rx.try_recv().unwrap();
+        assert_eq!(
+            u16::from_le_bytes([sent[0], sent[1]]),
+            ServerOpcodes::PendingRaidLock as u16
+        );
+        assert_eq!(
+            session.pending_bind,
+            Some(crate::session::RepresentedPendingBind {
+                instance_id: 77,
+                time_until_lock_ms: 60_000,
+            })
+        );
+    }
+
+    #[test]
+    fn send_pending_raid_lock_warning_only_does_not_set_pending_bind_like_cpp() {
+        let (mut session, _send_rx) = make_session();
+
+        session.send_pending_raid_lock_like_cpp(77, 0xA5, false, true);
+
+        assert!(session.pending_bind.is_none());
+    }
+
+    #[tokio::test]
+    async fn instance_lock_response_accept_confirms_and_clears_pending_bind_like_cpp() {
+        let (mut session, _send_rx) = make_session();
+        session.pending_bind = Some(crate::session::RepresentedPendingBind {
+            instance_id: 77,
+            time_until_lock_ms: 60_000,
+        });
+
+        session
+            .handle_instance_lock_response(WorldPacket::from_bytes(&[0x80]))
+            .await;
+
+        assert!(session.pending_bind.is_none());
+        assert_eq!(session.represented_confirmed_pending_binds, vec![77]);
+        assert_eq!(session.represented_repop_at_graveyard_count, 0);
+    }
+
+    #[tokio::test]
+    async fn instance_lock_response_decline_repops_and_clears_pending_bind_like_cpp() {
+        let (mut session, _send_rx) = make_session();
+        session.pending_bind = Some(crate::session::RepresentedPendingBind {
+            instance_id: 77,
+            time_until_lock_ms: 60_000,
+        });
+
+        session
+            .handle_instance_lock_response(WorldPacket::from_bytes(&[0x00]))
+            .await;
+
+        assert!(session.pending_bind.is_none());
+        assert!(session.represented_confirmed_pending_binds.is_empty());
+        assert_eq!(session.represented_repop_at_graveyard_count, 1);
     }
 }
