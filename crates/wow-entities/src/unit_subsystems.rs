@@ -1694,6 +1694,13 @@ pub struct GenericMovementInform {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoveFallPlan {
+    Noop,
+    PlayerFallInfo,
+    SplineStarted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MoveSplineState {
     pub enabled: bool,
     pub finalized: bool,
@@ -2006,6 +2013,57 @@ impl MotionSubsystem {
             arrival_spell,
         );
         true
+    }
+
+    pub fn move_knockback_from_like_cpp(
+        &mut self,
+        is_player: bool,
+        duration_ms: u32,
+        speed_xy: f32,
+    ) -> bool {
+        if is_player || speed_xy < 0.01 {
+            return false;
+        }
+
+        self.add_generic_movement(
+            MovementGeneratorKind::Effect,
+            0,
+            duration_ms,
+            MovementGeneratorPriority::Highest,
+            0,
+            MOVEMENTGENERATOR_FLAG_INITIALIZATION_PENDING | MOVEMENTGENERATOR_FLAG_PERSIST_ON_DEATH,
+            None,
+        );
+        true
+    }
+
+    pub fn move_fall_like_cpp(
+        &mut self,
+        movement_id: u32,
+        duration_ms: u32,
+        has_valid_ground_height: bool,
+        vertical_delta: f32,
+        has_root_or_stun_state: bool,
+        is_player: bool,
+    ) -> MoveFallPlan {
+        if !has_valid_ground_height || vertical_delta.abs() < 0.1 || has_root_or_stun_state {
+            return MoveFallPlan::Noop;
+        }
+
+        if is_player {
+            return MoveFallPlan::PlayerFallInfo;
+        }
+
+        self.add_generic_movement(
+            MovementGeneratorKind::Effect,
+            movement_id,
+            duration_ms,
+            MovementGeneratorPriority::Highest,
+            0,
+            MOVEMENTGENERATOR_FLAG_INITIALIZATION_PENDING,
+            None,
+        );
+        MoveFallPlan::SplineStarted
     }
 
     fn add_generic_movement(
@@ -3230,6 +3288,65 @@ mod unit_subsystems_tests {
         assert_eq!(gravity_jump.arrival_spell_target_guid, ObjectGuid::EMPTY);
         assert!(gravity_jump.has_flag(MOVEMENTGENERATOR_FLAG_INITIALIZATION_PENDING));
         assert!(gravity_jump.has_flag(MOVEMENTGENERATOR_FLAG_PERSIST_ON_DEATH));
+    }
+
+    #[test]
+    fn knockback_generator_matches_cpp_player_guard_and_persist_flag() {
+        let mut motion = MotionSubsystem::default();
+
+        assert!(!motion.move_knockback_from_like_cpp(true, 300, 1.0));
+        assert!(motion.active_generators.is_empty());
+
+        assert!(!motion.move_knockback_from_like_cpp(false, 300, 0.009));
+        assert!(motion.active_generators.is_empty());
+
+        assert!(motion.move_knockback_from_like_cpp(false, 300, 0.01));
+        let generator = motion.current_movement_generator();
+        assert_eq!(generator.kind, MovementGeneratorKind::Effect);
+        assert_eq!(generator.priority, MovementGeneratorPriority::Highest);
+        assert_eq!(generator.base_unit_state, 0);
+        assert_eq!(generator.movement_id, 0);
+        assert_eq!(generator.duration_ms, Some(300));
+        assert!(generator.has_flag(MOVEMENTGENERATOR_FLAG_INITIALIZATION_PENDING));
+        assert!(generator.has_flag(MOVEMENTGENERATOR_FLAG_PERSIST_ON_DEATH));
+    }
+
+    #[test]
+    fn move_fall_like_cpp_guards_player_and_creature_spline_paths() {
+        let mut motion = MotionSubsystem::default();
+
+        assert_eq!(
+            motion.move_fall_like_cpp(3, 400, false, 10.0, false, false),
+            MoveFallPlan::Noop
+        );
+        assert_eq!(
+            motion.move_fall_like_cpp(3, 400, true, 0.099, false, false),
+            MoveFallPlan::Noop
+        );
+        assert_eq!(
+            motion.move_fall_like_cpp(3, 400, true, 10.0, true, false),
+            MoveFallPlan::Noop
+        );
+        assert!(motion.active_generators.is_empty());
+
+        assert_eq!(
+            motion.move_fall_like_cpp(3, 400, true, 10.0, false, true),
+            MoveFallPlan::PlayerFallInfo
+        );
+        assert!(motion.active_generators.is_empty());
+
+        assert_eq!(
+            motion.move_fall_like_cpp(3, 400, true, 10.0, false, false),
+            MoveFallPlan::SplineStarted
+        );
+        let generator = motion.current_movement_generator();
+        assert_eq!(generator.kind, MovementGeneratorKind::Effect);
+        assert_eq!(generator.priority, MovementGeneratorPriority::Highest);
+        assert_eq!(generator.base_unit_state, 0);
+        assert_eq!(generator.movement_id, 3);
+        assert_eq!(generator.duration_ms, Some(400));
+        assert!(generator.has_flag(MOVEMENTGENERATOR_FLAG_INITIALIZATION_PENDING));
+        assert!(!generator.has_flag(MOVEMENTGENERATOR_FLAG_PERSIST_ON_DEATH));
     }
 
     #[test]
