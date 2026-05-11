@@ -68,6 +68,10 @@ fn rounded_median_u32(sorted_values: &[u32]) -> u32 {
         ((f64::from(sorted_values[mid - 1]) + f64::from(sorted_values[mid])) / 2.0).round() as u32
     }
 }
+
+fn set_active_player_update_bit_like_cpp(mask: &mut [u32; 48], bit: usize) {
+    mask[bit / 32] |= 1 << (bit % 32);
+}
 use wow_packet::{ClientPacket, WorldPacket};
 
 /// Maximum number of packets processed per `update()` call.
@@ -724,6 +728,12 @@ pub struct WorldSession {
     temporary_pet_unsummon_requests_like_cpp: u32,
     /// Count of C++ jump proc side effects requested by movement.
     movement_jump_proc_requests_like_cpp: u32,
+    /// Represented `ActivePlayerData::LocalFlags`.
+    active_player_local_flags_like_cpp: u32,
+    /// Represented `ActivePlayerData::TransportServerTime`.
+    active_player_transport_server_time_like_cpp: i32,
+    /// Count of visibility refreshes requested by movement initialization.
+    movement_visibility_refresh_requests_like_cpp: u32,
 
     // ── Aura system ───────────────────────────────────────────────
     /// All visible auras on the player: slot (0-254) → AuraApplication
@@ -933,6 +943,7 @@ pub struct AuraApplication {
 pub(crate) const SPELL_AURA_INTERRUPT_FLAG_LOOTING_LIKE_CPP: u32 = 0x0000_0800;
 pub(crate) const SPELL_AURA_INTERRUPT_FLAG_LANDING_OR_FLIGHT_LIKE_CPP: u32 = 0x0200_0000;
 pub(crate) const SPELL_AURA_INTERRUPT_FLAG2_JUMP_LIKE_CPP: u32 = 0x0000_0020;
+pub(crate) const PLAYER_LOCAL_FLAG_OVERRIDE_TRANSPORT_SERVER_TIME_LIKE_CPP: u32 = 0x0000_8000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RepresentedAuraEffectLikeCpp {
@@ -1136,6 +1147,9 @@ impl WorldSession {
             player_stand_state_like_cpp: UnitStandStateType::Stand,
             temporary_pet_unsummon_requests_like_cpp: 0,
             movement_jump_proc_requests_like_cpp: 0,
+            active_player_local_flags_like_cpp: 0,
+            active_player_transport_server_time_like_cpp: 0,
+            movement_visibility_refresh_requests_like_cpp: 0,
             visible_auras: HashMap::new(),
             spell_store: None,
             quest_store: None,
@@ -5811,6 +5825,53 @@ impl WorldSession {
     #[cfg(test)]
     pub(crate) fn movement_jump_proc_requests_like_cpp(&self) -> u32 {
         self.movement_jump_proc_requests_like_cpp
+    }
+
+    pub(crate) fn apply_move_init_active_mover_complete_like_cpp(&mut self, ticks: u32) {
+        self.active_player_local_flags_like_cpp |=
+            PLAYER_LOCAL_FLAG_OVERRIDE_TRANSPORT_SERVER_TIME_LIKE_CPP;
+        self.active_player_transport_server_time_like_cpp =
+            Self::game_time_ms_like_cpp().saturating_sub(ticks) as i32;
+        self.movement_visibility_refresh_requests_like_cpp = self
+            .movement_visibility_refresh_requests_like_cpp
+            .saturating_add(1);
+        self.send_active_player_transport_server_time_update_like_cpp();
+    }
+
+    fn send_active_player_transport_server_time_update_like_cpp(&self) {
+        let Some(guid) = self.player_guid() else {
+            return;
+        };
+
+        use wow_packet::packets::update::{ActivePlayerDataValuesUpdate, UpdateObject};
+
+        let mut data = ActivePlayerDataValuesUpdate::default();
+        set_active_player_update_bit_like_cpp(&mut data.active_player_data_mask, 38);
+        set_active_player_update_bit_like_cpp(&mut data.active_player_data_mask, 69);
+        set_active_player_update_bit_like_cpp(&mut data.active_player_data_mask, 70);
+        set_active_player_update_bit_like_cpp(&mut data.active_player_data_mask, 118);
+        data.local_flags = self.active_player_local_flags_like_cpp;
+        data.transport_server_time = self.active_player_transport_server_time_like_cpp;
+        self.send_packet(&UpdateObject::full_active_player_values_update(
+            guid,
+            self.player_map_id_like_cpp(),
+            data,
+        ));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active_player_local_flags_like_cpp(&self) -> u32 {
+        self.active_player_local_flags_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active_player_transport_server_time_like_cpp(&self) -> i32 {
+        self.active_player_transport_server_time_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn movement_visibility_refresh_requests_like_cpp(&self) -> u32 {
+        self.movement_visibility_refresh_requests_like_cpp
     }
 
     pub(crate) fn interrupt_non_melee_spell_cast_for_loot_like_cpp(&mut self) -> bool {

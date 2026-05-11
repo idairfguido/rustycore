@@ -292,8 +292,8 @@ impl WorldSession {
             ticks = pkt.ticks,
             "MoveInitActiveMoverComplete"
         );
-        // TODO: Set player local flags and transport server time when transport system exists.
-        // For now, do nothing — the client expects no response.
+        self.apply_move_init_active_mover_complete_like_cpp(pkt.ticks);
+        self.update_visibility().await;
     }
 }
 
@@ -513,6 +513,30 @@ mod tests {
         info.position.z = -499.0;
         session.apply_movement_side_effects_like_cpp(Some(ClientOpcodes::MoveHeartbeat), &info);
         assert!(!session.player_out_of_bounds_like_cpp());
+    }
+
+    #[test]
+    fn move_init_active_mover_complete_sets_cpp_transport_state() {
+        let mut session = make_session();
+        let before = WorldSession::game_time_ms_like_cpp();
+
+        session.apply_move_init_active_mover_complete_like_cpp(25);
+
+        assert!(
+            session.active_player_local_flags_like_cpp()
+                & crate::session::PLAYER_LOCAL_FLAG_OVERRIDE_TRANSPORT_SERVER_TIME_LIKE_CPP
+                != 0
+        );
+        assert!(session.active_player_transport_server_time_like_cpp() >= 0);
+        assert!(
+            session.active_player_transport_server_time_like_cpp()
+                <= WorldSession::game_time_ms_like_cpp() as i32
+        );
+        assert!(
+            session.active_player_transport_server_time_like_cpp()
+                >= before.saturating_sub(25) as i32
+        );
+        assert_eq!(session.movement_visibility_refresh_requests_like_cpp(), 1);
     }
 }
 
