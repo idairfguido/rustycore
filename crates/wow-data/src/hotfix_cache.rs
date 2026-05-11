@@ -12,6 +12,7 @@
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::fs;
 use std::path::Path;
 
 use anyhow::Result;
@@ -252,6 +253,19 @@ impl HotfixBlobCache {
         table.get(&(record_id as u32)).map(|v| v.as_slice())
     }
 
+    /// Look up C++ `DB2Manager::HotfixOptionalData` entries for one locale.
+    pub fn get_optional_data(
+        &self,
+        table_hash: u32,
+        record_id: i32,
+        locale: &str,
+    ) -> Option<&[HotfixOptionalData]> {
+        self.optional_data
+            .get(locale)?
+            .get(&(table_hash, record_id))
+            .map(|entries| entries.as_slice())
+    }
+
     /// Whether the cache has any data for a given table hash.
     pub fn has_table(&self, table_hash: u32) -> bool {
         self.blobs.contains_key(&table_hash)
@@ -306,38 +320,51 @@ pub fn build_hotfix_blob_cache(data_dir: &str, locale: &str) -> HotfixBlobCache 
 
     let dbc_dir = Path::new(data_dir).join("dbc").join(locale);
 
-    // Load Item.db2 — the client needs this alongside ItemSparse to display item info
-    let item_db2 = dbc_dir.join("Item.db2");
-    if item_db2.exists() {
-        match cache.load_db2(&item_db2) {
-            Ok(n) => info!("HotfixBlobCache: loaded {} Item records", n),
-            Err(e) => tracing::warn!("HotfixBlobCache: failed to load Item.db2: {e}"),
-        }
-    } else {
-        tracing::warn!(
-            "HotfixBlobCache: Item.db2 not found at {}",
-            item_db2.display()
-        );
-    }
+    let mut loaded_files = 0usize;
+    let mut failed_files = 0usize;
+    let mut loaded_records = 0usize;
 
-    // Load ItemSparse.db2
-    let item_sparse = dbc_dir.join("ItemSparse.db2");
+    match fs::read_dir(&dbc_dir) {
+        Ok(entries) => {
+            let mut db2_paths = entries
+                .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+                .filter(|path| {
+                    path.extension()
+                        .and_then(|ext| ext.to_str())
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("db2"))
+                })
+                .collect::<Vec<_>>();
+            db2_paths.sort();
 
-    if item_sparse.exists() {
-        match cache.load_db2(&item_sparse) {
-            Ok(n) => info!("HotfixBlobCache: loaded {} ItemSparse records", n),
-            Err(e) => tracing::warn!("HotfixBlobCache: failed to load ItemSparse.db2: {e}"),
+            for db2_path in db2_paths {
+                match cache.load_db2(&db2_path) {
+                    Ok(n) => {
+                        loaded_files += 1;
+                        loaded_records += n;
+                    }
+                    Err(e) => {
+                        failed_files += 1;
+                        tracing::warn!(
+                            "HotfixBlobCache: failed to load {}: {e}",
+                            db2_path.display()
+                        );
+                    }
+                }
+            }
         }
-    } else {
-        tracing::warn!(
-            "HotfixBlobCache: ItemSparse.db2 not found at {}",
-            item_sparse.display()
-        );
+        Err(e) => tracing::warn!(
+            "HotfixBlobCache: failed to read DB2 directory {}: {e}",
+            dbc_dir.display()
+        ),
     }
 
     info!(
-        "HotfixBlobCache: {} total blobs cached",
-        cache.total_blobs()
+        "HotfixBlobCache: loaded {loaded_records} records from {loaded_files} DB2 files ({failed_files} failed)"
+    );
+    info!(
+        "HotfixBlobCache: {} total blobs cached across {} table hashes",
+        cache.total_blobs(),
+        cache.blobs.len()
     );
     cache
 }
@@ -374,5 +401,28 @@ mod tests {
         assert_eq!(cache.get(0x919B_E54E, 58256), Some(&[1, 2, 3][..]));
         assert!(cache.has_table(0x919B_E54E));
         assert_eq!(cache.total_blobs(), 1);
+    }
+
+    #[test]
+    fn optional_data_is_indexed_by_locale_table_and_record() {
+        let mut cache = HotfixBlobCache::new();
+        cache
+            .optional_data
+            .entry("enUS".to_string())
+            .or_default()
+            .entry((0xDF2F_53CF, 67))
+            .or_default()
+            .push(HotfixOptionalData {
+                key: 0x1234_5678,
+                data: vec![9, 8, 7],
+            });
+
+        let entries = cache
+            .get_optional_data(0xDF2F_53CF, 67, "enUS")
+            .expect("optional data should exist");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].key, 0x1234_5678);
+        assert_eq!(entries[0].data, [9, 8, 7]);
+        assert!(cache.get_optional_data(0xDF2F_53CF, 67, "esES").is_none());
     }
 }

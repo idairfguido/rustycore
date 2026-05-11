@@ -1923,13 +1923,22 @@ impl WorldSession {
         for record_id in &query.queries {
             if let Some(ref c) = cache {
                 if let Some(blob) = c.get(query.table_hash, *record_id) {
+                    let mut data = blob.to_vec();
+                    if let Some(optional_entries) =
+                        c.get_optional_data(query.table_hash, *record_id, &self.locale)
+                    {
+                        for optional_data in optional_entries {
+                            data.extend_from_slice(&optional_data.key.to_le_bytes());
+                            data.extend_from_slice(&optional_data.data);
+                        }
+                    }
                     info!(
                         "DbQueryBulk: FOUND blob table=0x{:08X} record={} ({} bytes)",
                         query.table_hash,
                         record_id,
-                        blob.len()
+                        data.len()
                     );
-                    self.send_packet(&DBReply::found(query.table_hash, *record_id, blob.to_vec()));
+                    self.send_packet(&DBReply::found(query.table_hash, *record_id, data));
                     continue;
                 }
             }
