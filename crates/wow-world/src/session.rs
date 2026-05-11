@@ -1172,7 +1172,7 @@ impl WorldSession {
         let mut manager = manager
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        manager.remove_creature_any(self.current_map_id, 0, guid)
+        manager.remove_creature_any(self.player_map_id_like_cpp(), 0, guid)
     }
 
     pub(crate) fn mutate_world_creature<F, R>(&mut self, guid: ObjectGuid, f: F) -> Option<R>
@@ -1183,7 +1183,9 @@ impl WorldSession {
             let mut manager = manager
                 .write()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if let Some(creature) = manager.find_creature_mut(self.current_map_id, 0, guid) {
+            if let Some(creature) =
+                manager.find_creature_mut(self.player_map_id_like_cpp(), 0, guid)
+            {
                 return Some(f(creature));
             }
         }
@@ -1191,7 +1193,8 @@ impl WorldSession {
         #[cfg(test)]
         {
             let mut legacy = self.creatures.remove(&guid)?;
-            let mut creature = Self::test_world_creature_from_legacy(self.current_map_id, &legacy);
+            let mut creature =
+                Self::test_world_creature_from_legacy(self.player_map_id_like_cpp(), &legacy);
             let result = f(&mut creature);
             Self::sync_test_world_creature_to_legacy(&creature, &mut legacy);
             self.creatures.insert(guid, legacy);
@@ -1209,7 +1212,7 @@ impl WorldSession {
             return manager
                 .read()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .creature_guids(self.current_map_id, 0);
+                .creature_guids(self.player_map_id_like_cpp(), 0);
         }
 
         #[cfg(test)]
@@ -2541,7 +2544,7 @@ impl WorldSession {
 
         let update = player.values_update(true);
         if let Some(packet) =
-            player_values_update_to_update_object(guid, self.current_map_id, &update)
+            player_values_update_to_update_object(guid, self.player_map_id_like_cpp(), &update)
         {
             self.send_packet(&packet);
         }
@@ -3795,7 +3798,7 @@ impl WorldSession {
         use wow_packet::packets::aura::{AuraData, AuraUpdate};
 
         let update = AuraUpdate {
-            target_guid: self.player_guid.unwrap_or(ObjectGuid::EMPTY),
+            target_guid: self.player_guid().unwrap_or(ObjectGuid::EMPTY),
             updated_auras: vec![AuraData {
                 slot,
                 spell_id,
@@ -3815,7 +3818,7 @@ impl WorldSession {
         use wow_packet::packets::aura::AuraUpdate;
 
         let update = AuraUpdate {
-            target_guid: self.player_guid.unwrap_or(ObjectGuid::EMPTY),
+            target_guid: self.player_guid().unwrap_or(ObjectGuid::EMPTY),
             updated_auras: vec![],
             removed_aura_slots: vec![slot],
         };
@@ -4569,13 +4572,15 @@ impl WorldSession {
     /// - Entry: when player enters a trigger (was not in one)
     /// - Exit: when player leaves a trigger (was in one, no longer is)
     pub async fn check_area_triggers(&mut self) {
-        let (Some(pos), Some(store)) = (self.player_position, self.area_trigger_store.as_ref())
-        else {
+        let (Some(pos), Some(store)) = (
+            self.player_position_like_cpp(),
+            self.area_trigger_store.as_ref(),
+        ) else {
             return;
         };
 
         // Get all triggers at the current position on the player's current map
-        let triggers = store.get_triggers_at_position(self.current_map_id, &pos);
+        let triggers = store.get_triggers_at_position(self.player_map_id_like_cpp(), &pos);
 
         // Check if we've exited the previous trigger
         if let Some(prev_trigger_id) = self.active_area_trigger {
@@ -4636,7 +4641,7 @@ impl WorldSession {
             return;
         }
 
-        let Some(current_pos) = self.player_position else {
+        let Some(current_pos) = self.player_position_like_cpp() else {
             warn!(
                 "Cannot teleport account {}: no current position",
                 self.account_id
@@ -4646,7 +4651,7 @@ impl WorldSession {
 
         info!(
             account = self.account_id,
-            old_map = self.current_map_id,
+            old_map = self.player_map_id_like_cpp(),
             new_map = new_map,
             old_pos = format!(
                 "({:.2}, {:.2}, {:.2})",
@@ -4683,7 +4688,7 @@ impl WorldSession {
         info!(
             account = self.account_id,
             "Teleport initiated: map {} → {} dest ({:.2}, {:.2}, {:.2}); awaiting WorldPortResponse",
-            self.current_map_id,
+            self.player_map_id_like_cpp(),
             new_map,
             new_pos.x,
             new_pos.y,
@@ -5422,7 +5427,7 @@ impl WorldSession {
             use wow_packet::ServerPacket;
             use wow_packet::packets::update::{CreatureCreateData, UpdateObject};
 
-            let map_id = self.current_map_id;
+            let map_id = self.player_map_id_like_cpp();
             for g in &despawn_guids {
                 // Before removing, save data needed for respawn.
                 if let Some(c) = self.remove_world_creature(*g) {
@@ -5650,7 +5655,7 @@ impl WorldSession {
         use wow_packet::ServerPacket;
         use wow_packet::packets::combat::{AttackerStateUpdate, SAttackStop, VICTIM_STATE_HIT};
 
-        let (player_guid, combat_target) = match (self.player_guid, self.combat_target) {
+        let (player_guid, combat_target) = match (self.player_guid(), self.combat_target) {
             (Some(pg), Some(ct)) => (pg, ct),
             _ => return,
         };
@@ -5772,7 +5777,7 @@ impl WorldSession {
             empty_inv_slots,
             PlayerCombatStats::default(), // other players don't need detailed combat stats
             empty_skills,
-            self.player_gold,
+            self.player_gold_like_cpp(),
             vec![], // quest_log — not sent to other players
         );
 
@@ -5998,7 +6003,7 @@ impl WorldSession {
         cast_id: ObjectGuid,
         spell_visual: wow_packet::packets::spell::SpellCastVisual,
     ) -> Result<(), &'static str> {
-        let player_guid = self.player_guid.ok_or("No player GUID")?;
+        let player_guid = self.player_guid().ok_or("No player GUID")?;
 
         // Obtener SpellInfo
         let spell_info = self
@@ -6079,7 +6084,7 @@ impl WorldSession {
         target_guid: ObjectGuid,
         heal_amount: u32,
     ) -> Result<(), &'static str> {
-        let player_guid = self.player_guid.ok_or("No player GUID")?;
+        let player_guid = self.player_guid().ok_or("No player GUID")?;
 
         // Si target es el mismo jugador
         if target_guid == player_guid {
@@ -6111,7 +6116,7 @@ impl WorldSession {
         target_guid: ObjectGuid,
         damage_amount: u32,
     ) -> Result<(), &'static str> {
-        let _player_guid = self.player_guid.ok_or("No player GUID")?;
+        let _player_guid = self.player_guid().ok_or("No player GUID")?;
         let account_id = self.account_id;
 
         // Si target es otra criatura — mutate canonical shared map state.

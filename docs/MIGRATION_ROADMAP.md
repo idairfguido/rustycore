@@ -621,7 +621,7 @@ Cada fase es un commit (o pequeño grupo de commits) mergeable a `main` con `car
     - [x] **#032c4** `character`/`trainer`: reemplazar gold/currency/player metadata/inventory directos por mutadores/getters canónicos y cerrar residuos de login/logout.
   - [ ] **#032d** Retirar o hacer privados los campos heredados cuando dejen de ser fuente runtime, dejando solo puentes `cfg(test)` si aún son necesarios.
     - [x] **#032d1** Cerrar residuos fuera de la lista original (`combat`, `social`, `misc`, `spell`, `loot`) que todavía leían GUID/posición/item runtime directamente en vez de C++ `GetPlayer()`/`GetItemByGuid()`.
-    - [ ] **#032d2** Encapsular accesos internos de `session.rs` que todavía usan campos legacy como fallback/runtime y separar claramente bootstrap/test de runtime canónico.
+    - [x] **#032d2** Encapsular accesos internos de `session.rs` que todavía usan campos legacy como fallback/runtime y separar claramente bootstrap/test de runtime canónico.
     - [ ] **#032d3** Reducir visibilidad de campos heredados o moverlos detrás de helpers `cfg(test)` cuando ya no haya consumidores productivos directos.
 
 > Tras cerrar #032, el roadmap continúa con Fase 2 (Movement) y siguientes según la sección 4.
