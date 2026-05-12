@@ -1003,6 +1003,95 @@ pub fn build_straight_point_path_like_cpp(
     })
 }
 
+pub fn build_point_path_like_cpp(
+    nav_mesh: &DetourNavMesh,
+    query: &DetourNavMeshQuery<'_>,
+    filter: &DetourQueryFilter,
+    start_point: [f32; 3],
+    end_point: [f32; 3],
+    poly_refs: &[DetourPolyRef],
+    point_path_limit: usize,
+    mut path_type: DetourPathType,
+    force_destination: bool,
+    use_straight_path: bool,
+    use_raycast: bool,
+) -> Result<DetourPointPath, DetourNavMeshQueryError> {
+    if use_raycast {
+        return Ok(DetourPointPath {
+            points: vec![start_point, end_point],
+            actual_end: end_point,
+            path_type: DetourPathType::NOPATH,
+        });
+    }
+
+    let point_result = if use_straight_path {
+        query
+            .find_straight_path(start_point, end_point, poly_refs, point_path_limit, 0)
+            .map(|points| points.into_iter().map(|point| point.position).collect())
+    } else {
+        find_smooth_path_like_cpp(
+            nav_mesh,
+            query,
+            filter,
+            start_point,
+            end_point,
+            poly_refs,
+            point_path_limit,
+        )
+    };
+
+    let mut points = match point_result {
+        Ok(points) => points,
+        Err(_) => {
+            return Ok(DetourPointPath {
+                points: vec![start_point, end_point],
+                actual_end: end_point,
+                path_type: path_type | DetourPathType::SHORTCUT | DetourPathType::NOPATH,
+            });
+        }
+    };
+
+    if poly_refs.len() == 1 && points.len() == 1 {
+        points.push(end_point);
+    } else if points.len() < 2 {
+        return Ok(DetourPointPath {
+            points: vec![start_point, end_point],
+            actual_end: end_point,
+            path_type: path_type | DetourPathType::SHORTCUT | DetourPathType::NOPATH,
+        });
+    } else if points.len() >= point_path_limit {
+        return Ok(DetourPointPath {
+            points: vec![start_point, end_point],
+            actual_end: end_point,
+            path_type: path_type | DetourPathType::SHORTCUT | DetourPathType::SHORT,
+        });
+    }
+
+    let mut actual_end = points.last().copied().unwrap_or(end_point);
+    if force_destination
+        && (!path_type.contains(DetourPathType::NORMAL)
+            || !detour_in_range(end_point, actual_end, 1.0, 1.0))
+    {
+        actual_end = end_point;
+        if detour_distance_sq(points.last().copied().unwrap_or(start_point), end_point)
+            < 0.3 * detour_distance_sq(start_point, end_point)
+        {
+            if let Some(last) = points.last_mut() {
+                *last = end_point;
+            }
+        } else {
+            points = vec![start_point, end_point];
+        }
+        path_type = DetourPathType::NORMAL | DetourPathType::NOT_USING_PATH;
+    }
+
+    Ok(DetourPointPath {
+        points,
+        actual_end,
+        path_type,
+    })
+}
+
 pub fn build_straight_poly_path_like_cpp(
     query: &DetourNavMeshQuery<'_>,
     filter: &DetourQueryFilter,
@@ -2707,6 +2796,75 @@ mod tests {
         .unwrap();
 
         assert_eq!(smooth, vec![[0.25, 0.0, 0.25], [0.75, 0.0, 0.75]]);
+    }
+
+    #[test]
+    fn build_point_path_dispatches_straight_smooth_and_raycast_like_cpp() {
+        let params = DetourNavMeshParams {
+            origin: [0.0, 0.0, 0.0],
+            tile_width: 1.0,
+            tile_height: 1.0,
+            max_tiles: 16,
+            max_polys: 128,
+        };
+        let mut mesh = DetourNavMesh::new(&params).unwrap();
+        mesh.add_tile(&generated_square_tile_blob(0, 0)).unwrap();
+        let query = DetourNavMeshQuery::new(&mesh, 1024).unwrap();
+        let filter = DetourQueryFilter::new().unwrap();
+        let nearest = query
+            .find_nearest_poly([0.25, 0.0, 0.25], [3.0, 5.0, 3.0], &filter)
+            .unwrap();
+
+        let smooth = build_point_path_like_cpp(
+            &mesh,
+            &query,
+            &filter,
+            [0.25, 0.0, 0.25],
+            [0.75, 0.0, 0.75],
+            &[nearest.poly_ref],
+            MAX_POINT_PATH_LENGTH_LIKE_CPP,
+            DetourPathType::NORMAL,
+            false,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(smooth.points, vec![[0.25, 0.0, 0.25], [0.75, 0.0, 0.75]]);
+        assert_eq!(smooth.path_type, DetourPathType::NORMAL);
+
+        let straight = build_point_path_like_cpp(
+            &mesh,
+            &query,
+            &filter,
+            [0.25, 0.0, 0.25],
+            [0.75, 0.0, 0.75],
+            &[nearest.poly_ref],
+            MAX_POINT_PATH_LENGTH_LIKE_CPP,
+            DetourPathType::NORMAL,
+            false,
+            true,
+            false,
+        )
+        .unwrap();
+        assert_eq!(straight.points, smooth.points);
+        assert_eq!(straight.path_type, DetourPathType::NORMAL);
+
+        let raycast = build_point_path_like_cpp(
+            &mesh,
+            &query,
+            &filter,
+            [0.25, 0.0, 0.25],
+            [0.75, 0.0, 0.75],
+            &[nearest.poly_ref],
+            MAX_POINT_PATH_LENGTH_LIKE_CPP,
+            DetourPathType::NORMAL,
+            false,
+            false,
+            true,
+        )
+        .unwrap();
+        assert_eq!(raycast.points, vec![[0.25, 0.0, 0.25], [0.75, 0.0, 0.75]]);
+        assert_eq!(raycast.path_type, DetourPathType::NOPATH);
     }
 
     #[test]
