@@ -20,6 +20,8 @@ pub const MAP_DIFFICULTY_FLAG_USE_LOOT_BASED_LOCK: u8 = 0x02;
 pub struct MapEntry {
     pub id: u32,
     pub instance_type: i8,
+    pub parent_map_id: i16,
+    pub cosmetic_parent_map_id: i16,
     pub flags1: u32,
 }
 
@@ -57,8 +59,11 @@ impl MapStore {
                 id,
                 // WDC4 record ids supply C++ field 0 (`ID`) and this reader
                 // exposes `Flags[3]` as one array field, so C++ field 8 -> 7
-                // and C++ fields 22..24 -> field 21.
+                // C++ fields 13..14 -> fields 12..13 and C++ fields 22..24
+                // -> field 21.
                 instance_type: reader.get_field_i8(idx, 7),
+                parent_map_id: reader.get_field_i16(idx, 12),
+                cosmetic_parent_map_id: reader.get_field_i16(idx, 13),
                 flags1: reader.get_field_u32(idx, 21),
             };
             entries.insert(id, entry);
@@ -180,11 +185,40 @@ mod tests {
         let store = MapStore::from_entries([MapEntry {
             id: 631,
             instance_type: 2,
+            parent_map_id: -1,
+            cosmetic_parent_map_id: -1,
             flags1: MAP_FLAG_FLEXIBLE_RAID_LOCKING,
         }]);
 
         assert!(store.get(631).unwrap().is_flex_locking());
         assert!(store.get(1).is_none());
+    }
+
+    #[test]
+    fn map_store_parent_fields_match_cpp_load_info() {
+        let store = MapStore::from_entries([
+            MapEntry {
+                id: 609,
+                instance_type: 0,
+                parent_map_id: 571,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+            MapEntry {
+                id: 111,
+                instance_type: 0,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: 1,
+                flags1: 0,
+            },
+        ]);
+
+        let child = store.get(609).unwrap();
+        assert_eq!(child.parent_map_id, 571);
+        assert_eq!(child.cosmetic_parent_map_id, -1);
+        let cosmetic = store.get(111).unwrap();
+        assert_eq!(cosmetic.parent_map_id, -1);
+        assert_eq!(cosmetic.cosmetic_parent_map_id, 1);
     }
 
     #[test]

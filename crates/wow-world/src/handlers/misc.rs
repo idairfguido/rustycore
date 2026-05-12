@@ -1212,11 +1212,15 @@ mod tests {
             MapEntry {
                 id: 0,
                 instance_type: 0,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
                 flags1: 0,
             },
             MapEntry {
                 id: 631,
                 instance_type: 2,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
                 flags1: wow_data::map::MAP_FLAG_FLEXIBLE_RAID_LOCKING,
             },
         ])));
