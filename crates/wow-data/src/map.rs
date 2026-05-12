@@ -77,6 +77,10 @@ impl MapStore {
         self.entries.get(&id)
     }
 
+    pub fn entries(&self) -> impl Iterator<Item = &MapEntry> {
+        self.entries.values()
+    }
+
     /// Resolve the root terrain map the same way C++ `TerrainMgr::LoadTerrain`
     /// does before loading grid/vmap files.
     pub fn terrain_root_map_id_like_cpp(&self, map_id: u32) -> Option<u32> {

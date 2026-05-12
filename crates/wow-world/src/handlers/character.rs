@@ -3004,6 +3004,7 @@ impl WorldSession {
             let loot_id: u32 = result.try_read::<Option<u32>>(23).flatten().unwrap_or(0);
             let gold_min: u32 = result.try_read::<Option<u32>>(24).flatten().unwrap_or(0);
             let gold_max: u32 = result.try_read::<Option<u32>>(25).flatten().unwrap_or(0);
+            let terrain_swap_map: i32 = result.try_read(26).unwrap_or(-1);
 
             let display_id = if model_id > 0 {
                 model_id
@@ -3077,6 +3078,7 @@ impl WorldSession {
                 gold_max,
                 None,
                 0,
+                terrain_swap_map,
             );
 
             if !result.next_row() {
@@ -3202,6 +3204,7 @@ impl WorldSession {
                 let loot_id: u32 = cr.try_read::<Option<u32>>(23).flatten().unwrap_or(0);
                 let gold_min: u32 = cr.try_read::<Option<u32>>(24).flatten().unwrap_or(0);
                 let gold_max: u32 = cr.try_read::<Option<u32>>(25).flatten().unwrap_or(0);
+                let terrain_swap_map: i32 = cr.try_read(26).unwrap_or(-1);
 
                 let display_id = if model_id > 0 {
                     model_id
@@ -3276,6 +3279,7 @@ impl WorldSession {
                         gold_max,
                         None,
                         0,
+                        terrain_swap_map,
                     );
                 }
 

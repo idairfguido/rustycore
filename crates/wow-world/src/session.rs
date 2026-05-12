@@ -686,6 +686,7 @@ pub struct WorldSession {
     // Map stores (Map.db2 + MapDifficulty.db2)
     map_store: Option<Arc<MapStore>>,
     map_difficulty_store: Option<Arc<MapDifficultyStore>>,
+    terrain_swap_store: Option<Arc<wow_data::TerrainSwapStore>>,
 
     // Shared player registry for broadcasting to nearby sessions
     player_registry: Option<Arc<PlayerRegistry>>,
@@ -1214,6 +1215,7 @@ pub struct PendingRespawn {
     pub gold_max: u32,
     pub boss_id: Option<u32>,
     pub dungeon_encounter_id: u32,
+    pub terrain_swap_map: i32,
 }
 
 fn is_represented_bag_slot(slot: u8) -> bool {
@@ -1283,6 +1285,7 @@ impl WorldSession {
             dungeon_encounter_store: None,
             map_store: None,
             map_difficulty_store: None,
+            terrain_swap_store: None,
             player_registry: None,
             object_accessor: None,
             group_registry: None,
@@ -1473,6 +1476,7 @@ impl WorldSession {
         gold_max: u32,
         boss_id: Option<u32>,
         dungeon_encounter_id: u32,
+        terrain_swap_map: i32,
     ) {
         let guid = create_data.guid;
         let entry = create_data.entry;
@@ -1500,6 +1504,29 @@ impl WorldSession {
                             .set_entry(entry);
                         let _ = creature.unit_mut().world_mut().set_map(map_id as u32, 0);
                         creature.unit_mut().world_mut().relocate(position);
+                        let validated_terrain_swap_map =
+                            if let (Some(map_store), Some(terrain_swap_store)) =
+                                (&self.map_store, &self.terrain_swap_store)
+                            {
+                                if let Some(terrain_swap_map) = terrain_swap_store
+                                    .validate_spawn_terrain_swap_like_cpp(
+                                        map_store,
+                                        u32::from(map_id),
+                                        terrain_swap_map,
+                                    )
+                                {
+                                    creature
+                                        .unit_mut()
+                                        .world_mut()
+                                        .phase_shift_mut()
+                                        .add_visible_map_id_like_cpp(terrain_swap_map, 1);
+                                    i32::try_from(terrain_swap_map).unwrap_or(-1)
+                                } else {
+                                    -1
+                                }
+                            } else {
+                                -1
+                            };
                         creature.unit_mut().set_level(level);
                         creature.unit_mut().set_max_health(u64::from(hp));
                         creature.unit_mut().set_health(u64::from(hp));
@@ -1513,6 +1540,7 @@ impl WorldSession {
                         creature.ai_ownership_mut().gold_max = gold_max;
                         creature.ai_ownership_mut().boss_id = boss_id;
                         creature.ai_ownership_mut().dungeon_encounter_id = dungeon_encounter_id;
+                        creature.ai_ownership_mut().terrain_swap_map = validated_terrain_swap_map;
                         creature
                     },
                     create_data.clone(),
@@ -3281,6 +3309,10 @@ impl WorldSession {
 
     pub fn set_map_difficulty_store(&mut self, store: Arc<MapDifficultyStore>) {
         self.map_difficulty_store = Some(store);
+    }
+
+    pub fn set_terrain_swap_store(&mut self, store: Arc<wow_data::TerrainSwapStore>) {
+        self.terrain_swap_store = Some(store);
     }
 
     pub(crate) fn map_difficulty_store(&self) -> Option<&Arc<MapDifficultyStore>> {
@@ -7343,6 +7375,7 @@ impl WorldSession {
                         gold_max: c.gold_max(),
                         boss_id: c.boss_id(),
                         dungeon_encounter_id: c.dungeon_encounter_id(),
+                        terrain_swap_map: c.creature.ai_ownership().terrain_swap_map,
                     });
                     tracing::info!(
                         "Corpse despawned: {:?} (entry {}) — respawn in {}s",
@@ -7407,6 +7440,7 @@ impl WorldSession {
                 r.gold_max,
                 r.boss_id,
                 r.dungeon_encounter_id,
+                r.terrain_swap_map,
             );
             self.visible_creatures.insert(guid);
         }
@@ -8543,7 +8577,62 @@ mod tests {
             0,
             None,
             0,
+            -1,
         );
+    }
+
+    #[test]
+    fn register_world_creature_applies_valid_terrain_swap_visible_map_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let guid = test_creature_guid(609);
+        let map_store = Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: 0,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+            wow_data::MapEntry {
+                id: 609,
+                instance_type: 0,
+                parent_map_id: 571,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ]));
+        let terrain_swap_store = Arc::new(wow_data::TerrainSwapStore::from_rows_like_cpp(
+            &map_store,
+            [],
+            [],
+            |_| true,
+        ));
+
+        session.set_map_manager(Arc::clone(&manager));
+        session.set_map_store(map_store);
+        session.set_terrain_swap_store(terrain_swap_store);
+        session.register_world_creature(
+            571,
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            test_creature_create_data(guid, 9001, 25),
+            3,
+            5,
+            20.0,
+            0,
+            0,
+            0,
+            None,
+            0,
+            609,
+        );
+
+        let guard = manager
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let creature = guard.find_creature(571, 0, guid).unwrap();
+        assert!(creature.phase_shift().has_visible_map_id_like_cpp(609));
+        assert_eq!(creature.creature.ai_ownership().terrain_swap_map, 609);
     }
 
     #[test]

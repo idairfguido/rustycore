@@ -85,6 +85,10 @@ pub enum WorldStatements {
     SEL_GAMEOBJECT_SPAWNS,
     /// Load all static areatrigger spawn rows into the C++ AreaTriggerDataStore-style spawn store.
     SEL_AREATRIGGER_SPAWNS,
+    /// Load C++ terrain world map definitions.
+    SEL_TERRAIN_WORLD_MAPS,
+    /// Load C++ terrain swap default definitions.
+    SEL_TERRAIN_SWAP_DEFAULTS,
     /// Load C++ spawn group templates.
     SEL_SPAWN_GROUP_TEMPLATES,
     /// Load C++ spawn group members.
@@ -403,7 +407,8 @@ impl StatementDef for WorldStatements {
                 "ct.speed_walk, ct.speed_run, ct.scale, ct.unit_class, ",
                 "ct.BaseAttackTime, ct.RangeAttackTime, ",
                 "ctm.CreatureDisplayID, ",
-                "ctdiff.LootID, ctdiff.GoldMin, ctdiff.GoldMax ",
+                "ctdiff.LootID, ctdiff.GoldMin, ctdiff.GoldMax, ",
+                "c.terrainSwapMap ",
                 "FROM creature c ",
                 "JOIN creature_template ct ON c.id = ct.entry ",
                 "LEFT JOIN creature_template_difficulty ctdiff ON ct.entry = ctdiff.Entry AND ctdiff.DifficultyID = 0 ",
@@ -451,6 +456,12 @@ impl StatementDef for WorldStatements {
             ),
             Self::SEL_AREATRIGGER_SPAWNS => {
                 "SELECT SpawnId, AreaTriggerCreatePropertiesId, IsCustom, MapId, SpawnDifficulties, PosX, PosY, PosZ, Orientation, PhaseUseFlags, PhaseId, PhaseGroup, SpellForVisuals, ScriptName FROM `areatrigger`"
+            }
+            Self::SEL_TERRAIN_WORLD_MAPS => {
+                "SELECT TerrainSwapMap, UiMapPhaseId FROM `terrain_worldmap`"
+            }
+            Self::SEL_TERRAIN_SWAP_DEFAULTS => {
+                "SELECT MapId, TerrainSwapMap FROM `terrain_swap_defaults`"
             }
             Self::SEL_SPAWN_GROUP_TEMPLATES => {
                 "SELECT groupId, groupName, groupFlags FROM spawn_group_template"

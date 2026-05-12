@@ -453,6 +453,11 @@ async fn main() -> Result<()> {
         "Loaded {} C++ mmap disable rows",
         mmap_disabled_map_ids.len()
     );
+    let terrain_swap_store = Arc::new(
+        wow_data::load_terrain_swaps(world_db.as_ref(), &map_store, |_| true)
+            .await
+            .context("Failed to load C++ terrain swap stores")?,
+    );
 
     let map_difficulty_store = Arc::new(
         wow_data::MapDifficultyStore::load(&data_dir, &locale)
@@ -793,6 +798,7 @@ async fn main() -> Result<()> {
         dungeon_encounter_store: Some(Arc::clone(&dungeon_encounter_store)),
         map_store: Some(Arc::clone(&map_store)),
         map_difficulty_store: Some(Arc::clone(&map_difficulty_store)),
+        terrain_swap_store: Some(Arc::clone(&terrain_swap_store)),
         quest_store: Some(Arc::clone(&quest_store)),
         quest_xp_store: Some(Arc::clone(&quest_xp_store)),
         player_xp_table: Some(Arc::clone(&player_xp_table)),
@@ -1646,6 +1652,9 @@ async fn create_session(
     }
     if let Some(ref store) = resources.map_difficulty_store {
         session.set_map_difficulty_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.terrain_swap_store {
+        session.set_terrain_swap_store(Arc::clone(store));
     }
     if let Some(ref store) = resources.quest_store {
         session.set_quest_store(Arc::clone(store));

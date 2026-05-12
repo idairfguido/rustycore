@@ -80,6 +80,7 @@ pub struct CreatureAiOwnershipState {
     pub gold_max: u32,
     pub boss_id: Option<u32>,
     pub dungeon_encounter_id: u32,
+    pub terrain_swap_map: i32,
     pub last_movement_inform: Option<CreatureMovementInform>,
 }
 
@@ -112,6 +113,7 @@ impl Default for CreatureAiOwnershipState {
             gold_max: 0,
             boss_id: None,
             dungeon_encounter_id: 0,
+            terrain_swap_map: -1,
             last_movement_inform: None,
         }
     }
@@ -1966,6 +1968,7 @@ mod tests {
         assert_eq!(creature.ai_ownership().gold_max, 0);
         assert_eq!(creature.ai_ownership().boss_id, None);
         assert_eq!(creature.ai_ownership().dungeon_encounter_id, 0);
+        assert_eq!(creature.ai_ownership().terrain_swap_map, -1);
         assert_eq!(creature.ai_ownership().last_movement_inform, None);
     }
 
