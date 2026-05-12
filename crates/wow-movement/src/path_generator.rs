@@ -148,6 +148,36 @@ impl PathGenerator {
         true
     }
 
+    pub fn apply_detour_path_like_cpp(
+        &mut self,
+        start: Position,
+        destination: Position,
+        actual_end: Position,
+        points: impl IntoIterator<Item = Position>,
+        poly_refs: &[u64],
+        path_type: PathType,
+        force_destination: bool,
+    ) {
+        self.clear();
+        self.set_start_position(start);
+        self.end_position = destination;
+        self.actual_end_position = actual_end;
+        self.force_destination = force_destination;
+        self.path_type = path_type;
+
+        for (index, poly_ref) in poly_refs
+            .iter()
+            .copied()
+            .take(MAX_PATH_LENGTH_LIKE_CPP)
+            .enumerate()
+        {
+            self.path_poly_refs[index] = poly_ref;
+            self.poly_length += 1;
+        }
+
+        self.path_points.extend(points);
+    }
+
     #[must_use]
     pub fn path_length(&self) -> f32 {
         self.path_points
@@ -399,6 +429,33 @@ mod tests {
         ));
         assert_eq!(path.path_type(), PathType::BLANK);
         assert!(path.path_points().is_empty());
+    }
+
+    #[test]
+    fn apply_detour_path_writes_cpp_pathgenerator_state() {
+        let mut path = PathGenerator::new();
+        path.calculate_without_navmesh_like_cpp(pos(9.0, 9.0, 9.0), pos(10.0, 10.0, 10.0), false);
+
+        path.apply_detour_path_like_cpp(
+            pos(1.0, 2.0, 3.0),
+            pos(7.0, 8.0, 9.0),
+            pos(7.0, 8.0, 9.5),
+            [pos(1.0, 2.0, 3.0), pos(4.0, 5.0, 6.0), pos(7.0, 8.0, 9.5)],
+            &[11, 22],
+            PathType::NORMAL,
+            true,
+        );
+
+        assert_eq!(path.start_position(), pos(1.0, 2.0, 3.0));
+        assert_eq!(path.end_position(), pos(7.0, 8.0, 9.0));
+        assert_eq!(path.actual_end_position(), pos(7.0, 8.0, 9.5));
+        assert_eq!(path.path_type(), PathType::NORMAL);
+        assert!(path.force_destination());
+        assert_eq!(path.poly_length(), 2);
+        assert_eq!(
+            path.path_points(),
+            &[pos(1.0, 2.0, 3.0), pos(4.0, 5.0, 6.0), pos(7.0, 8.0, 9.5)]
+        );
     }
 
     #[test]
