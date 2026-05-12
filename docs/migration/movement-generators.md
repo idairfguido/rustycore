@@ -48,6 +48,7 @@ Current Rust status:
 - `#A06.8h.3e.30` ports represented runtime `FormationMovementGenerator` into `wow-movement`: `AbstractFollower` target tracking, follow-formation base state, 1200ms relaunch interval, 1.65s leader-spline prediction, waypoint angle flip, predicted-spline stop, formation-move state, arrival facing/inform and finalize/deactivate cleanup.
 - `#A06.8h.3e.31` ports represented runtime `FlightPathMovementGenerator` into `wow-movement`: default/highest/in-flight state, taxi/control flags, fly/smooth/uncompressed/walk launch at 32.0, map-end/teleport segmentation, C++ path-shortening, discount costs, taxi-destination switches, departure/arrival events, end-grid preload, teleport resume/skip and active finalize cleanup.
 - `#A06.8h.3e.32` ports represented runtime `SplineChainMovementGenerator` into `wow-movement`: chain links, resume info, partial resume, invalid point clamp, `MovebyPath`/`MoveTo` launch selection, duration-adjusted `_msToNext`, update sequencing, resume-info extraction and finalize inform.
+- `#A06.8h.3e.33` ports the runtime `MotionMaster::PropagateSpeedChange` and `StopOnDeath` hooks into `wow-movement`: speed changes notify only the current generator like C++, persist-on-death current generators suppress death cleanup, and non-persisting current generators produce clear/default-idle/stop-moving actions.
 - Still missing: generalized executable generator behavior against a real `Unit`, pathgen-backed destinations, real SmartAI/script dispatch for `MovementInform`, real `CallAssistance` map/AI effects, SQL-backed spline-chain loading, and full runtime `MotionMaster` ownership outside the represented subsystem.
 
 ---
@@ -333,7 +334,7 @@ Generators do not own packet writers directly; every motion is serialized throug
 - **Owner-backed runtime `MotionMaster` is still incomplete.** `wow-movement::MotionMaster` has boxed generator storage, priority ordering, delayed actions and top update/pop behavior, but still lacks real `Unit` owner context, default factory selection, owner finalize callbacks, public `Move*` API parity and map tick wiring.
 - **`AbstractFollower` helper is represented only.** Target add/remove tracking exists in `wow-movement`; real owner/target `Unit` lookup and dirty tracking from actual map relocation still need owner-backed integration.
 - **`MovementInform` AI callback** is only represented for selected bridges; real SmartAI/script dispatch is not wired.
-- **`PropagateSpeedChange`** — speed changes never propagate to in-flight motion (because no in-flight motion exists).
+- **`PropagateSpeedChange`** — `wow-movement::MotionMaster` now matches C++ by notifying only the current generator; real owner speed mutation still needs to call this hook from the owner-backed runtime.
 - **Waypoint loading** — no `WaypointManager`, no SQL reader for `waypoint_path*`, no `script_waypoint`, no `creature_formations`, no `script_spline_chain_meta`.
 - **Taxi flight** — represented `FlightPathMovementGenerator` exists, but there is still no `PlayerTaxi`, no `TaxiPath.dbc`/`TaxiPathNode.dbc` consumer, no real taxi handlers and no `SMSG_FLIGHT_SPLINE_SYNC` writer/caller.
 - **Charge / jump / knockback / fall** — no parabolic emitters; `CMSG_MOVE_FALL_LAND` is parsed but no fall damage compute.
@@ -569,7 +570,7 @@ Numbered for cross-reference from `MIGRATION_ROADMAP.md` §5. Complexity: **L** 
 - [ ] **#MOVE-GEN.24** Wire `Unit::MovementInform(type, id)` AI callback (cross-link with [`ai-base.md`](ai-base.md)). (M)
 - [ ] **#MOVE-GEN.25** Wire per-Unit `MotionMaster::update(diff)` into `MapManager` creature tick. (H)
 - [ ] **#MOVE-GEN.26** Replace `wow_ai::wander` linear-tween with `RandomMovementGenerator` push at spawn time. (M)
-- [ ] **#MOVE-GEN.27** `MotionMaster::PropagateSpeedChange` + listener registry. (M)
+- [x] **#MOVE-GEN.27** `MotionMaster::PropagateSpeedChange` and `StopOnDeath` hooks. C++ audit corrected the old plan: `PropagateSpeedChange` notifies only `GetCurrentMovementGenerator()`, not every live generator or a listener registry. Runtime `wow-movement::MotionMaster` now exposes current-generator speed propagation plus `StopOnDeath` persist/clear/idle/stop-moving action semantics. Remaining owner-backed caller wiring stays under `#MOVE-GEN.8/#MOVE-GEN.25`. (M)
 
 ---
 
@@ -604,8 +605,8 @@ Numbered for cross-reference from `MIGRATION_ROADMAP.md` §5. Complexity: **L** 
 - [ ] Test: `SMSG_FLIGHT_SPLINE_SYNC` writer/caller for taxi flight once real `Player`/`MoveSpline` runtime is wired.
 - [x] Test: `SplineChainMovementGenerator::ResumeFrom(SplineChainResumeInfo)` continues from `(SplineIndex, PointIndex, TimeToNext)`, clamps invalid point indexes, adjusts `_msToNext` when launch duration differs, sequences next splines and emits finalize inform.
 - [x] Test: `FormationMovementGenerator` covers stationary/moving leader shape, 1.65s prediction, angle flip, periodic relaunch, arrival inform and finalize/deactivate cleanup.
-- [ ] Test: `MotionMaster::PropagateSpeedChange` calls `MovementGenerator::UnitSpeedChanged` on every live generator.
-- [ ] Test: `StopOnDeath` removes all generators that don't have `MOVEMENTGENERATOR_FLAG_PERSIST_ON_DEATH`.
+- [x] Test: `MotionMaster::PropagateSpeedChange` calls `MovementGenerator::UnitSpeedChanged` on the current generator only, matching `MotionMaster.cpp`.
+- [x] Test: `StopOnDeath` preserves a current generator with `MOVEMENTGENERATOR_FLAG_PERSIST_ON_DEATH`, and otherwise clears, moves idle when in-world, and requests owner `StopMoving`.
 - [ ] Test: Generator pushed with `MOTION_PRIORITY_HIGHEST` displaces a `NORMAL` priority active even if same type.
 - [ ] Test: `AbstractFollower::dirty_bit` flips when target relocates between updates.
 - [x] Test: `ConfusedMovementGenerator` selected destinations preserve the C++ `4*frand-2` distance and `2*pi` angle shape, including negative-distance hops around the captured reference.
@@ -704,7 +705,7 @@ Numbered for cross-reference from `MIGRATION_ROADMAP.md` §5. Complexity: **L** 
 
 **Scope.** Cross-checked `/home/server/woltk-trinity-legacy/src/server/game/Movement/MotionMaster.{h,cpp}` (246 + 1376 lines), `MovementGenerator.{h,cpp}` (154 + 61), `MovementDefines.{h,cpp}` (142 + 48), `AbstractFollower.{h,cpp}` (36 + 31), and all 13 generator pairs under `MovementGenerators/` (3134 lines total of `.cpp`) against the Rust workspace at `/home/server/rustycore/crates/`.
 
-**MotionMaster: runtime core exists, owner integration incomplete.** `wow-entities::MotionSubsystem` carries the represented bridge, and `wow-movement::MotionMaster` now has boxed executable `MovementGenerator` storage, default/active priority ordering, delayed actions, update/init/reset/pop behavior and represented base-unit-state ref counts. Still missing: owner `Unit`, real finalize callbacks, default factory selection, map tick wiring, `PropagateSpeedChange` against concrete owner movement state, and full public `Move*` API parity.
+**MotionMaster: runtime core exists, owner integration incomplete.** `wow-entities::MotionSubsystem` carries the represented bridge, and `wow-movement::MotionMaster` now has boxed executable `MovementGenerator` storage, default/active priority ordering, delayed actions, update/init/reset/pop behavior, represented base-unit-state ref counts, current-generator speed propagation, and C++ death-stop action semantics. Still missing: owner `Unit`, real finalize callbacks, default factory selection, map tick wiring, owner calls into `PropagateSpeedChange`, and full public `Move*` API parity.
 
 **Generators: partially represented, not 13/13 runtime-complete.**
 - IdleMovementGenerator + Rotate + Distract + AssistanceDistract: runtime structs now exist in `wow-movement`; owner-specific effects remain represented until the owner-backed `MotionMaster` is wired. Creature rotate/distract bridge can launch facing-only `MoveSplineInit`; real generic SmartAI/script dispatch is still pending.

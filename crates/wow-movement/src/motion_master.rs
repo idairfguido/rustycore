@@ -353,6 +353,48 @@ impl MotionMaster {
         }
     }
 
+    pub fn stop_on_death(
+        &mut self,
+        owner_in_world: bool,
+        idle_factory: impl FnOnce() -> Box<dyn MovementGenerator>,
+    ) -> StopOnDeathAction {
+        if self
+            .current_generator()
+            .is_some_and(|generator| generator.has_flag(MovementGeneratorFlags::PERSIST_ON_DEATH))
+        {
+            return StopOnDeathAction {
+                persisted: true,
+                cleared_motion_master: false,
+                moved_idle: false,
+                stop_moving: false,
+            };
+        }
+
+        if owner_in_world {
+            self.clear();
+            self.add(idle_factory(), MovementSlot::Default);
+        }
+
+        StopOnDeathAction {
+            persisted: false,
+            cleared_motion_master: owner_in_world,
+            moved_idle: owner_in_world,
+            stop_moving: true,
+        }
+    }
+
+    fn current_generator(&self) -> Option<&dyn MovementGenerator> {
+        if !self.active_generators.is_empty() {
+            self.active_generators
+                .first()
+                .map(|generator| generator.as_ref())
+        } else {
+            self.default_generator
+                .as_ref()
+                .map(|generator| generator.as_ref())
+        }
+    }
+
     fn current_generator_mut(&mut self) -> Option<&mut Box<dyn MovementGenerator>> {
         if !self.active_generators.is_empty() {
             self.active_generators.first_mut()
@@ -464,6 +506,14 @@ impl MotionMaster {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StopOnDeathAction {
+    pub persisted: bool,
+    pub cleared_motion_master: bool,
+    pub moved_idle: bool,
+    pub stop_moving: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResolvedDelayedAction {
     pub action_type: MotionMasterDelayedActionType,
     pub executed: bool,
@@ -515,9 +565,74 @@ mod tests {
     use super::*;
     use crate::{
         AssistanceDistractMovementGenerator, DistractMovementGenerator, IdleMovementGenerator,
-        RotateDirection, RotateMovementGenerator, UNIT_STATE_DISTRACTED_LIKE_CPP,
-        UNIT_STATE_ROTATING_LIKE_CPP,
+        MovementGeneratorState, RotateDirection, RotateMovementGenerator,
+        UNIT_STATE_DISTRACTED_LIKE_CPP, UNIT_STATE_ROTATING_LIKE_CPP,
     };
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    struct TrackingMovementGenerator {
+        state: MovementGeneratorState,
+        kind: MovementGeneratorType,
+        speed_changes: Arc<AtomicUsize>,
+        finalized: Arc<AtomicUsize>,
+    }
+
+    impl TrackingMovementGenerator {
+        fn new(
+            kind: MovementGeneratorType,
+            priority: MovementGeneratorPriority,
+            flags: MovementGeneratorFlags,
+            speed_changes: Arc<AtomicUsize>,
+            finalized: Arc<AtomicUsize>,
+        ) -> Self {
+            Self {
+                state: MovementGeneratorState {
+                    mode: MovementGeneratorMode::Default,
+                    priority,
+                    flags,
+                    base_unit_state: 0,
+                },
+                kind,
+                speed_changes,
+                finalized,
+            }
+        }
+    }
+
+    impl MovementGenerator for TrackingMovementGenerator {
+        fn state(&self) -> &MovementGeneratorState {
+            &self.state
+        }
+
+        fn state_mut(&mut self) -> &mut MovementGeneratorState {
+            &mut self.state
+        }
+
+        fn kind(&self) -> MovementGeneratorType {
+            self.kind
+        }
+
+        fn initialize(&mut self) {}
+
+        fn reset(&mut self) {}
+
+        fn update(&mut self, _diff_ms: u32) -> bool {
+            true
+        }
+
+        fn deactivate(&mut self) {}
+
+        fn finalize(&mut self, _active: bool, _movement_inform: bool) {
+            self.finalized.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn unit_speed_changed(&mut self) {
+            self.speed_changes.fetch_add(1, Ordering::SeqCst);
+        }
+    }
 
     #[test]
     fn motion_master_flags_and_delayed_action_values_match_cpp() {
@@ -695,5 +810,138 @@ mod tests {
             MovementSlot::Active
         ));
         assert_eq!(motion.current_kind(), Some(MovementGeneratorType::Idle));
+    }
+
+    #[test]
+    fn motion_master_propagates_speed_change_to_current_generator_only_like_cpp() {
+        let default_speed_changes = Arc::new(AtomicUsize::new(0));
+        let active_speed_changes = Arc::new(AtomicUsize::new(0));
+        let finalized = Arc::new(AtomicUsize::new(0));
+        let mut motion = MotionMaster::new(Box::new(TrackingMovementGenerator::new(
+            MovementGeneratorType::Idle,
+            MovementGeneratorPriority::None,
+            MovementGeneratorFlags::NONE,
+            Arc::clone(&default_speed_changes),
+            Arc::clone(&finalized),
+        )));
+        motion.add(
+            Box::new(TrackingMovementGenerator::new(
+                MovementGeneratorType::Rotate,
+                MovementGeneratorPriority::Normal,
+                MovementGeneratorFlags::NONE,
+                Arc::clone(&active_speed_changes),
+                Arc::clone(&finalized),
+            )),
+            MovementSlot::Active,
+        );
+
+        motion.propagate_speed_change();
+        assert_eq!(active_speed_changes.load(Ordering::SeqCst), 1);
+        assert_eq!(default_speed_changes.load(Ordering::SeqCst), 0);
+
+        motion.clear_slot(MovementSlot::Active);
+        motion.propagate_speed_change();
+        assert_eq!(active_speed_changes.load(Ordering::SeqCst), 1);
+        assert_eq!(default_speed_changes.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn motion_master_stop_on_death_preserves_persisting_current_generator_like_cpp() {
+        let speed_changes = Arc::new(AtomicUsize::new(0));
+        let finalized = Arc::new(AtomicUsize::new(0));
+        let mut motion = MotionMaster::new(Box::new(IdleMovementGenerator::new()));
+        motion.add(
+            Box::new(TrackingMovementGenerator::new(
+                MovementGeneratorType::Effect,
+                MovementGeneratorPriority::Highest,
+                MovementGeneratorFlags::PERSIST_ON_DEATH,
+                Arc::clone(&speed_changes),
+                Arc::clone(&finalized),
+            )),
+            MovementSlot::Active,
+        );
+
+        let action = motion.stop_on_death(true, || Box::new(IdleMovementGenerator::new()));
+
+        assert_eq!(
+            action,
+            StopOnDeathAction {
+                persisted: true,
+                cleared_motion_master: false,
+                moved_idle: false,
+                stop_moving: false,
+            }
+        );
+        assert_eq!(motion.current_kind(), Some(MovementGeneratorType::Effect));
+        assert_eq!(motion.size(), 2);
+        assert_eq!(finalized.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn motion_master_stop_on_death_clears_and_moves_idle_when_owner_is_in_world_like_cpp() {
+        let default_finalized = Arc::new(AtomicUsize::new(0));
+        let active_finalized = Arc::new(AtomicUsize::new(0));
+        let speed_changes = Arc::new(AtomicUsize::new(0));
+        let mut motion = MotionMaster::new(Box::new(TrackingMovementGenerator::new(
+            MovementGeneratorType::Idle,
+            MovementGeneratorPriority::None,
+            MovementGeneratorFlags::NONE,
+            Arc::clone(&speed_changes),
+            Arc::clone(&default_finalized),
+        )));
+        motion.add(
+            Box::new(TrackingMovementGenerator::new(
+                MovementGeneratorType::Rotate,
+                MovementGeneratorPriority::Normal,
+                MovementGeneratorFlags::NONE,
+                Arc::clone(&speed_changes),
+                Arc::clone(&active_finalized),
+            )),
+            MovementSlot::Active,
+        );
+
+        let action = motion.stop_on_death(true, || Box::new(IdleMovementGenerator::new()));
+
+        assert_eq!(
+            action,
+            StopOnDeathAction {
+                persisted: false,
+                cleared_motion_master: true,
+                moved_idle: true,
+                stop_moving: true,
+            }
+        );
+        assert_eq!(motion.current_kind(), Some(MovementGeneratorType::Idle));
+        assert_eq!(motion.size(), 1);
+        assert_eq!(default_finalized.load(Ordering::SeqCst), 1);
+        assert_eq!(active_finalized.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn motion_master_stop_on_death_stops_without_clearing_when_owner_is_not_in_world_like_cpp() {
+        let speed_changes = Arc::new(AtomicUsize::new(0));
+        let finalized = Arc::new(AtomicUsize::new(0));
+        let mut motion = MotionMaster::new(Box::new(TrackingMovementGenerator::new(
+            MovementGeneratorType::Idle,
+            MovementGeneratorPriority::None,
+            MovementGeneratorFlags::NONE,
+            Arc::clone(&speed_changes),
+            Arc::clone(&finalized),
+        )));
+
+        let action = motion.stop_on_death(false, || Box::new(IdleMovementGenerator::new()));
+
+        assert_eq!(
+            action,
+            StopOnDeathAction {
+                persisted: false,
+                cleared_motion_master: false,
+                moved_idle: false,
+                stop_moving: true,
+            }
+        );
+        assert_eq!(motion.current_kind(), Some(MovementGeneratorType::Idle));
+        assert_eq!(motion.size(), 1);
+        assert_eq!(finalized.load(Ordering::SeqCst), 0);
     }
 }
