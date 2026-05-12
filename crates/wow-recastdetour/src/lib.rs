@@ -235,6 +235,12 @@ unsafe extern "C" {
         position: *const f32,
         closest: *mut f32,
     ) -> DetourStatus;
+    fn rustycore_dt_nav_mesh_query_get_poly_height(
+        query: *const RawDetourNavMeshQuery,
+        poly_ref: DetourPolyRef,
+        position: *const f32,
+        height: *mut f32,
+    ) -> DetourStatus;
     fn rustycore_dt_free(ptr: *mut std::ffi::c_void);
     fn rustycore_dt_create_square_tile_data(
         tile_x: i32,
@@ -502,6 +508,27 @@ impl<'mesh> DetourNavMeshQuery<'mesh> {
 
         Ok(closest)
     }
+
+    pub fn get_poly_height(
+        &self,
+        poly_ref: DetourPolyRef,
+        position: [f32; 3],
+    ) -> Result<f32, DetourNavMeshQueryError> {
+        let mut height = 0.0;
+        let status = unsafe {
+            rustycore_dt_nav_mesh_query_get_poly_height(
+                self.raw.as_ptr(),
+                poly_ref,
+                position.as_ptr(),
+                &mut height,
+            )
+        };
+        if detour_status_failed(status) {
+            return Err(DetourNavMeshQueryError::GetPolyHeightFailed { status });
+        }
+
+        Ok(height)
+    }
 }
 
 impl Drop for DetourNavMeshQuery<'_> {
@@ -608,6 +635,8 @@ pub enum DetourNavMeshQueryError {
     ClosestPointOnPolyFailed { status: DetourStatus },
     #[error("Detour closestPointOnPolyBoundary failed with status 0x{status:08x}")]
     ClosestPointOnPolyBoundaryFailed { status: DetourStatus },
+    #[error("Detour getPolyHeight failed with status 0x{status:08x}")]
+    GetPolyHeightFailed { status: DetourStatus },
 }
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
@@ -1336,6 +1365,37 @@ mod tests {
             Err(DetourNavMeshQueryError::ClosestPointOnPolyBoundaryFailed {
                 status: DT_FAILURE_LIKE_CPP | DT_INVALID_PARAM_LIKE_CPP,
             },)
+        );
+    }
+
+    #[test]
+    fn detour_query_get_poly_height_matches_cpp_shape() {
+        let params = DetourNavMeshParams {
+            origin: [0.0, 0.0, 0.0],
+            tile_width: 1.0,
+            tile_height: 1.0,
+            max_tiles: 16,
+            max_polys: 128,
+        };
+        let mut mesh = DetourNavMesh::new(&params).unwrap();
+        let tile = generated_square_tile_blob(0, 0);
+        mesh.add_tile(&tile).unwrap();
+
+        let query = DetourNavMeshQuery::new(&mesh, 1024).unwrap();
+        let filter = DetourQueryFilter::new().unwrap();
+        let nearest = query
+            .find_nearest_poly([0.5, 0.0, 0.5], [3.0, 5.0, 3.0], &filter)
+            .unwrap();
+
+        assert_eq!(
+            query.get_poly_height(nearest.poly_ref, [0.5, 7.0, 0.5]),
+            Ok(0.0)
+        );
+        assert_eq!(
+            query.get_poly_height(0, [0.5, 0.0, 0.5]),
+            Err(DetourNavMeshQueryError::GetPolyHeightFailed {
+                status: DT_FAILURE_LIKE_CPP | DT_INVALID_PARAM_LIKE_CPP,
+            })
         );
     }
 

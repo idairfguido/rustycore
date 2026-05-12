@@ -198,6 +198,15 @@ extern "C"
         return query->closestPointOnPolyBoundary((dtPolyRef)poly_ref, position, closest);
     }
 
+    dtStatus rustycore_dt_nav_mesh_query_get_poly_height(
+        dtNavMeshQuery const* query,
+        uint64_t poly_ref,
+        float const* position,
+        float* height)
+    {
+        return query->getPolyHeight((dtPolyRef)poly_ref, position, height);
+    }
+
     void rustycore_dt_free(void* ptr)
     {
         dtFree(ptr);
