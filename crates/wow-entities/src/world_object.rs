@@ -329,6 +329,10 @@ impl PhaseShift {
         self.phases.get(&phase_id)
     }
 
+    pub fn phases_like_cpp(&self) -> impl Iterator<Item = &PhaseRef> + '_ {
+        self.phases.values()
+    }
+
     pub const fn flags_like_cpp(&self) -> PhaseShiftFlags {
         self.flags
     }
