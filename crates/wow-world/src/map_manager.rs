@@ -1,4 +1,6 @@
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock, mpsc};
 use std::thread;
@@ -41,6 +43,12 @@ pub const DEFAULT_GRID_UNLOAD_TIME: Duration = Duration::from_secs(300);
 /// inventing terrain values.
 pub const DEFAULT_MIN_HEIGHT_LIKE_CPP: f32 = -500.0;
 
+const MAP_MAGIC_LIKE_CPP: &[u8; 4] = b"MAPS";
+const MAP_VERSION_MAGIC_LIKE_CPP: u32 = 10;
+const MAP_FILE_HEADER_SIZE_LIKE_CPP: usize = 44;
+const TERRAIN_GRID_COUNT_LIKE_CPP: usize =
+    MAX_NUMBER_OF_GRIDS_LIKE_CPP as usize * MAX_NUMBER_OF_GRIDS_LIKE_CPP as usize;
+
 pub fn terrain_grid_coords_for_wow_position_like_cpp(x: f32, y: f32) -> (i32, i32) {
     let center_grid_offset = SIZE_OF_GRIDS_LIKE_CPP / 2.0;
     let x_offset = (x - center_grid_offset) / SIZE_OF_GRIDS_LIKE_CPP;
@@ -75,6 +83,145 @@ pub fn terrain_map_id_for_phase_shift_like_cpp(
                 .unwrap_or(map_id)
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct TerrainGridFilesLikeCpp {
+    map_id: u32,
+    grid_file_exists: Vec<bool>,
+    child_terrain: Vec<TerrainGridFilesLikeCpp>,
+}
+
+impl TerrainGridFilesLikeCpp {
+    pub fn load_root_like_cpp(
+        data_dir: impl AsRef<Path>,
+        map_id: u32,
+        parent_child_map_data: &HashMap<u32, Vec<u32>>,
+    ) -> io::Result<Self> {
+        Self::load_impl_like_cpp(data_dir.as_ref(), map_id, parent_child_map_data)
+    }
+
+    fn load_impl_like_cpp(
+        data_dir: &Path,
+        map_id: u32,
+        parent_child_map_data: &HashMap<u32, Vec<u32>>,
+    ) -> io::Result<Self> {
+        let grid_file_exists = discover_grid_map_files_like_cpp(data_dir, map_id)?;
+        let mut child_terrain = Vec::new();
+        if let Some(child_map_ids) = parent_child_map_data.get(&map_id) {
+            for child_map_id in child_map_ids {
+                child_terrain.push(Self::load_impl_like_cpp(
+                    data_dir,
+                    *child_map_id,
+                    parent_child_map_data,
+                )?);
+            }
+        }
+
+        Ok(Self {
+            map_id,
+            grid_file_exists,
+            child_terrain,
+        })
+    }
+
+    pub fn map_id(&self) -> u32 {
+        self.map_id
+    }
+
+    pub fn has_grid_file_like_cpp(&self, gx: i32, gy: i32) -> bool {
+        terrain_grid_bitset_index_like_cpp(gx, gy)
+            .and_then(|idx| self.grid_file_exists.get(idx).copied())
+            .unwrap_or(false)
+    }
+
+    pub fn has_child_terrain_grid_file_like_cpp(&self, map_id: u32, gx: i32, gy: i32) -> bool {
+        self.child_terrain
+            .iter()
+            .find(|child_terrain| child_terrain.map_id == map_id)
+            .is_some_and(|child_terrain| child_terrain.has_grid_file_like_cpp(gx, gy))
+    }
+
+    pub fn terrain_map_id_for_phase_shift_like_cpp(
+        &self,
+        phase_shift: &PhaseShift,
+        source_map_id: u32,
+        x: f32,
+        y: f32,
+    ) -> u32 {
+        terrain_map_id_for_phase_shift_like_cpp(
+            phase_shift,
+            source_map_id,
+            x,
+            y,
+            |map_id, gx, gy| self.has_child_terrain_grid_file_like_cpp(map_id, gx, gy),
+        )
+    }
+}
+
+fn discover_grid_map_files_like_cpp(data_dir: &Path, map_id: u32) -> io::Result<Vec<bool>> {
+    let tile_list_name = data_dir.join("maps").join(format!("{map_id:04}.tilelist"));
+    if let Ok(mut tile_list) = File::open(tile_list_name) {
+        let mut map_magic = [0_u8; 4];
+        let mut version_magic = [0_u8; 4];
+        let mut build = [0_u8; 4];
+        let mut tiles_data = vec![0_u8; TERRAIN_GRID_COUNT_LIKE_CPP];
+        if tile_list.read_exact(&mut map_magic).is_ok()
+            && map_magic == *MAP_MAGIC_LIKE_CPP
+            && tile_list.read_exact(&mut version_magic).is_ok()
+            && u32::from_le_bytes(version_magic) == MAP_VERSION_MAGIC_LIKE_CPP
+            && tile_list.read_exact(&mut build).is_ok()
+            && tile_list.read_exact(&mut tiles_data).is_ok()
+        {
+            return Ok(terrain_grid_bitset_from_cpp_string_like_cpp(&tiles_data));
+        }
+    }
+
+    let mut grid_file_exists = vec![false; TERRAIN_GRID_COUNT_LIKE_CPP];
+    for gx in 0..MAX_NUMBER_OF_GRIDS_LIKE_CPP {
+        for gy in 0..MAX_NUMBER_OF_GRIDS_LIKE_CPP {
+            let idx = terrain_grid_bitset_index_like_cpp(gx, gy).expect("valid terrain grid index");
+            grid_file_exists[idx] = exist_map_like_cpp(data_dir, map_id, gx, gy);
+        }
+    }
+    Ok(grid_file_exists)
+}
+
+fn terrain_grid_bitset_index_like_cpp(gx: i32, gy: i32) -> Option<usize> {
+    if !(0..MAX_NUMBER_OF_GRIDS_LIKE_CPP).contains(&gx)
+        || !(0..MAX_NUMBER_OF_GRIDS_LIKE_CPP).contains(&gy)
+    {
+        return None;
+    }
+
+    Some(gx as usize * MAX_NUMBER_OF_GRIDS_LIKE_CPP as usize + gy as usize)
+}
+
+fn terrain_grid_bitset_from_cpp_string_like_cpp(tiles_data: &[u8]) -> Vec<bool> {
+    let mut grid_file_exists = vec![false; TERRAIN_GRID_COUNT_LIKE_CPP];
+    for (idx, exists) in grid_file_exists.iter_mut().enumerate() {
+        let string_idx = TERRAIN_GRID_COUNT_LIKE_CPP - 1 - idx;
+        *exists = tiles_data.get(string_idx).copied() == Some(b'1');
+    }
+    grid_file_exists
+}
+
+fn exist_map_like_cpp(data_dir: &Path, map_id: u32, gx: i32, gy: i32) -> bool {
+    let file_name = data_dir
+        .join("maps")
+        .join(format!("{map_id:04}_{gx:02}_{gy:02}.map"));
+    let Ok(mut file) = File::open(file_name) else {
+        return false;
+    };
+
+    let mut header = [0_u8; MAP_FILE_HEADER_SIZE_LIKE_CPP];
+    if file.read_exact(&mut header).is_err() {
+        return false;
+    }
+
+    header[..4] == MAP_MAGIC_LIKE_CPP[..]
+        && u32::from_le_bytes([header[4], header[5], header[6], header[7]])
+            == MAP_VERSION_MAGIC_LIKE_CPP
 }
 
 fn position_to_i32_tuple(position: Position) -> (i32, i32, i32) {
@@ -1810,7 +1957,50 @@ pub fn grid_corner(grid_x: i16, grid_y: i16) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use wow_core::guid::HighGuid;
+
+    fn unique_temp_data_dir(test_name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before unix epoch")
+            .as_nanos();
+        let data_dir = std::env::temp_dir().join(format!("rustycore-{test_name}-{unique}"));
+        fs::create_dir_all(data_dir.join("maps")).expect("create maps test dir");
+        data_dir
+    }
+
+    fn map_file_header_like_cpp() -> Vec<u8> {
+        let mut header = Vec::new();
+        header.extend_from_slice(MAP_MAGIC_LIKE_CPP);
+        header.extend_from_slice(&MAP_VERSION_MAGIC_LIKE_CPP.to_le_bytes());
+        header.extend_from_slice(&0_u32.to_le_bytes());
+        header.extend_from_slice(&0_u32.to_le_bytes());
+        header.extend_from_slice(&0_u32.to_le_bytes());
+        header.extend_from_slice(&0_u32.to_le_bytes());
+        header.extend_from_slice(&0_u32.to_le_bytes());
+        header.extend_from_slice(&0_u32.to_le_bytes());
+        header.extend_from_slice(&0_u32.to_le_bytes());
+        header.extend_from_slice(&0_u32.to_le_bytes());
+        header.extend_from_slice(&0_u32.to_le_bytes());
+        assert_eq!(header.len(), MAP_FILE_HEADER_SIZE_LIKE_CPP);
+        header
+    }
+
+    fn tilelist_like_cpp(grid_indices: impl IntoIterator<Item = usize>) -> Vec<u8> {
+        let mut bitset_string = vec![b'0'; TERRAIN_GRID_COUNT_LIKE_CPP];
+        for grid_idx in grid_indices {
+            bitset_string[TERRAIN_GRID_COUNT_LIKE_CPP - 1 - grid_idx] = b'1';
+        }
+
+        let mut tilelist = Vec::new();
+        tilelist.extend_from_slice(MAP_MAGIC_LIKE_CPP);
+        tilelist.extend_from_slice(&MAP_VERSION_MAGIC_LIKE_CPP.to_le_bytes());
+        tilelist.extend_from_slice(&0_u32.to_le_bytes());
+        tilelist.extend_from_slice(&bitset_string);
+        tilelist
+    }
 
     #[test]
     fn terrain_grid_coords_match_cpp_compute_grid_coord_reversal() {
@@ -1891,6 +2081,101 @@ mod tests {
             terrain_map_id_for_phase_shift_like_cpp(&phase_shift, 571, 0.0, 0.0, |_, _, _| false);
 
         assert_eq!(map_id, 571);
+    }
+
+    #[test]
+    fn terrain_grid_files_read_cpp_tilelist_bitset_string_order() {
+        let data_dir = unique_temp_data_dir("terrain-grid-tilelist");
+        let grid_idx = terrain_grid_bitset_index_like_cpp(31, 31).expect("valid grid index");
+        fs::write(
+            data_dir.join("maps").join("0609.tilelist"),
+            tilelist_like_cpp([grid_idx]),
+        )
+        .expect("write tilelist");
+
+        let terrain = TerrainGridFilesLikeCpp::load_root_like_cpp(&data_dir, 609, &HashMap::new())
+            .expect("load terrain grid files");
+
+        assert!(terrain.has_grid_file_like_cpp(31, 31));
+        assert!(!terrain.has_grid_file_like_cpp(31, 30));
+        fs::remove_dir_all(data_dir).expect("remove test dir");
+    }
+
+    #[test]
+    fn terrain_grid_files_fallback_validates_map_header_like_cpp() {
+        let data_dir = unique_temp_data_dir("terrain-grid-map-header");
+        fs::write(
+            data_dir.join("maps").join("0609_31_31.map"),
+            map_file_header_like_cpp(),
+        )
+        .expect("write map file");
+        fs::write(
+            data_dir.join("maps").join("0609_31_30.map"),
+            b"not a valid map header",
+        )
+        .expect("write invalid map file");
+
+        let terrain = TerrainGridFilesLikeCpp::load_root_like_cpp(&data_dir, 609, &HashMap::new())
+            .expect("load terrain grid files");
+
+        assert!(terrain.has_grid_file_like_cpp(31, 31));
+        assert!(!terrain.has_grid_file_like_cpp(31, 30));
+        fs::remove_dir_all(data_dir).expect("remove test dir");
+    }
+
+    #[test]
+    fn terrain_grid_files_has_child_terrain_grid_file_like_cpp() {
+        let data_dir = unique_temp_data_dir("terrain-grid-child");
+        let grid_idx = terrain_grid_bitset_index_like_cpp(31, 31).expect("valid grid index");
+        fs::write(
+            data_dir.join("maps").join("0571.tilelist"),
+            tilelist_like_cpp([]),
+        )
+        .expect("write parent tilelist");
+        fs::write(
+            data_dir.join("maps").join("0609.tilelist"),
+            tilelist_like_cpp([grid_idx]),
+        )
+        .expect("write child tilelist");
+        let parent_child_map_data = HashMap::from([(571, vec![609]), (609, Vec::new())]);
+
+        let terrain =
+            TerrainGridFilesLikeCpp::load_root_like_cpp(&data_dir, 571, &parent_child_map_data)
+                .expect("load terrain grid files");
+
+        assert!(terrain.has_child_terrain_grid_file_like_cpp(609, 31, 31));
+        assert!(!terrain.has_child_terrain_grid_file_like_cpp(609, 31, 30));
+        assert!(!terrain.has_child_terrain_grid_file_like_cpp(700, 31, 31));
+        fs::remove_dir_all(data_dir).expect("remove test dir");
+    }
+
+    #[test]
+    fn terrain_grid_files_resolve_phase_shift_visible_map_like_cpp() {
+        let data_dir = unique_temp_data_dir("terrain-grid-resolver");
+        let grid_idx = terrain_grid_bitset_index_like_cpp(31, 31).expect("valid grid index");
+        fs::write(
+            data_dir.join("maps").join("0571.tilelist"),
+            tilelist_like_cpp([]),
+        )
+        .expect("write parent tilelist");
+        fs::write(
+            data_dir.join("maps").join("0609.tilelist"),
+            tilelist_like_cpp([grid_idx]),
+        )
+        .expect("write child tilelist");
+        let parent_child_map_data = HashMap::from([(571, vec![609]), (609, Vec::new())]);
+        let terrain =
+            TerrainGridFilesLikeCpp::load_root_like_cpp(&data_dir, 571, &parent_child_map_data)
+                .expect("load terrain grid files");
+        let mut phase_shift = PhaseShift::default();
+        phase_shift.add_visible_map_id_like_cpp(700, 1);
+        phase_shift.add_visible_map_id_like_cpp(609, 1);
+
+        assert_eq!(
+            terrain.terrain_map_id_for_phase_shift_like_cpp(&phase_shift, 571, 0.0, 0.0),
+            609
+        );
+        fs::remove_dir_all(data_dir).expect("remove test dir");
     }
 
     #[test]
