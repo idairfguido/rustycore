@@ -1,4 +1,5 @@
 pub mod chase;
+pub mod confused;
 pub mod distract;
 pub mod fleeing;
 pub mod follow;
@@ -12,6 +13,15 @@ pub use chase::{
     ChaseMovementAction, ChaseMovementGenerator, ChaseMovementInform, ChaseRangeBounds,
     ChaseUnitSnapshot, ChaseWalkMode, UNIT_STATE_CHASE_LIKE_CPP, UNIT_STATE_CHASE_MOVE_LIKE_CPP,
     position_okay_like_cpp as chase_position_okay_like_cpp,
+};
+pub use confused::{
+    CONFUSED_LOS_RETRY_MS_LIKE_CPP, CONFUSED_PATH_LENGTH_LIMIT_LIKE_CPP,
+    CONFUSED_PATH_RETRY_MS_LIKE_CPP, CONFUSED_RANDOM_DELAY_MAX_MS_LIKE_CPP,
+    CONFUSED_RANDOM_DELAY_MIN_MS_LIKE_CPP, CONFUSED_RANDOM_DISTANCE_OFFSET_LIKE_CPP,
+    CONFUSED_RANDOM_DISTANCE_SCALE_LIKE_CPP, ConfusedDestinationPlan, ConfusedFinalizeAction,
+    ConfusedLaunchPlan, ConfusedMovementAction, ConfusedMovementGenerator, ConfusedPathResult,
+    ConfusedUnitSnapshot, UNIT_FLAG_CONFUSED_LIKE_CPP, UNIT_STATE_CONFUSED_LIKE_CPP,
+    UNIT_STATE_CONFUSED_MOVE_LIKE_CPP, compute_confused_destination_like_cpp,
 };
 pub use distract::{
     AssistanceDistractFinalizeAction, AssistanceDistractMovementGenerator, DistractFacingSpline,
