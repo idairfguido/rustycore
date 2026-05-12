@@ -128,6 +128,13 @@ pub struct RawDetourQueryFilter {
 
 pub type DetourStatus = u32;
 pub type DetourTileRef = u64;
+pub type DetourPolyRef = u64;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DetourNearestPoly {
+    pub poly_ref: DetourPolyRef,
+    pub nearest_point: [f32; 3],
+}
 
 unsafe extern "C" {
     fn rustycore_dt_alloc_nav_mesh() -> *mut RawDetourNavMesh;
@@ -170,6 +177,14 @@ unsafe extern "C" {
         area: i32,
         cost: f32,
     );
+    fn rustycore_dt_nav_mesh_query_find_nearest_poly(
+        query: *const RawDetourNavMeshQuery,
+        center: *const f32,
+        half_extents: *const f32,
+        filter: *const RawDetourQueryFilter,
+        nearest_ref: *mut DetourPolyRef,
+        nearest_point: *mut f32,
+    ) -> DetourStatus;
     fn rustycore_dt_free(ptr: *mut std::ffi::c_void);
     fn rustycore_dt_create_square_tile_data(
         tile_x: i32,
@@ -279,6 +294,34 @@ impl<'mesh> DetourNavMeshQuery<'mesh> {
     pub const fn as_raw(&self) -> *mut RawDetourNavMeshQuery {
         self.raw.as_ptr()
     }
+
+    pub fn find_nearest_poly(
+        &self,
+        center: [f32; 3],
+        half_extents: [f32; 3],
+        filter: &DetourQueryFilter,
+    ) -> Result<DetourNearestPoly, DetourNavMeshQueryError> {
+        let mut poly_ref = 0;
+        let mut nearest_point = [0.0; 3];
+        let status = unsafe {
+            rustycore_dt_nav_mesh_query_find_nearest_poly(
+                self.raw.as_ptr(),
+                center.as_ptr(),
+                half_extents.as_ptr(),
+                filter.as_raw(),
+                &mut poly_ref,
+                nearest_point.as_mut_ptr(),
+            )
+        };
+        if detour_status_failed(status) {
+            return Err(DetourNavMeshQueryError::FindNearestPolyFailed { status });
+        }
+
+        Ok(DetourNearestPoly {
+            poly_ref,
+            nearest_point,
+        })
+    }
 }
 
 impl Drop for DetourNavMeshQuery<'_> {
@@ -369,6 +412,8 @@ pub enum DetourNavMeshQueryError {
     AllocationFailed,
     #[error("Detour navmesh query initialization failed with status 0x{status:08x}")]
     InitFailed { status: DetourStatus },
+    #[error("Detour findNearestPoly failed with status 0x{status:08x}")]
+    FindNearestPolyFailed { status: DetourStatus },
 }
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
@@ -934,6 +979,32 @@ mod tests {
                 max: DT_MAX_AREAS_LIKE_CPP,
             })
         );
+    }
+
+    #[test]
+    fn detour_query_find_nearest_poly_matches_cpp_shape() {
+        let params = DetourNavMeshParams {
+            origin: [0.0, 0.0, 0.0],
+            tile_width: 1.0,
+            tile_height: 1.0,
+            max_tiles: 16,
+            max_polys: 128,
+        };
+        let mut mesh = DetourNavMesh::new(&params).unwrap();
+        let tile = generated_square_tile_blob(0, 0);
+        let tile_ref = mesh.add_tile(&tile).unwrap();
+        assert_ne!(tile_ref, 0);
+
+        let query = DetourNavMeshQuery::new(&mesh, 1024).unwrap();
+        let filter = DetourQueryFilter::new().unwrap();
+        let nearest = query
+            .find_nearest_poly([0.5, 0.0, 0.5], [3.0, 5.0, 3.0], &filter)
+            .unwrap();
+
+        assert_ne!(nearest.poly_ref, 0);
+        assert!((nearest.nearest_point[0] - 0.5).abs() < f32::EPSILON);
+        assert!((nearest.nearest_point[1] - 0.0).abs() < f32::EPSILON);
+        assert!((nearest.nearest_point[2] - 0.5).abs() < f32::EPSILON);
     }
 
     #[test]

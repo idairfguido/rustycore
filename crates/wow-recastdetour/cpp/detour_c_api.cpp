@@ -115,6 +115,22 @@ extern "C"
         filter->setAreaCost(area, cost);
     }
 
+    dtStatus rustycore_dt_nav_mesh_query_find_nearest_poly(
+        dtNavMeshQuery const* query,
+        float const* center,
+        float const* half_extents,
+        dtQueryFilter const* filter,
+        uint64_t* nearest_ref,
+        float* nearest_point)
+    {
+        dtPolyRef poly_ref = 0;
+        dtStatus status = query->findNearestPoly(center, half_extents, filter, &poly_ref, nearest_point);
+        if (nearest_ref)
+            *nearest_ref = poly_ref;
+
+        return status;
+    }
+
     void rustycore_dt_free(void* ptr)
     {
         dtFree(ptr);
