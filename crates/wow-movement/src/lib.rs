@@ -1,5 +1,6 @@
 pub mod defines;
 pub mod generator;
+pub mod generators;
 pub mod motion_master;
 pub mod spline;
 
@@ -11,6 +12,7 @@ pub use generator::{
     MovementGenerator, MovementGeneratorFlags, MovementGeneratorMode, MovementGeneratorPriority,
     MovementGeneratorState, MovementGeneratorType, MovementSlot,
 };
+pub use generators::IdleMovementGenerator;
 pub use motion_master::{
     DelayedAction, DelayedActionQueue, MotionMasterDelayedActionType, MotionMasterFlags,
     ResolvedDelayedAction,
