@@ -285,7 +285,7 @@ Numbered for cross-reference from `MIGRATION_ROADMAP.md` §5. Complexity: **L** 
 - [ ] **#MOVE-PATH.23** Wire `PathGenerator` into `MoveSplineInit::MoveTo(generatePath=true, ...)` — see [`movement-spline.md`](movement-spline.md) #MOVE-SPL.14. The creature-side bridge now accepts already-calculated Detour paths and performs the C++ `NOPATH` direct fallback; the full `MoveTo(generatePath=true)` owner call still needs real map/query lookup. (M)
 - [ ] **#MOVE-PATH.24** Snapshot tests: known map + known start/end → expected path waypoints (record from C++ trinity, replay in Rust). (H)
 - [ ] **#MOVE-PATH.25** Stress test: 1000 chase paths/sec on Stormwind tile; verify no leaks of `dtNavMeshQuery`. (M)
-- [ ] **#MOVE-PATH.26** Config plumbing: `mmap.enabled`, `mmap.allowedMaps` from worldserver.conf. (L)
+- [x] **#MOVE-PATH.26** Config plumbing: C++ `mmap.enablePathFinding` / `CONFIG_ENABLE_MMAPS` and `DataDir` are resolved from `worldserver.conf`, stored in the session runtime config, and logged with the `DataDir/mmaps` path. No `mmap.allowedMaps` key exists in this legacy; per-map disabling is C++ `DisableMgr` / `DISABLE_TYPE_MMAP` and remains tracked under #MOVE-PATH.21 runtime gates. (L)
 
 ---
 

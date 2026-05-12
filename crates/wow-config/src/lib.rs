@@ -1505,6 +1505,7 @@ CharacterCreating.Disabled.RaceMask = 12
             values.get_int64("CONFIG_CHARACTER_CREATING_DISABLED_RACEMASK"),
             Some(12)
         );
+        assert_eq!(values.get_bool("CONFIG_ENABLE_MMAPS"), Some(true));
         assert_eq!(values.get_int("CONFIG_INTERVAL_SAVE"), Some(900_000));
     }
 

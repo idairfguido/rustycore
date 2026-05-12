@@ -35,7 +35,9 @@ use wow_network::world_socket::{AccountInfo, AccountLookup};
 use wow_network::{
     GroupRegistry, LootDropRatesLikeCpp, PendingInvites, PlayerRegistry, SessionResources,
 };
-use wow_world::{MapManager as LegacyMapManager, SharedMapManager, WorldSession};
+use wow_world::{
+    MMapRuntimeConfigLikeCpp, MapManager as LegacyMapManager, SharedMapManager, WorldSession,
+};
 
 type SharedCanonicalMapManager = Arc<Mutex<wow_map::MapManager>>;
 
@@ -804,6 +806,16 @@ async fn main() -> Result<()> {
     let world_port = world_config_u16(&world_configs, "CONFIG_PORT_WORLD", 8085);
     let instance_port = world_config_u16(&world_configs, "CONFIG_PORT_INSTANCE", 8086);
     let max_expansion = world_config_u8(&world_configs, "CONFIG_EXPANSION", 2);
+    let mmap_runtime_config = mmap_runtime_config_like_cpp(&world_configs);
+    info!(
+        "WORLD: MMap pathfinding: {}, data directory: {}/mmaps",
+        if mmap_runtime_config.enabled {
+            "enabled"
+        } else {
+            "disabled"
+        },
+        mmap_runtime_config.data_dir
+    );
 
     let realm_addr: SocketAddr = format!("{bind_ip}:{world_port}")
         .parse()
@@ -823,6 +835,7 @@ async fn main() -> Result<()> {
         let smap = Arc::clone(&shared_map);
         let accessor = Arc::clone(&object_accessor);
         let port = instance_port;
+        let mmap_config = mmap_runtime_config.clone();
         async move {
             if let Err(e) = wow_network::start_world_listener(
                 realm_addr,
@@ -842,6 +855,7 @@ async fn main() -> Result<()> {
                         accessor,
                         port,
                         max_expansion,
+                        mmap_config.clone(),
                     )
                 },
             )
@@ -989,6 +1003,13 @@ fn world_config_f32(configs: &WorldConfigSet, enum_name: &str, default: f32) -> 
 
 fn world_config_bool(configs: &WorldConfigSet, enum_name: &str, default: bool) -> bool {
     configs.get_bool(enum_name).unwrap_or(default)
+}
+
+fn mmap_runtime_config_like_cpp(configs: &WorldConfigSet) -> MMapRuntimeConfigLikeCpp {
+    MMapRuntimeConfigLikeCpp {
+        data_dir: wow_config::get_string_default("DataDir", "./Data"),
+        enabled: world_config_bool(configs, "CONFIG_ENABLE_MMAPS", true),
+    }
 }
 
 fn loot_drop_rates_like_cpp(configs: &WorldConfigSet) -> LootDropRatesLikeCpp {
@@ -1436,6 +1457,7 @@ async fn create_session(
     object_accessor: wow_world::SharedObjectAccessor,
     instance_port: u16,
     max_expansion: u8,
+    mmap_runtime_config: MMapRuntimeConfigLikeCpp,
 ) {
     info!(
         "Creating session for account {} (bnet_id={})",
@@ -1579,6 +1601,7 @@ async fn create_session(
     }
     session.set_loot_drop_rates_like_cpp(resources.loot_drop_rates);
     session.set_enable_ae_loot_like_cpp(resources.enable_ae_loot);
+    session.set_mmap_runtime_config_like_cpp(mmap_runtime_config);
     session.set_object_accessor(object_accessor);
     if let (Some(greg), Some(pinv)) = (&resources.group_registry, &resources.pending_invites) {
         session.set_group_registry(Arc::clone(greg), Arc::clone(pinv));
@@ -1729,8 +1752,8 @@ fn locale_id_to_name(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        load_world_config_from, loot_drop_rates_like_cpp, world_config_bool, world_config_u8,
-        world_config_u16,
+        load_world_config_from, loot_drop_rates_like_cpp, mmap_runtime_config_like_cpp,
+        world_config_bool, world_config_u8, world_config_u16,
     };
     use std::env;
     use std::fs;
@@ -1816,6 +1839,23 @@ Rate.Drop.Money = 6
 
         let configs = wow_config::load_world_config_values();
         assert!(world_config_bool(&configs, "CONFIG_ENABLE_AE_LOOT", false));
+    }
+
+    #[test]
+    fn mmap_runtime_config_uses_cpp_world_config_key_and_data_dir() {
+        let _guard = TEST_LOCK.lock().expect("test lock poisoned");
+        wow_config::load_config_from_str(
+            r#"
+DataDir = "/srv/wow-data"
+mmap.enablePathFinding = 0
+"#,
+        )
+        .expect("config should load");
+
+        let configs = wow_config::load_world_config_values();
+        let mmap_config = mmap_runtime_config_like_cpp(&configs);
+        assert_eq!(mmap_config.data_dir, "/srv/wow-data");
+        assert!(!mmap_config.enabled);
     }
 
     fn unique_temp_dir(name: &str) -> PathBuf {

@@ -78,6 +78,21 @@ use wow_packet::{ClientPacket, WorldPacket};
 /// Maximum number of packets processed per `update()` call.
 const MAX_PACKETS_PER_UPDATE: usize = 100;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MMapRuntimeConfigLikeCpp {
+    pub data_dir: String,
+    pub enabled: bool,
+}
+
+impl Default for MMapRuntimeConfigLikeCpp {
+    fn default() -> Self {
+        Self {
+            data_dir: "./Data".to_string(),
+            enabled: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RepresentedLootRollVote {
     pub vote: u8,
@@ -951,6 +966,8 @@ pub struct WorldSession {
     loot_drop_rates: LootDropRatesLikeCpp,
     /// C++ `CONFIG_ENABLE_AE_LOOT` represented switch.
     enable_ae_loot_like_cpp: bool,
+    /// C++ `CONFIG_ENABLE_MMAPS` + `DataDir` represented until map lifecycle owns real mmaps.
+    mmap_runtime_config_like_cpp: MMapRuntimeConfigLikeCpp,
     /// Session-local representation of `GameObject::m_unique_users` for no-GetLootId chest uses.
     pub(crate) represented_unique_gameobject_uses: std::collections::HashSet<wow_core::ObjectGuid>,
     /// Represented C++ `GameEvents::Trigger` and `TriggeringLinkedGameObject` hook points.
@@ -1368,6 +1385,7 @@ impl WorldSession {
             represented_loot_roll_criteria_events: Vec::new(),
             loot_drop_rates: LootDropRatesLikeCpp::default(),
             enable_ae_loot_like_cpp: false,
+            mmap_runtime_config_like_cpp: MMapRuntimeConfigLikeCpp::default(),
             represented_unique_gameobject_uses: std::collections::HashSet::new(),
             represented_gameobject_use_effects: Vec::new(),
             represented_gameobject_use_states: std::collections::HashMap::new(),
@@ -2331,8 +2349,16 @@ impl WorldSession {
         self.enable_ae_loot_like_cpp = enabled;
     }
 
+    pub fn set_mmap_runtime_config_like_cpp(&mut self, config: MMapRuntimeConfigLikeCpp) {
+        self.mmap_runtime_config_like_cpp = config;
+    }
+
     pub(crate) fn enable_ae_loot_like_cpp(&self) -> bool {
         self.enable_ae_loot_like_cpp
+    }
+
+    pub fn mmap_runtime_config_like_cpp(&self) -> &MMapRuntimeConfigLikeCpp {
+        &self.mmap_runtime_config_like_cpp
     }
 
     pub fn loot_drop_rates_like_cpp(&self) -> LootDropRatesLikeCpp {

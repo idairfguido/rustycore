@@ -666,7 +666,7 @@ WrongPass.Logging	bnetserver:server/bnetserver/bnetserver.conf.dist:180	bnetserv
 WrongPass.MaxCount	bnetserver:server/bnetserver/bnetserver.conf.dist:156	bnetserver=0	Int:server/bnetserver/REST/LoginRESTService.cpp:334	Int=0		get_value:crates/bnet-server/src/main.rs:80	rust_exact_key	-
 XP.Boost.Daymask	worldserver:server/worldserver/worldserver.conf.dist:3334	worldserver=0	Int:server/game/World/World.cpp:651	Int=0	CONFIG_XP_BOOST_DAYMASK		missing_in_rust	-
 XP.Boost.Rate	worldserver:server/worldserver/worldserver.conf.dist:3341	worldserver=2.0	Float:server/game/World/World.cpp:652	Float=2.0f	RATE_XP_BOOST		missing_in_rust	-
-mmap.enablePathFinding	worldserver:server/worldserver/worldserver.conf.dist:430	worldserver=1	Bool:server/game/World/World.cpp:1547	Bool=true	CONFIG_ENABLE_MMAPS		missing_in_rust	-
+mmap.enablePathFinding	worldserver:server/worldserver/worldserver.conf.dist:430	worldserver=1	Bool:server/game/World/World.cpp:1547	Bool=true	CONFIG_ENABLE_MMAPS	load_world_config_values:crates/wow-config/src/lib.rs|mmap_runtime_config_like_cpp:crates/world-server/src/main.rs|MMapRuntimeConfigLikeCpp:crates/wow-world/src/session.rs	rust_runtime_config	-
 vmap.enableHeight	worldserver:server/worldserver/worldserver.conf.dist:441	worldserver=1	Bool:server/game/World/World.cpp:1553	Bool=true	bool enableHeight		missing_in_rust	-
 vmap.enableIndoorCheck	worldserver:server/worldserver/worldserver.conf.dist:449	worldserver=1	Bool:server/game/World/World.cpp:1550|Bool:server/game/World/World.cpp:1551	Bool=false|Bool=true	CONFIG_VMAP_INDOOR_CHECK|bool enableIndoor		missing_in_rust	-
 vmap.enableLOS	worldserver:server/worldserver/worldserver.conf.dist:440	worldserver=1	Bool:server/game/World/World.cpp:1552	Bool=true	bool enableLOS		missing_in_rust	-
