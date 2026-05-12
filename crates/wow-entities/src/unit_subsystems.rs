@@ -1549,9 +1549,13 @@ pub const MOVEMENTGENERATOR_FLAG_FINALIZED: u16 = 0x100;
 pub const MOVEMENTGENERATOR_FLAG_PERSIST_ON_DEATH: u16 = 0x200;
 pub const MOVEMENTGENERATOR_FLAG_TRANSITORY: u16 =
     MOVEMENTGENERATOR_FLAG_SPEED_UPDATE_PENDING | MOVEMENTGENERATOR_FLAG_INTERRUPTED;
-pub const MOTIONMASTER_FLAG_INITIALIZATION_PENDING: u8 = 0x4;
-pub const MOTIONMASTER_FLAG_STATIC_INITIALIZATION_PENDING: u8 = 0x2;
+pub const MOTIONMASTER_FLAG_NONE: u8 = 0x0;
 pub const MOTIONMASTER_FLAG_UPDATE: u8 = 0x1;
+pub const MOTIONMASTER_FLAG_STATIC_INITIALIZATION_PENDING: u8 = 0x2;
+pub const MOTIONMASTER_FLAG_INITIALIZATION_PENDING: u8 = 0x4;
+pub const MOTIONMASTER_FLAG_INITIALIZING: u8 = 0x8;
+pub const MOTIONMASTER_FLAG_DELAYED: u8 =
+    MOTIONMASTER_FLAG_UPDATE | MOTIONMASTER_FLAG_INITIALIZATION_PENDING;
 pub const EVENT_CHARGE: u32 = 1003;
 pub const EVENT_JUMP: u32 = 1004;
 pub const EVENT_CHARGE_PREPATH: u32 = 1005;
@@ -2083,6 +2087,70 @@ impl Default for MoveSplineState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum MotionMasterDelayedActionType {
+    Clear = 0,
+    ClearSlot = 1,
+    ClearMode = 2,
+    ClearPriority = 3,
+    Add = 4,
+    Remove = 5,
+    RemoveType = 6,
+    Initialize = 7,
+}
+
+impl MotionMasterDelayedActionType {
+    pub const fn trinity_id(self) -> u8 {
+        self as u8
+    }
+
+    pub const fn from_trinity_id(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Clear),
+            1 => Some(Self::ClearSlot),
+            2 => Some(Self::ClearMode),
+            3 => Some(Self::ClearPriority),
+            4 => Some(Self::Add),
+            5 => Some(Self::Remove),
+            6 => Some(Self::RemoveType),
+            7 => Some(Self::Initialize),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MotionMasterDelayedAction {
+    pub action_type: MotionMasterDelayedActionType,
+    pub validator_passed: bool,
+}
+
+impl MotionMasterDelayedAction {
+    pub const fn new(action_type: MotionMasterDelayedActionType) -> Self {
+        Self {
+            action_type,
+            validator_passed: true,
+        }
+    }
+
+    pub const fn with_validator(
+        action_type: MotionMasterDelayedActionType,
+        validator_passed: bool,
+    ) -> Self {
+        Self {
+            action_type,
+            validator_passed,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MotionMasterResolvedDelayedAction {
+    pub action_type: MotionMasterDelayedActionType,
+    pub executed: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MotionSubsystem {
     pub default_generator: MovementGeneratorRef,
@@ -2090,7 +2158,7 @@ pub struct MotionSubsystem {
     pub current_generator: MovementGeneratorKind,
     pub base_unit_states: HashMap<u32, usize>,
     pub flags: u8,
-    pub delayed_actions: Vec<u8>,
+    pub delayed_actions: Vec<MotionMasterDelayedAction>,
     pub paused: bool,
     pub stopped: bool,
     pub spline: MoveSplineState,
@@ -2117,6 +2185,41 @@ impl Default for MotionSubsystem {
 }
 
 impl MotionSubsystem {
+    pub const fn has_motion_master_flag(&self, flag: u8) -> bool {
+        self.flags & flag != 0
+    }
+
+    pub const fn should_delay_motion_master_action_like_cpp(&self) -> bool {
+        self.has_motion_master_flag(MOTIONMASTER_FLAG_DELAYED)
+    }
+
+    pub fn push_delayed_action_like_cpp(&mut self, action_type: MotionMasterDelayedActionType) {
+        self.delayed_actions
+            .push(MotionMasterDelayedAction::new(action_type));
+    }
+
+    pub fn push_delayed_action_with_validator_like_cpp(
+        &mut self,
+        action_type: MotionMasterDelayedActionType,
+        validator_passed: bool,
+    ) {
+        self.delayed_actions
+            .push(MotionMasterDelayedAction::with_validator(
+                action_type,
+                validator_passed,
+            ));
+    }
+
+    pub fn resolve_delayed_actions_like_cpp(&mut self) -> Vec<MotionMasterResolvedDelayedAction> {
+        self.delayed_actions
+            .drain(..)
+            .map(|action| MotionMasterResolvedDelayedAction {
+                action_type: action.action_type,
+                executed: action.validator_passed,
+            })
+            .collect()
+    }
+
     pub fn set_current_generator(&mut self, generator: MovementGeneratorKind) {
         self.add_generator(MovementGeneratorRef::new(generator, MovementSlot::Active));
     }
@@ -3553,6 +3656,69 @@ mod unit_subsystems_tests {
             motion.current_movement_generator().kind,
             MovementGeneratorKind::Follow
         );
+    }
+
+    #[test]
+    fn motion_master_flags_and_delayed_actions_match_cpp_shape() {
+        assert_eq!(MOTIONMASTER_FLAG_NONE, 0x0);
+        assert_eq!(MOTIONMASTER_FLAG_UPDATE, 0x1);
+        assert_eq!(MOTIONMASTER_FLAG_STATIC_INITIALIZATION_PENDING, 0x2);
+        assert_eq!(MOTIONMASTER_FLAG_INITIALIZATION_PENDING, 0x4);
+        assert_eq!(MOTIONMASTER_FLAG_INITIALIZING, 0x8);
+        assert_eq!(
+            MOTIONMASTER_FLAG_DELAYED,
+            MOTIONMASTER_FLAG_UPDATE | MOTIONMASTER_FLAG_INITIALIZATION_PENDING
+        );
+
+        assert_eq!(MotionMasterDelayedActionType::Clear.trinity_id(), 0);
+        assert_eq!(MotionMasterDelayedActionType::ClearSlot.trinity_id(), 1);
+        assert_eq!(MotionMasterDelayedActionType::ClearMode.trinity_id(), 2);
+        assert_eq!(MotionMasterDelayedActionType::ClearPriority.trinity_id(), 3);
+        assert_eq!(MotionMasterDelayedActionType::Add.trinity_id(), 4);
+        assert_eq!(MotionMasterDelayedActionType::Remove.trinity_id(), 5);
+        assert_eq!(MotionMasterDelayedActionType::RemoveType.trinity_id(), 6);
+        assert_eq!(MotionMasterDelayedActionType::Initialize.trinity_id(), 7);
+        assert_eq!(
+            MotionMasterDelayedActionType::from_trinity_id(6),
+            Some(MotionMasterDelayedActionType::RemoveType)
+        );
+        assert_eq!(MotionMasterDelayedActionType::from_trinity_id(8), None);
+
+        let mut motion = MotionSubsystem::default();
+        assert!(motion.should_delay_motion_master_action_like_cpp());
+        motion.flags = MOTIONMASTER_FLAG_UPDATE;
+        assert!(motion.should_delay_motion_master_action_like_cpp());
+        motion.flags = MOTIONMASTER_FLAG_STATIC_INITIALIZATION_PENDING;
+        assert!(!motion.should_delay_motion_master_action_like_cpp());
+        motion.flags = MOTIONMASTER_FLAG_INITIALIZING;
+        assert!(!motion.should_delay_motion_master_action_like_cpp());
+
+        motion.push_delayed_action_like_cpp(MotionMasterDelayedActionType::Add);
+        motion.push_delayed_action_with_validator_like_cpp(
+            MotionMasterDelayedActionType::RemoveType,
+            false,
+        );
+        motion.push_delayed_action_like_cpp(MotionMasterDelayedActionType::Initialize);
+
+        let resolved = motion.resolve_delayed_actions_like_cpp();
+        assert_eq!(
+            resolved,
+            vec![
+                MotionMasterResolvedDelayedAction {
+                    action_type: MotionMasterDelayedActionType::Add,
+                    executed: true,
+                },
+                MotionMasterResolvedDelayedAction {
+                    action_type: MotionMasterDelayedActionType::RemoveType,
+                    executed: false,
+                },
+                MotionMasterResolvedDelayedAction {
+                    action_type: MotionMasterDelayedActionType::Initialize,
+                    executed: true,
+                },
+            ]
+        );
+        assert!(motion.delayed_actions.is_empty());
     }
 
     #[test]
