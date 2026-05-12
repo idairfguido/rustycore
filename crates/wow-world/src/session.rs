@@ -20,7 +20,7 @@ use wow_constants::unit::{Team, UnitFlags, UnitStandStateType};
 use wow_constants::{
     BagFamilyMask, BuyResult, ClientOpcodes, InventoryResult, InventoryType, ItemBondingType,
     ItemClass, ItemContext, ItemEnchantmentType, ItemFlags, ItemFlags2, ItemQuality, SellResult,
-    TypeId, TypeMask,
+    TypeId, TypeMask, UnitState,
 };
 use wow_core::{ObjectGuid, ObjectGuidGenerator};
 use wow_data::{
@@ -98,6 +98,14 @@ impl Default for MMapRuntimeConfigLikeCpp {
 impl MMapRuntimeConfigLikeCpp {
     pub fn pathfinding_enabled_for_map_like_cpp(&self, map_id: u32) -> bool {
         self.enabled && !self.disabled_map_ids.contains(&map_id)
+    }
+
+    pub fn should_try_pathfinding_like_cpp(
+        &self,
+        map_id: u32,
+        owner_ignores_pathfinding: bool,
+    ) -> bool {
+        self.pathfinding_enabled_for_map_like_cpp(map_id) && !owner_ignores_pathfinding
     }
 }
 
@@ -7389,6 +7397,8 @@ impl WorldSession {
         }
         // ──────────────────────────────────────────────────────────────────
 
+        let mmap_runtime_config = self.mmap_runtime_config_like_cpp.clone();
+        let map_id_for_pathfinding = u32::from(self.player_map_id_like_cpp());
         for guid in guids {
             let _ = self.mutate_world_creature(guid, |creature| {
                 if !creature.is_alive() {
@@ -7406,9 +7416,24 @@ impl WorldSession {
                             }
                             if creature.should_wander() {
                                 let dst = creature.pick_wander_destination();
-                                if let Some((from, move_spline)) =
+                                let owner_ignores_pathfinding = creature
+                                    .creature
+                                    .unit()
+                                    .has_unit_state(UnitState::IGNORE_PATHFINDING.bits());
+                                let movement = if mmap_runtime_config
+                                    .should_try_pathfinding_like_cpp(
+                                        map_id_for_pathfinding,
+                                        owner_ignores_pathfinding,
+                                    ) {
+                                    creature
+                                        .begin_move_spline_with_detour_path_like_cpp(
+                                            dst, None, false,
+                                        )
+                                        .map(|(from, spline, _path)| (from, spline))
+                                } else {
                                     creature.begin_move_spline_like_cpp(dst)
-                                {
+                                };
+                                if let Some((from, move_spline)) = movement {
                                     creature
                                         .creature
                                         .set_ai_state(wow_entities::CreatureAiState::WalkingRandom);
@@ -8258,6 +8283,19 @@ mod tests {
         );
 
         (session, pkt_tx, send_rx)
+    }
+
+    #[test]
+    fn mmap_runtime_config_matches_cpp_pathfinding_gate() {
+        let mut config = MMapRuntimeConfigLikeCpp::default();
+        config.disabled_map_ids.insert(571);
+
+        assert!(config.should_try_pathfinding_like_cpp(0, false));
+        assert!(!config.should_try_pathfinding_like_cpp(571, false));
+        assert!(!config.should_try_pathfinding_like_cpp(0, true));
+
+        config.enabled = false;
+        assert!(!config.should_try_pathfinding_like_cpp(0, false));
     }
 
     #[test]

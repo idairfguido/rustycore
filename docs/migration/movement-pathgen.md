@@ -117,7 +117,7 @@ Optional (some Trinity forks have `PathFinderTerrainInfo.cpp` exposing per-tile 
 - `Entities/WorldObject` — owner provides `mapId`, `instanceId`, current position, swim/fly state.
 - [`common-collision.md`](common-collision.md) — `VMapManager` for height query when normalizing path Z; mmap tile coords align 1:1 with VMap grid (1600/3 = 533.333 yards per tile).
 - [`movement-spline.md`](movement-spline.md) — produces `PointsArray` consumed by `MoveSplineInit::MovebyPath`.
-- `Config` — `mmap.enabled`, `mmap.allowedMaps` flags.
+- `Config` / `DisableMgr` — `mmap.enablePathFinding` / `CONFIG_ENABLE_MMAPS` plus `DISABLE_TYPE_MMAP` rows from `disables`.
 
 **Depended on by:**
 - Every [`movement-generators.md`](movement-generators.md) generator that calls `MoveSplineInit::MoveTo(..., generatePath=true)`: Chase, Follow, Point, Waypoint, Confused, Fleeing, Random (when `_setRandomLocation` validates pickability).
@@ -133,8 +133,8 @@ Optional (some Trinity forks have `PathFinderTerrainInfo.cpp` exposing per-tile 
 
 | Statement / Source | Purpose | DB |
 |---|---|---|
-| Config `mmap.enabled` (worldserver.conf) | Master switch — disabled → all paths fall back to `BuildShortcut` | config |
-| Config `mmap.allowedMaps` | Per-map allowlist | config |
+| Config `mmap.enablePathFinding` (worldserver.conf) | Master switch — disabled → all paths fall back to `BuildShortcut` | config |
+| `disables.sourceType = DISABLE_TYPE_MMAP` | Per-map pathfinding disable gate used by `DisableMgr::IsPathfindingEnabled(mapId)` | world |
 
 DBC/DB2 stores indirectly relevant:
 
