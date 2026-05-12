@@ -2024,7 +2024,9 @@ pub struct MMapPathfindingContextLoadLikeCpp {
     pub instance_id: u32,
     pub tile_x: i32,
     pub tile_y: i32,
+    pub map_data_available: bool,
     pub instance_query_available: bool,
+    pub tile_available: bool,
     pub tile_loaded: bool,
 }
 
@@ -2239,9 +2241,51 @@ impl MMapManager {
     ) -> Result<MMapPathfindingContextLoadLikeCpp, MMapManagerError> {
         let base_path = base_path.as_ref();
         let (tile_x, tile_y) = mmap_tile_coords_for_wow_position_like_cpp(x, y);
-        let instance_query_available =
-            self.load_map_instance(base_path, mesh_map_id, instance_map_id, instance_id)?;
-        let tile_loaded = self.load_map(base_path, mesh_map_id, tile_x, tile_y)?;
+        let map_data_available = match self.load_map_data(base_path, mesh_map_id) {
+            Ok(loaded) => loaded,
+            Err(error @ MMapManagerError::InvalidMapInThreadUnsafe { .. }) => return Err(error),
+            Err(_) => false,
+        };
+
+        let mut instance_query_available = false;
+        let mut tile_loaded = false;
+        let mut tile_available = false;
+
+        if map_data_available {
+            instance_query_available = match self.load_map_instance(
+                base_path,
+                mesh_map_id,
+                instance_map_id,
+                instance_id,
+            ) {
+                Ok(loaded) => loaded,
+                Err(error @ MMapManagerError::InvalidMapInThreadUnsafe { .. }) => {
+                    return Err(error);
+                }
+                Err(_) => false,
+            };
+
+            let packed_grid_pos = pack_tile_id_like_cpp(tile_x, tile_y);
+            let had_tile = self
+                .loaded_mmaps
+                .get(&mesh_map_id)
+                .and_then(Option::as_ref)
+                .is_some_and(|data| data.loaded_tile_refs.contains_key(&packed_grid_pos));
+            tile_loaded = match self.load_map(base_path, mesh_map_id, tile_x, tile_y) {
+                Ok(loaded) => loaded,
+                Err(error @ MMapManagerError::InvalidMapInThreadUnsafe { .. }) => {
+                    return Err(error);
+                }
+                Err(_) => false,
+            };
+            tile_available = had_tile
+                || tile_loaded
+                || self
+                    .loaded_mmaps
+                    .get(&mesh_map_id)
+                    .and_then(Option::as_ref)
+                    .is_some_and(|data| data.loaded_tile_refs.contains_key(&packed_grid_pos));
+        }
 
         Ok(MMapPathfindingContextLoadLikeCpp {
             mesh_map_id,
@@ -2249,7 +2293,9 @@ impl MMapManager {
             instance_id,
             tile_x,
             tile_y,
+            map_data_available,
             instance_query_available,
+            tile_available,
             tile_loaded,
         })
     }
@@ -3794,7 +3840,9 @@ mod tests {
                 instance_id: 42,
                 tile_x: 32,
                 tile_y: 32,
+                map_data_available: true,
                 instance_query_available: true,
+                tile_available: true,
                 tile_loaded: true,
             }
         );
@@ -3813,10 +3861,49 @@ mod tests {
         assert_eq!(
             reused,
             MMapPathfindingContextLoadLikeCpp {
+                tile_available: true,
                 tile_loaded: false,
                 ..loaded
             }
         );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn mmap_manager_pathfinding_context_missing_tile_falls_back_like_cpp() {
+        let root = unique_test_dir("mmap-manager-missing-path-context");
+        std::fs::create_dir_all(root.join("mmaps")).unwrap();
+
+        let params = DetourNavMeshParams {
+            origin: [0.0, 0.0, 0.0],
+            tile_width: 1.0,
+            tile_height: 1.0,
+            max_tiles: 4096,
+            max_polys: 16_384,
+        };
+        std::fs::write(root.join("mmaps/0001.mmap"), params.to_bytes()).unwrap();
+
+        let mut manager = MMapManager::new();
+        let loaded = manager
+            .load_pathfinding_context_for_wow_position_like_cpp(&root, 1, 1, 42, 0.0, 0.0)
+            .unwrap();
+
+        assert_eq!(
+            loaded,
+            MMapPathfindingContextLoadLikeCpp {
+                mesh_map_id: 1,
+                instance_map_id: 1,
+                instance_id: 42,
+                tile_x: 32,
+                tile_y: 32,
+                map_data_available: true,
+                instance_query_available: true,
+                tile_available: false,
+                tile_loaded: false,
+            }
+        );
+        assert_eq!(manager.get_loaded_tiles_count(), 0);
 
         std::fs::remove_dir_all(root).unwrap();
     }
