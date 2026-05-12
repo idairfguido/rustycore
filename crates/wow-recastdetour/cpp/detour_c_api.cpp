@@ -2,6 +2,7 @@
 #include "DetourAlloc.h"
 #include "DetourStatus.h"
 #include "DetourNavMeshBuilder.h"
+#include "DetourNavMeshQuery.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -57,6 +58,21 @@ extern "C"
     dtStatus rustycore_dt_nav_mesh_remove_tile(dtNavMesh* mesh, uint64_t tile_ref)
     {
         return mesh->removeTile((dtTileRef)tile_ref, 0, 0);
+    }
+
+    dtNavMeshQuery* rustycore_dt_alloc_nav_mesh_query()
+    {
+        return dtAllocNavMeshQuery();
+    }
+
+    void rustycore_dt_free_nav_mesh_query(dtNavMeshQuery* query)
+    {
+        dtFreeNavMeshQuery(query);
+    }
+
+    dtStatus rustycore_dt_nav_mesh_query_init(dtNavMeshQuery* query, dtNavMesh const* mesh, int max_nodes)
+    {
+        return query->init(mesh, max_nodes);
     }
 
     void rustycore_dt_free(void* ptr)

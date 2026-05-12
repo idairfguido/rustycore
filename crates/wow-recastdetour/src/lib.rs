@@ -116,6 +116,11 @@ pub struct RawDetourNavMesh {
     _private: [u8; 0],
 }
 
+#[repr(C)]
+pub struct RawDetourNavMeshQuery {
+    _private: [u8; 0],
+}
+
 pub type DetourStatus = u32;
 pub type DetourTileRef = u64;
 
@@ -137,6 +142,13 @@ unsafe extern "C" {
     fn rustycore_dt_nav_mesh_remove_tile(
         mesh: *mut RawDetourNavMesh,
         tile_ref: DetourTileRef,
+    ) -> DetourStatus;
+    fn rustycore_dt_alloc_nav_mesh_query() -> *mut RawDetourNavMeshQuery;
+    fn rustycore_dt_free_nav_mesh_query(query: *mut RawDetourNavMeshQuery);
+    fn rustycore_dt_nav_mesh_query_init(
+        query: *mut RawDetourNavMeshQuery,
+        mesh: *const RawDetourNavMesh,
+        max_nodes: i32,
     ) -> DetourStatus;
     fn rustycore_dt_free(ptr: *mut std::ffi::c_void);
     fn rustycore_dt_create_square_tile_data(
@@ -217,6 +229,44 @@ impl Drop for DetourNavMesh {
     }
 }
 
+#[derive(Debug)]
+pub struct DetourNavMeshQuery<'mesh> {
+    raw: NonNull<RawDetourNavMeshQuery>,
+    _mesh_lifetime_and_thread_model: PhantomData<(&'mesh DetourNavMesh, Rc<()>)>,
+}
+
+impl<'mesh> DetourNavMeshQuery<'mesh> {
+    pub fn new(
+        mesh: &'mesh DetourNavMesh,
+        max_nodes: i32,
+    ) -> Result<Self, DetourNavMeshQueryError> {
+        let raw = NonNull::new(unsafe { rustycore_dt_alloc_nav_mesh_query() })
+            .ok_or(DetourNavMeshQueryError::AllocationFailed)?;
+        let status =
+            unsafe { rustycore_dt_nav_mesh_query_init(raw.as_ptr(), mesh.as_raw(), max_nodes) };
+        if detour_status_failed(status) {
+            unsafe { rustycore_dt_free_nav_mesh_query(raw.as_ptr()) };
+            return Err(DetourNavMeshQueryError::InitFailed { status });
+        }
+
+        Ok(Self {
+            raw,
+            _mesh_lifetime_and_thread_model: PhantomData,
+        })
+    }
+
+    #[must_use]
+    pub const fn as_raw(&self) -> *mut RawDetourNavMeshQuery {
+        self.raw.as_ptr()
+    }
+}
+
+impl Drop for DetourNavMeshQuery<'_> {
+    fn drop(&mut self) {
+        unsafe { rustycore_dt_free_nav_mesh_query(self.raw.as_ptr()) };
+    }
+}
+
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum DetourNavMeshError {
     #[error("Detour navmesh allocation failed")]
@@ -233,6 +283,14 @@ pub enum DetourTileError {
     AddTileFailed { status: DetourStatus },
     #[error("Detour removeTile failed with status 0x{status:08x}")]
     RemoveTileFailed { status: DetourStatus },
+}
+
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum DetourNavMeshQueryError {
+    #[error("Detour navmesh query allocation failed")]
+    AllocationFailed,
+    #[error("Detour navmesh query initialization failed with status 0x{status:08x}")]
+    InitFailed { status: DetourStatus },
 }
 
 #[must_use]
@@ -729,6 +787,21 @@ mod tests {
         let tile_ref = mesh.add_tile(&tile).unwrap();
         assert_ne!(tile_ref, 0);
         mesh.remove_tile(tile_ref).unwrap();
+    }
+
+    #[test]
+    fn detour_nav_mesh_query_initializes_like_mmap_manager_cpp() {
+        let params = DetourNavMeshParams {
+            origin: [0.0, 0.0, 0.0],
+            tile_width: 1.0,
+            tile_height: 1.0,
+            max_tiles: 16,
+            max_polys: 128,
+        };
+        let mesh = DetourNavMesh::new(&params).unwrap();
+
+        let query = DetourNavMeshQuery::new(&mesh, 1024).unwrap();
+        assert!(!query.as_raw().is_null());
     }
 
     #[test]
