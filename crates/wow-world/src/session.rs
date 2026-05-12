@@ -14,6 +14,7 @@ use parking_lot::RwLock;
 use tracing::{debug, info, trace, warn};
 
 use crate::entity_update_bridge::player_values_update_to_update_object;
+use crate::map_manager::{WorldMMapPathRequestLikeCpp, WorldMMapPathfinderWorkerLikeCpp};
 use wow_constants::item::{CurrencyTypes, CurrencyTypesFlags};
 use wow_constants::movement::MovementFlag;
 use wow_constants::unit::{Team, UnitFlags, UnitStandStateType};
@@ -59,6 +60,7 @@ use wow_packet::packets::item::{
     ItemPushResult, ItemPushResultDisplayType, ItemTimeUpdate,
 };
 use wow_packet::packets::misc::{BuyFailed, SellResponse};
+use wow_recastdetour::PathQueryFilterContext;
 
 fn rounded_median_u32(sorted_values: &[u32]) -> u32 {
     debug_assert!(!sorted_values.is_empty());
@@ -844,6 +846,9 @@ pub struct WorldSession {
     /// route through here so all sessions on the same map see the same world.
     /// `None` until the world server injects the manager (see `set_map_manager`).
     pub(crate) map_manager: Option<crate::map_manager::SharedMapManager>,
+    /// Dedicated Detour owner handle. The underlying `MMapManager` remains on
+    /// its worker thread because Detour state is not `Send + Sync`.
+    mmap_pathfinder_like_cpp: Option<Arc<WorldMMapPathfinderWorkerLikeCpp>>,
     /// Shared C++ `InstanceLockMgr` analogue used by raid-info and instance entry paths.
     pub(crate) instance_lock_mgr: Option<Arc<std::sync::RwLock<wow_instances::InstanceLockMgr>>>,
 
@@ -1339,6 +1344,7 @@ impl WorldSession {
             creatures: std::collections::HashMap::new(),
             vendor_item_counts: HashMap::new(),
             map_manager: None,
+            mmap_pathfinder_like_cpp: None,
             combat_target: None,
             in_combat: false,
             player_alive_like_cpp: true,
@@ -1432,6 +1438,15 @@ impl WorldSession {
     /// Inject the shared map manager. Call once at session creation, before login.
     pub fn set_map_manager(&mut self, mgr: crate::map_manager::SharedMapManager) {
         self.map_manager = Some(mgr);
+    }
+
+    /// Inject the dedicated Detour worker handle. The session only sends
+    /// path requests; it never owns raw mmap/navmesh state.
+    pub fn set_mmap_pathfinder_like_cpp(
+        &mut self,
+        pathfinder: Arc<WorldMMapPathfinderWorkerLikeCpp>,
+    ) {
+        self.mmap_pathfinder_like_cpp = Some(pathfinder);
     }
 
     /// Inject the shared C++ `InstanceLockMgr` analogue.
@@ -7398,6 +7413,7 @@ impl WorldSession {
         // ──────────────────────────────────────────────────────────────────
 
         let mmap_runtime_config = self.mmap_runtime_config_like_cpp.clone();
+        let mmap_pathfinder = self.mmap_pathfinder_like_cpp.clone();
         let map_id_for_pathfinding = u32::from(self.player_map_id_like_cpp());
         for guid in guids {
             let _ = self.mutate_world_creature(guid, |creature| {
@@ -7425,9 +7441,36 @@ impl WorldSession {
                                         map_id_for_pathfinding,
                                         owner_ignores_pathfinding,
                                     ) {
+                                    let detour_path = mmap_pathfinder.as_ref().and_then(|worker| {
+                                        match worker.calculate_path_like_cpp(
+                                            WorldMMapPathRequestLikeCpp {
+                                                start: creature.position(),
+                                                destination: dst,
+                                                mesh_map_id: map_id_for_pathfinding,
+                                                instance_map_id: map_id_for_pathfinding,
+                                                instance_id: 0,
+                                                filter_context: PathQueryFilterContext::creature(
+                                                    true, false, false, false,
+                                                ),
+                                                force_destination: false,
+                                            },
+                                        ) {
+                                            Ok(path) => path,
+                                            Err(error) => {
+                                                tracing::warn!(
+                                                    "mmap pathfinding failed for creature {:?}: {:?}",
+                                                    guid,
+                                                    error
+                                                );
+                                                None
+                                            }
+                                        }
+                                    });
                                     creature
                                         .begin_move_spline_with_detour_path_like_cpp(
-                                            dst, None, false,
+                                            dst,
+                                            detour_path.as_ref(),
+                                            false,
                                         )
                                         .map(|(from, spline, _path)| (from, spline))
                                 } else {

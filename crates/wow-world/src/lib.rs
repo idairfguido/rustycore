@@ -10,7 +10,9 @@ pub mod handlers;
 pub mod map_manager;
 pub mod session;
 
-pub use map_manager::{GridCoord, MapManager, SharedMapManager, WorldCreature};
+pub use map_manager::{
+    GridCoord, MapManager, SharedMapManager, WorldCreature, WorldMMapPathfinderWorkerLikeCpp,
+};
 pub use session::{
     MMapRuntimeConfigLikeCpp, SharedObjectAccessor, WorldSession, new_shared_object_accessor,
 };

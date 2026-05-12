@@ -37,7 +37,8 @@ use wow_network::{
     GroupRegistry, LootDropRatesLikeCpp, PendingInvites, PlayerRegistry, SessionResources,
 };
 use wow_world::{
-    MMapRuntimeConfigLikeCpp, MapManager as LegacyMapManager, SharedMapManager, WorldSession,
+    MMapRuntimeConfigLikeCpp, MapManager as LegacyMapManager, SharedMapManager,
+    WorldMMapPathfinderWorkerLikeCpp, WorldSession,
 };
 
 type SharedCanonicalMapManager = Arc<Mutex<wow_map::MapManager>>;
@@ -823,6 +824,11 @@ async fn main() -> Result<()> {
         },
         mmap_runtime_config.data_dir
     );
+    let mmap_pathfinder = mmap_runtime_config.enabled.then(|| {
+        Arc::new(WorldMMapPathfinderWorkerLikeCpp::spawn(
+            &mmap_runtime_config.data_dir,
+        ))
+    });
 
     let realm_addr: SocketAddr = format!("{bind_ip}:{world_port}")
         .parse()
@@ -843,6 +849,7 @@ async fn main() -> Result<()> {
         let accessor = Arc::clone(&object_accessor);
         let port = instance_port;
         let mmap_config = mmap_runtime_config.clone();
+        let mmap_pathfinder = mmap_pathfinder.clone();
         async move {
             if let Err(e) = wow_network::start_world_listener(
                 realm_addr,
@@ -852,6 +859,7 @@ async fn main() -> Result<()> {
                     let mgr = Arc::clone(&mgr);
                     let smap = Arc::clone(&smap);
                     let accessor = Arc::clone(&accessor);
+                    let mmap_pathfinder = mmap_pathfinder.clone();
                     create_session(
                         account,
                         pkt_rx,
@@ -863,6 +871,7 @@ async fn main() -> Result<()> {
                         port,
                         max_expansion,
                         mmap_config.clone(),
+                        mmap_pathfinder,
                     )
                 },
             )
@@ -1505,6 +1514,7 @@ async fn create_session(
     instance_port: u16,
     max_expansion: u8,
     mmap_runtime_config: MMapRuntimeConfigLikeCpp,
+    mmap_pathfinder: Option<Arc<WorldMMapPathfinderWorkerLikeCpp>>,
 ) {
     info!(
         "Creating session for account {} (bnet_id={})",
@@ -1649,6 +1659,9 @@ async fn create_session(
     session.set_loot_drop_rates_like_cpp(resources.loot_drop_rates);
     session.set_enable_ae_loot_like_cpp(resources.enable_ae_loot);
     session.set_mmap_runtime_config_like_cpp(mmap_runtime_config);
+    if let Some(pathfinder) = mmap_pathfinder {
+        session.set_mmap_pathfinder_like_cpp(pathfinder);
+    }
     session.set_object_accessor(object_accessor);
     if let (Some(greg), Some(pinv)) = (&resources.group_registry, &resources.pending_invites) {
         session.set_group_registry(Arc::clone(greg), Arc::clone(pinv));
