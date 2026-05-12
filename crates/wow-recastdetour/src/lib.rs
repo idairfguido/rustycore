@@ -747,6 +747,116 @@ impl Drop for DetourQueryFilter {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathQueryFilterOwner {
+    Creature {
+        can_walk: bool,
+        can_enter_water: bool,
+        in_combat: bool,
+        in_evade_mode: bool,
+    },
+    Player,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PathQueryFilterContext {
+    pub owner: PathQueryFilterOwner,
+    pub force_enabled_flags: NavTerrainFlag,
+    pub force_disabled_flags: NavTerrainFlag,
+    pub is_in_water: bool,
+    pub is_under_water: bool,
+    pub current_nav_terrain: NavTerrainFlag,
+}
+
+impl PathQueryFilterContext {
+    #[must_use]
+    pub const fn creature(
+        can_walk: bool,
+        can_enter_water: bool,
+        in_combat: bool,
+        in_evade_mode: bool,
+    ) -> Self {
+        Self {
+            owner: PathQueryFilterOwner::Creature {
+                can_walk,
+                can_enter_water,
+                in_combat,
+                in_evade_mode,
+            },
+            force_enabled_flags: NavTerrainFlag::EMPTY,
+            force_disabled_flags: NavTerrainFlag::EMPTY,
+            is_in_water: false,
+            is_under_water: false,
+            current_nav_terrain: NavTerrainFlag::GROUND,
+        }
+    }
+
+    #[must_use]
+    pub const fn player() -> Self {
+        Self {
+            owner: PathQueryFilterOwner::Player,
+            force_enabled_flags: NavTerrainFlag::EMPTY,
+            force_disabled_flags: NavTerrainFlag::EMPTY,
+            is_in_water: false,
+            is_under_water: false,
+            current_nav_terrain: NavTerrainFlag::GROUND,
+        }
+    }
+}
+
+pub fn create_path_query_filter_like_cpp(
+    context: PathQueryFilterContext,
+) -> Result<DetourQueryFilter, DetourQueryFilterError> {
+    let mut filter = DetourQueryFilter::new()?;
+    let include_flags = match context.owner {
+        PathQueryFilterOwner::Creature {
+            can_walk,
+            can_enter_water,
+            ..
+        } => {
+            let mut flags = NavTerrainFlag::EMPTY;
+            if can_walk {
+                flags |= NavTerrainFlag::GROUND;
+            }
+            if can_enter_water {
+                flags |= NavTerrainFlag::WATER | NavTerrainFlag::MAGMA_SLIME;
+            }
+            flags
+        }
+        PathQueryFilterOwner::Player => {
+            NavTerrainFlag::GROUND | NavTerrainFlag::WATER | NavTerrainFlag::MAGMA_SLIME
+        }
+    };
+
+    filter.set_include_flags(include_flags.bits());
+    filter.set_exclude_flags(NavTerrainFlag::EMPTY.bits());
+    update_path_query_filter_like_cpp(&mut filter, context);
+    Ok(filter)
+}
+
+pub fn update_path_query_filter_like_cpp(
+    filter: &mut DetourQueryFilter,
+    context: PathQueryFilterContext,
+) {
+    filter.set_include_flags(filter.include_flags() | context.force_enabled_flags.bits());
+    filter.set_exclude_flags(filter.exclude_flags() | context.force_disabled_flags.bits());
+
+    if context.is_in_water || context.is_under_water {
+        filter.set_include_flags(filter.include_flags() | context.current_nav_terrain.bits());
+    }
+
+    if let PathQueryFilterOwner::Creature {
+        in_combat,
+        in_evade_mode,
+        ..
+    } = context.owner
+    {
+        if in_combat || in_evade_mode {
+            filter.set_include_flags(filter.include_flags() | NavTerrainFlag::GROUND_STEEP.bits());
+        }
+    }
+}
+
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum DetourNavMeshError {
     #[error("Detour navmesh allocation failed")]
@@ -1594,6 +1704,66 @@ mod tests {
                 area: DT_MAX_AREAS_LIKE_CPP,
                 max: DT_MAX_AREAS_LIKE_CPP,
             })
+        );
+    }
+
+    #[test]
+    fn path_query_filter_create_matches_cpp_owner_rules() {
+        let ground_creature = create_path_query_filter_like_cpp(PathQueryFilterContext::creature(
+            true, false, false, false,
+        ))
+        .unwrap();
+        assert_eq!(
+            ground_creature.include_flags(),
+            NavTerrainFlag::GROUND.bits()
+        );
+        assert_eq!(
+            ground_creature.exclude_flags(),
+            NavTerrainFlag::EMPTY.bits()
+        );
+
+        let water_creature = create_path_query_filter_like_cpp(PathQueryFilterContext::creature(
+            false, true, false, false,
+        ))
+        .unwrap();
+        assert_eq!(
+            water_creature.include_flags(),
+            (NavTerrainFlag::WATER | NavTerrainFlag::MAGMA_SLIME).bits()
+        );
+
+        let player = create_path_query_filter_like_cpp(PathQueryFilterContext::player()).unwrap();
+        assert_eq!(
+            player.include_flags(),
+            (NavTerrainFlag::GROUND | NavTerrainFlag::WATER | NavTerrainFlag::MAGMA_SLIME).bits()
+        );
+    }
+
+    #[test]
+    fn path_query_filter_update_matches_cpp_force_water_and_combat_rules() {
+        let mut context = PathQueryFilterContext::creature(true, false, true, false);
+        context.force_enabled_flags = NavTerrainFlag::WATER;
+        context.force_disabled_flags = NavTerrainFlag::MAGMA_SLIME;
+        context.is_in_water = true;
+        context.current_nav_terrain = NavTerrainFlag::MAGMA_SLIME;
+
+        let filter = create_path_query_filter_like_cpp(context).unwrap();
+        assert_eq!(
+            filter.include_flags(),
+            (NavTerrainFlag::GROUND
+                | NavTerrainFlag::GROUND_STEEP
+                | NavTerrainFlag::WATER
+                | NavTerrainFlag::MAGMA_SLIME)
+                .bits()
+        );
+        assert_eq!(filter.exclude_flags(), NavTerrainFlag::MAGMA_SLIME.bits());
+
+        let mut evade_context = PathQueryFilterContext::creature(true, false, false, true);
+        evade_context.is_under_water = true;
+        evade_context.current_nav_terrain = NavTerrainFlag::WATER;
+        let filter = create_path_query_filter_like_cpp(evade_context).unwrap();
+        assert_eq!(
+            filter.include_flags(),
+            (NavTerrainFlag::GROUND | NavTerrainFlag::GROUND_STEEP | NavTerrainFlag::WATER).bits()
         );
     }
 
