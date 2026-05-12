@@ -1,3 +1,9 @@
+use std::{
+    collections::HashMap,
+    fs, io,
+    path::{Path, PathBuf},
+};
+
 use thiserror::Error;
 
 pub const MMAP_MAGIC_LIKE_CPP: u32 = 0x4d4d_4150;
@@ -96,6 +102,160 @@ pub enum DetourNavMeshParamsError {
     TooShort { actual: usize, expected: usize },
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct MMapData {
+    pub nav_mesh_params: DetourNavMeshParams,
+    pub loaded_tile_refs: HashMap<u32, u64>,
+}
+
+impl MMapData {
+    #[must_use]
+    pub fn new(nav_mesh_params: DetourNavMeshParams) -> Self {
+        Self {
+            nav_mesh_params,
+            loaded_tile_refs: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadUnsafeMapData {
+    pub map_id: u32,
+    pub child_map_ids: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MMapManager {
+    loaded_mmaps: HashMap<u32, Option<MMapData>>,
+    parent_map_data: HashMap<u32, u32>,
+    loaded_tiles: u32,
+    thread_safe_environment: bool,
+}
+
+impl Default for MMapManager {
+    fn default() -> Self {
+        Self {
+            loaded_mmaps: HashMap::new(),
+            parent_map_data: HashMap::new(),
+            loaded_tiles: 0,
+            thread_safe_environment: true,
+        }
+    }
+}
+
+impl MMapManager {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn initialize_thread_unsafe<I>(&mut self, map_data: I)
+    where
+        I: IntoIterator<Item = ThreadUnsafeMapData>,
+    {
+        self.loaded_mmaps.clear();
+        self.parent_map_data.clear();
+        self.loaded_tiles = 0;
+
+        for data in map_data {
+            self.loaded_mmaps.entry(data.map_id).or_insert(None);
+
+            for child_map_id in data.child_map_ids {
+                self.parent_map_data.insert(child_map_id, data.map_id);
+            }
+        }
+
+        self.thread_safe_environment = false;
+    }
+
+    pub fn load_map_data(
+        &mut self,
+        base_path: impl AsRef<Path>,
+        map_id: u32,
+    ) -> Result<bool, MMapManagerError> {
+        if let Some(data) = self.loaded_mmaps.get(&map_id) {
+            if data.is_some() {
+                return Ok(true);
+            }
+        } else if !self.thread_safe_environment {
+            return Err(MMapManagerError::InvalidMapInThreadUnsafe { map_id });
+        } else {
+            self.loaded_mmaps.insert(map_id, None);
+        }
+
+        let path = map_file_path_like_cpp(base_path, map_id);
+        let bytes = fs::read(&path).map_err(|source| MMapManagerError::ReadMapFile {
+            path: path.clone(),
+            source,
+        })?;
+        let nav_mesh_params =
+            DetourNavMeshParams::parse(&bytes).map_err(MMapManagerError::BadMapParams)?;
+
+        self.loaded_mmaps
+            .insert(map_id, Some(MMapData::new(nav_mesh_params)));
+
+        Ok(true)
+    }
+
+    #[must_use]
+    pub fn get_mmap_data(&self, map_id: u32) -> Option<&MMapData> {
+        self.loaded_mmaps.get(&map_id).and_then(Option::as_ref)
+    }
+
+    pub fn unload_map(&mut self, map_id: u32) -> bool {
+        let Some(data) = self.loaded_mmaps.get_mut(&map_id) else {
+            return false;
+        };
+
+        let Some(loaded) = data.take() else {
+            return false;
+        };
+
+        self.loaded_tiles = self
+            .loaded_tiles
+            .saturating_sub(loaded.loaded_tile_refs.len() as u32);
+        true
+    }
+
+    #[must_use]
+    pub fn get_nav_mesh_params(&self, map_id: u32) -> Option<DetourNavMeshParams> {
+        self.loaded_mmaps
+            .get(&map_id)
+            .and_then(Option::as_ref)
+            .map(|data| data.nav_mesh_params)
+    }
+
+    #[must_use]
+    pub fn parent_map_id(&self, child_map_id: u32) -> Option<u32> {
+        self.parent_map_data.get(&child_map_id).copied()
+    }
+
+    #[must_use]
+    pub fn get_loaded_tiles_count(&self) -> u32 {
+        self.loaded_tiles
+    }
+
+    #[must_use]
+    pub fn get_loaded_maps_count(&self) -> u32 {
+        self.loaded_mmaps.len() as u32
+    }
+
+    #[must_use]
+    pub fn is_thread_safe_environment(&self) -> bool {
+        self.thread_safe_environment
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum MMapManagerError {
+    #[error("invalid map id {map_id} passed after thread-unsafe initialization")]
+    InvalidMapInThreadUnsafe { map_id: u32 },
+    #[error("failed to read mmap file {path:?}: {source}")]
+    ReadMapFile { path: PathBuf, source: io::Error },
+    #[error("bad mmap params: {0}")]
+    BadMapParams(DetourNavMeshParamsError),
+}
+
 impl MmapTileHeader {
     #[must_use]
     pub const fn new(dt_version: u32) -> Self {
@@ -187,6 +347,11 @@ pub const fn pack_tile_id_like_cpp(x: i32, y: i32) -> u32 {
 #[must_use]
 pub fn map_file_name_like_cpp(map_id: u32) -> String {
     format!("mmaps/{map_id:04}.mmap")
+}
+
+#[must_use]
+pub fn map_file_path_like_cpp(base_path: impl AsRef<Path>, map_id: u32) -> PathBuf {
+    base_path.as_ref().join(map_file_name_like_cpp(map_id))
 }
 
 #[must_use]
@@ -343,8 +508,98 @@ mod tests {
         assert_eq!(pack_tile_id_like_cpp(0x12, 0x34), 0x0012_0034);
         assert_eq!(map_file_name_like_cpp(571), "mmaps/0571.mmap");
         assert_eq!(
+            map_file_path_like_cpp("/srv/wow", 571),
+            std::path::PathBuf::from("/srv/wow/mmaps/0571.mmap")
+        );
+        assert_eq!(
             tile_file_name_like_cpp(571, 32, 48),
             "mmaps/05713248.mmtile"
         );
+    }
+
+    #[test]
+    fn mmap_manager_loads_map_params_and_caches_like_cpp() {
+        let root = unique_test_dir("mmap-manager-loads-map-params");
+        std::fs::create_dir_all(root.join("mmaps")).unwrap();
+
+        let params = DetourNavMeshParams {
+            origin: [1.0, 2.0, 3.0],
+            tile_width: 533.3333,
+            tile_height: 533.3333,
+            max_tiles: 128,
+            max_polys: 16_384,
+        };
+        std::fs::write(root.join("mmaps/0001.mmap"), params.to_bytes()).unwrap();
+
+        let mut manager = MMapManager::new();
+        assert!(manager.is_thread_safe_environment());
+        assert_eq!(manager.get_loaded_maps_count(), 0);
+        assert!(matches!(manager.load_map_data(&root, 1), Ok(true)));
+        assert!(matches!(manager.load_map_data(&root, 1), Ok(true)));
+        assert_eq!(manager.get_loaded_maps_count(), 1);
+        assert_eq!(manager.get_loaded_tiles_count(), 0);
+        assert_eq!(manager.get_nav_mesh_params(1), Some(params));
+        assert_eq!(manager.get_mmap_data(1).unwrap().loaded_tile_refs.len(), 0);
+        assert!(manager.unload_map(1));
+        assert!(!manager.unload_map(1));
+        assert_eq!(manager.get_loaded_maps_count(), 1);
+        assert_eq!(manager.get_nav_mesh_params(1), None);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn mmap_manager_thread_unsafe_preloads_allowed_map_ids_like_cpp() {
+        let root = unique_test_dir("mmap-manager-thread-unsafe");
+        std::fs::create_dir_all(root.join("mmaps")).unwrap();
+
+        let params = DetourNavMeshParams {
+            origin: [10.0, 20.0, 30.0],
+            tile_width: 533.3333,
+            tile_height: 533.3333,
+            max_tiles: 256,
+            max_polys: 32_768,
+        };
+        std::fs::write(root.join("mmaps/0571.mmap"), params.to_bytes()).unwrap();
+
+        let mut manager = MMapManager::new();
+        manager.initialize_thread_unsafe([ThreadUnsafeMapData {
+            map_id: 571,
+            child_map_ids: vec![609],
+        }]);
+
+        assert!(!manager.is_thread_safe_environment());
+        assert_eq!(manager.get_loaded_maps_count(), 1);
+        assert_eq!(manager.get_nav_mesh_params(571), None);
+        assert_eq!(manager.parent_map_id(609), Some(571));
+        assert!(matches!(manager.load_map_data(&root, 571), Ok(true)));
+        assert_eq!(manager.get_nav_mesh_params(571), Some(params));
+        assert!(matches!(
+            manager.load_map_data(&root, 1),
+            Err(MMapManagerError::InvalidMapInThreadUnsafe { map_id: 1 })
+        ));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn mmap_manager_keeps_placeholder_after_missing_file_like_cpp() {
+        let root = unique_test_dir("mmap-manager-missing-file");
+        let mut manager = MMapManager::new();
+
+        assert!(matches!(
+            manager.load_map_data(&root, 999),
+            Err(MMapManagerError::ReadMapFile { .. })
+        ));
+        assert_eq!(manager.get_loaded_maps_count(), 1);
+        assert_eq!(manager.get_nav_mesh_params(999), None);
+    }
+
+    fn unique_test_dir(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "rustycore-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ))
     }
 }

@@ -3,7 +3,7 @@
 > **C++ canonical path:** `src/server/game/Movement/PathGenerator.{h,cpp}` + Detour bridge from `src/common/Collision/Management/MMapManager.{h,cpp}` + `src/common/Collision/Maps/MMapDefines.h` + 3rdparty `dep/recastnavigation/Detour/`
 > **Rust target crate(s):** `crates/wow-recastdetour/` (MMapDefines slice + future FFI bindings to Recast/Detour) + `crates/wow-movement/src/path_generator.rs`
 > **Layer:** L5 sub-module (depends on `wow-collision` / VMaps L3 for height fallback, mmap tile loading from disk)
-> **Status:** ⚠️ first portable slices started — `wow-movement::PathGenerator` now has C++ constants/flags, no-navmesh shortcut fallback, geometry helpers, path length and `ShortenPathUntilDist`; `wow-recastdetour` now has `MMapDefines.h` constants/flags, `MmapTileHeader`, Detour constants and `dtNavMeshParams` parsing, but no Detour FFI or mmap tile loader
+> **Status:** ⚠️ first portable slices started — `wow-movement::PathGenerator` now has C++ constants/flags, no-navmesh shortcut fallback, geometry helpers, path length and `ShortenPathUntilDist`; `wow-recastdetour` now has `MMapDefines.h` constants/flags, `MmapTileHeader`, Detour constants, `dtNavMeshParams` parsing and a pre-FFI `MMapManager` map cache, but no Detour FFI or mmap tile loader
 > **Audited vs C++:** ✅ complete 2026-05-01
 > **Last updated:** 2026-05-12
 
@@ -175,34 +175,33 @@ Tile generation is offline (`mmaps_generator` tool from Trinity); the runtime on
 
 | Rust target | Kind | Rust files | Lines | Status | Notes |
 |---|---|---:|---:|---|---|
-| `crates/wow-recastdetour` | `crate_dir` | 1 | partial | `portable_slice` | `MMapDefines.h` constants/flags, `MmapTileHeader`, Detour constants, `dtNavMeshParams` parser and small MMapManager helper names/pack ids; no Detour FFI |
+| `crates/wow-recastdetour` | `crate_dir` | 1 | partial | `portable_slice` | `MMapDefines.h` constants/flags, `MmapTileHeader`, Detour constants, `dtNavMeshParams` parser, pre-FFI `MMapManager` map cache and helper names/pack ids; no Detour FFI |
 | `crates/wow-movement/src/path_generator.rs` | `path` | 1 | partial | `portable_slice` | C++ constants/flags, no-navmesh shortcut fallback, path length, geometry helpers and `ShortenPathUntilDist`; no Detour-backed pathfinding |
 | `crates/wow-recastdetour/Cargo.toml` | `file` | 1 | partial | `exists_manifest` | declares `bitflags`/`thiserror`; not Detour-linked |
-| `crates/wow-recastdetour/src/lib.rs` | `file` | 1 | partial | `portable_slice` | portable `MMapDefines.h` slice; no Detour FFI |
+| `crates/wow-recastdetour/src/lib.rs` | `file` | 1 | partial | `portable_slice` | portable `MMapDefines.h`/Detour constants, `.mmap` params and pre-FFI `MMapManager`; no Detour FFI |
 
 <!-- REFINE.021:END rust-target-coverage -->
 
 **Files in `/home/server/rustycore`:**
 - `crates/wow-recastdetour/Cargo.toml` — declares `bitflags`/`thiserror`.
-- `crates/wow-recastdetour/src/lib.rs` — portable `MMapDefines.h`/Detour header slice: `MMAP_MAGIC`, `MMAP_VERSION`, 20-byte `MmapTileHeader`, `dtNavMeshParams`, Detour version/magic constants, `NavArea`, `NavTerrainFlag`, tile-id packing and C++ file naming helpers.
+- `crates/wow-recastdetour/src/lib.rs` — portable `MMapDefines.h`/Detour header slice: `MMAP_MAGIC`, `MMAP_VERSION`, 20-byte `MmapTileHeader`, `dtNavMeshParams`, Detour version/magic constants, `NavArea`, `NavTerrainFlag`, tile-id packing, C++ file naming helpers and pre-FFI `MMapManager` map cache.
 - `crates/wow-movement/src/path_generator.rs` — first portable slice: `PathType`, constants, degraded no-navmesh shortcut fallback, `SetPathLengthLimit`, distance/range helpers, far-from-poly flags and `ShortenPathUntilDist` shape.
 - *No* `mmap` tile loader anywhere.
 - *No* Detour FFI bindings (no `cxx`, `bindgen`, or `recastnavigation-sys` integration).
 
 **What's implemented:**
 - Portable, owner-independent pathgen slice in `wow-movement`: exact `PathType` bits and constants from `PathGenerator.h`, C++-style no-navmesh fallback (`BuildShortcut` followed by `PATHFIND_NORMAL | PATHFIND_NOT_USING_PATH`), path length, `SetUseStraightPath`, `SetUseRaycast`, `SetPathLengthLimit`, `Dist3DSqr`, `InRange`, `InRangeYZX`, `AddFarFromPolyFlags`, and `ShortenPathUntilDist` with line-of-sight abstracted as a callback.
-- `wow-recastdetour` covers C++ `MMapDefines.h` data layout, validates `.mmtile` headers before Detour owns tile data, and can parse the `.mmap` `dtNavMeshParams` payload that `MMapManager::loadMapData` reads before `dtNavMesh::init`. There is still no static or dynamic link to Recast/Detour and no header generation.
+- `wow-recastdetour` covers C++ `MMapDefines.h` data layout, validates `.mmtile` headers before Detour owns tile data, can parse the `.mmap` `dtNavMeshParams` payload that `MMapManager::loadMapData` reads before `dtNavMesh::init`, and has a pre-FFI `MMapManager` skeleton for `loadedMMaps`, `InitializeThreadUnsafe`, failed-open placeholders, `parentMapData`, `loadMapData` and `unloadMap(mapId)` map-level state. There is still no static or dynamic link to Recast/Detour and no header generation.
 
 **What's missing vs C++:**
 - **Detour-backed `PathGenerator` behavior** — the real `CalculatePath`, `BuildPolyPath`, `BuildPointPath`, `FindSmoothPath`, `FixupCorridor`, `GetSteerTarget`, `NormalizePath`, filter setup and mmap-backed branches remain unported.
 - **Owner-backed context** — the portable `PathGenerator` does not own a `WorldObject`, `Map`, `MMapManager`, collision height or phase shift yet; LOS/Z normalization are represented through explicit callbacks or left for owner integration.
 - **`dtNavMesh` / `dtNavMeshQuery` / `dtQueryFilter` FFI** — no Rust wrapper, no safety abstractions, no lifetime model. The Detour C++ runtime is not linked.
-- **`MMapManager`** — no tile cache, no operational `loadMapData`/`loadMap(mapId,x,y)`, no per-instance query allocation. Only helper file names, packed tile IDs and the `.mmap` params parser exist.
+- **`MMapManager` tile/query branch** — map-level cache and `.mmap` param loading exist, but there is no operational `loadMap(mapId,x,y)`, no Detour tile ownership, no `loadMapInstance` and no per-instance query allocation.
 - **`mmtile` tile data reader** — the 20-byte tile header parser exists, but reading the Detour tile blob and passing ownership to `dtNavMesh::addTile` remains unimplemented until FFI lands.
 - **Filter creation** — no `CreateFilter` / `UpdateFilter`; no creature-type → include-flags mapping.
 - **Path normalization** — no Z-clamp via `Map::GetHeight`; no `IsInvalidDestinationZ`.
-- **Chase shortening** — no `ShortenPathUntilDist`; chase will overshoot once it lands.
-- **Far-from-poly diagnostics** — no `AddFarFromPolyFlags`; no way to detect if a creature got pushed off the navmesh.
+- **Pathgen runtime integration** — portable `ShortenPathUntilDist` and `AddFarFromPolyFlags` exist, but are not yet wired into Detour-backed `CalculatePath`/chase runtime because owner `WorldObject`, map height and Detour query context are still missing.
 - **Detour-backed FFI** — pure path constants, `NavTerrainFlag`, Detour magic/version constants and `dtNavMeshParams` layout are declared, but `dtAllocNavMesh`, `dtNavMesh::init`, `dtNavMeshQuery` and tile data ownership still need FFI.
 - **Per-instance threading model** — Detour `dtNavMeshQuery` is not thread-safe; the Rust port must allocate one per `MapManager` instance, mirroring C++. No design for this exists.
 
@@ -217,7 +216,7 @@ Tile generation is offline (`mmaps_generator` tool from Trinity); the runtime on
 
 **Tests existing:**
 - Unit tests cover the portable `PathGenerator` slice in `wow-movement`: constants/flags, no-navmesh shortcut fallback, invalid coordinate rejection, path length, geometry helpers, far-from-poly flags, path-length limit and `ShortenPathUntilDist`.
-- Unit tests cover `wow-recastdetour` portable header/flag work: `MMAP_MAGIC`, `MMAP_VERSION`, `MmapTileHeader` layout/round-trip/error cases, Detour constants, `dtNavMeshParams` layout/round-trip, nav terrain flag values, tile ID packing and C++ file naming helpers.
+- Unit tests cover `wow-recastdetour` portable header/flag work: `MMAP_MAGIC`, `MMAP_VERSION`, `MmapTileHeader` layout/round-trip/error cases, Detour constants, `dtNavMeshParams` layout/round-trip, nav terrain flag values, tile ID packing, C++ file naming helpers and pre-FFI `MMapManager` map-level load/unload/thread-unsafe behavior.
 - Test: `.mmap` map header parser reads/writes the exact 28-byte `dtNavMeshParams` layout (`orig[3]`, `tileWidth`, `tileHeight`, `maxTiles`, `maxPolys`); real `dtNavMesh::init` remains pending behind FFI.
 - 0 tests for actual mmap tile load into Detour (no FFI/loader yet).
 - 0 tests for Detour FFI wrapper (no FFI).
@@ -255,7 +254,7 @@ Numbered for cross-reference from `MIGRATION_ROADMAP.md` §5. Complexity: **L** 
 - [ ] **#MOVE-PATH.4** Safe Rust wrappers: `struct DetourNavMesh(*mut dtNavMesh)` + Drop; `struct DetourNavMeshQuery(*mut dtNavMeshQuery)` + Drop; `struct DetourQueryFilter`. Document `!Send + !Sync` bounds (Detour is not thread-safe). (H)
 - [ ] **#MOVE-PATH.5** `MmapTileHeader` struct + `mmtile` file parser: 20-byte header struct/parser is done with magic/version/size/liquid flag validation; remaining work is reading the tile blob and handing ownership to `dtNavMesh::addTile`. (M)
 - [x] **#MOVE-PATH.6** `.mmap` map header parser: reads `dtNavMeshParams` (origin, tileWidth/Height, maxTiles, maxPolys) as the exact 28-byte C++ layout. (M)
-- [ ] **#MOVE-PATH.7** `MMapManager` skeleton: `HashMap<MapId, MMapData>` cache; `load_map(map_id)` + `unload_map`. (H)
+- [x] **#MOVE-PATH.7** `MMapManager` skeleton: C++-like `loadedMMaps` cache, `InitializeThreadUnsafe` placeholders, failed-open placeholders, `parentMapData`, `.mmap` `load_map_data(map_id)` and map-level `unload_map(map_id)` are ported pre-FFI. Tile-level load/unload and queries remain in later tasks. (H)
 - [ ] **#MOVE-PATH.8** Per-instance `dtNavMeshQuery` allocator: `MMapData { mesh: DetourNavMesh, queries: HashMap<InstanceId, DetourNavMeshQuery> }`. (M)
 - [ ] **#MOVE-PATH.9** On-demand tile load: `load_map_data(map_id, tx, ty)` reads file lazily; track loaded set per map. (H)
 - [x] **#MOVE-PATH.10** `NavTerrainFlag` enum from actual `MMapDefines.h`: `EMPTY=0`, `GROUND=1`, `GROUND_STEEP=2`, `WATER=4`, `MAGMA_SLIME=8`; old doc values were corrected after re-checking the legacy tree. Poly-area → flag mapping still belongs to Detour-backed filter work. (L)
@@ -328,7 +327,7 @@ Numbered for cross-reference from `MIGRATION_ROADMAP.md` §5. Complexity: **L** 
 
 | Scope | Decision | C++ retained | Evidence |
 |---|---|---|---|
-| `active_port_scope` | Full C++ surface remains in migration scope; no product exclusion recorded. | 2 files / 1195 lines; refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/PathGenerator.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Movement/PathGenerator.h` | `crates/wow-recastdetour/` (currently 0-line placeholder; FFI bindings to Recast/Detour) + future `crates/wow-movement/src/path_generator.rs` \| ❌ not started — `wow-recastdetour` is a 0-line placeholder; no `PathGenerator`; no mmap tile loader |
+| `active_port_scope` | Full C++ surface remains in migration scope; no product exclusion recorded. | 2 files / 1195 lines; refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/PathGenerator.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Movement/PathGenerator.h` | `crates/wow-recastdetour/` + `crates/wow-movement/src/path_generator.rs` are active partial ports; Detour FFI, tile loader, query/filter bridge and full `PathGenerator` remain open |
 
 <!-- REFINE.025:END product-scope -->
 
@@ -340,9 +339,9 @@ Numbered for cross-reference from `MIGRATION_ROADMAP.md` §5. Complexity: **L** 
 
 | ID | Rust evidence | C++ evidence | Status | Notes |
 |---|---|---|---|---|
-| `#MOVEMENT_PATHGEN.DIV.001` | `crates/wow-recastdetour` (`exists_empty`, 0 Rust lines) | 2 C++ files / 1195 lines assigned; refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/PathGenerator.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Movement/PathGenerator.h` | `exists_empty` | Rust target exists but has no active Rust source lines for a module with canonical C++ coverage. crate exists; no active Rust source lines |
-| `#MOVEMENT_PATHGEN.DIV.002` | `crates/wow-movement/src/path_generator.rs` (`missing_declared_path`, 0 Rust lines) | 2 C++ files / 1195 lines assigned; refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/PathGenerator.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Movement/PathGenerator.h` | `missing_declared_path` | Declared/proposed Rust target is absent while C++ coverage exists. declared/proposed target does not exist |
-| `#MOVEMENT_PATHGEN.DIV.003` | `crates/wow-recastdetour/src/lib.rs` (`exists_empty`, 0 Rust lines) | 2 C++ files / 1195 lines assigned; refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/PathGenerator.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Movement/PathGenerator.h` | `exists_empty` | Rust target exists but has no active Rust source lines for a module with canonical C++ coverage. file exists but has 0 lines |
+| `#MOVEMENT_PATHGEN.DIV.001` | `crates/wow-recastdetour` (`partial_port`) | 2 C++ files / 1195 lines assigned; refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/PathGenerator.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Movement/PathGenerator.h` | `partial` | Portable headers, params and map cache exist; Detour FFI and tile/query runtime absent. |
+| `#MOVEMENT_PATHGEN.DIV.002` | `crates/wow-movement/src/path_generator.rs` (`partial_port`) | 2 C++ files / 1195 lines assigned; refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/PathGenerator.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Movement/PathGenerator.h` | `partial` | Owner-independent fallback slice exists; Detour-backed path calculation remains absent. |
+| `#MOVEMENT_PATHGEN.DIV.003` | `crates/wow-recastdetour/src/lib.rs` (`partial_port`) | 2 C++ files / 1195 lines assigned; refs: `/home/server/woltk-trinity-legacy/src/server/game/Movement/PathGenerator.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Movement/PathGenerator.h` | `partial` | File is no longer empty; the missing surface is FFI, `addTile/removeTile`, query allocation and safe wrappers. |
 
 <!-- REFINE.023:END known-divergences -->
 
@@ -401,11 +400,11 @@ Numbered for cross-reference from `MIGRATION_ROADMAP.md` §5. Complexity: **L** 
 
 **Scope.** Cross-checked `/home/server/woltk-trinity-legacy/src/server/game/Movement/PathGenerator.{h,cpp}` (150 + 1045 lines) and the supporting `src/common/Collision/Management/MMapManager.{h,cpp}` + `src/common/Collision/Maps/MMapDefines.h` (~80) + `dep/recastnavigation/Detour/` against the Rust workspace at `/home/server/rustycore/crates/`. Note: this WotLK 3.4.3 source tree does **not** ship a separate `PathFinderTerrainInfo.cpp` — terrain queries are inlined into `PathGenerator::GetNavTerrain` and `Map::GetHeight`. Verified by directory listing.
 
-**`wow-recastdetour` is still pre-FFI.** The workspace now has a portable `MMapDefines.h`/Detour header slice (`MMAP_MAGIC`, `MMAP_VERSION`, `MmapTileHeader`, `dtNavMeshParams`, Detour constants and file naming helpers), but still has **0 lines of FFI code, 0 bindings, and 0 link to Recast/Detour**. There is no `recastnavigation-sys` dependency, no `cxx` bridge, no `bindgen` invocation, no vendored Detour build. The C++ runtime (15+ classes across `dtNavMesh`, `dtNavMeshQuery`, `dtQueryFilter`, plus the math helpers) is still absent.
+**`wow-recastdetour` is still pre-FFI.** The workspace now has a portable `MMapDefines.h`/Detour header slice (`MMAP_MAGIC`, `MMAP_VERSION`, `MmapTileHeader`, `dtNavMeshParams`, Detour constants, file naming helpers and map-level `MMapManager` state), but still has **0 lines of FFI code, 0 bindings, and 0 link to Recast/Detour**. There is no `recastnavigation-sys` dependency, no `cxx` bridge, no `bindgen` invocation, no vendored Detour build. The C++ runtime (15+ classes across `dtNavMesh`, `dtNavMeshQuery`, `dtQueryFilter`, plus the math helpers) is still absent.
 
 **`PathGenerator` real Detour branch: absent.** The C++ class is **1045 lines** of pathfinding logic — `CalculatePath`, `BuildPolyPath`, `BuildPointPath`, `BuildShortcut`, `FindSmoothPath`, `FixupCorridor`, `GetSteerTarget`, `NormalizePath`, `AddFarFromPolyFlags`, `ShortenPathUntilDist`, `CreateFilter`, `UpdateFilter`, `IsInvalidDestinationZ`, plus 8 geometry helpers. Rust now ships the portable owner-independent subset (`PathType`, constants, no-navmesh `BuildShortcut` fallback, geometry helpers, path length and `ShortenPathUntilDist` shape), but none of the Detour-backed methods are operational yet.
 
-**`MMapManager` tile cache: absent.** The on-demand `.mmtile` loader (`mmaps/{mapid:04}{x:02}{y:02}.mmtile`), operational `.mmap` map reader (`mmaps/{mapid:04}.mmap` → `dtNavMesh::init`), per-instance `dtNavMeshQuery` allocator and tile ownership handoff — none exist in Rust. There is no on-disk reader for the offline-generated mmap tile blobs. The runtime cannot load Detour data even if FFI were wired.
+**`MMapManager` tile/query runtime: absent.** Rust now has the map-level `loadedMMaps` cache and `.mmap` param reader, but the on-demand `.mmtile` loader (`mmaps/{mapid:04}{x:02}{y:02}.mmtile`), operational `dtNavMesh::init/addTile/removeTile`, per-instance `dtNavMeshQuery` allocator and tile ownership handoff are still absent. The runtime cannot load Detour tile blobs until FFI is wired.
 
 **Filter and area cost: absent.** The C++ `dtQueryFilter` setup distinguishes ground/water/magma/slime/empty navigation areas with per-area cost (lava ≈ 100×, water 1.5× for swimming creatures, etc.) and per-creature include flags (flying creatures skip ground; swimmers include water). Rust has none of this — there is no `NavTerrain` enum, no `CreateFilter`, no `UpdateFilter`. Without filter setup, even if Detour were linked, every creature would happily path through lava.
 
