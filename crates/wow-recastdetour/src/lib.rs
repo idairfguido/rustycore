@@ -197,6 +197,25 @@ pub struct DetourPolyPath {
     pub end_far_from_poly: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DetourPathOptions {
+    pub point_path_limit: usize,
+    pub force_destination: bool,
+    pub use_straight_path: bool,
+    pub use_raycast: bool,
+}
+
+impl Default for DetourPathOptions {
+    fn default() -> Self {
+        Self {
+            point_path_limit: MAX_POINT_PATH_LENGTH_LIKE_CPP,
+            force_destination: false,
+            use_straight_path: false,
+            use_raycast: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum PreviousPolyPathLikeCpp {
     Recalculate,
@@ -209,6 +228,16 @@ pub struct DetourSteerTarget {
     pub position: [f32; 3],
     pub flags: u8,
     pub poly_ref: DetourPolyRef,
+}
+
+#[must_use]
+pub const fn wow_position_to_detour_like_cpp(position: [f32; 3]) -> [f32; 3] {
+    [position[1], position[2], position[0]]
+}
+
+#[must_use]
+pub const fn detour_position_to_wow_like_cpp(position: [f32; 3]) -> [f32; 3] {
+    [position[2], position[0], position[1]]
 }
 
 unsafe extern "C" {
@@ -1391,6 +1420,54 @@ pub fn build_raycast_poly_path_like_cpp(
     })
 }
 
+pub fn calculate_detour_path_like_cpp(
+    nav_mesh: &DetourNavMesh,
+    query: &DetourNavMeshQuery<'_>,
+    filter: &DetourQueryFilter,
+    start_wow: [f32; 3],
+    end_wow: [f32; 3],
+    options: DetourPathOptions,
+) -> Result<DetourPolyPath, DetourNavMeshQueryError> {
+    let start_point = wow_position_to_detour_like_cpp(start_wow);
+    let end_point = wow_position_to_detour_like_cpp(end_wow);
+    let mut poly_path = if options.use_raycast {
+        build_raycast_poly_path_like_cpp(query, filter, start_point, end_point)?
+    } else {
+        build_straight_poly_path_like_cpp(
+            query,
+            filter,
+            start_point,
+            end_point,
+            options.point_path_limit,
+            options.force_destination,
+        )?
+    };
+
+    if !options.use_raycast {
+        poly_path.point_path = build_point_path_like_cpp(
+            nav_mesh,
+            query,
+            filter,
+            start_point,
+            end_point,
+            &poly_path.poly_refs,
+            options.point_path_limit,
+            poly_path.point_path.path_type,
+            options.force_destination,
+            options.use_straight_path,
+            false,
+        )?;
+    }
+
+    for point in &mut poly_path.point_path.points {
+        *point = detour_position_to_wow_like_cpp(*point);
+    }
+    poly_path.point_path.actual_end =
+        detour_position_to_wow_like_cpp(poly_path.point_path.actual_end);
+
+    Ok(poly_path)
+}
+
 #[must_use]
 pub fn fixup_corridor_like_cpp(
     path: &[DetourPolyRef],
@@ -2357,6 +2434,14 @@ mod tests {
     }
 
     #[test]
+    fn wow_detour_coordinate_flip_matches_pathgenerator_cpp() {
+        let wow = [100.0, 200.0, 30.0];
+        let detour = wow_position_to_detour_like_cpp(wow);
+        assert_eq!(detour, [200.0, 30.0, 100.0]);
+        assert_eq!(detour_position_to_wow_like_cpp(detour), wow);
+    }
+
+    #[test]
     fn detour_nav_mesh_params_round_trips_cpp_layout() {
         let params = DetourNavMeshParams {
             origin: [-17_066.666, -17_066.666, -2_000.0],
@@ -2950,6 +3035,38 @@ mod tests {
         .unwrap();
         assert_eq!(raycast.points, vec![[0.25, 0.0, 0.25], [0.75, 0.0, 0.75]]);
         assert_eq!(raycast.path_type, DetourPathType::NOPATH);
+    }
+
+    #[test]
+    fn calculate_detour_path_returns_wow_coordinates_like_cpp() {
+        let params = DetourNavMeshParams {
+            origin: [0.0, 0.0, 0.0],
+            tile_width: 1.0,
+            tile_height: 1.0,
+            max_tiles: 16,
+            max_polys: 128,
+        };
+        let mut mesh = DetourNavMesh::new(&params).unwrap();
+        mesh.add_tile(&generated_square_tile_blob(0, 0)).unwrap();
+        let query = DetourNavMeshQuery::new(&mesh, 1024).unwrap();
+        let filter = DetourQueryFilter::new().unwrap();
+
+        let path = calculate_detour_path_like_cpp(
+            &mesh,
+            &query,
+            &filter,
+            [0.25, 0.25, 0.0],
+            [0.75, 0.75, 0.0],
+            DetourPathOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(path.point_path.path_type, DetourPathType::NORMAL);
+        assert_eq!(
+            path.point_path.points,
+            vec![[0.25, 0.25, 0.0], [0.75, 0.75, 0.0]]
+        );
+        assert_eq!(path.point_path.actual_end, [0.75, 0.75, 0.0]);
     }
 
     #[test]
