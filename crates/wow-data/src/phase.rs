@@ -117,6 +117,10 @@ impl PhaseStore {
         self.entries.get(&id)
     }
 
+    pub fn entries(&self) -> impl Iterator<Item = &PhaseEntry> {
+        self.entries.values()
+    }
+
     pub fn contains(&self, id: u32) -> bool {
         self.entries.contains_key(&id)
     }

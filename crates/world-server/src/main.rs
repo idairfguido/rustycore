@@ -473,6 +473,13 @@ async fn main() -> Result<()> {
         phase_store.len(),
         phase_group_store.len()
     );
+    let phase_info_store = Arc::new(wow_data::PhaseInfoStore::from_phase_store_like_cpp(
+        &phase_store,
+    ));
+    info!(
+        "Seeded {} phase info records",
+        phase_info_store.phase_info_count()
+    );
     let terrain_swap_store = Arc::new(
         wow_data::load_terrain_swaps(world_db.as_ref(), &map_store, |phase_id| {
             ui_map_x_map_art_store.is_ui_map_phase(phase_id)
