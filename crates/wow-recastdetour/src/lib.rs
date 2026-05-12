@@ -2017,6 +2017,17 @@ pub struct ThreadUnsafeMapData {
     pub child_map_ids: Vec<u32>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MMapPathfindingContextLoadLikeCpp {
+    pub mesh_map_id: u32,
+    pub instance_map_id: u32,
+    pub instance_id: u32,
+    pub tile_x: i32,
+    pub tile_y: i32,
+    pub instance_query_available: bool,
+    pub tile_loaded: bool,
+}
+
 #[derive(Debug)]
 pub struct MMapManager {
     loaded_mmaps: HashMap<u32, Option<MMapData>>,
@@ -2215,6 +2226,32 @@ impl MMapManager {
 
         data.load_nav_mesh_query(instance_map_id, instance_id)
             .map_err(MMapManagerError::NavMeshQuery)
+    }
+
+    pub fn load_pathfinding_context_for_wow_position_like_cpp(
+        &mut self,
+        base_path: impl AsRef<Path>,
+        mesh_map_id: u32,
+        instance_map_id: u32,
+        instance_id: u32,
+        x: f32,
+        y: f32,
+    ) -> Result<MMapPathfindingContextLoadLikeCpp, MMapManagerError> {
+        let base_path = base_path.as_ref();
+        let (tile_x, tile_y) = mmap_tile_coords_for_wow_position_like_cpp(x, y);
+        let instance_query_available =
+            self.load_map_instance(base_path, mesh_map_id, instance_map_id, instance_id)?;
+        let tile_loaded = self.load_map(base_path, mesh_map_id, tile_x, tile_y)?;
+
+        Ok(MMapPathfindingContextLoadLikeCpp {
+            mesh_map_id,
+            instance_map_id,
+            instance_id,
+            tile_x,
+            tile_y,
+            instance_query_available,
+            tile_loaded,
+        })
     }
 
     pub fn unload_map_instance(
@@ -3723,6 +3760,62 @@ mod tests {
                 .unwrap()
                 .loaded_tile_refs
                 .is_empty()
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn mmap_manager_loads_pathfinding_context_from_wow_position_like_cpp() {
+        let root = unique_test_dir("mmap-manager-loads-path-context");
+        std::fs::create_dir_all(root.join("mmaps")).unwrap();
+
+        let params = DetourNavMeshParams {
+            origin: [0.0, 0.0, 0.0],
+            tile_width: 1.0,
+            tile_height: 1.0,
+            max_tiles: 4096,
+            max_polys: 16_384,
+        };
+        std::fs::write(root.join("mmaps/0001.mmap"), params.to_bytes()).unwrap();
+        let tile = generated_square_tile_blob(32, 32);
+        write_mmap_tile_blob(&tile_file_path_like_cpp(&root, 1, 32, 32), &tile);
+
+        let mut manager = MMapManager::new();
+        let loaded = manager
+            .load_pathfinding_context_for_wow_position_like_cpp(&root, 1, 1, 42, 0.0, 0.0)
+            .unwrap();
+
+        assert_eq!(
+            loaded,
+            MMapPathfindingContextLoadLikeCpp {
+                mesh_map_id: 1,
+                instance_map_id: 1,
+                instance_id: 42,
+                tile_x: 32,
+                tile_y: 32,
+                instance_query_available: true,
+                tile_loaded: true,
+            }
+        );
+        assert!(manager.get_nav_mesh_query(1, 1, 42).is_some());
+        assert!(
+            manager
+                .get_mmap_data(1)
+                .unwrap()
+                .loaded_tile_refs
+                .contains_key(&pack_tile_id_like_cpp(32, 32))
+        );
+
+        let reused = manager
+            .load_pathfinding_context_for_wow_position_like_cpp(&root, 1, 1, 42, 0.0, 0.0)
+            .unwrap();
+        assert_eq!(
+            reused,
+            MMapPathfindingContextLoadLikeCpp {
+                tile_loaded: false,
+                ..loaded
+            }
         );
 
         std::fs::remove_dir_all(root).unwrap();
