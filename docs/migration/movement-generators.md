@@ -28,7 +28,7 @@ Current Rust status:
 - `#A06.8h.3e.8` ports represented assistance movement semantics: `MoveSeekAssistance` stop/react-passive side effects, `EVENT_ASSIST_MOVE`, `AssistanceMovementGenerator::Finalize` side-effect plan, `CreatureFamilyAssistanceDelay=1500`, and `AssistanceDistractMovementGenerator` return-to-aggressive finalization.
 - `#A06.8h.3e.9` ports represented idle/rotate/distract semantics: idle default priority/flags and stop action, rotate constructor/update/finalize rules, and distract constructor/init/update/finalize rules.
 - `#A06.8h.3e.10` connects represented creature distract/rotate to real facing-only `MoveSplineInit` launches (`MoveTo(current position)` + `SetFacing(angle)`), preserves C++'s stationary facing spline shape, mutates real `UnitData::StandState` to stand on distract initialize, applies distract final home orientation, and records rotate `MovementInform(ROTATE,id)` on canonical creature AI state.
-- Still missing: generalized executable generator behavior against a real `Unit`, pathgen-backed destinations, real SmartAI/script dispatch for `MovementInform`, real `CallAssistance` map/AI effects, follow/chase/flee/random/waypoint/taxi/spline-chain runtime logic, and real MotionMaster delayed-action payload execution.
+- Still missing: generalized executable generator behavior against a real `Unit`, pathgen-backed destinations, real SmartAI/script dispatch for `MovementInform`, real `CallAssistance` map/AI effects, follow/chase/flee/random/waypoint/taxi/spline-chain runtime logic, and full `MotionMaster::Update` ownership over delayed actions.
 
 ---
 
@@ -528,7 +528,7 @@ Numbered for cross-reference from `MIGRATION_ROADMAP.md` §5. Complexity: **L** 
 - [ ] **#MOVE-GEN.4** Port `MovementGeneratorFlags` bitflags (`bitflags!` crate already in workspace). (L)
 - [ ] **#MOVE-GEN.5** Define `trait MovementGenerator { fn initialize, reset, update, deactivate, finalize, kind, ... }`. (M)
 - [ ] **#MOVE-GEN.6** Port `ChaseRange` + `ChaseAngle` structs with `is_angle_okay`, `upper_bound`, `lower_bound`. (L)
-- [x] **#MOVE-GEN.7** Port `MotionMasterFlags` + `MotionMasterDelayedActionType` + `DelayedAction` struct. Flags, enum IDs and FIFO validator resolution are represented in `wow-entities`; real payload execution remains in `#MOVE-GEN.8/#MOVE-GEN.9`. (L)
+- [x] **#MOVE-GEN.7** Port `MotionMasterFlags` + `MotionMasterDelayedActionType` + `DelayedAction` struct. Flags, enum IDs, FIFO validator resolution, and represented payload execution are in `wow-entities`; generalized `MotionMaster::Update` remains in `#MOVE-GEN.8/#MOVE-GEN.9`. (L)
 - [ ] **#MOVE-GEN.8** Implement `MotionMaster` core: stack per slot (`Vec<Box<dyn MovementGenerator>>`), `update(diff)` with delayed-action draining. (H)
 - [ ] **#MOVE-GEN.9** Wire `MotionMaster::add/remove/clear` + flag-gated deferral. (M)
 - [ ] **#MOVE-GEN.10** `IdleMovementGenerator` + `RotateMovementGenerator` + `DistractMovementGenerator` + `AssistanceDistractMovementGenerator`. Constructor/lifecycle semantics are represented for all four generators, including rotate orientation math and distract timer rules; creature rotate/distract can launch real facing-only `MoveSplineInit` splines; distract initialize mutates real stand state, distract finalize applies home orientation and rotate finalize records represented inform on canonical creature AI state. Remaining work is generalized MotionMaster execution and real SmartAI/script dispatch. (M)

@@ -2121,27 +2121,64 @@ impl MotionMasterDelayedActionType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MotionMasterDelayedActionPayload {
+    Clear,
+    ClearSlot(MovementSlot),
+    ClearMode(MovementGeneratorMode),
+    ClearPriority(MovementGeneratorPriority),
+    Add(MovementGeneratorRef),
+    Remove {
+        kind: MovementGeneratorKind,
+        slot: MovementSlot,
+    },
+    RemoveType {
+        kind: MovementGeneratorKind,
+        slot: MovementSlot,
+    },
+    Initialize,
+}
+
+impl MotionMasterDelayedActionPayload {
+    pub const fn action_type(self) -> MotionMasterDelayedActionType {
+        match self {
+            Self::Clear => MotionMasterDelayedActionType::Clear,
+            Self::ClearSlot(_) => MotionMasterDelayedActionType::ClearSlot,
+            Self::ClearMode(_) => MotionMasterDelayedActionType::ClearMode,
+            Self::ClearPriority(_) => MotionMasterDelayedActionType::ClearPriority,
+            Self::Add(_) => MotionMasterDelayedActionType::Add,
+            Self::Remove { .. } => MotionMasterDelayedActionType::Remove,
+            Self::RemoveType { .. } => MotionMasterDelayedActionType::RemoveType,
+            Self::Initialize => MotionMasterDelayedActionType::Initialize,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MotionMasterDelayedAction {
-    pub action_type: MotionMasterDelayedActionType,
+    pub payload: MotionMasterDelayedActionPayload,
     pub validator_passed: bool,
 }
 
 impl MotionMasterDelayedAction {
-    pub const fn new(action_type: MotionMasterDelayedActionType) -> Self {
+    pub const fn new(payload: MotionMasterDelayedActionPayload) -> Self {
         Self {
-            action_type,
+            payload,
             validator_passed: true,
         }
     }
 
     pub const fn with_validator(
-        action_type: MotionMasterDelayedActionType,
+        payload: MotionMasterDelayedActionPayload,
         validator_passed: bool,
     ) -> Self {
         Self {
-            action_type,
+            payload,
             validator_passed,
         }
+    }
+
+    pub const fn action_type(self) -> MotionMasterDelayedActionType {
+        self.payload.action_type()
     }
 }
 
@@ -2194,8 +2231,35 @@ impl MotionSubsystem {
     }
 
     pub fn push_delayed_action_like_cpp(&mut self, action_type: MotionMasterDelayedActionType) {
-        self.delayed_actions
-            .push(MotionMasterDelayedAction::new(action_type));
+        let payload = match action_type {
+            MotionMasterDelayedActionType::Clear => MotionMasterDelayedActionPayload::Clear,
+            MotionMasterDelayedActionType::ClearSlot => {
+                MotionMasterDelayedActionPayload::ClearSlot(MovementSlot::Active)
+            }
+            MotionMasterDelayedActionType::ClearMode => {
+                MotionMasterDelayedActionPayload::ClearMode(MovementGeneratorMode::Default)
+            }
+            MotionMasterDelayedActionType::ClearPriority => {
+                MotionMasterDelayedActionPayload::ClearPriority(MovementGeneratorPriority::Normal)
+            }
+            MotionMasterDelayedActionType::Add => MotionMasterDelayedActionPayload::Add(
+                MovementGeneratorRef::new(MovementGeneratorKind::Idle, MovementSlot::Active),
+            ),
+            MotionMasterDelayedActionType::Remove => MotionMasterDelayedActionPayload::Remove {
+                kind: MovementGeneratorKind::Idle,
+                slot: MovementSlot::Active,
+            },
+            MotionMasterDelayedActionType::RemoveType => {
+                MotionMasterDelayedActionPayload::RemoveType {
+                    kind: MovementGeneratorKind::Idle,
+                    slot: MovementSlot::Active,
+                }
+            }
+            MotionMasterDelayedActionType::Initialize => {
+                MotionMasterDelayedActionPayload::Initialize
+            }
+        };
+        self.push_delayed_payload_like_cpp(payload);
     }
 
     pub fn push_delayed_action_with_validator_like_cpp(
@@ -2205,7 +2269,58 @@ impl MotionSubsystem {
     ) {
         self.delayed_actions
             .push(MotionMasterDelayedAction::with_validator(
-                action_type,
+                match action_type {
+                    MotionMasterDelayedActionType::Clear => MotionMasterDelayedActionPayload::Clear,
+                    MotionMasterDelayedActionType::ClearSlot => {
+                        MotionMasterDelayedActionPayload::ClearSlot(MovementSlot::Active)
+                    }
+                    MotionMasterDelayedActionType::ClearMode => {
+                        MotionMasterDelayedActionPayload::ClearMode(MovementGeneratorMode::Default)
+                    }
+                    MotionMasterDelayedActionType::ClearPriority => {
+                        MotionMasterDelayedActionPayload::ClearPriority(
+                            MovementGeneratorPriority::Normal,
+                        )
+                    }
+                    MotionMasterDelayedActionType::Add => {
+                        MotionMasterDelayedActionPayload::Add(MovementGeneratorRef::new(
+                            MovementGeneratorKind::Idle,
+                            MovementSlot::Active,
+                        ))
+                    }
+                    MotionMasterDelayedActionType::Remove => {
+                        MotionMasterDelayedActionPayload::Remove {
+                            kind: MovementGeneratorKind::Idle,
+                            slot: MovementSlot::Active,
+                        }
+                    }
+                    MotionMasterDelayedActionType::RemoveType => {
+                        MotionMasterDelayedActionPayload::RemoveType {
+                            kind: MovementGeneratorKind::Idle,
+                            slot: MovementSlot::Active,
+                        }
+                    }
+                    MotionMasterDelayedActionType::Initialize => {
+                        MotionMasterDelayedActionPayload::Initialize
+                    }
+                },
+                validator_passed,
+            ));
+    }
+
+    pub fn push_delayed_payload_like_cpp(&mut self, payload: MotionMasterDelayedActionPayload) {
+        self.delayed_actions
+            .push(MotionMasterDelayedAction::new(payload));
+    }
+
+    pub fn push_delayed_payload_with_validator_like_cpp(
+        &mut self,
+        payload: MotionMasterDelayedActionPayload,
+        validator_passed: bool,
+    ) {
+        self.delayed_actions
+            .push(MotionMasterDelayedAction::with_validator(
+                payload,
                 validator_passed,
             ));
     }
@@ -2214,10 +2329,27 @@ impl MotionSubsystem {
         self.delayed_actions
             .drain(..)
             .map(|action| MotionMasterResolvedDelayedAction {
-                action_type: action.action_type,
+                action_type: action.action_type(),
                 executed: action.validator_passed,
             })
             .collect()
+    }
+
+    pub fn resolve_delayed_action_payloads_like_cpp(
+        &mut self,
+    ) -> Vec<MotionMasterResolvedDelayedAction> {
+        let mut resolved = Vec::new();
+        while !self.delayed_actions.is_empty() {
+            let action = self.delayed_actions.remove(0);
+            if action.validator_passed {
+                self.apply_delayed_action_payload_like_cpp(action.payload);
+            }
+            resolved.push(MotionMasterResolvedDelayedAction {
+                action_type: action.action_type(),
+                executed: action.validator_passed,
+            });
+        }
+        resolved
     }
 
     pub fn set_current_generator(&mut self, generator: MovementGeneratorKind) {
@@ -2344,6 +2476,52 @@ impl MotionSubsystem {
         }
         self.current_generator = self.current_movement_generator().kind;
         removed
+    }
+
+    pub fn clear_by_mode(&mut self, mode: MovementGeneratorMode) -> Vec<MovementGeneratorRef> {
+        let mut removed = Vec::new();
+        let mut index = 0;
+        while index < self.active_generators.len() {
+            if self.active_generators[index].mode == mode {
+                removed.push(self.remove_generator_at(index));
+            } else {
+                index += 1;
+            }
+        }
+        self.current_generator = self.current_movement_generator().kind;
+        removed
+    }
+
+    pub fn direct_initialize_like_cpp(&mut self) {
+        self.clear_active();
+        self.move_idle();
+    }
+
+    fn apply_delayed_action_payload_like_cpp(&mut self, payload: MotionMasterDelayedActionPayload) {
+        match payload {
+            MotionMasterDelayedActionPayload::Clear => {
+                self.clear_active();
+            }
+            MotionMasterDelayedActionPayload::ClearSlot(slot) => {
+                self.clear_slot(slot);
+            }
+            MotionMasterDelayedActionPayload::ClearMode(mode) => {
+                self.clear_by_mode(mode);
+            }
+            MotionMasterDelayedActionPayload::ClearPriority(priority) => {
+                self.clear_by_priority(priority);
+            }
+            MotionMasterDelayedActionPayload::Add(generator) => {
+                self.add_generator(generator);
+            }
+            MotionMasterDelayedActionPayload::Remove { kind, slot }
+            | MotionMasterDelayedActionPayload::RemoveType { kind, slot } => {
+                self.remove_generator_kind(kind, slot);
+            }
+            MotionMasterDelayedActionPayload::Initialize => {
+                self.direct_initialize_like_cpp();
+            }
+        }
     }
 
     pub fn move_idle(&mut self) {
@@ -3719,6 +3897,65 @@ mod unit_subsystems_tests {
             ]
         );
         assert!(motion.delayed_actions.is_empty());
+    }
+
+    #[test]
+    fn motion_master_delayed_action_payloads_apply_fifo_like_cpp() {
+        let mut motion = MotionSubsystem::default();
+        motion.add_to_world();
+        motion.add_generator(
+            MovementGeneratorRef::new(MovementGeneratorKind::Follow, MovementSlot::Active)
+                .with_priority(MovementGeneratorPriority::Normal)
+                .with_base_unit_state(UnitState::FOLLOW.bits()),
+        );
+        motion.push_delayed_payload_like_cpp(MotionMasterDelayedActionPayload::Add(
+            MovementGeneratorRef::new(MovementGeneratorKind::Effect, MovementSlot::Active)
+                .with_priority(MovementGeneratorPriority::Highest)
+                .with_base_unit_state(UnitState::JUMPING.bits())
+                .with_movement_id(7),
+        ));
+        motion.push_delayed_payload_with_validator_like_cpp(
+            MotionMasterDelayedActionPayload::RemoveType {
+                kind: MovementGeneratorKind::Effect,
+                slot: MovementSlot::Active,
+            },
+            false,
+        );
+        motion.push_delayed_payload_like_cpp(MotionMasterDelayedActionPayload::ClearPriority(
+            MovementGeneratorPriority::Highest,
+        ));
+
+        let resolved = motion.resolve_delayed_action_payloads_like_cpp();
+        assert_eq!(
+            resolved,
+            vec![
+                MotionMasterResolvedDelayedAction {
+                    action_type: MotionMasterDelayedActionType::Add,
+                    executed: true,
+                },
+                MotionMasterResolvedDelayedAction {
+                    action_type: MotionMasterDelayedActionType::RemoveType,
+                    executed: false,
+                },
+                MotionMasterResolvedDelayedAction {
+                    action_type: MotionMasterDelayedActionType::ClearPriority,
+                    executed: true,
+                },
+            ]
+        );
+        assert!(motion.delayed_actions.is_empty());
+        assert_eq!(
+            motion.current_movement_generator().kind,
+            MovementGeneratorKind::Follow
+        );
+        assert_eq!(
+            motion.base_unit_states.get(&UnitState::JUMPING.bits()),
+            None
+        );
+        assert_eq!(
+            motion.base_unit_states.get(&UnitState::FOLLOW.bits()),
+            Some(&1)
+        );
     }
 
     #[test]
