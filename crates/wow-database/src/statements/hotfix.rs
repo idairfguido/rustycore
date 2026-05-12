@@ -8,6 +8,8 @@ use super::StatementDef;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[allow(non_camel_case_types)]
 pub enum HotfixStatements {
+    /// C++ `HOTFIX_SEL_AREA_TABLE`.
+    SEL_AREA_TABLE,
     /// `DB2Manager::LoadHotfixData`.
     SEL_HOTFIX_DATA,
     /// `DB2Manager::LoadHotfixBlob`.
@@ -25,6 +27,12 @@ pub enum HotfixStatements {
 impl StatementDef for HotfixStatements {
     fn sql(self) -> &'static str {
         match self {
+            Self::SEL_AREA_TABLE => concat!(
+                "SELECT ID, ZoneName, AreaName, ContinentID, ParentAreaID, AreaBit, SoundProviderPref, ",
+                "SoundProviderPrefUnderwater, AmbienceID, UwAmbience, ZoneMusic, UwZoneMusic, ExplorationLevel, IntroSound, UwIntroSound, FactionGroupMask, ",
+                "AmbientMultiplier, MountFlags, PvpCombatWorldStateID, WildBattlePetLevelMin, WildBattlePetLevelMax, WindSettingsID, Flags1, Flags2, ",
+                "LiquidTypeID1, LiquidTypeID2, LiquidTypeID3, LiquidTypeID4 FROM area_table WHERE VerifiedBuild > 0"
+            ),
             Self::SEL_HOTFIX_DATA => {
                 "SELECT Id, UniqueId, TableHash, RecordId, Status FROM hotfix_data ORDER BY Id"
             }

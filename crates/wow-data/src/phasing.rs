@@ -7,7 +7,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::PhaseStore;
+use anyhow::Result;
+use tracing::info;
+use wow_database::{WorldDatabase, WorldStatements};
+
+use crate::{AreaTableStore, PhaseStore};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PhaseConditionContainer {
@@ -93,12 +97,110 @@ impl PhaseInfoStore {
     pub fn phase_area_count(&self) -> usize {
         self.phase_info_by_area.values().map(Vec::len).sum()
     }
+
+    pub fn load_area_phases_from_rows_like_cpp(
+        &mut self,
+        area_store: &AreaTableStore,
+        phase_store: &PhaseStore,
+        rows: impl IntoIterator<Item = (u32, u32)>,
+    ) -> usize {
+        let mut count = 0usize;
+        for (area_id, phase_id) in rows {
+            if !area_store.contains(area_id) || !phase_store.contains(phase_id) {
+                continue;
+            }
+
+            let phase_info =
+                self.phase_info_by_id
+                    .entry(phase_id)
+                    .or_insert_with(|| PhaseInfoStruct {
+                        id: phase_id,
+                        areas: HashSet::new(),
+                    });
+            phase_info.areas.insert(area_id);
+            self.phase_info_by_area
+                .entry(area_id)
+                .or_default()
+                .push(PhaseAreaInfo {
+                    phase_id,
+                    sub_area_exclusions: HashSet::new(),
+                    conditions: PhaseConditionContainer::default(),
+                });
+            count += 1;
+        }
+
+        self.populate_sub_area_exclusions_like_cpp(area_store);
+        count
+    }
+
+    pub async fn load_area_phases_like_cpp(
+        &mut self,
+        db: &WorldDatabase,
+        area_store: &AreaTableStore,
+        phase_store: &PhaseStore,
+    ) -> Result<usize> {
+        let stmt = db.prepare(WorldStatements::SEL_PHASE_AREAS);
+        let mut result = db.query(&stmt).await?;
+        if result.is_empty() {
+            return Ok(0);
+        }
+
+        let mut rows = Vec::new();
+        loop {
+            rows.push((result.read(0), result.read(1)));
+            if !result.next_row() {
+                break;
+            }
+        }
+
+        let count = self.load_area_phases_from_rows_like_cpp(area_store, phase_store, rows);
+        info!("Loaded {count} phase area definitions");
+        Ok(count)
+    }
+
+    fn populate_sub_area_exclusions_like_cpp(&mut self, area_store: &AreaTableStore) {
+        let area_phase_pairs: Vec<_> = self
+            .phase_info_by_area
+            .iter()
+            .flat_map(|(area_id, phases)| {
+                phases
+                    .iter()
+                    .map(|phase| (*area_id, phase.phase_id))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        for (child_area_id, phase_id) in area_phase_pairs {
+            let mut parent_area_id = child_area_id;
+            loop {
+                let Some(area) = area_store.get(parent_area_id) else {
+                    break;
+                };
+
+                parent_area_id = u32::from(area.parent_area_id);
+                if parent_area_id == 0 {
+                    break;
+                }
+
+                let Some(parent_area_phases) = self.phase_info_by_area.get_mut(&parent_area_id)
+                else {
+                    continue;
+                };
+
+                for parent_area_phase in parent_area_phases {
+                    if parent_area_phase.phase_id == phase_id {
+                        parent_area_phase.sub_area_exclusions.insert(child_area_id);
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::PhaseEntry;
+    use crate::{AreaTableEntry, PhaseEntry};
 
     #[test]
     fn phase_info_store_seeds_from_phase_store_like_cpp_load_phases() {
@@ -129,5 +231,55 @@ mod tests {
             })
         );
         assert!(!phase_info.is_allowed_in_area_like_cpp(101, |_, _| false));
+    }
+
+    #[test]
+    fn phase_area_rows_skip_missing_area_or_phase_like_cpp() {
+        let area_store = AreaTableStore::from_entries([AreaTableEntry {
+            id: 100,
+            parent_area_id: 0,
+        }]);
+        let phase_store = PhaseStore::from_entries([PhaseEntry { id: 10, flags: 0 }]);
+        let mut store = PhaseInfoStore::from_phase_store_like_cpp(&phase_store);
+
+        let count = store.load_area_phases_from_rows_like_cpp(
+            &area_store,
+            &phase_store,
+            [(100, 10), (101, 10), (100, 11)],
+        );
+
+        assert_eq!(count, 1);
+        assert_eq!(store.phase_area_count(), 1);
+        assert_eq!(store.phase_info(10).map(|phase| phase.areas.len()), Some(1));
+        assert!(store.phases_for_area(101).is_none());
+    }
+
+    #[test]
+    fn phase_area_rows_populate_parent_sub_area_exclusions_like_cpp() {
+        let area_store = AreaTableStore::from_entries([
+            AreaTableEntry {
+                id: 100,
+                parent_area_id: 0,
+            },
+            AreaTableEntry {
+                id: 101,
+                parent_area_id: 100,
+            },
+        ]);
+        let phase_store = PhaseStore::from_entries([PhaseEntry { id: 10, flags: 0 }]);
+        let mut store = PhaseInfoStore::from_phase_store_like_cpp(&phase_store);
+
+        let count = store.load_area_phases_from_rows_like_cpp(
+            &area_store,
+            &phase_store,
+            [(100, 10), (101, 10)],
+        );
+
+        assert_eq!(count, 2);
+        let parent_phase = store
+            .phases_for_area(100)
+            .and_then(|phases| phases.iter().find(|phase| phase.phase_id == 10))
+            .expect("parent area phase missing");
+        assert!(parent_phase.sub_area_exclusions.contains(&101));
     }
 }

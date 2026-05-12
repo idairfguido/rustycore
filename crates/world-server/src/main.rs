@@ -458,6 +458,11 @@ async fn main() -> Result<()> {
             .await
             .context("Failed to load UiMapXMapArt.db2 / hotfix rows")?,
     );
+    let area_table_store = Arc::new(
+        wow_data::AreaTableStore::load_with_hotfixes(&data_dir, &locale, &hotfix_db)
+            .await
+            .context("Failed to load AreaTable.db2 / hotfix rows")?,
+    );
     let phase_store = Arc::new(
         wow_data::PhaseStore::load_with_hotfixes(&data_dir, &locale, &hotfix_db)
             .await
@@ -473,12 +478,16 @@ async fn main() -> Result<()> {
         phase_store.len(),
         phase_group_store.len()
     );
-    let phase_info_store = Arc::new(wow_data::PhaseInfoStore::from_phase_store_like_cpp(
-        &phase_store,
-    ));
+    let mut phase_info_store = wow_data::PhaseInfoStore::from_phase_store_like_cpp(&phase_store);
+    phase_info_store
+        .load_area_phases_like_cpp(world_db.as_ref(), &area_table_store, &phase_store)
+        .await
+        .context("Failed to load phase_area rows")?;
+    let phase_info_store = Arc::new(phase_info_store);
     info!(
-        "Seeded {} phase info records",
-        phase_info_store.phase_info_count()
+        "Seeded {} phase info records and {} phase area rows",
+        phase_info_store.phase_info_count(),
+        phase_info_store.phase_area_count()
     );
     let terrain_swap_store = Arc::new(
         wow_data::load_terrain_swaps(world_db.as_ref(), &map_store, |phase_id| {

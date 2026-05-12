@@ -186,14 +186,15 @@ No CMSG opcode is consumed by Phasing directly — phase state is purely server-
 - `wow-entities::WorldObject` owns C++ `_phaseShift` / `_suppressedPhaseShift` equivalents and exposes mutable accessors for both.
 - `PhaseShift::can_see` now mirrors the C++ pure predicate for `Unphased`, `AlwaysVisible`, `Inverse`, `InverseUnphased`, `NoCosmetic`, and personal phases.
 - `wow-data::PhaseInfoStore` seeds C++ `_phaseInfoById` from `PhaseStore`, matching current `ObjectMgr::LoadPhases`.
+- `AreaTable.db2` is loaded with hotfix overlays for `ParentAreaID`, and `phase_area` rows are loaded into C++-like `PhaseInfoStore` area buckets with parent `SubAreaExclusions`.
 - Terrain swap metadata loading exists for `terrain_worldmap` / `terrain_swap_defaults`, including C++ DB2+hotfix `UiMapXMapArt.PhaseID` validation for `IsUiMapPhase`.
 - `Phase.db2` and `PhaseXPhaseGroup.db2` are loaded with hotfix overlays, exposing C++-like personal/cosmetic phase checks and `GetPhasesForGroup`.
 - Creature spawn `terrainSwapMap` is validated against `Map.ParentMapID` and applied to the creature `PhaseShift` visible-map ids.
 
 **What's missing vs C++:**
 - `PhasingHandler` façade — none of the public methods exist.
-- `PhaseAreaInfo` / `PhaseInfoStruct` data structures and their loaders in ObjectMgr-equivalent.
-- `phase_area` SQL loading and condition attachment; the old plan reference to `phase_definitions` does not apply to this C++ branch because phase info is seeded from `sPhaseStore`.
+- Canonical `ConditionContainer` storage/evaluation inside `PhaseAreaInfo`.
+- `phase_area` condition attachment; the old plan reference to `phase_definitions` does not apply to this C++ branch because phase info is seeded from `sPhaseStore`.
 - `CONDITION_SOURCE_TYPE_PHASE` and `CONDITION_SOURCE_TYPE_TERRAIN_SWAP` integration with the (also-missing) ConditionMgr.
 - `OnAreaChange` / `OnMapChange` / `OnConditionChange` lifecycle hooks.
 - Aura integration (`SPELL_AURA_PHASE`, `SPELL_AURA_PHASE_GROUP`).
@@ -271,7 +272,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [x] **#PHASE.5** Add `phase_shift` and `suppressed_phase_shift` fields to the WorldObject base (actual Rust owner: `crates/wow-entities/src/world_object.rs`) and propagate through Player / Creature / GameObject / DynamicObject / AreaTrigger via their embedded `WorldObject`/`Unit` base (M)
 - [ ] **#PHASE.6** Define `PhaseInfoStruct`, `PhaseAreaInfo` (with `SubAreaExclusions: HashSet<u32>`, `Conditions: ConditionContainer`), `TerrainSwapInfo` (with `UiMapPhaseIDs: Vec<u32>`) data structs in `crates/wow-data/src/phasing.rs` (M; partial: `PhaseInfoStruct` / `PhaseAreaInfo` shells exist; canonical condition container still belongs to #COND/#PHASE.8; `TerrainSwapInfo` is in `terrain_swap.rs`)
 - [x] **#PHASE.7** Implement current C++ phase-info seed (`sPhaseStore` → `_phaseInfoById`; old `phase_definitions` plan entry corrected because this branch no longer loads that table) (L)
-- [ ] **#PHASE.8** Implement loader for `phase_area` (areaId → `Vec<PhaseAreaInfo>`) joined with `conditions WHERE SourceTypeOrReferenceId = 26` (M)
+- [ ] **#PHASE.8** Implement loader for `phase_area` (areaId → `Vec<PhaseAreaInfo>`) joined with `conditions WHERE SourceTypeOrReferenceId = 26` (M; partial: `phase_area` rows + AreaTable parent `SubAreaExclusions` are loaded; condition attachment remains blocked on canonical ConditionMgr)
 - [x] **#PHASE.9** Implement loader for `terrain_swap_defaults` (mapId → `Vec<TerrainSwapInfo>`) (L)
 - [x] **#PHASE.10** Implement loader for `terrain_worldmap` (terrainSwapMapId → `Vec<UiMapPhaseId>`) and merge into `TerrainSwapInfo::UiMapPhaseIDs`, validating via C++ DB2+hotfix `UiMapXMapArt.PhaseID` (L)
 - [x] **#PHASE.11** Wire up `Phase.db2` (PhaseStore) loading in `crates/wow-data` and expose `is_personal_phase(phaseId)` / `is_cosmetic_phase(phaseId)` (M)
@@ -429,7 +430,7 @@ The struct only carries a `player_guid`; there is no `PhaseShift` field. The sin
 - Quest-driven phased duplicates (Borean Tundra D.E.H.T.A., Death Knight starting zone) will render every variant simultaneously once those NPCs land.
 - `SMSG_PARTY_MEMBER_FULL_STATE` writes `PhaseShiftFlags = 0` (`packets/party.rs:281`) so party UI never marks anyone out-of-phase.
 - `OnAreaChange` / `OnMapChange` / `OnConditionChange` are not called anywhere — the packet is fire-and-forget at login. Crossing into phased areas re-sends nothing.
-- DB table `phase_area` is not loaded yet; terrain swap tables are loaded; phase info is seeded from `Phase.db2` like this C++ branch rather than from the legacy `phase_definitions` table.
+- DB table `phase_area` is loaded, but its `ConditionContainer` attachment is still a placeholder until canonical ConditionMgr support is wired; terrain swap tables are loaded; phase info is seeded from `Phase.db2` like this C++ branch rather than from the legacy `phase_definitions` table.
 - `Phase.db2` and `PhaseXPhaseGroup.db2` are parsed, but phase/group validation is not yet applied to creature/gameobject/transport spawn rows.
 
 **Coupling to ConditionMgr:** §8's claim is correct that this can't be fixed properly without ConditionMgr (also ❌). #PHASE.15 / #PHASE.16 / #PHASE.17 explicitly take a `ConditionContainer`. Treat #PHASE.* as blocked-on #COND.1–#COND.20.

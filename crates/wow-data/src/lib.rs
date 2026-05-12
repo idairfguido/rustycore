@@ -5,6 +5,7 @@
 
 //! Game data file readers (DB2/WDC4).
 
+pub mod area;
 pub mod area_trigger;
 pub mod chr_specialization;
 pub mod currency;
@@ -39,6 +40,7 @@ pub mod terrain_swap;
 pub mod ui_map;
 pub mod wdc4;
 
+pub use area::{AreaTableEntry, AreaTableStore};
 pub use area_trigger::{
     AreaTriggerData, AreaTriggerStore, AreaTriggerTeleport, TriggerShape, load_area_triggers,
 };

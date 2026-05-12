@@ -89,6 +89,8 @@ pub enum WorldStatements {
     SEL_TERRAIN_WORLD_MAPS,
     /// Load C++ terrain swap default definitions.
     SEL_TERRAIN_SWAP_DEFAULTS,
+    /// Load C++ phase area definitions.
+    SEL_PHASE_AREAS,
     /// Load C++ spawn group templates.
     SEL_SPAWN_GROUP_TEMPLATES,
     /// Load C++ spawn group members.
@@ -463,6 +465,7 @@ impl StatementDef for WorldStatements {
             Self::SEL_TERRAIN_SWAP_DEFAULTS => {
                 "SELECT MapId, TerrainSwapMap FROM `terrain_swap_defaults`"
             }
+            Self::SEL_PHASE_AREAS => "SELECT AreaId, PhaseId FROM `phase_area`",
             Self::SEL_SPAWN_GROUP_TEMPLATES => {
                 "SELECT groupId, groupName, groupFlags FROM spawn_group_template"
             }

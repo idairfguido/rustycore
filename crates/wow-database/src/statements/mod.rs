@@ -286,6 +286,11 @@ mod tests {
                 .sql()
                 .contains("ui_map_x_map_art")
         );
+        assert!(
+            HotfixStatements::SEL_AREA_TABLE
+                .sql()
+                .contains("area_table")
+        );
         assert!(HotfixStatements::SEL_PHASE.sql().contains("phase"));
         assert!(
             HotfixStatements::SEL_PHASE_X_PHASE_GROUP
@@ -314,6 +319,11 @@ mod tests {
         assert!(areatrigger.contains("FROM `areatrigger`"));
         assert!(areatrigger.contains("SpawnId, AreaTriggerCreatePropertiesId"));
         assert_eq!(areatrigger.matches('?').count(), 0);
+
+        assert_eq!(
+            WorldStatements::SEL_PHASE_AREAS.sql(),
+            "SELECT AreaId, PhaseId FROM `phase_area`"
+        );
     }
 
     #[test]
