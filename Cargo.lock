@@ -3235,6 +3235,7 @@ name = "wow-recastdetour"
 version = "0.1.0"
 dependencies = [
  "bitflags",
+ "cc",
  "thiserror",
 ]
 
