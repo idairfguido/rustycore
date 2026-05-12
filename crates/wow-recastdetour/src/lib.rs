@@ -1257,6 +1257,110 @@ pub fn get_steer_target_like_cpp(
     }))
 }
 
+pub fn find_smooth_path_like_cpp(
+    query: &DetourNavMeshQuery<'_>,
+    filter: &DetourQueryFilter,
+    start_pos: [f32; 3],
+    end_pos: [f32; 3],
+    poly_path: &[DetourPolyRef],
+    max_smooth_path_size: usize,
+) -> Result<Vec<[f32; 3]>, DetourNavMeshQueryError> {
+    if poly_path.is_empty() || max_smooth_path_size == 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut polys = poly_path.to_vec();
+    let mut iter_pos;
+    let target_pos;
+
+    if poly_path.len() > 1 {
+        iter_pos = query.closest_point_on_poly_boundary(polys[0], start_pos)?;
+        target_pos = query.closest_point_on_poly_boundary(*polys.last().unwrap(), end_pos)?;
+    } else {
+        iter_pos = start_pos;
+        target_pos = end_pos;
+    }
+
+    let mut smooth_path = Vec::with_capacity(max_smooth_path_size);
+    smooth_path.push(iter_pos);
+
+    while !polys.is_empty() && smooth_path.len() < max_smooth_path_size {
+        let Some(steer) = get_steer_target_like_cpp(
+            query,
+            iter_pos,
+            target_pos,
+            SMOOTH_PATH_SLOP_LIKE_CPP,
+            &polys,
+        )?
+        else {
+            break;
+        };
+
+        let end_of_path = steer.flags & DT_STRAIGHTPATH_END_LIKE_CPP != 0;
+        let offmesh_connection = steer.flags & DT_STRAIGHTPATH_OFFMESH_CONNECTION_LIKE_CPP != 0;
+
+        let delta = [
+            steer.position[0] - iter_pos[0],
+            steer.position[1] - iter_pos[1],
+            steer.position[2] - iter_pos[2],
+        ];
+        let delta_len = detour_distance(steer.position, iter_pos);
+        if delta_len <= f32::EPSILON {
+            break;
+        }
+        let len =
+            if (end_of_path || offmesh_connection) && delta_len < SMOOTH_PATH_STEP_SIZE_LIKE_CPP {
+                1.0
+            } else {
+                SMOOTH_PATH_STEP_SIZE_LIKE_CPP / delta_len
+            };
+        let move_target = [
+            iter_pos[0] + delta[0] * len,
+            iter_pos[1] + delta[1] * len,
+            iter_pos[2] + delta[2] * len,
+        ];
+
+        let moved = query.move_along_surface(polys[0], iter_pos, move_target, filter, 16)?;
+        polys = fixup_corridor_like_cpp(&polys, MAX_PATH_LENGTH_LIKE_CPP, &moved.visited);
+
+        let mut result = moved.result_position;
+        if let Some(first_poly) = polys.first().copied() {
+            if let Ok(height) = query.get_poly_height(first_poly, result) {
+                result[1] = height;
+            }
+        }
+        result[1] += 0.5;
+        iter_pos = result;
+
+        if end_of_path && detour_in_range(iter_pos, steer.position, SMOOTH_PATH_SLOP_LIKE_CPP, 1.0)
+        {
+            iter_pos = target_pos;
+            if smooth_path.len() < max_smooth_path_size {
+                smooth_path.push(iter_pos);
+            }
+            break;
+        }
+
+        if offmesh_connection
+            && detour_in_range(iter_pos, steer.position, SMOOTH_PATH_SLOP_LIKE_CPP, 1.0)
+        {
+            return Err(DetourNavMeshQueryError::SmoothPathOffMeshUnsupported);
+        }
+
+        if smooth_path.len() < max_smooth_path_size {
+            smooth_path.push(iter_pos);
+        }
+    }
+
+    if smooth_path.len() >= MAX_POINT_PATH_LENGTH_LIKE_CPP {
+        return Err(DetourNavMeshQueryError::SmoothPathTooLong {
+            point_count: smooth_path.len(),
+        });
+    }
+
+    Ok(smooth_path)
+}
+
 fn add_far_from_poly_flags_like_cpp(
     path_type: &mut DetourPathType,
     start_far_from_poly: bool,
@@ -1346,6 +1450,10 @@ pub enum DetourNavMeshQueryError {
     VisitedBufferTooLarge { max_visited_size: usize },
     #[error("Detour raycast failed with status 0x{status:08x}")]
     RaycastFailed { status: DetourStatus },
+    #[error("Detour smooth path off-mesh connection handling is not ported yet")]
+    SmoothPathOffMeshUnsupported,
+    #[error("Detour smooth path reached C++ MAX_POINT_PATH_LENGTH: {point_count}")]
+    SmoothPathTooLong { point_count: usize },
 }
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
@@ -2509,6 +2617,36 @@ mod tests {
         assert_eq!(steer.position, [0.75, 2.0, 0.75]);
         assert_eq!(steer.flags, DT_STRAIGHTPATH_END_LIKE_CPP);
         assert_eq!(steer.poly_ref, 0);
+    }
+
+    #[test]
+    fn find_smooth_path_matches_cpp_same_poly_shape() {
+        let params = DetourNavMeshParams {
+            origin: [0.0, 0.0, 0.0],
+            tile_width: 1.0,
+            tile_height: 1.0,
+            max_tiles: 16,
+            max_polys: 128,
+        };
+        let mut mesh = DetourNavMesh::new(&params).unwrap();
+        mesh.add_tile(&generated_square_tile_blob(0, 0)).unwrap();
+        let query = DetourNavMeshQuery::new(&mesh, 1024).unwrap();
+        let filter = DetourQueryFilter::new().unwrap();
+        let nearest = query
+            .find_nearest_poly([0.25, 0.0, 0.25], [3.0, 5.0, 3.0], &filter)
+            .unwrap();
+
+        let smooth = find_smooth_path_like_cpp(
+            &query,
+            &filter,
+            [0.25, 0.0, 0.25],
+            [0.75, 0.0, 0.75],
+            &[nearest.poly_ref],
+            MAX_POINT_PATH_LENGTH_LIKE_CPP,
+        )
+        .unwrap();
+
+        assert_eq!(smooth, vec![[0.25, 0.0, 0.25], [0.75, 0.0, 0.75]]);
     }
 
     #[test]
