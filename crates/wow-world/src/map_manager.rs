@@ -10,7 +10,8 @@ use wow_constants::{UnitStandStateType, UnitState, WeaponAttackType};
 use wow_core::{ObjectGuid, Position};
 use wow_entities::{
     Creature, CreatureAiState, DistractMovementAction, EVENT_CHARGE_PREPATH, GenericMovementInform,
-    MovementGeneratorKind, PointMovementAction, PointMovementInform, RotateMovementUpdate,
+    MovementGeneratorKind, PhaseShift, PointMovementAction, PointMovementInform,
+    RotateMovementUpdate,
 };
 use wow_movement::{
     MoveSpline, MoveSplineInit, MoveSplineLaunchInput, MoveSplineStopInput, MoveSplineStopResult,
@@ -18,9 +19,10 @@ use wow_movement::{
 };
 use wow_packet::packets::update::CreatureCreateData;
 use wow_recastdetour::{
-    DetourNavMeshQueryError, DetourPathOptions, DetourPathType, DetourPolyPath,
-    DetourQueryFilterError, MMapData, MMapManager as DetourMMapManager, MMapManagerError,
-    PathQueryFilterContext, ThreadUnsafeMapData, create_path_query_filter_like_cpp,
+    CENTER_GRID_ID_LIKE_CPP, DetourNavMeshQueryError, DetourPathOptions, DetourPathType,
+    DetourPolyPath, DetourQueryFilterError, MAX_NUMBER_OF_GRIDS_LIKE_CPP, MMapData,
+    MMapManager as DetourMMapManager, MMapManagerError, PathQueryFilterContext,
+    SIZE_OF_GRIDS_LIKE_CPP, ThreadUnsafeMapData, create_path_query_filter_like_cpp,
 };
 
 /// Size of a grid cell in yards (64x64 yards like TrinityCore).
@@ -38,6 +40,42 @@ pub const DEFAULT_GRID_UNLOAD_TIME: Duration = Duration::from_secs(300);
 /// the fallback here lets movement preserve the C++ under-map branch without
 /// inventing terrain values.
 pub const DEFAULT_MIN_HEIGHT_LIKE_CPP: f32 = -500.0;
+
+pub fn terrain_grid_coords_for_wow_position_like_cpp(x: f32, y: f32) -> (i32, i32) {
+    let center_grid_offset = SIZE_OF_GRIDS_LIKE_CPP / 2.0;
+    let x_offset = (x - center_grid_offset) / SIZE_OF_GRIDS_LIKE_CPP;
+    let y_offset = (y - center_grid_offset) / SIZE_OF_GRIDS_LIKE_CPP;
+    let grid_x = (x_offset + CENTER_GRID_ID_LIKE_CPP as f32 + 0.5) as i32;
+    let grid_y = (y_offset + CENTER_GRID_ID_LIKE_CPP as f32 + 0.5) as i32;
+
+    (
+        (MAX_NUMBER_OF_GRIDS_LIKE_CPP - 1) - grid_x,
+        (MAX_NUMBER_OF_GRIDS_LIKE_CPP - 1) - grid_y,
+    )
+}
+
+pub fn terrain_map_id_for_phase_shift_like_cpp(
+    phase_shift: &PhaseShift,
+    map_id: u32,
+    x: f32,
+    y: f32,
+    mut has_child_terrain_grid_file: impl FnMut(u32, i32, i32) -> bool,
+) -> u32 {
+    match phase_shift.visible_map_id_count_like_cpp() {
+        0 => map_id,
+        1 => phase_shift
+            .visible_map_ids_like_cpp()
+            .next()
+            .unwrap_or(map_id),
+        _ => {
+            let (grid_x, grid_y) = terrain_grid_coords_for_wow_position_like_cpp(x, y);
+            phase_shift
+                .visible_map_ids_like_cpp()
+                .find(|visible_map_id| has_child_terrain_grid_file(*visible_map_id, grid_x, grid_y))
+                .unwrap_or(map_id)
+        }
+    }
+}
 
 fn position_to_i32_tuple(position: Position) -> (i32, i32, i32) {
     (position.x as i32, position.y as i32, position.z as i32)
@@ -1773,6 +1811,87 @@ pub fn grid_corner(grid_x: i16, grid_y: i16) -> (f32, f32) {
 mod tests {
     use super::*;
     use wow_core::guid::HighGuid;
+
+    #[test]
+    fn terrain_grid_coords_match_cpp_compute_grid_coord_reversal() {
+        assert_eq!(
+            terrain_grid_coords_for_wow_position_like_cpp(0.0, 0.0),
+            (31, 31)
+        );
+        assert_eq!(
+            terrain_grid_coords_for_wow_position_like_cpp(SIZE_OF_GRIDS_LIKE_CPP, 0.0),
+            (30, 31)
+        );
+        assert_eq!(
+            terrain_grid_coords_for_wow_position_like_cpp(-SIZE_OF_GRIDS_LIKE_CPP, 0.0),
+            (32, 31)
+        );
+    }
+
+    #[test]
+    fn terrain_map_id_without_visible_maps_returns_source_map_like_cpp() {
+        let phase_shift = PhaseShift::default();
+        let mut called = false;
+
+        let map_id =
+            terrain_map_id_for_phase_shift_like_cpp(&phase_shift, 571, 0.0, 0.0, |_, _, _| {
+                called = true;
+                true
+            });
+
+        assert_eq!(map_id, 571);
+        assert!(!called);
+    }
+
+    #[test]
+    fn terrain_map_id_single_visible_map_returns_it_like_cpp() {
+        let mut phase_shift = PhaseShift::default();
+        phase_shift.add_visible_map_id_like_cpp(609, 1);
+        let mut called = false;
+
+        let map_id =
+            terrain_map_id_for_phase_shift_like_cpp(&phase_shift, 571, 0.0, 0.0, |_, _, _| {
+                called = true;
+                false
+            });
+
+        assert_eq!(map_id, 609);
+        assert!(!called);
+    }
+
+    #[test]
+    fn terrain_map_id_multiple_visible_maps_uses_child_grid_lookup_like_cpp() {
+        let mut phase_shift = PhaseShift::default();
+        phase_shift.add_visible_map_id_like_cpp(700, 1);
+        phase_shift.add_visible_map_id_like_cpp(609, 1);
+        let mut checked = Vec::new();
+
+        let map_id = terrain_map_id_for_phase_shift_like_cpp(
+            &phase_shift,
+            571,
+            0.0,
+            0.0,
+            |visible_map_id, gx, gy| {
+                checked.push((visible_map_id, gx, gy));
+                visible_map_id == 609
+            },
+        );
+
+        assert_eq!(map_id, 609);
+        assert_eq!(checked, vec![(609, 31, 31)]);
+    }
+
+    #[test]
+    fn terrain_map_id_multiple_visible_maps_falls_back_to_source_map_like_cpp() {
+        let mut phase_shift = PhaseShift::default();
+        phase_shift.add_visible_map_id_like_cpp(609, 1);
+        phase_shift.add_visible_map_id_like_cpp(700, 1);
+
+        let map_id =
+            terrain_map_id_for_phase_shift_like_cpp(&phase_shift, 571, 0.0, 0.0, |_, _, _| false);
+
+        assert_eq!(map_id, 571);
+    }
 
     #[test]
     fn test_world_to_grid_positive() {
