@@ -2,7 +2,8 @@ pub mod defines;
 pub mod spline;
 
 pub use defines::{
-    CONTACT_DISTANCE_LIKE_CPP, ChaseAngle, ChaseRange, normalize_orientation_like_cpp,
+    CONTACT_DISTANCE_LIKE_CPP, ChaseAngle, ChaseRange, JumpArrivalCastArgs, JumpChargeParams,
+    JumpChargeSpec, normalize_orientation_like_cpp,
 };
 pub use spline::{
     AnimTierTransition, FacingInfo, JumpSpeeds, MonsterMovePathData, MonsterMoveType, MoveSpline,

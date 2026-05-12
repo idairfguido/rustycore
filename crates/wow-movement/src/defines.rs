@@ -1,5 +1,7 @@
 use std::f32::consts::{FRAC_PI_4, TAU};
 
+use wow_core::ObjectGuid;
+
 pub const CONTACT_DISTANCE_LIKE_CPP: f32 = 0.5;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -101,6 +103,89 @@ pub fn normalize_orientation_like_cpp(mut orientation: f32) -> f32 {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct JumpArrivalCastArgs {
+    pub spell_id: u32,
+    pub target: ObjectGuid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum JumpChargeSpec {
+    Speed(f32),
+    MoveTimeSeconds(f32),
+}
+
+impl JumpChargeSpec {
+    #[must_use]
+    pub const fn value(self) -> f32 {
+        match self {
+            Self::Speed(value) | Self::MoveTimeSeconds(value) => value,
+        }
+    }
+
+    #[must_use]
+    pub const fn treat_speed_as_move_time_seconds(self) -> bool {
+        matches!(self, Self::MoveTimeSeconds(_))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct JumpChargeParams {
+    pub spec: JumpChargeSpec,
+    pub jump_gravity: f32,
+    pub spell_visual_id: Option<u32>,
+    pub progress_curve_id: Option<u32>,
+    pub parabolic_curve_id: Option<u32>,
+}
+
+impl JumpChargeParams {
+    #[must_use]
+    pub const fn with_speed(speed: f32) -> Self {
+        Self {
+            spec: JumpChargeSpec::Speed(speed),
+            jump_gravity: 0.0,
+            spell_visual_id: None,
+            progress_curve_id: None,
+            parabolic_curve_id: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn with_move_time_seconds(move_time_seconds: f32) -> Self {
+        Self {
+            spec: JumpChargeSpec::MoveTimeSeconds(move_time_seconds),
+            jump_gravity: 0.0,
+            spell_visual_id: None,
+            progress_curve_id: None,
+            parabolic_curve_id: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn with_jump_gravity(mut self, jump_gravity: f32) -> Self {
+        self.jump_gravity = jump_gravity;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_spell_visual_id(mut self, spell_visual_id: u32) -> Self {
+        self.spell_visual_id = Some(spell_visual_id);
+        self
+    }
+
+    #[must_use]
+    pub const fn with_progress_curve_id(mut self, progress_curve_id: u32) -> Self {
+        self.progress_curve_id = Some(progress_curve_id);
+        self
+    }
+
+    #[must_use]
+    pub const fn with_parabolic_curve_id(mut self, parabolic_curve_id: u32) -> Self {
+        self.parabolic_curve_id = Some(parabolic_curve_id);
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,5 +233,36 @@ mod tests {
         assert!(angle.is_angle_okay(0.1));
         assert!(angle.is_angle_okay(TAU - 0.4));
         assert!(!angle.is_angle_okay(1.0));
+    }
+
+    #[test]
+    fn jump_arrival_and_charge_params_match_cpp_field_shape() {
+        let target = ObjectGuid::create_uniq(0x1234);
+        let arrival = JumpArrivalCastArgs {
+            spell_id: 1234,
+            target,
+        };
+        assert_eq!(arrival.spell_id, 1234);
+        assert_eq!(arrival.target, target);
+        assert_eq!(JumpArrivalCastArgs::default().spell_id, 0);
+        assert_eq!(JumpArrivalCastArgs::default().target, ObjectGuid::EMPTY);
+
+        let speed = JumpChargeParams::with_speed(14.5)
+            .with_jump_gravity(19.0)
+            .with_spell_visual_id(7)
+            .with_progress_curve_id(8)
+            .with_parabolic_curve_id(9);
+        assert_eq!(speed.spec.value(), 14.5);
+        assert!(!speed.spec.treat_speed_as_move_time_seconds());
+        assert_close(speed.jump_gravity, 19.0);
+        assert_eq!(speed.spell_visual_id, Some(7));
+        assert_eq!(speed.progress_curve_id, Some(8));
+        assert_eq!(speed.parabolic_curve_id, Some(9));
+
+        let timed = JumpChargeParams::with_move_time_seconds(2.5);
+        assert_eq!(timed.spec.value(), 2.5);
+        assert!(timed.spec.treat_speed_as_move_time_seconds());
+        assert_close(timed.jump_gravity, 0.0);
+        assert_eq!(timed.spell_visual_id, None);
     }
 }

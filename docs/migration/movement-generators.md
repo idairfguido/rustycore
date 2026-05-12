@@ -30,6 +30,7 @@ Current Rust status:
 - `#A06.8h.3e.10` connects represented creature distract/rotate to real facing-only `MoveSplineInit` launches (`MoveTo(current position)` + `SetFacing(angle)`), preserves C++'s stationary facing spline shape, mutates real `UnitData::StandState` to stand on distract initialize, applies distract final home orientation, and records rotate `MovementInform(ROTATE,id)` on canonical creature AI state.
 - `#A06.8h.3e.13` adds a represented `MotionMaster::Update` driver over `MotionSubsystem`: C++ stall flags, `UPDATE` guard, top initialize/reset/update, natural pop, and end-of-tick delayed action drain.
 - `#A06.8h.3e.14` ports pure `MovementDefines` chase helpers into `wow-movement`: `ChaseRange`, `ChaseAngle`, C++ contact-distance tolerances and angle wrapping.
+- `#A06.8h.3e.15` ports pure jump/charge helper data into `wow-movement`: `JumpArrivalCastArgs`, `JumpChargeParams`, and a tagged replacement for the C++ speed/move-time union.
 - Still missing: generalized executable generator behavior against a real `Unit`, pathgen-backed destinations, real SmartAI/script dispatch for `MovementInform`, real `CallAssistance` map/AI effects, follow/chase/flee/random/waypoint/taxi/spline-chain runtime logic, and full runtime `MotionMaster` ownership outside the represented subsystem.
 
 ---
@@ -655,8 +656,8 @@ Numbered for cross-reference from `MIGRATION_ROADMAP.md` §5. Complexity: **L** 
 | `std::multiset<MovementGenerator*, Comparator>` | `Vec<Box<dyn MovementGenerator>>` kept sorted by `(priority desc, insertion_idx)` | Multiset is overkill |
 | `unique_ptr<MovementGenerator, Deleter>` | `Box<dyn MovementGenerator>` | — |
 | `ChaseRange` / `ChaseAngle` | `struct ChaseRange { min: f32, min_tol: f32, max: f32, max_tol: f32 }` / `struct ChaseAngle { relative: f32, tolerance: f32 }` | POD |
-| `JumpArrivalCastArgs` | `struct JumpArrivalCastArgs { spell_id: u32, target: ObjectGuid }` | — |
-| `JumpChargeParams` (union) | `enum JumpChargeSpec { Speed(f32), MoveTimeSec(f32) }` | Tagged enum replaces union |
+| `JumpArrivalCastArgs` | `wow_movement::JumpArrivalCastArgs { spell_id: u32, target: ObjectGuid }` | Ported in `#A06.8h.3e.15` |
+| `JumpChargeParams` (union) | `wow_movement::JumpChargeParams { spec: JumpChargeSpec, jump_gravity, spell_visual_id, progress_curve_id, parabolic_curve_id }` | Tagged enum replaces union; ported in `#A06.8h.3e.15` |
 | `IdleMovementGenerator` | `struct IdleMovementGenerator;` impl `MovementGenerator` | Stateless |
 | `RandomMovementGenerator<Creature>` | `struct RandomMovementGenerator { wander_distance: f32, duration: Option<Duration>, next_hop_at: Instant, current_path: Option<Vec<Vec3>> }` | Drop the `<Creature>` — runtime check |
 | `WaypointMovementGenerator<Creature>` | `struct WaypointMovementGenerator { path: Arc<WaypointPath>, current_node: usize, paused_until: Option<Instant>, repeatable: bool, ... }` | Path shared via `Arc` |
