@@ -55,6 +55,44 @@ pub struct MmapTileHeader {
     pub padding: [u8; 3],
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MmapTileBlob {
+    pub header: MmapTileHeader,
+    pub data: Vec<u8>,
+}
+
+impl MmapTileBlob {
+    pub fn parse(bytes: &[u8], expected_dt_version: u32) -> Result<Self, MmapTileBlobError> {
+        let header = MmapTileHeader::parse(bytes).map_err(MmapTileBlobError::BadHeader)?;
+        header
+            .validate_dt_version(expected_dt_version)
+            .map_err(MmapTileBlobError::BadHeader)?;
+
+        let data_start = MMAP_TILE_HEADER_SIZE_LIKE_CPP;
+        let available = bytes.len().saturating_sub(data_start);
+        let declared = header.size as usize;
+        if declared > available {
+            return Err(MmapTileBlobError::CorruptedDataSize {
+                declared,
+                available,
+            });
+        }
+
+        Ok(Self {
+            header,
+            data: bytes[data_start..data_start + declared].to_vec(),
+        })
+    }
+}
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum MmapTileBlobError {
+    #[error("bad mmap tile header: {0}")]
+    BadHeader(MmapTileHeaderError),
+    #[error("corrupted mmap tile data size: declared {declared} bytes, available {available}")]
+    CorruptedDataSize { declared: usize, available: usize },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DetourNavMeshParams {
     pub origin: [f32; 3],
@@ -359,6 +397,39 @@ pub fn tile_file_name_like_cpp(map_id: u32, x: i32, y: i32) -> String {
     format!("mmaps/{map_id:04}{x:02}{y:02}.mmtile")
 }
 
+#[must_use]
+pub fn tile_file_path_like_cpp(
+    base_path: impl AsRef<Path>,
+    map_id: u32,
+    x: i32,
+    y: i32,
+) -> PathBuf {
+    base_path
+        .as_ref()
+        .join(tile_file_name_like_cpp(map_id, x, y))
+}
+
+pub fn read_mmap_tile_blob_file(
+    path: impl AsRef<Path>,
+    expected_dt_version: u32,
+) -> Result<MmapTileBlob, MmapTileFileError> {
+    let path = path.as_ref();
+    let bytes = fs::read(path).map_err(|source| MmapTileFileError::ReadTileFile {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    MmapTileBlob::parse(&bytes, expected_dt_version).map_err(MmapTileFileError::BadTileBlob)
+}
+
+#[derive(Debug, Error)]
+pub enum MmapTileFileError {
+    #[error("failed to read mmap tile file {path:?}: {source}")]
+    ReadTileFile { path: PathBuf, source: io::Error },
+    #[error("bad mmap tile blob: {0}")]
+    BadTileBlob(MmapTileBlobError),
+}
+
 fn read_u32(bytes: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes([
         bytes[offset],
@@ -504,6 +575,81 @@ mod tests {
     }
 
     #[test]
+    fn mmap_tile_blob_reads_header_and_data_like_cpp_before_add_tile() {
+        let header = MmapTileHeader {
+            mmap_magic: MMAP_MAGIC_LIKE_CPP,
+            dt_version: DT_NAVMESH_VERSION_LIKE_CPP,
+            mmap_version: MMAP_VERSION_LIKE_CPP,
+            size: 4,
+            uses_liquids: false,
+            padding: [0, 0, 0],
+        };
+        let mut bytes = header.to_bytes().to_vec();
+        bytes.extend_from_slice(&[1, 2, 3, 4, 99]);
+
+        let blob = MmapTileBlob::parse(&bytes, DT_NAVMESH_VERSION_LIKE_CPP).unwrap();
+        assert_eq!(blob.header, header);
+        assert_eq!(blob.data, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn mmap_tile_blob_rejects_cpp_load_failures_before_detour_ownership() {
+        assert!(matches!(
+            MmapTileBlob::parse(&[0; 19], DT_NAVMESH_VERSION_LIKE_CPP),
+            Err(MmapTileBlobError::BadHeader(
+                MmapTileHeaderError::TooShort { .. }
+            ))
+        ));
+
+        let mut bad_dt_version = MmapTileHeader::new(DT_NAVMESH_VERSION_LIKE_CPP + 1).to_bytes();
+        bad_dt_version[12..16].copy_from_slice(&0_u32.to_le_bytes());
+        assert!(matches!(
+            MmapTileBlob::parse(&bad_dt_version, DT_NAVMESH_VERSION_LIKE_CPP),
+            Err(MmapTileBlobError::BadHeader(
+                MmapTileHeaderError::BadDetourVersion { .. }
+            ))
+        ));
+
+        let mut corrupt_size = MmapTileHeader::new(DT_NAVMESH_VERSION_LIKE_CPP)
+            .to_bytes()
+            .to_vec();
+        corrupt_size[12..16].copy_from_slice(&5_u32.to_le_bytes());
+        corrupt_size.extend_from_slice(&[1, 2, 3, 4]);
+        assert_eq!(
+            MmapTileBlob::parse(&corrupt_size, DT_NAVMESH_VERSION_LIKE_CPP),
+            Err(MmapTileBlobError::CorruptedDataSize {
+                declared: 5,
+                available: 4,
+            })
+        );
+    }
+
+    #[test]
+    fn mmap_tile_blob_file_reader_uses_cpp_file_shape() {
+        let root = unique_test_dir("mmap-tile-blob-file-reader");
+        std::fs::create_dir_all(root.join("mmaps")).unwrap();
+        let path = tile_file_path_like_cpp(&root, 571, 32, 48);
+
+        let header = MmapTileHeader {
+            mmap_magic: MMAP_MAGIC_LIKE_CPP,
+            dt_version: DT_NAVMESH_VERSION_LIKE_CPP,
+            mmap_version: MMAP_VERSION_LIKE_CPP,
+            size: 3,
+            uses_liquids: true,
+            padding: [0, 0, 0],
+        };
+        let mut bytes = header.to_bytes().to_vec();
+        bytes.extend_from_slice(&[9, 8, 7]);
+        std::fs::write(&path, bytes).unwrap();
+
+        let blob = read_mmap_tile_blob_file(&path, DT_NAVMESH_VERSION_LIKE_CPP).unwrap();
+        assert_eq!(blob.header, header);
+        assert_eq!(blob.data, vec![9, 8, 7]);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn mmap_manager_small_helpers_match_cpp() {
         assert_eq!(pack_tile_id_like_cpp(0x12, 0x34), 0x0012_0034);
         assert_eq!(map_file_name_like_cpp(571), "mmaps/0571.mmap");
@@ -514,6 +660,10 @@ mod tests {
         assert_eq!(
             tile_file_name_like_cpp(571, 32, 48),
             "mmaps/05713248.mmtile"
+        );
+        assert_eq!(
+            tile_file_path_like_cpp("/srv/wow", 571, 32, 48),
+            std::path::PathBuf::from("/srv/wow/mmaps/05713248.mmtile")
         );
     }
 
