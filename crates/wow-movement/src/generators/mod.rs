@@ -11,6 +11,7 @@ pub mod idle;
 pub mod point;
 pub mod random;
 pub mod rotate;
+pub mod spline_chain;
 pub mod waypoint;
 
 pub use chase::{
@@ -98,6 +99,11 @@ pub use random::{
 pub use rotate::{
     RotateFacingSpline, RotateMovementGenerator, RotateMovementInform, RotateMovementUpdate,
     UNIT_STATE_ROTATING_LIKE_CPP,
+};
+pub use spline_chain::{
+    SplineChainFinalizeAction, SplineChainInform, SplineChainLaunchPlan, SplineChainLink,
+    SplineChainMovementAction, SplineChainMovementGenerator, SplineChainResumeInfo,
+    UNIT_STATE_SPLINE_CHAIN_ROAMING_LIKE_CPP, UNIT_STATE_SPLINE_CHAIN_ROAMING_MOVE_LIKE_CPP,
 };
 pub use waypoint::{
     UNIT_STATE_WAYPOINT_LOST_CONTROL_LIKE_CPP, UNIT_STATE_WAYPOINT_NOT_MOVE_LIKE_CPP,
