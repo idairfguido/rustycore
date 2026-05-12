@@ -30,6 +30,8 @@ pub const DT_NAV_MESH_PARAMS_SIZE_LIKE_CPP: usize = 28;
 pub const DT_FAILURE_LIKE_CPP: DetourStatus = 1_u32 << 31;
 pub const DT_SUCCESS_LIKE_CPP: DetourStatus = 1_u32 << 30;
 pub const DT_IN_PROGRESS_LIKE_CPP: DetourStatus = 1_u32 << 29;
+pub const DT_OUT_OF_MEMORY_LIKE_CPP: DetourStatus = 1_u32 << 2;
+pub const DT_INVALID_PARAM_LIKE_CPP: DetourStatus = 1_u32 << 3;
 
 pub const NAV_AREA_EMPTY_LIKE_CPP: u8 = 0;
 pub const NAV_AREA_GROUND_LIKE_CPP: u8 = 11;
@@ -115,6 +117,7 @@ pub struct RawDetourNavMesh {
 }
 
 pub type DetourStatus = u32;
+pub type DetourTileRef = u64;
 
 unsafe extern "C" {
     fn rustycore_dt_alloc_nav_mesh() -> *mut RawDetourNavMesh;
@@ -124,6 +127,17 @@ unsafe extern "C" {
         params: *const DetourNavMeshParams,
     ) -> DetourStatus;
     fn rustycore_dt_nav_mesh_get_max_tiles(mesh: *const RawDetourNavMesh) -> u32;
+    fn rustycore_dt_nav_mesh_add_tile_copy(
+        mesh: *mut RawDetourNavMesh,
+        data: *const u8,
+        data_size: i32,
+        flags: i32,
+        result: *mut DetourTileRef,
+    ) -> DetourStatus;
+    fn rustycore_dt_nav_mesh_remove_tile(
+        mesh: *mut RawDetourNavMesh,
+        tile_ref: DetourTileRef,
+    ) -> DetourStatus;
 }
 
 #[derive(Debug)]
@@ -153,6 +167,37 @@ impl DetourNavMesh {
         unsafe { rustycore_dt_nav_mesh_get_max_tiles(self.raw.as_ptr()) }
     }
 
+    pub fn add_tile(&mut self, tile: &MmapTileBlob) -> Result<DetourTileRef, DetourTileError> {
+        let data_size =
+            i32::try_from(tile.data.len()).map_err(|_| DetourTileError::TileDataTooLarge {
+                size: tile.data.len(),
+            })?;
+        let mut tile_ref = 0;
+        let status = unsafe {
+            rustycore_dt_nav_mesh_add_tile_copy(
+                self.raw.as_ptr(),
+                tile.data.as_ptr(),
+                data_size,
+                DT_TILE_FREE_DATA_LIKE_CPP,
+                &mut tile_ref,
+            )
+        };
+        if detour_status_failed(status) {
+            return Err(DetourTileError::AddTileFailed { status });
+        }
+
+        Ok(tile_ref)
+    }
+
+    pub fn remove_tile(&mut self, tile_ref: DetourTileRef) -> Result<(), DetourTileError> {
+        let status = unsafe { rustycore_dt_nav_mesh_remove_tile(self.raw.as_ptr(), tile_ref) };
+        if detour_status_failed(status) {
+            return Err(DetourTileError::RemoveTileFailed { status });
+        }
+
+        Ok(())
+    }
+
     #[must_use]
     pub const fn as_raw(&self) -> *mut RawDetourNavMesh {
         self.raw.as_ptr()
@@ -171,6 +216,16 @@ pub enum DetourNavMeshError {
     AllocationFailed,
     #[error("Detour navmesh initialization failed with status 0x{status:08x}")]
     InitFailed { status: DetourStatus },
+}
+
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum DetourTileError {
+    #[error("Detour tile data is too large for C++ int size: {size} bytes")]
+    TileDataTooLarge { size: usize },
+    #[error("Detour addTile failed with status 0x{status:08x}")]
+    AddTileFailed { status: DetourStatus },
+    #[error("Detour removeTile failed with status 0x{status:08x}")]
+    RemoveTileFailed { status: DetourStatus },
 }
 
 #[must_use]
@@ -560,6 +615,8 @@ mod tests {
         assert_eq!(DT_FAILURE_LIKE_CPP, 1_u32 << 31);
         assert_eq!(DT_SUCCESS_LIKE_CPP, 1_u32 << 30);
         assert_eq!(DT_IN_PROGRESS_LIKE_CPP, 1_u32 << 29);
+        assert_eq!(DT_OUT_OF_MEMORY_LIKE_CPP, 1_u32 << 2);
+        assert_eq!(DT_INVALID_PARAM_LIKE_CPP, 1_u32 << 3);
         assert!(detour_status_failed(DT_FAILURE_LIKE_CPP));
         assert!(!detour_status_failed(DT_SUCCESS_LIKE_CPP));
 
@@ -612,6 +669,42 @@ mod tests {
         let mesh = DetourNavMesh::new(&params).unwrap();
         assert_eq!(mesh.max_tiles(), 16);
         assert!(!mesh.as_raw().is_null());
+    }
+
+    #[test]
+    fn detour_nav_mesh_tile_wrapper_reports_cpp_add_and_remove_failures() {
+        let params = DetourNavMeshParams {
+            origin: [0.0, 0.0, 0.0],
+            tile_width: 533.3333,
+            tile_height: 533.3333,
+            max_tiles: 16,
+            max_polys: 128,
+        };
+        let mut mesh = DetourNavMesh::new(&params).unwrap();
+
+        let header = MmapTileHeader {
+            mmap_magic: MMAP_MAGIC_LIKE_CPP,
+            dt_version: DT_NAVMESH_VERSION_LIKE_CPP,
+            mmap_version: MMAP_VERSION_LIKE_CPP,
+            size: 128,
+            uses_liquids: true,
+            padding: [0, 0, 0],
+        };
+        let bad_tile = MmapTileBlob {
+            header,
+            data: vec![0; 128],
+        };
+        assert!(matches!(
+            mesh.add_tile(&bad_tile),
+            Err(DetourTileError::AddTileFailed { status })
+                if detour_status_failed(status)
+        ));
+        assert_eq!(
+            mesh.remove_tile(0),
+            Err(DetourTileError::RemoveTileFailed {
+                status: DT_FAILURE_LIKE_CPP | DT_INVALID_PARAM_LIKE_CPP,
+            })
+        );
     }
 
     #[test]
