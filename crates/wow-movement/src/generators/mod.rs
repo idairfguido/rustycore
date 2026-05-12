@@ -3,6 +3,7 @@ pub mod confused;
 pub mod distract;
 pub mod fleeing;
 pub mod follow;
+pub mod formation;
 pub mod generic;
 pub mod home;
 pub mod idle;
@@ -46,6 +47,14 @@ pub use follow::{
     FOLLOW_RANGE_TOLERANCE_LIKE_CPP, FollowFinalizeAction, FollowLaunchPlan, FollowMovementAction,
     FollowMovementGenerator, FollowMovementInform, FollowUnitSnapshot, UNIT_STATE_FOLLOW_LIKE_CPP,
     UNIT_STATE_FOLLOW_MOVE_LIKE_CPP, position_okay_like_cpp, selected_relative_angle_like_cpp,
+};
+pub use formation::{
+    FORMATION_MOVEMENT_INTERVAL_MS_LIKE_CPP, FORMATION_PREDICTED_SPLINE_SECONDS_LIKE_CPP,
+    FormationArrivalAction, FormationFinalizeAction, FormationLaunchPlan, FormationMovementAction,
+    FormationMovementGenerator, FormationMovementInform, FormationUnitSnapshot,
+    UNIT_STATE_FOLLOW_FORMATION_LIKE_CPP, UNIT_STATE_FOLLOW_FORMATION_MOVE_LIKE_CPP,
+    UNIT_STATE_FORMATION_NOT_MOVE_LIKE_CPP,
+    move_position_like_cpp as formation_move_position_like_cpp,
 };
 pub use generic::{
     GenericArrivalSpell, GenericMovementFinalize, GenericMovementGenerator, GenericMovementInform,
