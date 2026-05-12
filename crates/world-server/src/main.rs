@@ -453,10 +453,17 @@ async fn main() -> Result<()> {
         "Loaded {} C++ mmap disable rows",
         mmap_disabled_map_ids.len()
     );
-    let terrain_swap_store = Arc::new(
-        wow_data::load_terrain_swaps(world_db.as_ref(), &map_store, |_| true)
+    let ui_map_x_map_art_store = Arc::new(
+        wow_data::UiMapXMapArtStore::load_with_hotfixes(&data_dir, &locale, &hotfix_db)
             .await
-            .context("Failed to load C++ terrain swap stores")?,
+            .context("Failed to load UiMapXMapArt.db2 / hotfix rows")?,
+    );
+    let terrain_swap_store = Arc::new(
+        wow_data::load_terrain_swaps(world_db.as_ref(), &map_store, |phase_id| {
+            ui_map_x_map_art_store.is_ui_map_phase(phase_id)
+        })
+        .await
+        .context("Failed to load C++ terrain swap stores")?,
     );
 
     let map_difficulty_store = Arc::new(

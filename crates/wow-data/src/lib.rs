@@ -34,6 +34,7 @@ pub mod skill;
 pub mod spell;
 pub mod spell_item_enchantment;
 pub mod terrain_swap;
+pub mod ui_map;
 pub mod wdc4;
 
 pub use area_trigger::{
@@ -81,3 +82,4 @@ pub use skill::{SkillInfoEntry, SkillStore};
 pub use spell::{SpellInfo, SpellStore};
 pub use spell_item_enchantment::{SpellItemEnchantmentEntry, SpellItemEnchantmentStore};
 pub use terrain_swap::{TerrainSwapInfo, TerrainSwapStore, load_terrain_swaps};
+pub use ui_map::{UiMapXMapArtEntry, UiMapXMapArtStore};

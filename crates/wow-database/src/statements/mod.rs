@@ -281,6 +281,11 @@ mod tests {
                 .sql()
                 .contains("hotfix_optional_data")
         );
+        assert!(
+            HotfixStatements::SEL_UI_MAP_X_MAP_ART
+                .sql()
+                .contains("ui_map_x_map_art")
+        );
     }
 
     #[test]
