@@ -6,19 +6,24 @@ pub mod spline;
 
 pub use defines::{
     CONTACT_DISTANCE_LIKE_CPP, ChaseAngle, ChaseRange, JumpArrivalCastArgs, JumpChargeParams,
-    JumpChargeSpec, RotateDirection, normalize_orientation_like_cpp,
+    JumpChargeSpec, MovementWalkRunSpeedSelectionMode, RotateDirection,
+    normalize_orientation_like_cpp,
 };
 pub use generator::{
     MovementGenerator, MovementGeneratorFlags, MovementGeneratorMode, MovementGeneratorPriority,
     MovementGeneratorState, MovementGeneratorType, MovementSlot,
 };
 pub use generators::{
-    AssistanceDistractFinalizeAction, AssistanceDistractMovementGenerator, DistractFacingSpline,
-    DistractFinalizeAction, DistractInitializeAction, DistractMovementGenerator,
-    GenericArrivalSpell, GenericMovementFinalize, GenericMovementGenerator, GenericMovementInform,
-    GenericSplineInitializer, IdleMovementGenerator, RotateFacingSpline, RotateMovementGenerator,
+    AssistanceDistractFinalizeAction, AssistanceDistractMovementGenerator,
+    AssistanceMovementFinalize, AssistanceMovementGenerator,
+    CREATURE_FAMILY_ASSISTANCE_DELAY_MS_LIKE_CPP, DistractFacingSpline, DistractFinalizeAction,
+    DistractInitializeAction, DistractMovementGenerator, EVENT_CHARGE_LIKE_CPP,
+    EVENT_CHARGE_PREPATH_LIKE_CPP, GenericArrivalSpell, GenericMovementFinalize,
+    GenericMovementGenerator, GenericMovementInform, GenericSplineInitializer,
+    IdleMovementGenerator, PointMovementAction, PointMovementFinalize, PointMovementGenerator,
+    PointMovementInform, PointMovementLaunch, RotateFacingSpline, RotateMovementGenerator,
     RotateMovementInform, RotateMovementUpdate, UNIT_STATE_DISTRACTED_LIKE_CPP,
-    UNIT_STATE_ROAMING_LIKE_CPP, UNIT_STATE_ROTATING_LIKE_CPP,
+    UNIT_STATE_ROAMING_LIKE_CPP, UNIT_STATE_ROAMING_MOVE_LIKE_CPP, UNIT_STATE_ROTATING_LIKE_CPP,
 };
 pub use motion_master::{
     DelayedAction, DelayedActionQueue, MotionMaster, MotionMasterDelayedActionType,

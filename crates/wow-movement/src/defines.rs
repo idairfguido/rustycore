@@ -27,6 +27,14 @@ impl RotateDirection {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum MovementWalkRunSpeedSelectionMode {
+    #[default]
+    Default,
+    ForceRun,
+    ForceWalk,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ChaseRange {
     pub min_range: f32,
@@ -217,6 +225,14 @@ mod tests {
 
     fn assert_close(left: f32, right: f32) {
         assert!((left - right).abs() < EPSILON, "left={left}, right={right}");
+    }
+
+    #[test]
+    fn movement_walk_run_speed_selection_mode_defaults_like_cpp() {
+        assert_eq!(
+            MovementWalkRunSpeedSelectionMode::default(),
+            MovementWalkRunSpeedSelectionMode::Default
+        );
     }
 
     #[test]
