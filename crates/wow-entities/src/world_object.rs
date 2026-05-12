@@ -203,10 +203,22 @@ impl VisibleMapIdRef {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UiMapPhaseIdRef {
+    references: i32,
+}
+
+impl UiMapPhaseIdRef {
+    pub const fn references(&self) -> i32 {
+        self.references
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PhaseShift {
     phases: BTreeSet<u32>,
     visible_map_ids: BTreeMap<u32, VisibleMapIdRef>,
+    ui_map_phase_ids: BTreeMap<u32, UiMapPhaseIdRef>,
 }
 
 impl PhaseShift {
@@ -214,6 +226,7 @@ impl PhaseShift {
         Self {
             phases: phases.into_iter().collect(),
             visible_map_ids: BTreeMap::new(),
+            ui_map_phase_ids: BTreeMap::new(),
         }
     }
 
@@ -224,6 +237,7 @@ impl PhaseShift {
     pub fn clear(&mut self) {
         self.phases.clear();
         self.visible_map_ids.clear();
+        self.ui_map_phase_ids.clear();
     }
 
     pub fn add_visible_map_id_like_cpp(&mut self, visible_map_id: u32, references: i32) -> bool {
@@ -262,6 +276,40 @@ impl PhaseShift {
 
     pub fn visible_map_id_ref_like_cpp(&self, visible_map_id: u32) -> Option<&VisibleMapIdRef> {
         self.visible_map_ids.get(&visible_map_id)
+    }
+
+    pub fn add_ui_map_phase_id_like_cpp(&mut self, ui_map_phase_id: u32, references: i32) -> bool {
+        let inserted = !self.ui_map_phase_ids.contains_key(&ui_map_phase_id);
+        let entry = self
+            .ui_map_phase_ids
+            .entry(ui_map_phase_id)
+            .or_insert(UiMapPhaseIdRef { references: 0 });
+        entry.references += references;
+        inserted
+    }
+
+    pub fn remove_ui_map_phase_id_like_cpp(&mut self, ui_map_phase_id: u32) -> bool {
+        let Some(entry) = self.ui_map_phase_ids.get_mut(&ui_map_phase_id) else {
+            return false;
+        };
+        entry.references -= 1;
+        if entry.references == 0 {
+            self.ui_map_phase_ids.remove(&ui_map_phase_id);
+            return true;
+        }
+        false
+    }
+
+    pub fn has_ui_map_phase_id_like_cpp(&self, ui_map_phase_id: u32) -> bool {
+        self.ui_map_phase_ids.contains_key(&ui_map_phase_id)
+    }
+
+    pub fn ui_map_phase_ids_like_cpp(&self) -> impl Iterator<Item = u32> + '_ {
+        self.ui_map_phase_ids.keys().copied()
+    }
+
+    pub fn ui_map_phase_id_ref_like_cpp(&self, ui_map_phase_id: u32) -> Option<&UiMapPhaseIdRef> {
+        self.ui_map_phase_ids.get(&ui_map_phase_id)
     }
 
     pub fn can_see(&self, other: &Self) -> bool {
@@ -1100,12 +1148,45 @@ mod tests {
     fn phase_shift_clear_removes_visible_map_ids_like_cpp() {
         let mut phase_shift = PhaseShift::from_phases([10]);
         phase_shift.add_visible_map_id_like_cpp(609, 1);
+        phase_shift.add_ui_map_phase_id_like_cpp(42, 1);
 
         phase_shift.clear();
 
         assert!(!phase_shift.has_visible_map_id_like_cpp(609));
         assert!(phase_shift.visible_map_ids_like_cpp().next().is_none());
+        assert!(!phase_shift.has_ui_map_phase_id_like_cpp(42));
+        assert!(phase_shift.ui_map_phase_ids_like_cpp().next().is_none());
         assert!(phase_shift.can_see(&PhaseShift::from_phases([20])));
+    }
+
+    #[test]
+    fn phase_shift_ui_map_phase_ids_reference_count_like_cpp() {
+        let mut phase_shift = PhaseShift::default();
+
+        assert!(phase_shift.add_ui_map_phase_id_like_cpp(42, 1));
+        assert!(!phase_shift.add_ui_map_phase_id_like_cpp(42, 1));
+        assert!(phase_shift.has_ui_map_phase_id_like_cpp(42));
+        assert_eq!(
+            phase_shift
+                .ui_map_phase_id_ref_like_cpp(42)
+                .map(UiMapPhaseIdRef::references),
+            Some(2)
+        );
+        assert_eq!(
+            phase_shift.ui_map_phase_ids_like_cpp().collect::<Vec<_>>(),
+            vec![42]
+        );
+
+        assert!(!phase_shift.remove_ui_map_phase_id_like_cpp(42));
+        assert_eq!(
+            phase_shift
+                .ui_map_phase_id_ref_like_cpp(42)
+                .map(UiMapPhaseIdRef::references),
+            Some(1)
+        );
+        assert!(phase_shift.remove_ui_map_phase_id_like_cpp(42));
+        assert!(!phase_shift.has_ui_map_phase_id_like_cpp(42));
+        assert!(!phase_shift.remove_ui_map_phase_id_like_cpp(42));
     }
 
     #[test]
