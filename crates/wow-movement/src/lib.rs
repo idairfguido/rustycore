@@ -19,8 +19,8 @@ pub use generators::{
     RotateMovementUpdate, UNIT_STATE_DISTRACTED_LIKE_CPP, UNIT_STATE_ROTATING_LIKE_CPP,
 };
 pub use motion_master::{
-    DelayedAction, DelayedActionQueue, MotionMasterDelayedActionType, MotionMasterFlags,
-    ResolvedDelayedAction,
+    DelayedAction, DelayedActionQueue, MotionMaster, MotionMasterDelayedActionType,
+    MotionMasterFlags, ResolvedDelayedAction,
 };
 pub use spline::{
     AnimTierTransition, FacingInfo, JumpSpeeds, MonsterMovePathData, MonsterMoveType, MoveSpline,

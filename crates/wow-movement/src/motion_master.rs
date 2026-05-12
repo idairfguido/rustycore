@@ -2,6 +2,11 @@ use std::collections::VecDeque;
 
 use bitflags::bitflags;
 
+use crate::{
+    MovementGenerator, MovementGeneratorFlags, MovementGeneratorMode, MovementGeneratorPriority,
+    MovementGeneratorType, MovementSlot,
+};
+
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct MotionMasterFlags: u8 {
@@ -90,15 +95,390 @@ impl<M> DelayedAction<M> {
     }
 }
 
+pub struct MotionMaster {
+    default_generator: Option<Box<dyn MovementGenerator>>,
+    active_generators: Vec<Box<dyn MovementGenerator>>,
+    delayed_actions: DelayedActionQueue<MotionMaster>,
+    flags: MotionMasterFlags,
+    base_unit_state_refs: Vec<u32>,
+    pub last_resolved_delayed_actions: Vec<ResolvedDelayedAction>,
+}
+
+impl MotionMaster {
+    #[must_use]
+    pub fn new(default_generator: Box<dyn MovementGenerator>) -> Self {
+        Self {
+            default_generator: Some(default_generator),
+            active_generators: Vec::new(),
+            delayed_actions: DelayedActionQueue::default(),
+            flags: MotionMasterFlags::NONE,
+            base_unit_state_refs: Vec::new(),
+            last_resolved_delayed_actions: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn new_pending() -> Self {
+        Self {
+            default_generator: None,
+            active_generators: Vec::new(),
+            delayed_actions: DelayedActionQueue::default(),
+            flags: MotionMasterFlags::INITIALIZATION_PENDING,
+            base_unit_state_refs: Vec::new(),
+            last_resolved_delayed_actions: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub const fn flags(&self) -> MotionMasterFlags {
+        self.flags
+    }
+
+    #[must_use]
+    pub fn delayed_action_count(&self) -> usize {
+        self.delayed_actions.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.default_generator.is_none() && self.active_generators.is_empty()
+    }
+
+    #[must_use]
+    pub fn size(&self) -> usize {
+        usize::from(self.default_generator.is_some()) + self.active_generators.len()
+    }
+
+    #[must_use]
+    pub fn current_slot(&self) -> Option<MovementSlot> {
+        if !self.active_generators.is_empty() {
+            Some(MovementSlot::Active)
+        } else if self.default_generator.is_some() {
+            Some(MovementSlot::Default)
+        } else {
+            None
+        }
+    }
+
+    #[must_use]
+    pub fn current_kind(&self) -> Option<MovementGeneratorType> {
+        self.active_generators
+            .first()
+            .map(|generator| generator.kind())
+            .or_else(|| {
+                self.default_generator
+                    .as_ref()
+                    .map(|generator| generator.kind())
+            })
+    }
+
+    #[must_use]
+    pub fn current_kind_for_slot(&self, slot: MovementSlot) -> Option<MovementGeneratorType> {
+        match slot {
+            MovementSlot::Default => self
+                .default_generator
+                .as_ref()
+                .map(|generator| generator.kind()),
+            MovementSlot::Active => self
+                .active_generators
+                .first()
+                .map(|generator| generator.kind()),
+        }
+    }
+
+    #[must_use]
+    pub fn has_generator_kind(&self, kind: MovementGeneratorType, slot: MovementSlot) -> bool {
+        match slot {
+            MovementSlot::Default => self
+                .default_generator
+                .as_ref()
+                .is_some_and(|generator| generator.kind() == kind),
+            MovementSlot::Active => self
+                .active_generators
+                .iter()
+                .any(|generator| generator.kind() == kind),
+        }
+    }
+
+    #[must_use]
+    pub fn base_unit_state_ref_count(&self, base_unit_state: u32) -> usize {
+        self.base_unit_state_refs
+            .iter()
+            .filter(|state| **state == base_unit_state)
+            .count()
+    }
+
+    pub fn add(&mut self, movement: Box<dyn MovementGenerator>, slot: MovementSlot) {
+        if self.flags.intersects(MotionMasterFlags::DELAYED) {
+            self.delayed_actions.push(DelayedAction::new(
+                MotionMasterDelayedActionType::Add,
+                move |motion_master: &mut MotionMaster| motion_master.add(movement, slot),
+            ));
+            return;
+        }
+
+        self.direct_add(movement, slot);
+    }
+
+    pub fn remove_kind(&mut self, kind: MovementGeneratorType, slot: MovementSlot) {
+        if self.flags.intersects(MotionMasterFlags::DELAYED) {
+            self.delayed_actions.push(DelayedAction::new(
+                MotionMasterDelayedActionType::RemoveType,
+                move |motion_master: &mut MotionMaster| motion_master.remove_kind(kind, slot),
+            ));
+            return;
+        }
+
+        match slot {
+            MovementSlot::Default => {
+                if self
+                    .default_generator
+                    .as_ref()
+                    .is_some_and(|generator| generator.kind() == kind)
+                {
+                    self.delete_default(false, false);
+                }
+            }
+            MovementSlot::Active => {
+                if let Some(index) = self
+                    .active_generators
+                    .iter()
+                    .position(|generator| generator.kind() == kind)
+                {
+                    self.remove_active_index(index, index == 0, false);
+                }
+            }
+        }
+    }
+
+    pub fn clear(&mut self) {
+        if self.flags.intersects(MotionMasterFlags::DELAYED) {
+            self.delayed_actions.push(DelayedAction::new(
+                MotionMasterDelayedActionType::Clear,
+                |motion_master: &mut MotionMaster| motion_master.clear(),
+            ));
+            return;
+        }
+
+        self.direct_clear();
+    }
+
+    pub fn clear_slot(&mut self, slot: MovementSlot) {
+        if self.flags.intersects(MotionMasterFlags::DELAYED) {
+            self.delayed_actions.push(DelayedAction::new(
+                MotionMasterDelayedActionType::ClearSlot,
+                move |motion_master: &mut MotionMaster| motion_master.clear_slot(slot),
+            ));
+            return;
+        }
+
+        match slot {
+            MovementSlot::Default => self.delete_default(self.active_generators.is_empty(), false),
+            MovementSlot::Active => self.direct_clear_active(),
+        }
+    }
+
+    pub fn clear_mode(&mut self, mode: MovementGeneratorMode) {
+        if self.flags.intersects(MotionMasterFlags::DELAYED) {
+            self.delayed_actions.push(DelayedAction::new(
+                MotionMasterDelayedActionType::ClearMode,
+                move |motion_master: &mut MotionMaster| motion_master.clear_mode(mode),
+            ));
+            return;
+        }
+
+        let mut index = 0;
+        while index < self.active_generators.len() {
+            if self.active_generators[index].state().mode == mode {
+                self.remove_active_index(index, false, false);
+            } else {
+                index += 1;
+            }
+        }
+    }
+
+    pub fn clear_priority(&mut self, priority: MovementGeneratorPriority) {
+        if self.flags.intersects(MotionMasterFlags::DELAYED) {
+            self.delayed_actions.push(DelayedAction::new(
+                MotionMasterDelayedActionType::ClearPriority,
+                move |motion_master: &mut MotionMaster| motion_master.clear_priority(priority),
+            ));
+            return;
+        }
+
+        let mut index = 0;
+        while index < self.active_generators.len() {
+            if self.active_generators[index].state().priority == priority {
+                self.remove_active_index(index, false, false);
+            } else {
+                index += 1;
+            }
+        }
+    }
+
+    pub fn update(&mut self, diff_ms: u32) {
+        if self
+            .flags
+            .intersects(MotionMasterFlags::INITIALIZATION_PENDING | MotionMasterFlags::INITIALIZING)
+            || self.is_empty()
+        {
+            return;
+        }
+
+        self.flags.insert(MotionMasterFlags::UPDATE);
+        let keep_running = {
+            let top = self
+                .current_generator_mut()
+                .expect("non-empty motion master");
+            if top.has_flag(MovementGeneratorFlags::INITIALIZATION_PENDING) {
+                top.initialize();
+            }
+            if top.has_flag(MovementGeneratorFlags::DEACTIVATED) {
+                top.reset();
+            }
+            top.update(diff_ms)
+        };
+
+        if !keep_running && !self.active_generators.is_empty() {
+            self.remove_active_index(0, true, true);
+        }
+
+        self.flags.remove(MotionMasterFlags::UPDATE);
+        self.resolve_delayed_actions();
+    }
+
+    pub fn propagate_speed_change(&mut self) {
+        if let Some(generator) = self.current_generator_mut() {
+            generator.unit_speed_changed();
+        }
+    }
+
+    fn current_generator_mut(&mut self) -> Option<&mut Box<dyn MovementGenerator>> {
+        if !self.active_generators.is_empty() {
+            self.active_generators.first_mut()
+        } else {
+            self.default_generator.as_mut()
+        }
+    }
+
+    fn direct_add(&mut self, movement: Box<dyn MovementGenerator>, slot: MovementSlot) {
+        match slot {
+            MovementSlot::Default => {
+                self.delete_default(self.active_generators.is_empty(), false);
+                if movement.has_flag(MovementGeneratorFlags::INITIALIZATION_PENDING) {
+                    self.flags
+                        .insert(MotionMasterFlags::STATIC_INITIALIZATION_PENDING);
+                }
+                self.default_generator = Some(movement);
+            }
+            MovementSlot::Active => {
+                if self.active_generators.is_empty() {
+                    if let Some(default_generator) = self.default_generator.as_mut() {
+                        default_generator.deactivate();
+                    }
+                } else {
+                    let top_priority = self.active_generators[0].state().priority;
+                    let priority = movement.state().priority;
+                    if priority >= top_priority {
+                        if priority == top_priority {
+                            self.remove_active_index(0, true, false);
+                        } else {
+                            self.active_generators[0].deactivate();
+                        }
+                    } else if let Some(index) = self
+                        .active_generators
+                        .iter()
+                        .position(|generator| generator.state().priority == priority)
+                    {
+                        self.remove_active_index(index, false, false);
+                    }
+                }
+
+                self.add_base_unit_state(movement.state().base_unit_state);
+                let priority = movement.state().priority;
+                let index = self
+                    .active_generators
+                    .iter()
+                    .position(|generator| generator.state().priority < priority)
+                    .unwrap_or(self.active_generators.len());
+                self.active_generators.insert(index, movement);
+            }
+        }
+    }
+
+    fn direct_clear(&mut self) {
+        self.delete_default(self.active_generators.is_empty(), false);
+        self.direct_clear_active();
+        self.base_unit_state_refs.clear();
+    }
+
+    fn direct_clear_active(&mut self) {
+        if !self.active_generators.is_empty() {
+            self.remove_active_index(0, true, false);
+        }
+        while !self.active_generators.is_empty() {
+            self.remove_active_index(0, false, false);
+        }
+    }
+
+    fn remove_active_index(&mut self, index: usize, active: bool, movement_inform: bool) {
+        let mut movement = self.active_generators.remove(index);
+        movement.finalize(active, movement_inform);
+        self.clear_base_unit_state(movement.state().base_unit_state);
+    }
+
+    fn delete_default(&mut self, active: bool, movement_inform: bool) {
+        if let Some(mut default_generator) = self.default_generator.take() {
+            default_generator.finalize(active, movement_inform);
+        }
+    }
+
+    fn add_base_unit_state(&mut self, base_unit_state: u32) {
+        if base_unit_state != 0 {
+            self.base_unit_state_refs.push(base_unit_state);
+        }
+    }
+
+    fn clear_base_unit_state(&mut self, base_unit_state: u32) {
+        if base_unit_state == 0 {
+            return;
+        }
+        if let Some(index) = self
+            .base_unit_state_refs
+            .iter()
+            .position(|state| *state == base_unit_state)
+        {
+            self.base_unit_state_refs.remove(index);
+        }
+    }
+
+    fn resolve_delayed_actions(&mut self) {
+        self.last_resolved_delayed_actions.clear();
+        while !self.delayed_actions.is_empty() {
+            let mut delayed_actions = std::mem::take(&mut self.delayed_actions);
+            let resolved = delayed_actions.resolve_all(self);
+            self.last_resolved_delayed_actions.extend(resolved);
+            self.delayed_actions = delayed_actions;
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResolvedDelayedAction {
     pub action_type: MotionMasterDelayedActionType,
     pub executed: bool,
 }
 
-#[derive(Default)]
 pub struct DelayedActionQueue<M> {
     actions: VecDeque<DelayedAction<M>>,
+}
+
+impl<M> Default for DelayedActionQueue<M> {
+    fn default() -> Self {
+        Self {
+            actions: VecDeque::new(),
+        }
+    }
 }
 
 impl<M> DelayedActionQueue<M> {
@@ -133,6 +513,11 @@ impl<M> DelayedActionQueue<M> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        AssistanceDistractMovementGenerator, DistractMovementGenerator, IdleMovementGenerator,
+        RotateDirection, RotateMovementGenerator, UNIT_STATE_DISTRACTED_LIKE_CPP,
+        UNIT_STATE_ROTATING_LIKE_CPP,
+    };
 
     #[test]
     fn motion_master_flags_and_delayed_action_values_match_cpp() {
@@ -197,5 +582,118 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn motion_master_add_orders_active_generators_like_cpp_priorities() {
+        let mut motion = MotionMaster::new(Box::new(IdleMovementGenerator::new()));
+        assert_eq!(motion.current_slot(), Some(MovementSlot::Default));
+        assert_eq!(motion.current_kind(), Some(MovementGeneratorType::Idle));
+
+        motion.add(
+            Box::new(RotateMovementGenerator::new(
+                7,
+                1_000,
+                RotateDirection::Left,
+            )),
+            MovementSlot::Active,
+        );
+        assert_eq!(motion.current_slot(), Some(MovementSlot::Active));
+        assert_eq!(motion.current_kind(), Some(MovementGeneratorType::Rotate));
+        assert_eq!(
+            motion.base_unit_state_ref_count(UNIT_STATE_ROTATING_LIKE_CPP),
+            1
+        );
+
+        motion.add(
+            Box::new(DistractMovementGenerator::new(500, 1.0)),
+            MovementSlot::Active,
+        );
+        assert_eq!(motion.current_kind(), Some(MovementGeneratorType::Distract));
+        assert_eq!(
+            motion.base_unit_state_ref_count(UNIT_STATE_DISTRACTED_LIKE_CPP),
+            1
+        );
+        assert_eq!(
+            motion.base_unit_state_ref_count(UNIT_STATE_ROTATING_LIKE_CPP),
+            1
+        );
+    }
+
+    #[test]
+    fn motion_master_update_initializes_pops_and_resolves_delayed_like_cpp() {
+        let mut motion = MotionMaster::new(Box::new(IdleMovementGenerator::new()));
+        motion.add(
+            Box::new(RotateMovementGenerator::new(
+                7,
+                1_000,
+                RotateDirection::Left,
+            )),
+            MovementSlot::Active,
+        );
+
+        motion.flags.insert(MotionMasterFlags::UPDATE);
+        motion.add(
+            Box::new(AssistanceDistractMovementGenerator::new(500, 1.0)),
+            MovementSlot::Active,
+        );
+        assert_eq!(motion.delayed_action_count(), 1);
+        motion.flags.remove(MotionMasterFlags::UPDATE);
+
+        motion.update(1_000);
+        assert_eq!(
+            motion.last_resolved_delayed_actions,
+            vec![ResolvedDelayedAction {
+                action_type: MotionMasterDelayedActionType::Add,
+                executed: true,
+            }]
+        );
+        assert_eq!(
+            motion.current_kind(),
+            Some(MovementGeneratorType::AssistanceDistract)
+        );
+        assert_eq!(
+            motion.base_unit_state_ref_count(UNIT_STATE_ROTATING_LIKE_CPP),
+            0
+        );
+        assert_eq!(
+            motion.base_unit_state_ref_count(UNIT_STATE_DISTRACTED_LIKE_CPP),
+            1
+        );
+    }
+
+    #[test]
+    fn motion_master_delays_clear_remove_and_filters_like_cpp() {
+        let mut motion = MotionMaster::new(Box::new(IdleMovementGenerator::new()));
+        motion.add(
+            Box::new(RotateMovementGenerator::new(
+                7,
+                1_000,
+                RotateDirection::Right,
+            )),
+            MovementSlot::Active,
+        );
+        motion.add(
+            Box::new(AssistanceDistractMovementGenerator::new(500, 1.0)),
+            MovementSlot::Active,
+        );
+
+        motion
+            .flags
+            .insert(MotionMasterFlags::INITIALIZATION_PENDING);
+        motion.remove_kind(MovementGeneratorType::Rotate, MovementSlot::Active);
+        motion.clear_priority(MovementGeneratorPriority::Normal);
+        assert_eq!(motion.delayed_action_count(), 2);
+        motion
+            .flags
+            .remove(MotionMasterFlags::INITIALIZATION_PENDING);
+        motion.update(1);
+        assert_eq!(motion.last_resolved_delayed_actions.len(), 2);
+        assert!(!motion.has_generator_kind(MovementGeneratorType::Rotate, MovementSlot::Active));
+        assert!(!motion.has_generator_kind(
+            MovementGeneratorType::AssistanceDistract,
+            MovementSlot::Active
+        ));
+        assert_eq!(motion.current_kind(), Some(MovementGeneratorType::Idle));
     }
 }
