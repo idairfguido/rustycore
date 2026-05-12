@@ -183,6 +183,7 @@ No CMSG opcode is consumed by Phasing directly — phase state is purely server-
 - A single SMSG_PHASE_SHIFT_CHANGE serializer with constant payload.
 - `wow-entities::PhaseShift` now carries C++-like phase refs, visible map id refs and UI map phase id refs with refcount semantics.
 - Terrain swap metadata loading exists for `terrain_worldmap` / `terrain_swap_defaults`, including C++ DB2+hotfix `UiMapXMapArt.PhaseID` validation for `IsUiMapPhase`.
+- `Phase.db2` and `PhaseXPhaseGroup.db2` are loaded with hotfix overlays, exposing C++-like personal/cosmetic phase checks and `GetPhasesForGroup`.
 - Creature spawn `terrainSwapMap` is validated against `Map.ParentMapID` and applied to the creature `PhaseShift` visible-map ids.
 
 **What's missing vs C++:**
@@ -195,7 +196,6 @@ No CMSG opcode is consumed by Phasing directly — phase state is purely server-
 - `ControlledUnitVisitor` recursive propagation through pets/vehicles/totems.
 - `MultiPersonalPhaseTracker` per-map; private spawn lifecycle.
 - `PhaseShift::CanSee` — and the integration of that predicate into the visibility / grid-notifier codepaths.
-- DB2 reads of `Phase.db2` / `PhaseXPhaseGroup.db2`.
 - GameObject/transport terrain swap application is still missing because Rust does not yet have the canonical C++ `GameObject::Create` / transport runtime path wired.
 - `PartyMemberPhaseStates` piece of `SMSG_PARTY_MEMBER_FULL_STATE`.
 
@@ -270,8 +270,8 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [ ] **#PHASE.8** Implement loader for `phase_area` (areaId → `Vec<PhaseAreaInfo>`) joined with `conditions WHERE SourceTypeOrReferenceId = 26` (M)
 - [x] **#PHASE.9** Implement loader for `terrain_swap_defaults` (mapId → `Vec<TerrainSwapInfo>`) (L)
 - [x] **#PHASE.10** Implement loader for `terrain_worldmap` (terrainSwapMapId → `Vec<UiMapPhaseId>`) and merge into `TerrainSwapInfo::UiMapPhaseIDs`, validating via C++ DB2+hotfix `UiMapXMapArt.PhaseID` (L)
-- [ ] **#PHASE.11** Wire up `Phase.db2` (PhaseStore) loading in `crates/wow-data` and expose `is_personal_phase(phaseId)` / `is_cosmetic_phase(phaseId)` (M)
-- [ ] **#PHASE.12** Wire up `PhaseXPhaseGroup.db2` and expose `get_phases_for_group(groupId) -> Option<&Vec<u32>>` (M)
+- [x] **#PHASE.11** Wire up `Phase.db2` (PhaseStore) loading in `crates/wow-data` and expose `is_personal_phase(phaseId)` / `is_cosmetic_phase(phaseId)` (M)
+- [x] **#PHASE.12** Wire up `PhaseXPhaseGroup.db2` and expose `get_phases_for_group(groupId) -> Option<&Vec<u32>>` equivalent (M)
 - [ ] **#PHASE.13** Implement `PhasingHandler::add_phase` / `remove_phase` static façade including `ControlledUnitVisitor` recursion through pets, summon slots, and vehicle passengers (H)
 - [ ] **#PHASE.14** Implement `PhasingHandler::add_phase_group` / `remove_phase_group` using `get_phases_for_group` (M)
 - [ ] **#PHASE.15** Implement `PhasingHandler::on_area_change` (parent-area walk via AreaTable.db2, condition evaluation per `PhaseAreaInfo`, suppression bookkeeping, aura re-application) (XL — split: walk + apply, re-apply auras, suppression bucket, controlled-unit propagation)
@@ -426,7 +426,7 @@ The struct only carries a `player_guid`; there is no `PhaseShift` field. The sin
 - `SMSG_PARTY_MEMBER_FULL_STATE` writes `PhaseShiftFlags = 0` (`packets/party.rs:281`) so party UI never marks anyone out-of-phase.
 - `OnAreaChange` / `OnMapChange` / `OnConditionChange` are not called anywhere — the packet is fire-and-forget at login. Crossing into phased areas re-sends nothing.
 - DB tables `phase_definitions` and `phase_area` are not loaded by `wow-database`; terrain swap tables are now loaded.
-- `Phase.db2` and `PhaseXPhaseGroup.db2` are not parsed by `wow-data`.
+- `Phase.db2` and `PhaseXPhaseGroup.db2` are parsed, but phase/group validation is not yet applied to creature/gameobject/transport spawn rows.
 
 **Coupling to ConditionMgr:** §8's claim is correct that this can't be fixed properly without ConditionMgr (also ❌). #PHASE.15 / #PHASE.16 / #PHASE.17 explicitly take a `ConditionContainer`. Treat #PHASE.* as blocked-on #COND.1–#COND.20.
 

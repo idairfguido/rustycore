@@ -458,6 +458,21 @@ async fn main() -> Result<()> {
             .await
             .context("Failed to load UiMapXMapArt.db2 / hotfix rows")?,
     );
+    let phase_store = Arc::new(
+        wow_data::PhaseStore::load_with_hotfixes(&data_dir, &locale, &hotfix_db)
+            .await
+            .context("Failed to load Phase.db2 / hotfix rows")?,
+    );
+    let phase_group_store = Arc::new(
+        wow_data::PhaseGroupStore::load_with_hotfixes(&data_dir, &locale, &phase_store, &hotfix_db)
+            .await
+            .context("Failed to load PhaseXPhaseGroup.db2 / hotfix rows")?,
+    );
+    info!(
+        "Loaded {} phases and {} phase-group rows",
+        phase_store.len(),
+        phase_group_store.len()
+    );
     let terrain_swap_store = Arc::new(
         wow_data::load_terrain_swaps(world_db.as_ref(), &map_store, |phase_id| {
             ui_map_x_map_art_store.is_ui_map_phase(phase_id)

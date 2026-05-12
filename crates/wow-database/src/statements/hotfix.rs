@@ -14,6 +14,10 @@ pub enum HotfixStatements {
     SEL_HOTFIX_BLOB,
     /// `DB2Manager::LoadHotfixOptionalData`.
     SEL_HOTFIX_OPTIONAL_DATA,
+    /// C++ `HOTFIX_SEL_PHASE`.
+    SEL_PHASE,
+    /// C++ `HOTFIX_SEL_PHASE_X_PHASE_GROUP`.
+    SEL_PHASE_X_PHASE_GROUP,
     /// C++ `HOTFIX_SEL_UI_MAP_X_MAP_ART`.
     SEL_UI_MAP_X_MAP_ART,
 }
@@ -29,6 +33,10 @@ impl StatementDef for HotfixStatements {
             }
             Self::SEL_HOTFIX_OPTIONAL_DATA => {
                 "SELECT TableHash, RecordId, locale, `Key`, `Data` FROM hotfix_optional_data ORDER BY TableHash"
+            }
+            Self::SEL_PHASE => "SELECT ID, Flags FROM phase WHERE VerifiedBuild > 0",
+            Self::SEL_PHASE_X_PHASE_GROUP => {
+                "SELECT ID, PhaseID, PhaseGroupID FROM phase_x_phase_group WHERE VerifiedBuild > 0"
             }
             Self::SEL_UI_MAP_X_MAP_ART => {
                 "SELECT ID, PhaseID, UiMapArtID, UiMapID FROM ui_map_x_map_art WHERE VerifiedBuild > 0"

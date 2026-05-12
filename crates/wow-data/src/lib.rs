@@ -25,6 +25,7 @@ pub mod item_random_suffix;
 pub mod item_stats;
 pub mod lock;
 pub mod map;
+pub mod phase;
 pub mod player_power;
 pub mod player_stats;
 pub mod quest;
@@ -73,6 +74,7 @@ pub use item_stats::{
 };
 pub use lock::{LockEntry, LockStore};
 pub use map::{MapDifficultyEntry, MapDifficultyStore, MapEntry, MapStore};
+pub use phase::{PhaseEntry, PhaseGroupStore, PhaseStore, PhaseXPhaseGroupEntry};
 pub use player_power::{
     ClassPowerIndexRecord, Db2PlayerPowerIndexResolver, PlayerClassPowerIndexStore,
 };

@@ -286,6 +286,12 @@ mod tests {
                 .sql()
                 .contains("ui_map_x_map_art")
         );
+        assert!(HotfixStatements::SEL_PHASE.sql().contains("phase"));
+        assert!(
+            HotfixStatements::SEL_PHASE_X_PHASE_GROUP
+                .sql()
+                .contains("phase_x_phase_group")
+        );
     }
 
     #[test]

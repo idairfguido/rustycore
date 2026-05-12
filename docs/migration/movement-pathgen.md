@@ -194,6 +194,7 @@ Tile generation is offline (`mmaps_generator` tool from Trinity); the runtime on
 - `crates/wow-data/src/map.rs` now loads `MapEntry::ParentMapID` / `CosmeticParentMapID`, resolves the C++ `TerrainMgr::LoadTerrain` root-map chain, and builds C++ `World::SetInitialWorldSettings` `mapData` buckets.
 - `crates/wow-data/src/terrain_swap.rs` now mirrors the C++ `ObjectMgr::LoadTerrainWorldMaps` / `LoadTerrainSwapDefaults` metadata shape and spawn `terrainSwapMap` parent validation.
 - `crates/wow-data/src/ui_map.rs` now loads the `UiMapXMapArt.db2` plus hotfix-table `PhaseID` set used by C++ `DB2Manager::IsUiMapPhase`.
+- `crates/wow-data/src/phase.rs` now loads `Phase.db2` / `PhaseXPhaseGroup.db2` plus hotfix rows, exposing C++ `IsPersonalPhase` / cosmetic checks and phase-group expansion.
 - `crates/wow-world/src/map_manager.rs` now initializes the local Detour `MMapManager` worker with that `mapData`, matching C++ `MMapManager::InitializeThreadUnsafe(mapData)`, has the C++ `TerrainInfo` grid-file existence slice: optional `maps/{mapid:04}.tilelist` (`MAPS` v10 + `std::bitset::to_string()` ordering), fallback `.map` header validation, child-terrain lookup and `PhaseShift.VisibleMapIds` terrain-map resolution, and passes the resolved terrain map id as the Detour mesh map id for worker requests.
 
 **What's implemented:**
