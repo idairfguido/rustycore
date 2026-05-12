@@ -7454,6 +7454,7 @@ impl WorldSession {
                                                     true, false, false, false,
                                                 ),
                                                 force_destination: false,
+                                                phase_shift: creature.phase_shift().clone(),
                                             },
                                         ) {
                                             Ok(path) => path,

@@ -159,6 +159,83 @@ impl TerrainGridFilesLikeCpp {
     }
 }
 
+#[derive(Debug)]
+pub struct TerrainGridFileIndexLikeCpp {
+    data_dir: PathBuf,
+    parent_child_map_data: HashMap<u32, Vec<u32>>,
+    parent_map_ids: HashMap<u32, u32>,
+    terrain_maps: HashMap<u32, TerrainGridFilesLikeCpp>,
+}
+
+impl TerrainGridFileIndexLikeCpp {
+    pub fn new(
+        data_dir: impl AsRef<Path>,
+        parent_child_map_data: impl IntoIterator<Item = (u32, Vec<u32>)>,
+    ) -> Self {
+        let parent_child_map_data: HashMap<u32, Vec<u32>> =
+            parent_child_map_data.into_iter().collect();
+        let mut parent_map_ids = HashMap::new();
+        for (parent_map_id, child_map_ids) in &parent_child_map_data {
+            for child_map_id in child_map_ids {
+                parent_map_ids.insert(*child_map_id, *parent_map_id);
+            }
+        }
+
+        Self {
+            data_dir: data_dir.as_ref().to_path_buf(),
+            parent_child_map_data,
+            parent_map_ids,
+            terrain_maps: HashMap::new(),
+        }
+    }
+
+    pub fn root_map_id_like_cpp(&self, map_id: u32) -> u32 {
+        let mut root_map_id = map_id;
+        while let Some(parent_map_id) = self.parent_map_ids.get(&root_map_id).copied() {
+            root_map_id = parent_map_id;
+        }
+        root_map_id
+    }
+
+    pub fn terrain_for_map_like_cpp(
+        &mut self,
+        map_id: u32,
+    ) -> io::Result<&TerrainGridFilesLikeCpp> {
+        let root_map_id = self.root_map_id_like_cpp(map_id);
+        if !self.terrain_maps.contains_key(&root_map_id) {
+            let terrain = TerrainGridFilesLikeCpp::load_root_like_cpp(
+                &self.data_dir,
+                root_map_id,
+                &self.parent_child_map_data,
+            )?;
+            self.terrain_maps.insert(root_map_id, terrain);
+        }
+
+        Ok(self
+            .terrain_maps
+            .get(&root_map_id)
+            .expect("terrain root inserted"))
+    }
+
+    pub fn terrain_map_id_for_phase_shift_like_cpp(
+        &mut self,
+        phase_shift: &PhaseShift,
+        source_map_id: u32,
+        x: f32,
+        y: f32,
+    ) -> u32 {
+        if phase_shift.visible_map_id_count_like_cpp() == 0 {
+            return source_map_id;
+        }
+
+        self.terrain_for_map_like_cpp(source_map_id)
+            .map(|terrain| {
+                terrain.terrain_map_id_for_phase_shift_like_cpp(phase_shift, source_map_id, x, y)
+            })
+            .unwrap_or(source_map_id)
+    }
+}
+
 fn discover_grid_map_files_like_cpp(data_dir: &Path, map_id: u32) -> io::Result<Vec<bool>> {
     let tile_list_name = data_dir.join("maps").join(format!("{map_id:04}.tilelist"));
     if let Ok(mut tile_list) = File::open(tile_list_name) {
@@ -265,12 +342,15 @@ impl From<MMapManagerError> for WorldDetourPathError {
 pub struct WorldMMapPathfinderLikeCpp {
     data_dir: PathBuf,
     mmap_manager: DetourMMapManager,
+    terrain_grid_file_index: TerrainGridFileIndexLikeCpp,
 }
 
 impl WorldMMapPathfinderLikeCpp {
     pub fn new(data_dir: impl AsRef<Path>) -> Self {
+        let data_dir = data_dir.as_ref().to_path_buf();
         Self {
-            data_dir: data_dir.as_ref().to_path_buf(),
+            terrain_grid_file_index: TerrainGridFileIndexLikeCpp::new(&data_dir, []),
+            data_dir,
             mmap_manager: DetourMMapManager::new(),
         }
     }
@@ -279,15 +359,22 @@ impl WorldMMapPathfinderLikeCpp {
         data_dir: impl AsRef<Path>,
         parent_child_map_data: impl IntoIterator<Item = (u32, Vec<u32>)>,
     ) -> Self {
+        let data_dir = data_dir.as_ref().to_path_buf();
+        let parent_child_map_data: Vec<(u32, Vec<u32>)> =
+            parent_child_map_data.into_iter().collect();
         let mut mmap_manager = DetourMMapManager::new();
-        mmap_manager.initialize_thread_unsafe(parent_child_map_data.into_iter().map(
+        mmap_manager.initialize_thread_unsafe(parent_child_map_data.iter().cloned().map(
             |(map_id, child_map_ids)| ThreadUnsafeMapData {
                 map_id,
                 child_map_ids,
             },
         ));
         Self {
-            data_dir: data_dir.as_ref().to_path_buf(),
+            terrain_grid_file_index: TerrainGridFileIndexLikeCpp::new(
+                &data_dir,
+                parent_child_map_data,
+            ),
+            data_dir,
             mmap_manager,
         }
     }
@@ -361,12 +448,25 @@ impl WorldMMapPathfinderLikeCpp {
             .map_err(WorldDetourPathError::from)
     }
 
+    pub fn resolve_mesh_map_id_for_path_request_like_cpp(
+        &mut self,
+        request: &WorldMMapPathRequestLikeCpp,
+    ) -> u32 {
+        self.terrain_grid_file_index
+            .terrain_map_id_for_phase_shift_like_cpp(
+                &request.phase_shift,
+                request.mesh_map_id,
+                request.start.x,
+                request.start.y,
+            )
+    }
+
     pub fn mmap_manager(&self) -> &DetourMMapManager {
         &self.mmap_manager
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct WorldMMapPathRequestLikeCpp {
     pub start: Position,
     pub destination: Position,
@@ -375,6 +475,7 @@ pub struct WorldMMapPathRequestLikeCpp {
     pub instance_id: u32,
     pub filter_context: PathQueryFilterContext,
     pub force_destination: bool,
+    pub phase_shift: PhaseShift,
 }
 
 #[derive(Debug)]
@@ -417,10 +518,12 @@ impl WorldMMapPathfinderWorkerLikeCpp {
                 let mut pathfinder = pathfinder_factory(data_dir);
                 while let Ok(message) = request_rx.recv() {
                     let request = message.request;
+                    let mesh_map_id =
+                        pathfinder.resolve_mesh_map_id_for_path_request_like_cpp(&request);
                     let result = pathfinder.calculate_path_from_positions_like_cpp(
                         request.start,
                         request.destination,
-                        request.mesh_map_id,
+                        mesh_map_id,
                         request.instance_map_id,
                         request.instance_id,
                         request.filter_context,
@@ -668,6 +771,10 @@ impl WorldCreature {
 
     pub fn instance_id(&self) -> u32 {
         self.creature.unit().world().instance_id()
+    }
+
+    pub fn phase_shift(&self) -> &PhaseShift {
+        self.creature.unit().world().phase_shift()
     }
 
     pub fn home_position(&self) -> Position {
@@ -2179,6 +2286,71 @@ mod tests {
     }
 
     #[test]
+    fn terrain_grid_file_index_resolves_root_and_visible_child_map_like_cpp() {
+        let data_dir = unique_temp_data_dir("terrain-grid-index");
+        let grid_idx = terrain_grid_bitset_index_like_cpp(31, 31).expect("valid grid index");
+        fs::write(
+            data_dir.join("maps").join("0571.tilelist"),
+            tilelist_like_cpp([]),
+        )
+        .expect("write parent tilelist");
+        fs::write(
+            data_dir.join("maps").join("0609.tilelist"),
+            tilelist_like_cpp([grid_idx]),
+        )
+        .expect("write child tilelist");
+        let mut index =
+            TerrainGridFileIndexLikeCpp::new(&data_dir, [(571, vec![609]), (609, Vec::new())]);
+        let mut phase_shift = PhaseShift::default();
+        phase_shift.add_visible_map_id_like_cpp(609, 1);
+
+        assert_eq!(index.root_map_id_like_cpp(609), 571);
+        assert_eq!(
+            index.terrain_map_id_for_phase_shift_like_cpp(&phase_shift, 571, 0.0, 0.0),
+            609
+        );
+        fs::remove_dir_all(data_dir).expect("remove test dir");
+    }
+
+    #[test]
+    fn world_mmap_pathfinder_resolves_mesh_map_from_phase_shift_like_cpp() {
+        let data_dir = unique_temp_data_dir("mmap-phase-shift-mesh-map");
+        let grid_idx = terrain_grid_bitset_index_like_cpp(31, 31).expect("valid grid index");
+        fs::write(
+            data_dir.join("maps").join("0571.tilelist"),
+            tilelist_like_cpp([]),
+        )
+        .expect("write parent tilelist");
+        fs::write(
+            data_dir.join("maps").join("0609.tilelist"),
+            tilelist_like_cpp([grid_idx]),
+        )
+        .expect("write child tilelist");
+        let mut pathfinder = WorldMMapPathfinderLikeCpp::new_with_parent_map_data_like_cpp(
+            &data_dir,
+            [(571, vec![609]), (609, Vec::new())],
+        );
+        let mut phase_shift = PhaseShift::default();
+        phase_shift.add_visible_map_id_like_cpp(609, 1);
+        let request = WorldMMapPathRequestLikeCpp {
+            start: Position::new(0.0, 0.0, 0.0, 0.0),
+            destination: Position::new(20.0, 0.0, 0.0, 0.0),
+            mesh_map_id: 571,
+            instance_map_id: 571,
+            instance_id: 42,
+            filter_context: PathQueryFilterContext::creature(true, false, false, false),
+            force_destination: false,
+            phase_shift,
+        };
+
+        assert_eq!(
+            pathfinder.resolve_mesh_map_id_for_path_request_like_cpp(&request),
+            609
+        );
+        fs::remove_dir_all(data_dir).expect("remove test dir");
+    }
+
+    #[test]
     fn test_world_to_grid_positive() {
         assert_eq!(world_to_grid_x(0.0), 0);
         assert_eq!(world_to_grid_x(63.9), 0);
@@ -2724,6 +2896,7 @@ mod tests {
             instance_id: 42,
             filter_context: PathQueryFilterContext::creature(true, false, false, false),
             force_destination: false,
+            phase_shift: PhaseShift::default(),
         });
 
         assert_eq!(result, Ok(None));
