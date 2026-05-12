@@ -14,16 +14,20 @@ pub use generator::{
     MovementGeneratorState, MovementGeneratorType, MovementSlot,
 };
 pub use generators::{
-    AssistanceDistractFinalizeAction, AssistanceDistractMovementGenerator,
-    AssistanceMovementFinalize, AssistanceMovementGenerator,
+    AbstractFollower, AbstractFollowerEvent, AssistanceDistractFinalizeAction,
+    AssistanceDistractMovementGenerator, AssistanceMovementFinalize, AssistanceMovementGenerator,
     CREATURE_FAMILY_ASSISTANCE_DELAY_MS_LIKE_CPP, DistractFacingSpline, DistractFinalizeAction,
     DistractInitializeAction, DistractMovementGenerator, EVENT_CHARGE_LIKE_CPP,
-    EVENT_CHARGE_PREPATH_LIKE_CPP, GenericArrivalSpell, GenericMovementFinalize,
-    GenericMovementGenerator, GenericMovementInform, GenericSplineInitializer,
-    IdleMovementGenerator, PointMovementAction, PointMovementFinalize, PointMovementGenerator,
-    PointMovementInform, PointMovementLaunch, RotateFacingSpline, RotateMovementGenerator,
-    RotateMovementInform, RotateMovementUpdate, UNIT_STATE_DISTRACTED_LIKE_CPP,
+    EVENT_CHARGE_PREPATH_LIKE_CPP, FOLLOW_CHECK_INTERVAL_MS_LIKE_CPP,
+    FOLLOW_RANGE_TOLERANCE_LIKE_CPP, FollowFinalizeAction, FollowLaunchPlan, FollowMovementAction,
+    FollowMovementGenerator, FollowMovementInform, FollowUnitSnapshot, GenericArrivalSpell,
+    GenericMovementFinalize, GenericMovementGenerator, GenericMovementInform,
+    GenericSplineInitializer, IdleMovementGenerator, PointMovementAction, PointMovementFinalize,
+    PointMovementGenerator, PointMovementInform, PointMovementLaunch, RotateFacingSpline,
+    RotateMovementGenerator, RotateMovementInform, RotateMovementUpdate,
+    UNIT_STATE_DISTRACTED_LIKE_CPP, UNIT_STATE_FOLLOW_LIKE_CPP, UNIT_STATE_FOLLOW_MOVE_LIKE_CPP,
     UNIT_STATE_ROAMING_LIKE_CPP, UNIT_STATE_ROAMING_MOVE_LIKE_CPP, UNIT_STATE_ROTATING_LIKE_CPP,
+    position_okay_like_cpp, selected_relative_angle_like_cpp,
 };
 pub use motion_master::{
     DelayedAction, DelayedActionQueue, MotionMaster, MotionMasterDelayedActionType,

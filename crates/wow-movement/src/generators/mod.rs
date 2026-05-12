@@ -1,4 +1,5 @@
 pub mod distract;
+pub mod follow;
 pub mod generic;
 pub mod idle;
 pub mod point;
@@ -8,6 +9,12 @@ pub use distract::{
     AssistanceDistractFinalizeAction, AssistanceDistractMovementGenerator, DistractFacingSpline,
     DistractFinalizeAction, DistractInitializeAction, DistractMovementGenerator,
     UNIT_STATE_DISTRACTED_LIKE_CPP,
+};
+pub use follow::{
+    AbstractFollower, AbstractFollowerEvent, FOLLOW_CHECK_INTERVAL_MS_LIKE_CPP,
+    FOLLOW_RANGE_TOLERANCE_LIKE_CPP, FollowFinalizeAction, FollowLaunchPlan, FollowMovementAction,
+    FollowMovementGenerator, FollowMovementInform, FollowUnitSnapshot, UNIT_STATE_FOLLOW_LIKE_CPP,
+    UNIT_STATE_FOLLOW_MOVE_LIKE_CPP, position_okay_like_cpp, selected_relative_angle_like_cpp,
 };
 pub use generic::{
     GenericArrivalSpell, GenericMovementFinalize, GenericMovementGenerator, GenericMovementInform,
