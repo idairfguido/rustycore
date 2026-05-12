@@ -4,6 +4,7 @@ pub mod distract;
 pub mod fleeing;
 pub mod follow;
 pub mod generic;
+pub mod home;
 pub mod idle;
 pub mod point;
 pub mod rotate;
@@ -47,6 +48,12 @@ pub use follow::{
 pub use generic::{
     GenericArrivalSpell, GenericMovementFinalize, GenericMovementGenerator, GenericMovementInform,
     GenericSplineInitializer, UNIT_STATE_ROAMING_LIKE_CPP,
+};
+pub use home::{
+    HOME_CLEAR_ON_FINALIZE_MASK_LIKE_CPP, HOME_CLEAR_ON_TARGET_MASK_LIKE_CPP, HomeFinalizeAction,
+    HomeLaunchPlan, HomeMovementAction, HomeMovementGenerator, HomeUnitSnapshot,
+    UNIT_FLAG_CAN_SWIM_LIKE_CPP, UNIT_STATE_ALL_ERASABLE_LIKE_CPP,
+    UNIT_STATE_HOME_INTERRUPT_MASK_LIKE_CPP,
 };
 pub use idle::IdleMovementGenerator;
 pub use point::{
