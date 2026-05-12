@@ -189,7 +189,7 @@ No CMSG opcode is consumed by Phasing directly — phase state is purely server-
 - `wow-data::PhaseInfoStore` seeds C++ `_phaseInfoById` from `PhaseStore`, matching current `ObjectMgr::LoadPhases`.
 - `AreaTable.db2` is loaded with hotfix overlays for `ParentAreaID`, and `phase_area` rows are loaded into C++-like `PhaseInfoStore` area buckets with parent `SubAreaExclusions`.
 - `wow-world::phasing` implements the pure C++ `PhasingHandler::ResetPhaseShift`, `InheritPhaseShift`, `SetAlwaysVisible`, and `SetInversed` slices.
-- `wow-world::phasing` implements the core C++ `PhasingHandler::AddPhase` / `RemovePhase` / phase-group mutations for a single object, including phase DB2 flag lookup and personal GUID stamping; controlled-unit traversal remains open.
+- `wow-world::phasing` implements the core C++ `PhasingHandler::AddPhase` / `RemovePhase` / phase-group mutations for a single object, including phase DB2 flag lookup and personal GUID stamping; `ControlledUnitVisitor` selection/visited rules are ported, but runtime world-object recursion is not wired yet.
 - Terrain swap metadata loading exists for `terrain_worldmap` / `terrain_swap_defaults`, including C++ DB2+hotfix `UiMapXMapArt.PhaseID` validation for `IsUiMapPhase`.
 - `Phase.db2` and `PhaseXPhaseGroup.db2` are loaded with hotfix overlays, exposing C++-like personal/cosmetic phase checks and `GetPhasesForGroup`.
 - Creature spawn `terrainSwapMap` is validated against `Map.ParentMapID` and applied to the creature `PhaseShift` visible-map ids.
@@ -280,7 +280,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [x] **#PHASE.10** Implement loader for `terrain_worldmap` (terrainSwapMapId → `Vec<UiMapPhaseId>`) and merge into `TerrainSwapInfo::UiMapPhaseIDs`, validating via C++ DB2+hotfix `UiMapXMapArt.PhaseID` (L)
 - [x] **#PHASE.11** Wire up `Phase.db2` (PhaseStore) loading in `crates/wow-data` and expose `is_personal_phase(phaseId)` / `is_cosmetic_phase(phaseId)` (M)
 - [x] **#PHASE.12** Wire up `PhaseXPhaseGroup.db2` and expose `get_phases_for_group(groupId) -> Option<&Vec<u32>>` equivalent (M)
-- [ ] **#PHASE.13** Implement `PhasingHandler::add_phase` / `remove_phase` static façade including `ControlledUnitVisitor` recursion through pets, summon slots, and vehicle passengers (H; partial: single-object C++ core mutation implemented in `wow-world::phasing`)
+- [ ] **#PHASE.13** Implement `PhasingHandler::add_phase` / `remove_phase` static façade including `ControlledUnitVisitor` recursion through pets, summon slots, and vehicle passengers (H; partial: single-object C++ core mutation plus `ControlledUnitVisitor` selection/visited rules implemented in `wow-world::phasing`; live ObjectAccessor-style recursion still open)
 - [ ] **#PHASE.14** Implement `PhasingHandler::add_phase_group` / `remove_phase_group` using `get_phases_for_group` (M; partial: single-object group mutation implemented in `wow-world::phasing`; controlled-unit traversal remains under #PHASE.13)
 - [ ] **#PHASE.15** Implement `PhasingHandler::on_area_change` (parent-area walk via AreaTable.db2, condition evaluation per `PhaseAreaInfo`, suppression bookkeeping, aura re-application) (XL — split: walk + apply, re-apply auras, suppression bucket, controlled-unit propagation)
 - [ ] **#PHASE.16** Implement `PhasingHandler::on_map_change` (terrain-swap evaluation against `CONDITION_SOURCE_TYPE_TERRAIN_SWAP`, populate `VisibleMapIds` + `UiMapPhaseIds`) (H)
