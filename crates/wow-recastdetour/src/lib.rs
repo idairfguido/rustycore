@@ -155,6 +155,13 @@ pub struct DetourMoveAlongSurface {
     pub visited: Vec<DetourPolyRef>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct DetourRaycast {
+    pub hit_t: f32,
+    pub hit_normal: [f32; 3],
+    pub path: Vec<DetourPolyRef>,
+}
+
 unsafe extern "C" {
     fn rustycore_dt_alloc_nav_mesh() -> *mut RawDetourNavMesh;
     fn rustycore_dt_free_nav_mesh(mesh: *mut RawDetourNavMesh);
@@ -257,6 +264,18 @@ unsafe extern "C" {
         visited: *mut DetourPolyRef,
         visited_count: *mut i32,
         max_visited_size: i32,
+    ) -> DetourStatus;
+    fn rustycore_dt_nav_mesh_query_raycast(
+        query: *const RawDetourNavMeshQuery,
+        start_ref: DetourPolyRef,
+        start_pos: *const f32,
+        end_pos: *const f32,
+        filter: *const RawDetourQueryFilter,
+        hit_t: *mut f32,
+        hit_normal: *mut f32,
+        path: *mut DetourPolyRef,
+        path_count: *mut i32,
+        max_path: i32,
     ) -> DetourStatus;
     fn rustycore_dt_free(ptr: *mut std::ffi::c_void);
     fn rustycore_dt_create_square_tile_data(
@@ -585,6 +604,48 @@ impl<'mesh> DetourNavMeshQuery<'mesh> {
             visited,
         })
     }
+
+    pub fn raycast(
+        &self,
+        start_ref: DetourPolyRef,
+        start_pos: [f32; 3],
+        end_pos: [f32; 3],
+        filter: &DetourQueryFilter,
+        max_path: usize,
+    ) -> Result<DetourRaycast, DetourNavMeshQueryError> {
+        if max_path > i32::MAX as usize {
+            return Err(DetourNavMeshQueryError::PathBufferTooLarge { max_path });
+        }
+
+        let mut hit_t = 0.0;
+        let mut hit_normal = [0.0; 3];
+        let mut path = vec![0; max_path];
+        let mut path_count = 0;
+        let status = unsafe {
+            rustycore_dt_nav_mesh_query_raycast(
+                self.raw.as_ptr(),
+                start_ref,
+                start_pos.as_ptr(),
+                end_pos.as_ptr(),
+                filter.as_raw(),
+                &mut hit_t,
+                hit_normal.as_mut_ptr(),
+                path.as_mut_ptr(),
+                &mut path_count,
+                max_path as i32,
+            )
+        };
+        if detour_status_failed(status) {
+            return Err(DetourNavMeshQueryError::RaycastFailed { status });
+        }
+
+        path.truncate(path_count.max(0) as usize);
+        Ok(DetourRaycast {
+            hit_t,
+            hit_normal,
+            path,
+        })
+    }
 }
 
 impl Drop for DetourNavMeshQuery<'_> {
@@ -699,6 +760,8 @@ pub enum DetourNavMeshQueryError {
         "Detour moveAlongSurface visited buffer is too large for C++ int size: {max_visited_size}"
     )]
     VisitedBufferTooLarge { max_visited_size: usize },
+    #[error("Detour raycast failed with status 0x{status:08x}")]
+    RaycastFailed { status: DetourStatus },
 }
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
@@ -1501,6 +1564,45 @@ mod tests {
                 0,
             ),
             Err(DetourNavMeshQueryError::MoveAlongSurfaceFailed {
+                status: DT_FAILURE_LIKE_CPP | DT_INVALID_PARAM_LIKE_CPP,
+            })
+        );
+    }
+
+    #[test]
+    fn detour_query_raycast_matches_cpp_shape() {
+        let params = DetourNavMeshParams {
+            origin: [0.0, 0.0, 0.0],
+            tile_width: 1.0,
+            tile_height: 1.0,
+            max_tiles: 16,
+            max_polys: 128,
+        };
+        let mut mesh = DetourNavMesh::new(&params).unwrap();
+        let tile = generated_square_tile_blob(0, 0);
+        mesh.add_tile(&tile).unwrap();
+
+        let query = DetourNavMeshQuery::new(&mesh, 1024).unwrap();
+        let filter = DetourQueryFilter::new().unwrap();
+        let nearest = query
+            .find_nearest_poly([0.5, 0.0, 0.5], [3.0, 5.0, 3.0], &filter)
+            .unwrap();
+
+        let raycast = query
+            .raycast(
+                nearest.poly_ref,
+                [0.25, 0.0, 0.25],
+                [0.75, 0.0, 0.75],
+                &filter,
+                16,
+            )
+            .unwrap();
+
+        assert_eq!(raycast.hit_t, 0.0);
+        assert!(raycast.path.is_empty());
+        assert_eq!(
+            query.raycast(0, [0.25, 0.0, 0.25], [0.75, 0.0, 0.75], &filter, 16,),
+            Err(DetourNavMeshQueryError::RaycastFailed {
                 status: DT_FAILURE_LIKE_CPP | DT_INVALID_PARAM_LIKE_CPP,
             })
         );

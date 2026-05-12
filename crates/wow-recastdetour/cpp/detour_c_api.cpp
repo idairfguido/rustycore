@@ -229,6 +229,30 @@ extern "C"
             max_visited_size);
     }
 
+    dtStatus rustycore_dt_nav_mesh_query_raycast(
+        dtNavMeshQuery const* query,
+        uint64_t start_ref,
+        float const* start_pos,
+        float const* end_pos,
+        dtQueryFilter const* filter,
+        float* hit_t,
+        float* hit_normal,
+        uint64_t* path,
+        int* path_count,
+        int max_path)
+    {
+        return query->raycast(
+            (dtPolyRef)start_ref,
+            start_pos,
+            end_pos,
+            filter,
+            hit_t,
+            hit_normal,
+            (dtPolyRef*)path,
+            path_count,
+            max_path);
+    }
+
     void rustycore_dt_free(void* ptr)
     {
         dtFree(ptr);
