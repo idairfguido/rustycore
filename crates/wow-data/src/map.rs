@@ -5,7 +5,7 @@
 
 //! Map.db2 and MapDifficulty.db2 readers.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -75,6 +75,62 @@ impl MapStore {
 
     pub fn get(&self, id: u32) -> Option<&MapEntry> {
         self.entries.get(&id)
+    }
+
+    /// Resolve the root terrain map the same way C++ `TerrainMgr::LoadTerrain`
+    /// does before loading grid/vmap files.
+    pub fn terrain_root_map_id_like_cpp(&self, map_id: u32) -> Option<u32> {
+        let mut current_map_id = map_id;
+        let mut entry = self.get(current_map_id)?;
+
+        while entry.parent_map_id != -1 || entry.cosmetic_parent_map_id != -1 {
+            let parent_map_id = if entry.parent_map_id != -1 {
+                entry.parent_map_id
+            } else {
+                entry.cosmetic_parent_map_id
+            };
+
+            let Ok(parent_map_id) = u32::try_from(parent_map_id) else {
+                break;
+            };
+            let Some(parent_entry) = self.get(parent_map_id) else {
+                break;
+            };
+
+            current_map_id = parent_map_id;
+            entry = parent_entry;
+        }
+
+        Some(current_map_id)
+    }
+
+    /// Build C++ `World::SetInitialWorldSettings` mapData:
+    /// every map id is present and direct child maps are attached to
+    /// `ParentMapID`, or `CosmeticParentMapID` when no parent exists.
+    pub fn parent_child_map_data_like_cpp(&self) -> Vec<(u32, Vec<u32>)> {
+        let mut map_data = BTreeMap::<u32, Vec<u32>>::new();
+        for entry in self.entries.values() {
+            map_data.entry(entry.id).or_default();
+            if entry.parent_map_id != -1 {
+                assert!(
+                    entry.cosmetic_parent_map_id == -1
+                        || entry.cosmetic_parent_map_id == entry.parent_map_id,
+                    "inconsistent parent map data for map {} (ParentMapID = {}, CosmeticParentMapID = {})",
+                    entry.id,
+                    entry.parent_map_id,
+                    entry.cosmetic_parent_map_id
+                );
+                if let Ok(parent_map_id) = u32::try_from(entry.parent_map_id) {
+                    map_data.entry(parent_map_id).or_default().push(entry.id);
+                }
+            } else if entry.cosmetic_parent_map_id != -1 {
+                if let Ok(parent_map_id) = u32::try_from(entry.cosmetic_parent_map_id) {
+                    map_data.entry(parent_map_id).or_default().push(entry.id);
+                }
+            }
+        }
+
+        map_data.into_iter().collect()
     }
 
     pub fn len(&self) -> usize {
@@ -219,6 +275,141 @@ mod tests {
         let cosmetic = store.get(111).unwrap();
         assert_eq!(cosmetic.parent_map_id, -1);
         assert_eq!(cosmetic.cosmetic_parent_map_id, 1);
+    }
+
+    #[test]
+    fn terrain_root_map_id_follows_parent_chain_like_cpp() {
+        let store = MapStore::from_entries([
+            MapEntry {
+                id: 1,
+                instance_type: 0,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+            MapEntry {
+                id: 571,
+                instance_type: 0,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: 1,
+                flags1: 0,
+            },
+            MapEntry {
+                id: 609,
+                instance_type: 0,
+                parent_map_id: 571,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ]);
+
+        assert_eq!(store.terrain_root_map_id_like_cpp(609), Some(1));
+        assert_eq!(store.terrain_root_map_id_like_cpp(571), Some(1));
+        assert_eq!(store.terrain_root_map_id_like_cpp(1), Some(1));
+    }
+
+    #[test]
+    fn terrain_root_map_id_prefers_parent_over_cosmetic_like_cpp() {
+        let store = MapStore::from_entries([
+            MapEntry {
+                id: 1,
+                instance_type: 0,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+            MapEntry {
+                id: 571,
+                instance_type: 0,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+            MapEntry {
+                id: 609,
+                instance_type: 0,
+                parent_map_id: 571,
+                cosmetic_parent_map_id: 1,
+                flags1: 0,
+            },
+        ]);
+
+        assert_eq!(store.terrain_root_map_id_like_cpp(609), Some(571));
+    }
+
+    #[test]
+    fn terrain_root_map_id_handles_missing_entries_like_cpp() {
+        let store = MapStore::from_entries([MapEntry {
+            id: 609,
+            instance_type: 0,
+            parent_map_id: 571,
+            cosmetic_parent_map_id: -1,
+            flags1: 0,
+        }]);
+
+        assert_eq!(store.terrain_root_map_id_like_cpp(609), Some(609));
+        assert_eq!(store.terrain_root_map_id_like_cpp(571), None);
+    }
+
+    #[test]
+    fn parent_child_map_data_matches_cpp_world_initialization() {
+        let store = MapStore::from_entries([
+            MapEntry {
+                id: 1,
+                instance_type: 0,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+            MapEntry {
+                id: 571,
+                instance_type: 0,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: 1,
+                flags1: 0,
+            },
+            MapEntry {
+                id: 609,
+                instance_type: 0,
+                parent_map_id: 571,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ]);
+
+        let map_data = store.parent_child_map_data_like_cpp();
+        assert_eq!(
+            map_data,
+            vec![(1, vec![571]), (571, vec![609]), (609, Vec::new())]
+        );
+    }
+
+    #[test]
+    fn parent_child_map_data_creates_missing_parent_bucket_like_cpp() {
+        let store = MapStore::from_entries([MapEntry {
+            id: 609,
+            instance_type: 0,
+            parent_map_id: 571,
+            cosmetic_parent_map_id: -1,
+            flags1: 0,
+        }]);
+
+        let map_data = store.parent_child_map_data_like_cpp();
+        assert_eq!(map_data, vec![(571, vec![609]), (609, Vec::new())]);
+    }
+
+    #[test]
+    #[should_panic(expected = "inconsistent parent map data")]
+    fn parent_child_map_data_rejects_inconsistent_parent_like_cpp_assert() {
+        let store = MapStore::from_entries([MapEntry {
+            id: 609,
+            instance_type: 0,
+            parent_map_id: 571,
+            cosmetic_parent_map_id: 1,
+            flags1: 0,
+        }]);
+
+        let _ = store.parent_child_map_data_like_cpp();
     }
 
     #[test]

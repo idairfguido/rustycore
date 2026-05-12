@@ -20,7 +20,7 @@ use wow_packet::packets::update::CreatureCreateData;
 use wow_recastdetour::{
     DetourNavMeshQueryError, DetourPathOptions, DetourPathType, DetourPolyPath,
     DetourQueryFilterError, MMapData, MMapManager as DetourMMapManager, MMapManagerError,
-    PathQueryFilterContext, create_path_query_filter_like_cpp,
+    PathQueryFilterContext, ThreadUnsafeMapData, create_path_query_filter_like_cpp,
 };
 
 /// Size of a grid cell in yards (64x64 yards like TrinityCore).
@@ -87,6 +87,23 @@ impl WorldMMapPathfinderLikeCpp {
         Self {
             data_dir: data_dir.as_ref().to_path_buf(),
             mmap_manager: DetourMMapManager::new(),
+        }
+    }
+
+    pub fn new_with_parent_map_data_like_cpp(
+        data_dir: impl AsRef<Path>,
+        parent_child_map_data: impl IntoIterator<Item = (u32, Vec<u32>)>,
+    ) -> Self {
+        let mut mmap_manager = DetourMMapManager::new();
+        mmap_manager.initialize_thread_unsafe(parent_child_map_data.into_iter().map(
+            |(map_id, child_map_ids)| ThreadUnsafeMapData {
+                map_id,
+                child_map_ids,
+            },
+        ));
+        Self {
+            data_dir: data_dir.as_ref().to_path_buf(),
+            mmap_manager,
         }
     }
 
@@ -188,12 +205,31 @@ struct WorldMMapPathfinderMessageLikeCpp {
 
 impl WorldMMapPathfinderWorkerLikeCpp {
     pub fn spawn(data_dir: impl AsRef<Path>) -> Self {
+        Self::spawn_with_pathfinder_factory(data_dir, WorldMMapPathfinderLikeCpp::new)
+    }
+
+    pub fn spawn_with_parent_map_data_like_cpp(
+        data_dir: impl AsRef<Path>,
+        parent_child_map_data: Vec<(u32, Vec<u32>)>,
+    ) -> Self {
+        Self::spawn_with_pathfinder_factory(data_dir, move |data_dir| {
+            WorldMMapPathfinderLikeCpp::new_with_parent_map_data_like_cpp(
+                data_dir,
+                parent_child_map_data,
+            )
+        })
+    }
+
+    fn spawn_with_pathfinder_factory(
+        data_dir: impl AsRef<Path>,
+        pathfinder_factory: impl FnOnce(PathBuf) -> WorldMMapPathfinderLikeCpp + Send + 'static,
+    ) -> Self {
         let (request_tx, request_rx) = mpsc::channel::<WorldMMapPathfinderMessageLikeCpp>();
         let data_dir = data_dir.as_ref().to_path_buf();
         thread::Builder::new()
             .name("world-mmap-pathfinder-like-cpp".to_string())
             .spawn(move || {
-                let mut pathfinder = WorldMMapPathfinderLikeCpp::new(data_dir);
+                let mut pathfinder = pathfinder_factory(data_dir);
                 while let Ok(message) = request_rx.recv() {
                     let request = message.request;
                     let result = pathfinder.calculate_path_from_positions_like_cpp(
@@ -2289,6 +2325,19 @@ mod tests {
         assert_eq!(result, Ok(None));
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn world_mmap_pathfinder_initializes_thread_unsafe_parent_map_data_like_cpp() {
+        let root = unique_test_dir("world-mmap-pathfinder-parent-map-data");
+        let pathfinder = WorldMMapPathfinderLikeCpp::new_with_parent_map_data_like_cpp(
+            &root,
+            [(571, vec![609]), (609, Vec::new())],
+        );
+
+        assert!(!pathfinder.mmap_manager().is_thread_safe_environment());
+        assert_eq!(pathfinder.mmap_manager().get_loaded_maps_count(), 2);
+        assert_eq!(pathfinder.mmap_manager().parent_map_id(609), Some(571));
     }
 
     #[test]

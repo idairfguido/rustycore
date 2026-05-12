@@ -825,9 +825,12 @@ async fn main() -> Result<()> {
         mmap_runtime_config.data_dir
     );
     let mmap_pathfinder = mmap_runtime_config.enabled.then(|| {
-        Arc::new(WorldMMapPathfinderWorkerLikeCpp::spawn(
-            &mmap_runtime_config.data_dir,
-        ))
+        Arc::new(
+            WorldMMapPathfinderWorkerLikeCpp::spawn_with_parent_map_data_like_cpp(
+                &mmap_runtime_config.data_dir,
+                map_store.parent_child_map_data_like_cpp(),
+            ),
+        )
     });
 
     let realm_addr: SocketAddr = format!("{bind_ip}:{world_port}")
