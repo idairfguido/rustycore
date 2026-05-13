@@ -288,8 +288,8 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [x] **#PHASE.18** Implement `PhasingHandler::reset_phase_shift`, `inherit_phase_shift`, `set_always_visible`, `set_inversed` (M)
 - [x] **#PHASE.19** Replace the constant SMSG_PHASE_SHIFT_CHANGE in `crates/wow-packet/src/packets/misc.rs` with a real serializer/builder that takes `&PhaseShift` and writes flags + phase list + personal GUID + visible-map-id list + ui-map-phase-id list (M; runtime hooks still tracked in #PHASE.15/#PHASE.16/#PHASE.17/#PHASE.26)
 - [ ] **#PHASE.20** Hook up `SPELL_AURA_PHASE` apply/remove and `SPELL_AURA_PHASE_GROUP` apply/remove in the (yet-to-be-fully-built) aura effect dispatcher to call `PhasingHandler::add_phase` / `add_phase_group` (M, depends on aura system)
-- [ ] **#PHASE.21** Implement `PersonalPhaseSpawns` (objects + grids + optional `Duration` countdown) and `PlayerPersonalPhasesTracker` (per-owner) in `crates/wow-world/src/phasing/personal.rs` (H)
-- [ ] **#PHASE.22** Implement `MultiPersonalPhaseTracker` on each `Map` with `LoadGrid` / `UnloadGrid` / `RegisterTrackedObject` / `OnOwnerPhaseChanged` / `MarkAllPhasesForDeletion` / `Update(diff)` (XL — splittable per method)
+- [x] **#PHASE.21** Implement `PersonalPhaseSpawns` (objects + grids + optional `Duration` countdown) and `PlayerPersonalPhasesTracker` (per-owner) in `crates/wow-world/src/phasing/personal.rs` (H)
+- [ ] **#PHASE.22** Implement `MultiPersonalPhaseTracker` on each `Map` with `LoadGrid` / `UnloadGrid` / `RegisterTrackedObject` / `OnOwnerPhaseChanged` / `MarkAllPhasesForDeletion` / `Update(diff)` (XL — splittable per method; partial: C++ core multi-owner state machine implemented with injected grid-loader/despawn callbacks; actual `Map` ownership and grid lifecycle hooks remain open)
 - [ ] **#PHASE.23** Wire `MultiPersonalPhaseTracker::update` into the per-map tick (1-minute countdown semantics from `PersonalPhaseSpawns::DELETE_TIME_DEFAULT`) (M)
 - [ ] **#PHASE.24** Implement `InitDbPhaseShift` / `InitDbPersonalOwnership` / `InitDbVisibleMapId` so creature/gameobject DB rows that carry `phaseUseFlags` / `PhaseId` / `PhaseGroup` / `terrainSwapMap` columns produce correct phase state at spawn (M)
 - [ ] **#PHASE.25** Implement `GetTerrainMapId(phaseShift, mapId, terrain, x, y)` so collision / area lookups select the alt map when a swap is active at coordinates (M)
@@ -329,8 +329,8 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [x] Test: `OnConditionChange` moves phases and visible-map IDs between `Phases`/`VisibleMapIds` and `SuppressedPhaseShift` when injected C++ condition predicates flip, preserving refcounts for represented fields.
 - [ ] Test: `SPELL_AURA_PHASE` apply adds phase to ALL controlled units (pet, vehicle passengers); remove pulls them all back.
 - [ ] Test: SMSG_PHASE_SHIFT_CHANGE wire format — given a known PhaseShift fixture, the bytes match the legacy C++ binary output.
-- [ ] Test: `MultiPersonalPhaseTracker` despawns personal-phase spawns 60 s after the owner's phase set no longer contains them.
-- [ ] Test: `MultiPersonalPhaseTracker::LoadGrid` only loads spawns whose phase the owner currently holds.
+- [x] Test: `MultiPersonalPhaseTracker` despawns personal-phase spawns 60 s after the owner's phase set no longer contains them.
+- [x] Test: `MultiPersonalPhaseTracker::LoadGrid` only loads spawns whose phase the owner currently holds.
 - [ ] Test: `terrain_swap_defaults` — entering a map with a terrain swap whose conditions pass produces `VisibleMapIds = [swapMapId]` and the matching `UiMapPhaseIds`; failing conditions instead populate `SuppressedPhaseShift`.
 - [ ] Test: `GetTerrainMapId` — when `VisibleMapIds` contains the alt and the alt has area data at (x,y), return alt; else return the source.
 

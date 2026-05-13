@@ -13,6 +13,9 @@ use wow_data::{AreaTableStore, PhaseGroupStore, PhaseInfoStore, PhaseStore, Terr
 use wow_entities::{PhaseShift, Unit, WorldObject};
 use wow_packet::packets::misc::{PhaseShiftChange, PhaseShiftDataPhase};
 
+#[path = "phasing/personal.rs"]
+pub mod personal;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PhaseVisibilityUpdate {
     pub update_visibility: bool,
