@@ -5,7 +5,10 @@
 
 //! Runtime side of C++ `ConditionMgr` evaluation context.
 
+use std::sync::{Arc, OnceLock};
+
 use num_traits::FromPrimitive;
+use parking_lot::RwLock;
 use wow_constants::MAX_CONDITION_TARGETS;
 use wow_constants::{
     ComparisonType, ConditionInstanceInfo, ConditionSourceType, ConditionType, RelationType,
@@ -20,6 +23,32 @@ pub const QUEST_STATUS_COMPLETE_LIKE_CPP: u8 = 1;
 pub const QUEST_STATUS_INCOMPLETE_LIKE_CPP: u8 = 3;
 pub const QUEST_STATUS_FAILED_LIKE_CPP: u8 = 5;
 pub const QUEST_STATUS_REWARDED_LIKE_CPP: u8 = 6;
+
+static CONDITION_MGR_STORE_LIKE_CPP: OnceLock<RwLock<Option<Arc<ConditionEntriesByTypeStore>>>> =
+    OnceLock::new();
+
+fn condition_mgr_store_slot_like_cpp() -> &'static RwLock<Option<Arc<ConditionEntriesByTypeStore>>>
+{
+    CONDITION_MGR_STORE_LIKE_CPP.get_or_init(|| RwLock::new(None))
+}
+
+/// Install the process-wide C++ `sConditionMgr` condition store.
+///
+/// This keeps the access pattern close to C++ while storing the actual data in an `Arc`, so a
+/// future reload can atomically replace the active store without changing call sites.
+pub fn set_condition_mgr_store_like_cpp(store: Arc<ConditionEntriesByTypeStore>) {
+    *condition_mgr_store_slot_like_cpp().write() = Some(store);
+}
+
+/// Return the active C++ `sConditionMgr` store, if startup loaded it.
+pub fn condition_mgr_store_like_cpp() -> Option<Arc<ConditionEntriesByTypeStore>> {
+    condition_mgr_store_slot_like_cpp().read().as_ref().cloned()
+}
+
+/// Clear the process-wide condition store. Used by tests and future reload wiring.
+pub fn clear_condition_mgr_store_like_cpp() {
+    *condition_mgr_store_slot_like_cpp().write() = None;
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ConditionMapRef {
@@ -1414,6 +1443,37 @@ mod tests {
             info.last_failed_condition.unwrap(),
             &condition
         ));
+    }
+
+    #[test]
+    fn global_condition_mgr_store_can_be_installed_and_replaced_like_cpp_reload_foundation() {
+        clear_condition_mgr_store_like_cpp();
+        assert!(condition_mgr_store_like_cpp().is_none());
+
+        let first = Arc::new(ConditionEntriesByTypeStore::from_conditions_like_cpp([
+            Condition {
+                source_type: ConditionSourceType::Phase,
+                source_entry: 10,
+                condition_type: ConditionType::None,
+                ..Condition::default()
+            },
+        ]));
+        set_condition_mgr_store_like_cpp(Arc::clone(&first));
+        assert_eq!(
+            condition_mgr_store_like_cpp()
+                .as_ref()
+                .map(|store| store.bucket_count()),
+            Some(1)
+        );
+
+        let second = Arc::new(ConditionEntriesByTypeStore::default());
+        set_condition_mgr_store_like_cpp(Arc::clone(&second));
+        assert!(Arc::ptr_eq(
+            &condition_mgr_store_like_cpp().expect("condition store installed"),
+            &second
+        ));
+
+        clear_condition_mgr_store_like_cpp();
     }
 
     #[test]

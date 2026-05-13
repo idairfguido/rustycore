@@ -788,6 +788,7 @@ async fn main() -> Result<()> {
         condition_attachment_report.spell_click_aura_spell_ids.len(),
         condition_attachment_report.deferred_spell_implicit_target_condition_count
     );
+    wow_world::conditions::set_condition_mgr_store_like_cpp(Arc::clone(&condition_store));
 
     // Shared group registry and pending invites
     let group_registry = Arc::new(GroupRegistry::new());
