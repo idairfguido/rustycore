@@ -7,7 +7,9 @@
 
 use num_traits::FromPrimitive;
 use wow_constants::MAX_CONDITION_TARGETS;
-use wow_constants::{ComparisonType, ConditionSourceType, ConditionType, TypeId, TypeMask};
+use wow_constants::{
+    ComparisonType, ConditionSourceType, ConditionType, TypeId, TypeMask, UnitStandStateType,
+};
 use wow_data::{Condition, ConditionEntriesByTypeStore, ConditionId};
 use wow_entities::WorldObject;
 use wow_loot::{LootStoreItemContext, condition_source_type_for_loot_store_kind_like_cpp};
@@ -31,6 +33,7 @@ impl ConditionMapRef {
 pub struct ConditionSourceInfo<'a> {
     pub condition_targets: [Option<&'a WorldObject>; MAX_CONDITION_TARGETS],
     pub unit_targets: [Option<ConditionUnitSnapshot>; MAX_CONDITION_TARGETS],
+    pub player_targets: [Option<ConditionPlayerSnapshot>; MAX_CONDITION_TARGETS],
     pub condition_map: Option<ConditionMapRef>,
     pub last_failed_condition: Option<&'a Condition>,
 }
@@ -46,6 +49,17 @@ pub struct ConditionUnitSnapshot {
     pub in_water: bool,
     pub unit_state: u32,
     pub stand_state: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ConditionPlayerSnapshot {
+    pub team: u32,
+    pub native_gender: u32,
+    pub drunken_state: u32,
+    pub can_be_game_master: bool,
+    pub is_game_master: bool,
+    pub pet_type: Option<u32>,
+    pub is_in_flight: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +94,7 @@ impl<'a> ConditionSourceInfo<'a> {
         Self {
             condition_targets,
             unit_targets: [None; MAX_CONDITION_TARGETS],
+            player_targets: [None; MAX_CONDITION_TARGETS],
             condition_map,
             last_failed_condition: None,
         }
@@ -90,6 +105,7 @@ impl<'a> ConditionSourceInfo<'a> {
         Self {
             condition_targets: [None; MAX_CONDITION_TARGETS],
             unit_targets: [None; MAX_CONDITION_TARGETS],
+            player_targets: [None; MAX_CONDITION_TARGETS],
             condition_map: Some(condition_map),
             last_failed_condition: None,
         }
@@ -102,6 +118,16 @@ impl<'a> ConditionSourceInfo<'a> {
     ) {
         if target_index < MAX_CONDITION_TARGETS {
             self.unit_targets[target_index] = Some(snapshot);
+        }
+    }
+
+    pub fn set_player_target_snapshot(
+        &mut self,
+        target_index: usize,
+        snapshot: ConditionPlayerSnapshot,
+    ) {
+        if target_index < MAX_CONDITION_TARGETS {
+            self.player_targets[target_index] = Some(snapshot);
         }
     }
 
@@ -130,6 +156,27 @@ fn compare_values_f32_like_cpp(comparison_type: u32, left: f32, right: f32) -> b
         Some(ComparisonType::LowEq) => left <= right,
         _ => false,
     }
+}
+
+fn is_player_object_like_cpp(object: &WorldObject) -> bool {
+    matches!(
+        object.object().type_id(),
+        TypeId::Player | TypeId::ActivePlayer
+    )
+}
+
+fn unit_stand_state_is_sit_like_cpp(stand_state: u32) -> bool {
+    stand_state == UnitStandStateType::Sit as u32
+        || stand_state == UnitStandStateType::SitChair as u32
+        || stand_state == UnitStandStateType::SitLowChair as u32
+        || stand_state == UnitStandStateType::SitMediumChair as u32
+        || stand_state == UnitStandStateType::SitHighChair as u32
+}
+
+fn unit_stand_state_is_stand_like_cpp(stand_state: u32) -> bool {
+    !unit_stand_state_is_sit_like_cpp(stand_state)
+        && stand_state != UnitStandStateType::Sleep as u32
+        && stand_state != UnitStandStateType::Kneel as u32
 }
 
 /// Ported subset of C++ `Condition::Meets`.
@@ -172,6 +219,8 @@ pub fn condition_meets_basic_like_cpp<'a>(
 
     if let Some(object) = object {
         let unit = source_info.unit_targets[target_index];
+        let player =
+            source_info.player_targets[target_index].filter(|_| is_player_object_like_cpp(object));
         match condition.condition_type {
             ConditionType::ZoneId => cond_meets = object.zone_id() == condition.condition_value1,
             ConditionType::AreaId => {
@@ -182,10 +231,20 @@ pub fn condition_meets_basic_like_cpp<'a>(
                     cond_meets = (unit.class_mask & condition.condition_value1) != 0;
                 }
             }
+            ConditionType::Team => {
+                if let Some(player) = player {
+                    cond_meets = player.team == condition.condition_value1;
+                }
+            }
             ConditionType::Race => {
                 if let Some(unit) = unit {
                     cond_meets = unit.race != 0
                         && condition.condition_value1 & (1_u32 << u32::from(unit.race - 1)) != 0;
+                }
+            }
+            ConditionType::Gender => {
+                if let Some(player) = player {
+                    cond_meets = player.native_gender == condition.condition_value1;
                 }
             }
             ConditionType::Level => {
@@ -265,9 +324,44 @@ pub fn condition_meets_basic_like_cpp<'a>(
             }
             ConditionType::StandState => {
                 if let Some(unit) = unit {
-                    cond_meets = unit.stand_state == condition.condition_value1;
+                    cond_meets = if condition.condition_value1 == 0 {
+                        unit.stand_state == condition.condition_value2
+                    } else if condition.condition_value2 == 0 {
+                        unit_stand_state_is_stand_like_cpp(unit.stand_state)
+                    } else if condition.condition_value2 == 1 {
+                        unit_stand_state_is_sit_like_cpp(unit.stand_state)
+                    } else {
+                        false
+                    };
                 }
             }
+            ConditionType::DrunkenState => {
+                if let Some(player) = player {
+                    cond_meets = player.drunken_state >= condition.condition_value1;
+                }
+            }
+            ConditionType::GameMaster => {
+                if let Some(player) = player {
+                    cond_meets = if condition.condition_value1 == 1 {
+                        player.can_be_game_master
+                    } else {
+                        player.is_game_master
+                    };
+                }
+            }
+            ConditionType::PetType => {
+                if let Some(player) = player
+                    && let Some(pet_type) = player.pet_type
+                {
+                    cond_meets = ((1_u32 << pet_type) & condition.condition_value1) != 0;
+                }
+            }
+            ConditionType::Taxi => {
+                if let Some(player) = player {
+                    cond_meets = player.is_in_flight;
+                }
+            }
+            ConditionType::Charmed => return ConditionMeetResult::Unsupported,
             ConditionType::PrivateObject | ConditionType::StringId => {
                 return ConditionMeetResult::Unsupported;
             }
@@ -603,6 +697,12 @@ mod tests {
         object
     }
 
+    fn player_object(map_id: u32, instance_id: u32) -> WorldObject {
+        let mut object = WorldObject::new(false, TypeId::Player, TypeMask::PLAYER | TypeMask::UNIT);
+        object.set_map(map_id, instance_id).unwrap();
+        object
+    }
+
     #[test]
     fn condition_source_info_uses_first_non_null_target_map_like_cpp() {
         let target1 = world_object(571, 2);
@@ -800,7 +900,8 @@ mod tests {
             },
             Condition {
                 condition_type: ConditionType::StandState,
-                condition_value1: 8,
+                condition_value1: 0,
+                condition_value2: UnitStandStateType::Kneel as u32,
                 ..Condition::default()
             },
         ];
@@ -812,6 +913,106 @@ mod tests {
                 "{condition:?}"
             );
         }
+    }
+
+    #[test]
+    fn basic_condition_meets_player_snapshot_branches_like_cpp() {
+        let target = player_object(571, 2);
+        let mut info = ConditionSourceInfo::from_targets(Some(&target), None, None);
+        info.set_player_target_snapshot(
+            0,
+            ConditionPlayerSnapshot {
+                team: 469,
+                native_gender: 1,
+                drunken_state: 2,
+                can_be_game_master: true,
+                is_game_master: false,
+                pet_type: Some(2),
+                is_in_flight: true,
+            },
+        );
+
+        let conditions = vec![
+            Condition {
+                condition_type: ConditionType::Team,
+                condition_value1: 469,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::Gender,
+                condition_value1: 1,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::DrunkenState,
+                condition_value1: 2,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::GameMaster,
+                condition_value1: 1,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::PetType,
+                condition_value1: 1 << 2,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::Taxi,
+                ..Condition::default()
+            },
+        ];
+
+        for condition in &conditions {
+            assert_eq!(
+                condition_meets_basic_like_cpp(condition, &mut info, |_, _| false),
+                ConditionMeetResult::Evaluated(true),
+                "{condition:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn basic_condition_meets_stand_state_modes_like_cpp() {
+        let target = world_object(571, 2);
+        let mut info = ConditionSourceInfo::from_targets(Some(&target), None, None);
+        info.set_unit_target_snapshot(
+            0,
+            ConditionUnitSnapshot {
+                level: 1,
+                health: 1,
+                max_health: 1,
+                class_mask: 1,
+                race: 1,
+                is_alive: true,
+                in_water: false,
+                unit_state: 0,
+                stand_state: UnitStandStateType::SitChair as u32,
+            },
+        );
+
+        let sit_mode = Condition {
+            condition_type: ConditionType::StandState,
+            condition_value1: 1,
+            condition_value2: 1,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&sit_mode, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(true)
+        );
+
+        let stand_mode = Condition {
+            condition_type: ConditionType::StandState,
+            condition_value1: 1,
+            condition_value2: 0,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&stand_mode, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(false)
+        );
     }
 
     #[test]
@@ -868,12 +1069,12 @@ mod tests {
             ConditionMeetResult::Unsupported
         );
 
-        let player_condition = Condition {
-            condition_type: ConditionType::Team,
+        let unrepresented_condition = Condition {
+            condition_type: ConditionType::Aura,
             ..Condition::default()
         };
         assert_eq!(
-            condition_meets_basic_like_cpp(&player_condition, &mut info, |_, _| false),
+            condition_meets_basic_like_cpp(&unrepresented_condition, &mut info, |_, _| false),
             ConditionMeetResult::Unsupported
         );
     }
