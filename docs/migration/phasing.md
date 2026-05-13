@@ -204,13 +204,13 @@ No CMSG opcode is consumed by Phasing directly — phase state is purely server-
 - Aura integration (`SPELL_AURA_PHASE`, `SPELL_AURA_PHASE_GROUP`).
 - `ControlledUnitVisitor` recursive propagation through pets/vehicles/totems.
 - `MultiPersonalPhaseTracker` per-map; private spawn lifecycle.
-- Full integration of `PhaseShift::can_see` into canonical map/grid notifier codepaths; session DB spawn visibility is wired, but player phase ownership is still represented until canonical `Player` world-object phase state lands.
+- Full integration of `PhaseShift::can_see` into every canonical map/grid notifier codepath; session DB spawn visibility and the map creature visibility query can now apply the predicate, but player phase ownership is still represented until canonical `Player` world-object phase state lands.
 - GameObject/transport terrain swap application is still missing because Rust does not yet have the canonical C++ `GameObject::Create` / transport runtime path wired.
 - `PartyMemberPhaseStates` piece of `SMSG_PARTY_MEMBER_FULL_STATE`.
 
 **Suspicious / likely divergent (hipótesis pre-auditoría):**
 - The constant SMSG_PHASE_SHIFT_CHANGE payload uses `PhaseShiftFlags::Unphased = 0x08` always; once any aura-phase or area-phase is applied, that field has to flip off `Unphased` and on `NoCosmetic`/etc. as appropriate, otherwise client-side phase intersection drifts.
-- Canonical `WorldObject::CanSeeOrDetect` parity is not complete until player-owned phase state and grid notifier filtering use the same predicate; DB spawn send paths now apply the predicate, but non-DB/runtime object visibility still needs audit.
+- Canonical `WorldObject::CanSeeOrDetect` parity is not complete until player-owned phase state and every grid notifier/filter callsite uses the same predicate; DB spawn send paths and the map creature visibility query can now apply it, but non-DB/runtime object visibility still needs audit.
 - The packet writes `PreloadMapIDs` count even though we never preload any swap maps — fine for now but must align with eventual terrain-swap implementation to avoid double-counting bytes.
 
 **Tests existing:**
@@ -294,7 +294,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [ ] **#PHASE.23** Wire `MultiPersonalPhaseTracker::update` into the per-map tick (1-minute countdown semantics from `PersonalPhaseSpawns::DELETE_TIME_DEFAULT`) (M; partial: `MapInstance::update_personal_phases_like_cpp` queues expired objects and `remove_personal_phase_objects_like_cpp` removes them; server tick callsite remains open)
 - [ ] **#PHASE.24** Implement `InitDbPhaseShift` / `InitDbPersonalOwnership` / `InitDbVisibleMapId` so creature/gameobject DB rows that carry `phaseUseFlags` / `PhaseId` / `PhaseGroup` / `terrainSwapMap` columns produce correct phase state at spawn (M; partial: C++ helper semantics implemented; visible creature spawn/respawn path now selects and applies `phaseUseFlags`/`phaseid`/`phasegroup` plus `terrainSwapMap`; visible gameobject path now records represented `GameObject::GetPhaseShift()` from the same DB columns until canonical GO ownership lands; remaining spawn paths still need areatrigger/transport wiring and DB personal owner loader)
 - [x] **#PHASE.25** Implement `GetTerrainMapId(phaseShift, mapId, terrain, x, y)` so collision / area lookups select the alt map when a swap is active at coordinates (`terrain_map_id_for_phase_shift_like_cpp` + `TerrainGridFilesLikeCpp` / `TerrainGridFileIndexLikeCpp` in `crates/wow-world/src/map_manager.rs`) (M)
-- [ ] **#PHASE.26** Integrate `PhaseShift::can_see` into the Rust visibility / grid-notifier path (the C++ `WorldObject::CanSeeOrDetect` chain) so phased objects actually become invisible (H; partial: session creature/gameobject DB create paths now filter through `PhaseShift::can_see` against represented player phase; remaining canonical player phase ownership, non-DB object paths, and map/grid notifier filtering stay open)
+- [ ] **#PHASE.26** Integrate `PhaseShift::can_see` into the Rust visibility / grid-notifier path (the C++ `WorldObject::CanSeeOrDetect` chain) so phased objects actually become invisible (H; partial: session creature/gameobject DB create paths now filter through `PhaseShift::can_see` against represented player phase, and `MapManager::get_visible_creatures_in_phase` mirrors the C++ grid searcher phase filter for canonical creature queries; remaining canonical player phase ownership, non-DB object paths, and all grid notifier callsites stay open)
 - [ ] **#PHASE.27** Implement `FillPartyMemberPhase` for `SMSG_PARTY_MEMBER_FULL_STATE` so the group UI knows when a member is out of phase (M)
 - [ ] **#PHASE.28** Add `PrintToChat` / `FormatPhases` admin/debug helpers (L)
 - [ ] **#PHASE.29** Wire `OnConditionChange` to be re-fired by relevant condition triggers (quest state change, aura apply, item add — all in the C++ `Condition::Meets` triggers) (M, depends on Conditions module)

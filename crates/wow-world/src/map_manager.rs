@@ -2050,6 +2050,18 @@ impl MapManager {
         y: f32,
         _z: f32,
     ) -> Vec<WorldCreature> {
+        self.get_visible_creatures_in_phase(map_id, instance_id, x, y, _z, None)
+    }
+
+    pub fn get_visible_creatures_in_phase(
+        &self,
+        map_id: u16,
+        instance_id: u32,
+        x: f32,
+        y: f32,
+        z: f32,
+        seer_phase_shift: Option<&PhaseShift>,
+    ) -> Vec<WorldCreature> {
         let center_x = world_to_grid_x(x);
         let center_y = world_to_grid_y(y);
 
@@ -2063,9 +2075,15 @@ impl MapManager {
 
                 if let Some(grid) = self.get_grid(map_id, instance_id, grid_x, grid_y) {
                     for creature in grid.creatures.values() {
+                        if let Some(seer_phase_shift) = seer_phase_shift
+                            && !seer_phase_shift.can_see(creature.phase_shift())
+                        {
+                            continue;
+                        }
+
                         // Optional: Check actual distance for precise visibility
                         let dist =
-                            Position::distance(&Position::new(x, y, _z, 0.0), &creature.position());
+                            Position::distance(&Position::new(x, y, z, 0.0), &creature.position());
                         if dist <= VISIBILITY_RADIUS {
                             creatures.push(creature.clone());
                         }
@@ -3492,6 +3510,73 @@ mod tests {
         // Should not find creature far away
         let visible = manager.get_visible_creatures(0, 0, 1000.0, 1000.0, 0.0);
         assert!(visible.is_empty());
+    }
+
+    #[test]
+    fn visible_creatures_in_phase_filters_like_cpp_grid_searchers() {
+        let mut manager = MapManager::new();
+        let visible_guid = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 1, 100);
+        let hidden_guid = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 0, 0, 1, 101);
+
+        let mut seer_phase = PhaseShift::default();
+        seer_phase.add_phase_like_cpp(20, wow_constants::PhaseFlags::empty(), 1);
+
+        let mut visible_creature = WorldCreature::new(
+            visible_guid,
+            1,
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            50,
+            1,
+            5,
+            10,
+            20.0,
+            0,
+            35,
+            0,
+            0,
+        );
+        visible_creature
+            .creature
+            .unit_mut()
+            .world_mut()
+            .phase_shift_mut()
+            .add_phase_like_cpp(20, wow_constants::PhaseFlags::empty(), 1);
+
+        let mut hidden_creature = WorldCreature::new(
+            hidden_guid,
+            1,
+            Position::new(11.0, 10.0, 0.0, 0.0),
+            50,
+            1,
+            5,
+            10,
+            20.0,
+            0,
+            35,
+            0,
+            0,
+        );
+        hidden_creature
+            .creature
+            .unit_mut()
+            .world_mut()
+            .phase_shift_mut()
+            .add_phase_like_cpp(30, wow_constants::PhaseFlags::empty(), 1);
+
+        manager.add_creature(0, 0, 0, 0, visible_creature);
+        manager.add_creature(0, 0, 0, 0, hidden_creature);
+
+        let visible =
+            manager.get_visible_creatures_in_phase(0, 0, 10.0, 10.0, 0.0, Some(&seer_phase));
+        let visible_guids: HashSet<ObjectGuid> = visible.iter().map(WorldCreature::guid).collect();
+        assert!(visible_guids.contains(&visible_guid));
+        assert!(!visible_guids.contains(&hidden_guid));
+
+        let unfiltered = manager.get_visible_creatures(0, 0, 10.0, 10.0, 0.0);
+        let unfiltered_guids: HashSet<ObjectGuid> =
+            unfiltered.iter().map(WorldCreature::guid).collect();
+        assert!(unfiltered_guids.contains(&visible_guid));
+        assert!(unfiltered_guids.contains(&hidden_guid));
     }
 
     fn unique_test_dir(name: &str) -> std::path::PathBuf {
