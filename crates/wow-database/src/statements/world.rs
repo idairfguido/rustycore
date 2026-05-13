@@ -201,6 +201,8 @@ pub enum WorldStatements {
     SEL_LOOT_TEMPLATE_CONDITION_REFERENCE_USES,
     /// Load distinct C++ ConditionMgr reference-condition template IDs for startup validation.
     SEL_CONDITION_REFERENCE_TEMPLATE_IDS,
+    /// Load all C++ ConditionMgr conditions rows.
+    SEL_CONDITIONS,
     /// Load C++ ItemEnchantmentMgr random enchantment groups.
     SEL_ITEM_RANDOM_ENCHANTMENT_TEMPLATE,
     /// Load all area trigger teleport destinations.
@@ -656,6 +658,12 @@ impl StatementDef for WorldStatements {
                 "FROM conditions ",
                 "WHERE SourceTypeOrReferenceId < 0 AND SourceGroup = 0 AND SourceEntry = 0 AND SourceId = 0 ",
                 "ORDER BY -SourceTypeOrReferenceId",
+            ),
+            Self::SEL_CONDITIONS => concat!(
+                "SELECT SourceTypeOrReferenceId, SourceGroup, SourceEntry, SourceId, ElseGroup, ",
+                "ConditionTypeOrReference, ConditionTarget, ConditionValue1, ConditionValue2, ConditionValue3, ",
+                "COALESCE(ConditionStringValue1, ''), NegativeCondition, ErrorType, ErrorTextId, COALESCE(ScriptName, '') ",
+                "FROM conditions",
             ),
             Self::SEL_ITEM_RANDOM_ENCHANTMENT_TEMPLATE => {
                 "SELECT Id, EnchantmentId, Chance FROM item_random_enchantment_template"
