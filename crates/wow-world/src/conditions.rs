@@ -518,7 +518,7 @@ pub fn is_object_meeting_trainer_spell_conditions_like_cpp<'a>(
     meets: impl FnMut(&'a Condition, &mut ConditionSourceInfo<'a>) -> bool,
 ) -> bool {
     if let Some(conditions) = condition_store.conditions_for_like_cpp(
-        ConditionSourceType::NpcVendor,
+        ConditionSourceType::TrainerSpell,
         ConditionId::new(trainer_id, spell_id as i32, 0),
     ) {
         let mut source_info = ConditionSourceInfo::from_targets(player, None, None);
@@ -1049,6 +1049,13 @@ mod tests {
                 condition_type: ConditionType::Aura,
                 ..Condition::default()
             },
+            Condition {
+                source_type: ConditionSourceType::TrainerSpell,
+                source_group: 50,
+                source_entry: 60,
+                condition_type: ConditionType::Aura,
+                ..Condition::default()
+            },
         ]);
         let player = world_object(571, 1);
         let other = world_object(571, 1);
@@ -1077,10 +1084,17 @@ mod tests {
         ));
         assert!(is_object_meeting_trainer_spell_conditions_like_cpp(
             &store,
+            50,
+            60,
+            Some(&player),
+            |_, source_info| std::ptr::eq(source_info.condition_targets[0].unwrap(), &player),
+        ));
+        assert!(is_object_meeting_trainer_spell_conditions_like_cpp(
+            &store,
             30,
             40,
             Some(&player),
-            |_, source_info| std::ptr::eq(source_info.condition_targets[0].unwrap(), &player),
+            |_, _| false,
         ));
     }
 
