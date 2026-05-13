@@ -36,6 +36,8 @@ pub struct ConditionSourceInfo<'a> {
     pub unit_targets: [Option<ConditionUnitSnapshot>; MAX_CONDITION_TARGETS],
     pub player_targets: [Option<ConditionPlayerSnapshot>; MAX_CONDITION_TARGETS],
     pub spawn_id_targets: [Option<u64>; MAX_CONDITION_TARGETS],
+    pub private_object_targets: [bool; MAX_CONDITION_TARGETS],
+    pub string_id_targets: [Option<&'a [&'a str]>; MAX_CONDITION_TARGETS],
     pub condition_map: Option<ConditionMapRef>,
     pub last_failed_condition: Option<&'a Condition>,
 }
@@ -100,6 +102,8 @@ impl<'a> ConditionSourceInfo<'a> {
             unit_targets: [None; MAX_CONDITION_TARGETS],
             player_targets: [None; MAX_CONDITION_TARGETS],
             spawn_id_targets: [None; MAX_CONDITION_TARGETS],
+            private_object_targets: [false; MAX_CONDITION_TARGETS],
+            string_id_targets: [None; MAX_CONDITION_TARGETS],
             condition_map,
             last_failed_condition: None,
         }
@@ -112,6 +116,8 @@ impl<'a> ConditionSourceInfo<'a> {
             unit_targets: [None; MAX_CONDITION_TARGETS],
             player_targets: [None; MAX_CONDITION_TARGETS],
             spawn_id_targets: [None; MAX_CONDITION_TARGETS],
+            private_object_targets: [false; MAX_CONDITION_TARGETS],
+            string_id_targets: [None; MAX_CONDITION_TARGETS],
             condition_map: Some(condition_map),
             last_failed_condition: None,
         }
@@ -140,6 +146,22 @@ impl<'a> ConditionSourceInfo<'a> {
     pub fn set_spawn_id_target_snapshot(&mut self, target_index: usize, spawn_id: u64) {
         if target_index < MAX_CONDITION_TARGETS {
             self.spawn_id_targets[target_index] = Some(spawn_id);
+        }
+    }
+
+    pub fn set_private_object_target_snapshot(&mut self, target_index: usize, is_private: bool) {
+        if target_index < MAX_CONDITION_TARGETS {
+            self.private_object_targets[target_index] = is_private;
+        }
+    }
+
+    pub fn set_string_id_target_snapshot(
+        &mut self,
+        target_index: usize,
+        string_ids: &'a [&'a str],
+    ) {
+        if target_index < MAX_CONDITION_TARGETS {
+            self.string_id_targets[target_index] = Some(string_ids);
         }
     }
 
@@ -429,8 +451,17 @@ pub fn condition_meets_basic_like_cpp<'a>(
                     cond_meets = unit.is_charmed;
                 }
             }
-            ConditionType::PrivateObject | ConditionType::StringId => {
-                return ConditionMeetResult::Unsupported;
+            ConditionType::PrivateObject => {
+                cond_meets = source_info.private_object_targets[target_index];
+            }
+            ConditionType::StringId => {
+                if matches!(object.object().type_id(), TypeId::Unit | TypeId::GameObject)
+                    && let Some(string_ids) = source_info.string_id_targets[target_index]
+                {
+                    cond_meets = string_ids
+                        .iter()
+                        .any(|string_id| *string_id == condition.condition_string_value1.as_str());
+                }
             }
             ConditionType::None | ConditionType::MapId => {}
             _ => return ConditionMeetResult::Unsupported,
@@ -863,6 +894,8 @@ mod tests {
         target.phase_shift_mut().add_visible_map_id_like_cpp(609, 1);
         let mut info = ConditionSourceInfo::from_targets(Some(&target), None, None);
         info.set_spawn_id_target_snapshot(0, 42);
+        info.set_private_object_target_snapshot(0, true);
+        info.set_string_id_target_snapshot(0, &["template-id", "spawn-id", "script-id"]);
 
         let entry_condition = Condition {
             condition_type: ConditionType::ObjectEntryGuid,
@@ -884,6 +917,25 @@ mod tests {
         };
         assert_eq!(
             condition_meets_basic_like_cpp(&spawn_condition, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(true)
+        );
+
+        let private_condition = Condition {
+            condition_type: ConditionType::PrivateObject,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&private_condition, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(true)
+        );
+
+        let string_id_condition = Condition {
+            condition_type: ConditionType::StringId,
+            condition_string_value1: "spawn-id".to_string(),
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&string_id_condition, &mut info, |_, _| false),
             ConditionMeetResult::Evaluated(true)
         );
 
