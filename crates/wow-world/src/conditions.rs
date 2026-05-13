@@ -15,6 +15,12 @@ use wow_data::{Condition, ConditionEntriesByTypeStore, ConditionId};
 use wow_entities::WorldObject;
 use wow_loot::{LootStoreItemContext, condition_source_type_for_loot_store_kind_like_cpp};
 
+pub const QUEST_STATUS_NONE_LIKE_CPP: u8 = 0;
+pub const QUEST_STATUS_COMPLETE_LIKE_CPP: u8 = 1;
+pub const QUEST_STATUS_INCOMPLETE_LIKE_CPP: u8 = 3;
+pub const QUEST_STATUS_FAILED_LIKE_CPP: u8 = 5;
+pub const QUEST_STATUS_REWARDED_LIKE_CPP: u8 = 6;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ConditionMapRef {
     pub map_id: u32,
@@ -35,6 +41,7 @@ pub struct ConditionSourceInfo<'a> {
     pub condition_targets: [Option<&'a WorldObject>; MAX_CONDITION_TARGETS],
     pub unit_targets: [Option<ConditionUnitSnapshot>; MAX_CONDITION_TARGETS],
     pub player_targets: [Option<ConditionPlayerSnapshot>; MAX_CONDITION_TARGETS],
+    pub player_quest_targets: [Option<ConditionPlayerQuestSnapshot<'a>>; MAX_CONDITION_TARGETS],
     pub spawn_id_targets: [Option<u64>; MAX_CONDITION_TARGETS],
     pub private_object_targets: [bool; MAX_CONDITION_TARGETS],
     pub string_id_targets: [Option<&'a [&'a str]>; MAX_CONDITION_TARGETS],
@@ -66,6 +73,56 @@ pub struct ConditionPlayerSnapshot {
     pub is_game_master: bool,
     pub pet_type: Option<u32>,
     pub is_in_flight: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConditionQuestStatusSnapshot {
+    pub quest_id: u32,
+    pub status: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConditionQuestObjectiveProgressSnapshot {
+    pub quest_id: u32,
+    pub objective_id: u32,
+    pub counter: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConditionPlayerQuestSnapshot<'a> {
+    pub statuses: &'a [ConditionQuestStatusSnapshot],
+    pub objective_progress: &'a [ConditionQuestObjectiveProgressSnapshot],
+    pub rewarded_quest_ids: &'a [u32],
+    pub daily_quest_ids: &'a [u32],
+}
+
+impl ConditionPlayerQuestSnapshot<'_> {
+    fn quest_status_like_cpp(self, quest_id: u32) -> u8 {
+        self.statuses
+            .iter()
+            .find(|status| status.quest_id == quest_id)
+            .map(|status| status.status)
+            .or_else(|| {
+                self.is_quest_rewarded_like_cpp(quest_id)
+                    .then_some(QUEST_STATUS_REWARDED_LIKE_CPP)
+            })
+            .unwrap_or(QUEST_STATUS_NONE_LIKE_CPP)
+    }
+
+    fn is_quest_rewarded_like_cpp(self, quest_id: u32) -> bool {
+        self.rewarded_quest_ids.contains(&quest_id)
+    }
+
+    fn is_daily_quest_done_like_cpp(self, quest_id: u32) -> bool {
+        self.daily_quest_ids.contains(&quest_id)
+    }
+
+    fn quest_is_in_log_like_cpp(self, quest_id: u32) -> bool {
+        !matches!(
+            self.quest_status_like_cpp(quest_id),
+            QUEST_STATUS_NONE_LIKE_CPP | QUEST_STATUS_REWARDED_LIKE_CPP
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,6 +158,7 @@ impl<'a> ConditionSourceInfo<'a> {
             condition_targets,
             unit_targets: [None; MAX_CONDITION_TARGETS],
             player_targets: [None; MAX_CONDITION_TARGETS],
+            player_quest_targets: [None; MAX_CONDITION_TARGETS],
             spawn_id_targets: [None; MAX_CONDITION_TARGETS],
             private_object_targets: [false; MAX_CONDITION_TARGETS],
             string_id_targets: [None; MAX_CONDITION_TARGETS],
@@ -115,6 +173,7 @@ impl<'a> ConditionSourceInfo<'a> {
             condition_targets: [None; MAX_CONDITION_TARGETS],
             unit_targets: [None; MAX_CONDITION_TARGETS],
             player_targets: [None; MAX_CONDITION_TARGETS],
+            player_quest_targets: [None; MAX_CONDITION_TARGETS],
             spawn_id_targets: [None; MAX_CONDITION_TARGETS],
             private_object_targets: [false; MAX_CONDITION_TARGETS],
             string_id_targets: [None; MAX_CONDITION_TARGETS],
@@ -140,6 +199,16 @@ impl<'a> ConditionSourceInfo<'a> {
     ) {
         if target_index < MAX_CONDITION_TARGETS {
             self.player_targets[target_index] = Some(snapshot);
+        }
+    }
+
+    pub fn set_player_quest_target_snapshot(
+        &mut self,
+        target_index: usize,
+        snapshot: ConditionPlayerQuestSnapshot<'a>,
+    ) {
+        if target_index < MAX_CONDITION_TARGETS {
+            self.player_quest_targets[target_index] = Some(snapshot);
         }
     }
 
@@ -263,8 +332,9 @@ pub fn condition_meets_basic_like_cpp<'a>(
 
     if let Some(object) = object {
         let unit = source_info.unit_targets[target_index];
-        let player =
-            source_info.player_targets[target_index].filter(|_| is_player_object_like_cpp(object));
+        let is_player = is_player_object_like_cpp(object);
+        let player = source_info.player_targets[target_index].filter(|_| is_player);
+        let player_quests = source_info.player_quest_targets[target_index].filter(|_| is_player);
         match condition.condition_type {
             ConditionType::ZoneId => cond_meets = object.zone_id() == condition.condition_value1,
             ConditionType::AreaId => {
@@ -289,6 +359,30 @@ pub fn condition_meets_basic_like_cpp<'a>(
             ConditionType::Gender => {
                 if let Some(player) = player {
                     cond_meets = player.native_gender == condition.condition_value1;
+                }
+            }
+            ConditionType::QuestRewarded => {
+                if let Some(quests) = player_quests {
+                    cond_meets = quests.is_quest_rewarded_like_cpp(condition.condition_value1);
+                }
+            }
+            ConditionType::QuestTaken => {
+                if let Some(quests) = player_quests {
+                    cond_meets = quests.quest_status_like_cpp(condition.condition_value1)
+                        == QUEST_STATUS_INCOMPLETE_LIKE_CPP;
+                }
+            }
+            ConditionType::QuestComplete => {
+                if let Some(quests) = player_quests {
+                    cond_meets = quests.quest_status_like_cpp(condition.condition_value1)
+                        == QUEST_STATUS_COMPLETE_LIKE_CPP
+                        && !quests.is_quest_rewarded_like_cpp(condition.condition_value1);
+                }
+            }
+            ConditionType::QuestNone => {
+                if let Some(quests) = player_quests {
+                    cond_meets = quests.quest_status_like_cpp(condition.condition_value1)
+                        == QUEST_STATUS_NONE_LIKE_CPP;
                 }
             }
             ConditionType::Level => {
@@ -444,6 +538,41 @@ pub fn condition_meets_basic_like_cpp<'a>(
             ConditionType::Taxi => {
                 if let Some(player) = player {
                     cond_meets = player.is_in_flight;
+                }
+            }
+            ConditionType::DailyQuestDone => {
+                if let Some(quests) = player_quests {
+                    cond_meets = quests.is_daily_quest_done_like_cpp(condition.condition_value1);
+                }
+            }
+            ConditionType::QuestState => {
+                if let Some(quests) = player_quests {
+                    let quest_status = quests.quest_status_like_cpp(condition.condition_value1);
+                    cond_meets = ((condition.condition_value2 & (1 << QUEST_STATUS_NONE_LIKE_CPP))
+                        != 0
+                        && quest_status == QUEST_STATUS_NONE_LIKE_CPP)
+                        || ((condition.condition_value2 & (1 << QUEST_STATUS_COMPLETE_LIKE_CPP))
+                            != 0
+                            && quest_status == QUEST_STATUS_COMPLETE_LIKE_CPP)
+                        || ((condition.condition_value2 & (1 << QUEST_STATUS_INCOMPLETE_LIKE_CPP))
+                            != 0
+                            && quest_status == QUEST_STATUS_INCOMPLETE_LIKE_CPP)
+                        || ((condition.condition_value2 & (1 << QUEST_STATUS_FAILED_LIKE_CPP))
+                            != 0
+                            && quest_status == QUEST_STATUS_FAILED_LIKE_CPP)
+                        || ((condition.condition_value2 & (1 << QUEST_STATUS_REWARDED_LIKE_CPP))
+                            != 0
+                            && quests.is_quest_rewarded_like_cpp(condition.condition_value1));
+                }
+            }
+            ConditionType::QuestObjectiveProgress => {
+                if let Some(quests) = player_quests
+                    && let Some(progress) = quests.objective_progress.iter().find(|progress| {
+                        progress.objective_id == condition.condition_value1
+                            && quests.quest_is_in_log_like_cpp(progress.quest_id)
+                    })
+                {
+                    cond_meets = progress.counter == condition.condition_value3 as i32;
                 }
             }
             ConditionType::Charmed => {
@@ -1174,6 +1303,106 @@ mod tests {
                 "{condition:?}"
             );
         }
+    }
+
+    #[test]
+    fn basic_condition_meets_player_quest_snapshot_branches_like_cpp() {
+        let target = player_object(571, 2);
+        let statuses = [
+            ConditionQuestStatusSnapshot {
+                quest_id: 10,
+                status: QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+            },
+            ConditionQuestStatusSnapshot {
+                quest_id: 20,
+                status: QUEST_STATUS_COMPLETE_LIKE_CPP,
+            },
+            ConditionQuestStatusSnapshot {
+                quest_id: 30,
+                status: QUEST_STATUS_FAILED_LIKE_CPP,
+            },
+        ];
+        let objective_progress = [ConditionQuestObjectiveProgressSnapshot {
+            quest_id: 10,
+            objective_id: 900,
+            counter: 4,
+        }];
+        let rewarded_quest_ids = [40];
+        let daily_quest_ids = [50];
+        let mut info = ConditionSourceInfo::from_targets(Some(&target), None, None);
+        info.set_player_quest_target_snapshot(
+            0,
+            ConditionPlayerQuestSnapshot {
+                statuses: &statuses,
+                objective_progress: &objective_progress,
+                rewarded_quest_ids: &rewarded_quest_ids,
+                daily_quest_ids: &daily_quest_ids,
+            },
+        );
+
+        let conditions = vec![
+            Condition {
+                condition_type: ConditionType::QuestTaken,
+                condition_value1: 10,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::QuestComplete,
+                condition_value1: 20,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::QuestNone,
+                condition_value1: 999,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::QuestRewarded,
+                condition_value1: 40,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::QuestState,
+                condition_value1: 30,
+                condition_value2: 1 << QUEST_STATUS_FAILED_LIKE_CPP,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::QuestState,
+                condition_value1: 40,
+                condition_value2: 1 << QUEST_STATUS_REWARDED_LIKE_CPP,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::QuestObjectiveProgress,
+                condition_value1: 900,
+                condition_value3: 4,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::DailyQuestDone,
+                condition_value1: 50,
+                ..Condition::default()
+            },
+        ];
+
+        for condition in &conditions {
+            assert_eq!(
+                condition_meets_basic_like_cpp(condition, &mut info, |_, _| false),
+                ConditionMeetResult::Evaluated(true),
+                "{condition:?}"
+            );
+        }
+
+        let rewarded_is_not_complete = Condition {
+            condition_type: ConditionType::QuestComplete,
+            condition_value1: 40,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&rewarded_is_not_complete, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(false)
+        );
     }
 
     #[test]
