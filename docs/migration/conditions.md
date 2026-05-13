@@ -3,9 +3,9 @@
 > **C++ canonical path:** `src/server/game/Conditions/` (`ConditionMgr`, `DisableMgr`)
 > **Rust target crate(s):** `crates/wow-data/` (load `conditions` table, store `ConditionContainer` keyed by `(SourceType, SourceGroup, SourceEntry)`), `crates/wow-world/src/conditions/` (the `Meets` evaluator with access to `Player`/`Unit`/`Map`), no dedicated crate yet.
 > **Layer:** L7 (Game systems — depends on Entities/Player+Unit L4, Quests L6, Reputation L6, Achievements L7, Map L4, World/DB2 L1; depended on by Phasing L7, Loot L6, Gossip L6, SmartScripts L7, SpellMgr L5, Vendors, Trainers, Graveyards, AreaTriggers, Conversation, GameObjects)
-> **Status:** ❌ not started — there is no `ConditionMgr` in Rust, no `Condition` struct, no `conditions` table loader. Several upstream systems (Phasing, Gossip menus, Loot drops, Vendor item visibility, Trainer spell prerequisites) depend on a working ConditionMgr; right now those callsites either return "always true" or are absent entirely.
-> **Audited vs C++:** ✅ audited 2026-05-01 (status confirmed ❌ — silent-default bug catalogued in §13)
-> **Last updated:** 2026-05-01
+> **Status:** 🟡 in progress — core data shapes, SQL row parsing, static load validation, condition grouping/reference semantics, searcher masks, partial `Condition::Meets`, and specialized lookup helpers are implemented. Full external-store validation, downstream source-type attachment, remaining evaluator branches, DB2 helpers, `DisableMgr`, and startup wiring remain open.
+> **Audited vs C++:** ✅ audited 2026-05-01; implementation progress re-checked against C++ continuously during port work.
+> **Last updated:** 2026-05-13
 
 ---
 
@@ -216,8 +216,10 @@ ConditionMgr is server-internal — it emits no packets directly. Indirectly, wh
 - `wow-data::ConditionEntriesByTypeStore` groups parsed rows by `ConditionSourceType` and `ConditionId`, and `ConditionsReference` mirrors the C++ weak-reference holder used by downstream modules across reloads.
 
 **What's missing vs C++:**
-- Everything: data types (`Condition`, `ConditionSourceInfo`, `ConditionId`, `ConditionContainer`), enums (`ConditionTypes` ~58, `ConditionSourceType` ~33), the loader, the per-type evaluators, the source-type index builders, the `IsPlayerMeetingCondition` / `IsMeetingWorldStateExpression` / `IsUnitMeetingCondition` static helpers, `DisableMgr`.
-- All downstream callsites (Phasing, Loot, Gossip, Vendors, Trainers, etc.) currently behave as if every condition passes.
+- External-store-backed validation in `isConditionTypeValid` / `isSourceTypeValid` (spell, item, quest, faction, area, achievement, phase, DB2, loot/gossip/trainer/vendor/spawn references).
+- Source-type index builders/attachments into downstream systems (`LootTemplate`, gossip menus/options, spell implicit targets, phases, graveyards) and startup/reload wiring.
+- Remaining runtime `Condition::Meets` branches that need real player/unit/map/DB2 state, plus `IsPlayerMeetingCondition`, `IsMeetingWorldStateExpression`, `IsUnitMeetingCondition`, and `DisableMgr`.
+- Downstream callsites are only partially prepared; Loot/Gossip/Vendors/Trainers/Phasing still need real ConditionMgr integration before they can claim full parity.
 
 **Suspicious / likely divergent (hipótesis pre-auditoría):**
 - Without ConditionMgr, every NPC vendor sells every item to every player; loot tables are unfiltered; quest gossip menus show all options; phases never suppress; spell-click NPCs accept any clicker. This is not "divergent", it is "absent" — once a feature is built that requires conditions, expect immediate-and-loud regressions.
@@ -346,7 +348,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 
 | Scope | Decision | C++ retained | Evidence |
 |---|---|---|---|
-| `active_port_scope` | Full C++ surface remains in migration scope; no product exclusion recorded. | 4 files / 4800 lines; refs: `/home/server/woltk-trinity-legacy/src/server/game/Conditions/ConditionMgr.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Conditions/DisableMgr.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Conditions/ConditionMgr.h` | `crates/wow-data/` (load `conditions` table, store `ConditionContainer` keyed by `(SourceType, SourceGroup, SourceEntry)`), `crates/wow-world/src/conditions/` (the `Meets` evaluator with access to `Player`/`Unit`/`Map`), no dedicated crate yet. \| ❌ not started — there is no `ConditionMgr` in Rust, no `Condition` struct, no `conditions` table loader. Several upstream systems (Phasing, Gossip menus, Loot drops, Vendor item visibility, Trainer spell prerequisites) depend on a working ConditionMgr; right now those callsites either return "always true" or are absent entirely. |
+| `active_port_scope` | Full C++ surface remains in migration scope; no product exclusion recorded. | 4 files / 4800 lines; refs: `/home/server/woltk-trinity-legacy/src/server/game/Conditions/ConditionMgr.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Conditions/DisableMgr.cpp`, `/home/server/woltk-trinity-legacy/src/server/game/Conditions/ConditionMgr.h` | `crates/wow-data/` (conditions table row parsing, static validation, storage), `crates/wow-world/src/conditions.rs` (runtime condition evaluation and lookup helpers), downstream modules still to wire. |
 
 <!-- REFINE.025:END product-scope -->
 
@@ -427,4 +429,4 @@ Evidence collected by exhaustive grep across `crates/`:
 | Phasing area entry | `phasing.md` (also ❌) | N/A — phasing itself stubbed (see phasing audit). |
 | Smart-script branches | not yet implemented | N/A. |
 
-**Migration unblock priority:** ConditionMgr is the L7 keystone. Phasing, Loot quest filtering, Gossip polish, Vendors, Trainers all unblock here. Recommend tackling **#COND.1 → #COND.20** before any of the dependent modules can claim ✅. No code change made by this audit; all 32 sub-tasks (#COND.1 – #COND.32) remain accurate and are still the work plan.
+**Migration unblock priority:** ConditionMgr is the L7 keystone. Phasing, Loot quest filtering, Gossip polish, Vendors, Trainers all unblock here. Continue closing **#COND.7**, **#COND.20**, **#COND.21**, and **#COND.22** before dependent modules can claim full parity.
