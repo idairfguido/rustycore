@@ -45,7 +45,9 @@ pub struct ConditionUnitSnapshot {
     pub max_health: u64,
     pub class_mask: u32,
     pub race: u8,
+    pub creature_type: Option<u32>,
     pub is_alive: bool,
+    pub is_charmed: bool,
     pub in_water: bool,
     pub unit_state: u32,
     pub stand_state: u32,
@@ -322,6 +324,14 @@ pub fn condition_meets_basic_like_cpp<'a>(
                     cond_meets = unit.in_water;
                 }
             }
+            ConditionType::CreatureType => {
+                if let Some(unit) = unit
+                    && object.object().type_id() == TypeId::Unit
+                    && let Some(creature_type) = unit.creature_type
+                {
+                    cond_meets = creature_type == condition.condition_value1;
+                }
+            }
             ConditionType::StandState => {
                 if let Some(unit) = unit {
                     cond_meets = if condition.condition_value1 == 0 {
@@ -361,7 +371,11 @@ pub fn condition_meets_basic_like_cpp<'a>(
                     cond_meets = player.is_in_flight;
                 }
             }
-            ConditionType::Charmed => return ConditionMeetResult::Unsupported,
+            ConditionType::Charmed => {
+                if let Some(unit) = unit {
+                    cond_meets = unit.is_charmed;
+                }
+            }
             ConditionType::PrivateObject | ConditionType::StringId => {
                 return ConditionMeetResult::Unsupported;
             }
@@ -849,7 +863,9 @@ mod tests {
                 max_health: 1000,
                 class_mask: 1 << (2 - 1),
                 race: 4,
+                creature_type: Some(7),
                 is_alive: true,
+                is_charmed: true,
                 in_water: true,
                 unit_state: 0x20,
                 stand_state: 8,
@@ -896,6 +912,15 @@ mod tests {
             },
             Condition {
                 condition_type: ConditionType::InWater,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::CreatureType,
+                condition_value1: 7,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::Charmed,
                 ..Condition::default()
             },
             Condition {
@@ -985,7 +1010,9 @@ mod tests {
                 max_health: 1,
                 class_mask: 1,
                 race: 1,
+                creature_type: None,
                 is_alive: true,
+                is_charmed: false,
                 in_water: false,
                 unit_state: 0,
                 stand_state: UnitStandStateType::SitChair as u32,
@@ -1011,6 +1038,38 @@ mod tests {
         };
         assert_eq!(
             condition_meets_basic_like_cpp(&stand_mode, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(false)
+        );
+    }
+
+    #[test]
+    fn basic_condition_meets_creature_type_requires_creature_like_cpp() {
+        let target = player_object(571, 2);
+        let mut info = ConditionSourceInfo::from_targets(Some(&target), None, None);
+        info.set_unit_target_snapshot(
+            0,
+            ConditionUnitSnapshot {
+                level: 1,
+                health: 1,
+                max_health: 1,
+                class_mask: 1,
+                race: 1,
+                creature_type: Some(7),
+                is_alive: true,
+                is_charmed: false,
+                in_water: false,
+                unit_state: 0,
+                stand_state: UnitStandStateType::Stand as u32,
+            },
+        );
+
+        let condition = Condition {
+            condition_type: ConditionType::CreatureType,
+            condition_value1: 7,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&condition, &mut info, |_, _| false),
             ConditionMeetResult::Evaluated(false)
         );
     }
