@@ -276,6 +276,19 @@ pub fn condition_meets_basic_like_cpp<'a>(
                     .object()
                     .is_type(TypeMask::from_bits_truncate(condition.condition_value1));
             }
+            ConditionType::DistanceTo => {
+                if let Some(to_object) = usize::try_from(condition.condition_value1)
+                    .ok()
+                    .filter(|target| *target < MAX_CONDITION_TARGETS)
+                    .and_then(|target| source_info.condition_targets[target])
+                {
+                    cond_meets = compare_values_f32_like_cpp(
+                        condition.condition_value3,
+                        object.distance(to_object),
+                        condition.condition_value2 as f32,
+                    );
+                }
+            }
             ConditionType::PhaseId => {
                 cond_meets = object
                     .phase_shift()
@@ -703,6 +716,7 @@ pub fn is_loot_store_item_meeting_conditions_like_cpp<'a>(
 mod tests {
     use super::*;
     use wow_constants::{ConditionType, PhaseFlags, TypeId, TypeMask};
+    use wow_core::Position;
     use wow_loot::{LootStoreItem, LootStoreItemContext, LootStoreKind};
 
     fn world_object(map_id: u32, instance_id: u32) -> WorldObject {
@@ -847,6 +861,30 @@ mod tests {
         };
         assert_eq!(
             condition_meets_basic_like_cpp(&terrain_condition, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(true)
+        );
+    }
+
+    #[test]
+    fn basic_condition_meets_distance_to_uses_cpp_target_and_combat_reach_distance() {
+        let mut target0 = world_object(571, 2);
+        let mut target1 = world_object(571, 2);
+        target0.relocate(Position::xyz(0.0, 0.0, 0.0));
+        target1.relocate(Position::xyz(3.0, 4.0, 0.0));
+        target0.set_combat_reach(1.0);
+        target1.set_combat_reach(1.0);
+
+        let mut info = ConditionSourceInfo::from_targets(Some(&target0), Some(&target1), None);
+        let condition = Condition {
+            condition_type: ConditionType::DistanceTo,
+            condition_value1: 1,
+            condition_value2: 3,
+            condition_value3: ComparisonType::LowEq as u32,
+            ..Condition::default()
+        };
+
+        assert_eq!(
+            condition_meets_basic_like_cpp(&condition, &mut info, |_, _| false),
             ConditionMeetResult::Evaluated(true)
         );
     }
