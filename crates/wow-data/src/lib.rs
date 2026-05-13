@@ -8,6 +8,7 @@
 pub mod area;
 pub mod area_trigger;
 pub mod chr_specialization;
+pub mod conditions;
 pub mod currency;
 pub mod dungeon_encounter;
 pub mod hotfix_cache;
@@ -45,6 +46,7 @@ pub use area_trigger::{
     AreaTriggerData, AreaTriggerStore, AreaTriggerTeleport, TriggerShape, load_area_triggers,
 };
 pub use chr_specialization::{ChrSpecializationEntry, ChrSpecializationStore};
+pub use conditions::{Condition, ConditionContainer, ConditionId};
 pub use currency::{CurrencyTypesEntry, CurrencyTypesStore};
 pub use dungeon_encounter::{DungeonEncounterEntry, DungeonEncounterStore};
 pub use hotfix_cache::{

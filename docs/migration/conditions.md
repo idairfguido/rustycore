@@ -203,6 +203,7 @@ ConditionMgr is server-internal — it emits no packets directly. Indirectly, wh
 
 **What's implemented:**
 - `crates/wow-constants/src/conditions.rs` defines C++-value-compatible `ConditionType`, `ConditionSourceType`, `RelationType`, `ConditionInstanceInfo`, `MAX_CONDITION_TARGETS`, and `ComparisonType` constants/enums from `ConditionMgr.h` / `Util.h`.
+- `crates/wow-data/src/conditions.rs` defines the owned `Condition`, `ConditionId`, and `ConditionContainer` data shapes with C++ constructor defaults and `Condition::isLoaded` parity.
 
 **What's missing vs C++:**
 - Everything: data types (`Condition`, `ConditionSourceInfo`, `ConditionId`, `ConditionContainer`), enums (`ConditionTypes` ~58, `ConditionSourceType` ~33), the loader, the per-type evaluators, the source-type index builders, the `IsPlayerMeetingCondition` / `IsMeetingWorldStateExpression` / `IsUnitMeetingCondition` static helpers, `DisableMgr`.
@@ -259,9 +260,9 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [x] **#COND.1** Define `ConditionTypes` enum (~58 variants + `MAX`) in `crates/wow-constants/src/conditions.rs` matching C++ values byte-for-byte (including the deprecated `SPAWNMASK_DEPRECATED = 19` and `OBJECT_ENTRY_GUID_LEGACY = 31` / `TYPE_MASK_LEGACY = 32`) (M)
 - [x] **#COND.2** Define `ConditionSourceType` enum (~33 variants + `MAX_DB_ALLOWED` + internal `REFERENCE_CONDITION` + `MAX`) (M)
 - [x] **#COND.3** Define auxiliary enums `RelationType` (6), `InstanceInfo` (4), `MaxConditionTargets = 3`, plus `ComparisonType` (referenced by `_LEVEL`, `_HP_VAL`, `_HP_PCT`, `_DISTANCE_TO`, `_BATTLE_PET_COUNT`) (L)
-- [ ] **#COND.4** Define `Condition` struct in `crates/wow-data/src/conditions.rs` with all 16 fields (`SourceType`, `SourceGroup`, `SourceEntry`, `SourceId`, `ElseGroup`, `ConditionType`, `ConditionTarget`, `ConditionValue1/2/3`, `ConditionStringValue1`, `ErrorType`, `ErrorTextId`, `ReferenceId`, `ScriptId`, `NegativeCondition`) and a `Default` impl (M)
+- [x] **#COND.4** Define `Condition` struct in `crates/wow-data/src/conditions.rs` with all 16 fields (`SourceType`, `SourceGroup`, `SourceEntry`, `SourceId`, `ElseGroup`, `ConditionType`, `ConditionTarget`, `ConditionValue1/2/3`, `ConditionStringValue1`, `ErrorType`, `ErrorTextId`, `ReferenceId`, `ScriptId`, `NegativeCondition`) and a `Default` impl (M)
 - [ ] **#COND.5** Define `ConditionSourceInfo` (3-target array, optional `Map` ref, mutable `LastFailedCondition` slot) (L)
-- [ ] **#COND.6** Define `ConditionId` `(SourceGroup, SourceEntry, SourceId)` with `Hash`/`Eq` (L)
+- [x] **#COND.6** Define `ConditionId` `(SourceGroup, SourceEntry, SourceId)` with `Hash`/`Eq` (L)
 - [ ] **#COND.7** Implement loader for `conditions` table — single SQL query, build `ConditionEntriesByTypeArray` (`[ConditionsByEntryMap; CONDITION_SOURCE_TYPE_MAX]`), validate every row via `is_source_type_valid` + `is_condition_type_valid`, drop invalid rows with `tc_log_error("sql.sql", …)`-equivalent (XL — split: row parser, validator, indexer)
 - [ ] **#COND.8** Resolve `ReferenceId` chains during load — a condition with `SourceTypeOrReferenceId < 0` is a reference; expand once flat (M)
 - [ ] **#COND.9** Implement `Condition::meets` evaluator — the giant switch over `ConditionType`. Split by category: presence/equality (NONE, ZONEID, AREAID, MAPID, TEAM, CLASS, RACE, GENDER, LEVEL, ALIVE, IN_WATER, GAMEMASTER, CHARMED, TAXI, PRIVATE_OBJECT) (M)
