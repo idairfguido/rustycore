@@ -202,7 +202,7 @@ ConditionMgr is server-internal — it emits no packets directly. Indirectly, wh
 - Stub-level dependencies: a few packets (`crates/wow-packet/src/packets/character.rs`, `quest.rs`, `update.rs`) write `0` for `UnlockedConditionalAppearanceCount`, `ConditionalDescriptionText count`, `ContentTuningConditionMask`, `ConditionalTransmog.Size` — none of these are ConditionMgr concerns, they are unrelated DB2-driven optional client fields.
 
 **What's implemented:**
-- Nothing in ConditionMgr.
+- `crates/wow-constants/src/conditions.rs` defines C++-value-compatible `ConditionType`, `ConditionSourceType`, `RelationType`, `ConditionInstanceInfo`, `MAX_CONDITION_TARGETS`, and `ComparisonType` constants/enums from `ConditionMgr.h` / `Util.h`.
 
 **What's missing vs C++:**
 - Everything: data types (`Condition`, `ConditionSourceInfo`, `ConditionId`, `ConditionContainer`), enums (`ConditionTypes` ~58, `ConditionSourceType` ~33), the loader, the per-type evaluators, the source-type index builders, the `IsPlayerMeetingCondition` / `IsMeetingWorldStateExpression` / `IsUnitMeetingCondition` static helpers, `DisableMgr`.
@@ -256,9 +256,9 @@ Numera los items para poder referenciarlos desde `MIGRATION_ROADMAP.md` sección
 
 Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>12h, splitear).
 
-- [ ] **#COND.1** Define `ConditionTypes` enum (~58 variants + `MAX`) in `crates/wow-constants/src/conditions.rs` matching C++ values byte-for-byte (including the deprecated `SPAWNMASK_DEPRECATED = 19` and `OBJECT_ENTRY_GUID_LEGACY = 31` / `TYPE_MASK_LEGACY = 32`) (M)
-- [ ] **#COND.2** Define `ConditionSourceType` enum (~33 variants + `MAX_DB_ALLOWED` + internal `REFERENCE_CONDITION` + `MAX`) (M)
-- [ ] **#COND.3** Define auxiliary enums `RelationType` (6), `InstanceInfo` (4), `MaxConditionTargets = 3`, plus `ComparisonType` (referenced by `_LEVEL`, `_HP_VAL`, `_HP_PCT`, `_DISTANCE_TO`, `_BATTLE_PET_COUNT`) (L)
+- [x] **#COND.1** Define `ConditionTypes` enum (~58 variants + `MAX`) in `crates/wow-constants/src/conditions.rs` matching C++ values byte-for-byte (including the deprecated `SPAWNMASK_DEPRECATED = 19` and `OBJECT_ENTRY_GUID_LEGACY = 31` / `TYPE_MASK_LEGACY = 32`) (M)
+- [x] **#COND.2** Define `ConditionSourceType` enum (~33 variants + `MAX_DB_ALLOWED` + internal `REFERENCE_CONDITION` + `MAX`) (M)
+- [x] **#COND.3** Define auxiliary enums `RelationType` (6), `InstanceInfo` (4), `MaxConditionTargets = 3`, plus `ComparisonType` (referenced by `_LEVEL`, `_HP_VAL`, `_HP_PCT`, `_DISTANCE_TO`, `_BATTLE_PET_COUNT`) (L)
 - [ ] **#COND.4** Define `Condition` struct in `crates/wow-data/src/conditions.rs` with all 16 fields (`SourceType`, `SourceGroup`, `SourceEntry`, `SourceId`, `ElseGroup`, `ConditionType`, `ConditionTarget`, `ConditionValue1/2/3`, `ConditionStringValue1`, `ErrorType`, `ErrorTextId`, `ReferenceId`, `ScriptId`, `NegativeCondition`) and a `Default` impl (M)
 - [ ] **#COND.5** Define `ConditionSourceInfo` (3-target array, optional `Map` ref, mutable `LastFailedCondition` slot) (L)
 - [ ] **#COND.6** Define `ConditionId` `(SourceGroup, SourceEntry, SourceId)` with `Hash`/`Eq` (L)
