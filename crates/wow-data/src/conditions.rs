@@ -13,8 +13,18 @@ use std::{
 use anyhow::Result;
 use num_traits::FromPrimitive;
 use tracing::info;
-use wow_constants::{ConditionSourceType, ConditionType};
+use wow_constants::{ConditionSourceType, ConditionType, TypeId, TypeMask};
 use wow_database::{WorldDatabase, WorldStatements};
+
+pub const GRID_MAP_TYPE_MASK_CORPSE: u32 = 0x01;
+pub const GRID_MAP_TYPE_MASK_CREATURE: u32 = 0x02;
+pub const GRID_MAP_TYPE_MASK_DYNAMIC_OBJECT: u32 = 0x04;
+pub const GRID_MAP_TYPE_MASK_GAME_OBJECT: u32 = 0x08;
+pub const GRID_MAP_TYPE_MASK_PLAYER: u32 = 0x10;
+pub const GRID_MAP_TYPE_MASK_AREA_TRIGGER: u32 = 0x20;
+pub const GRID_MAP_TYPE_MASK_SCENE_OBJECT: u32 = 0x40;
+pub const GRID_MAP_TYPE_MASK_CONVERSATION: u32 = 0x80;
+pub const GRID_MAP_TYPE_MASK_ALL: u32 = 0xFF;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct ConditionId {
@@ -116,6 +126,105 @@ impl Condition {
 
         text.push(']');
         text
+    }
+
+    /// C++ `Condition::GetSearcherTypeMaskForCondition`.
+    pub fn get_searcher_type_mask_for_condition_like_cpp(&self) -> u32 {
+        if self.negative_condition {
+            return GRID_MAP_TYPE_MASK_ALL;
+        }
+
+        match self.condition_type {
+            ConditionType::None
+            | ConditionType::ZoneId
+            | ConditionType::ActiveEvent
+            | ConditionType::InstanceInfo
+            | ConditionType::MapId
+            | ConditionType::AreaId
+            | ConditionType::NearCreature
+            | ConditionType::NearGameObject
+            | ConditionType::DistanceTo
+            | ConditionType::WorldState
+            | ConditionType::PhaseId
+            | ConditionType::RealmAchievement
+            | ConditionType::TerrainSwap
+            | ConditionType::DifficultyId
+            | ConditionType::ScenarioStep => GRID_MAP_TYPE_MASK_ALL,
+            ConditionType::Aura
+            | ConditionType::Class
+            | ConditionType::Race
+            | ConditionType::Level
+            | ConditionType::RelationTo
+            | ConditionType::ReactionTo
+            | ConditionType::Alive
+            | ConditionType::HpVal
+            | ConditionType::HpPct
+            | ConditionType::UnitState
+            | ConditionType::InWater
+            | ConditionType::StandState
+            | ConditionType::Charmed => GRID_MAP_TYPE_MASK_CREATURE | GRID_MAP_TYPE_MASK_PLAYER,
+            ConditionType::Item
+            | ConditionType::ItemEquipped
+            | ConditionType::ReputationRank
+            | ConditionType::Achievement
+            | ConditionType::Team
+            | ConditionType::Skill
+            | ConditionType::QuestRewarded
+            | ConditionType::QuestTaken
+            | ConditionType::QuestComplete
+            | ConditionType::QuestNone
+            | ConditionType::Spell
+            | ConditionType::DrunkenState
+            | ConditionType::Title
+            | ConditionType::Gender
+            | ConditionType::DailyQuestDone
+            | ConditionType::PetType
+            | ConditionType::Taxi
+            | ConditionType::QuestState
+            | ConditionType::QuestObjectiveProgress
+            | ConditionType::GameMaster
+            | ConditionType::BattlePetCount
+            | ConditionType::SceneInProgress
+            | ConditionType::PlayerCondition => GRID_MAP_TYPE_MASK_PLAYER,
+            ConditionType::ObjectEntryGuid | ConditionType::ObjectEntryGuidLegacy => {
+                match self.condition_value1 {
+                    value if value == TypeId::Unit as u32 => GRID_MAP_TYPE_MASK_CREATURE,
+                    value if value == TypeId::Player as u32 => GRID_MAP_TYPE_MASK_PLAYER,
+                    value if value == TypeId::GameObject as u32 => GRID_MAP_TYPE_MASK_GAME_OBJECT,
+                    value if value == TypeId::Corpse as u32 => GRID_MAP_TYPE_MASK_CORPSE,
+                    value if value == TypeId::AreaTrigger as u32 => GRID_MAP_TYPE_MASK_AREA_TRIGGER,
+                    _ => 0,
+                }
+            }
+            ConditionType::TypeMask | ConditionType::TypeMaskLegacy => {
+                let condition_mask = TypeMask::from_bits_truncate(self.condition_value1);
+                let mut mask = 0;
+                if condition_mask.intersects(TypeMask::UNIT) {
+                    mask |= GRID_MAP_TYPE_MASK_CREATURE | GRID_MAP_TYPE_MASK_PLAYER;
+                }
+                if condition_mask.intersects(TypeMask::PLAYER) {
+                    mask |= GRID_MAP_TYPE_MASK_PLAYER;
+                }
+                if condition_mask.intersects(TypeMask::GAME_OBJECT) {
+                    mask |= GRID_MAP_TYPE_MASK_GAME_OBJECT;
+                }
+                if condition_mask.intersects(TypeMask::CORPSE) {
+                    mask |= GRID_MAP_TYPE_MASK_CORPSE;
+                }
+                if condition_mask.intersects(TypeMask::AREA_TRIGGER) {
+                    mask |= GRID_MAP_TYPE_MASK_AREA_TRIGGER;
+                }
+                mask
+            }
+            ConditionType::CreatureType => GRID_MAP_TYPE_MASK_CREATURE,
+            ConditionType::PrivateObject => GRID_MAP_TYPE_MASK_ALL & !GRID_MAP_TYPE_MASK_PLAYER,
+            ConditionType::SpawnMaskDeprecated | ConditionType::StringId | ConditionType::Max => {
+                panic!(
+                    "Condition::GetSearcherTypeMaskForCondition - missing condition handling for {:?}",
+                    self.condition_type
+                )
+            }
+        }
     }
 }
 
@@ -345,6 +454,51 @@ impl ConditionEntriesByTypeStore {
             .flat_map(HashMap::values)
             .map(|conditions| conditions.len())
             .sum()
+    }
+
+    /// C++ `ConditionMgr::GetSearcherTypeMaskForConditionList`.
+    pub fn get_searcher_type_mask_for_condition_list_like_cpp(
+        &self,
+        conditions: &[Condition],
+    ) -> u32 {
+        if conditions.is_empty() {
+            return GRID_MAP_TYPE_MASK_ALL;
+        }
+
+        let mut else_group_searcher_type_masks = std::collections::BTreeMap::<u32, u32>::new();
+        for condition in conditions {
+            assert!(
+                condition.is_loaded_like_cpp(),
+                "ConditionMgr::GetSearcherTypeMaskForConditionList - not yet loaded condition found in list"
+            );
+
+            let group_mask = else_group_searcher_type_masks
+                .entry(condition.else_group)
+                .or_insert(GRID_MAP_TYPE_MASK_ALL);
+            if *group_mask == 0 {
+                continue;
+            }
+
+            if condition.reference_id != 0 {
+                let reference_conditions = self
+                    .conditions_for_like_cpp(
+                        ConditionSourceType::ReferenceCondition,
+                        ConditionId::new(condition.reference_id, 0, 0),
+                    )
+                    .expect(
+                        "ConditionMgr::GetSearcherTypeMaskForConditionList - incorrect reference",
+                    );
+                *group_mask &= self.get_searcher_type_mask_for_condition_list_like_cpp(
+                    reference_conditions.as_slice(),
+                );
+            } else {
+                *group_mask &= condition.get_searcher_type_mask_for_condition_like_cpp();
+            }
+        }
+
+        else_group_searcher_type_masks
+            .values()
+            .fold(0, |mask, group_mask| mask | group_mask)
     }
 }
 
@@ -613,6 +767,134 @@ mod tests {
         assert_eq!(
             condition.to_string_like_cpp(true),
             "[Condition SourceType: 34 (Reference), SourceGroup: 55, SourceEntry: 0, ConditionType: 57 (Private Object)]"
+        );
+    }
+
+    #[test]
+    fn condition_searcher_type_mask_matches_cpp_direct_cases() {
+        assert_eq!(
+            Condition {
+                condition_type: ConditionType::None,
+                ..Condition::default()
+            }
+            .get_searcher_type_mask_for_condition_like_cpp(),
+            GRID_MAP_TYPE_MASK_ALL
+        );
+        assert_eq!(
+            Condition {
+                condition_type: ConditionType::Aura,
+                ..Condition::default()
+            }
+            .get_searcher_type_mask_for_condition_like_cpp(),
+            GRID_MAP_TYPE_MASK_CREATURE | GRID_MAP_TYPE_MASK_PLAYER
+        );
+        assert_eq!(
+            Condition {
+                condition_type: ConditionType::Item,
+                ..Condition::default()
+            }
+            .get_searcher_type_mask_for_condition_like_cpp(),
+            GRID_MAP_TYPE_MASK_PLAYER
+        );
+        assert_eq!(
+            Condition {
+                condition_type: ConditionType::CreatureType,
+                ..Condition::default()
+            }
+            .get_searcher_type_mask_for_condition_like_cpp(),
+            GRID_MAP_TYPE_MASK_CREATURE
+        );
+        assert_eq!(
+            Condition {
+                condition_type: ConditionType::PrivateObject,
+                ..Condition::default()
+            }
+            .get_searcher_type_mask_for_condition_like_cpp(),
+            GRID_MAP_TYPE_MASK_ALL & !GRID_MAP_TYPE_MASK_PLAYER
+        );
+        assert_eq!(
+            Condition {
+                condition_type: ConditionType::Team,
+                negative_condition: true,
+                ..Condition::default()
+            }
+            .get_searcher_type_mask_for_condition_like_cpp(),
+            GRID_MAP_TYPE_MASK_ALL
+        );
+    }
+
+    #[test]
+    fn condition_searcher_type_mask_object_entry_and_type_mask_match_cpp() {
+        assert_eq!(
+            Condition {
+                condition_type: ConditionType::ObjectEntryGuid,
+                condition_value1: TypeId::Unit as u32,
+                ..Condition::default()
+            }
+            .get_searcher_type_mask_for_condition_like_cpp(),
+            GRID_MAP_TYPE_MASK_CREATURE
+        );
+        assert_eq!(
+            Condition {
+                condition_type: ConditionType::ObjectEntryGuid,
+                condition_value1: TypeId::Player as u32,
+                ..Condition::default()
+            }
+            .get_searcher_type_mask_for_condition_like_cpp(),
+            GRID_MAP_TYPE_MASK_PLAYER
+        );
+        assert_eq!(
+            Condition {
+                condition_type: ConditionType::ObjectEntryGuid,
+                condition_value1: TypeId::GameObject as u32,
+                ..Condition::default()
+            }
+            .get_searcher_type_mask_for_condition_like_cpp(),
+            GRID_MAP_TYPE_MASK_GAME_OBJECT
+        );
+        assert_eq!(
+            Condition {
+                condition_type: ConditionType::TypeMask,
+                condition_value1: (TypeMask::UNIT | TypeMask::GAME_OBJECT).bits(),
+                ..Condition::default()
+            }
+            .get_searcher_type_mask_for_condition_like_cpp(),
+            GRID_MAP_TYPE_MASK_CREATURE
+                | GRID_MAP_TYPE_MASK_PLAYER
+                | GRID_MAP_TYPE_MASK_GAME_OBJECT
+        );
+    }
+
+    #[test]
+    fn condition_searcher_type_mask_list_ands_groups_ors_else_groups_and_expands_refs() {
+        let reference_condition = Condition {
+            source_type: ConditionSourceType::ReferenceCondition,
+            source_group: 77,
+            condition_type: ConditionType::Item,
+            ..Condition::default()
+        };
+        let store = ConditionEntriesByTypeStore::from_conditions_like_cpp([reference_condition]);
+        let conditions = vec![
+            Condition {
+                else_group: 0,
+                condition_type: ConditionType::Aura,
+                ..Condition::default()
+            },
+            Condition {
+                else_group: 0,
+                reference_id: 77,
+                ..Condition::default()
+            },
+            Condition {
+                else_group: 1,
+                condition_type: ConditionType::CreatureType,
+                ..Condition::default()
+            },
+        ];
+
+        assert_eq!(
+            store.get_searcher_type_mask_for_condition_list_like_cpp(&conditions),
+            GRID_MAP_TYPE_MASK_PLAYER | GRID_MAP_TYPE_MASK_CREATURE
         );
     }
 
