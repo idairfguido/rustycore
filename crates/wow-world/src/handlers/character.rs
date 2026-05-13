@@ -3029,6 +3029,20 @@ impl WorldSession {
                 continue;
             };
 
+            let (target_phase_shift, _) = self.db_spawn_phase_shift_like_cpp(
+                map_id,
+                phase_use_flags,
+                phase_id,
+                phase_group_id,
+                terrain_swap_map,
+            );
+            if !self.can_see_phase_shift_like_cpp(&target_phase_shift) {
+                if !result.next_row() {
+                    break;
+                }
+                continue;
+            }
+
             let health = if cur_health > 0 {
                 cur_health as i64
             } else {
@@ -3244,6 +3258,20 @@ impl WorldSession {
                     continue;
                 };
 
+                let (target_phase_shift, _) = self.db_spawn_phase_shift_like_cpp(
+                    map_id,
+                    phase_use_flags,
+                    phase_id,
+                    phase_group_id,
+                    terrain_swap_map,
+                );
+                if !self.can_see_phase_shift_like_cpp(&target_phase_shift) {
+                    if !cr.next_row() {
+                        break;
+                    }
+                    continue;
+                }
+
                 let health = if cur_health > 0 {
                     cur_health as i64
                 } else {
@@ -3419,6 +3447,20 @@ impl WorldSession {
                 let terrain_swap_map: i32 = go_result.try_read(21).unwrap_or(-1);
 
                 if display_id == 0 {
+                    if !go_result.next_row() {
+                        break;
+                    }
+                    continue;
+                }
+
+                let (target_phase_shift, _) = self.db_spawn_phase_shift_like_cpp(
+                    map_id,
+                    phase_use_flags,
+                    phase_id,
+                    phase_group_id,
+                    terrain_swap_map,
+                );
+                if !self.can_see_phase_shift_like_cpp(&target_phase_shift) {
                     if !go_result.next_row() {
                         break;
                     }
@@ -3862,6 +3904,20 @@ impl WorldSession {
 
             // Skip gameobjects with no display
             if display_id == 0 {
+                if !result.next_row() {
+                    break;
+                }
+                continue;
+            }
+
+            let (target_phase_shift, _) = self.db_spawn_phase_shift_like_cpp(
+                map_id,
+                phase_use_flags,
+                phase_id,
+                phase_group_id,
+                terrain_swap_map,
+            );
+            if !self.can_see_phase_shift_like_cpp(&target_phase_shift) {
                 if !result.next_row() {
                     break;
                 }

@@ -1029,6 +1029,9 @@ pub struct WorldSession {
     /// gameobjects until canonical gameobject map ownership lands.
     pub(crate) represented_gameobject_phase_shifts:
         std::collections::HashMap<wow_core::ObjectGuid, PhaseShift>,
+    /// Represented C++ `Player::GetPhaseShift()` for session DB visibility
+    /// filtering until canonical player `WorldObject` phase ownership lands.
+    pub(crate) represented_player_phase_shift: PhaseShift,
     /// Position at which visibility was last fully recalculated.
     pub(crate) last_visibility_pos: Option<wow_core::Position>,
 
@@ -1437,6 +1440,7 @@ impl WorldSession {
             visible_creatures: std::collections::HashSet::new(),
             visible_gameobjects: std::collections::HashSet::new(),
             represented_gameobject_phase_shifts: std::collections::HashMap::new(),
+            represented_player_phase_shift: PhaseShift::default(),
             last_visibility_pos: None,
             gossip_options: Vec::new(),
             gossip_source_guid: None,
@@ -1503,6 +1507,13 @@ impl WorldSession {
         let faction = create_data.faction_template.max(0) as u32;
         let npc_flags = create_data.npc_flags as u32;
         let unit_flags = create_data.unit_flags;
+        let (db_phase_shift, validated_terrain_swap_map) = self.db_spawn_phase_shift_like_cpp(
+            map_id,
+            phase_use_flags,
+            phase_id,
+            phase_group_id,
+            terrain_swap_map,
+        );
 
         if let Some(manager) = &self.map_manager {
             let (grid_x, grid_y) = crate::map_manager::world_to_grid_coords(position.x, position.y);
@@ -1521,41 +1532,7 @@ impl WorldSession {
                             .set_entry(entry);
                         let _ = creature.unit_mut().world_mut().set_map(map_id as u32, 0);
                         creature.unit_mut().world_mut().relocate(position);
-                        if let (Some(phase_store), Some(phase_group_store)) =
-                            (&self.phase_store, &self.phase_group_store)
-                        {
-                            init_db_phase_shift_like_cpp(
-                                creature.unit_mut().world_mut().phase_shift_mut(),
-                                phase_store,
-                                phase_group_store,
-                                phase_use_flags,
-                                phase_id,
-                                phase_group_id,
-                            );
-                        }
-                        let validated_terrain_swap_map =
-                            if let (Some(map_store), Some(terrain_swap_store)) =
-                                (&self.map_store, &self.terrain_swap_store)
-                            {
-                                if let Some(terrain_swap_map) = terrain_swap_store
-                                    .validate_spawn_terrain_swap_like_cpp(
-                                        map_store,
-                                        u32::from(map_id),
-                                        terrain_swap_map,
-                                    )
-                                {
-                                    init_db_visible_map_id_like_cpp(
-                                        creature.unit_mut().world_mut().phase_shift_mut(),
-                                        terrain_swap_store,
-                                        i32::try_from(terrain_swap_map).unwrap_or(-1),
-                                    );
-                                    i32::try_from(terrain_swap_map).unwrap_or(-1)
-                                } else {
-                                    -1
-                                }
-                            } else {
-                                -1
-                            };
+                        *creature.unit_mut().world_mut().phase_shift_mut() = db_phase_shift.clone();
                         creature.unit_mut().set_level(level);
                         creature.unit_mut().set_max_health(u64::from(hp));
                         creature.unit_mut().set_health(u64::from(hp));
@@ -3364,6 +3341,33 @@ impl WorldSession {
         phase_group_id: u32,
         terrain_swap_map: i32,
     ) {
+        let (phase_shift, _) = self.db_spawn_phase_shift_like_cpp(
+            map_id,
+            phase_use_flags,
+            phase_id,
+            phase_group_id,
+            terrain_swap_map,
+        );
+        self.record_represented_gameobject_phase_shift_like_cpp(guid, phase_shift);
+    }
+
+    pub(crate) fn record_represented_gameobject_phase_shift_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        phase_shift: PhaseShift,
+    ) {
+        self.represented_gameobject_phase_shifts
+            .insert(guid, phase_shift);
+    }
+
+    pub(crate) fn db_spawn_phase_shift_like_cpp(
+        &self,
+        map_id: u16,
+        phase_use_flags: u8,
+        phase_id: u16,
+        phase_group_id: u32,
+        terrain_swap_map: i32,
+    ) -> (PhaseShift, i32) {
         let mut phase_shift = PhaseShift::default();
         if let (Some(phase_store), Some(phase_group_store)) =
             (&self.phase_store, &self.phase_group_store)
@@ -3378,6 +3382,7 @@ impl WorldSession {
             );
         }
 
+        let mut validated_terrain_swap_map = -1;
         if let (Some(map_store), Some(terrain_swap_store)) =
             (&self.map_store, &self.terrain_swap_store)
             && let Some(terrain_swap_map) = terrain_swap_store.validate_spawn_terrain_swap_like_cpp(
@@ -3391,10 +3396,24 @@ impl WorldSession {
                 terrain_swap_store,
                 i32::try_from(terrain_swap_map).unwrap_or(-1),
             );
+            validated_terrain_swap_map = i32::try_from(terrain_swap_map).unwrap_or(-1);
         }
 
-        self.represented_gameobject_phase_shifts
-            .insert(guid, phase_shift);
+        (phase_shift, validated_terrain_swap_map)
+    }
+
+    pub(crate) fn represented_player_phase_shift_like_cpp(&self) -> &PhaseShift {
+        &self.represented_player_phase_shift
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_represented_player_phase_shift_like_cpp(&mut self, phase_shift: PhaseShift) {
+        self.represented_player_phase_shift = phase_shift;
+    }
+
+    pub(crate) fn can_see_phase_shift_like_cpp(&self, other: &PhaseShift) -> bool {
+        self.represented_player_phase_shift_like_cpp()
+            .can_see(other)
     }
 
     pub(crate) fn map_difficulty_store(&self) -> Option<&Arc<MapDifficultyStore>> {
@@ -8845,6 +8864,51 @@ mod tests {
         assert!(phase_shift.has_phase_like_cpp(20));
         assert!(phase_shift.has_visible_map_id_like_cpp(609));
         assert_eq!(phase_shift.flags_like_cpp(), PhaseShiftFlags::INVERSE);
+    }
+
+    #[test]
+    fn session_db_spawn_phase_visibility_uses_player_phase_can_see_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let phase_store = Arc::new(wow_data::PhaseStore::from_entries([wow_data::PhaseEntry {
+            id: 20,
+            flags: 0,
+        }]));
+        let phase_group_store = Arc::new(wow_data::PhaseGroupStore::from_entries(
+            &phase_store,
+            [wow_data::PhaseXPhaseGroupEntry {
+                id: 1,
+                phase_id: 20,
+                phase_group_id: 7,
+            }],
+        ));
+
+        session.set_phase_store(Arc::clone(&phase_store));
+        session.set_phase_group_store(Arc::clone(&phase_group_store));
+
+        let (target_phase_shift, _) = session.db_spawn_phase_shift_like_cpp(571, 0, 20, 0, -1);
+        assert!(!session.can_see_phase_shift_like_cpp(&target_phase_shift));
+
+        let mut player_phase_shift = PhaseShift::default();
+        init_db_phase_shift_like_cpp(
+            &mut player_phase_shift,
+            &phase_store,
+            &phase_group_store,
+            0,
+            20,
+            0,
+        );
+        session.set_represented_player_phase_shift_like_cpp(player_phase_shift);
+        assert!(session.can_see_phase_shift_like_cpp(&target_phase_shift));
+
+        let (always_visible_shift, _) = session.db_spawn_phase_shift_like_cpp(
+            571,
+            crate::phasing::PHASE_USE_FLAGS_ALWAYS_VISIBLE,
+            20,
+            0,
+            -1,
+        );
+        session.set_represented_player_phase_shift_like_cpp(PhaseShift::default());
+        assert!(session.can_see_phase_shift_like_cpp(&always_visible_shift));
     }
 
     #[test]
