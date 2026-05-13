@@ -27,6 +27,8 @@ use wow_recastdetour::{
     SIZE_OF_GRIDS_LIKE_CPP, ThreadUnsafeMapData, create_path_query_filter_like_cpp,
 };
 
+use crate::phasing::personal::MultiPersonalPhaseTracker;
+
 /// Size of a grid cell in yards (64x64 yards like TrinityCore).
 pub const GRID_SIZE: f32 = 64.0;
 
@@ -621,6 +623,10 @@ pub struct GridCoord {
 impl GridCoord {
     pub fn new(x: i16, y: i16) -> Self {
         Self { x, y }
+    }
+
+    pub fn personal_phase_grid_id_like_cpp(&self) -> u16 {
+        (i32::from(self.x) * MAX_NUMBER_OF_GRIDS_LIKE_CPP + i32::from(self.y)) as u16
     }
 
     /// Get surrounding coordinates in a 3x3 area (including self).
@@ -1553,6 +1559,8 @@ pub struct MapInstance {
     pub instance_id: u32,
     pub grids: HashMap<GridCoord, Grid>,
     pub grid_unload_timeout: Duration,
+    pub personal_phases: MultiPersonalPhaseTracker,
+    personal_phase_objects_to_remove: HashSet<ObjectGuid>,
 }
 
 impl MapInstance {
@@ -1562,6 +1570,8 @@ impl MapInstance {
             instance_id,
             grids: HashMap::new(),
             grid_unload_timeout: DEFAULT_GRID_UNLOAD_TIME,
+            personal_phases: MultiPersonalPhaseTracker::default(),
+            personal_phase_objects_to_remove: HashSet::new(),
         }
     }
 
@@ -1587,7 +1597,13 @@ impl MapInstance {
     }
 
     pub fn remove_grid(&mut self, x: i16, y: i16) -> bool {
-        self.grids.remove(&GridCoord::new(x, y)).is_some()
+        let coord = GridCoord::new(x, y);
+        let removed = self.grids.remove(&coord).is_some();
+        if removed {
+            self.personal_phases
+                .unload_grid_like_cpp(coord.personal_phase_grid_id_like_cpp());
+        }
+        removed
     }
 
     pub fn add_creature(&mut self, x: i16, y: i16, creature: WorldCreature) -> bool {
@@ -1629,6 +1645,8 @@ impl MapInstance {
                 coord, self.map_id
             );
             self.grids.remove(&coord);
+            self.personal_phases
+                .unload_grid_like_cpp(coord.personal_phase_grid_id_like_cpp());
         }
     }
 
@@ -1642,6 +1660,87 @@ impl MapInstance {
 
     pub fn min_height_like_cpp(&self, _x: f32, _y: f32) -> f32 {
         DEFAULT_MIN_HEIGHT_LIKE_CPP
+    }
+
+    pub fn load_personal_phase_grid_like_cpp(
+        &mut self,
+        phase_shift: &PhaseShift,
+        x: i16,
+        y: i16,
+        has_personal_spawns: impl FnMut(u32) -> bool,
+        load_phase: impl FnMut(ObjectGuid, u32),
+    ) -> bool {
+        self.get_or_create_grid(x, y);
+        self.personal_phases.load_grid_like_cpp(
+            phase_shift,
+            GridCoord::new(x, y).personal_phase_grid_id_like_cpp(),
+            has_personal_spawns,
+            load_phase,
+        )
+    }
+
+    pub fn update_personal_phases_for_owner_like_cpp(
+        &mut self,
+        phase_owner: ObjectGuid,
+        phase_shift: &PhaseShift,
+        grid: Option<GridCoord>,
+        has_personal_spawns: impl FnMut(u32) -> bool,
+        load_phase: impl FnMut(ObjectGuid, u32),
+    ) -> bool {
+        self.personal_phases.on_owner_phase_changed_like_cpp(
+            phase_owner,
+            phase_shift,
+            grid.map(|coord| coord.personal_phase_grid_id_like_cpp()),
+            has_personal_spawns,
+            load_phase,
+        )
+    }
+
+    pub fn register_personal_phase_object_like_cpp(
+        &mut self,
+        phase_id: u32,
+        phase_owner: ObjectGuid,
+        object: ObjectGuid,
+    ) {
+        self.personal_phases
+            .register_tracked_object_like_cpp(phase_id, phase_owner, object);
+    }
+
+    pub fn unregister_personal_phase_object_like_cpp(
+        &mut self,
+        phase_owner: ObjectGuid,
+        object: ObjectGuid,
+    ) {
+        self.personal_phases
+            .unregister_tracked_object_like_cpp(phase_owner, object);
+    }
+
+    pub fn mark_personal_phases_for_deletion_like_cpp(&mut self, phase_owner: ObjectGuid) {
+        self.personal_phases
+            .mark_all_phases_for_deletion_like_cpp(phase_owner);
+    }
+
+    pub fn update_personal_phases_like_cpp(&mut self, diff: Duration) {
+        let mut objects_to_remove = Vec::new();
+        self.personal_phases
+            .update_like_cpp(diff, |guid| objects_to_remove.push(guid));
+        self.personal_phase_objects_to_remove
+            .extend(objects_to_remove);
+    }
+
+    pub fn remove_personal_phase_objects_like_cpp(&mut self) -> usize {
+        let objects_to_remove = std::mem::take(&mut self.personal_phase_objects_to_remove);
+        let removed = objects_to_remove.len();
+        for object in objects_to_remove {
+            for grid in self.grids.values_mut() {
+                grid.remove_creature(object);
+            }
+        }
+        removed
+    }
+
+    pub fn queued_personal_phase_remove_count_like_cpp(&self) -> usize {
+        self.personal_phase_objects_to_remove.len()
     }
 }
 
@@ -2003,6 +2102,8 @@ impl MapManager {
                     if grid.should_unload(map.grid_unload_timeout) {
                         info!("Unloading distant grid {:?} from map {}", coord, map_id);
                         map.grids.remove(&coord);
+                        map.personal_phases
+                            .unload_grid_like_cpp(coord.personal_phase_grid_id_like_cpp());
                     }
                 }
             }
@@ -2066,6 +2167,7 @@ mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use wow_constants::PhaseFlags;
     use wow_core::guid::HighGuid;
 
     fn unique_temp_data_dir(test_name: &str) -> PathBuf {
@@ -2093,6 +2195,23 @@ mod tests {
         header.extend_from_slice(&0_u32.to_le_bytes());
         assert_eq!(header.len(), MAP_FILE_HEADER_SIZE_LIKE_CPP);
         header
+    }
+
+    fn test_creature(guid: ObjectGuid) -> WorldCreature {
+        WorldCreature::new(
+            guid,
+            1,
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            50,
+            1,
+            5,
+            10,
+            20.0,
+            0,
+            35,
+            0,
+            0,
+        )
     }
 
     fn tilelist_like_cpp(grid_indices: impl IntoIterator<Item = usize>) -> Vec<u8> {
@@ -2461,6 +2580,68 @@ mod tests {
         grid.player_enter(player);
         grid.last_player_time = Instant::now() - Duration::from_secs(400);
         assert!(!grid.should_unload(Duration::from_secs(300)));
+    }
+
+    #[test]
+    fn map_instance_load_personal_phase_grid_tracks_cpp_grid_id_once() {
+        let owner = ObjectGuid::create_player(1, 1);
+        let mut phase_shift = PhaseShift::default();
+        phase_shift.add_phase_like_cpp(10, PhaseFlags::PERSONAL, 1);
+        phase_shift.set_personal_guid_like_cpp(owner);
+        let mut map = MapInstance::new(571, 0);
+        let mut loaded = Vec::new();
+
+        assert!(map.load_personal_phase_grid_like_cpp(
+            &phase_shift,
+            3,
+            5,
+            |phase_id| phase_id == 10,
+            |owner, phase_id| loaded.push((owner, phase_id)),
+        ));
+        assert!(map.is_grid_loaded(3, 5));
+        assert_eq!(loaded, vec![(owner, 10)]);
+
+        assert!(!map.load_personal_phase_grid_like_cpp(
+            &phase_shift,
+            3,
+            5,
+            |phase_id| phase_id == 10,
+            |owner, phase_id| loaded.push((owner, phase_id)),
+        ));
+        assert_eq!(loaded, vec![(owner, 10)]);
+
+        let tracker = map.personal_phases.owner_tracker_like_cpp(owner).unwrap();
+        assert!(tracker.is_grid_loaded_for_phase_like_cpp(3 * 64 + 5, 10));
+    }
+
+    #[test]
+    fn map_instance_unload_grid_purges_personal_phase_grid_tracking_like_cpp() {
+        let owner = ObjectGuid::create_player(1, 1);
+        let mut phase_shift = PhaseShift::default();
+        phase_shift.add_phase_like_cpp(10, PhaseFlags::PERSONAL, 1);
+        phase_shift.set_personal_guid_like_cpp(owner);
+        let mut map = MapInstance::new(571, 0);
+
+        map.load_personal_phase_grid_like_cpp(&phase_shift, 3, 5, |_| true, |_, _| {});
+        assert!(map.remove_grid(3, 5));
+        assert!(map.personal_phases.owner_tracker_like_cpp(owner).is_none());
+    }
+
+    #[test]
+    fn map_instance_update_personal_phases_queues_and_removes_expired_objects_like_cpp() {
+        let owner = ObjectGuid::create_player(1, 1);
+        let object = ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 571, 0, 1, 100);
+        let mut map = MapInstance::new(571, 0);
+        map.add_creature(0, 0, test_creature(object));
+        map.register_personal_phase_object_like_cpp(10, owner, object);
+        map.mark_personal_phases_for_deletion_like_cpp(owner);
+
+        map.update_personal_phases_like_cpp(Duration::from_secs(60));
+        assert_eq!(map.queued_personal_phase_remove_count_like_cpp(), 1);
+        assert!(map.get_creature(0, 0, object).is_some());
+
+        assert_eq!(map.remove_personal_phase_objects_like_cpp(), 1);
+        assert!(map.get_creature(0, 0, object).is_none());
     }
 
     #[test]
