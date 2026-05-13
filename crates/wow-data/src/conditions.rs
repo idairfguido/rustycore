@@ -98,6 +98,23 @@ impl Condition {
         ConditionId::new(self.source_group, self.source_entry, self.source_id)
     }
 
+    /// C++ `Condition::GetMaxAvailableConditionTargets`.
+    pub const fn max_available_condition_targets_like_cpp(&self) -> u32 {
+        match self.source_type {
+            ConditionSourceType::Spell
+            | ConditionSourceType::SpellImplicitTarget
+            | ConditionSourceType::CreatureTemplateVehicle
+            | ConditionSourceType::VehicleSpell
+            | ConditionSourceType::SpellClickEvent
+            | ConditionSourceType::GossipMenu
+            | ConditionSourceType::GossipMenuOption
+            | ConditionSourceType::SmartEvent
+            | ConditionSourceType::NpcVendor
+            | ConditionSourceType::SpellProc => 2,
+            _ => 1,
+        }
+    }
+
     /// C++ `Condition::ToString`.
     pub fn to_string_like_cpp(&self, ext: bool) -> String {
         let mut text = format!(
@@ -526,6 +543,19 @@ pub enum ConditionRowSkipReason {
     SelfReference(i32),
     InvalidConditionType(i32),
     InvalidSourceType(i32),
+    SourceGroupNotAllowed {
+        source_type: ConditionSourceType,
+        source_group: u32,
+    },
+    SourceIdNotAllowed {
+        source_type: ConditionSourceType,
+        source_id: u32,
+    },
+    ConditionTargetOutOfRange {
+        source_type: ConditionSourceType,
+        condition_target: u8,
+        max_available_targets: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -609,14 +639,59 @@ pub fn parse_condition_row_like_cpp(
     Ok(condition)
 }
 
+pub fn normalize_loaded_condition_shape_like_cpp(
+    condition: &mut Condition,
+) -> Result<(), ConditionRowSkipReason> {
+    if condition.source_group != 0
+        && !condition_source_can_have_group_set_like_cpp(condition.source_type)
+    {
+        return Err(ConditionRowSkipReason::SourceGroupNotAllowed {
+            source_type: condition.source_type,
+            source_group: condition.source_group,
+        });
+    }
+
+    if condition.source_id != 0 && !condition_source_can_have_id_set_like_cpp(condition.source_type)
+    {
+        return Err(ConditionRowSkipReason::SourceIdNotAllowed {
+            source_type: condition.source_type,
+            source_id: condition.source_id,
+        });
+    }
+
+    if condition.error_type != 0 && condition.source_type != ConditionSourceType::Spell {
+        condition.error_type = 0;
+    }
+
+    if condition.error_text_id != 0 && condition.error_type == 0 {
+        condition.error_text_id = 0;
+    }
+
+    if condition.reference_id == 0 {
+        let max_available_targets = condition.max_available_condition_targets_like_cpp();
+        if u32::from(condition.condition_target) >= max_available_targets {
+            return Err(ConditionRowSkipReason::ConditionTargetOutOfRange {
+                source_type: condition.source_type,
+                condition_target: condition.condition_target,
+                max_available_targets,
+            });
+        }
+    }
+
+    Ok(())
+}
+
 pub fn parse_condition_rows_like_cpp(
     rows: impl IntoIterator<Item = ConditionDbRowLikeCpp>,
     mut script_id_for_name: impl FnMut(&str) -> u32,
 ) -> ConditionLoadReport {
     let mut report = ConditionLoadReport::default();
     for row in rows {
-        match parse_condition_row_like_cpp(row, &mut script_id_for_name) {
-            Ok(condition) => report.conditions.push(condition),
+        match parse_condition_row_like_cpp(row.clone(), &mut script_id_for_name) {
+            Ok(mut condition) => match normalize_loaded_condition_shape_like_cpp(&mut condition) {
+                Ok(()) => report.conditions.push(condition),
+                Err(reason) => report.skipped.push(SkippedConditionRow { row, reason }),
+            },
             Err(skipped) => report.skipped.push(skipped),
         }
     }
@@ -670,6 +745,29 @@ pub async fn load_condition_rows_like_cpp(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn condition_row(
+        source_type: ConditionSourceType,
+        condition_type: ConditionType,
+    ) -> ConditionDbRowLikeCpp {
+        ConditionDbRowLikeCpp {
+            source_type_or_reference_id: source_type as i32,
+            source_group: 0,
+            source_entry: 0,
+            source_id: 0,
+            else_group: 0,
+            condition_type_or_reference: condition_type as i32,
+            condition_target: 0,
+            condition_value1: 0,
+            condition_value2: 0,
+            condition_value3: 0,
+            condition_string_value1: String::new(),
+            negative_condition: false,
+            error_type: 0,
+            error_text_id: 0,
+            script_name: String::new(),
+        }
+    }
 
     #[test]
     fn condition_default_matches_cpp_constructor() {
@@ -732,6 +830,34 @@ mod tests {
         assert!(!condition_source_can_have_id_set_like_cpp(
             ConditionSourceType::SpellClickEvent,
         ));
+    }
+
+    #[test]
+    fn max_available_condition_targets_matches_cpp_source_groups() {
+        assert_eq!(
+            Condition {
+                source_type: ConditionSourceType::SpellClickEvent,
+                ..Condition::default()
+            }
+            .max_available_condition_targets_like_cpp(),
+            2
+        );
+        assert_eq!(
+            Condition {
+                source_type: ConditionSourceType::SmartEvent,
+                ..Condition::default()
+            }
+            .max_available_condition_targets_like_cpp(),
+            2
+        );
+        assert_eq!(
+            Condition {
+                source_type: ConditionSourceType::Phase,
+                ..Condition::default()
+            }
+            .max_available_condition_targets_like_cpp(),
+            1
+        );
     }
 
     #[test]
@@ -1008,6 +1134,86 @@ mod tests {
         let skipped = parse_condition_row_like_cpp(row, |_| 0).unwrap_err();
 
         assert_eq!(skipped.reason, ConditionRowSkipReason::SelfReference(-42));
+    }
+
+    #[test]
+    fn parse_condition_rows_applies_cpp_source_group_and_id_shape_validation() {
+        let mut invalid_group =
+            condition_row(ConditionSourceType::QuestAvailable, ConditionType::Aura);
+        invalid_group.source_group = 5;
+        let mut invalid_id = condition_row(ConditionSourceType::Phase, ConditionType::Aura);
+        invalid_id.source_id = 9;
+        let report = parse_condition_rows_like_cpp([invalid_group, invalid_id], |_| 0);
+
+        assert_eq!(report.conditions.len(), 0);
+        assert_eq!(
+            report.skipped[0].reason,
+            ConditionRowSkipReason::SourceGroupNotAllowed {
+                source_type: ConditionSourceType::QuestAvailable,
+                source_group: 5,
+            }
+        );
+        assert_eq!(
+            report.skipped[1].reason,
+            ConditionRowSkipReason::SourceIdNotAllowed {
+                source_type: ConditionSourceType::Phase,
+                source_id: 9,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_condition_rows_validates_condition_target_for_non_references_like_cpp() {
+        let mut invalid = condition_row(ConditionSourceType::Phase, ConditionType::Aura);
+        invalid.condition_target = 1;
+        let mut valid = condition_row(ConditionSourceType::SpellClickEvent, ConditionType::Aura);
+        valid.condition_target = 1;
+        let mut reference = condition_row(ConditionSourceType::Phase, ConditionType::Aura);
+        reference.condition_type_or_reference = -77;
+        reference.condition_target = 2;
+
+        let report = parse_condition_rows_like_cpp([invalid, valid, reference], |_| 0);
+
+        assert_eq!(report.conditions.len(), 2);
+        assert_eq!(
+            report.conditions[0].source_type,
+            ConditionSourceType::SpellClickEvent
+        );
+        assert_eq!(report.conditions[1].reference_id, 77);
+        assert_eq!(
+            report.skipped[0].reason,
+            ConditionRowSkipReason::ConditionTargetOutOfRange {
+                source_type: ConditionSourceType::Phase,
+                condition_target: 1,
+                max_available_targets: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_condition_rows_normalizes_error_fields_like_cpp() {
+        let mut non_spell = condition_row(ConditionSourceType::Phase, ConditionType::Aura);
+        non_spell.error_type = 7;
+        non_spell.error_text_id = 8;
+        let mut spell_with_error = condition_row(ConditionSourceType::Spell, ConditionType::Aura);
+        spell_with_error.error_type = 7;
+        spell_with_error.error_text_id = 8;
+        let mut spell_without_error =
+            condition_row(ConditionSourceType::Spell, ConditionType::Aura);
+        spell_without_error.error_text_id = 8;
+
+        let report = parse_condition_rows_like_cpp(
+            [non_spell, spell_with_error, spell_without_error],
+            |_| 0,
+        );
+
+        assert_eq!(report.conditions.len(), 3);
+        assert_eq!(report.conditions[0].error_type, 0);
+        assert_eq!(report.conditions[0].error_text_id, 0);
+        assert_eq!(report.conditions[1].error_type, 7);
+        assert_eq!(report.conditions[1].error_text_id, 8);
+        assert_eq!(report.conditions[2].error_type, 0);
+        assert_eq!(report.conditions[2].error_text_id, 0);
     }
 
     #[test]

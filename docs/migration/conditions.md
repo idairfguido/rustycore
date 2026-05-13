@@ -211,6 +211,7 @@ ConditionMgr is server-internal — it emits no packets directly. Indirectly, wh
 - `crates/wow-world/src/conditions.rs` implements C++ `IsObjectMeetToConditions` OR-of-AND `ElseGroup` aggregation and `IsObjectMeetingNotGroupedConditions` lookup with injected per-condition evaluator.
 - `crates/wow-world/src/conditions.rs` implements C++ specialized condition lookups for spell-click, vehicle spell, smart event, vendor item, area trigger, trainer spell, and object-id visibility keys.
 - `wow-database::WorldStatements::SEL_CONDITIONS` plus `wow-data::load_condition_rows_like_cpp` parse the C++ `conditions` table projection, including negative reference rows and reference templates; full validation/indexing remains open under `#COND.7`, `#COND.20`, `#COND.21`, and `#COND.22`.
+- `wow-data::parse_condition_rows_like_cpp` now applies C++ load-shape checks that do not require external stores: allowed `SourceGroup`, allowed `SourceId`, max `ConditionTarget`, and `ErrorType/ErrorTextId` normalization.
 - `wow-data::ConditionEntriesByTypeStore` groups parsed rows by `ConditionSourceType` and `ConditionId`, and `ConditionsReference` mirrors the C++ weak-reference holder used by downstream modules across reloads.
 
 **What's missing vs C++:**
@@ -271,7 +272,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [x] **#COND.4** Define `Condition` struct in `crates/wow-data/src/conditions.rs` with all 16 fields (`SourceType`, `SourceGroup`, `SourceEntry`, `SourceId`, `ElseGroup`, `ConditionType`, `ConditionTarget`, `ConditionValue1/2/3`, `ConditionStringValue1`, `ErrorType`, `ErrorTextId`, `ReferenceId`, `ScriptId`, `NegativeCondition`) and a `Default` impl (M)
 - [x] **#COND.5** Define `ConditionSourceInfo` (3-target array, optional `Map` ref, mutable `LastFailedCondition` slot) (L)
 - [x] **#COND.6** Define `ConditionId` `(SourceGroup, SourceEntry, SourceId)` with `Hash`/`Eq` (L)
-- [ ] **#COND.7** Implement loader for `conditions` table — single SQL query, build `ConditionEntriesByTypeArray` (`[ConditionsByEntryMap; CONDITION_SOURCE_TYPE_MAX]`), validate every row via `is_source_type_valid` + `is_condition_type_valid`, drop invalid rows with `tc_log_error("sql.sql", …)`-equivalent (XL — split: row parser, validator, indexer; partial: SQL statement + row parser + self-reference skip + negative reference/template handling + ConditionStore grouping implemented)
+- [ ] **#COND.7** Implement loader for `conditions` table — single SQL query, build `ConditionEntriesByTypeArray` (`[ConditionsByEntryMap; CONDITION_SOURCE_TYPE_MAX]`), validate every row via `is_source_type_valid` + `is_condition_type_valid`, drop invalid rows with `tc_log_error("sql.sql", …)`-equivalent (XL — split: row parser, validator, indexer; partial: SQL statement + row parser + self-reference skip + negative reference/template handling + shape validation + error-field normalization + ConditionStore grouping implemented)
 - [x] **#COND.8** Port `ReferenceId` row semantics — negative `ConditionTypeOrReference` rows keep `ReferenceId`, negative `SourceTypeOrReferenceId` rows are stored under `CONDITION_SOURCE_TYPE_REFERENCE_CONDITION`; C++ does **not** expand them flat during load, it resolves them recursively at evaluation/searcher-mask time (M)
 - [ ] **#COND.9** Implement `Condition::meets` evaluator — the giant switch over `ConditionType`. Split by category: presence/equality (NONE, ZONEID, AREAID, MAPID, TEAM, CLASS, RACE, GENDER, LEVEL, ALIVE, IN_WATER, GAMEMASTER, CHARMED, TAXI, PRIVATE_OBJECT) (M; partial: `NONE`, `MAPID`, `ZONEID`, `AREAID`, `CLASS`, `RACE`, `LEVEL`, `ALIVE`, `IN_WATER`; player-only state and `PRIVATE_OBJECT` remain open)
 - [ ] **#COND.10** `Condition::meets` — inventory and progression (ITEM, ITEM_EQUIPPED, SKILL, SPELL, ACHIEVEMENT, REALM_ACHIEVEMENT, TITLE, BATTLE_PET_COUNT) (M)
@@ -317,11 +318,11 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 
 <!-- REFINE.024:END tests-required -->
 
-- [ ] Test: `conditions` table loader rejects rows with bogus `SourceType` and logs the error.
+- [x] Test: `conditions` table loader rejects rows with bogus `SourceType` and logs the error. (Parser skip reason covered; logging adapter remains part of final load-service wiring.)
 - [ ] Test: `conditions` table loader rejects rows with bogus `(SourceType, SourceEntry)` (e.g. CONDITION_SOURCE_TYPE_NPC_VENDOR with non-existent creatureId).
 - [x] Test: `ReferenceId` resolves correctly — negative source/type rows are parsed into reference-template buckets and runtime evaluation recursively expands `ReferenceId` buckets, matching C++ load/evaluation split.
 - [ ] Test: OR-of-AND semantics — group A `{X AND Y}`, group B `{Z}`. Pass X+Y but not Z → meets. Pass Z but neither X nor Y → meets. Pass nothing → fail.
-- [ ] Test: `NegativeCondition = 1` flips the row's truth value before AND-aggregation.
+- [x] Test: `NegativeCondition = 1` flips the row's truth value before AND-aggregation.
 - [ ] Test: each ConditionType evaluator — one positive and one negative sample per ConditionType, fed a synthetic `WorldObject` fixture; for the Player-state types, a synthetic `Player` fixture.
 - [ ] Test: `CONDITION_REPUTATION_RANK` with rankMask — Honored set, mask = `1 << REP_HONORED` → meets; mask = `1 << REP_EXALTED` → fails.
 - [ ] Test: `CONDITION_QUESTSTATE` with state mask covering INCOMPLETE+COMPLETE — both states pass, NONE fails.
