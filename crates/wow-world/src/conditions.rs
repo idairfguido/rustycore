@@ -5,8 +5,9 @@
 
 //! Runtime side of C++ `ConditionMgr` evaluation context.
 
+use num_traits::FromPrimitive;
 use wow_constants::MAX_CONDITION_TARGETS;
-use wow_constants::{ConditionSourceType, ConditionType, TypeId, TypeMask};
+use wow_constants::{ComparisonType, ConditionSourceType, ConditionType, TypeId, TypeMask};
 use wow_data::{Condition, ConditionEntriesByTypeStore, ConditionId};
 use wow_entities::WorldObject;
 
@@ -28,8 +29,22 @@ impl ConditionMapRef {
 #[derive(Debug)]
 pub struct ConditionSourceInfo<'a> {
     pub condition_targets: [Option<&'a WorldObject>; MAX_CONDITION_TARGETS],
+    pub unit_targets: [Option<ConditionUnitSnapshot>; MAX_CONDITION_TARGETS],
     pub condition_map: Option<ConditionMapRef>,
     pub last_failed_condition: Option<&'a Condition>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ConditionUnitSnapshot {
+    pub level: u32,
+    pub health: u64,
+    pub max_health: u64,
+    pub class_mask: u32,
+    pub race: u8,
+    pub is_alive: bool,
+    pub in_water: bool,
+    pub unit_state: u32,
+    pub stand_state: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +78,7 @@ impl<'a> ConditionSourceInfo<'a> {
 
         Self {
             condition_targets,
+            unit_targets: [None; MAX_CONDITION_TARGETS],
             condition_map,
             last_failed_condition: None,
         }
@@ -72,13 +88,46 @@ impl<'a> ConditionSourceInfo<'a> {
     pub const fn from_map(condition_map: ConditionMapRef) -> Self {
         Self {
             condition_targets: [None; MAX_CONDITION_TARGETS],
+            unit_targets: [None; MAX_CONDITION_TARGETS],
             condition_map: Some(condition_map),
             last_failed_condition: None,
         }
     }
 
+    pub fn set_unit_target_snapshot(
+        &mut self,
+        target_index: usize,
+        snapshot: ConditionUnitSnapshot,
+    ) {
+        if target_index < MAX_CONDITION_TARGETS {
+            self.unit_targets[target_index] = Some(snapshot);
+        }
+    }
+
     pub fn mark_failed_like_cpp(&mut self, condition: &'a Condition) {
         self.last_failed_condition = Some(condition);
+    }
+}
+
+fn compare_values_u64_like_cpp(comparison_type: u32, left: u64, right: u64) -> bool {
+    match ComparisonType::from_u32(comparison_type) {
+        Some(ComparisonType::Eq) => left == right,
+        Some(ComparisonType::High) => left > right,
+        Some(ComparisonType::Low) => left < right,
+        Some(ComparisonType::HighEq) => left >= right,
+        Some(ComparisonType::LowEq) => left <= right,
+        _ => false,
+    }
+}
+
+fn compare_values_f32_like_cpp(comparison_type: u32, left: f32, right: f32) -> bool {
+    match ComparisonType::from_u32(comparison_type) {
+        Some(ComparisonType::Eq) => left == right,
+        Some(ComparisonType::High) => left > right,
+        Some(ComparisonType::Low) => left < right,
+        Some(ComparisonType::HighEq) => left >= right,
+        Some(ComparisonType::LowEq) => left <= right,
+        _ => false,
     }
 }
 
@@ -114,16 +163,38 @@ pub fn condition_meets_basic_like_cpp<'a>(
         _ => needs_object = true,
     }
 
-    let object = source_info.condition_targets[usize::from(condition.condition_target)];
+    let target_index = usize::from(condition.condition_target);
+    let object = source_info.condition_targets[target_index];
     if needs_object && object.is_none() {
         return ConditionMeetResult::Evaluated(false);
     }
 
     if let Some(object) = object {
+        let unit = source_info.unit_targets[target_index];
         match condition.condition_type {
             ConditionType::ZoneId => cond_meets = object.zone_id() == condition.condition_value1,
             ConditionType::AreaId => {
                 cond_meets = is_in_area_like_cpp(object.area_id(), condition.condition_value1);
+            }
+            ConditionType::Class => {
+                if let Some(unit) = unit {
+                    cond_meets = (unit.class_mask & condition.condition_value1) != 0;
+                }
+            }
+            ConditionType::Race => {
+                if let Some(unit) = unit {
+                    cond_meets = unit.race != 0
+                        && condition.condition_value1 & (1_u32 << u32::from(unit.race - 1)) != 0;
+                }
+            }
+            ConditionType::Level => {
+                if let Some(unit) = unit {
+                    cond_meets = compare_values_u64_like_cpp(
+                        condition.condition_value2,
+                        u64::from(unit.level),
+                        u64::from(condition.condition_value1),
+                    );
+                }
             }
             ConditionType::ObjectEntryGuid | ConditionType::ObjectEntryGuidLegacy => {
                 let type_id = object.object().type_id();
@@ -152,6 +223,49 @@ pub fn condition_meets_basic_like_cpp<'a>(
                 cond_meets = object
                     .phase_shift()
                     .has_visible_map_id_like_cpp(condition.condition_value1);
+            }
+            ConditionType::Alive => {
+                if let Some(unit) = unit {
+                    cond_meets = unit.is_alive;
+                }
+            }
+            ConditionType::HpVal => {
+                if let Some(unit) = unit {
+                    cond_meets = compare_values_u64_like_cpp(
+                        condition.condition_value2,
+                        unit.health,
+                        u64::from(condition.condition_value1),
+                    );
+                }
+            }
+            ConditionType::HpPct => {
+                if let Some(unit) = unit {
+                    let health_pct = if unit.max_health == 0 {
+                        0.0
+                    } else {
+                        (unit.health as f32 / unit.max_health as f32) * 100.0
+                    };
+                    cond_meets = compare_values_f32_like_cpp(
+                        condition.condition_value2,
+                        health_pct,
+                        condition.condition_value1 as f32,
+                    );
+                }
+            }
+            ConditionType::UnitState => {
+                if let Some(unit) = unit {
+                    cond_meets = (unit.unit_state & condition.condition_value1) != 0;
+                }
+            }
+            ConditionType::InWater => {
+                if let Some(unit) = unit {
+                    cond_meets = unit.in_water;
+                }
+            }
+            ConditionType::StandState => {
+                if let Some(unit) = unit {
+                    cond_meets = unit.stand_state == condition.condition_value1;
+                }
             }
             ConditionType::PrivateObject | ConditionType::StringId => {
                 return ConditionMeetResult::Unsupported;
@@ -586,6 +700,102 @@ mod tests {
             condition_meets_basic_like_cpp(&terrain_condition, &mut info, |_, _| false),
             ConditionMeetResult::Evaluated(true)
         );
+    }
+
+    #[test]
+    fn basic_condition_meets_unit_snapshot_class_race_level_and_life_like_cpp() {
+        let target = world_object(571, 2);
+        let mut info = ConditionSourceInfo::from_targets(Some(&target), None, None);
+        info.set_unit_target_snapshot(
+            0,
+            ConditionUnitSnapshot {
+                level: 70,
+                health: 750,
+                max_health: 1000,
+                class_mask: 1 << (2 - 1),
+                race: 4,
+                is_alive: true,
+                in_water: true,
+                unit_state: 0x20,
+                stand_state: 8,
+            },
+        );
+
+        let conditions = vec![
+            Condition {
+                condition_type: ConditionType::Class,
+                condition_value1: 1 << (2 - 1),
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::Race,
+                condition_value1: 1 << (4 - 1),
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::Level,
+                condition_value1: 60,
+                condition_value2: ComparisonType::HighEq as u32,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::Alive,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::HpVal,
+                condition_value1: 700,
+                condition_value2: ComparisonType::High as u32,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::HpPct,
+                condition_value1: 75,
+                condition_value2: ComparisonType::Eq as u32,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::UnitState,
+                condition_value1: 0x20,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::InWater,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::StandState,
+                condition_value1: 8,
+                ..Condition::default()
+            },
+        ];
+
+        for condition in &conditions {
+            assert_eq!(
+                condition_meets_basic_like_cpp(condition, &mut info, |_, _| false),
+                ConditionMeetResult::Evaluated(true),
+                "{condition:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn basic_condition_meets_unit_branches_fail_without_unit_snapshot_like_cpp_tounit_null() {
+        let target = world_object(571, 2);
+        let mut info = ConditionSourceInfo::from_targets(Some(&target), None, None);
+        let condition = Condition {
+            condition_type: ConditionType::Alive,
+            ..Condition::default()
+        };
+
+        assert_eq!(
+            condition_meets_basic_like_cpp(&condition, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(false)
+        );
+        assert!(std::ptr::eq(
+            info.last_failed_condition.unwrap(),
+            &condition
+        ));
     }
 
     #[test]
