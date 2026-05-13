@@ -139,6 +139,11 @@ Out-of-tree consumers (each calls `sConditionMgr` extensively):
 - `Spawn groups` — `_SPAWN_GROUP`.
 - `Object visibility` — `_OBJECT_ID_VISIBILITY` (filter creatures/gameobjects by entry).
 
+**Phasing contract:**
+- `PhasingHandler::OnAreaChange` needs `CONDITION_SOURCE_TYPE_PHASE` buckets attached to each `PhaseAreaInfo` as a reload-safe `ConditionsReference`/weak handle, mirroring C++ `PhaseRef::AreaConditions`.
+- `PhasingHandler::OnMapChange` and `OnConditionChange` need `IsObjectMeetingNotGroupedConditions(CONDITION_SOURCE_TYPE_TERRAIN_SWAP, terrainSwapId, object)` with C++ OR-of-AND `ElseGroup` semantics and `NegativeCondition` support.
+- Do not mark phasing lifecycle tasks complete while ConditionMgr still uses injected predicates or "always true" fallbacks; those are test seams only, not C++ parity.
+
 ---
 
 ## 6. SQL / DB queries (if any)

@@ -122,6 +122,10 @@ Out-of-tree touchpoints:
 - `Conversation`, `AreaTrigger`, `Scene`, `Garrison`, `Scenario` modules — push personal phases on mission start, pop on completion.
 - `SmartScript` `SMART_ACTION_ADD_PHASE` / `REMOVE_PHASE` / `RANDOM_PHASE_GROUP` — script-driven phase mutation.
 
+**Cross-module blockers:**
+- See `conditions.md`: `#COND.4`, `#COND.7`, `#COND.17`, `#COND.18`, `#COND.20` and `#COND.29` are the minimum ConditionMgr surface needed before `#PHASE.8`, `#PHASE.15`, `#PHASE.16`, `#PHASE.17` and `#PHASE.29` can become fully wired. Until `ConditionsReference` exists, Rust phasing may keep injected predicates for unit tests but cannot claim parity with C++ `PhaseRef::AreaConditions`.
+- See `maps.md`: `#MAPS.6`, `#MAPS.7`, `#MAPS.8`, `#MAPS.9`, `#MAPS.10`, `#MAPS.13`, `#MAPS.15`, `#MAPS.16`, `#MAPS.17`, `#MAPS.18` and `#MAPS.20` are the minimum Map/Grid surface for `#PHASE.22`, `#PHASE.23` and the remaining `#PHASE.26` visibility/grid notifier work. `MultiPersonalPhaseTracker` cannot be complete without C++-style grid load/unload and nearby-cell visitation.
+
 ---
 
 ## 6. SQL / DB queries (if any)
@@ -300,7 +304,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [x] **#PHASE.27** Implement `FillPartyMemberPhase` for `SMSG_PARTY_MEMBER_FULL_STATE` so the group UI knows when a member is out of phase (`PartyMemberPhaseStates` serializer + `party_member_phase_states_like_cpp` + player-registry snapshot feeding group full-state packets; live phase-change resend hooks remain tracked by #PHASE.15/#PHASE.17/#PHASE.26) (M)
 - [x] **#PHASE.28** Add `PrintToChat` / `FormatPhases` admin/debug helpers (`format_phases_like_cpp` + `print_to_chat_snapshot_like_cpp`; concrete GM/chat command integration remains tracked outside the pure phasing port because Rust has no equivalent command layer yet) (L)
 - [ ] **#PHASE.29** Wire `OnConditionChange` to be re-fired by relevant condition triggers (quest state change, aura apply, item add — all in the C++ `Condition::Meets` triggers) (M, depends on Conditions module)
-- [ ] **#PHASE.30** Documentation: cross-link `phasing.md` ↔ `conditions.md` ↔ `maps.md` (`MultiPersonalPhaseTracker` ownership) (L)
+- [x] **#PHASE.30** Documentation: cross-link `phasing.md` ↔ `conditions.md` ↔ `maps.md` (`MultiPersonalPhaseTracker` ownership and ConditionMgr phase/terrain-swap blockers) (L)
 
 ---
 

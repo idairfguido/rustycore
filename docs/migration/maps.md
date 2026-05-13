@@ -152,6 +152,12 @@ All paths relative to `/home/server/woltk-trinity-legacy/`.
 - `ScriptMgr` — script callbacks (OnObjectEnter, OnObjectLeave, OnDestroy)
 - `PhasingHandler` — zone/area visibility based on phase shifts
 
+**Phasing contract:**
+- `Map` must own the per-map `MultiPersonalPhaseTracker` equivalent and call its `LoadGrid` / `UnloadGrid` / `Update` from the same grid lifecycle points as C++ `Map.cpp`.
+- `ObjectGridLoader` must register personal-phase spawns with the tracker instead of inserting them as globally visible regular grid objects.
+- `VisitNearbyCellsOf`, `AddToMap`, relocation and object update broadcasts must consult `PhaseShift::CanSee` through the same visibility chain tracked in `phasing.md #PHASE.26`; DB-spawn session filtering alone is not sufficient.
+- `Map::GetAreaId`, `GetZoneId`, height and liquid queries must accept the caller `PhaseShift` and route terrain lookup through `PhasingHandler::GetTerrainMapId` when visible-map terrain swaps are active.
+
 **Depended on by:**
 - `World` — creates maps, orchestrates map updates in main loop
 - `WorldSession` — player->map transfer, movement packets parsed into Map::PlayerRelocation
