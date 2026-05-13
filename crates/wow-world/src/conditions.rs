@@ -40,6 +40,7 @@ impl ConditionMapRef {
 pub struct ConditionSourceInfo<'a> {
     pub condition_targets: [Option<&'a WorldObject>; MAX_CONDITION_TARGETS],
     pub unit_targets: [Option<ConditionUnitSnapshot>; MAX_CONDITION_TARGETS],
+    pub unit_aura_targets: [Option<&'a [ConditionAuraEffectSnapshot]>; MAX_CONDITION_TARGETS],
     pub player_targets: [Option<ConditionPlayerSnapshot>; MAX_CONDITION_TARGETS],
     pub player_quest_targets: [Option<ConditionPlayerQuestSnapshot<'a>>; MAX_CONDITION_TARGETS],
     pub player_progression_targets:
@@ -65,6 +66,12 @@ pub struct ConditionUnitSnapshot {
     pub in_water: bool,
     pub unit_state: u32,
     pub stand_state: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConditionAuraEffectSnapshot {
+    pub spell_id: u32,
+    pub effect_index: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -237,6 +244,7 @@ impl<'a> ConditionSourceInfo<'a> {
         Self {
             condition_targets,
             unit_targets: [None; MAX_CONDITION_TARGETS],
+            unit_aura_targets: [None; MAX_CONDITION_TARGETS],
             player_targets: [None; MAX_CONDITION_TARGETS],
             player_quest_targets: [None; MAX_CONDITION_TARGETS],
             player_progression_targets: [None; MAX_CONDITION_TARGETS],
@@ -254,6 +262,7 @@ impl<'a> ConditionSourceInfo<'a> {
         Self {
             condition_targets: [None; MAX_CONDITION_TARGETS],
             unit_targets: [None; MAX_CONDITION_TARGETS],
+            unit_aura_targets: [None; MAX_CONDITION_TARGETS],
             player_targets: [None; MAX_CONDITION_TARGETS],
             player_quest_targets: [None; MAX_CONDITION_TARGETS],
             player_progression_targets: [None; MAX_CONDITION_TARGETS],
@@ -273,6 +282,16 @@ impl<'a> ConditionSourceInfo<'a> {
     ) {
         if target_index < MAX_CONDITION_TARGETS {
             self.unit_targets[target_index] = Some(snapshot);
+        }
+    }
+
+    pub fn set_unit_aura_target_snapshot(
+        &mut self,
+        target_index: usize,
+        aura_effects: &'a [ConditionAuraEffectSnapshot],
+    ) {
+        if target_index < MAX_CONDITION_TARGETS {
+            self.unit_aura_targets[target_index] = Some(aura_effects);
         }
     }
 
@@ -434,12 +453,22 @@ pub fn condition_meets_basic_like_cpp<'a>(
 
     if let Some(object) = object {
         let unit = source_info.unit_targets[target_index];
+        let unit_auras =
+            source_info.unit_aura_targets[target_index].filter(|_| is_unit_object_like_cpp(object));
         let is_player = is_player_object_like_cpp(object);
         let player = source_info.player_targets[target_index].filter(|_| is_player);
         let player_quests = source_info.player_quest_targets[target_index].filter(|_| is_player);
         let player_progression =
             source_info.player_progression_targets[target_index].filter(|_| is_player);
         match condition.condition_type {
+            ConditionType::Aura => {
+                if let Some(aura_effects) = unit_auras {
+                    cond_meets = aura_effects.iter().any(|aura| {
+                        aura.spell_id == condition.condition_value1
+                            && aura.effect_index == condition.condition_value2
+                    });
+                }
+            }
             ConditionType::ZoneId => cond_meets = object.zone_id() == condition.condition_value1,
             ConditionType::AreaId => {
                 cond_meets = is_in_area_like_cpp(object.area_id(), condition.condition_value1);
@@ -1314,6 +1343,10 @@ mod tests {
     #[test]
     fn basic_condition_meets_unit_snapshot_class_race_level_and_life_like_cpp() {
         let target = world_object(571, 2);
+        let aura_effects = [ConditionAuraEffectSnapshot {
+            spell_id: 17,
+            effect_index: 1,
+        }];
         let mut info = ConditionSourceInfo::from_targets(Some(&target), None, None);
         info.set_unit_target_snapshot(
             0,
@@ -1331,8 +1364,15 @@ mod tests {
                 stand_state: 8,
             },
         );
+        info.set_unit_aura_target_snapshot(0, &aura_effects);
 
         let conditions = vec![
+            Condition {
+                condition_type: ConditionType::Aura,
+                condition_value1: 17,
+                condition_value2: 1,
+                ..Condition::default()
+            },
             Condition {
                 condition_type: ConditionType::Class,
                 condition_value1: 1 << (2 - 1),
@@ -1794,7 +1834,7 @@ mod tests {
         );
 
         let unrepresented_condition = Condition {
-            condition_type: ConditionType::Aura,
+            condition_type: ConditionType::ReputationRank,
             ..Condition::default()
         };
         assert_eq!(
