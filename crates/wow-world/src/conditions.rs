@@ -5,8 +5,8 @@
 
 //! Runtime side of C++ `ConditionMgr` evaluation context.
 
-use wow_constants::ConditionSourceType;
 use wow_constants::MAX_CONDITION_TARGETS;
+use wow_constants::{ConditionSourceType, ConditionType, TypeId, TypeMask};
 use wow_data::{Condition, ConditionEntriesByTypeStore, ConditionId};
 use wow_entities::WorldObject;
 
@@ -30,6 +30,21 @@ pub struct ConditionSourceInfo<'a> {
     pub condition_targets: [Option<&'a WorldObject>; MAX_CONDITION_TARGETS],
     pub condition_map: Option<ConditionMapRef>,
     pub last_failed_condition: Option<&'a Condition>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConditionMeetResult {
+    Evaluated(bool),
+    Unsupported,
+}
+
+impl ConditionMeetResult {
+    pub const fn value(self) -> Option<bool> {
+        match self {
+            Self::Evaluated(value) => Some(value),
+            Self::Unsupported => None,
+        }
+    }
 }
 
 impl<'a> ConditionSourceInfo<'a> {
@@ -65,6 +80,96 @@ impl<'a> ConditionSourceInfo<'a> {
     pub fn mark_failed_like_cpp(&mut self, condition: &'a Condition) {
         self.last_failed_condition = Some(condition);
     }
+}
+
+/// Ported subset of C++ `Condition::Meets`.
+///
+/// Returns `Unsupported` for condition types whose exact C++ state is not yet represented by
+/// the Rust entity/DB2/runtime layers.
+pub fn condition_meets_basic_like_cpp<'a>(
+    condition: &'a Condition,
+    source_info: &mut ConditionSourceInfo<'a>,
+    mut is_in_area_like_cpp: impl FnMut(u32, u32) -> bool,
+) -> ConditionMeetResult {
+    if usize::from(condition.condition_target) >= MAX_CONDITION_TARGETS {
+        return ConditionMeetResult::Evaluated(false);
+    }
+
+    let mut cond_meets = false;
+    let mut needs_object = false;
+
+    match condition.condition_type {
+        ConditionType::None => cond_meets = true,
+        ConditionType::MapId => {
+            cond_meets = source_info
+                .condition_map
+                .is_some_and(|map| map.map_id == condition.condition_value1);
+        }
+        ConditionType::ActiveEvent
+        | ConditionType::InstanceInfo
+        | ConditionType::WorldState
+        | ConditionType::RealmAchievement
+        | ConditionType::DifficultyId
+        | ConditionType::ScenarioStep => return ConditionMeetResult::Unsupported,
+        _ => needs_object = true,
+    }
+
+    let object = source_info.condition_targets[usize::from(condition.condition_target)];
+    if needs_object && object.is_none() {
+        return ConditionMeetResult::Evaluated(false);
+    }
+
+    if let Some(object) = object {
+        match condition.condition_type {
+            ConditionType::ZoneId => cond_meets = object.zone_id() == condition.condition_value1,
+            ConditionType::AreaId => {
+                cond_meets = is_in_area_like_cpp(object.area_id(), condition.condition_value1);
+            }
+            ConditionType::ObjectEntryGuid | ConditionType::ObjectEntryGuidLegacy => {
+                let type_id = object.object().type_id();
+                if type_id as u32 == condition.condition_value1 {
+                    cond_meets = condition.condition_value2 == 0
+                        || object.object().entry() == condition.condition_value2;
+
+                    if condition.condition_value3 != 0
+                        && matches!(type_id, TypeId::Unit | TypeId::GameObject)
+                    {
+                        return ConditionMeetResult::Unsupported;
+                    }
+                }
+            }
+            ConditionType::TypeMask | ConditionType::TypeMaskLegacy => {
+                cond_meets = object
+                    .object()
+                    .is_type(TypeMask::from_bits_truncate(condition.condition_value1));
+            }
+            ConditionType::PhaseId => {
+                cond_meets = object
+                    .phase_shift()
+                    .has_phase_like_cpp(condition.condition_value1);
+            }
+            ConditionType::TerrainSwap => {
+                cond_meets = object
+                    .phase_shift()
+                    .has_visible_map_id_like_cpp(condition.condition_value1);
+            }
+            ConditionType::PrivateObject | ConditionType::StringId => {
+                return ConditionMeetResult::Unsupported;
+            }
+            ConditionType::None | ConditionType::MapId => {}
+            _ => return ConditionMeetResult::Unsupported,
+        }
+    }
+
+    if condition.negative_condition {
+        cond_meets = !cond_meets;
+    }
+
+    if !cond_meets {
+        source_info.mark_failed_like_cpp(condition);
+    }
+
+    ConditionMeetResult::Evaluated(cond_meets)
 }
 
 /// C++ `ConditionMgr::IsObjectMeetToConditions`.
@@ -341,7 +446,7 @@ pub fn is_object_meeting_visibility_by_object_id_conditions_like_cpp<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wow_constants::{ConditionType, TypeId, TypeMask};
+    use wow_constants::{ConditionType, PhaseFlags, TypeId, TypeMask};
 
     fn world_object(map_id: u32, instance_id: u32) -> WorldObject {
         let mut object = WorldObject::new(false, TypeId::Unit, TypeMask::UNIT);
@@ -385,6 +490,147 @@ mod tests {
             info.last_failed_condition.unwrap(),
             &condition
         ));
+    }
+
+    #[test]
+    fn basic_condition_meets_map_zone_area_and_negative_like_cpp() {
+        let mut target = world_object(571, 2);
+        target.set_zone_and_area(67, 123);
+        let mut info = ConditionSourceInfo::from_targets(Some(&target), None, None);
+
+        let map_condition = Condition {
+            condition_type: ConditionType::MapId,
+            condition_value1: 571,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&map_condition, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(true)
+        );
+
+        let zone_condition = Condition {
+            condition_type: ConditionType::ZoneId,
+            condition_value1: 67,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&zone_condition, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(true)
+        );
+
+        let area_condition = Condition {
+            condition_type: ConditionType::AreaId,
+            condition_value1: 999,
+            negative_condition: true,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&area_condition, &mut info, |current, required| {
+                current == 123 && required == 999
+            }),
+            ConditionMeetResult::Evaluated(false)
+        );
+        assert!(std::ptr::eq(
+            info.last_failed_condition.unwrap(),
+            &area_condition
+        ));
+    }
+
+    #[test]
+    fn basic_condition_meets_object_type_entry_mask_and_phasing_like_cpp() {
+        let mut target = world_object(571, 2);
+        target.object_mut().set_entry(1001);
+        target
+            .phase_shift_mut()
+            .add_phase_like_cpp(55, PhaseFlags::NONE, 1);
+        target.phase_shift_mut().add_visible_map_id_like_cpp(609, 1);
+        let mut info = ConditionSourceInfo::from_targets(Some(&target), None, None);
+
+        let entry_condition = Condition {
+            condition_type: ConditionType::ObjectEntryGuid,
+            condition_value1: TypeId::Unit as u32,
+            condition_value2: 1001,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&entry_condition, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(true)
+        );
+
+        let mask_condition = Condition {
+            condition_type: ConditionType::TypeMask,
+            condition_value1: TypeMask::UNIT.bits(),
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&mask_condition, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(true)
+        );
+
+        let phase_condition = Condition {
+            condition_type: ConditionType::PhaseId,
+            condition_value1: 55,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&phase_condition, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(true)
+        );
+
+        let terrain_condition = Condition {
+            condition_type: ConditionType::TerrainSwap,
+            condition_value1: 609,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&terrain_condition, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(true)
+        );
+    }
+
+    #[test]
+    fn basic_condition_meets_missing_object_returns_false_before_negative_like_cpp() {
+        let condition = Condition {
+            condition_type: ConditionType::ZoneId,
+            condition_value1: 67,
+            negative_condition: true,
+            ..Condition::default()
+        };
+        let mut info = ConditionSourceInfo::from_targets(None, None, None);
+
+        assert_eq!(
+            condition_meets_basic_like_cpp(&condition, &mut info, |_, _| true),
+            ConditionMeetResult::Evaluated(false)
+        );
+        assert!(info.last_failed_condition.is_none());
+    }
+
+    #[test]
+    fn basic_condition_meets_reports_unsupported_for_unrepresented_cpp_state() {
+        let mut target = world_object(571, 2);
+        target.object_mut().set_entry(1001);
+        let mut info = ConditionSourceInfo::from_targets(Some(&target), None, None);
+
+        let spawn_condition = Condition {
+            condition_type: ConditionType::ObjectEntryGuid,
+            condition_value1: TypeId::Unit as u32,
+            condition_value2: 1001,
+            condition_value3: 77,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&spawn_condition, &mut info, |_, _| false),
+            ConditionMeetResult::Unsupported
+        );
+
+        let player_condition = Condition {
+            condition_type: ConditionType::Team,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&player_condition, &mut info, |_, _| false),
+            ConditionMeetResult::Unsupported
+        );
     }
 
     #[test]
