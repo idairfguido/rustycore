@@ -321,6 +321,12 @@ impl PhaseShift {
         false
     }
 
+    pub fn remove_phase_all_references_like_cpp(&mut self, phase_id: u32) -> Option<PhaseRef> {
+        let phase_ref = self.phases.remove(&phase_id)?;
+        self.modify_phase_reference_counters(phase_ref, -phase_ref.references);
+        Some(phase_ref)
+    }
+
     pub fn has_phase_like_cpp(&self, phase_id: u32) -> bool {
         self.phases.contains_key(&phase_id)
     }
@@ -335,6 +341,10 @@ impl PhaseShift {
 
     pub fn phase_snapshot_like_cpp(&self) -> Vec<PhaseRef> {
         self.phases.values().copied().collect()
+    }
+
+    pub fn phase_count_like_cpp(&self) -> usize {
+        self.phases.len()
     }
 
     pub const fn flags_like_cpp(&self) -> PhaseShiftFlags {
@@ -405,6 +415,13 @@ impl PhaseShift {
         false
     }
 
+    pub fn remove_visible_map_id_all_references_like_cpp(
+        &mut self,
+        visible_map_id: u32,
+    ) -> Option<VisibleMapIdRef> {
+        self.visible_map_ids.remove(&visible_map_id)
+    }
+
     pub fn has_visible_map_id_like_cpp(&self, visible_map_id: u32) -> bool {
         self.visible_map_ids.contains_key(&visible_map_id)
     }
@@ -415,6 +432,13 @@ impl PhaseShift {
 
     pub fn visible_map_ids_like_cpp(&self) -> impl Iterator<Item = u32> + '_ {
         self.visible_map_ids.keys().copied()
+    }
+
+    pub fn visible_map_id_snapshot_like_cpp(&self) -> Vec<(u32, VisibleMapIdRef)> {
+        self.visible_map_ids
+            .iter()
+            .map(|(visible_map_id, visible_map_ref)| (*visible_map_id, visible_map_ref.clone()))
+            .collect()
     }
 
     pub fn visible_map_id_ref_like_cpp(&self, visible_map_id: u32) -> Option<&VisibleMapIdRef> {
@@ -1414,6 +1438,26 @@ mod tests {
         assert!(phase_shift.remove_visible_map_id_like_cpp(609));
         assert!(!phase_shift.has_visible_map_id_like_cpp(609));
         assert!(!phase_shift.remove_visible_map_id_like_cpp(609));
+    }
+
+    #[test]
+    fn phase_shift_can_remove_all_phase_and_visible_map_references_like_cpp() {
+        let mut phase_shift = PhaseShift::default();
+        phase_shift.add_phase_like_cpp(20, PhaseFlags::PERSONAL, 2);
+        phase_shift.add_visible_map_id_like_cpp(609, 2);
+
+        let removed_phase = phase_shift
+            .remove_phase_all_references_like_cpp(20)
+            .expect("phase should be removed");
+        assert_eq!(removed_phase.references(), 2);
+        assert!(!phase_shift.has_phase_like_cpp(20));
+        assert!(!phase_shift.has_personal_phase_like_cpp());
+
+        let removed_visible_map = phase_shift
+            .remove_visible_map_id_all_references_like_cpp(609)
+            .expect("visible map should be removed");
+        assert_eq!(removed_visible_map.references(), 2);
+        assert!(!phase_shift.has_visible_map_id_like_cpp(609));
     }
 
     #[test]
