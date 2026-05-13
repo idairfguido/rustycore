@@ -8,7 +8,8 @@
 use num_traits::FromPrimitive;
 use wow_constants::MAX_CONDITION_TARGETS;
 use wow_constants::{
-    ComparisonType, ConditionSourceType, ConditionType, TypeId, TypeMask, UnitStandStateType,
+    ComparisonType, ConditionSourceType, ConditionType, RelationType, TypeId, TypeMask,
+    UnitStandStateType,
 };
 use wow_data::{Condition, ConditionEntriesByTypeStore, ConditionId};
 use wow_entities::WorldObject;
@@ -167,6 +168,16 @@ fn is_player_object_like_cpp(object: &WorldObject) -> bool {
     )
 }
 
+fn is_unit_object_like_cpp(object: &WorldObject) -> bool {
+    matches!(
+        object.object().type_id(),
+        TypeId::Unit | TypeId::Player | TypeId::ActivePlayer
+    ) || object
+        .object()
+        .type_mask()
+        .intersects(TypeMask::UNIT | TypeMask::PLAYER | TypeMask::ACTIVE_PLAYER)
+}
+
 fn unit_stand_state_is_sit_like_cpp(stand_state: u32) -> bool {
     stand_state == UnitStandStateType::Sit as u32
         || stand_state == UnitStandStateType::SitChair as u32
@@ -287,6 +298,23 @@ pub fn condition_meets_basic_like_cpp<'a>(
                         object.distance(to_object),
                         condition.condition_value2 as f32,
                     );
+                }
+            }
+            ConditionType::RelationTo => {
+                if RelationType::from_u32(condition.condition_value2)
+                    != Some(RelationType::SelfRelation)
+                {
+                    return ConditionMeetResult::Unsupported;
+                }
+
+                if let Some(to_object) = usize::try_from(condition.condition_value1)
+                    .ok()
+                    .filter(|target| *target < MAX_CONDITION_TARGETS)
+                    .and_then(|target| source_info.condition_targets[target])
+                    && is_unit_object_like_cpp(object)
+                    && is_unit_object_like_cpp(to_object)
+                {
+                    cond_meets = std::ptr::eq(object, to_object);
                 }
             }
             ConditionType::PhaseId => {
@@ -886,6 +914,41 @@ mod tests {
         assert_eq!(
             condition_meets_basic_like_cpp(&condition, &mut info, |_, _| false),
             ConditionMeetResult::Evaluated(true)
+        );
+    }
+
+    #[test]
+    fn basic_condition_meets_relation_self_like_cpp() {
+        let target = world_object(571, 2);
+        let other = world_object(571, 2);
+        let self_condition = Condition {
+            condition_type: ConditionType::RelationTo,
+            condition_value1: 1,
+            condition_value2: RelationType::SelfRelation as u32,
+            ..Condition::default()
+        };
+
+        let mut same_info = ConditionSourceInfo::from_targets(Some(&target), Some(&target), None);
+        assert_eq!(
+            condition_meets_basic_like_cpp(&self_condition, &mut same_info, |_, _| false),
+            ConditionMeetResult::Evaluated(true)
+        );
+
+        let mut other_info = ConditionSourceInfo::from_targets(Some(&target), Some(&other), None);
+        assert_eq!(
+            condition_meets_basic_like_cpp(&self_condition, &mut other_info, |_, _| false),
+            ConditionMeetResult::Evaluated(false)
+        );
+
+        let party_condition = Condition {
+            condition_type: ConditionType::RelationTo,
+            condition_value1: 1,
+            condition_value2: RelationType::InParty as u32,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&party_condition, &mut other_info, |_, _| false),
+            ConditionMeetResult::Unsupported
         );
     }
 
