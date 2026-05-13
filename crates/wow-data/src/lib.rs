@@ -46,7 +46,10 @@ pub use area_trigger::{
     AreaTriggerData, AreaTriggerStore, AreaTriggerTeleport, TriggerShape, load_area_triggers,
 };
 pub use chr_specialization::{ChrSpecializationEntry, ChrSpecializationStore};
-pub use conditions::{Condition, ConditionContainer, ConditionId};
+pub use conditions::{
+    Condition, ConditionContainer, ConditionEntriesByTypeStore, ConditionId, ConditionsByEntryMap,
+    ConditionsReference,
+};
 pub use currency::{CurrencyTypesEntry, CurrencyTypesStore};
 pub use dungeon_encounter::{DungeonEncounterEntry, DungeonEncounterStore};
 pub use hotfix_cache::{

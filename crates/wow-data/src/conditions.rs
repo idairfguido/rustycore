@@ -5,6 +5,11 @@
 
 //! C++ `ConditionMgr` data rows.
 
+use std::{
+    collections::HashMap,
+    sync::{Arc, Weak},
+};
+
 use anyhow::Result;
 use num_traits::FromPrimitive;
 use tracing::info;
@@ -85,6 +90,89 @@ impl Condition {
 }
 
 pub type ConditionContainer = Vec<Condition>;
+pub type ConditionsByEntryMap = HashMap<ConditionId, Arc<ConditionContainer>>;
+
+#[derive(Debug, Clone, Default)]
+pub struct ConditionsReference {
+    conditions: Weak<ConditionContainer>,
+}
+
+impl ConditionsReference {
+    pub fn new(conditions: &Arc<ConditionContainer>) -> Self {
+        Self {
+            conditions: Arc::downgrade(conditions),
+        }
+    }
+
+    pub fn upgrade(&self) -> Option<Arc<ConditionContainer>> {
+        self.conditions.upgrade()
+    }
+
+    pub fn is_expired(&self) -> bool {
+        self.conditions.strong_count() == 0
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ConditionEntriesByTypeStore {
+    entries: HashMap<ConditionSourceType, ConditionsByEntryMap>,
+}
+
+impl ConditionEntriesByTypeStore {
+    pub fn from_conditions_like_cpp(conditions: impl IntoIterator<Item = Condition>) -> Self {
+        let mut store = Self::default();
+        for condition in conditions {
+            store.add_condition_like_cpp(condition);
+        }
+        store
+    }
+
+    pub fn add_condition_like_cpp(&mut self, condition: Condition) {
+        self.entries
+            .entry(condition.source_type)
+            .or_default()
+            .entry(condition.id_like_cpp())
+            .or_insert_with(|| Arc::new(Vec::new()));
+
+        let bucket = self
+            .entries
+            .get_mut(&condition.source_type)
+            .and_then(|by_id| by_id.get_mut(&condition.id_like_cpp()))
+            .expect("condition bucket must exist after insertion");
+        Arc::make_mut(bucket).push(condition);
+    }
+
+    pub fn conditions_for_like_cpp(
+        &self,
+        source_type: ConditionSourceType,
+        id: ConditionId,
+    ) -> Option<&Arc<ConditionContainer>> {
+        self.entries
+            .get(&source_type)
+            .and_then(|by_id| by_id.get(&id))
+    }
+
+    pub fn reference_for_like_cpp(
+        &self,
+        source_type: ConditionSourceType,
+        id: ConditionId,
+    ) -> Option<ConditionsReference> {
+        self.conditions_for_like_cpp(source_type, id)
+            .map(ConditionsReference::new)
+    }
+
+    pub fn bucket_count(&self) -> usize {
+        self.entries.values().map(HashMap::len).sum()
+    }
+
+    pub fn condition_count(&self) -> usize {
+        self.entries
+            .values()
+            .flat_map(HashMap::values)
+            .map(|conditions| conditions.len())
+            .sum()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConditionDbRowLikeCpp {
@@ -127,6 +215,10 @@ pub struct ConditionLoadReport {
 impl ConditionLoadReport {
     pub fn parsed_count(&self) -> usize {
         self.conditions.len()
+    }
+
+    pub fn into_store_like_cpp(self) -> ConditionEntriesByTypeStore {
+        ConditionEntriesByTypeStore::from_conditions_like_cpp(self.conditions)
     }
 }
 
@@ -401,5 +493,63 @@ mod tests {
         let skipped = parse_condition_row_like_cpp(row, |_| 0).unwrap_err();
 
         assert_eq!(skipped.reason, ConditionRowSkipReason::SelfReference(-42));
+    }
+
+    #[test]
+    fn condition_entries_store_groups_by_source_type_and_id_like_cpp() {
+        let first = Condition {
+            source_type: ConditionSourceType::Phase,
+            source_group: 7,
+            source_entry: 20,
+            source_id: 0,
+            condition_type: ConditionType::Aura,
+            condition_value1: 100,
+            ..Condition::default()
+        };
+        let second = Condition {
+            condition_value1: 101,
+            ..first.clone()
+        };
+        let other = Condition {
+            source_type: ConditionSourceType::TerrainSwap,
+            source_group: 7,
+            source_entry: 20,
+            source_id: 0,
+            condition_type: ConditionType::MapId,
+            ..Condition::default()
+        };
+
+        let store = ConditionEntriesByTypeStore::from_conditions_like_cpp([
+            first.clone(),
+            second.clone(),
+            other,
+        ]);
+
+        assert_eq!(store.bucket_count(), 2);
+        assert_eq!(store.condition_count(), 3);
+        let phase_bucket = store
+            .conditions_for_like_cpp(ConditionSourceType::Phase, first.id_like_cpp())
+            .unwrap();
+        assert_eq!(phase_bucket.as_slice(), &[first, second]);
+    }
+
+    #[test]
+    fn conditions_reference_expires_after_store_reload_like_cpp() {
+        let condition = Condition {
+            source_type: ConditionSourceType::Phase,
+            source_group: 7,
+            source_entry: 20,
+            condition_type: ConditionType::Aura,
+            ..Condition::default()
+        };
+        let reference = {
+            let store = ConditionEntriesByTypeStore::from_conditions_like_cpp([condition.clone()]);
+            store
+                .reference_for_like_cpp(ConditionSourceType::Phase, condition.id_like_cpp())
+                .unwrap()
+        };
+
+        assert!(reference.upgrade().is_none());
+        assert!(reference.is_expired());
     }
 }

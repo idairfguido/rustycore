@@ -206,6 +206,7 @@ ConditionMgr is server-internal — it emits no packets directly. Indirectly, wh
 - `crates/wow-data/src/conditions.rs` defines the owned `Condition`, `ConditionId`, and `ConditionContainer` data shapes with C++ constructor defaults and `Condition::isLoaded` parity.
 - `crates/wow-world/src/conditions.rs` defines runtime `ConditionSourceInfo` with 3 target slots, derived map context, and last-failed-condition tracking.
 - `wow-database::WorldStatements::SEL_CONDITIONS` plus `wow-data::load_condition_rows_like_cpp` parse the C++ `conditions` table projection, including negative reference rows and reference templates; full validation/indexing remains open under `#COND.7`, `#COND.20`, `#COND.21`, and `#COND.22`.
+- `wow-data::ConditionEntriesByTypeStore` groups parsed rows by `ConditionSourceType` and `ConditionId`, and `ConditionsReference` mirrors the C++ weak-reference holder used by downstream modules across reloads.
 
 **What's missing vs C++:**
 - Everything: data types (`Condition`, `ConditionSourceInfo`, `ConditionId`, `ConditionContainer`), enums (`ConditionTypes` ~58, `ConditionSourceType` ~33), the loader, the per-type evaluators, the source-type index builders, the `IsPlayerMeetingCondition` / `IsMeetingWorldStateExpression` / `IsUnitMeetingCondition` static helpers, `DisableMgr`.
@@ -265,7 +266,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [x] **#COND.4** Define `Condition` struct in `crates/wow-data/src/conditions.rs` with all 16 fields (`SourceType`, `SourceGroup`, `SourceEntry`, `SourceId`, `ElseGroup`, `ConditionType`, `ConditionTarget`, `ConditionValue1/2/3`, `ConditionStringValue1`, `ErrorType`, `ErrorTextId`, `ReferenceId`, `ScriptId`, `NegativeCondition`) and a `Default` impl (M)
 - [x] **#COND.5** Define `ConditionSourceInfo` (3-target array, optional `Map` ref, mutable `LastFailedCondition` slot) (L)
 - [x] **#COND.6** Define `ConditionId` `(SourceGroup, SourceEntry, SourceId)` with `Hash`/`Eq` (L)
-- [ ] **#COND.7** Implement loader for `conditions` table — single SQL query, build `ConditionEntriesByTypeArray` (`[ConditionsByEntryMap; CONDITION_SOURCE_TYPE_MAX]`), validate every row via `is_source_type_valid` + `is_condition_type_valid`, drop invalid rows with `tc_log_error("sql.sql", …)`-equivalent (XL — split: row parser, validator, indexer; partial: SQL statement + row parser + self-reference skip + negative reference/template handling implemented)
+- [ ] **#COND.7** Implement loader for `conditions` table — single SQL query, build `ConditionEntriesByTypeArray` (`[ConditionsByEntryMap; CONDITION_SOURCE_TYPE_MAX]`), validate every row via `is_source_type_valid` + `is_condition_type_valid`, drop invalid rows with `tc_log_error("sql.sql", …)`-equivalent (XL — split: row parser, validator, indexer; partial: SQL statement + row parser + self-reference skip + negative reference/template handling + ConditionStore grouping implemented)
 - [ ] **#COND.8** Resolve `ReferenceId` chains during load — a condition with `SourceTypeOrReferenceId < 0` is a reference; expand once flat (M)
 - [ ] **#COND.9** Implement `Condition::meets` evaluator — the giant switch over `ConditionType`. Split by category: presence/equality (NONE, ZONEID, AREAID, MAPID, TEAM, CLASS, RACE, GENDER, LEVEL, ALIVE, IN_WATER, GAMEMASTER, CHARMED, TAXI, PRIVATE_OBJECT) (M)
 - [ ] **#COND.10** `Condition::meets` — inventory and progression (ITEM, ITEM_EQUIPPED, SKILL, SPELL, ACHIEVEMENT, REALM_ACHIEVEMENT, TITLE, BATTLE_PET_COUNT) (M)
@@ -287,7 +288,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [ ] **#COND.26** Implement `Condition::get_searcher_type_mask_for_condition` — for early-exit during grid searches (M)
 - [ ] **#COND.27** Implement `Condition::to_string(ext)` — the debug formatter used in `tc_log_error` (L)
 - [ ] **#COND.28** Implement `ConditionMgr::clean` and reload semantics — drop and rebuild all index buckets, invalidate `weak_ptr`s in downstream `ConditionsReference` holders (M)
-- [ ] **#COND.29** Implement `ConditionsReference` weak-pointer wrapper for downstream modules (Phasing, Loot, Gossip) so they can hold a non-owning handle that survives reload safely (M)
+- [x] **#COND.29** Implement `ConditionsReference` weak-pointer wrapper for downstream modules (Phasing, Loot, Gossip) so they can hold a non-owning handle that survives reload safely (M; downstream wiring remains tracked by each source-type index builder task)
 - [ ] **#COND.30** Implement `DisableMgr` with all 8 `DisableType` variants, `LoadDisables`, `IsDisabledFor` per type, and the convenience helpers `IsPathfindingEnabled`, `IsVMAPDisabledFor`, `IsMMAPDisabledFor` (H)
 - [ ] **#COND.31** Wire `sConditionMgr` access pattern (singleton via `OnceCell` / `&'static`) into the world startup sequence so dependents can call it after `LoadConditions` (L)
 - [ ] **#COND.32** Documentation cross-links: `conditions.md` ↔ `phasing.md` (TERRAIN_SWAP, PHASE), `loot.md` (every LOOT_TEMPLATE source), `gossip.md` (when written), `spells.md` (SPELL_IMPLICIT_TARGET, SPELL_PROC, SPELL_CLICK_EVENT) (L)
