@@ -35,6 +35,7 @@ pub struct ConditionSourceInfo<'a> {
     pub condition_targets: [Option<&'a WorldObject>; MAX_CONDITION_TARGETS],
     pub unit_targets: [Option<ConditionUnitSnapshot>; MAX_CONDITION_TARGETS],
     pub player_targets: [Option<ConditionPlayerSnapshot>; MAX_CONDITION_TARGETS],
+    pub spawn_id_targets: [Option<u64>; MAX_CONDITION_TARGETS],
     pub condition_map: Option<ConditionMapRef>,
     pub last_failed_condition: Option<&'a Condition>,
 }
@@ -98,6 +99,7 @@ impl<'a> ConditionSourceInfo<'a> {
             condition_targets,
             unit_targets: [None; MAX_CONDITION_TARGETS],
             player_targets: [None; MAX_CONDITION_TARGETS],
+            spawn_id_targets: [None; MAX_CONDITION_TARGETS],
             condition_map,
             last_failed_condition: None,
         }
@@ -109,6 +111,7 @@ impl<'a> ConditionSourceInfo<'a> {
             condition_targets: [None; MAX_CONDITION_TARGETS],
             unit_targets: [None; MAX_CONDITION_TARGETS],
             player_targets: [None; MAX_CONDITION_TARGETS],
+            spawn_id_targets: [None; MAX_CONDITION_TARGETS],
             condition_map: Some(condition_map),
             last_failed_condition: None,
         }
@@ -131,6 +134,12 @@ impl<'a> ConditionSourceInfo<'a> {
     ) {
         if target_index < MAX_CONDITION_TARGETS {
             self.player_targets[target_index] = Some(snapshot);
+        }
+    }
+
+    pub fn set_spawn_id_target_snapshot(&mut self, target_index: usize, spawn_id: u64) {
+        if target_index < MAX_CONDITION_TARGETS {
+            self.spawn_id_targets[target_index] = Some(spawn_id);
         }
     }
 
@@ -278,7 +287,10 @@ pub fn condition_meets_basic_like_cpp<'a>(
                     if condition.condition_value3 != 0
                         && matches!(type_id, TypeId::Unit | TypeId::GameObject)
                     {
-                        return ConditionMeetResult::Unsupported;
+                        cond_meets &=
+                            source_info.spawn_id_targets[target_index].is_some_and(|spawn_id| {
+                                spawn_id == u64::from(condition.condition_value3)
+                            });
                     }
                 }
             }
@@ -850,6 +862,7 @@ mod tests {
             .add_phase_like_cpp(55, PhaseFlags::NONE, 1);
         target.phase_shift_mut().add_visible_map_id_like_cpp(609, 1);
         let mut info = ConditionSourceInfo::from_targets(Some(&target), None, None);
+        info.set_spawn_id_target_snapshot(0, 42);
 
         let entry_condition = Condition {
             condition_type: ConditionType::ObjectEntryGuid,
@@ -859,6 +872,18 @@ mod tests {
         };
         assert_eq!(
             condition_meets_basic_like_cpp(&entry_condition, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(true)
+        );
+
+        let spawn_condition = Condition {
+            condition_type: ConditionType::ObjectEntryGuid,
+            condition_value1: TypeId::Unit as u32,
+            condition_value2: 1001,
+            condition_value3: 42,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&spawn_condition, &mut info, |_, _| false),
             ConditionMeetResult::Evaluated(true)
         );
 
@@ -1226,7 +1251,7 @@ mod tests {
         };
         assert_eq!(
             condition_meets_basic_like_cpp(&spawn_condition, &mut info, |_, _| false),
-            ConditionMeetResult::Unsupported
+            ConditionMeetResult::Evaluated(false)
         );
 
         let unrepresented_condition = Condition {
