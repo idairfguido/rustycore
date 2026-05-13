@@ -42,9 +42,12 @@ pub struct ConditionSourceInfo<'a> {
     pub unit_targets: [Option<ConditionUnitSnapshot>; MAX_CONDITION_TARGETS],
     pub player_targets: [Option<ConditionPlayerSnapshot>; MAX_CONDITION_TARGETS],
     pub player_quest_targets: [Option<ConditionPlayerQuestSnapshot<'a>>; MAX_CONDITION_TARGETS],
+    pub player_progression_targets:
+        [Option<ConditionPlayerProgressionSnapshot<'a>>; MAX_CONDITION_TARGETS],
     pub spawn_id_targets: [Option<u64>; MAX_CONDITION_TARGETS],
     pub private_object_targets: [bool; MAX_CONDITION_TARGETS],
     pub string_id_targets: [Option<&'a [&'a str]>; MAX_CONDITION_TARGETS],
+    pub realm_achievement_ids: &'a [u32],
     pub condition_map: Option<ConditionMapRef>,
     pub last_failed_condition: Option<&'a Condition>,
 }
@@ -126,6 +129,83 @@ impl ConditionPlayerQuestSnapshot<'_> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConditionItemCountSnapshot {
+    pub item_id: u32,
+    pub count: u32,
+    pub bank_count: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConditionSkillSnapshot {
+    pub skill_id: u32,
+    pub base_value: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConditionBattlePetCountSnapshot {
+    pub species_id: u32,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConditionPlayerProgressionSnapshot<'a> {
+    pub items: &'a [ConditionItemCountSnapshot],
+    pub equipped_item_or_gem_ids: &'a [u32],
+    pub skills: &'a [ConditionSkillSnapshot],
+    pub spell_ids: &'a [u32],
+    pub achievement_ids: &'a [u32],
+    pub title_ids: &'a [u32],
+    pub battle_pet_counts: &'a [ConditionBattlePetCountSnapshot],
+}
+
+impl ConditionPlayerProgressionSnapshot<'_> {
+    fn has_item_count_like_cpp(self, item_id: u32, required_count: u32, check_bank: bool) -> bool {
+        self.items
+            .iter()
+            .find(|item| item.item_id == item_id)
+            .is_some_and(|item| {
+                let count = if check_bank {
+                    item.count.saturating_add(item.bank_count)
+                } else {
+                    item.count
+                };
+                count >= required_count
+            })
+    }
+
+    fn has_item_or_gem_equipped_like_cpp(self, item_id: u32) -> bool {
+        self.equipped_item_or_gem_ids.contains(&item_id)
+    }
+
+    fn has_skill_base_value_like_cpp(self, skill_id: u32, required_value: u32) -> bool {
+        self.skills
+            .iter()
+            .find(|skill| skill.skill_id == skill_id)
+            .is_some_and(|skill| skill.base_value >= required_value)
+    }
+
+    fn has_spell_like_cpp(self, spell_id: u32) -> bool {
+        self.spell_ids.contains(&spell_id)
+    }
+
+    fn has_achievement_like_cpp(self, achievement_id: u32) -> bool {
+        self.achievement_ids.contains(&achievement_id)
+    }
+
+    fn has_title_like_cpp(self, title_id: u32) -> bool {
+        self.title_ids.contains(&title_id)
+    }
+
+    fn battle_pet_count_like_cpp(self, species_id: u32) -> u32 {
+        self.battle_pet_counts
+            .iter()
+            .find(|pet| pet.species_id == species_id)
+            .map(|pet| pet.count)
+            .unwrap_or(0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConditionMeetResult {
     Evaluated(bool),
     Unsupported,
@@ -159,9 +239,11 @@ impl<'a> ConditionSourceInfo<'a> {
             unit_targets: [None; MAX_CONDITION_TARGETS],
             player_targets: [None; MAX_CONDITION_TARGETS],
             player_quest_targets: [None; MAX_CONDITION_TARGETS],
+            player_progression_targets: [None; MAX_CONDITION_TARGETS],
             spawn_id_targets: [None; MAX_CONDITION_TARGETS],
             private_object_targets: [false; MAX_CONDITION_TARGETS],
             string_id_targets: [None; MAX_CONDITION_TARGETS],
+            realm_achievement_ids: &[],
             condition_map,
             last_failed_condition: None,
         }
@@ -174,9 +256,11 @@ impl<'a> ConditionSourceInfo<'a> {
             unit_targets: [None; MAX_CONDITION_TARGETS],
             player_targets: [None; MAX_CONDITION_TARGETS],
             player_quest_targets: [None; MAX_CONDITION_TARGETS],
+            player_progression_targets: [None; MAX_CONDITION_TARGETS],
             spawn_id_targets: [None; MAX_CONDITION_TARGETS],
             private_object_targets: [false; MAX_CONDITION_TARGETS],
             string_id_targets: [None; MAX_CONDITION_TARGETS],
+            realm_achievement_ids: &[],
             condition_map: Some(condition_map),
             last_failed_condition: None,
         }
@@ -210,6 +294,20 @@ impl<'a> ConditionSourceInfo<'a> {
         if target_index < MAX_CONDITION_TARGETS {
             self.player_quest_targets[target_index] = Some(snapshot);
         }
+    }
+
+    pub fn set_player_progression_target_snapshot(
+        &mut self,
+        target_index: usize,
+        snapshot: ConditionPlayerProgressionSnapshot<'a>,
+    ) {
+        if target_index < MAX_CONDITION_TARGETS {
+            self.player_progression_targets[target_index] = Some(snapshot);
+        }
+    }
+
+    pub fn set_realm_achievement_ids(&mut self, achievement_ids: &'a [u32]) {
+        self.realm_achievement_ids = achievement_ids;
     }
 
     pub fn set_spawn_id_target_snapshot(&mut self, target_index: usize, spawn_id: u64) {
@@ -315,10 +413,14 @@ pub fn condition_meets_basic_like_cpp<'a>(
                 .condition_map
                 .is_some_and(|map| map.map_id == condition.condition_value1);
         }
+        ConditionType::RealmAchievement => {
+            cond_meets = source_info
+                .realm_achievement_ids
+                .contains(&condition.condition_value1);
+        }
         ConditionType::ActiveEvent
         | ConditionType::InstanceInfo
         | ConditionType::WorldState
-        | ConditionType::RealmAchievement
         | ConditionType::DifficultyId
         | ConditionType::ScenarioStep => return ConditionMeetResult::Unsupported,
         _ => needs_object = true,
@@ -335,6 +437,8 @@ pub fn condition_meets_basic_like_cpp<'a>(
         let is_player = is_player_object_like_cpp(object);
         let player = source_info.player_targets[target_index].filter(|_| is_player);
         let player_quests = source_info.player_quest_targets[target_index].filter(|_| is_player);
+        let player_progression =
+            source_info.player_progression_targets[target_index].filter(|_| is_player);
         match condition.condition_type {
             ConditionType::ZoneId => cond_meets = object.zone_id() == condition.condition_value1,
             ConditionType::AreaId => {
@@ -361,6 +465,34 @@ pub fn condition_meets_basic_like_cpp<'a>(
                     cond_meets = player.native_gender == condition.condition_value1;
                 }
             }
+            ConditionType::Item => {
+                if let Some(progression) = player_progression {
+                    cond_meets = progression.has_item_count_like_cpp(
+                        condition.condition_value1,
+                        condition.condition_value2,
+                        condition.condition_value3 != 0,
+                    );
+                }
+            }
+            ConditionType::ItemEquipped => {
+                if let Some(progression) = player_progression {
+                    cond_meets =
+                        progression.has_item_or_gem_equipped_like_cpp(condition.condition_value1);
+                }
+            }
+            ConditionType::Achievement => {
+                if let Some(progression) = player_progression {
+                    cond_meets = progression.has_achievement_like_cpp(condition.condition_value1);
+                }
+            }
+            ConditionType::Skill => {
+                if let Some(progression) = player_progression {
+                    cond_meets = progression.has_skill_base_value_like_cpp(
+                        condition.condition_value1,
+                        condition.condition_value2,
+                    );
+                }
+            }
             ConditionType::QuestRewarded => {
                 if let Some(quests) = player_quests {
                     cond_meets = quests.is_quest_rewarded_like_cpp(condition.condition_value1);
@@ -383,6 +515,11 @@ pub fn condition_meets_basic_like_cpp<'a>(
                 if let Some(quests) = player_quests {
                     cond_meets = quests.quest_status_like_cpp(condition.condition_value1)
                         == QUEST_STATUS_NONE_LIKE_CPP;
+                }
+            }
+            ConditionType::Spell => {
+                if let Some(progression) = player_progression {
+                    cond_meets = progression.has_spell_like_cpp(condition.condition_value1);
                 }
             }
             ConditionType::Level => {
@@ -540,6 +677,22 @@ pub fn condition_meets_basic_like_cpp<'a>(
                     cond_meets = player.is_in_flight;
                 }
             }
+            ConditionType::Title => {
+                if let Some(progression) = player_progression {
+                    cond_meets = progression.has_title_like_cpp(condition.condition_value1);
+                }
+            }
+            ConditionType::BattlePetCount => {
+                if let Some(progression) = player_progression {
+                    cond_meets = compare_values_u64_like_cpp(
+                        condition.condition_value3,
+                        u64::from(
+                            progression.battle_pet_count_like_cpp(condition.condition_value1),
+                        ),
+                        u64::from(condition.condition_value2),
+                    );
+                }
+            }
             ConditionType::DailyQuestDone => {
                 if let Some(quests) = player_quests {
                     cond_meets = quests.is_daily_quest_done_like_cpp(condition.condition_value1);
@@ -592,7 +745,7 @@ pub fn condition_meets_basic_like_cpp<'a>(
                         .any(|string_id| *string_id == condition.condition_string_value1.as_str());
                 }
             }
-            ConditionType::None | ConditionType::MapId => {}
+            ConditionType::None | ConditionType::MapId | ConditionType::RealmAchievement => {}
             _ => return ConditionMeetResult::Unsupported,
         }
     }
@@ -1303,6 +1456,111 @@ mod tests {
                 "{condition:?}"
             );
         }
+    }
+
+    #[test]
+    fn basic_condition_meets_player_progression_snapshot_branches_like_cpp() {
+        let target = player_object(571, 2);
+        let items = [ConditionItemCountSnapshot {
+            item_id: 100,
+            count: 2,
+            bank_count: 3,
+        }];
+        let equipped_item_or_gem_ids = [200];
+        let skills = [ConditionSkillSnapshot {
+            skill_id: 300,
+            base_value: 75,
+        }];
+        let spell_ids = [400];
+        let achievement_ids = [500];
+        let title_ids = [600];
+        let battle_pet_counts = [ConditionBattlePetCountSnapshot {
+            species_id: 700,
+            count: 4,
+        }];
+        let realm_achievement_ids = [800];
+        let mut info = ConditionSourceInfo::from_targets(Some(&target), None, None);
+        info.set_player_progression_target_snapshot(
+            0,
+            ConditionPlayerProgressionSnapshot {
+                items: &items,
+                equipped_item_or_gem_ids: &equipped_item_or_gem_ids,
+                skills: &skills,
+                spell_ids: &spell_ids,
+                achievement_ids: &achievement_ids,
+                title_ids: &title_ids,
+                battle_pet_counts: &battle_pet_counts,
+            },
+        );
+        info.set_realm_achievement_ids(&realm_achievement_ids);
+
+        let conditions = vec![
+            Condition {
+                condition_type: ConditionType::Item,
+                condition_value1: 100,
+                condition_value2: 5,
+                condition_value3: 1,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::ItemEquipped,
+                condition_value1: 200,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::Skill,
+                condition_value1: 300,
+                condition_value2: 75,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::Spell,
+                condition_value1: 400,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::Achievement,
+                condition_value1: 500,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::Title,
+                condition_value1: 600,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::BattlePetCount,
+                condition_value1: 700,
+                condition_value2: 4,
+                condition_value3: ComparisonType::HighEq as u32,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::RealmAchievement,
+                condition_value1: 800,
+                ..Condition::default()
+            },
+        ];
+
+        for condition in &conditions {
+            assert_eq!(
+                condition_meets_basic_like_cpp(condition, &mut info, |_, _| false),
+                ConditionMeetResult::Evaluated(true),
+                "{condition:?}"
+            );
+        }
+
+        let without_bank = Condition {
+            condition_type: ConditionType::Item,
+            condition_value1: 100,
+            condition_value2: 5,
+            condition_value3: 0,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&without_bank, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(false)
+        );
     }
 
     #[test]
