@@ -10,6 +10,7 @@ use wow_constants::MAX_CONDITION_TARGETS;
 use wow_constants::{ComparisonType, ConditionSourceType, ConditionType, TypeId, TypeMask};
 use wow_data::{Condition, ConditionEntriesByTypeStore, ConditionId};
 use wow_entities::WorldObject;
+use wow_loot::{LootStoreItemContext, condition_source_type_for_loot_store_kind_like_cpp};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ConditionMapRef {
@@ -557,10 +558,44 @@ pub fn is_object_meeting_visibility_by_object_id_conditions_like_cpp<'a>(
     true
 }
 
+/// C++ `LootTemplate::LinkConditions` + `LootItem::AllowedForPlayer` condition check.
+///
+/// Rust keeps loot items immutable and passes `LootStoreItemContext` during fill; this resolves the
+/// same condition bucket C++ links into `LootStoreItem::conditions` and evaluates it with the looter
+/// as target0.
+pub fn is_loot_store_item_meeting_conditions_like_cpp<'a>(
+    condition_store: &'a ConditionEntriesByTypeStore,
+    context: LootStoreItemContext,
+    looter: Option<&'a WorldObject>,
+    meets: impl FnMut(&'a Condition, &mut ConditionSourceInfo<'a>) -> bool,
+) -> bool {
+    let Some(source_type) = ConditionSourceType::from_u32(
+        condition_source_type_for_loot_store_kind_like_cpp(context.store_kind) as u32,
+    ) else {
+        return true;
+    };
+
+    if let Some(conditions) = condition_store.conditions_for_like_cpp(
+        source_type,
+        ConditionId::new(context.entry, context.item.item_id as i32, 0),
+    ) {
+        let mut source_info = ConditionSourceInfo::from_targets(looter, None, None);
+        return is_object_meet_to_conditions_like_cpp(
+            &mut source_info,
+            conditions.as_slice(),
+            condition_store,
+            meets,
+        );
+    }
+
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use wow_constants::{ConditionType, PhaseFlags, TypeId, TypeMask};
+    use wow_loot::{LootStoreItem, LootStoreItemContext, LootStoreKind};
 
     fn world_object(map_id: u32, instance_id: u32) -> WorldObject {
         let mut object = WorldObject::new(false, TypeId::Unit, TypeMask::UNIT);
@@ -1175,6 +1210,54 @@ mod tests {
             conditions_for_area_trigger_like_cpp(&store, 77, true).unwrap()[0].condition_value1,
             20
         );
+    }
+
+    #[test]
+    fn loot_store_item_conditions_use_cpp_store_entry_item_key_and_looter_target() {
+        let condition = Condition {
+            source_type: ConditionSourceType::CreatureLootTemplate,
+            source_group: 500,
+            source_entry: 6948,
+            condition_type: ConditionType::Aura,
+            ..Condition::default()
+        };
+        let store = ConditionEntriesByTypeStore::from_conditions_like_cpp([condition]);
+        let looter = world_object(571, 1);
+        let context = LootStoreItemContext {
+            store_kind: LootStoreKind::Creature,
+            entry: 500,
+            item: LootStoreItem {
+                item_id: 6948,
+                reference: 0,
+                chance: 100.0,
+                needs_quest: false,
+                loot_mode: 1,
+                group_id: 0,
+                min_count: 1,
+                max_count: 1,
+            },
+        };
+
+        assert!(is_loot_store_item_meeting_conditions_like_cpp(
+            &store,
+            context,
+            Some(&looter),
+            |_, source_info| std::ptr::eq(source_info.condition_targets[0].unwrap(), &looter),
+        ));
+
+        let missing_item_context = LootStoreItemContext {
+            item: LootStoreItem {
+                item_id: 6949,
+                ..context.item
+            },
+            ..context
+        };
+        assert!(is_loot_store_item_meeting_conditions_like_cpp(
+            &store,
+            missing_item_context,
+            Some(&looter),
+            |_, _| false,
+        ));
     }
 
     #[test]
