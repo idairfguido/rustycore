@@ -195,6 +195,7 @@ No CMSG opcode is consumed by Phasing directly — phase state is purely server-
 - Terrain swap metadata loading exists for `terrain_worldmap` / `terrain_swap_defaults`, including C++ DB2+hotfix `UiMapXMapArt.PhaseID` validation for `IsUiMapPhase`.
 - `Phase.db2` and `PhaseXPhaseGroup.db2` are loaded with hotfix overlays, exposing C++-like personal/cosmetic phase checks and `GetPhasesForGroup`.
 - Creature spawn `terrainSwapMap` is validated against `Map.ParentMapID` and applied to the creature `PhaseShift` visible-map ids.
+- `wow-world::phasing` ports C++ `PhasingHandler::FormatPhases` and the C++ `PrintToChat` argument formatter as `PhaseShiftChatSnapshot`; actual GM/chat command wiring remains pending until the Rust command layer exists.
 
 **What's missing vs C++:**
 - Full `PhasingHandler` façade — only reset/inherit/visibility-flag helpers and packet build are implemented.
@@ -297,7 +298,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [x] **#PHASE.25** Implement `GetTerrainMapId(phaseShift, mapId, terrain, x, y)` so collision / area lookups select the alt map when a swap is active at coordinates (`terrain_map_id_for_phase_shift_like_cpp` + `TerrainGridFilesLikeCpp` / `TerrainGridFileIndexLikeCpp` in `crates/wow-world/src/map_manager.rs`) (M)
 - [ ] **#PHASE.26** Integrate `PhaseShift::can_see` into the Rust visibility / grid-notifier path (the C++ `WorldObject::CanSeeOrDetect` chain) so phased objects actually become invisible (H; partial: session creature/gameobject DB create paths now filter through `PhaseShift::can_see` against represented player phase, `MapManager::get_visible_creatures_in_phase` mirrors the C++ grid searcher phase filter for canonical creature queries, and the `ObjectAccessor` player snapshot preserves represented player phase; remaining live player phase lifecycle hooks, non-DB object paths, and all grid notifier callsites stay open)
 - [x] **#PHASE.27** Implement `FillPartyMemberPhase` for `SMSG_PARTY_MEMBER_FULL_STATE` so the group UI knows when a member is out of phase (`PartyMemberPhaseStates` serializer + `party_member_phase_states_like_cpp` + player-registry snapshot feeding group full-state packets; live phase-change resend hooks remain tracked by #PHASE.15/#PHASE.17/#PHASE.26) (M)
-- [ ] **#PHASE.28** Add `PrintToChat` / `FormatPhases` admin/debug helpers (L)
+- [x] **#PHASE.28** Add `PrintToChat` / `FormatPhases` admin/debug helpers (`format_phases_like_cpp` + `print_to_chat_snapshot_like_cpp`; concrete GM/chat command integration remains tracked outside the pure phasing port because Rust has no equivalent command layer yet) (L)
 - [ ] **#PHASE.29** Wire `OnConditionChange` to be re-fired by relevant condition triggers (quest state change, aura apply, item add — all in the C++ `Condition::Meets` triggers) (M, depends on Conditions module)
 - [ ] **#PHASE.30** Documentation: cross-link `phasing.md` ↔ `conditions.md` ↔ `maps.md` (`MultiPersonalPhaseTracker` ownership) (L)
 

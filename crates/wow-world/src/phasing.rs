@@ -7,6 +7,8 @@
 
 use std::{collections::HashSet, error::Error, fmt};
 
+use std::fmt::Write as _;
+
 use wow_constants::{PhaseFlags, PhaseShiftFlags, TypeId};
 use wow_core::ObjectGuid;
 use wow_data::{AreaTableStore, PhaseGroupStore, PhaseInfoStore, PhaseStore, TerrainSwapStore};
@@ -765,6 +767,87 @@ pub fn party_member_phase_states_like_cpp(
     })
 }
 
+/// Arguments produced by C++ `PhasingHandler::PrintToChat` before localization.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhaseShiftChatSnapshot {
+    pub flags: u32,
+    pub personal_guid: ObjectGuid,
+    pub personal_owner_name: String,
+    pub phases: Option<String>,
+    pub visible_map_ids: Option<String>,
+    pub ui_map_phase_ids: Option<String>,
+}
+
+/// C++ `PhasingHandler::FormatPhases`.
+pub fn format_phases_like_cpp(phase_shift: &PhaseShift) -> String {
+    let mut phases = String::new();
+    for phase in phase_shift.phases_like_cpp() {
+        let _ = write!(phases, "{},", phase.id());
+    }
+    phases
+}
+
+/// C++ `PhasingHandler::PrintToChat`, split from the concrete `ChatHandler`.
+pub fn print_to_chat_snapshot_like_cpp(
+    target: &WorldObject,
+    mut resolve_personal_owner_name: impl FnMut(ObjectGuid) -> Option<String>,
+    mut resolve_phase_name: impl FnMut(u32) -> Option<String>,
+    cosmetic_label: &str,
+    personal_label: &str,
+) -> PhaseShiftChatSnapshot {
+    let phase_shift = target.phase_shift();
+    let mut personal_owner_name = String::from("N/A");
+
+    if phase_shift.has_personal_phase_like_cpp()
+        && let Some(name) = resolve_personal_owner_name(phase_shift.personal_guid_like_cpp())
+    {
+        personal_owner_name = name;
+    }
+
+    let phases = if phase_shift.phase_count_like_cpp() != 0 {
+        let mut phases = String::new();
+        for phase in phase_shift.phases_like_cpp() {
+            phases.push_str("\r\n   ");
+            let phase_name =
+                resolve_phase_name(phase.id()).unwrap_or_else(|| String::from("Unknown Name"));
+            let _ = write!(phases, "{} ({})", phase.id(), phase_name);
+            if phase.flags().contains(PhaseFlags::COSMETIC) {
+                let _ = write!(phases, " ({cosmetic_label})");
+            }
+            if phase.flags().contains(PhaseFlags::PERSONAL) {
+                let _ = write!(phases, " ({personal_label})");
+            }
+        }
+        Some(phases)
+    } else {
+        None
+    };
+
+    let visible_map_ids = if phase_shift.visible_map_id_count_like_cpp() != 0 {
+        let mut visible_map_ids = String::new();
+        for visible_map_id in phase_shift.visible_map_ids_like_cpp() {
+            let _ = write!(visible_map_ids, "{visible_map_id}, ");
+        }
+        Some(visible_map_ids)
+    } else {
+        None
+    };
+
+    let mut ui_map_phase_ids = String::new();
+    for ui_map_phase_id in phase_shift.ui_map_phase_ids_like_cpp() {
+        let _ = write!(ui_map_phase_ids, "{ui_map_phase_id}, ");
+    }
+
+    PhaseShiftChatSnapshot {
+        flags: phase_shift.flags_like_cpp().bits(),
+        personal_guid: phase_shift.personal_guid_like_cpp(),
+        personal_owner_name,
+        phases,
+        visible_map_ids,
+        ui_map_phase_ids: (!ui_map_phase_ids.is_empty()).then_some(ui_map_phase_ids),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1475,6 +1558,75 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn format_phases_keeps_cpp_comma_suffix_and_order() {
+        let mut phase_shift = PhaseShift::default();
+        phase_shift.add_phase_like_cpp(20, PhaseFlags::PERSONAL, 1);
+        phase_shift.add_phase_like_cpp(10, PhaseFlags::COSMETIC, 1);
+
+        assert_eq!(format_phases_like_cpp(&phase_shift), "10,20,");
+    }
+
+    #[test]
+    fn print_to_chat_snapshot_matches_cpp_argument_payloads() {
+        let personal_guid = ObjectGuid::create_player(1, 99);
+        let mut object = world_object();
+        object
+            .phase_shift_mut()
+            .set_flags_like_cpp(PhaseShiftFlags::ALWAYS_VISIBLE);
+        object
+            .phase_shift_mut()
+            .set_personal_guid_like_cpp(personal_guid);
+        object
+            .phase_shift_mut()
+            .add_phase_like_cpp(20, PhaseFlags::PERSONAL, 1);
+        object
+            .phase_shift_mut()
+            .add_phase_like_cpp(10, PhaseFlags::COSMETIC, 1);
+        object.phase_shift_mut().add_visible_map_id_like_cpp(609, 1);
+        object.phase_shift_mut().add_visible_map_id_like_cpp(571, 1);
+        object.phase_shift_mut().add_ui_map_phase_id_like_cpp(42, 1);
+
+        let snapshot = print_to_chat_snapshot_like_cpp(
+            &object,
+            |guid| (guid == personal_guid).then(|| String::from("Owner")),
+            |phase_id| Some(format!("Phase {phase_id}")),
+            "Cosmetic",
+            "Personal",
+        );
+
+        assert_eq!(snapshot.flags, object.phase_shift().flags_like_cpp().bits());
+        assert_eq!(snapshot.personal_guid, personal_guid);
+        assert_eq!(snapshot.personal_owner_name, "Owner");
+        assert_eq!(
+            snapshot.phases,
+            Some(String::from(
+                "\r\n   10 (Phase 10) (Cosmetic)\r\n   20 (Phase 20) (Personal)"
+            ))
+        );
+        assert_eq!(snapshot.visible_map_ids, Some(String::from("571, 609, ")));
+        assert_eq!(snapshot.ui_map_phase_ids, Some(String::from("42, ")));
+    }
+
+    #[test]
+    fn print_to_chat_snapshot_uses_cpp_missing_owner_and_phase_name_fallbacks() {
+        let mut object = world_object();
+        object
+            .phase_shift_mut()
+            .add_phase_like_cpp(20, PhaseFlags::PERSONAL, 1);
+
+        let snapshot =
+            print_to_chat_snapshot_like_cpp(&object, |_| None, |_| None, "Cosmetic", "Personal");
+
+        assert_eq!(snapshot.personal_owner_name, "N/A");
+        assert_eq!(
+            snapshot.phases,
+            Some(String::from("\r\n   20 (Unknown Name) (Personal)"))
+        );
+        assert_eq!(snapshot.visible_map_ids, None);
+        assert_eq!(snapshot.ui_map_phase_ids, None);
     }
 
     #[test]

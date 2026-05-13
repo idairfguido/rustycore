@@ -683,15 +683,14 @@ mod tests {
         registry.insert(leader, broadcast_info(leader, leader_tx));
         registry.insert(member, broadcast_info(member, member_tx));
         if let Some(mut info) = registry.get_mut(&member) {
-            info.party_member_phase_states =
-                wow_packet::packets::party::PartyMemberPhaseStates {
-                    phase_shift_flags: 0x08,
-                    personal_guid: ObjectGuid::EMPTY,
-                    phases: vec![wow_packet::packets::party::PartyMemberPhase {
-                        flags: 0x02,
-                        id: 20,
-                    }],
-                };
+            info.party_member_phase_states = wow_packet::packets::party::PartyMemberPhaseStates {
+                phase_shift_flags: 0x08,
+                personal_guid: ObjectGuid::EMPTY,
+                phases: vec![wow_packet::packets::party::PartyMemberPhase {
+                    flags: 0x02,
+                    id: 20,
+                }],
+            };
         }
         let mut group = GroupInfo::new(leader);
         group.members.push(member);
