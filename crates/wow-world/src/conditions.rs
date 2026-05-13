@@ -8,8 +8,8 @@
 use num_traits::FromPrimitive;
 use wow_constants::MAX_CONDITION_TARGETS;
 use wow_constants::{
-    ComparisonType, ConditionSourceType, ConditionType, RelationType, TypeId, TypeMask,
-    UnitStandStateType,
+    ComparisonType, ConditionInstanceInfo, ConditionSourceType, ConditionType, RelationType,
+    TypeId, TypeMask, UnitStandStateType,
 };
 use wow_data::{Condition, ConditionEntriesByTypeStore, ConditionId};
 use wow_entities::WorldObject;
@@ -54,6 +54,7 @@ pub struct ConditionSourceInfo<'a> {
     pub private_object_targets: [bool; MAX_CONDITION_TARGETS],
     pub string_id_targets: [Option<&'a [&'a str]>; MAX_CONDITION_TARGETS],
     pub realm_achievement_ids: &'a [u32],
+    pub map_state: Option<ConditionMapStateSnapshot<'a>>,
     pub condition_map: Option<ConditionMapRef>,
     pub last_failed_condition: Option<&'a Condition>,
 }
@@ -184,12 +185,19 @@ pub struct ConditionBattlePetCountSnapshot {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConditionReputationSnapshot {
+    pub faction_id: u32,
+    pub rank: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConditionPlayerProgressionSnapshot<'a> {
     pub items: &'a [ConditionItemCountSnapshot],
     pub equipped_item_or_gem_ids: &'a [u32],
     pub skills: &'a [ConditionSkillSnapshot],
     pub spell_ids: &'a [u32],
     pub achievement_ids: &'a [u32],
+    pub reputations: &'a [ConditionReputationSnapshot],
     pub title_ids: &'a [u32],
     pub battle_pet_counts: &'a [ConditionBattlePetCountSnapshot],
 }
@@ -228,6 +236,13 @@ impl ConditionPlayerProgressionSnapshot<'_> {
         self.achievement_ids.contains(&achievement_id)
     }
 
+    fn has_reputation_rank_like_cpp(self, faction_id: u32, rank_mask: u32) -> bool {
+        self.reputations
+            .iter()
+            .find(|reputation| reputation.faction_id == faction_id)
+            .is_some_and(|reputation| ((1_u32 << reputation.rank) & rank_mask) != 0)
+    }
+
     fn has_title_like_cpp(self, title_id: u32) -> bool {
         self.title_ids.contains(&title_id)
     }
@@ -238,6 +253,55 @@ impl ConditionPlayerProgressionSnapshot<'_> {
             .find(|pet| pet.species_id == species_id)
             .map(|pet| pet.count)
             .unwrap_or(0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConditionMapDataSnapshot {
+    pub id: u32,
+    pub value: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConditionWorldStateSnapshot {
+    pub id: u32,
+    pub value: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConditionMapStateSnapshot<'a> {
+    pub active_event_ids: &'a [u32],
+    pub world_states: &'a [ConditionWorldStateSnapshot],
+    pub difficulty_id: u32,
+    pub instance_data: &'a [ConditionMapDataSnapshot],
+    pub instance_data64: &'a [ConditionMapDataSnapshot],
+    pub boss_states: &'a [ConditionMapDataSnapshot],
+}
+
+impl ConditionMapStateSnapshot<'_> {
+    fn world_state_value_like_cpp(self, world_state_id: u32) -> i32 {
+        self.world_states
+            .iter()
+            .find(|world_state| world_state.id == world_state_id)
+            .map(|world_state| world_state.value)
+            .unwrap_or(0)
+    }
+
+    fn instance_data_value_like_cpp(
+        self,
+        instance_info: ConditionInstanceInfo,
+        id: u32,
+    ) -> Option<u64> {
+        let values = match instance_info {
+            ConditionInstanceInfo::Data => self.instance_data,
+            ConditionInstanceInfo::Data64 => self.instance_data64,
+            ConditionInstanceInfo::BossState => self.boss_states,
+            ConditionInstanceInfo::GuidData => return None,
+        };
+        values
+            .iter()
+            .find(|data| data.id == id)
+            .map(|data| data.value)
     }
 }
 
@@ -284,6 +348,7 @@ impl<'a> ConditionSourceInfo<'a> {
             private_object_targets: [false; MAX_CONDITION_TARGETS],
             string_id_targets: [None; MAX_CONDITION_TARGETS],
             realm_achievement_ids: &[],
+            map_state: None,
             condition_map,
             last_failed_condition: None,
         }
@@ -305,6 +370,7 @@ impl<'a> ConditionSourceInfo<'a> {
             private_object_targets: [false; MAX_CONDITION_TARGETS],
             string_id_targets: [None; MAX_CONDITION_TARGETS],
             realm_achievement_ids: &[],
+            map_state: None,
             condition_map: Some(condition_map),
             last_failed_condition: None,
         }
@@ -392,6 +458,10 @@ impl<'a> ConditionSourceInfo<'a> {
 
     pub fn set_realm_achievement_ids(&mut self, achievement_ids: &'a [u32]) {
         self.realm_achievement_ids = achievement_ids;
+    }
+
+    pub fn set_map_state_snapshot(&mut self, map_state: ConditionMapStateSnapshot<'a>) {
+        self.map_state = Some(map_state);
     }
 
     pub fn set_spawn_id_target_snapshot(&mut self, target_index: usize, spawn_id: u64) {
@@ -502,11 +572,36 @@ pub fn condition_meets_basic_like_cpp<'a>(
                 .realm_achievement_ids
                 .contains(&condition.condition_value1);
         }
-        ConditionType::ActiveEvent
-        | ConditionType::InstanceInfo
-        | ConditionType::WorldState
-        | ConditionType::DifficultyId
-        | ConditionType::ScenarioStep => return ConditionMeetResult::Unsupported,
+        ConditionType::ActiveEvent => {
+            cond_meets = source_info.map_state.is_some_and(|map_state| {
+                map_state
+                    .active_event_ids
+                    .contains(&condition.condition_value1)
+            });
+        }
+        ConditionType::WorldState => {
+            cond_meets = source_info.map_state.is_some_and(|map_state| {
+                map_state.world_state_value_like_cpp(condition.condition_value1)
+                    == condition.condition_value2 as i32
+            });
+        }
+        ConditionType::DifficultyId => {
+            cond_meets = source_info
+                .map_state
+                .is_some_and(|map_state| map_state.difficulty_id == condition.condition_value1);
+        }
+        ConditionType::InstanceInfo => {
+            let Some(instance_info) = ConditionInstanceInfo::from_u32(condition.condition_value3)
+            else {
+                return ConditionMeetResult::Evaluated(false);
+            };
+            cond_meets = source_info.map_state.is_some_and(|map_state| {
+                map_state
+                    .instance_data_value_like_cpp(instance_info, condition.condition_value1)
+                    .is_some_and(|value| value == u64::from(condition.condition_value2))
+            });
+        }
+        ConditionType::ScenarioStep => return ConditionMeetResult::Unsupported,
         _ => needs_object = true,
     }
 
@@ -579,6 +674,14 @@ pub fn condition_meets_basic_like_cpp<'a>(
             ConditionType::Achievement => {
                 if let Some(progression) = player_progression {
                     cond_meets = progression.has_achievement_like_cpp(condition.condition_value1);
+                }
+            }
+            ConditionType::ReputationRank => {
+                if let Some(progression) = player_progression {
+                    cond_meets = progression.has_reputation_rank_like_cpp(
+                        condition.condition_value1,
+                        condition.condition_value2,
+                    );
                 }
             }
             ConditionType::Skill => {
@@ -917,6 +1020,10 @@ pub fn condition_meets_basic_like_cpp<'a>(
                 }
             }
             ConditionType::None | ConditionType::MapId | ConditionType::RealmAchievement => {}
+            ConditionType::ActiveEvent
+            | ConditionType::InstanceInfo
+            | ConditionType::WorldState
+            | ConditionType::DifficultyId => {}
             _ => return ConditionMeetResult::Unsupported,
         }
     }
@@ -1298,6 +1405,19 @@ mod tests {
         let mut target = world_object(571, 2);
         target.set_zone_and_area(67, 123);
         let mut info = ConditionSourceInfo::from_targets(Some(&target), None, None);
+        let active_events = [77];
+        let world_states = [ConditionWorldStateSnapshot { id: 88, value: -5 }];
+        let instance_data = [ConditionMapDataSnapshot { id: 1, value: 42 }];
+        let instance_data64 = [ConditionMapDataSnapshot { id: 2, value: 84 }];
+        let boss_states = [ConditionMapDataSnapshot { id: 3, value: 2 }];
+        info.set_map_state_snapshot(ConditionMapStateSnapshot {
+            active_event_ids: &active_events,
+            world_states: &world_states,
+            difficulty_id: 23,
+            instance_data: &instance_data,
+            instance_data64: &instance_data64,
+            boss_states: &boss_states,
+        });
 
         let map_condition = Condition {
             condition_type: ConditionType::MapId,
@@ -1316,6 +1436,73 @@ mod tests {
         };
         assert_eq!(
             condition_meets_basic_like_cpp(&zone_condition, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(true)
+        );
+
+        let active_event_condition = Condition {
+            condition_type: ConditionType::ActiveEvent,
+            condition_value1: 77,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&active_event_condition, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(true)
+        );
+
+        let world_state_condition = Condition {
+            condition_type: ConditionType::WorldState,
+            condition_value1: 88,
+            condition_value2: (-5_i32) as u32,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&world_state_condition, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(true)
+        );
+
+        let difficulty_condition = Condition {
+            condition_type: ConditionType::DifficultyId,
+            condition_value1: 23,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&difficulty_condition, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(true)
+        );
+
+        let instance_data_condition = Condition {
+            condition_type: ConditionType::InstanceInfo,
+            condition_value1: 1,
+            condition_value2: 42,
+            condition_value3: ConditionInstanceInfo::Data as u32,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&instance_data_condition, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(true)
+        );
+
+        let instance_data64_condition = Condition {
+            condition_type: ConditionType::InstanceInfo,
+            condition_value1: 2,
+            condition_value2: 84,
+            condition_value3: ConditionInstanceInfo::Data64 as u32,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&instance_data64_condition, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(true)
+        );
+
+        let boss_state_condition = Condition {
+            condition_type: ConditionType::InstanceInfo,
+            condition_value1: 3,
+            condition_value2: 2,
+            condition_value3: ConditionInstanceInfo::BossState as u32,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&boss_state_condition, &mut info, |_, _| false),
             ConditionMeetResult::Evaluated(true)
         );
 
@@ -1751,6 +1938,10 @@ mod tests {
         }];
         let spell_ids = [400];
         let achievement_ids = [500];
+        let reputations = [ConditionReputationSnapshot {
+            faction_id: 550,
+            rank: 5,
+        }];
         let title_ids = [600];
         let battle_pet_counts = [ConditionBattlePetCountSnapshot {
             species_id: 700,
@@ -1766,6 +1957,7 @@ mod tests {
                 skills: &skills,
                 spell_ids: &spell_ids,
                 achievement_ids: &achievement_ids,
+                reputations: &reputations,
                 title_ids: &title_ids,
                 battle_pet_counts: &battle_pet_counts,
             },
@@ -1799,6 +1991,12 @@ mod tests {
             Condition {
                 condition_type: ConditionType::Achievement,
                 condition_value1: 500,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::ReputationRank,
+                condition_value1: 550,
+                condition_value2: 1 << 5,
                 ..Condition::default()
             },
             Condition {
@@ -2072,7 +2270,7 @@ mod tests {
         );
 
         let unrepresented_condition = Condition {
-            condition_type: ConditionType::ReputationRank,
+            condition_type: ConditionType::SceneInProgress,
             ..Condition::default()
         };
         assert_eq!(
