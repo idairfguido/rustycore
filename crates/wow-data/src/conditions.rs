@@ -1131,10 +1131,39 @@ pub struct SkippedConditionRow {
     pub reason: ConditionRowSkipReason,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConditionLoadWarningLikeCpp {
+    ReferenceUselessConditionTarget {
+        source_type_or_reference_id: i32,
+        condition_target: u8,
+    },
+    ReferenceUselessValue {
+        source_type_or_reference_id: i32,
+        field: u8,
+        value: u32,
+    },
+    ReferenceUselessNegativeCondition {
+        source_type_or_reference_id: i32,
+    },
+    ReferenceTemplateUselessSourceGroup {
+        source_type_or_reference_id: i32,
+        source_group: u32,
+    },
+    ReferenceTemplateUselessSourceEntry {
+        source_type_or_reference_id: i32,
+        source_entry: i32,
+    },
+    ReferenceTemplateUselessSourceId {
+        source_type_or_reference_id: i32,
+        source_id: u32,
+    },
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConditionLoadReport {
     pub conditions: Vec<Condition>,
     pub skipped: Vec<SkippedConditionRow>,
+    pub warnings: Vec<ConditionLoadWarningLikeCpp>,
 }
 
 impl ConditionLoadReport {
@@ -1204,6 +1233,80 @@ pub fn parse_condition_row_like_cpp(
     }
 
     Ok(condition)
+}
+
+pub fn condition_load_warnings_like_cpp(
+    row: &ConditionDbRowLikeCpp,
+) -> Vec<ConditionLoadWarningLikeCpp> {
+    let mut warnings = Vec::new();
+
+    if row.condition_type_or_reference < 0 {
+        if row.condition_target != 0 {
+            warnings.push(
+                ConditionLoadWarningLikeCpp::ReferenceUselessConditionTarget {
+                    source_type_or_reference_id: row.source_type_or_reference_id,
+                    condition_target: row.condition_target,
+                },
+            );
+        }
+        if row.condition_value1 != 0 {
+            warnings.push(ConditionLoadWarningLikeCpp::ReferenceUselessValue {
+                source_type_or_reference_id: row.source_type_or_reference_id,
+                field: 1,
+                value: row.condition_value1,
+            });
+        }
+        if row.condition_value2 != 0 {
+            warnings.push(ConditionLoadWarningLikeCpp::ReferenceUselessValue {
+                source_type_or_reference_id: row.source_type_or_reference_id,
+                field: 2,
+                value: row.condition_value2,
+            });
+        }
+        if row.condition_value3 != 0 {
+            warnings.push(ConditionLoadWarningLikeCpp::ReferenceUselessValue {
+                source_type_or_reference_id: row.source_type_or_reference_id,
+                field: 3,
+                value: row.condition_value3,
+            });
+        }
+        if row.negative_condition {
+            warnings.push(
+                ConditionLoadWarningLikeCpp::ReferenceUselessNegativeCondition {
+                    source_type_or_reference_id: row.source_type_or_reference_id,
+                },
+            );
+        }
+    }
+
+    if row.source_type_or_reference_id < 0 {
+        if row.source_group != 0 {
+            warnings.push(
+                ConditionLoadWarningLikeCpp::ReferenceTemplateUselessSourceGroup {
+                    source_type_or_reference_id: row.source_type_or_reference_id,
+                    source_group: row.source_group,
+                },
+            );
+        }
+        if row.source_entry != 0 {
+            warnings.push(
+                ConditionLoadWarningLikeCpp::ReferenceTemplateUselessSourceEntry {
+                    source_type_or_reference_id: row.source_type_or_reference_id,
+                    source_entry: row.source_entry,
+                },
+            );
+        }
+        if row.source_id != 0 {
+            warnings.push(
+                ConditionLoadWarningLikeCpp::ReferenceTemplateUselessSourceId {
+                    source_type_or_reference_id: row.source_type_or_reference_id,
+                    source_id: row.source_id,
+                },
+            );
+        }
+    }
+
+    warnings
 }
 
 pub fn normalize_loaded_condition_shape_like_cpp(
@@ -1276,6 +1379,9 @@ pub fn parse_condition_rows_like_cpp(
 ) -> ConditionLoadReport {
     let mut report = ConditionLoadReport::default();
     for row in rows {
+        report
+            .warnings
+            .extend(condition_load_warnings_like_cpp(&row));
         match parse_condition_row_like_cpp(row.clone(), &mut script_id_for_name) {
             Ok(mut condition) => {
                 match normalize_loaded_condition_shape_for_row_like_cpp(&mut condition, &row) {
@@ -1326,9 +1432,10 @@ pub async fn load_condition_rows_like_cpp(
 
     let report = parse_condition_rows_like_cpp(rows, script_id_for_name);
     info!(
-        "Parsed {} conditions rows ({} skipped before validation)",
+        "Parsed {} conditions rows ({} skipped before validation, {} load warnings)",
         report.parsed_count(),
-        report.skipped.len()
+        report.skipped.len(),
+        report.warnings.len()
     );
     Ok(report)
 }
@@ -2015,6 +2122,107 @@ mod tests {
         assert_eq!(condition.source_id, 7);
         assert_eq!(condition.reference_id, ConditionType::Aura as u32);
         assert_eq!(condition.condition_type, ConditionType::None);
+    }
+
+    #[test]
+    fn parse_condition_rows_records_cpp_reference_useless_data_warnings_without_skipping() {
+        let row = ConditionDbRowLikeCpp {
+            source_type_or_reference_id: ConditionSourceType::Phase as i32,
+            source_group: 0,
+            source_entry: 0,
+            source_id: 0,
+            else_group: 0,
+            condition_type_or_reference: -42,
+            condition_target: 1,
+            condition_value1: 10,
+            condition_value2: 20,
+            condition_value3: 30,
+            condition_string_value1: String::new(),
+            negative_condition: true,
+            error_type: 0,
+            error_text_id: 0,
+            script_name: String::new(),
+        };
+
+        let report = parse_condition_rows_like_cpp([row], |_| 0);
+
+        assert_eq!(report.conditions.len(), 1);
+        assert!(report.skipped.is_empty());
+        assert_eq!(
+            report.warnings,
+            vec![
+                ConditionLoadWarningLikeCpp::ReferenceUselessConditionTarget {
+                    source_type_or_reference_id: ConditionSourceType::Phase as i32,
+                    condition_target: 1,
+                },
+                ConditionLoadWarningLikeCpp::ReferenceUselessValue {
+                    source_type_or_reference_id: ConditionSourceType::Phase as i32,
+                    field: 1,
+                    value: 10,
+                },
+                ConditionLoadWarningLikeCpp::ReferenceUselessValue {
+                    source_type_or_reference_id: ConditionSourceType::Phase as i32,
+                    field: 2,
+                    value: 20,
+                },
+                ConditionLoadWarningLikeCpp::ReferenceUselessValue {
+                    source_type_or_reference_id: ConditionSourceType::Phase as i32,
+                    field: 3,
+                    value: 30,
+                },
+                ConditionLoadWarningLikeCpp::ReferenceUselessNegativeCondition {
+                    source_type_or_reference_id: ConditionSourceType::Phase as i32,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_condition_rows_records_cpp_reference_template_useless_data_warnings() {
+        let row = ConditionDbRowLikeCpp {
+            source_type_or_reference_id: -500,
+            source_group: 9,
+            source_entry: 8,
+            source_id: 7,
+            else_group: 0,
+            condition_type_or_reference: ConditionType::Aura as i32,
+            condition_target: 0,
+            condition_value1: 0,
+            condition_value2: 0,
+            condition_value3: 0,
+            condition_string_value1: String::new(),
+            negative_condition: false,
+            error_type: 0,
+            error_text_id: 0,
+            script_name: String::new(),
+        };
+
+        let report = parse_condition_rows_like_cpp([row], |_| 0);
+
+        assert_eq!(
+            report.warnings,
+            vec![
+                ConditionLoadWarningLikeCpp::ReferenceTemplateUselessSourceGroup {
+                    source_type_or_reference_id: -500,
+                    source_group: 9,
+                },
+                ConditionLoadWarningLikeCpp::ReferenceTemplateUselessSourceEntry {
+                    source_type_or_reference_id: -500,
+                    source_entry: 8,
+                },
+                ConditionLoadWarningLikeCpp::ReferenceTemplateUselessSourceId {
+                    source_type_or_reference_id: -500,
+                    source_id: 7,
+                },
+            ]
+        );
+        assert_eq!(
+            report.skipped[0].reason,
+            ConditionRowSkipReason::SourceIdNotAllowed {
+                source_type: ConditionSourceType::ReferenceCondition,
+                source_id: 7,
+            }
+        );
     }
 
     #[test]
