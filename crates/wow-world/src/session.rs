@@ -3918,6 +3918,7 @@ impl WorldSession {
             return None;
         }
         object.relocate(pos);
+        *object.phase_shift_mut() = self.represented_player_phase_shift.clone();
         object.object_mut().add_to_world();
         Some(object)
     }
@@ -11097,6 +11098,29 @@ mod tests {
         assert!(accessor.find_connected_player(player_guid).is_none());
         assert!(session.inventory_items.is_empty());
         assert!(session.inventory_item_objects.is_empty());
+    }
+
+    #[test]
+    fn object_accessor_sync_preserves_represented_player_phase_shift_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let accessor = new_shared_object_accessor();
+        let player_guid = ObjectGuid::create_player(1, 43);
+
+        let mut player_phase_shift = PhaseShift::default();
+        player_phase_shift.add_phase_like_cpp(20, wow_constants::PhaseFlags::empty(), 1);
+        session.set_represented_player_phase_shift_like_cpp(player_phase_shift.clone());
+
+        session.set_object_accessor(Arc::clone(&accessor));
+        session.set_player_guid(Some(player_guid));
+        session.player_name = Some("Thrall".into());
+        session.player_position = Some(Position::new(1.0, 2.0, 3.0, 0.0));
+        session.current_map_id = 1;
+        session.sync_object_accessor_player();
+
+        let accessor = accessor.read();
+        let player = accessor.find_connected_player(player_guid).unwrap();
+        assert!(player.phase_shift().can_see(&player_phase_shift));
+        assert!(player.phase_shift().has_phase_like_cpp(20));
     }
 
     #[tokio::test]
