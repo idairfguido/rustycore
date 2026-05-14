@@ -12,8 +12,10 @@ use crate::wdc4::Wdc4Reader;
 
 pub const MAX_VEHICLE_SEATS_LIKE_CPP: usize = 8;
 pub const VEHICLE_SEAT_FLAG_SHOULD_USE_VEH_SEAT_EXIT_ANIM_ON_VOLUNTARY_EXIT: i32 = 0x0000_0008;
+pub const VEHICLE_SEAT_FLAG_DISABLE_GRAVITY: i32 = 0x0000_0004;
 pub const VEHICLE_SEAT_FLAG_CAN_CONTROL: i32 = 0x0000_0800;
 pub const VEHICLE_SEAT_FLAG_UNCONTROLLED: i32 = 0x0000_2000;
+pub const VEHICLE_SEAT_FLAG_PASSENGER_NOT_SELECTABLE: i32 = 0x0010_0000;
 pub const VEHICLE_SEAT_FLAG_UNK18: i32 = 0x0002_0000;
 pub const VEHICLE_SEAT_FLAG_CAN_ENTER_OR_EXIT: i32 = 0x0200_0000;
 pub const VEHICLE_SEAT_FLAG_CAN_SWITCH: i32 = 0x0400_0000;
@@ -79,6 +81,9 @@ impl VehicleSeatEntry {
             id: self.id,
             can_enter_or_exit: self.can_enter_or_exit_like_cpp(),
             usable_by_override: self.usable_by_override_like_cpp(),
+            can_control: self.has_flag(VEHICLE_SEAT_FLAG_CAN_CONTROL),
+            disables_gravity: self.has_flag(VEHICLE_SEAT_FLAG_DISABLE_GRAVITY),
+            passenger_not_selectable: self.has_flag(VEHICLE_SEAT_FLAG_PASSENGER_NOT_SELECTABLE),
         }
     }
 }
@@ -476,6 +481,10 @@ mod tests {
         };
         assert!(control.can_enter_or_exit_like_cpp());
         assert!(!control.usable_by_override_like_cpp());
+        let control_info = control.to_vehicle_seat_info_like_cpp();
+        assert!(control_info.can_control);
+        assert!(!control_info.disables_gravity);
+        assert!(!control_info.passenger_not_selectable);
 
         let forced = VehicleSeatEntry {
             id: 2,
@@ -485,6 +494,16 @@ mod tests {
         };
         assert!(!forced.can_enter_or_exit_like_cpp());
         assert!(forced.usable_by_override_like_cpp());
+
+        let passenger_flags = VehicleSeatEntry {
+            id: 3,
+            flags: VEHICLE_SEAT_FLAG_DISABLE_GRAVITY | VEHICLE_SEAT_FLAG_PASSENGER_NOT_SELECTABLE,
+            flags_b: 0,
+            flags_c: 0,
+        }
+        .to_vehicle_seat_info_like_cpp();
+        assert!(passenger_flags.disables_gravity);
+        assert!(passenger_flags.passenger_not_selectable);
     }
 
     #[test]

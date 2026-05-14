@@ -66,6 +66,9 @@ pub struct VehicleSeatInfo {
     pub id: u32,
     pub can_enter_or_exit: bool,
     pub usable_by_override: bool,
+    pub can_control: bool,
+    pub disables_gravity: bool,
+    pub passenger_not_selectable: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -129,6 +132,27 @@ pub struct VehiclePassengerAddPlan {
     pub seat_id: Option<i8>,
     pub scheduled_abort: bool,
     pub displaced_passenger: Option<ObjectGuid>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VehiclePassengerTransportReset {
+    None,
+    Reset,
+    InheritBaseTransport,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VehiclePassengerRemovePlan {
+    pub seat_id: i8,
+    pub set_vehicle_none: bool,
+    pub restore_gravity: bool,
+    pub restore_interactible: bool,
+    pub restore_npc_flag: bool,
+    pub remove_charm: bool,
+    pub transport_reset: VehiclePassengerTransportReset,
+    pub cast_parachute: bool,
+    pub call_ai_passenger_boarded: bool,
+    pub call_on_remove_passenger_script: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -567,13 +591,62 @@ impl Vehicle {
     }
 
     pub fn remove_passenger(&mut self, passenger: ObjectGuid) -> Option<i8> {
-        for (seat_id, seat) in &mut self.seats {
-            if seat.passenger.guid == passenger {
-                seat.passenger.reset();
-                return Some(*seat_id);
+        self.remove_passenger_plan_like_cpp(passenger, TypeId::Unit, false, false, false, false)
+            .map(|plan| plan.seat_id)
+    }
+
+    pub fn remove_passenger_plan_like_cpp(
+        &mut self,
+        passenger: ObjectGuid,
+        passenger_type_id: TypeId,
+        base_is_in_world: bool,
+        base_has_transport: bool,
+        passenger_is_flying: bool,
+        base_ai_enabled: bool,
+    ) -> Option<VehiclePassengerRemovePlan> {
+        let (&seat_id, seat) = self
+            .seats
+            .iter_mut()
+            .find(|(_, seat)| seat.passenger.guid == passenger)?;
+        let passenger_info = seat.passenger;
+
+        let restore_npc_flag = if seat.seat_info.can_enter_or_exit {
+            self.usable_seat_num = self.usable_seat_num.saturating_add(1);
+            self.usable_seat_num != 0
+        } else {
+            false
+        };
+        let restore_gravity =
+            seat.seat_info.disables_gravity && !passenger_info.is_gravity_disabled;
+        let restore_interactible =
+            seat.seat_info.passenger_not_selectable && !passenger_info.is_uninteractible;
+        let remove_charm = self.base_type_id == TypeId::Unit
+            && passenger_type_id == TypeId::Player
+            && seat.seat_info.can_control;
+        let transport_reset = if base_is_in_world {
+            if base_has_transport {
+                VehiclePassengerTransportReset::InheritBaseTransport
+            } else {
+                VehiclePassengerTransportReset::Reset
             }
-        }
-        None
+        } else {
+            VehiclePassengerTransportReset::None
+        };
+
+        seat.passenger.reset();
+
+        Some(VehiclePassengerRemovePlan {
+            seat_id,
+            set_vehicle_none: true,
+            restore_gravity,
+            restore_interactible,
+            restore_npc_flag,
+            remove_charm,
+            transport_reset,
+            cast_parachute: passenger_is_flying,
+            call_ai_passenger_boarded: self.base_type_id == TypeId::Unit && base_ai_enabled,
+            call_on_remove_passenger_script: self.base_type_id == TypeId::Unit,
+        })
     }
 
     pub fn remove_all_passengers(&mut self) {
@@ -585,7 +658,7 @@ impl Vehicle {
     }
 
     pub fn is_controllable_vehicle(&self) -> bool {
-        self.usable_seat_num != 0
+        self.seats.values().any(|seat| seat.seat_info.can_control)
     }
 
     pub fn add_pending_event(&mut self, passenger: ObjectGuid, seat_id: i8) {
@@ -738,6 +811,9 @@ mod tests {
             id,
             can_enter_or_exit,
             usable_by_override: false,
+            can_control: false,
+            disables_gravity: false,
+            passenger_not_selectable: false,
         }
     }
 
@@ -757,6 +833,9 @@ mod tests {
                         id: 1002,
                         can_enter_or_exit: false,
                         usable_by_override: true,
+                        can_control: true,
+                        disables_gravity: false,
+                        passenger_not_selectable: false,
                     },
                     VehicleSeatAddon::default(),
                 ),
@@ -807,6 +886,76 @@ mod tests {
         assert_eq!(vehicle.status(), VehicleStatus::Uninstalling);
         assert!(!vehicle.is_vehicle_in_use());
         assert!(!vehicle.has_pending_event_for_seat(2));
+    }
+
+    #[test]
+    fn remove_passenger_plan_restores_cpp_side_effects() {
+        let mut vehicle = vehicle();
+        let passenger = passenger_guid(1);
+        vehicle.seats.get_mut(&0).unwrap().seat_info.can_control = true;
+        vehicle
+            .seats
+            .get_mut(&0)
+            .unwrap()
+            .seat_info
+            .disables_gravity = true;
+        vehicle
+            .seats
+            .get_mut(&0)
+            .unwrap()
+            .seat_info
+            .passenger_not_selectable = true;
+        assert!(vehicle.add_vehicle_passenger(passenger, 0));
+        vehicle.usable_seat_num = 0;
+
+        let plan = vehicle
+            .remove_passenger_plan_like_cpp(passenger, TypeId::Player, true, false, true, true)
+            .expect("boarded passenger is removable");
+
+        assert_eq!(
+            plan,
+            VehiclePassengerRemovePlan {
+                seat_id: 0,
+                set_vehicle_none: true,
+                restore_gravity: true,
+                restore_interactible: true,
+                restore_npc_flag: true,
+                remove_charm: true,
+                transport_reset: VehiclePassengerTransportReset::Reset,
+                cast_parachute: true,
+                call_ai_passenger_boarded: true,
+                call_on_remove_passenger_script: true,
+            }
+        );
+        assert_eq!(vehicle.usable_seat_num(), 1);
+        assert!(vehicle.passenger(0).is_none());
+    }
+
+    #[test]
+    fn remove_passenger_plan_preserves_existing_passenger_flags_like_cpp() {
+        let mut vehicle = vehicle();
+        let passenger = passenger_guid(1);
+        let seat = vehicle.seats.get_mut(&0).unwrap();
+        seat.seat_info.disables_gravity = true;
+        seat.seat_info.passenger_not_selectable = true;
+        seat.passenger = PassengerInfo {
+            guid: passenger,
+            is_uninteractible: true,
+            is_gravity_disabled: true,
+        };
+
+        let plan = vehicle
+            .remove_passenger_plan_like_cpp(passenger, TypeId::Unit, true, true, false, false)
+            .expect("boarded passenger is removable");
+
+        assert!(!plan.restore_gravity);
+        assert!(!plan.restore_interactible);
+        assert_eq!(
+            plan.transport_reset,
+            VehiclePassengerTransportReset::InheritBaseTransport
+        );
+        assert!(!plan.remove_charm);
+        assert!(!plan.cast_parachute);
     }
 
     #[test]

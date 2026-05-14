@@ -278,11 +278,11 @@ pub use update_fields::{
 pub use vehicle::{
     MAX_VEHICLE_SEATS, PassengerInfo, Vehicle, VehicleAccessory, VehicleAccessoryInstallPlan,
     VehicleExitParameter, VehicleFlag, VehicleImmunityPlan, VehiclePassengerAddPlan,
-    VehiclePendingEventRemovalPlan, VehiclePendingJoinAbort, VehicleRemoveAllPassengersPlan,
-    VehicleResetPlan, VehicleSeat, VehicleSeatAddon, VehicleSeatInfo, VehicleSpellImmunity,
-    VehicleSpellImmunityKind, VehicleStatus, VehicleTemplate, calculate_passenger_offset,
-    calculate_passenger_position, vehicle_accessory_install_plan_like_cpp,
-    vehicle_immunity_plan_like_cpp,
+    VehiclePassengerRemovePlan, VehiclePassengerTransportReset, VehiclePendingEventRemovalPlan,
+    VehiclePendingJoinAbort, VehicleRemoveAllPassengersPlan, VehicleResetPlan, VehicleSeat,
+    VehicleSeatAddon, VehicleSeatInfo, VehicleSpellImmunity, VehicleSpellImmunityKind,
+    VehicleStatus, VehicleTemplate, calculate_passenger_offset, calculate_passenger_position,
+    vehicle_accessory_install_plan_like_cpp, vehicle_immunity_plan_like_cpp,
 };
 pub use world_object::{
     DEFAULT_HEIGHT_SEARCH, DEFAULT_VISIBILITY_DISTANCE, DEFAULT_VISIBILITY_INSTANCE,
