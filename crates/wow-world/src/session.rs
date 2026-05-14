@@ -972,13 +972,21 @@ pub struct WorldSession {
     player_mount_display_id_like_cpp: i32,
     /// Represented vehicle id selected from mount creature template until VehicleKit exists.
     player_mount_vehicle_id_like_cpp: u32,
+    /// Represented current pet GUID until player-owned pet runtime is canonical.
+    represented_pet_guid_like_cpp: Option<ObjectGuid>,
+    /// Represented current pet react state for C++ mount/dismount PetMode side effects.
+    represented_pet_react_state_like_cpp: u8,
+    /// Represented current pet command state for C++ mount/dismount PetMode side effects.
+    represented_pet_command_state_like_cpp: u8,
+    /// C++ `Player::m_temporaryPetReactState` saved by `DisablePetControlsOnMount`.
+    temporary_mount_pet_react_state_like_cpp: Option<u8>,
     /// Count of C++ `CreateVehicleKit` mount side effects represented until Vehicle runtime sends packets.
     mount_vehicle_create_requests_like_cpp: u32,
     /// Count of C++ `RemoveVehicleKit` mount side effects represented until Vehicle runtime sends packets.
     mount_vehicle_remove_requests_like_cpp: u32,
-    /// Count of C++ `DisablePetControlsOnMount` side effects represented until PetMode packets exist.
+    /// Count of C++ `DisablePetControlsOnMount` side effects represented until pet runtime is canonical.
     mount_pet_control_disable_requests_like_cpp: u32,
-    /// Count of C++ `EnablePetControlsOnDismount` side effects represented until PetMode packets exist.
+    /// Count of C++ `EnablePetControlsOnDismount` side effects represented until pet runtime is canonical.
     mount_pet_control_enable_requests_like_cpp: u32,
     /// Count of C++ mount/dismount pet resummon calls represented until pet runtime is canonical.
     mount_pet_resummon_requests_like_cpp: u32,
@@ -1579,6 +1587,12 @@ impl WorldSession {
             taxi_mounted_like_cpp: false,
             player_mount_display_id_like_cpp: 0,
             player_mount_vehicle_id_like_cpp: 0,
+            represented_pet_guid_like_cpp: None,
+            represented_pet_react_state_like_cpp:
+                wow_packet::packets::pet::REACT_DEFENSIVE_LIKE_CPP,
+            represented_pet_command_state_like_cpp:
+                wow_packet::packets::pet::COMMAND_FOLLOW_LIKE_CPP,
+            temporary_mount_pet_react_state_like_cpp: None,
             mount_vehicle_create_requests_like_cpp: 0,
             mount_vehicle_remove_requests_like_cpp: 0,
             mount_pet_control_disable_requests_like_cpp: 0,
@@ -4613,6 +4627,10 @@ impl WorldSession {
         self.mount_pet_control_disable_requests_like_cpp = self
             .mount_pet_control_disable_requests_like_cpp
             .saturating_add(1);
+        self.disable_pet_controls_on_mount_like_cpp(
+            wow_packet::packets::pet::REACT_PASSIVE_LIKE_CPP,
+            wow_packet::packets::pet::COMMAND_FOLLOW_LIKE_CPP,
+        );
         self.mount_collision_height_update_requests_like_cpp = self
             .mount_collision_height_update_requests_like_cpp
             .saturating_add(1);
@@ -4646,6 +4664,39 @@ impl WorldSession {
             vehicle_guid: player_guid,
             vehicle_rec_id,
         });
+    }
+
+    fn disable_pet_controls_on_mount_like_cpp(&mut self, react_state: u8, command_state: u8) {
+        let Some(pet_guid) = self.represented_pet_guid_like_cpp else {
+            return;
+        };
+
+        self.temporary_mount_pet_react_state_like_cpp =
+            Some(self.represented_pet_react_state_like_cpp);
+        self.represented_pet_react_state_like_cpp = react_state;
+        self.represented_pet_command_state_like_cpp = command_state;
+        self.send_packet(&wow_packet::packets::pet::PetMode {
+            pet_guid,
+            react_state,
+            command_state,
+            flag: 0,
+        });
+    }
+
+    fn enable_pet_controls_on_dismount_like_cpp(&mut self) {
+        if let Some(pet_guid) = self.represented_pet_guid_like_cpp {
+            if let Some(react_state) = self.temporary_mount_pet_react_state_like_cpp {
+                self.represented_pet_react_state_like_cpp = react_state;
+            }
+            self.send_packet(&wow_packet::packets::pet::PetMode {
+                pet_guid,
+                react_state: self.represented_pet_react_state_like_cpp,
+                command_state: self.represented_pet_command_state_like_cpp,
+                flag: 0,
+            });
+        }
+
+        self.temporary_mount_pet_react_state_like_cpp = None;
     }
 
     fn update_player_collision_height_like_cpp(&mut self) {
@@ -4763,6 +4814,7 @@ impl WorldSession {
                 self.mount_pet_control_enable_requests_like_cpp = self
                     .mount_pet_control_enable_requests_like_cpp
                     .saturating_add(1);
+                self.enable_pet_controls_on_dismount_like_cpp();
                 self.mount_pet_resummon_requests_like_cpp =
                     self.mount_pet_resummon_requests_like_cpp.saturating_add(1);
                 self.mount_collision_height_update_requests_like_cpp = self
@@ -6428,6 +6480,19 @@ impl WorldSession {
             .into_iter()
             .map(|mount| (mount.spell_id, mount.flags))
             .collect();
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn set_represented_pet_mode_state_like_cpp(
+        &mut self,
+        pet_guid: Option<ObjectGuid>,
+        react_state: u8,
+        command_state: u8,
+    ) {
+        self.represented_pet_guid_like_cpp = pet_guid;
+        self.represented_pet_react_state_like_cpp = react_state;
+        self.represented_pet_command_state_like_cpp = command_state;
+        self.temporary_mount_pet_react_state_like_cpp = None;
     }
 
     #[cfg(test)]
@@ -9820,11 +9885,18 @@ mod tests {
         let (mut session, _, send_rx) = make_session();
         let player_guid = ObjectGuid::create_player(1, 42);
         let other_guid = ObjectGuid::create_player(1, 43);
+        let pet_guid =
+            ObjectGuid::create_world_object(wow_core::guid::HighGuid::Pet, 0, 1, 0, 0, 500, 44);
         let registry = Arc::new(PlayerRegistry::default());
         let (other_tx, other_rx) = flume::bounded(8);
         session.set_player_guid(Some(player_guid));
         session.set_player_registry(Arc::clone(&registry));
         session.set_player_position_like_cpp(Position::new(1.0, 2.0, 3.0, 0.5));
+        session.set_represented_pet_mode_state_like_cpp(
+            Some(pet_guid),
+            wow_packet::packets::pet::REACT_DEFENSIVE_LIKE_CPP,
+            wow_packet::packets::pet::COMMAND_STAY_LIKE_CPP,
+        );
         session.player_race = 1;
         session.player_gender = 0;
         registry.insert(
@@ -9900,10 +9972,19 @@ mod tests {
         assert_eq!(session.mount_pet_control_enable_requests_like_cpp, 0);
         assert_eq!(session.mount_pet_resummon_requests_like_cpp, 0);
         assert_eq!(session.mount_collision_height_update_requests_like_cpp, 1);
+        assert_eq!(
+            session.represented_pet_react_state_like_cpp,
+            wow_packet::packets::pet::REACT_PASSIVE_LIKE_CPP
+        );
+        assert_eq!(
+            session.represented_pet_command_state_like_cpp,
+            wow_packet::packets::pet::COMMAND_FOLLOW_LIKE_CPP
+        );
         assert!((session.player_collision_height_like_cpp - 7.32).abs() < 0.0001);
         let opcodes = drain_server_opcodes(&send_rx);
         assert!(opcodes.contains(&(wow_constants::ServerOpcodes::MoveSetVehicleRecId as u16)));
         assert!(opcodes.contains(&(wow_constants::ServerOpcodes::SetVehicleRecId as u16)));
+        assert!(opcodes.contains(&(wow_constants::ServerOpcodes::PetMode as u16)));
         assert!(opcodes.contains(&(wow_constants::ServerOpcodes::MoveSetCollisionHeight as u16)));
         let broadcast = wow_packet::WorldPacket::from_bytes(&other_rx.try_recv().unwrap());
         assert_eq!(
@@ -9932,10 +10013,20 @@ mod tests {
         assert_eq!(session.mount_pet_control_enable_requests_like_cpp, 1);
         assert_eq!(session.mount_pet_resummon_requests_like_cpp, 1);
         assert_eq!(session.mount_collision_height_update_requests_like_cpp, 2);
+        assert_eq!(
+            session.represented_pet_react_state_like_cpp,
+            wow_packet::packets::pet::REACT_DEFENSIVE_LIKE_CPP
+        );
+        assert_eq!(
+            session.represented_pet_command_state_like_cpp,
+            wow_packet::packets::pet::COMMAND_FOLLOW_LIKE_CPP
+        );
+        assert_eq!(session.temporary_mount_pet_react_state_like_cpp, None);
         assert!((session.player_collision_height_like_cpp - 2.64).abs() < 0.0001);
         let opcodes = drain_server_opcodes(&send_rx);
         assert!(opcodes.contains(&(wow_constants::ServerOpcodes::MoveSetVehicleRecId as u16)));
         assert!(opcodes.contains(&(wow_constants::ServerOpcodes::SetVehicleRecId as u16)));
+        assert!(opcodes.contains(&(wow_constants::ServerOpcodes::PetMode as u16)));
         assert!(opcodes.contains(&(wow_constants::ServerOpcodes::MoveSetCollisionHeight as u16)));
         let broadcast = wow_packet::WorldPacket::from_bytes(&other_rx.try_recv().unwrap());
         assert_eq!(
