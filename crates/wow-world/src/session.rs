@@ -969,6 +969,18 @@ pub struct WorldSession {
     player_mount_display_id_like_cpp: i32,
     /// Represented vehicle id selected from mount creature template until VehicleKit exists.
     player_mount_vehicle_id_like_cpp: u32,
+    /// Count of C++ `CreateVehicleKit` mount side effects represented until Vehicle runtime sends packets.
+    mount_vehicle_create_requests_like_cpp: u32,
+    /// Count of C++ `RemoveVehicleKit` mount side effects represented until Vehicle runtime sends packets.
+    mount_vehicle_remove_requests_like_cpp: u32,
+    /// Count of C++ `DisablePetControlsOnMount` side effects represented until PetMode packets exist.
+    mount_pet_control_disable_requests_like_cpp: u32,
+    /// Count of C++ `EnablePetControlsOnDismount` side effects represented until PetMode packets exist.
+    mount_pet_control_enable_requests_like_cpp: u32,
+    /// Count of C++ mount/dismount pet resummon calls represented until pet runtime is canonical.
+    mount_pet_resummon_requests_like_cpp: u32,
+    /// Count of C++ mount collision-height updates represented until movement packets are canonical.
+    mount_collision_height_update_requests_like_cpp: u32,
     /// Represented `UnitData::Flags` for player deltas not yet backed by canonical Unit.
     player_unit_flags_like_cpp: UnitFlags,
     /// Represented `UNIT_FLAG_MOUNT` state until UnitData owns live player flags.
@@ -1554,6 +1566,12 @@ impl WorldSession {
             taxi_mounted_like_cpp: false,
             player_mount_display_id_like_cpp: 0,
             player_mount_vehicle_id_like_cpp: 0,
+            mount_vehicle_create_requests_like_cpp: 0,
+            mount_vehicle_remove_requests_like_cpp: 0,
+            mount_pet_control_disable_requests_like_cpp: 0,
+            mount_pet_control_enable_requests_like_cpp: 0,
+            mount_pet_resummon_requests_like_cpp: 0,
+            mount_collision_height_update_requests_like_cpp: 0,
             player_unit_flags_like_cpp: UnitFlags::PLAYER_CONTROLLED,
             player_mounted_like_cpp: false,
             player_pvp_hostile_like_cpp: false,
@@ -4518,12 +4536,18 @@ impl WorldSession {
             .and_then(|spell_id| self.select_represented_mount_aura_display_like_cpp(spell_id))
             .unwrap_or(0);
         let creature_entry = u32::try_from(effect.effect_misc_value_1).unwrap_or(0);
-        let (display_id, vehicle_id) = if selected_display_id != 0 {
-            (selected_display_id, 0)
+        let creature_template_mount =
+            self.represented_mount_creature_template_fallback_like_cpp(creature_entry);
+        let display_id = if selected_display_id != 0 {
+            selected_display_id
         } else {
-            self.represented_mount_creature_template_fallback_like_cpp(creature_entry)
-                .unwrap_or((0, 0))
+            creature_template_mount
+                .map(|(display_id, _)| display_id)
+                .unwrap_or(0)
         };
+        let vehicle_id = creature_template_mount
+            .map(|(_, vehicle_id)| vehicle_id)
+            .unwrap_or(0);
 
         let mut slot = 0u8;
         while self.visible_auras.contains_key(&slot) && slot < 255 {
@@ -4553,10 +4577,19 @@ impl WorldSession {
         self.visible_auras.insert(slot, aura);
         self.player_mount_display_id_like_cpp = display_id;
         self.player_mount_vehicle_id_like_cpp = vehicle_id;
-        self.player_mounted_like_cpp = display_id != 0;
-        if self.player_mounted_like_cpp {
-            self.player_unit_flags_like_cpp.insert(UnitFlags::MOUNT);
+        self.player_mounted_like_cpp = true;
+        self.player_unit_flags_like_cpp.insert(UnitFlags::MOUNT);
+        if vehicle_id != 0 {
+            self.mount_vehicle_create_requests_like_cpp = self
+                .mount_vehicle_create_requests_like_cpp
+                .saturating_add(1);
         }
+        self.mount_pet_control_disable_requests_like_cpp = self
+            .mount_pet_control_disable_requests_like_cpp
+            .saturating_add(1);
+        self.mount_collision_height_update_requests_like_cpp = self
+            .mount_collision_height_update_requests_like_cpp
+            .saturating_add(1);
 
         self.send_aura_update_applied(spell_id, slot, caster_guid, 0, 0x0000_0001);
         self.send_represented_mount_unit_update_like_cpp(display_id);
@@ -4590,10 +4623,27 @@ impl WorldSession {
         };
 
         if aura.represented_effect == Some(RepresentedAuraEffectLikeCpp::Mounted) {
+            let was_mounted = self.player_mounted_like_cpp;
+            let vehicle_id = self.player_mount_vehicle_id_like_cpp;
             self.player_mount_display_id_like_cpp = 0;
             self.player_mount_vehicle_id_like_cpp = 0;
             self.player_mounted_like_cpp = false;
             self.player_unit_flags_like_cpp.remove(UnitFlags::MOUNT);
+            if was_mounted {
+                if vehicle_id != 0 {
+                    self.mount_vehicle_remove_requests_like_cpp = self
+                        .mount_vehicle_remove_requests_like_cpp
+                        .saturating_add(1);
+                }
+                self.mount_pet_control_enable_requests_like_cpp = self
+                    .mount_pet_control_enable_requests_like_cpp
+                    .saturating_add(1);
+                self.mount_pet_resummon_requests_like_cpp =
+                    self.mount_pet_resummon_requests_like_cpp.saturating_add(1);
+                self.mount_collision_height_update_requests_like_cpp = self
+                    .mount_collision_height_update_requests_like_cpp
+                    .saturating_add(1);
+            }
             self.send_represented_mount_unit_update_like_cpp(0);
         }
 
@@ -9652,6 +9702,12 @@ mod tests {
         assert_eq!(session.player_mount_display_id_like_cpp, 4321);
         assert_eq!(session.player_mount_vehicle_id_like_cpp, 55);
         assert!(session.player_mounted_like_cpp);
+        assert_eq!(session.mount_vehicle_create_requests_like_cpp, 1);
+        assert_eq!(session.mount_vehicle_remove_requests_like_cpp, 0);
+        assert_eq!(session.mount_pet_control_disable_requests_like_cpp, 1);
+        assert_eq!(session.mount_pet_control_enable_requests_like_cpp, 0);
+        assert_eq!(session.mount_pet_resummon_requests_like_cpp, 0);
+        assert_eq!(session.mount_collision_height_update_requests_like_cpp, 1);
         assert!(
             session
                 .player_unit_flags_like_cpp
@@ -9668,6 +9724,12 @@ mod tests {
         assert_eq!(session.player_mount_display_id_like_cpp, 0);
         assert_eq!(session.player_mount_vehicle_id_like_cpp, 0);
         assert!(!session.player_mounted_like_cpp);
+        assert_eq!(session.mount_vehicle_create_requests_like_cpp, 1);
+        assert_eq!(session.mount_vehicle_remove_requests_like_cpp, 1);
+        assert_eq!(session.mount_pet_control_disable_requests_like_cpp, 1);
+        assert_eq!(session.mount_pet_control_enable_requests_like_cpp, 1);
+        assert_eq!(session.mount_pet_resummon_requests_like_cpp, 1);
+        assert_eq!(session.mount_collision_height_update_requests_like_cpp, 2);
         assert!(
             session
                 .player_unit_flags_like_cpp
@@ -9678,6 +9740,65 @@ mod tests {
                 .player_unit_flags_like_cpp
                 .contains(UnitFlags::MOUNT)
         );
+    }
+
+    #[test]
+    fn represented_mount_aura_keeps_creature_vehicle_with_mount_display_like_cpp() {
+        let (mut session, _, _) = make_session();
+        session.set_mount_store(Arc::new(wow_data::MountStore::from_entries([
+            wow_data::MountEntry {
+                id: 7,
+                mount_type_id: 0,
+                flags: 0,
+                source_type_enum: 0,
+                source_spell_id: 100,
+                player_condition_id: 0,
+                mount_fly_ride_height: 0.0,
+                ui_model_scene_id: 0,
+            },
+        ])));
+        session.set_mount_x_display_store(Arc::new(wow_data::MountXDisplayStore::from_entries([
+            wow_data::MountXDisplayEntry {
+                id: 1,
+                creature_display_info_id: 1000,
+                player_condition_id: 0,
+                mount_id: 7,
+            },
+        ])));
+        session.set_creature_template_mount_store(Arc::new(
+            wow_data::CreatureTemplateMountStoreLikeCpp::from_entries([
+                wow_data::CreatureTemplateMountEntryLikeCpp {
+                    entry: 1234,
+                    vehicle_id: 55,
+                    models: vec![wow_data::CreatureTemplateMountModelLikeCpp {
+                        display_id: 4321,
+                        display_scale: 1.0,
+                        probability: 0.0,
+                    }],
+                },
+            ]),
+        ));
+        let effect = wow_data::SpellEffectInfo {
+            effect: wow_data::spell::spell_effect_types::SPELL_EFFECT_APPLY_AURA,
+            effect_aura: wow_data::spell::aura_types::SPELL_AURA_MOUNTED,
+            effect_base_points: 77,
+            effect_misc_value_1: 1234,
+            ..Default::default()
+        };
+
+        session
+            .apply_represented_mounted_aura_like_cpp(100, ObjectGuid::EMPTY, &effect)
+            .unwrap();
+
+        assert_eq!(session.player_mount_display_id_like_cpp, 1000);
+        assert_eq!(session.player_mount_vehicle_id_like_cpp, 55);
+        assert!(session.player_mounted_like_cpp);
+        assert!(
+            session
+                .player_unit_flags_like_cpp
+                .contains(UnitFlags::PLAYER_CONTROLLED | UnitFlags::MOUNT)
+        );
+        assert_eq!(session.mount_vehicle_create_requests_like_cpp, 1);
     }
 
     #[test]
