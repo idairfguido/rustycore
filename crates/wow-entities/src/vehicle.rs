@@ -104,6 +104,26 @@ pub struct VehicleAccessoryInstallPlan {
     pub accessories: Vec<VehicleAccessory>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VehicleSpellImmunityKind {
+    Effect,
+    State,
+    Mechanic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VehicleSpellImmunity {
+    pub kind: VehicleSpellImmunityKind,
+    pub spell_or_mechanic: i32,
+    pub apply: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct VehicleImmunityPlan {
+    pub immunities: Vec<VehicleSpellImmunity>,
+    pub root: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct VehicleTemplate {
     pub despawn_delay_ms: i32,
@@ -122,6 +142,148 @@ pub fn vehicle_accessory_install_plan_like_cpp(
             .filter(|accessory| !evading || accessory.is_minion)
             .collect(),
     }
+}
+
+pub const SPELL_EFFECT_HEAL_LIKE_CPP: i32 = 6;
+pub const SPELL_EFFECT_DISPEL_LIKE_CPP: i32 = 38;
+pub const SPELL_EFFECT_KNOCK_BACK_LIKE_CPP: i32 = 98;
+pub const SPELL_EFFECT_HEAL_PCT_LIKE_CPP: i32 = 136;
+pub const SPELL_EFFECT_KNOCK_BACK_DEST_LIKE_CPP: i32 = 144;
+pub const SPELL_AURA_PERIODIC_HEAL_LIKE_CPP: i32 = 8;
+pub const SPELL_AURA_DAMAGE_SHIELD_LIKE_CPP: i32 = 15;
+pub const SPELL_AURA_MOD_RESISTANCE_LIKE_CPP: i32 = 22;
+pub const SPELL_AURA_MOD_STAT_LIKE_CPP: i32 = 29;
+pub const SPELL_AURA_MOD_DECREASE_SPEED_LIKE_CPP: i32 = 33;
+pub const SPELL_AURA_SCHOOL_IMMUNITY_LIKE_CPP: i32 = 39;
+pub const SPELL_AURA_SCHOOL_ABSORB_LIKE_CPP: i32 = 69;
+pub const SPELL_AURA_SPLIT_DAMAGE_PCT_LIKE_CPP: i32 = 81;
+pub const SPELL_AURA_MOD_DAMAGE_PERCENT_TAKEN_LIKE_CPP: i32 = 87;
+pub const SPELL_AURA_MOD_UNATTACKABLE_LIKE_CPP: i32 = 93;
+pub const MECHANIC_BANISH_LIKE_CPP: i32 = 18;
+pub const MECHANIC_SHIELD_LIKE_CPP: i32 = 19;
+pub const MECHANIC_IMMUNE_SHIELD_LIKE_CPP: i32 = 29;
+
+pub fn vehicle_immunity_plan_like_cpp(
+    vehicle_id: u32,
+    is_mechanical_creature: bool,
+    is_world_boss: bool,
+) -> VehicleImmunityPlan {
+    use VehicleSpellImmunityKind::{Effect, Mechanic, State};
+
+    let mut plan = VehicleImmunityPlan::default();
+    plan.immunities.extend([
+        VehicleSpellImmunity {
+            kind: Effect,
+            spell_or_mechanic: SPELL_EFFECT_KNOCK_BACK_LIKE_CPP,
+            apply: true,
+        },
+        VehicleSpellImmunity {
+            kind: Effect,
+            spell_or_mechanic: SPELL_EFFECT_KNOCK_BACK_DEST_LIKE_CPP,
+            apply: true,
+        },
+    ]);
+
+    if is_mechanical_creature && !is_world_boss {
+        plan.immunities.extend([
+            VehicleSpellImmunity {
+                kind: Effect,
+                spell_or_mechanic: SPELL_EFFECT_HEAL_LIKE_CPP,
+                apply: true,
+            },
+            VehicleSpellImmunity {
+                kind: Effect,
+                spell_or_mechanic: SPELL_EFFECT_HEAL_PCT_LIKE_CPP,
+                apply: true,
+            },
+            VehicleSpellImmunity {
+                kind: Effect,
+                spell_or_mechanic: SPELL_EFFECT_DISPEL_LIKE_CPP,
+                apply: true,
+            },
+            VehicleSpellImmunity {
+                kind: State,
+                spell_or_mechanic: SPELL_AURA_PERIODIC_HEAL_LIKE_CPP,
+                apply: true,
+            },
+            VehicleSpellImmunity {
+                kind: State,
+                spell_or_mechanic: SPELL_AURA_SCHOOL_IMMUNITY_LIKE_CPP,
+                apply: true,
+            },
+            VehicleSpellImmunity {
+                kind: State,
+                spell_or_mechanic: SPELL_AURA_MOD_UNATTACKABLE_LIKE_CPP,
+                apply: true,
+            },
+            VehicleSpellImmunity {
+                kind: State,
+                spell_or_mechanic: SPELL_AURA_SCHOOL_ABSORB_LIKE_CPP,
+                apply: true,
+            },
+            VehicleSpellImmunity {
+                kind: Mechanic,
+                spell_or_mechanic: MECHANIC_BANISH_LIKE_CPP,
+                apply: true,
+            },
+            VehicleSpellImmunity {
+                kind: Mechanic,
+                spell_or_mechanic: MECHANIC_SHIELD_LIKE_CPP,
+                apply: true,
+            },
+            VehicleSpellImmunity {
+                kind: Mechanic,
+                spell_or_mechanic: MECHANIC_IMMUNE_SHIELD_LIKE_CPP,
+                apply: true,
+            },
+            VehicleSpellImmunity {
+                kind: State,
+                spell_or_mechanic: SPELL_AURA_DAMAGE_SHIELD_LIKE_CPP,
+                apply: true,
+            },
+            VehicleSpellImmunity {
+                kind: State,
+                spell_or_mechanic: SPELL_AURA_SPLIT_DAMAGE_PCT_LIKE_CPP,
+                apply: true,
+            },
+            VehicleSpellImmunity {
+                kind: State,
+                spell_or_mechanic: SPELL_AURA_MOD_RESISTANCE_LIKE_CPP,
+                apply: true,
+            },
+            VehicleSpellImmunity {
+                kind: State,
+                spell_or_mechanic: SPELL_AURA_MOD_STAT_LIKE_CPP,
+                apply: true,
+            },
+            VehicleSpellImmunity {
+                kind: State,
+                spell_or_mechanic: SPELL_AURA_MOD_DAMAGE_PERCENT_TAKEN_LIKE_CPP,
+                apply: true,
+            },
+        ]);
+    }
+
+    match vehicle_id {
+        160 | 244 | 510 | 452 | 543 => {
+            plan.root = true;
+            plan.immunities.push(VehicleSpellImmunity {
+                kind: State,
+                spell_or_mechanic: SPELL_AURA_MOD_DECREASE_SPEED_LIKE_CPP,
+                apply: true,
+            });
+        }
+        335 | 336 | 338 => {
+            plan.immunities.push(VehicleSpellImmunity {
+                kind: State,
+                spell_or_mechanic: SPELL_AURA_MOD_DAMAGE_PERCENT_TAKEN_LIKE_CPP,
+                apply: false,
+            });
+        }
+        _ => {}
+    }
+
+    plan
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -500,6 +662,57 @@ mod tests {
         let creature_evading = vehicle_accessory_install_plan_like_cpp(TypeId::Unit, true, &all);
         assert!(!creature_evading.remove_all_passengers);
         assert_eq!(creature_evading.accessories, vec![all[0]]);
+    }
+
+    #[test]
+    fn apply_all_immunities_plan_matches_cpp_cases() {
+        let generic = vehicle_immunity_plan_like_cpp(1, false, false);
+        assert!(!generic.root);
+        assert_eq!(
+            generic.immunities,
+            vec![
+                VehicleSpellImmunity {
+                    kind: VehicleSpellImmunityKind::Effect,
+                    spell_or_mechanic: SPELL_EFFECT_KNOCK_BACK_LIKE_CPP,
+                    apply: true,
+                },
+                VehicleSpellImmunity {
+                    kind: VehicleSpellImmunityKind::Effect,
+                    spell_or_mechanic: SPELL_EFFECT_KNOCK_BACK_DEST_LIKE_CPP,
+                    apply: true,
+                },
+            ]
+        );
+
+        let mechanical = vehicle_immunity_plan_like_cpp(1, true, false);
+        assert!(mechanical.immunities.contains(&VehicleSpellImmunity {
+            kind: VehicleSpellImmunityKind::Effect,
+            spell_or_mechanic: SPELL_EFFECT_HEAL_LIKE_CPP,
+            apply: true,
+        }));
+        assert!(mechanical.immunities.contains(&VehicleSpellImmunity {
+            kind: VehicleSpellImmunityKind::State,
+            spell_or_mechanic: SPELL_AURA_MOD_DAMAGE_PERCENT_TAKEN_LIKE_CPP,
+            apply: true,
+        }));
+
+        let world_boss = vehicle_immunity_plan_like_cpp(1, true, true);
+        assert_eq!(world_boss.immunities, generic.immunities);
+
+        let rooted_cannon = vehicle_immunity_plan_like_cpp(160, false, false);
+        assert!(rooted_cannon.root);
+        assert!(rooted_cannon.immunities.contains(&VehicleSpellImmunity {
+            kind: VehicleSpellImmunityKind::State,
+            spell_or_mechanic: SPELL_AURA_MOD_DECREASE_SPEED_LIKE_CPP,
+            apply: true,
+        }));
+
+        let salvaged_chopper = vehicle_immunity_plan_like_cpp(335, false, false);
+        assert!(salvaged_chopper.immunities.contains(&VehicleSpellImmunity {
+            kind: VehicleSpellImmunityKind::State,
+            spell_or_mechanic: SPELL_AURA_MOD_DAMAGE_PERCENT_TAKEN_LIKE_CPP,
+            apply: false,
+        }));
     }
 
     #[test]
