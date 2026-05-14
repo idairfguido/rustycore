@@ -20,6 +20,7 @@ use wow_crypto::rsa_sign::rsa_sign_connect_to;
 use wow_data::{
     ConditionEntriesByTypeStore, ConditionId, CurrencyTypesStore, HotfixRecordStatus,
     ItemExtendedCostStore, PlayerConditionContextLikeCpp, PlayerConditionStore, hotfix_locale_mask,
+    is_player_meeting_condition_like_cpp,
 };
 use wow_database::{
     CharStatements, CharacterDatabase, LoginStatements, SqlTransaction, WorldDatabase,
@@ -686,12 +687,36 @@ fn vendor_buy_muid_to_cpp_slot(muid: i32) -> Option<u32> {
     if muid > 0 { Some(muid - 1) } else { None }
 }
 
-fn vendor_list_player_condition_failed_id(player_condition_id: u32) -> i32 {
-    player_condition_id as i32
+fn vendor_player_condition_failed_id_like_cpp(
+    player_condition_id: u32,
+    store: Option<&PlayerConditionStore>,
+    context: Option<PlayerConditionContextLikeCpp<'_>>,
+) -> i32 {
+    if player_condition_id == 0 {
+        return 0;
+    }
+
+    let (Some(store), Some(context)) = (store, context) else {
+        return player_condition_id as i32;
+    };
+
+    let Some(condition) = store.get(player_condition_id) else {
+        return 0;
+    };
+
+    if is_player_meeting_condition_like_cpp(condition, &context) {
+        0
+    } else {
+        player_condition_id as i32
+    }
 }
 
-fn vendor_buy_player_condition_block_result(player_condition_id: u32) -> Option<InventoryResult> {
-    if player_condition_id == 0 {
+fn vendor_buy_player_condition_block_result_like_cpp(
+    player_condition_id: u32,
+    store: Option<&PlayerConditionStore>,
+    context: Option<PlayerConditionContextLikeCpp<'_>>,
+) -> Option<InventoryResult> {
+    if vendor_player_condition_failed_id_like_cpp(player_condition_id, store, context) == 0 {
         None
     } else {
         Some(InventoryResult::ItemLocked)
@@ -4932,8 +4957,10 @@ impl WorldSession {
                             durability: 0,
                             stack_count: maxcount,
                             extended_cost,
-                            player_condition_failed: vendor_list_player_condition_failed_id(
+                            player_condition_failed: vendor_player_condition_failed_id_like_cpp(
                                 player_condition_id,
+                                player_condition_store.as_deref(),
+                                Some(player_condition_context.as_context(self)),
                             ),
                             locked: false,
                             do_not_filter,
@@ -5050,8 +5077,10 @@ impl WorldSession {
                         durability,
                         stack_count: stack_count.max(1),
                         extended_cost,
-                        player_condition_failed: vendor_list_player_condition_failed_id(
+                        player_condition_failed: vendor_player_condition_failed_id_like_cpp(
                             player_condition_id,
+                            player_condition_store.as_deref(),
+                            Some(player_condition_context.as_context(self)),
                         ),
                         locked: false,
                         do_not_filter,
@@ -5379,6 +5408,15 @@ impl WorldSession {
                 }
             };
 
+            if let Some(result) = vendor_buy_player_condition_block_result_like_cpp(
+                vendor_item.player_condition_id,
+                player_condition_store.as_deref(),
+                Some(player_condition_context.as_context(self)),
+            ) {
+                self.send_equip_error(result, None, None, 0, 0);
+                return;
+            }
+
             if let Some(result) =
                 vendor_buy_currency_quantity_block_result(vendor_item.max_count, quantity)
             {
@@ -5590,9 +5628,11 @@ impl WorldSession {
             self.send_buy_error(result, Some(buy.vendor_guid), buy.item_id as u32);
             return;
         }
-        if let Some(result) =
-            vendor_buy_player_condition_block_result(vendor_item.player_condition_id)
-        {
+        if let Some(result) = vendor_buy_player_condition_block_result_like_cpp(
+            vendor_item.player_condition_id,
+            player_condition_store.as_deref(),
+            Some(player_condition_context.as_context(self)),
+        ) {
             self.send_equip_error(result, None, None, 0, 0);
             return;
         }
@@ -8467,12 +8507,50 @@ mod tests {
     }
 
     #[test]
-    fn vendor_player_condition_fail_closed_until_condition_mgr_exists() {
-        assert_eq!(vendor_list_player_condition_failed_id(0), 0);
-        assert_eq!(vendor_list_player_condition_failed_id(42), 42);
-        assert_eq!(vendor_buy_player_condition_block_result(0), None);
+    fn vendor_player_condition_id_evaluates_player_condition_store_like_cpp() {
+        let store = PlayerConditionStore::from_entries([
+            wow_data::PlayerConditionEntry {
+                id: 42,
+                class_mask: 0,
+                ..Default::default()
+            },
+            wow_data::PlayerConditionEntry {
+                id: 43,
+                class_mask: 1 << 1,
+                ..Default::default()
+            },
+        ]);
+        let context = PlayerConditionContextLikeCpp {
+            class_mask: 1,
+            ..Default::default()
+        };
+
         assert_eq!(
-            vendor_buy_player_condition_block_result(42),
+            vendor_player_condition_failed_id_like_cpp(0, Some(&store), Some(context)),
+            0
+        );
+        assert_eq!(
+            vendor_player_condition_failed_id_like_cpp(42, Some(&store), Some(context)),
+            0
+        );
+        assert_eq!(
+            vendor_player_condition_failed_id_like_cpp(43, Some(&store), Some(context)),
+            43
+        );
+        assert_eq!(
+            vendor_player_condition_failed_id_like_cpp(999, Some(&store), Some(context)),
+            0
+        );
+        assert_eq!(
+            vendor_buy_player_condition_block_result_like_cpp(42, Some(&store), Some(context)),
+            None
+        );
+        assert_eq!(
+            vendor_buy_player_condition_block_result_like_cpp(43, Some(&store), Some(context)),
+            Some(InventoryResult::ItemLocked)
+        );
+        assert_eq!(
+            vendor_buy_player_condition_block_result_like_cpp(42, None, Some(context)),
             Some(InventoryResult::ItemLocked)
         );
     }
