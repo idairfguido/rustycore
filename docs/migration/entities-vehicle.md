@@ -104,7 +104,7 @@
 
 | Statement / Source | Purpose | DB |
 |---|---|---|
-| `vehicle_template` | per-entry despawn delay | world |
+| `vehicle_template` | per-entry despawn delay | world; loaded in Rust with C++ 1ms fallback |
 | `vehicle_template_accessory` | accessories by vehicle entry | world |
 | `vehicle_accessory` | accessories by creature spawn | world |
 | `vehicle_seat_addon` | seat orientation/exit overrides | world |
@@ -156,12 +156,12 @@ DBC stores:
 
 **Files in `/home/server/rustycore`:**
 - `crates/wow-entities/src/vehicle.rs` — represented `Vehicle` state, seat map, passenger helpers, pending join markers, transport offset/global transforms, and accessory POD.
-- `crates/wow-data/src/vehicle.rs` — `Vehicle.db2`/`VehicleSeat.db2` stores with hotfix overlays and C++ `vehicle_accessory`/`vehicle_template_accessory` lookup.
+- `crates/wow-data/src/vehicle.rs` — `Vehicle.db2`/`VehicleSeat.db2` stores with hotfix overlays, C++ `vehicle_template` despawn-delay lookup, and C++ `vehicle_accessory`/`vehicle_template_accessory` lookup.
 - `crates/wow-world/src/session.rs` — represented mount VehicleKit create/remove path, owner vehicle-rec packets, movement ack validation, mount accessory row selection, collision-height and pet-mode side effects.
 - `crates/wow-packet/src/packets/movement.rs` / `crates/wow-packet/src/packets/vehicle.rs` — movement vehicle id and represented vehicle-rec packets.
 - `crates/wow-constants/src/opcodes.rs` — vehicle opcodes enumerated; full request handlers still pending.
 
-**What's implemented:** represented VehicleKit state and mount integration, DB2 seat construction, C++ vehicle accessory row lookup, movement/vehicle-rec packet coverage for the mount path, and focused unit tests for the represented state.
+**What's implemented:** represented VehicleKit state and mount integration, DB2 seat construction, C++ vehicle template despawn-delay lookup, C++ vehicle accessory row lookup, movement/vehicle-rec packet coverage for the mount path, and focused unit tests for the represented state.
 
 **What's missing vs C++:** full live passenger runtime, accessory TempSummon/HandleSpellClick installation, transport-frame xform, immunities, despawn timer, and join event scheduling. `wow_entities::Vehicle` now represents install/uninstall status, seat maps, usable-seat counts, passenger insert/remove helpers, and vehicle accessory row selection is loaded in `wow-data` with C++ GUID-first/template fallback semantics.
 
@@ -202,7 +202,7 @@ DBC stores:
 
 - [x] **#VEH.1** Define `VehicleEntry` / `VehicleSeatEntry` DBC readers in `wow-data` (L)
 - [ ] **#VEH.2** Port `VehicleFlags`, `PowerType`, `VehicleExitParameters`, `VehicleSpells` to `wow-constants` (L)
-- [ ] **#VEH.3** Define `VehicleSeat`, `VehicleSeatAddon`, `VehicleAccessory`, `VehicleTemplate`, `PassengerInfo` POD types in `wow-world` (L) — partial: represented types live in `wow-entities`; `VehicleTemplate`/despawn delay still pending.
+- [x] **#VEH.3** Define `VehicleSeat`, `VehicleSeatAddon`, `VehicleAccessory`, `VehicleTemplate`, `PassengerInfo` POD types in `wow-world` (L) — represented types live in `wow-entities`.
 - [x] **#VEH.4** Port `TransportBase` xform (`CalculatePassengerPosition`/`Offset`) as free fns in `wow-entities` (L)
 - [ ] **#VEH.5** Implement `Vehicle` struct + `Install/Uninstall/Reset` lifecycle (M) — partial: install/uninstall represented; `Reset(evading)` and live `Unit` ownership pending.
 - [ ] **#VEH.6** Implement `AddVehiclePassenger`/`RemovePassenger`/`HasEmptySeat`/`GetNextEmptySeat` (M) — partial: pure seat-map helpers represented; aura/script side effects pending.
@@ -235,6 +235,7 @@ DBC stores:
 - [ ] Test: `AddVehiclePassenger(seatId=-1)` picks first empty in DBC index order
 - [ ] Test: passenger removal clears seat and fires control-aura removal path
 - [ ] Test: `CalculatePassengerPosition(offset, transO)` round-trips with `CalculatePassengerOffset`
+- [x] Test: `Vehicle::GetDespawnDelay` returns `vehicle_template.despawnDelayMs` and defaults to 1ms
 - [x] Test: accessory row lookup prefers `vehicle_accessory` spawn GUID rows and falls back to `vehicle_template_accessory`
 - [ ] Test: accessory install summons N creatures matching `vehicle_accessory` rows
 - [ ] Test: `IsControllableVehicle` true iff any seat has `CAN_CONTROL` flag

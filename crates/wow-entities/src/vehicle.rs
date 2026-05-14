@@ -121,7 +121,7 @@ pub struct VehicleAccessory {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct VehicleTemplate {
-    pub despawn_delay_ms: u32,
+    pub despawn_delay_ms: i32,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -596,6 +596,11 @@ async fn main() -> Result<()> {
             .context("Failed to load VehicleSeat.db2 / hotfix rows")?,
     );
     info!("Loaded {} vehicle seat rows", vehicle_seat_store.len());
+    let vehicle_template_store = Arc::new(
+        wow_data::VehicleTemplateStoreLikeCpp::load_like_cpp(world_db.as_ref())
+            .await
+            .context("Failed to load C++ vehicle_template rows")?,
+    );
     let vehicle_accessory_store = Arc::new(
         wow_data::VehicleAccessoryStoreLikeCpp::load_like_cpp(world_db.as_ref())
             .await
@@ -1289,6 +1294,7 @@ async fn main() -> Result<()> {
         mount_x_display_store: Some(Arc::clone(&mount_x_display_store)),
         vehicle_store: Some(Arc::clone(&vehicle_store)),
         vehicle_seat_store: Some(Arc::clone(&vehicle_seat_store)),
+        vehicle_template_store: Some(Arc::clone(&vehicle_template_store)),
         vehicle_accessory_store: Some(Arc::clone(&vehicle_accessory_store)),
         terrain_swap_store: Some(Arc::clone(&terrain_swap_store)),
         phase_store: Some(Arc::clone(&phase_store)),
@@ -2189,6 +2195,9 @@ async fn create_session(
     }
     if let Some(ref store) = resources.vehicle_seat_store {
         session.set_vehicle_seat_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.vehicle_template_store {
+        session.set_vehicle_template_store(Arc::clone(store));
     }
     if let Some(ref store) = resources.vehicle_accessory_store {
         session.set_vehicle_accessory_store(Arc::clone(store));

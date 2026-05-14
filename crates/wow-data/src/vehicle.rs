@@ -6,7 +6,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use tracing::info;
 use wow_database::{HotfixDatabase, HotfixStatements, WorldDatabase};
-use wow_entities::{VehicleAccessory, VehicleSeatAddon, VehicleSeatInfo};
+use wow_entities::{VehicleAccessory, VehicleSeatAddon, VehicleSeatInfo, VehicleTemplate};
 
 use crate::wdc4::Wdc4Reader;
 
@@ -79,6 +79,11 @@ pub struct VehicleStore {
 
 pub struct VehicleSeatStore {
     by_id: HashMap<u32, VehicleSeatEntry>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct VehicleTemplateStoreLikeCpp {
+    by_creature_entry: HashMap<u32, VehicleTemplate>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -280,6 +285,59 @@ impl VehicleSeatStore {
     }
 }
 
+impl VehicleTemplateStoreLikeCpp {
+    pub fn from_entries(entries: impl IntoIterator<Item = (u32, VehicleTemplate)>) -> Self {
+        Self {
+            by_creature_entry: entries.into_iter().collect(),
+        }
+    }
+
+    pub async fn load_like_cpp(db: &WorldDatabase) -> Result<Self> {
+        let mut result = db
+            .direct_query("SELECT `creatureId`, `despawnDelayMs` FROM `vehicle_template`")
+            .await?;
+        if result.is_empty() {
+            info!("Loaded 0 Vehicle Template entries");
+            return Ok(Self::default());
+        }
+
+        let mut entries = HashMap::new();
+        loop {
+            let creature_entry = result.read::<u32>(0);
+            let despawn_delay_ms = result.read::<i32>(1);
+            entries.insert(creature_entry, VehicleTemplate { despawn_delay_ms });
+
+            if !result.next_row() {
+                break;
+            }
+        }
+
+        let store = Self {
+            by_creature_entry: entries,
+        };
+        info!("Loaded {} Vehicle Template entries", store.len());
+        Ok(store)
+    }
+
+    pub fn get(&self, creature_entry: u32) -> Option<&VehicleTemplate> {
+        self.by_creature_entry.get(&creature_entry)
+    }
+
+    pub fn despawn_delay_ms_like_cpp(&self, creature_entry: u32) -> i32 {
+        self.get(creature_entry)
+            .map(|template| template.despawn_delay_ms)
+            .unwrap_or(1)
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_creature_entry.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_creature_entry.is_empty()
+    }
+}
+
 impl VehicleAccessoryStoreLikeCpp {
     pub fn from_parts(
         by_spawn_guid: impl IntoIterator<Item = (u64, Vec<VehicleAccessory>)>,
@@ -450,6 +508,19 @@ mod tests {
         assert_eq!(defs[1].0, 2);
         assert_eq!(defs[1].1.id, 101);
         assert!(defs[1].1.usable_by_override);
+    }
+
+    #[test]
+    fn vehicle_template_despawn_delay_defaults_to_one_ms_like_cpp() {
+        let store = VehicleTemplateStoreLikeCpp::from_entries([(
+            1234,
+            VehicleTemplate {
+                despawn_delay_ms: 2500,
+            },
+        )]);
+
+        assert_eq!(store.despawn_delay_ms_like_cpp(1234), 2500);
+        assert_eq!(store.despawn_delay_ms_like_cpp(9999), 1);
     }
 
     #[test]

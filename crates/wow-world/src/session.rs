@@ -44,7 +44,7 @@ use wow_data::{
     PlayerConditionPartyStatusLikeCpp, PlayerConditionQuestKillLikeCpp,
     PlayerConditionReputationLikeCpp, PlayerConditionSkillLikeCpp, PlayerConditionStore,
     PlayerStatsStore, RandPropPointsStore, SkillStore, SpellItemEnchantmentStore, SpellStore,
-    VehicleAccessoryStoreLikeCpp, VehicleSeatStore, VehicleStore,
+    VehicleAccessoryStoreLikeCpp, VehicleSeatStore, VehicleStore, VehicleTemplateStoreLikeCpp,
     is_player_meeting_condition_like_cpp,
 };
 use wow_database::{
@@ -740,6 +740,7 @@ pub struct WorldSession {
     mount_x_display_store: Option<Arc<MountXDisplayStore>>,
     vehicle_store: Option<Arc<VehicleStore>>,
     vehicle_seat_store: Option<Arc<VehicleSeatStore>>,
+    vehicle_template_store: Option<Arc<VehicleTemplateStoreLikeCpp>>,
     vehicle_accessory_store: Option<Arc<VehicleAccessoryStoreLikeCpp>>,
     terrain_swap_store: Option<Arc<wow_data::TerrainSwapStore>>,
     phase_store: Option<Arc<PhaseStore>>,
@@ -1506,6 +1507,7 @@ impl WorldSession {
             mount_x_display_store: None,
             vehicle_store: None,
             vehicle_seat_store: None,
+            vehicle_template_store: None,
             vehicle_accessory_store: None,
             terrain_swap_store: None,
             phase_store: None,
@@ -3645,6 +3647,10 @@ impl WorldSession {
         self.vehicle_seat_store = Some(store);
     }
 
+    pub fn set_vehicle_template_store(&mut self, store: Arc<VehicleTemplateStoreLikeCpp>) {
+        self.vehicle_template_store = Some(store);
+    }
+
     pub fn set_vehicle_accessory_store(&mut self, store: Arc<VehicleAccessoryStoreLikeCpp>) {
         self.vehicle_accessory_store = Some(store);
     }
@@ -4742,6 +4748,18 @@ impl WorldSession {
         self.player_mount_vehicle_accessories_like_cpp = accessories;
         self.player_mount_vehicle_kit_like_cpp = Some(vehicle_kit);
         true
+    }
+
+    #[allow(dead_code)]
+    fn player_mount_vehicle_despawn_delay_ms_like_cpp(&self) -> i32 {
+        let Some(vehicle_kit) = self.player_mount_vehicle_kit_like_cpp.as_ref() else {
+            return 1;
+        };
+
+        self.vehicle_template_store
+            .as_ref()
+            .map(|store| store.despawn_delay_ms_like_cpp(vehicle_kit.creature_entry()))
+            .unwrap_or(1)
     }
 
     fn send_set_vehicle_rec_id_like_cpp(&mut self, vehicle_id: u32) {
@@ -10086,6 +10104,14 @@ mod tests {
                 flags_c: 0,
             },
         ])));
+        session.set_vehicle_template_store(Arc::new(
+            wow_data::VehicleTemplateStoreLikeCpp::from_entries([(
+                1234,
+                wow_entities::VehicleTemplate {
+                    despawn_delay_ms: 2500,
+                },
+            )]),
+        ));
         session.set_vehicle_accessory_store(Arc::new(
             wow_data::VehicleAccessoryStoreLikeCpp::from_parts(
                 std::iter::empty::<(u64, Vec<wow_entities::VehicleAccessory>)>(),
@@ -10135,6 +10161,10 @@ mod tests {
         assert_eq!(
             session.player_mount_vehicle_accessories_like_cpp[0].accessory_entry,
             7001
+        );
+        assert_eq!(
+            session.player_mount_vehicle_despawn_delay_ms_like_cpp(),
+            2500
         );
         assert!(session.player_mounted_like_cpp);
         assert_eq!(session.mount_vehicle_create_requests_like_cpp, 1);
@@ -10187,6 +10217,7 @@ mod tests {
         assert_eq!(session.player_mount_vehicle_id_like_cpp, 0);
         assert!(session.player_mount_vehicle_kit_like_cpp.is_none());
         assert!(session.player_mount_vehicle_accessories_like_cpp.is_empty());
+        assert_eq!(session.player_mount_vehicle_despawn_delay_ms_like_cpp(), 1);
         assert_eq!(session.player_mount_vehicle_seat_count_like_cpp, 0);
         assert_eq!(session.player_mount_vehicle_usable_seat_count_like_cpp, 0);
         assert!(!session.player_mounted_like_cpp);
