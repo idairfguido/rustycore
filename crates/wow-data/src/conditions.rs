@@ -649,6 +649,15 @@ pub enum ConditionSourceValidationErrorLikeCpp {
     InvalidAreaTriggerSourceEntry(i32),
     InvalidObjectIdVisibilityObjectType(u32),
     UncheckedObjectIdVisibilityObjectType(u32),
+    NonExistingLootTemplate {
+        source_type: ConditionSourceType,
+        source_group: u32,
+    },
+    NonExistingLootSourceEntry {
+        source_type: ConditionSourceType,
+        source_group: u32,
+        source_entry: i32,
+    },
     NonExistingTerrainSwapMap(u32),
     NonExistingPhaseArea(u32),
 }
@@ -668,6 +677,8 @@ pub struct ConditionExternalValidationStoresLikeCpp<'a> {
     pub map_store: Option<&'a crate::MapStore>,
     pub phase_store: Option<&'a crate::PhaseStore>,
     pub max_skill_value: Option<u32>,
+    pub loot_template_exists: Option<&'a dyn Fn(ConditionSourceType, u32) -> bool>,
+    pub loot_source_entry_exists: Option<&'a dyn Fn(ConditionSourceType, u32, i32) -> bool>,
 }
 
 pub fn validate_condition_type_static_like_cpp(
@@ -1039,6 +1050,26 @@ pub fn validate_condition_source_external_like_cpp(
     use ConditionSourceValidationErrorLikeCpp as Error;
 
     match condition.source_type {
+        source_type if condition_source_is_loot_template_like_cpp(source_type) => {
+            if let Some(template_exists) = stores.loot_template_exists
+                && !template_exists(source_type, condition.source_group)
+            {
+                return Err(Error::NonExistingLootTemplate {
+                    source_type,
+                    source_group: condition.source_group,
+                });
+            }
+
+            if let Some(source_entry_exists) = stores.loot_source_entry_exists
+                && !source_entry_exists(source_type, condition.source_group, condition.source_entry)
+            {
+                return Err(Error::NonExistingLootSourceEntry {
+                    source_type,
+                    source_group: condition.source_group,
+                    source_entry: condition.source_entry,
+                });
+            }
+        }
         ConditionSourceType::TerrainSwap => {
             if let Some(store) = stores.map_store
                 && store.get(condition.source_entry as u32).is_none()
@@ -1060,6 +1091,24 @@ pub fn validate_condition_source_external_like_cpp(
     }
 
     Ok(())
+}
+
+const fn condition_source_is_loot_template_like_cpp(source_type: ConditionSourceType) -> bool {
+    matches!(
+        source_type,
+        ConditionSourceType::CreatureLootTemplate
+            | ConditionSourceType::DisenchantLootTemplate
+            | ConditionSourceType::FishingLootTemplate
+            | ConditionSourceType::GameObjectLootTemplate
+            | ConditionSourceType::ItemLootTemplate
+            | ConditionSourceType::MailLootTemplate
+            | ConditionSourceType::MillingLootTemplate
+            | ConditionSourceType::PickpocketingLootTemplate
+            | ConditionSourceType::ProspectingLootTemplate
+            | ConditionSourceType::ReferenceLootTemplate
+            | ConditionSourceType::SkinningLootTemplate
+            | ConditionSourceType::SpellLootTemplate
+    )
 }
 
 pub fn apply_external_condition_validation_like_cpp(
@@ -2166,6 +2215,7 @@ mod tests {
             map_store: Some(&map_store),
             phase_store: Some(&phase_store),
             max_skill_value: Some(450),
+            ..ConditionExternalValidationStoresLikeCpp::default()
         };
 
         for condition in [
@@ -2252,12 +2302,70 @@ mod tests {
             instance_type: 0,
             flags1: 0,
         }]);
+        let loot_template_exists = |source_type: ConditionSourceType, source_group: u32| {
+            source_type == ConditionSourceType::CreatureLootTemplate && source_group == 123
+        };
+        let loot_source_entry_exists =
+            |source_type: ConditionSourceType, source_group: u32, source_entry: i32| {
+                source_type == ConditionSourceType::CreatureLootTemplate
+                    && source_group == 123
+                    && (source_entry == 456 || source_entry == 900)
+            };
         let stores = ConditionExternalValidationStoresLikeCpp {
             area_table_store: Some(&area_store),
             map_store: Some(&map_store),
+            loot_template_exists: Some(&loot_template_exists),
+            loot_source_entry_exists: Some(&loot_source_entry_exists),
             ..ConditionExternalValidationStoresLikeCpp::default()
         };
 
+        assert_eq!(
+            validate_condition_source_external_like_cpp(
+                &Condition {
+                    source_type: ConditionSourceType::CreatureLootTemplate,
+                    source_group: 123,
+                    source_entry: 456,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Ok(())
+        );
+        assert!(matches!(
+            validate_condition_source_external_like_cpp(
+                &Condition {
+                    source_type: ConditionSourceType::CreatureLootTemplate,
+                    source_group: 999,
+                    source_entry: 456,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(
+                ConditionSourceValidationErrorLikeCpp::NonExistingLootTemplate {
+                    source_type: ConditionSourceType::CreatureLootTemplate,
+                    source_group: 999
+                }
+            )
+        ));
+        assert!(matches!(
+            validate_condition_source_external_like_cpp(
+                &Condition {
+                    source_type: ConditionSourceType::CreatureLootTemplate,
+                    source_group: 123,
+                    source_entry: 777,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(
+                ConditionSourceValidationErrorLikeCpp::NonExistingLootSourceEntry {
+                    source_type: ConditionSourceType::CreatureLootTemplate,
+                    source_group: 123,
+                    source_entry: 777
+                }
+            )
+        ));
         assert_eq!(
             validate_condition_source_external_like_cpp(
                 &Condition {

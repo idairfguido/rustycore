@@ -29,7 +29,7 @@ use wow_loot::{
     LootConditionId, LootConditionLinkReport, LootConditionReferenceUseLikeCpp,
     LootReferenceCheckReport, LootStore, LootStoreKind, LootStores, LootTemplateRow,
     check_loot_condition_links_like_cpp, check_loot_condition_references_like_cpp,
-    check_loot_references_like_cpp,
+    check_loot_references_like_cpp, loot_store_kind_for_condition_source_type_like_cpp,
 };
 use wow_network::session_mgr::SessionManager;
 use wow_network::world_socket::{AccountInfo, AccountLookup};
@@ -770,6 +770,29 @@ async fn main() -> Result<()> {
         wow_data::conditions::load_condition_rows_like_cpp(world_db.as_ref(), |_| 0)
             .await
             .context("Failed to load C++ conditions table")?;
+    let loot_template_exists = |source_type: wow_constants::ConditionSourceType,
+                                source_group: u32| {
+        loot_store_kind_for_condition_source_type_like_cpp(source_type as i32)
+            .and_then(|kind| loot_stores.get(&kind))
+            .is_some_and(|store| store.have_loot_for(source_group))
+    };
+    let loot_source_entry_exists = |source_type: wow_constants::ConditionSourceType,
+                                    source_group: u32,
+                                    source_entry: i32| {
+        let Some(source_entry) = u32::try_from(source_entry).ok() else {
+            return false;
+        };
+        let Some(store) = loot_store_kind_for_condition_source_type_like_cpp(source_type as i32)
+            .and_then(|kind| loot_stores.get(&kind))
+        else {
+            return false;
+        };
+        let Some(template) = store.get_loot_for(source_group) else {
+            return false;
+        };
+
+        item_store.get(source_entry).is_some() || template.is_reference_like_cpp(source_entry)
+    };
     let externally_skipped_conditions =
         wow_data::conditions::apply_external_condition_validation_like_cpp(
             &mut condition_load_report,
@@ -781,6 +804,8 @@ async fn main() -> Result<()> {
                 map_store: Some(map_store.as_ref()),
                 phase_store: Some(phase_store.as_ref()),
                 max_skill_value: Some(max_skill_value_like_cpp(&world_configs)),
+                loot_template_exists: Some(&loot_template_exists),
+                loot_source_entry_exists: Some(&loot_source_entry_exists),
             },
         );
     for skipped in &condition_load_report.skipped {
