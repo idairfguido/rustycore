@@ -19,6 +19,7 @@ pub mod loot;
 pub mod misc;
 pub mod movement;
 pub mod party;
+pub mod pet;
 pub mod query;
 pub mod quest;
 pub mod social;
