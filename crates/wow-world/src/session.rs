@@ -5302,6 +5302,13 @@ impl WorldSession {
                     Err(e) => warn!("Failed to read MoveInitActiveMoverComplete: {e}"),
                 }
             }
+            ClientOpcodes::MoveSetVehicleRecIdAck => {
+                let opcode = pkt.client_opcode().unwrap_or(opcode);
+                match wow_packet::packets::vehicle::MoveSetVehicleRecIdAck::read(&mut pkt) {
+                    Ok(ack) => self.handle_move_set_vehicle_rec_id_ack(opcode, ack).await,
+                    Err(e) => warn!("Failed to read MoveSetVehicleRecIdAck: {e}"),
+                }
+            }
             ClientOpcodes::MoveCollisionDisableAck
             | ClientOpcodes::MoveCollisionEnableAck
             | ClientOpcodes::MoveEnableDoubleJumpAck

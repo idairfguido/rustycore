@@ -8,7 +8,8 @@
 use wow_constants::ServerOpcodes;
 use wow_core::ObjectGuid;
 
-use crate::{ServerPacket, WorldPacket};
+use crate::packets::movement::MovementAck;
+use crate::{ClientPacket, PacketError, ServerPacket, WorldPacket};
 
 /// Mirrors C++ `WorldPackets::Vehicle::MoveSetVehicleRecID`.
 pub struct MoveSetVehicleRecId {
@@ -39,6 +40,25 @@ impl ServerPacket for SetVehicleRecId {
     fn write(&self, pkt: &mut WorldPacket) {
         pkt.write_packed_guid(&self.vehicle_guid);
         pkt.write_int32(self.vehicle_rec_id);
+    }
+}
+
+/// Mirrors C++ `WorldPackets::Vehicle::MoveSetVehicleRecIdAck`.
+#[derive(Debug, Clone)]
+pub struct MoveSetVehicleRecIdAck {
+    pub data: MovementAck,
+    pub vehicle_rec_id: i32,
+}
+
+impl ClientPacket for MoveSetVehicleRecIdAck {
+    const OPCODE: wow_constants::ClientOpcodes =
+        wow_constants::ClientOpcodes::MoveSetVehicleRecIdAck;
+
+    fn read(packet: &mut WorldPacket) -> Result<Self, PacketError> {
+        Ok(Self {
+            data: MovementAck::read(packet)?,
+            vehicle_rec_id: packet.read_int32()?,
+        })
     }
 }
 
