@@ -121,6 +121,8 @@ pub enum WorldStatements {
     SEL_CREATURE_GOSSIP_MENU,
     /// Gossip menu text ID (gossip_menu).
     SEL_GOSSIP_MENU,
+    /// Gossip menu text IDs (gossip_menu), used for C++ condition-based text selection.
+    SEL_GOSSIP_MENU_TEXTS,
     /// NPC text BroadcastTextID by npc_text ID.
     SEL_NPC_TEXT,
     /// Gossip menu options (gossip_menu_option) — includes OptionBroadcastTextID for localization.
@@ -528,6 +530,7 @@ impl StatementDef for WorldStatements {
                 "SELECT MenuID FROM creature_template_gossip WHERE CreatureID = ?"
             }
             Self::SEL_GOSSIP_MENU => "SELECT TextID FROM gossip_menu WHERE MenuID = ? LIMIT 1",
+            Self::SEL_GOSSIP_MENU_TEXTS => "SELECT TextID FROM gossip_menu WHERE MenuID = ?",
             Self::SEL_NPC_TEXT => "SELECT BroadcastTextID0 FROM npc_text WHERE ID = ? LIMIT 1",
             Self::SEL_GOSSIP_MENU_OPTIONS => concat!(
                 "SELECT GossipOptionID, OptionID, OptionNpc, OptionText, ",

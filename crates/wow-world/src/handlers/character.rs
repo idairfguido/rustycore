@@ -10,14 +10,17 @@ use std::sync::Arc;
 use rand::Rng;
 use tracing::{debug, info, trace, warn};
 use wow_constants::{
-    ClientOpcodes, InventoryResult, InventoryType, ItemBondingType, ItemContext,
-    ItemExtendedCostFlags, ItemFieldFlags, ItemFlags, ItemFlags2, ItemUpdateState, ItemVendorType,
-    Team,
+    ClientOpcodes, ConditionSourceType, InventoryResult, InventoryType, ItemBondingType,
+    ItemContext, ItemExtendedCostFlags, ItemFieldFlags, ItemFlags, ItemFlags2, ItemUpdateState,
+    ItemVendorType, Team, TypeId, TypeMask, UnitStandStateType,
 };
 use wow_core::guid::HighGuid;
 use wow_core::{ObjectGuid, Position};
 use wow_crypto::rsa_sign::rsa_sign_connect_to;
-use wow_data::{CurrencyTypesStore, HotfixRecordStatus, ItemExtendedCostStore, hotfix_locale_mask};
+use wow_data::{
+    ConditionEntriesByTypeStore, ConditionId, CurrencyTypesStore, HotfixRecordStatus,
+    ItemExtendedCostStore, hotfix_locale_mask,
+};
 use wow_database::{
     CharStatements, CharacterDatabase, LoginStatements, SqlTransaction, WorldDatabase,
     WorldStatements,
@@ -26,7 +29,7 @@ use wow_entities::{
     BANK_SLOT_BAG_END, BANK_SLOT_BAG_START, BUYBACK_SLOT_START, INVENTORY_DEFAULT_SIZE,
     INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_BAG_END, INVENTORY_SLOT_BAG_START,
     INVENTORY_SLOT_ITEM_START, MAX_BAG_SIZE, NULL_BAG, NULL_SLOT, REAGENT_BAG_SLOT_END,
-    REAGENT_BAG_SLOT_START, is_equipment_pos, is_inventory_pos,
+    REAGENT_BAG_SLOT_START, WorldObject, is_equipment_pos, is_inventory_pos,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::packets::auth::{
@@ -4117,9 +4120,6 @@ impl WorldSession {
             hello.unit, self.account_id
         );
 
-        use crate::session::GossipOptionInfo;
-        use wow_packet::packets::gossip::ClientGossipOption;
-
         const GOSSIP_FLAG: u32 = 0x1;
 
         let (npc_flags, entry) = self
@@ -4152,6 +4152,165 @@ impl WorldSession {
         self.handle_npc_direct_interaction(hello).await;
     }
 
+    fn build_condition_player_object_like_cpp(&self) -> Option<WorldObject> {
+        let mut player = WorldObject::new(
+            false,
+            TypeId::Player,
+            TypeMask::OBJECT | TypeMask::UNIT | TypeMask::PLAYER,
+        );
+        player.object_mut().create(self.player_guid()?);
+        let _ = player.set_map(u32::from(self.player_map_id_like_cpp()), 0);
+        if let Some(position) = self.player_position_like_cpp() {
+            player.relocate(position);
+        }
+        Some(player)
+    }
+
+    fn build_condition_creature_object_like_cpp(
+        &mut self,
+        npc_guid: ObjectGuid,
+    ) -> Option<(WorldObject, crate::conditions::ConditionUnitSnapshot)> {
+        self.mutate_world_creature(npc_guid, |creature| {
+            let mut source =
+                WorldObject::new(false, TypeId::Unit, TypeMask::OBJECT | TypeMask::UNIT);
+            source.object_mut().create(creature.guid());
+            source.object_mut().set_entry(creature.entry());
+            let _ = source.set_map(creature.map_id(), creature.instance_id());
+            source.relocate(creature.position());
+            *source.phase_shift_mut() = creature.phase_shift().clone();
+            let snapshot = crate::conditions::ConditionUnitSnapshot {
+                level: u32::from(creature.level()),
+                health: u64::from(creature.current_hp()),
+                max_health: u64::from(creature.max_hp()),
+                class_mask: 0,
+                race: 0,
+                creature_type: None,
+                is_alive: creature.is_alive(),
+                is_charmed: false,
+                in_water: false,
+                unit_state: 0,
+                stand_state: UnitStandStateType::Stand as u32,
+            };
+            (source, snapshot)
+        })
+    }
+
+    fn gossip_conditions_meet_like_cpp(
+        &mut self,
+        condition_store: &ConditionEntriesByTypeStore,
+        source_type: ConditionSourceType,
+        source_group: u32,
+        source_entry: i32,
+        npc_guid: ObjectGuid,
+    ) -> bool {
+        let Some(conditions) = condition_store
+            .conditions_for_like_cpp(source_type, ConditionId::new(source_group, source_entry, 0))
+        else {
+            return true;
+        };
+
+        let Some(player_object) = self.build_condition_player_object_like_cpp() else {
+            warn!(
+                "Gossip condition check failed closed: missing player object for {:?}",
+                source_type
+            );
+            return false;
+        };
+        let Some((source_object, source_unit_snapshot)) =
+            self.build_condition_creature_object_like_cpp(npc_guid)
+        else {
+            warn!(
+                "Gossip condition check failed closed: missing source object for {:?}",
+                source_type
+            );
+            return false;
+        };
+
+        let player_unit_snapshot = crate::conditions::ConditionUnitSnapshot {
+            level: u32::from(self.player_level_like_cpp()),
+            health: 1,
+            max_health: 1,
+            class_mask: player_class_mask(self.player_class_like_cpp()),
+            race: self.player_race_like_cpp(),
+            creature_type: None,
+            is_alive: self.player_is_alive_like_cpp(),
+            is_charmed: false,
+            in_water: false,
+            unit_state: 0,
+            stand_state: UnitStandStateType::Stand as u32,
+        };
+        let player_snapshot = crate::conditions::ConditionPlayerSnapshot {
+            team: player_team_for_race_cpp(self.player_race_like_cpp()) as u32,
+            native_gender: u32::from(self.player_gender_like_cpp()),
+            drunken_state: 0,
+            can_be_game_master: false,
+            is_game_master: false,
+            pet_type: None,
+            is_in_flight: false,
+        };
+
+        let mut source_info = crate::conditions::ConditionSourceInfo::from_targets(
+            Some(&player_object),
+            Some(&source_object),
+            None,
+        );
+        source_info.set_unit_target_snapshot(0, player_unit_snapshot);
+        source_info.set_player_target_snapshot(0, player_snapshot);
+        source_info.set_unit_target_snapshot(1, source_unit_snapshot);
+
+        crate::conditions::is_object_meet_to_conditions_like_cpp(
+            &mut source_info,
+            conditions.as_slice(),
+            condition_store,
+            |condition, source_info| match crate::conditions::condition_meets_basic_like_cpp(
+                condition,
+                source_info,
+                |current_area, required_area| current_area == required_area,
+            ) {
+                crate::conditions::ConditionMeetResult::Evaluated(value) => value,
+                crate::conditions::ConditionMeetResult::Unsupported => {
+                    warn!(
+                        "Gossip condition check failed closed: unsupported {:?} for {:?} {}:{}",
+                        condition.condition_type, source_type, source_group, source_entry
+                    );
+                    false
+                }
+            },
+        )
+    }
+
+    fn gossip_menu_text_conditions_meet_like_cpp(
+        &mut self,
+        condition_store: &ConditionEntriesByTypeStore,
+        menu_id: u32,
+        text_id: u32,
+        npc_guid: ObjectGuid,
+    ) -> bool {
+        if condition_store
+            .conditions_for_like_cpp(
+                ConditionSourceType::GossipMenu,
+                ConditionId::new(menu_id, text_id as i32, 0),
+            )
+            .is_some()
+        {
+            return self.gossip_conditions_meet_like_cpp(
+                condition_store,
+                ConditionSourceType::GossipMenu,
+                menu_id,
+                text_id as i32,
+                npc_guid,
+            );
+        }
+
+        self.gossip_conditions_meet_like_cpp(
+            condition_store,
+            ConditionSourceType::GossipMenu,
+            menu_id,
+            0,
+            npc_guid,
+        )
+    }
+
     /// Build a GossipMessage from the database for a creature entry.
     /// Returns None if no gossip menu exists.
     async fn build_gossip_menu(
@@ -4176,10 +4335,14 @@ impl WorldSession {
         }
         let menu_id: u32 = menu_result.try_read(0)?;
 
-        // 2. Get TextID from gossip_menu, then resolve BroadcastTextID from npc_text
-        let mut stmt = world_db.prepare(WorldStatements::SEL_GOSSIP_MENU);
+        let condition_store = self.condition_store().cloned();
+
+        // 2. Get TextID from gossip_menu, then resolve BroadcastTextID from npc_text.
+        // C++ Player::GetGossipTextId iterates every gossip_menu row and keeps the last row whose
+        // attached GossipMenu conditions meet for (player, source).
+        let mut stmt = world_db.prepare(WorldStatements::SEL_GOSSIP_MENU_TEXTS);
         stmt.set_u32(0, menu_id);
-        let text_result: wow_database::SqlResult =
+        let mut text_result: wow_database::SqlResult =
             tokio::time::timeout(std::time::Duration::from_secs(2), world_db.query(&stmt))
                 .await
                 .ok()?
@@ -4187,7 +4350,25 @@ impl WorldSession {
         let npc_text_id: u32 = if text_result.is_empty() {
             1
         } else {
-            text_result.try_read::<u32>(0).unwrap_or(1)
+            let mut selected = 1;
+            loop {
+                let text_id = text_result.try_read::<u32>(0).unwrap_or(1);
+                let meets = condition_store.as_ref().is_none_or(|store| {
+                    self.gossip_menu_text_conditions_meet_like_cpp(
+                        store.as_ref(),
+                        menu_id,
+                        text_id,
+                        npc_guid,
+                    )
+                });
+                if meets {
+                    selected = text_id;
+                }
+                if !text_result.next_row() {
+                    break;
+                }
+            }
+            selected
         };
 
         // Resolve BroadcastTextID from npc_text (C# uses BroadcastTextID, NOT TextID)
@@ -4254,7 +4435,7 @@ impl WorldSession {
         }
 
         // Resolve localized text for each option via OptionBroadcastTextID.
-        let locale = &self.locale;
+        let locale = self.locale.clone();
         info!(
             "Gossip locale='{}' for {} options",
             locale,
@@ -4263,12 +4444,24 @@ impl WorldSession {
         let mut gossip_options = Vec::new();
         let mut stored_options = Vec::new();
         for opt in &raw_options {
+            if let Some(store) = condition_store.as_ref()
+                && !self.gossip_conditions_meet_like_cpp(
+                    store.as_ref(),
+                    ConditionSourceType::GossipMenuOption,
+                    menu_id,
+                    opt.option_id as i32,
+                    npc_guid,
+                )
+            {
+                continue;
+            }
+
             let mut text = opt.option_text.clone();
 
             if opt.broadcast_text_id != 0 && locale != "enUS" {
                 let mut stmt = world_db.prepare(WorldStatements::SEL_BROADCAST_TEXT_LOCALE);
                 stmt.set_u32(0, opt.broadcast_text_id);
-                stmt.set_string(1, locale);
+                stmt.set_string(1, &locale);
                 if let Ok(Ok(r)) =
                     tokio::time::timeout(std::time::Duration::from_secs(2), world_db.query(&stmt))
                         .await
