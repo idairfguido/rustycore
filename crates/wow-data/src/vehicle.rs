@@ -5,8 +5,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use tracing::info;
-use wow_database::{HotfixDatabase, HotfixStatements};
-use wow_entities::{VehicleSeatAddon, VehicleSeatInfo};
+use wow_database::{HotfixDatabase, HotfixStatements, WorldDatabase};
+use wow_entities::{VehicleAccessory, VehicleSeatAddon, VehicleSeatInfo};
 
 use crate::wdc4::Wdc4Reader;
 
@@ -79,6 +79,12 @@ pub struct VehicleStore {
 
 pub struct VehicleSeatStore {
     by_id: HashMap<u32, VehicleSeatEntry>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct VehicleAccessoryStoreLikeCpp {
+    by_spawn_guid: HashMap<u64, Vec<VehicleAccessory>>,
+    by_creature_entry: HashMap<u32, Vec<VehicleAccessory>>,
 }
 
 impl VehicleStore {
@@ -274,6 +280,120 @@ impl VehicleSeatStore {
     }
 }
 
+impl VehicleAccessoryStoreLikeCpp {
+    pub fn from_parts(
+        by_spawn_guid: impl IntoIterator<Item = (u64, Vec<VehicleAccessory>)>,
+        by_creature_entry: impl IntoIterator<Item = (u32, Vec<VehicleAccessory>)>,
+    ) -> Self {
+        Self {
+            by_spawn_guid: by_spawn_guid.into_iter().collect(),
+            by_creature_entry: by_creature_entry.into_iter().collect(),
+        }
+    }
+
+    pub async fn load_like_cpp(db: &WorldDatabase) -> Result<Self> {
+        let mut store = Self::default();
+        let template_rows = store.load_template_accessories_like_cpp(db).await?;
+        let spawn_rows = store.load_spawn_accessories_like_cpp(db).await?;
+        info!(
+            "Loaded {template_rows} vehicle template accessories and {spawn_rows} vehicle accessories"
+        );
+        Ok(store)
+    }
+
+    async fn load_template_accessories_like_cpp(&mut self, db: &WorldDatabase) -> Result<usize> {
+        let mut result = db
+            .direct_query(
+                "SELECT `entry`, `accessory_entry`, `seat_id`, `minion`, `summontype`, `summontimer` \
+                 FROM `vehicle_template_accessory`",
+            )
+            .await?;
+        if result.is_empty() {
+            return Ok(0);
+        }
+
+        let mut count = 0usize;
+        loop {
+            let entry = result.read::<u32>(0);
+            let accessory = VehicleAccessory {
+                accessory_entry: result.read(1),
+                seat_id: result.read::<i8>(2),
+                is_minion: result.read::<bool>(3),
+                summoned_type: result.read(4),
+                summon_time_ms: result.read(5),
+            };
+            self.by_creature_entry
+                .entry(entry)
+                .or_default()
+                .push(accessory);
+            count += 1;
+
+            if !result.next_row() {
+                break;
+            }
+        }
+        Ok(count)
+    }
+
+    async fn load_spawn_accessories_like_cpp(&mut self, db: &WorldDatabase) -> Result<usize> {
+        let mut result = db
+            .direct_query(
+                "SELECT `guid`, `accessory_entry`, `seat_id`, `minion`, `summontype`, `summontimer` \
+                 FROM `vehicle_accessory`",
+            )
+            .await?;
+        if result.is_empty() {
+            return Ok(0);
+        }
+
+        let mut count = 0usize;
+        loop {
+            let guid = result.read::<u64>(0);
+            let accessory = VehicleAccessory {
+                accessory_entry: result.read(1),
+                seat_id: result.read::<i8>(2),
+                is_minion: result.read::<bool>(3),
+                summoned_type: result.read(4),
+                summon_time_ms: result.read(5),
+            };
+            self.by_spawn_guid.entry(guid).or_default().push(accessory);
+            count += 1;
+
+            if !result.next_row() {
+                break;
+            }
+        }
+        Ok(count)
+    }
+
+    pub fn accessories_for_vehicle_like_cpp(
+        &self,
+        spawn_guid_low: Option<u64>,
+        creature_entry: u32,
+    ) -> Option<&[VehicleAccessory]> {
+        if let Some(accessories) =
+            spawn_guid_low.and_then(|guid| self.by_spawn_guid.get(&guid).map(Vec::as_slice))
+        {
+            return Some(accessories);
+        }
+        self.by_creature_entry
+            .get(&creature_entry)
+            .map(Vec::as_slice)
+    }
+
+    pub fn template_len(&self) -> usize {
+        self.by_creature_entry.values().map(Vec::len).sum()
+    }
+
+    pub fn spawn_len(&self) -> usize {
+        self.by_spawn_guid.values().map(Vec::len).sum()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.template_len() == 0 && self.spawn_len() == 0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,5 +450,45 @@ mod tests {
         assert_eq!(defs[1].0, 2);
         assert_eq!(defs[1].1.id, 101);
         assert!(defs[1].1.usable_by_override);
+    }
+
+    #[test]
+    fn vehicle_accessories_prefer_spawn_guid_like_cpp() {
+        let template_accessory = VehicleAccessory {
+            accessory_entry: 10,
+            seat_id: 1,
+            is_minion: true,
+            summoned_type: 8,
+            summon_time_ms: 100,
+        };
+        let spawn_accessory = VehicleAccessory {
+            accessory_entry: 20,
+            seat_id: 2,
+            is_minion: false,
+            summoned_type: 6,
+            summon_time_ms: 200,
+        };
+        let store = VehicleAccessoryStoreLikeCpp::from_parts(
+            [(77, vec![spawn_accessory])],
+            [(1234, vec![template_accessory])],
+        );
+
+        assert_eq!(
+            store.accessories_for_vehicle_like_cpp(Some(77), 1234),
+            Some([spawn_accessory].as_slice())
+        );
+        assert_eq!(
+            store.accessories_for_vehicle_like_cpp(None, 1234),
+            Some([template_accessory].as_slice())
+        );
+        assert_eq!(
+            store.accessories_for_vehicle_like_cpp(Some(99), 1234),
+            Some([template_accessory].as_slice())
+        );
+        assert!(
+            store
+                .accessories_for_vehicle_like_cpp(Some(99), 1)
+                .is_none()
+        );
     }
 }

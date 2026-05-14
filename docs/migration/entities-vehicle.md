@@ -3,9 +3,9 @@
 > **C++ canonical path:** `/home/server/woltk-trinity-legacy/src/server/game/Entities/Vehicle/`
 > **Rust target crate(s):** `crates/wow-world/` (entity logic), `crates/wow-data/` (DBC), `crates/wow-constants/` (flags/opcodes)
 > **Layer:** L4 (sub-modules)
-> **Status:** ❌ not started
-> **Audited vs C++:** ⚠️ partial (header-level audit only)
-> **Last updated:** 2026-05-01
+> **Status:** partial
+> **Audited vs C++:** ⚠️ partial (VehicleKit/mount path and accessory lookup audited; full runtime still open)
+> **Last updated:** 2026-05-14
 
 ---
 
@@ -155,18 +155,19 @@ DBC stores:
 <!-- REFINE.021:END rust-target-coverage -->
 
 **Files in `/home/server/rustycore`:**
-- `crates/wow-constants/src/object.rs` — `TypeId::Vehicle = 9` defined; no flags
-- `crates/wow-constants/src/opcodes.rs` — vehicle opcodes enumerated, no handlers
-- `crates/wow-packet/src/packets/movement.rs` — `TransportInfo { vehicle_id: Option<i32> }` plumbed through `MOVEMENT_INFO`
-- **0 lines** of `Vehicle` entity logic.
+- `crates/wow-entities/src/vehicle.rs` — represented `Vehicle` state, seat map, passenger helpers, pending join markers, transport offset/global transforms, and accessory POD.
+- `crates/wow-data/src/vehicle.rs` — `Vehicle.db2`/`VehicleSeat.db2` stores with hotfix overlays and C++ `vehicle_accessory`/`vehicle_template_accessory` lookup.
+- `crates/wow-world/src/session.rs` — represented mount VehicleKit create/remove path, owner vehicle-rec packets, movement ack validation, mount accessory row selection, collision-height and pet-mode side effects.
+- `crates/wow-packet/src/packets/movement.rs` / `crates/wow-packet/src/packets/vehicle.rs` — movement vehicle id and represented vehicle-rec packets.
+- `crates/wow-constants/src/opcodes.rs` — vehicle opcodes enumerated; full request handlers still pending.
 
-**What's implemented:** type-id constant + opcode constants + a vehicle_id field on movement info.
+**What's implemented:** represented VehicleKit state and mount integration, DB2 seat construction, C++ vehicle accessory row lookup, movement/vehicle-rec packet coverage for the mount path, and focused unit tests for the represented state.
 
-**What's missing vs C++:** entire 995-line `Vehicle.cpp` — seat map, passenger add/remove, accessory summon, transport-frame xform, immunities, despawn timer, join event scheduling.
+**What's missing vs C++:** full live passenger runtime, accessory TempSummon/HandleSpellClick installation, transport-frame xform, immunities, despawn timer, and join event scheduling. `wow_entities::Vehicle` now represents install/uninstall status, seat maps, usable-seat counts, passenger insert/remove helpers, and vehicle accessory row selection is loaded in `wow-data` with C++ GUID-first/template fallback semantics.
 
-**Suspicious / likely divergent:** none — nothing exists to diverge.
+**Suspicious / likely divergent:** represented mount path records accessory rows but does not yet execute C++ `TempSummon` + `HandleSpellClick`; request handlers for exit/switch/eject/dismiss are not wired to live vehicle state yet.
 
-**Tests existing:** 0.
+**Tests existing:** focused `wow-entities`, `wow-data`, and `wow-world` unit tests for seat/passenger helpers, transforms, accessory lookup, and represented mount VehicleKit create/remove behavior.
 
 ---
 
@@ -199,13 +200,13 @@ DBC stores:
 
 <!-- REFINE.022:END task-wbs -->
 
-- [ ] **#VEH.1** Define `VehicleEntry` / `VehicleSeatEntry` DBC readers in `wow-data` (L)
+- [x] **#VEH.1** Define `VehicleEntry` / `VehicleSeatEntry` DBC readers in `wow-data` (L)
 - [ ] **#VEH.2** Port `VehicleFlags`, `PowerType`, `VehicleExitParameters`, `VehicleSpells` to `wow-constants` (L)
-- [ ] **#VEH.3** Define `VehicleSeat`, `VehicleSeatAddon`, `VehicleAccessory`, `VehicleTemplate`, `PassengerInfo` POD types in `wow-world` (L)
-- [ ] **#VEH.4** Port `TransportBase` xform (`CalculatePassengerPosition`/`Offset`) as free fns in `wow-math` (L)
-- [ ] **#VEH.5** Implement `Vehicle` struct + `Install/Uninstall/Reset` lifecycle (M)
-- [ ] **#VEH.6** Implement `AddVehiclePassenger`/`RemovePassenger`/`HasEmptySeat`/`GetNextEmptySeat` (M)
-- [ ] **#VEH.7** Implement `InstallAllAccessories` + `InstallAccessory` (depends on TempSummon) (M)
+- [ ] **#VEH.3** Define `VehicleSeat`, `VehicleSeatAddon`, `VehicleAccessory`, `VehicleTemplate`, `PassengerInfo` POD types in `wow-world` (L) — partial: represented types live in `wow-entities`; `VehicleTemplate`/despawn delay still pending.
+- [x] **#VEH.4** Port `TransportBase` xform (`CalculatePassengerPosition`/`Offset`) as free fns in `wow-entities` (L)
+- [ ] **#VEH.5** Implement `Vehicle` struct + `Install/Uninstall/Reset` lifecycle (M) — partial: install/uninstall represented; `Reset(evading)` and live `Unit` ownership pending.
+- [ ] **#VEH.6** Implement `AddVehiclePassenger`/`RemovePassenger`/`HasEmptySeat`/`GetNextEmptySeat` (M) — partial: pure seat-map helpers represented; aura/script side effects pending.
+- [ ] **#VEH.7** Implement `InstallAllAccessories` + `InstallAccessory` (depends on TempSummon) (M) — partial: C++ accessory row load/selection covered; TempSummon/HandleSpellClick pending.
 - [ ] **#VEH.8** Implement delayed join (`VehicleJoinEvent` analog) on session/map tick (M)
 - [ ] **#VEH.9** Wire vehicle opcodes (Exit/SwitchSeat/Eject/Dismiss) into `wow-handler` (M)
 - [ ] **#VEH.10** Apply immunities (`ApplyAllImmunities` from VehicleEntry flags) (L)
@@ -234,6 +235,7 @@ DBC stores:
 - [ ] Test: `AddVehiclePassenger(seatId=-1)` picks first empty in DBC index order
 - [ ] Test: passenger removal clears seat and fires control-aura removal path
 - [ ] Test: `CalculatePassengerPosition(offset, transO)` round-trips with `CalculatePassengerOffset`
+- [x] Test: accessory row lookup prefers `vehicle_accessory` spawn GUID rows and falls back to `vehicle_template_accessory`
 - [ ] Test: accessory install summons N creatures matching `vehicle_accessory` rows
 - [ ] Test: `IsControllableVehicle` true iff any seat has `CAN_CONTROL` flag
 
@@ -304,4 +306,4 @@ DBC stores:
 | `CMSG_REQUEST_VEHICLE_*` opcodes | yes (constants) | `crates/wow-constants/src/opcodes.rs` | ⚠️ enumerated, no handler |
 | `MOVEMENT_INFO::Transport.vehicle_id` | yes | `crates/wow-packet/src/packets/movement.rs` | ✅ wire-format only |
 
-**Verdict:** ❌ not started. Surface coverage ≈ 1% (constants and a movement-info field). No entity, no seats, no accessories, no handlers.
+**Verdict:** partial. `Vehicle` entity state, seat definitions, represented mount VehicleKit creation/removal packets, movement ack validation, and C++ accessory-row lookup are covered. Full passenger/aura-control runtime, accessory summoning, transport transforms, immunities, and script integration remain open.

@@ -164,8 +164,8 @@ pub use spell_item_enchantment::{SpellItemEnchantmentEntry, SpellItemEnchantment
 pub use terrain_swap::{TerrainSwapInfo, TerrainSwapStore, load_terrain_swaps};
 pub use ui_map::{UiMapXMapArtEntry, UiMapXMapArtStore};
 pub use vehicle::{
-    VEHICLE_SEAT_FLAG_B_USABLE_FORCED, VEHICLE_SEAT_FLAG_CAN_ENTER_OR_EXIT, VehicleEntry,
-    VehicleSeatEntry, VehicleSeatStore, VehicleStore,
+    VEHICLE_SEAT_FLAG_B_USABLE_FORCED, VEHICLE_SEAT_FLAG_CAN_ENTER_OR_EXIT,
+    VehicleAccessoryStoreLikeCpp, VehicleEntry, VehicleSeatEntry, VehicleSeatStore, VehicleStore,
 };
 pub use world_id_store::WorldIdStore;
 pub use world_safe_locs::{

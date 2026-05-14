@@ -106,6 +106,7 @@ pub struct SessionResources {
     pub mount_x_display_store: Option<Arc<wow_data::MountXDisplayStore>>,
     pub vehicle_store: Option<Arc<wow_data::VehicleStore>>,
     pub vehicle_seat_store: Option<Arc<wow_data::VehicleSeatStore>>,
+    pub vehicle_accessory_store: Option<Arc<wow_data::VehicleAccessoryStoreLikeCpp>>,
     pub terrain_swap_store: Option<Arc<wow_data::TerrainSwapStore>>,
     pub phase_store: Option<Arc<wow_data::PhaseStore>>,
     pub phase_group_store: Option<Arc<wow_data::PhaseGroupStore>>,
