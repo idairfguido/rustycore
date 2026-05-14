@@ -848,11 +848,9 @@ async fn main() -> Result<()> {
     );
 
     // Load spell metadata (cast time, cooldown, effects, etc.) — Phase 2
-    let spell_store = Arc::new(
-        wow_data::SpellStore::load(&hotfix_db)
-            .await
-            .context("Failed to load SpellStore")?,
-    );
+    let mut spell_store = wow_data::SpellStore::load(&hotfix_db)
+        .await
+        .context("Failed to load SpellStore")?;
     info!("Loaded {} spells from SpellStore", spell_store.len());
 
     // Load area trigger store (collision detection + teleportation)
@@ -999,7 +997,7 @@ async fn main() -> Result<()> {
             &mut condition_load_report,
             wow_data::conditions::ConditionExternalValidationStoresLikeCpp {
                 item_store: Some(item_store.as_ref()),
-                spell_store: Some(spell_store.as_ref()),
+                spell_store: Some(&spell_store),
                 area_table_store: Some(area_table_store.as_ref()),
                 skill_store: Some(skill_store.as_ref()),
                 map_store: Some(map_store.as_ref()),
@@ -1049,6 +1047,7 @@ async fn main() -> Result<()> {
     let condition_attachment_report = wow_data::attach_loaded_conditions_like_cpp(
         condition_store.as_ref(),
         Some(&mut gossip_store),
+        Some(&mut spell_store),
         Some(&mut phase_info_store),
         Some(&mut graveyard_store),
     );
@@ -1068,10 +1067,11 @@ async fn main() -> Result<()> {
         );
     }
     info!(
-        "Loaded C++ ConditionMgr store: {} buckets, {} externally skipped conditions, {} spell-click aura spell ids, {} deferred spell implicit target conditions, {} gossip menu condition rows attached ({} missing menus), {} gossip menu option condition rows attached ({} missing items), {} phase condition rows attached, {} graveyard condition rows attached",
+        "Loaded C++ ConditionMgr store: {} buckets, {} externally skipped conditions, {} spell-click aura spell ids, {} spell implicit target condition rows attached ({} deferred), {} gossip menu condition rows attached ({} missing menus), {} gossip menu option condition rows attached ({} missing items), {} phase condition rows attached, {} graveyard condition rows attached",
         condition_store.bucket_count(),
         externally_skipped_conditions.len(),
         condition_attachment_report.spell_click_aura_spell_ids.len(),
+        condition_attachment_report.spell_implicit_target_condition_count,
         condition_attachment_report.deferred_spell_implicit_target_condition_count,
         condition_attachment_report
             .gossip_menus
@@ -1090,6 +1090,7 @@ async fn main() -> Result<()> {
             .attached_condition_count
     );
     wow_world::conditions::set_condition_mgr_store_like_cpp(Arc::clone(&condition_store));
+    let spell_store = Arc::new(spell_store);
 
     // Shared group registry and pending invites
     let group_registry = Arc::new(GroupRegistry::new());

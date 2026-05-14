@@ -18,6 +18,8 @@ use anyhow::Result;
 use tracing::info;
 use wow_database::HotfixDatabase;
 
+use crate::{ConditionEntriesByTypeStore, ConditionsReference};
+
 /// Spell effect types (from SpellEffectType enum)
 pub mod spell_effect_types {
     pub const SPELL_EFFECT_SCHOOL_DAMAGE: u32 = 2;
@@ -195,6 +197,7 @@ const fn implicit_target_category_accepts_conditions_like_cpp(target: u32) -> bo
 #[derive(Default)]
 pub struct SpellStore {
     spells: HashMap<i32, SpellInfo>,
+    implicit_target_conditions: HashMap<(i32, u32), ConditionsReference>,
 }
 
 impl SpellStore {
@@ -202,6 +205,7 @@ impl SpellStore {
     pub fn new() -> Self {
         Self {
             spells: HashMap::new(),
+            implicit_target_conditions: HashMap::new(),
         }
     }
 
@@ -302,6 +306,49 @@ ORDER BY sm.ID, se.EffectIndex
         self.spells.get(&spell_id)
     }
 
+    pub fn implicit_target_conditions_like_cpp(
+        &self,
+        spell_id: i32,
+        effect_index: u32,
+    ) -> Option<&ConditionsReference> {
+        self.implicit_target_conditions
+            .get(&(spell_id, effect_index))
+    }
+
+    pub fn attach_spell_implicit_target_conditions_like_cpp(
+        &mut self,
+        conditions: &ConditionEntriesByTypeStore,
+    ) -> usize {
+        let mut attached = 0;
+        let Some(entries) = conditions.entries_for_source_type_like_cpp(
+            wow_constants::ConditionSourceType::SpellImplicitTarget,
+        ) else {
+            return attached;
+        };
+
+        self.implicit_target_conditions.clear();
+        for (id, bucket) in entries {
+            let Some(spell) = self.spells.get(&id.source_entry) else {
+                continue;
+            };
+
+            for effect in &spell.effects {
+                let bit = 1_u32.checked_shl(effect.effect_index).unwrap_or(0);
+                if bit == 0 || (id.source_group & bit) == 0 {
+                    continue;
+                }
+
+                self.implicit_target_conditions.insert(
+                    (id.source_entry, effect.effect_index),
+                    ConditionsReference::new(bucket),
+                );
+                attached += bucket.len();
+            }
+        }
+
+        attached
+    }
+
     /// Insert a spell into the store (for testing or dynamic registration).
     #[allow(dead_code)]
     pub fn insert(&mut self, spell_id: i32, info: SpellInfo) {
@@ -322,6 +369,8 @@ ORDER BY sm.ID, se.EffectIndex
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Condition, ConditionEntriesByTypeStore};
+    use wow_constants::{ConditionSourceType, ConditionType};
 
     #[test]
     fn test_spell_store_creation() {
@@ -415,6 +464,65 @@ mod tests {
         assert_eq!(
             spell.normalized_implicit_target_effect_mask_like_cpp(0b0001),
             0
+        );
+    }
+
+    #[test]
+    fn spell_implicit_target_conditions_attach_to_effects_like_cpp() {
+        let mut store = SpellStore::new();
+        store.insert(
+            100,
+            SpellInfo {
+                spell_id: 100,
+                cast_time_ms: 0,
+                cooldown_ms: 0,
+                recovery_time_ms: 0,
+                effect_type: 0,
+                effect_base_points: 0,
+                effect_bonus_coefficient: 0.0,
+                aura_type: None,
+                display_flags: 0,
+                effects: vec![
+                    SpellEffectInfo {
+                        effect_index: 0,
+                        effect: 0,
+                        chain_targets: 0,
+                        implicit_target_1: 6,
+                        implicit_target_2: 0,
+                    },
+                    SpellEffectInfo {
+                        effect_index: 1,
+                        effect: 0,
+                        chain_targets: 0,
+                        implicit_target_1: 7,
+                        implicit_target_2: 0,
+                    },
+                ],
+            },
+        );
+        let conditions = ConditionEntriesByTypeStore::from_conditions_like_cpp([Condition {
+            source_type: ConditionSourceType::SpellImplicitTarget,
+            source_group: 0b11,
+            source_entry: 100,
+            condition_type: ConditionType::Aura,
+            ..Condition::default()
+        }]);
+
+        assert_eq!(
+            store.attach_spell_implicit_target_conditions_like_cpp(&conditions),
+            2
+        );
+        assert!(
+            store
+                .implicit_target_conditions_like_cpp(100, 0)
+                .and_then(|reference| reference.upgrade())
+                .is_some_and(|conditions| conditions.len() == 1)
+        );
+        assert!(
+            store
+                .implicit_target_conditions_like_cpp(100, 1)
+                .and_then(|reference| reference.upgrade())
+                .is_some_and(|conditions| conditions.len() == 1)
         );
     }
 }
