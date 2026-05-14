@@ -14,7 +14,10 @@ use wow_constants::{
     ComparisonType, ConditionInstanceInfo, ConditionSourceType, ConditionType, RelationType,
     TypeId, TypeMask, UnitStandStateType,
 };
-use wow_data::{Condition, ConditionEntriesByTypeStore, ConditionId};
+use wow_data::{
+    Condition, ConditionEntriesByTypeStore, ConditionId, PlayerConditionContextLikeCpp,
+    PlayerConditionStore, is_player_meeting_condition_like_cpp,
+};
 use wow_entities::WorldObject;
 use wow_loot::{LootStoreItemContext, condition_source_type_for_loot_store_kind_like_cpp};
 
@@ -79,6 +82,9 @@ pub struct ConditionSourceInfo<'a> {
     pub player_quest_targets: [Option<ConditionPlayerQuestSnapshot<'a>>; MAX_CONDITION_TARGETS],
     pub player_progression_targets:
         [Option<ConditionPlayerProgressionSnapshot<'a>>; MAX_CONDITION_TARGETS],
+    pub player_condition_contexts:
+        [Option<PlayerConditionContextLikeCpp<'a>>; MAX_CONDITION_TARGETS],
+    pub player_condition_store: Option<&'a PlayerConditionStore>,
     pub spawn_id_targets: [Option<u64>; MAX_CONDITION_TARGETS],
     pub private_object_targets: [bool; MAX_CONDITION_TARGETS],
     pub string_id_targets: [Option<&'a [&'a str]>; MAX_CONDITION_TARGETS],
@@ -379,6 +385,8 @@ impl<'a> ConditionSourceInfo<'a> {
             player_targets: [None; MAX_CONDITION_TARGETS],
             player_quest_targets: [None; MAX_CONDITION_TARGETS],
             player_progression_targets: [None; MAX_CONDITION_TARGETS],
+            player_condition_contexts: [None; MAX_CONDITION_TARGETS],
+            player_condition_store: None,
             spawn_id_targets: [None; MAX_CONDITION_TARGETS],
             private_object_targets: [false; MAX_CONDITION_TARGETS],
             string_id_targets: [None; MAX_CONDITION_TARGETS],
@@ -401,6 +409,8 @@ impl<'a> ConditionSourceInfo<'a> {
             player_targets: [None; MAX_CONDITION_TARGETS],
             player_quest_targets: [None; MAX_CONDITION_TARGETS],
             player_progression_targets: [None; MAX_CONDITION_TARGETS],
+            player_condition_contexts: [None; MAX_CONDITION_TARGETS],
+            player_condition_store: None,
             spawn_id_targets: [None; MAX_CONDITION_TARGETS],
             private_object_targets: [false; MAX_CONDITION_TARGETS],
             string_id_targets: [None; MAX_CONDITION_TARGETS],
@@ -489,6 +499,20 @@ impl<'a> ConditionSourceInfo<'a> {
         if target_index < MAX_CONDITION_TARGETS {
             self.player_progression_targets[target_index] = Some(snapshot);
         }
+    }
+
+    pub fn set_player_condition_context(
+        &mut self,
+        target_index: usize,
+        context: PlayerConditionContextLikeCpp<'a>,
+    ) {
+        if target_index < MAX_CONDITION_TARGETS {
+            self.player_condition_contexts[target_index] = Some(context);
+        }
+    }
+
+    pub fn set_player_condition_store(&mut self, store: &'a PlayerConditionStore) {
+        self.player_condition_store = Some(store);
     }
 
     pub fn set_realm_achievement_ids(&mut self, achievement_ids: &'a [u32]) {
@@ -661,6 +685,8 @@ pub fn condition_meets_basic_like_cpp<'a>(
         let player_quests = source_info.player_quest_targets[target_index].filter(|_| is_player);
         let player_progression =
             source_info.player_progression_targets[target_index].filter(|_| is_player);
+        let player_condition_context =
+            source_info.player_condition_contexts[target_index].filter(|_| is_player);
         match condition.condition_type {
             ConditionType::Aura => {
                 if let Some(aura_effects) = unit_auras {
@@ -1009,6 +1035,17 @@ pub fn condition_meets_basic_like_cpp<'a>(
             ConditionType::SceneInProgress => {
                 if let Some(progression) = player_progression {
                     cond_meets = progression.has_active_scene_like_cpp(condition.condition_value1);
+                }
+            }
+            ConditionType::PlayerCondition => {
+                let Some(store) = source_info.player_condition_store else {
+                    return ConditionMeetResult::Unsupported;
+                };
+                let Some(context) = player_condition_context else {
+                    return ConditionMeetResult::Unsupported;
+                };
+                if let Some(player_condition) = store.get(condition.condition_value1) {
+                    cond_meets = is_player_meeting_condition_like_cpp(player_condition, &context);
                 }
             }
             ConditionType::DailyQuestDone => {
@@ -1393,6 +1430,7 @@ mod tests {
     use super::*;
     use wow_constants::{ConditionType, PhaseFlags, TypeId, TypeMask};
     use wow_core::Position;
+    use wow_data::{PlayerConditionContextLikeCpp, PlayerConditionEntry, PlayerConditionStore};
     use wow_loot::{LootStoreItem, LootStoreItemContext, LootStoreKind};
 
     fn world_object(map_id: u32, instance_id: u32) -> WorldObject {
@@ -2370,6 +2408,50 @@ mod tests {
         assert_eq!(
             condition_meets_basic_like_cpp(&unrepresented_condition, &mut info, |_, _| false),
             ConditionMeetResult::Unsupported
+        );
+    }
+
+    #[test]
+    fn basic_condition_meets_player_condition_delegates_to_db2_evaluator_like_cpp() {
+        let target = player_object(571, 2);
+        let store = PlayerConditionStore::from_entries([PlayerConditionEntry {
+            id: 970,
+            race_mask: 1 << 0,
+            class_mask: 1 << 1,
+            gender: 1,
+            ..PlayerConditionEntry::default()
+        }]);
+        let mut info = ConditionSourceInfo::from_targets(Some(&target), None, None);
+        info.set_player_condition_store(&store);
+        info.set_player_condition_context(
+            0,
+            PlayerConditionContextLikeCpp {
+                race: 1,
+                class_mask: 1 << 1,
+                gender: 1,
+                native_gender: 0,
+                ..Default::default()
+            },
+        );
+
+        let condition = Condition {
+            condition_type: ConditionType::PlayerCondition,
+            condition_value1: 970,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&condition, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(true)
+        );
+
+        let missing_condition = Condition {
+            condition_type: ConditionType::PlayerCondition,
+            condition_value1: 971,
+            ..Condition::default()
+        };
+        assert_eq!(
+            condition_meets_basic_like_cpp(&missing_condition, &mut info, |_, _| false),
+            ConditionMeetResult::Evaluated(false)
         );
     }
 

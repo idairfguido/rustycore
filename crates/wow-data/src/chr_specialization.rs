@@ -23,6 +23,7 @@ pub struct ChrSpecializationEntry {
 }
 
 /// In-memory store for `ChrSpecialization.db2`.
+#[derive(Debug)]
 pub struct ChrSpecializationStore {
     entries: HashMap<u32, ChrSpecializationEntry>,
 }
