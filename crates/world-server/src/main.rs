@@ -539,6 +539,45 @@ async fn main() -> Result<()> {
         "Loaded {} difficulties from Difficulty.db2",
         difficulty_store.len()
     );
+    let faction_store = Arc::new(
+        wow_data::Db2IdStore::load(&data_dir, &locale, "Faction.db2")
+            .context("Failed to load Faction.db2 — check DataDir and DBC.Locale config")?,
+    );
+    let achievement_store = Arc::new(
+        wow_data::Db2IdStore::load(&data_dir, &locale, "Achievement.db2")
+            .context("Failed to load Achievement.db2 — check DataDir and DBC.Locale config")?,
+    );
+    let char_titles_store = Arc::new(
+        wow_data::Db2IdStore::load(&data_dir, &locale, "CharTitles.db2")
+            .context("Failed to load CharTitles.db2 — check DataDir and DBC.Locale config")?,
+    );
+    let battle_pet_species_store = Arc::new(
+        wow_data::Db2IdStore::load(&data_dir, &locale, "BattlePetSpecies.db2")
+            .context("Failed to load BattlePetSpecies.db2 — check DataDir and DBC.Locale config")?,
+    );
+    let scenario_step_store = Arc::new(
+        wow_data::Db2IdStore::load(&data_dir, &locale, "ScenarioStep.db2")
+            .context("Failed to load ScenarioStep.db2 — check DataDir and DBC.Locale config")?,
+    );
+    let scene_script_package_store = Arc::new(
+        wow_data::Db2IdStore::load(&data_dir, &locale, "SceneScriptPackage.db2").context(
+            "Failed to load SceneScriptPackage.db2 — check DataDir and DBC.Locale config",
+        )?,
+    );
+    let player_condition_store = Arc::new(
+        wow_data::Db2IdStore::load(&data_dir, &locale, "PlayerCondition.db2")
+            .context("Failed to load PlayerCondition.db2 — check DataDir and DBC.Locale config")?,
+    );
+    info!(
+        "Loaded condition validation DB2 id stores: {} factions, {} achievements, {} titles, {} battle pet species, {} scenario steps, {} scene script packages, {} player conditions",
+        faction_store.len(),
+        achievement_store.len(),
+        char_titles_store.len(),
+        battle_pet_species_store.len(),
+        scenario_step_store.len(),
+        scene_script_package_store.len(),
+        player_condition_store.len()
+    );
 
     // Load ItemAppearance.db2 for item display-info resolution.
     let item_appearance_store = Arc::new(
@@ -841,6 +880,13 @@ async fn main() -> Result<()> {
                 area_trigger_store: Some(area_trigger_store.as_ref()),
                 graveyard_store: Some(&graveyard_store),
                 difficulty_store: Some(difficulty_store.as_ref()),
+                faction_store: Some(faction_store.as_ref()),
+                achievement_store: Some(achievement_store.as_ref()),
+                char_titles_store: Some(char_titles_store.as_ref()),
+                battle_pet_species_store: Some(battle_pet_species_store.as_ref()),
+                scenario_step_store: Some(scenario_step_store.as_ref()),
+                scene_script_package_store: Some(scene_script_package_store.as_ref()),
+                player_condition_store: Some(player_condition_store.as_ref()),
                 max_skill_value: Some(max_skill_value_like_cpp(&world_configs)),
                 loot_template_exists: Some(&loot_template_exists),
                 loot_source_entry_exists: Some(&loot_source_entry_exists),

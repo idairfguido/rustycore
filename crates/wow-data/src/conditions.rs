@@ -646,6 +646,16 @@ pub enum ConditionTypeValidationErrorLikeCpp {
         limit: i32,
     },
     NonExistingDifficulty(u32),
+    NonExistingFaction(u32),
+    NonExistingAchievement {
+        condition_type: ConditionType,
+        achievement_id: u32,
+    },
+    NonExistingTitle(u32),
+    NonExistingBattlePetSpecies(u32),
+    NonExistingScenarioStep(u32),
+    NonExistingSceneScriptPackage(u32),
+    NonExistingPlayerCondition(u32),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -702,6 +712,13 @@ pub struct ConditionExternalValidationStoresLikeCpp<'a> {
     pub area_trigger_store: Option<&'a crate::AreaTriggerStore>,
     pub graveyard_store: Option<&'a crate::GraveyardStore>,
     pub difficulty_store: Option<&'a crate::DifficultyStore>,
+    pub faction_store: Option<&'a crate::Db2IdStore>,
+    pub achievement_store: Option<&'a crate::Db2IdStore>,
+    pub char_titles_store: Option<&'a crate::Db2IdStore>,
+    pub battle_pet_species_store: Option<&'a crate::Db2IdStore>,
+    pub scenario_step_store: Option<&'a crate::Db2IdStore>,
+    pub scene_script_package_store: Option<&'a crate::Db2IdStore>,
+    pub player_condition_store: Option<&'a crate::Db2IdStore>,
     pub max_skill_value: Option<u32>,
     pub loot_template_exists: Option<&'a dyn Fn(ConditionSourceType, u32) -> bool>,
     pub loot_source_entry_exists: Option<&'a dyn Fn(ConditionSourceType, u32, i32) -> bool>,
@@ -1098,6 +1115,64 @@ pub fn validate_condition_type_external_like_cpp(
                 && !store.contains(condition.condition_value1)
             {
                 return Err(Error::NonExistingDifficulty(condition.condition_value1));
+            }
+        }
+        ConditionType::ReputationRank => {
+            if let Some(store) = stores.faction_store
+                && !store.contains(condition.condition_value1)
+            {
+                return Err(Error::NonExistingFaction(condition.condition_value1));
+            }
+        }
+        ConditionType::Achievement | ConditionType::RealmAchievement => {
+            if let Some(store) = stores.achievement_store
+                && !store.contains(condition.condition_value1)
+            {
+                return Err(Error::NonExistingAchievement {
+                    condition_type: condition.condition_type,
+                    achievement_id: condition.condition_value1,
+                });
+            }
+        }
+        ConditionType::Title => {
+            if let Some(store) = stores.char_titles_store
+                && !store.contains(condition.condition_value1)
+            {
+                return Err(Error::NonExistingTitle(condition.condition_value1));
+            }
+        }
+        ConditionType::BattlePetCount => {
+            if let Some(store) = stores.battle_pet_species_store
+                && !store.contains(condition.condition_value1)
+            {
+                return Err(Error::NonExistingBattlePetSpecies(
+                    condition.condition_value1,
+                ));
+            }
+        }
+        ConditionType::ScenarioStep => {
+            if let Some(store) = stores.scenario_step_store
+                && !store.contains(condition.condition_value1)
+            {
+                return Err(Error::NonExistingScenarioStep(condition.condition_value1));
+            }
+        }
+        ConditionType::SceneInProgress => {
+            if let Some(store) = stores.scene_script_package_store
+                && !store.contains(condition.condition_value1)
+            {
+                return Err(Error::NonExistingSceneScriptPackage(
+                    condition.condition_value1,
+                ));
+            }
+        }
+        ConditionType::PlayerCondition => {
+            if let Some(store) = stores.player_condition_store
+                && !store.contains(condition.condition_value1)
+            {
+                return Err(Error::NonExistingPlayerCondition(
+                    condition.condition_value1,
+                ));
             }
         }
         _ => {}
@@ -2398,6 +2473,14 @@ mod tests {
             vec![quest_objective(800, 0, 5), quest_objective(801, 10, 99)],
         )]);
         let difficulty_store = crate::DifficultyStore::from_ids([900]);
+        let faction_store = crate::Db2IdStore::from_ids("Faction.db2", [910]);
+        let achievement_store = crate::Db2IdStore::from_ids("Achievement.db2", [920]);
+        let char_titles_store = crate::Db2IdStore::from_ids("CharTitles.db2", [930]);
+        let battle_pet_species_store = crate::Db2IdStore::from_ids("BattlePetSpecies.db2", [940]);
+        let scenario_step_store = crate::Db2IdStore::from_ids("ScenarioStep.db2", [950]);
+        let scene_script_package_store =
+            crate::Db2IdStore::from_ids("SceneScriptPackage.db2", [960]);
+        let player_condition_store = crate::Db2IdStore::from_ids("PlayerCondition.db2", [970]);
         let stores = ConditionExternalValidationStoresLikeCpp {
             item_store: Some(&item_store),
             spell_store: Some(&spell_store),
@@ -2407,6 +2490,13 @@ mod tests {
             phase_store: Some(&phase_store),
             quest_store: Some(&quest_store),
             difficulty_store: Some(&difficulty_store),
+            faction_store: Some(&faction_store),
+            achievement_store: Some(&achievement_store),
+            char_titles_store: Some(&char_titles_store),
+            battle_pet_species_store: Some(&battle_pet_species_store),
+            scenario_step_store: Some(&scenario_step_store),
+            scene_script_package_store: Some(&scene_script_package_store),
+            player_condition_store: Some(&player_condition_store),
             max_skill_value: Some(450),
             ..ConditionExternalValidationStoresLikeCpp::default()
         };
@@ -2464,6 +2554,47 @@ mod tests {
             Condition {
                 condition_type: ConditionType::DifficultyId,
                 condition_value1: 900,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::ReputationRank,
+                condition_value1: 910,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::Achievement,
+                condition_value1: 920,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::RealmAchievement,
+                condition_value1: 920,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::Title,
+                condition_value1: 930,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::BattlePetCount,
+                condition_value1: 940,
+                condition_value3: 0,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::ScenarioStep,
+                condition_value1: 950,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::SceneInProgress,
+                condition_value1: 960,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::PlayerCondition,
+                condition_value1: 970,
                 ..Condition::default()
             },
         ] {
@@ -2554,6 +2685,88 @@ mod tests {
             Err(ConditionTypeValidationErrorLikeCpp::NonExistingDifficulty(
                 999
             ))
+        ));
+        assert!(matches!(
+            validate_condition_type_external_like_cpp(
+                &Condition {
+                    condition_type: ConditionType::ReputationRank,
+                    condition_value1: 999,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(ConditionTypeValidationErrorLikeCpp::NonExistingFaction(999))
+        ));
+        assert!(matches!(
+            validate_condition_type_external_like_cpp(
+                &Condition {
+                    condition_type: ConditionType::RealmAchievement,
+                    condition_value1: 999,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(
+                ConditionTypeValidationErrorLikeCpp::NonExistingAchievement {
+                    condition_type: ConditionType::RealmAchievement,
+                    achievement_id: 999
+                }
+            )
+        ));
+        assert!(matches!(
+            validate_condition_type_external_like_cpp(
+                &Condition {
+                    condition_type: ConditionType::Title,
+                    condition_value1: 999,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(ConditionTypeValidationErrorLikeCpp::NonExistingTitle(999))
+        ));
+        assert!(matches!(
+            validate_condition_type_external_like_cpp(
+                &Condition {
+                    condition_type: ConditionType::BattlePetCount,
+                    condition_value1: 999,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(ConditionTypeValidationErrorLikeCpp::NonExistingBattlePetSpecies(999))
+        ));
+        assert!(matches!(
+            validate_condition_type_external_like_cpp(
+                &Condition {
+                    condition_type: ConditionType::ScenarioStep,
+                    condition_value1: 999,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(ConditionTypeValidationErrorLikeCpp::NonExistingScenarioStep(999))
+        ));
+        assert!(matches!(
+            validate_condition_type_external_like_cpp(
+                &Condition {
+                    condition_type: ConditionType::SceneInProgress,
+                    condition_value1: 999,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(ConditionTypeValidationErrorLikeCpp::NonExistingSceneScriptPackage(999))
+        ));
+        assert!(matches!(
+            validate_condition_type_external_like_cpp(
+                &Condition {
+                    condition_type: ConditionType::PlayerCondition,
+                    condition_value1: 999,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(ConditionTypeValidationErrorLikeCpp::NonExistingPlayerCondition(999))
         ));
     }
 
