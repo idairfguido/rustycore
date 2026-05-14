@@ -35,9 +35,9 @@ use wow_data::{
     ItemCurrencyCostStore, ItemDisenchantLootStore, ItemExtendedCostStore,
     ItemModifiedAppearanceStore, ItemPriceBaseStore, ItemRandomEnchantmentTemplateStore,
     ItemRandomPropertiesStore, ItemRandomPropertyTemplateEntry, ItemRandomSuffixStore,
-    ItemStatsStore, ItemStore, LockStore, MapDifficultyStore, MapStore, PhaseGroupStore,
-    PhaseStore, PlayerConditionAuraLikeCpp, PlayerConditionContextLikeCpp,
-    PlayerConditionCountLikeCpp, PlayerConditionPartyStatusLikeCpp,
+    ItemStatsStore, ItemStore, LockStore, MapDifficultyStore, MapDifficultyXConditionStore,
+    MapStore, PhaseGroupStore, PhaseStore, PlayerConditionAuraLikeCpp,
+    PlayerConditionContextLikeCpp, PlayerConditionCountLikeCpp, PlayerConditionPartyStatusLikeCpp,
     PlayerConditionQuestKillLikeCpp, PlayerConditionReputationLikeCpp, PlayerConditionSkillLikeCpp,
     PlayerConditionStore, PlayerStatsStore, RandPropPointsStore, SkillStore,
     SpellItemEnchantmentStore, SpellStore, is_player_meeting_condition_like_cpp,
@@ -708,6 +708,7 @@ pub struct WorldSession {
     // Map stores (Map.db2 + MapDifficulty.db2)
     map_store: Option<Arc<MapStore>>,
     map_difficulty_store: Option<Arc<MapDifficultyStore>>,
+    map_difficulty_x_condition_store: Option<Arc<MapDifficultyXConditionStore>>,
     terrain_swap_store: Option<Arc<wow_data::TerrainSwapStore>>,
     phase_store: Option<Arc<PhaseStore>>,
     phase_group_store: Option<Arc<PhaseGroupStore>>,
@@ -1408,6 +1409,7 @@ impl WorldSession {
             dungeon_encounter_store: None,
             map_store: None,
             map_difficulty_store: None,
+            map_difficulty_x_condition_store: None,
             terrain_swap_store: None,
             phase_store: None,
             phase_group_store: None,
@@ -3465,6 +3467,13 @@ impl WorldSession {
 
     pub fn set_map_difficulty_store(&mut self, store: Arc<MapDifficultyStore>) {
         self.map_difficulty_store = Some(store);
+    }
+
+    pub fn set_map_difficulty_x_condition_store(
+        &mut self,
+        store: Arc<MapDifficultyXConditionStore>,
+    ) {
+        self.map_difficulty_x_condition_store = Some(store);
     }
 
     pub fn set_terrain_swap_store(&mut self, store: Arc<wow_data::TerrainSwapStore>) {
@@ -6359,6 +6368,19 @@ impl WorldSession {
         self.represented_meets_player_condition_id_like_cpp(player_condition_id)
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn represented_failed_map_difficulty_x_condition_like_cpp(
+        &self,
+        map_difficulty_id: u32,
+    ) -> Option<u32> {
+        let store = self.map_difficulty_x_condition_store.as_ref()?;
+        let player_conditions = self.player_condition_store.as_ref()?;
+        let context = self.represented_player_condition_context_like_cpp();
+        store.failed_condition_like_cpp(map_difficulty_id, player_conditions, |condition| {
+            is_player_meeting_condition_like_cpp(condition, &context.as_context(self))
+        })
+    }
+
     pub(crate) fn player_inventory_like_cpp(&self) -> Option<&SessionPlayerInventoryRuntime> {
         self.player_controller
             .as_ref()
@@ -8960,6 +8982,53 @@ mod tests {
         assert!(session.represented_mount_x_display_usable_like_cpp(42));
         assert!(!session.represented_mount_x_display_usable_like_cpp(43));
         assert!(session.represented_mount_x_display_usable_like_cpp(999));
+    }
+
+    #[test]
+    fn represented_failed_map_difficulty_x_condition_matches_cpp_first_failed_order() {
+        let (mut session, _, _) = make_session();
+        session.player_class = 1;
+        session.set_player_condition_store(Arc::new(wow_data::PlayerConditionStore::from_entries(
+            [
+                wow_data::PlayerConditionEntry {
+                    id: 42,
+                    class_mask: 1,
+                    ..Default::default()
+                },
+                wow_data::PlayerConditionEntry {
+                    id: 43,
+                    class_mask: 1 << 1,
+                    ..Default::default()
+                },
+            ],
+        )));
+        session.set_map_difficulty_x_condition_store(Arc::new(
+            wow_data::MapDifficultyXConditionStore::from_entries([
+                wow_data::MapDifficultyXConditionEntry {
+                    id: 100,
+                    failure_description: String::new(),
+                    player_condition_id: 43,
+                    order_index: 20,
+                    map_difficulty_id: 7,
+                },
+                wow_data::MapDifficultyXConditionEntry {
+                    id: 101,
+                    failure_description: String::new(),
+                    player_condition_id: 42,
+                    order_index: 10,
+                    map_difficulty_id: 7,
+                },
+            ]),
+        ));
+
+        assert_eq!(
+            session.represented_failed_map_difficulty_x_condition_like_cpp(7),
+            Some(100)
+        );
+        assert_eq!(
+            session.represented_failed_map_difficulty_x_condition_like_cpp(8),
+            None
+        );
     }
 
     #[test]

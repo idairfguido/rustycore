@@ -11,7 +11,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use tracing::info;
 
-use crate::wdc4::Wdc4Reader;
+use crate::{PlayerConditionEntry, PlayerConditionStore, wdc4::Wdc4Reader};
 
 pub const MAP_FLAG_FLEXIBLE_RAID_LOCKING: u32 = 0x0000_8000;
 pub const MAP_DIFFICULTY_FLAG_USE_LOOT_BASED_LOCK: u8 = 0x02;
@@ -165,6 +165,118 @@ impl MapDifficultyEntry {
 pub struct MapDifficultyStore {
     by_id: HashMap<u32, MapDifficultyEntry>,
     by_map_difficulty: HashMap<(u32, u8), u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapDifficultyXConditionEntry {
+    pub id: u32,
+    pub failure_description: String,
+    pub player_condition_id: u32,
+    pub order_index: i32,
+    pub map_difficulty_id: u32,
+}
+
+pub struct MapDifficultyXConditionStore {
+    by_id: HashMap<u32, MapDifficultyXConditionEntry>,
+    by_map_difficulty: HashMap<u32, Vec<u32>>,
+}
+
+impl MapDifficultyXConditionStore {
+    pub fn from_entries(entries: impl IntoIterator<Item = MapDifficultyXConditionEntry>) -> Self {
+        let mut entries: Vec<_> = entries.into_iter().collect();
+        entries.sort_by_key(|entry| entry.order_index);
+
+        let mut by_id = HashMap::new();
+        let mut by_map_difficulty = HashMap::<u32, Vec<u32>>::new();
+        for entry in entries {
+            by_map_difficulty
+                .entry(entry.map_difficulty_id)
+                .or_default()
+                .push(entry.id);
+            by_id.insert(entry.id, entry);
+        }
+
+        Self {
+            by_id,
+            by_map_difficulty,
+        }
+    }
+
+    /// Load MapDifficultyXCondition.db2 from `{data_dir}/dbc/{locale}/MapDifficultyXCondition.db2`.
+    ///
+    /// C++ refs:
+    /// - `DB2Structure.h::MapDifficultyXConditionEntry`
+    /// - `DB2LoadInfo.h::MapDifficultyXConditionLoadInfo`
+    /// - `DB2Stores.cpp` post-load sort and `_mapDifficultyConditions` build.
+    pub fn load(data_dir: &str, locale: &str) -> Result<Self> {
+        let path = Path::new(data_dir)
+            .join("dbc")
+            .join(locale)
+            .join("MapDifficultyXCondition.db2");
+        let reader = Wdc4Reader::open(&path)
+            .with_context(|| format!("failed to open {}", path.display()))?;
+
+        let mut entries = Vec::with_capacity(reader.total_count());
+        for (id, idx) in reader.iter_records() {
+            entries.push(MapDifficultyXConditionEntry {
+                id,
+                failure_description: reader.get_field_string(idx, 0),
+                player_condition_id: reader.get_field_u32(idx, 1),
+                order_index: reader.get_field_i32(idx, 2),
+                map_difficulty_id: reader.get_field_u32(idx, 3),
+            });
+        }
+
+        let store = Self::from_entries(entries);
+        info!(
+            "Loaded {} map difficulty conditions from {}",
+            store.len(),
+            path.display()
+        );
+        Ok(store)
+    }
+
+    pub fn get(&self, id: u32) -> Option<&MapDifficultyXConditionEntry> {
+        self.by_id.get(&id)
+    }
+
+    pub fn conditions_for_map_difficulty(
+        &self,
+        map_difficulty_id: u32,
+    ) -> impl Iterator<Item = &MapDifficultyXConditionEntry> {
+        self.by_map_difficulty
+            .get(&map_difficulty_id)
+            .into_iter()
+            .flat_map(|ids| ids.iter())
+            .filter_map(|id| self.by_id.get(id))
+    }
+
+    pub fn failed_condition_like_cpp<'a>(
+        &'a self,
+        map_difficulty_id: u32,
+        player_conditions: &'a PlayerConditionStore,
+        mut meets: impl FnMut(&'a PlayerConditionEntry) -> bool,
+    ) -> Option<u32> {
+        for entry in self.conditions_for_map_difficulty(map_difficulty_id) {
+            let Some(player_condition) = player_conditions.get(entry.player_condition_id) else {
+                continue;
+            };
+
+            if !meets(player_condition) {
+                return Some(entry.id);
+            }
+        }
+
+        None
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_id.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_id.is_empty()
+    }
 }
 
 impl MapDifficultyStore {
@@ -431,6 +543,81 @@ mod tests {
         assert_eq!(entry.lock_id, 7);
         assert!(entry.is_using_encounter_locks());
         assert!(store.get(631, 3).is_none());
+    }
+
+    #[test]
+    fn map_difficulty_x_conditions_are_grouped_in_cpp_order() {
+        let store = MapDifficultyXConditionStore::from_entries([
+            MapDifficultyXConditionEntry {
+                id: 10,
+                failure_description: "late".to_string(),
+                player_condition_id: 100,
+                order_index: 20,
+                map_difficulty_id: 7,
+            },
+            MapDifficultyXConditionEntry {
+                id: 11,
+                failure_description: "early".to_string(),
+                player_condition_id: 101,
+                order_index: 10,
+                map_difficulty_id: 7,
+            },
+            MapDifficultyXConditionEntry {
+                id: 12,
+                failure_description: "other".to_string(),
+                player_condition_id: 102,
+                order_index: 1,
+                map_difficulty_id: 8,
+            },
+        ]);
+
+        let ids: Vec<_> = store
+            .conditions_for_map_difficulty(7)
+            .map(|entry| entry.id)
+            .collect();
+        assert_eq!(ids, vec![11, 10]);
+    }
+
+    #[test]
+    fn map_difficulty_x_condition_failure_matches_cpp_first_unmet_existing_condition() {
+        let store = MapDifficultyXConditionStore::from_entries([
+            MapDifficultyXConditionEntry {
+                id: 10,
+                failure_description: String::new(),
+                player_condition_id: 100,
+                order_index: 10,
+                map_difficulty_id: 7,
+            },
+            MapDifficultyXConditionEntry {
+                id: 11,
+                failure_description: String::new(),
+                player_condition_id: 999,
+                order_index: 20,
+                map_difficulty_id: 7,
+            },
+            MapDifficultyXConditionEntry {
+                id: 12,
+                failure_description: String::new(),
+                player_condition_id: 101,
+                order_index: 30,
+                map_difficulty_id: 7,
+            },
+        ]);
+        let player_conditions = PlayerConditionStore::from_entries([
+            PlayerConditionEntry {
+                id: 100,
+                ..Default::default()
+            },
+            PlayerConditionEntry {
+                id: 101,
+                ..Default::default()
+            },
+        ]);
+
+        assert_eq!(
+            store.failed_condition_like_cpp(7, &player_conditions, |condition| condition.id == 100),
+            Some(12)
+        );
     }
 
     #[test]

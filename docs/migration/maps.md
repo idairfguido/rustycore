@@ -188,6 +188,7 @@ Map does **not** directly emit SQL; all DB I/O is delegated to specialized loade
 |---|---|---|
 | `MapStore` | Map.db2 (map IDs, names, type, PvP flag, corpse decay time) | MapManager::CreateMap, Map::GetEntry |
 | `MapDifficultyStore` | MapDifficulty.db2 (per-map difficulty modes) | Map::GetMapDifficulty, MapManager::CreateInstance |
+| `MapDifficultyXConditionStore` | MapDifficultyXCondition.db2 (ordered PlayerCondition gates per map difficulty) | Player::Satisfy transfer-abort difficulty checks |
 | `AreaTriggerStore` | AreaTrigger.db2 (trigger points, radius, shape) | Map::GetAreaId, AreaBoundary checks |
 | `LiquidStore` (implicit) | Liquid data per ADT tile | GridMap::GetLiquidStatus, Map::IsInWater |
 

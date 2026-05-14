@@ -111,7 +111,10 @@ pub use item_stats::{
     ItemRandomPropertyTemplateEntry, ItemSparseTemplateEntry, ItemStatEntry, ItemStatsStore,
 };
 pub use lock::{LockEntry, LockStore};
-pub use map::{MapDifficultyEntry, MapDifficultyStore, MapEntry, MapStore};
+pub use map::{
+    MapDifficultyEntry, MapDifficultyStore, MapDifficultyXConditionEntry,
+    MapDifficultyXConditionStore, MapEntry, MapStore,
+};
 pub use phase::{PhaseEntry, PhaseGroupStore, PhaseStore, PhaseXPhaseGroupEntry};
 pub use phasing::{
     PhaseAreaInfo, PhaseConditionAttachmentReport, PhaseConditionContainer, PhaseInfoStore,
