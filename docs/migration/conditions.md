@@ -3,7 +3,7 @@
 > **C++ canonical path:** `src/server/game/Conditions/` (`ConditionMgr`, `DisableMgr`)
 > **Rust target crate(s):** `crates/wow-data/` (load `conditions` table, store `ConditionContainer` keyed by `(SourceType, SourceGroup, SourceEntry)`), `crates/wow-world/src/conditions/` (the `Meets` evaluator with access to `Player`/`Unit`/`Map`), no dedicated crate yet.
 > **Layer:** L7 (Game systems — depends on Entities/Player+Unit L4, Quests L6, Reputation L6, Achievements L7, Map L4, World/DB2 L1; depended on by Phasing L7, Loot L6, Gossip L6, SmartScripts L7, SpellMgr L5, Vendors, Trainers, Graveyards, AreaTriggers, Conversation, GameObjects)
-> **Status:** 🟡 in progress — core data shapes, SQL row parsing, full load-time source/type validation, condition grouping/reference semantics, searcher masks, partial `Condition::Meets`, and specialized lookup helpers are implemented. Remaining downstream source-type attachment, evaluator branches, DB2 helpers, `DisableMgr`, and reload/consumer wiring remain open.
+> **Status:** 🟡 in progress — core data shapes, SQL row parsing, full load-time source/type validation, condition grouping/reference semantics, searcher masks, partial `Condition::Meets`, specialized lookup helpers, and the audited `DisableMgr` data/runtime core are implemented. Remaining downstream source-type attachment, evaluator branches, DB2 helpers, full `DisableMgr` consumer wiring, and reload/consumer wiring remain open.
 > **Audited vs C++:** ✅ audited 2026-05-01; implementation progress re-checked against C++ continuously during port work.
 > **Last updated:** 2026-05-13
 
@@ -38,7 +38,7 @@ All paths relative to `/home/server/woltk-trinity-legacy/`.
 |---|---|---|
 | `src/server/game/Conditions/ConditionMgr.h` | 400 | `ConditionTypes` (~58 entries), `ConditionSourceType` (~33 entries + reference + max), `RelationType`, `InstanceInfo`, `MaxConditionTargets`, `ConditionSourceInfo`, `ConditionId`, `Condition` struct, `ConditionMgr` singleton class, `ConditionsReference` weak-pointer wrapper |
 | `src/server/game/Conditions/ConditionMgr.cpp` | 3921 | Massive: `LoadConditions` (the single SQL load), per-source-type validators (`isSourceTypeValid`), per-condition-type validators (`isConditionTypeValid`), the giant `Condition::Meets` switch, `addToLootTemplate` / `addToGossipMenus` / `addToGossipMenuItems` / `addToSpellImplicitTargetConditions` / `addToPhases` / `addToGraveyardData` index builders, `IsPlayerMeetingCondition` (DB2 PlayerCondition.db2), `IsMeetingWorldStateExpression` (DB2), `IsUnitMeetingCondition` (DB2), the static metadata tables `StaticSourceTypeData[]` and `StaticConditionTypeData[]` |
-| `src/server/game/Conditions/DisableMgr.h` | 72 | `DisableType` enum (8 values: `SPELL`, `QUEST`, `MAP`, `BATTLEGROUND`, `CRITERIA`, `OUTDOOR_PVP`, `VMAP`, `MMAP`), `DisableFlags` enum, `IsDisabledFor` helpers; sibling system to ConditionMgr but distinct |
+| `src/server/game/Conditions/DisableMgr.h` | 72 | `DisableType` enum (9 values: `SPELL`, `QUEST`, `MAP`, `BATTLEGROUND`, `CRITERIA`, `OUTDOOR_PVP`, `VMAP`, `MMAP`, `LFG_MAP`), `DisableFlags` enum, `IsDisabledFor` helpers; sibling system to ConditionMgr but distinct |
 | `src/server/game/Conditions/DisableMgr.cpp` | 407 | `LoadDisables` (loads `disables` table), `IsDisabledFor` per-type implementations |
 
 Out-of-tree consumers (each calls `sConditionMgr` extensively):
@@ -73,7 +73,7 @@ Out-of-tree consumers (each calls `sConditionMgr` extensively):
 | `InstanceInfo` | enum (4) | `DATA`, `GUID_DATA`, `BOSS_STATE`, `DATA64` |
 | `MaxConditionTargets` | enum (1) | `MAX_CONDITION_TARGETS = 3` |
 | `ConditionTypeInfo` | struct | Static metadata: name + which `ConditionValue1/2/3/StringValue1` slots are meaningful per condition type |
-| `DisableType` | enum (8) | `SPELL`, `QUEST`, `MAP`, `BATTLEGROUND`, `CRITERIA`, `OUTDOOR_PVP`, `VMAP`, `MMAP` |
+| `DisableType` | enum (9) | `SPELL`, `QUEST`, `MAP`, `BATTLEGROUND`, `CRITERIA`, `OUTDOOR_PVP`, `VMAP`, `MMAP`, `LFG_MAP` |
 | `DisableFlags` (per type) | enum bitfields | E.g. `SPELL_DISABLE_PLAYER`, `SPELL_DISABLE_CREATURE`, `SPELL_DISABLE_PET`, `SPELL_DISABLE_DEPRECATED_SPELL`, `SPELL_DISABLE_MAP_ARG`, `SPELL_DISABLE_AREA_ARG`, `SPELL_DISABLE_LOS`; map disable flags include `DISABLE_TYPE_MAP_NORMAL/HEROIC/MAX_DIFFICULTY` etc |
 
 ---
@@ -227,7 +227,7 @@ ConditionMgr is server-internal — it emits no packets directly. Indirectly, wh
 **What's missing vs C++:**
 - Remaining integration of condition validation/indexing into all runtime consumers and reload paths.
 - Source-type index builder reload wiring and remaining consumer use sites. Gossip, spell implicit target, phase and graveyard attachment plus a represented final attachment pass exist in `wow-data`; world startup wires those represented attachments. Loot has a runtime bridge from `LootStoreItemContext`, but all production fill callsites still need to pass the ConditionMgr-backed predicate.
-- Remaining runtime `Condition::Meets` branches that need real player/unit/map/DB2 state, plus `IsPlayerMeetingCondition`, `IsMeetingWorldStateExpression`, `IsUnitMeetingCondition`, and `DisableMgr`.
+- Remaining runtime `Condition::Meets` branches that need real player/unit/map/DB2 state, plus `IsPlayerMeetingCondition`, `IsMeetingWorldStateExpression`, `IsUnitMeetingCondition`, and the remaining `DisableMgr` DB2/consumer wiring.
 - Downstream callsites are only partially prepared; Loot/Gossip/Vendors/Trainers/Phasing still need real ConditionMgr integration before they can claim full parity.
 
 **Suspicious / likely divergent (hipótesis pre-auditoría):**
@@ -307,7 +307,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [x] **#COND.27** Implement `Condition::to_string(ext)` — the debug formatter used in `tc_log_error` (L)
 - [ ] **#COND.28** Implement `ConditionMgr::clean` and reload semantics — drop and rebuild all index buckets, invalidate `weak_ptr`s in downstream `ConditionsReference` holders (M)
 - [x] **#COND.29** Implement `ConditionsReference` weak-pointer wrapper for downstream modules (Phasing, Loot, Gossip) so they can hold a non-owning handle that survives reload safely (M; downstream wiring remains tracked by each source-type index builder task)
-- [ ] **#COND.30** Implement `DisableMgr` with all 8 `DisableType` variants, `LoadDisables`, `IsDisabledFor` per type, and the convenience helpers `IsPathfindingEnabled`, `IsVMAPDisabledFor`, `IsMMAPDisabledFor` (H)
+- [ ] **#COND.30** Implement `DisableMgr` with all 9 `DisableType` variants, `LoadDisables`, `IsDisabledFor` per type, and the convenience helpers `IsPathfindingEnabled`, `IsVMAPDisabledFor`, `IsMMAPDisabledFor` (H; partial: `crates/wow-data/src/disable_mgr.rs` now ports the C++ enum/flag constants, `disables` SQL row shape, load/parse store, spell map/area params, spell/map/vmap/mmap/quest/bg/outdoorpvp/criteria/LFG runtime semantics, `IsPathfindingEnabled`, `IsVMAPDisabledFor`, and `world-server` MMAP startup gate through the shared loader; remaining: exact map-difficulty validation against `MapDifficulty.db2`, quest post-load validation, spell/criteria/battlemaster existence callbacks wired to real stores, and replacing future spell/map/vmap callsites with this shared store)
 - [x] **#COND.31** Wire `sConditionMgr` access pattern (singleton via `OnceCell` / `&'static`) into the world startup sequence so dependents can call it after `LoadConditions` (L; implemented as a process-wide replaceable `Arc<ConditionEntriesByTypeStore>` slot installed after startup load; reload invalidation and downstream weak-reference refresh remain tracked by #COND.28/#COND.20)
 - [ ] **#COND.32** Documentation cross-links: `conditions.md` ↔ `phasing.md` (TERRAIN_SWAP, PHASE), `loot.md` (every LOOT_TEMPLATE source), `gossip.md` (when written), `spells.md` (SPELL_IMPLICIT_TARGET, SPELL_PROC, SPELL_CLICK_EVENT) (L)
 
@@ -343,7 +343,7 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 - [ ] Test: `IsPlayerMeetingCondition` evaluates each PlayerCondition.db2 sub-check in isolation (tabular).
 - [ ] Test: `IsMeetingWorldStateExpression` evaluates the canonical operator set (=, !=, <, ≤, >, ≥, +, -, *, /, %, &, |, ^, &&, ||).
 - [ ] Test: ConditionMgr reload — load v1, reload v2, downstream `ConditionsReference` holders see the v2 buckets; v1 buckets dropped.
-- [ ] Test: `DisableMgr::IsDisabledFor(SPELL, spellId, unit)` honours per-type flags — spell disabled for player but not creature; verify both branches.
+- [x] Test: `DisableMgr::IsDisabledFor(SPELL, spellId, unit)` honours per-type flags and map/area params for player contexts; see `cargo test -p wow-data disable_mgr`.
 
 ---
 

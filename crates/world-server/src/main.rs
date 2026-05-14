@@ -1421,36 +1421,17 @@ async fn load_mmap_disabled_map_ids_like_cpp(
     world_db: &WorldDatabase,
     map_store: &wow_data::MapStore,
 ) -> Result<HashSet<u32>> {
-    const DISABLE_TYPE_MMAP_LIKE_CPP: u32 = 7;
+    let (disable_mgr, _) = wow_data::DisableMgrLikeCpp::load_like_cpp(
+        world_db,
+        wow_data::DisableMgrRefsLikeCpp {
+            map_store: Some(map_store),
+            ..Default::default()
+        },
+    )
+    .await
+    .context("Failed to query C++ disables")?;
 
-    let mut result = world_db
-        .direct_query("SELECT sourceType, entry, flags, params_0, params_1 FROM disables WHERE sourceType = 7")
-        .await
-        .context("Failed to query C++ mmap disables")?;
-    let mut disabled_map_ids = HashSet::new();
-
-    if result.is_empty() {
-        return Ok(disabled_map_ids);
-    }
-
-    loop {
-        let source_type = result.try_read::<u32>(0).unwrap_or(u32::MAX);
-        let entry = result.try_read::<u32>(1).unwrap_or(0);
-
-        if source_type == DISABLE_TYPE_MMAP_LIKE_CPP {
-            if map_store.get(entry).is_some() {
-                disabled_map_ids.insert(entry);
-            } else {
-                warn!("Map entry {entry} from `disables` doesn't exist in DB2, skipped");
-            }
-        }
-
-        if !result.next_row() {
-            break;
-        }
-    }
-
-    Ok(disabled_map_ids)
+    Ok(disable_mgr.disabled_mmap_map_ids_like_cpp())
 }
 
 fn loot_drop_rates_like_cpp(configs: &WorldConfigSet) -> LootDropRatesLikeCpp {

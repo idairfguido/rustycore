@@ -14,6 +14,7 @@ pub mod conditions;
 pub mod currency;
 pub mod db2_id_store;
 pub mod difficulty;
+pub mod disable_mgr;
 pub mod dungeon_encounter;
 pub mod gossip;
 pub mod graveyard;
@@ -67,6 +68,12 @@ pub use conditions::{
 pub use currency::{CurrencyTypesEntry, CurrencyTypesStore};
 pub use db2_id_store::Db2IdStore;
 pub use difficulty::DifficultyStore;
+pub use disable_mgr::{
+    DISABLE_TYPE_BATTLEGROUND, DISABLE_TYPE_CRITERIA, DISABLE_TYPE_LFG_MAP, DISABLE_TYPE_MAP,
+    DISABLE_TYPE_MMAP, DISABLE_TYPE_OUTDOORPVP, DISABLE_TYPE_QUEST, DISABLE_TYPE_SPELL,
+    DISABLE_TYPE_VMAP, DisableDbRowLikeCpp, DisableLoadReportLikeCpp, DisableMgrLikeCpp,
+    DisableMgrRefsLikeCpp, DisableWorldObjectRefLikeCpp,
+};
 pub use dungeon_encounter::{DungeonEncounterEntry, DungeonEncounterStore};
 pub use gossip::{GossipConditionAttachmentReport, GossipMenu, GossipMenuItem, GossipStore};
 pub use graveyard::{
