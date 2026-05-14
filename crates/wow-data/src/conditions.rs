@@ -2647,6 +2647,18 @@ mod tests {
                 DEFAULT_MAX_BATTLE_PETS_PER_SPECIES_LIKE_CPP + 1,
             )
         );
+
+        let mut string_id = Condition {
+            condition_type: ConditionType::StringId,
+            condition_string_value1: "spawn-id".to_string(),
+            ..Condition::default()
+        };
+        assert_eq!(
+            validate_condition_type_static_like_cpp(&mut string_id),
+            Ok(ConditionTypeValidationReportLikeCpp {
+                useless_value_fields: Vec::new(),
+            })
+        );
     }
 
     #[test]
