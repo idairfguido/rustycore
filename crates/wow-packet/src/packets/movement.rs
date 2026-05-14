@@ -468,6 +468,36 @@ impl MoveSetCollisionHeightAck {
     }
 }
 
+pub const UPDATE_COLLISION_HEIGHT_REASON_SCALE_LIKE_CPP: u8 = 0;
+pub const UPDATE_COLLISION_HEIGHT_REASON_MOUNT_LIKE_CPP: u8 = 1;
+pub const UPDATE_COLLISION_HEIGHT_REASON_FORCE_LIKE_CPP: u8 = 2;
+
+#[derive(Debug, Clone)]
+pub struct MoveSetCollisionHeight {
+    pub mover_guid: ObjectGuid,
+    pub sequence_index: u32,
+    pub height: f32,
+    pub scale: f32,
+    pub reason: u8,
+    pub mount_display_id: u32,
+    pub scale_duration: i32,
+}
+
+impl ServerPacket for MoveSetCollisionHeight {
+    const OPCODE: ServerOpcodes = ServerOpcodes::MoveSetCollisionHeight;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_packed_guid(&self.mover_guid);
+        pkt.write_uint32(self.sequence_index);
+        pkt.write_float(self.height);
+        pkt.write_float(self.scale);
+        pkt.write_uint8(self.reason);
+        pkt.write_uint32(self.mount_display_id);
+        pkt.write_int32(self.scale_duration);
+        pkt.flush_bits();
+    }
+}
+
 /// C++ `MovementForceType`, stored as two bits on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MovementForceType {
@@ -1768,5 +1798,44 @@ mod tests {
             })
         );
         assert!(packet_spline.movement.jump_extra.is_none());
+    }
+
+    #[test]
+    fn move_set_collision_height_matches_cpp_opcode_and_tail() {
+        let guid = ObjectGuid::create_player(1, 42);
+        let pkt = MoveSetCollisionHeight {
+            mover_guid: guid,
+            sequence_index: 7,
+            height: 1.5,
+            scale: 1.0,
+            reason: UPDATE_COLLISION_HEIGHT_REASON_MOUNT_LIKE_CPP,
+            mount_display_id: 4321,
+            scale_duration: 0,
+        };
+        let bytes = pkt.to_bytes();
+
+        assert_eq!(u16::from_le_bytes([bytes[0], bytes[1]]), 0x2e13);
+        assert!(bytes.len() > 23);
+        assert_eq!(
+            &bytes[bytes.len() - 21..bytes.len() - 17],
+            &7u32.to_le_bytes()
+        );
+        assert_eq!(
+            &bytes[bytes.len() - 17..bytes.len() - 13],
+            &1.5f32.to_le_bytes()
+        );
+        assert_eq!(
+            &bytes[bytes.len() - 13..bytes.len() - 9],
+            &1.0f32.to_le_bytes()
+        );
+        assert_eq!(
+            bytes[bytes.len() - 9],
+            UPDATE_COLLISION_HEIGHT_REASON_MOUNT_LIKE_CPP
+        );
+        assert_eq!(
+            &bytes[bytes.len() - 8..bytes.len() - 4],
+            &4321u32.to_le_bytes()
+        );
+        assert_eq!(&bytes[bytes.len() - 4..], &0i32.to_le_bytes());
     }
 }

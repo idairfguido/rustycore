@@ -983,6 +983,12 @@ pub struct WorldSession {
     mount_collision_height_update_requests_like_cpp: u32,
     /// C++ `Unit::m_movementCounter` equivalent for vehicle-rec movement control packets.
     mount_vehicle_movement_sequence_like_cpp: u32,
+    /// Represented `Unit::GetCollisionHeight()` until model-display collision data owns it.
+    player_collision_height_like_cpp: f32,
+    /// Represented `Object::GetObjectScale()` for movement collision-height packets.
+    player_object_scale_like_cpp: f32,
+    /// Represented `UnitData::ScaleDuration` for movement collision-height packets.
+    player_scale_duration_like_cpp: i32,
     /// Represented `UnitData::Flags` for player deltas not yet backed by canonical Unit.
     player_unit_flags_like_cpp: UnitFlags,
     /// Represented `UNIT_FLAG_MOUNT` state until UnitData owns live player flags.
@@ -1575,6 +1581,9 @@ impl WorldSession {
             mount_pet_resummon_requests_like_cpp: 0,
             mount_collision_height_update_requests_like_cpp: 0,
             mount_vehicle_movement_sequence_like_cpp: 0,
+            player_collision_height_like_cpp: 1.0,
+            player_object_scale_like_cpp: 1.0,
+            player_scale_duration_like_cpp: 0,
             player_unit_flags_like_cpp: UnitFlags::PLAYER_CONTROLLED,
             player_mounted_like_cpp: false,
             player_pvp_hostile_like_cpp: false,
@@ -4594,6 +4603,9 @@ impl WorldSession {
         self.mount_collision_height_update_requests_like_cpp = self
             .mount_collision_height_update_requests_like_cpp
             .saturating_add(1);
+        self.send_movement_set_collision_height_like_cpp(
+            wow_packet::packets::movement::UPDATE_COLLISION_HEIGHT_REASON_MOUNT_LIKE_CPP,
+        );
 
         self.send_aura_update_applied(spell_id, slot, caster_guid, 0, 0x0000_0001);
         self.send_represented_mount_unit_update_like_cpp(display_id);
@@ -4619,6 +4631,26 @@ impl WorldSession {
         self.send_packet(&wow_packet::packets::vehicle::SetVehicleRecId {
             vehicle_guid: player_guid,
             vehicle_rec_id,
+        });
+    }
+
+    fn send_movement_set_collision_height_like_cpp(&mut self, reason: u8) {
+        let Some(player_guid) = self.player_guid() else {
+            return;
+        };
+        let sequence_index = self.mount_vehicle_movement_sequence_like_cpp;
+        self.mount_vehicle_movement_sequence_like_cpp = self
+            .mount_vehicle_movement_sequence_like_cpp
+            .wrapping_add(1);
+
+        self.send_packet(&wow_packet::packets::movement::MoveSetCollisionHeight {
+            mover_guid: player_guid,
+            sequence_index,
+            height: self.player_collision_height_like_cpp,
+            scale: self.player_object_scale_like_cpp,
+            reason,
+            mount_display_id: u32::try_from(self.player_mount_display_id_like_cpp).unwrap_or(0),
+            scale_duration: self.player_scale_duration_like_cpp,
         });
     }
 
@@ -4669,6 +4701,9 @@ impl WorldSession {
                 self.mount_collision_height_update_requests_like_cpp = self
                     .mount_collision_height_update_requests_like_cpp
                     .saturating_add(1);
+                self.send_movement_set_collision_height_like_cpp(
+                    wow_packet::packets::movement::UPDATE_COLLISION_HEIGHT_REASON_MOUNT_LIKE_CPP,
+                );
             }
             self.send_represented_mount_unit_update_like_cpp(0);
         }
@@ -9753,6 +9788,7 @@ mod tests {
         let opcodes = drain_server_opcodes(&send_rx);
         assert!(opcodes.contains(&(wow_constants::ServerOpcodes::MoveSetVehicleRecId as u16)));
         assert!(opcodes.contains(&(wow_constants::ServerOpcodes::SetVehicleRecId as u16)));
+        assert!(opcodes.contains(&(wow_constants::ServerOpcodes::MoveSetCollisionHeight as u16)));
         assert!(
             session
                 .player_unit_flags_like_cpp
@@ -9778,6 +9814,7 @@ mod tests {
         let opcodes = drain_server_opcodes(&send_rx);
         assert!(opcodes.contains(&(wow_constants::ServerOpcodes::MoveSetVehicleRecId as u16)));
         assert!(opcodes.contains(&(wow_constants::ServerOpcodes::SetVehicleRecId as u16)));
+        assert!(opcodes.contains(&(wow_constants::ServerOpcodes::MoveSetCollisionHeight as u16)));
         assert!(
             session
                 .player_unit_flags_like_cpp
