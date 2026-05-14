@@ -521,6 +521,14 @@ async fn main() -> Result<()> {
         graveyard_report.missing_zones.len(),
         graveyard_report.duplicates.len()
     );
+    let (mut gossip_store, gossip_load_report) =
+        wow_data::GossipStore::load_like_cpp(world_db.as_ref())
+            .await
+            .context("Failed to load C++ gossip_menu/gossip_menu_option condition keys")?;
+    info!(
+        "Loaded {} gossip menu rows and {} gossip menu option keys",
+        gossip_load_report.menu_rows, gossip_load_report.menu_item_rows
+    );
     let (spawn_group_store, spawn_group_report) =
         wow_data::SpawnGroupTemplateStore::load_like_cpp(world_db.as_ref())
             .await
@@ -1040,16 +1048,42 @@ async fn main() -> Result<()> {
     let condition_store = Arc::new(condition_load_report.into_store_like_cpp());
     let condition_attachment_report = wow_data::attach_loaded_conditions_like_cpp(
         condition_store.as_ref(),
-        None,
+        Some(&mut gossip_store),
         Some(&mut phase_info_store),
         Some(&mut graveyard_store),
     );
+    for missing in &condition_attachment_report.gossip_menus.missing_menus {
+        warn!(
+            "ConditionMgr gossip attachment warning: GossipMenu {} not found for condition id {:?}",
+            missing.source_group, missing
+        );
+    }
+    for missing in &condition_attachment_report
+        .gossip_menu_items
+        .missing_menu_items
+    {
+        warn!(
+            "ConditionMgr gossip attachment warning: GossipMenuId {} Item {} not found for condition id {:?}",
+            missing.source_group, missing.source_entry, missing
+        );
+    }
     info!(
-        "Loaded C++ ConditionMgr store: {} buckets, {} externally skipped conditions, {} spell-click aura spell ids, {} deferred spell implicit target conditions, {} phase condition rows attached, {} graveyard condition rows attached",
+        "Loaded C++ ConditionMgr store: {} buckets, {} externally skipped conditions, {} spell-click aura spell ids, {} deferred spell implicit target conditions, {} gossip menu condition rows attached ({} missing menus), {} gossip menu option condition rows attached ({} missing items), {} phase condition rows attached, {} graveyard condition rows attached",
         condition_store.bucket_count(),
         externally_skipped_conditions.len(),
         condition_attachment_report.spell_click_aura_spell_ids.len(),
         condition_attachment_report.deferred_spell_implicit_target_condition_count,
+        condition_attachment_report
+            .gossip_menus
+            .attached_condition_count,
+        condition_attachment_report.gossip_menus.missing_menus.len(),
+        condition_attachment_report
+            .gossip_menu_items
+            .attached_condition_count,
+        condition_attachment_report
+            .gossip_menu_items
+            .missing_menu_items
+            .len(),
         condition_attachment_report.phases.attached_condition_count,
         condition_attachment_report
             .graveyards

@@ -7,7 +7,9 @@
 
 use std::collections::HashMap;
 
+use anyhow::Result;
 use wow_constants::ConditionSourceType;
+use wow_database::{WorldDatabase, WorldStatements};
 
 use crate::{ConditionEntriesByTypeStore, ConditionId, ConditionsReference};
 
@@ -32,6 +34,12 @@ pub struct GossipStore {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GossipLoadReport {
+    pub menu_rows: usize,
+    pub menu_item_rows: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GossipConditionAttachmentReport {
     pub attached_condition_count: usize,
     pub missing_menus: Vec<ConditionId>,
@@ -39,6 +47,47 @@ pub struct GossipConditionAttachmentReport {
 }
 
 impl GossipStore {
+    /// C++ `ObjectMgr::LoadGossipMenu` + condition-key subset of
+    /// `ObjectMgr::LoadGossipMenuItems`.
+    pub async fn load_like_cpp(db: &WorldDatabase) -> Result<(Self, GossipLoadReport)> {
+        let mut store = Self::default();
+        let mut report = GossipLoadReport::default();
+
+        let stmt = db.prepare(WorldStatements::SEL_GOSSIP_MENUS);
+        let mut result = db.query(&stmt).await?;
+        if !result.is_empty() {
+            loop {
+                store.add_menu_like_cpp(result.read(0), result.read(1));
+                report.menu_rows += 1;
+                if !result.next_row() {
+                    break;
+                }
+            }
+        }
+
+        let stmt = db.prepare(WorldStatements::SEL_GOSSIP_MENU_OPTION_KEYS);
+        let mut result = db.query(&stmt).await?;
+        if !result.is_empty() {
+            loop {
+                store.add_menu_item_like_cpp(result.read(0), result.read(1));
+                report.menu_item_rows += 1;
+                if !result.next_row() {
+                    break;
+                }
+            }
+        }
+
+        Ok((store, report))
+    }
+
+    pub fn menu_row_count(&self) -> usize {
+        self.menus_by_id.values().map(Vec::len).sum()
+    }
+
+    pub fn menu_item_row_count(&self) -> usize {
+        self.items_by_menu_id.values().map(Vec::len).sum()
+    }
+
     pub fn add_menu_like_cpp(&mut self, menu_id: u32, text_id: u32) {
         self.menus_by_id
             .entry(menu_id)

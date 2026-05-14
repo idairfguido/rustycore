@@ -123,10 +123,14 @@ pub enum WorldStatements {
     SEL_GOSSIP_MENU,
     /// Gossip menu text IDs (gossip_menu), used for C++ condition-based text selection.
     SEL_GOSSIP_MENU_TEXTS,
+    /// Load all C++ ObjectMgr gossip_menu keys.
+    SEL_GOSSIP_MENUS,
     /// NPC text BroadcastTextID by npc_text ID.
     SEL_NPC_TEXT,
     /// Gossip menu options (gossip_menu_option) — includes OptionBroadcastTextID for localization.
     SEL_GOSSIP_MENU_OPTIONS,
+    /// Load all C++ ObjectMgr gossip_menu_option condition keys.
+    SEL_GOSSIP_MENU_OPTION_KEYS,
     /// Localized text from broadcast_text_locale by ID and locale.
     SEL_BROADCAST_TEXT_LOCALE,
     /// Localized creature name/subname/title by entry and locale.
@@ -531,6 +535,7 @@ impl StatementDef for WorldStatements {
             }
             Self::SEL_GOSSIP_MENU => "SELECT TextID FROM gossip_menu WHERE MenuID = ? LIMIT 1",
             Self::SEL_GOSSIP_MENU_TEXTS => "SELECT TextID FROM gossip_menu WHERE MenuID = ?",
+            Self::SEL_GOSSIP_MENUS => "SELECT MenuID, TextID FROM gossip_menu",
             Self::SEL_NPC_TEXT => "SELECT BroadcastTextID0 FROM npc_text WHERE ID = ? LIMIT 1",
             Self::SEL_GOSSIP_MENU_OPTIONS => concat!(
                 "SELECT GossipOptionID, OptionID, OptionNpc, OptionText, ",
@@ -538,6 +543,9 @@ impl StatementDef for WorldStatements {
                 "OptionBroadcastTextID ",
                 "FROM gossip_menu_option WHERE MenuID = ? ORDER BY OptionID ASC",
             ),
+            Self::SEL_GOSSIP_MENU_OPTION_KEYS => {
+                "SELECT MenuID, OptionID FROM gossip_menu_option ORDER BY MenuID, OptionID"
+            }
             Self::SEL_BROADCAST_TEXT_LOCALE => {
                 "SELECT Text_lang FROM hotfixes.broadcast_text_locale WHERE ID = ? AND locale = ?"
             }
