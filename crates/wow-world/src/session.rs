@@ -40,7 +40,7 @@ use wow_data::{
     PlayerConditionCountLikeCpp, PlayerConditionPartyStatusLikeCpp,
     PlayerConditionQuestKillLikeCpp, PlayerConditionReputationLikeCpp, PlayerConditionSkillLikeCpp,
     PlayerConditionStore, PlayerStatsStore, RandPropPointsStore, SkillStore,
-    SpellItemEnchantmentStore, SpellStore,
+    SpellItemEnchantmentStore, SpellStore, is_player_meeting_condition_like_cpp,
 };
 use wow_database::{
     CharStatements, CharacterDatabase, LoginDatabase, PreparedStatement, SqlTransaction,
@@ -6304,6 +6304,25 @@ impl WorldSession {
         }
     }
 
+    pub(crate) fn represented_meets_player_condition_id_like_cpp(
+        &self,
+        player_condition_id: u32,
+    ) -> bool {
+        if player_condition_id == 0 {
+            return true;
+        }
+
+        let Some(store) = self.player_condition_store.as_ref() else {
+            return false;
+        };
+        let Some(condition) = store.get(player_condition_id) else {
+            return true;
+        };
+
+        let context = self.represented_player_condition_context_like_cpp();
+        is_player_meeting_condition_like_cpp(condition, &context.as_context(self))
+    }
+
     pub(crate) fn player_inventory_like_cpp(&self) -> Option<&SessionPlayerInventoryRuntime> {
         self.player_controller
             .as_ref()
@@ -8816,6 +8835,33 @@ mod tests {
         assert!(context.current_quests.contains(&101));
         assert_eq!(context.complete_quests, &[101]);
         assert_eq!(context.completed_quests, &[200]);
+    }
+
+    #[test]
+    fn represented_player_condition_id_matches_cpp_lookup_semantics() {
+        let (mut session, _, _) = make_session();
+        session.player_class = 1;
+        assert!(!session.represented_meets_player_condition_id_like_cpp(42));
+
+        session.set_player_condition_store(Arc::new(wow_data::PlayerConditionStore::from_entries(
+            [
+                wow_data::PlayerConditionEntry {
+                    id: 42,
+                    class_mask: 1,
+                    ..Default::default()
+                },
+                wow_data::PlayerConditionEntry {
+                    id: 43,
+                    class_mask: 1 << 1,
+                    ..Default::default()
+                },
+            ],
+        )));
+
+        assert!(session.represented_meets_player_condition_id_like_cpp(0));
+        assert!(session.represented_meets_player_condition_id_like_cpp(42));
+        assert!(!session.represented_meets_player_condition_id_like_cpp(43));
+        assert!(session.represented_meets_player_condition_id_like_cpp(999));
     }
 
     #[test]

@@ -8,8 +8,26 @@ use crate::{
 
 pub const DEFAULT_GAMEOBJECT_RESPAWN_DELAY_SECS: u32 = 300;
 pub const GAMEOBJECT_LOOT_MODE_DEFAULT: u16 = 0x1;
+pub const GAMEOBJECT_TYPE_DOOR: u32 = 0;
+pub const GAMEOBJECT_TYPE_BUTTON: u32 = 1;
+pub const GAMEOBJECT_TYPE_QUESTGIVER: u32 = 2;
 pub const GAMEOBJECT_TYPE_CHEST: u32 = 3;
+pub const GAMEOBJECT_TYPE_GENERIC: u32 = 5;
+pub const GAMEOBJECT_TYPE_TRAP: u32 = 6;
+pub const GAMEOBJECT_TYPE_CHAIR: u32 = 7;
+pub const GAMEOBJECT_TYPE_SPELL_FOCUS: u32 = 8;
+pub const GAMEOBJECT_TYPE_TEXT: u32 = 9;
+pub const GAMEOBJECT_TYPE_GOOBER: u32 = 10;
+pub const GAMEOBJECT_TYPE_CAMERA: u32 = 13;
+pub const GAMEOBJECT_TYPE_RITUAL: u32 = 18;
+pub const GAMEOBJECT_TYPE_MAILBOX: u32 = 19;
+pub const GAMEOBJECT_TYPE_SPELLCASTER: u32 = 22;
+pub const GAMEOBJECT_TYPE_FLAGSTAND: u32 = 24;
 pub const GAMEOBJECT_TYPE_FISHING_HOLE: u32 = 25;
+pub const GAMEOBJECT_TYPE_AURA_GENERATOR: u32 = 30;
+pub const GAMEOBJECT_TYPE_GUILD_BANK: u32 = 34;
+pub const GAMEOBJECT_TYPE_NEW_FLAG: u32 = 36;
+pub const GAMEOBJECT_TYPE_ITEM_FORGE: u32 = 47;
 pub const GAMEOBJECT_TYPE_GATHERING_NODE: u32 = 50;
 
 pub const GO_DYNFLAG_LO_NO_INTERACT: u32 = 0x0080;
@@ -125,6 +143,33 @@ impl GameObjectTemplateData {
             | GAMEOBJECT_TYPE_GATHERING_NODE => self.data[GAMEOBJECT_DATA_CHEST_LOOT],
             _ => 0,
         }
+    }
+
+    pub const fn get_condition_id1_like_cpp(&self) -> u32 {
+        let index = match self.go_type {
+            GAMEOBJECT_TYPE_DOOR => 7,
+            GAMEOBJECT_TYPE_BUTTON => 9,
+            GAMEOBJECT_TYPE_QUESTGIVER => 10,
+            GAMEOBJECT_TYPE_CHEST => 17,
+            GAMEOBJECT_TYPE_GENERIC => 6,
+            GAMEOBJECT_TYPE_TRAP => 15,
+            GAMEOBJECT_TYPE_CHAIR => 4,
+            GAMEOBJECT_TYPE_SPELL_FOCUS => 8,
+            GAMEOBJECT_TYPE_TEXT => 4,
+            GAMEOBJECT_TYPE_GOOBER => 22,
+            GAMEOBJECT_TYPE_CAMERA => 4,
+            GAMEOBJECT_TYPE_RITUAL => 8,
+            GAMEOBJECT_TYPE_MAILBOX => 0,
+            GAMEOBJECT_TYPE_SPELLCASTER => 5,
+            GAMEOBJECT_TYPE_FLAGSTAND => 8,
+            GAMEOBJECT_TYPE_AURA_GENERATOR => 3,
+            GAMEOBJECT_TYPE_GUILD_BANK => 0,
+            GAMEOBJECT_TYPE_NEW_FLAG => 4,
+            GAMEOBJECT_TYPE_ITEM_FORGE => 0,
+            GAMEOBJECT_TYPE_GATHERING_NODE => 11,
+            _ => return 0,
+        };
+        self.data[index]
     }
 
     pub const fn chest_loot_source_like_cpp(&self) -> Option<GameObjectLootSource> {
@@ -687,6 +732,48 @@ mod tests {
         );
         assert_eq!(
             GameObjectTemplateData::new(2, data).get_loot_id_like_cpp(),
+            0
+        );
+    }
+
+    #[test]
+    fn gameobject_template_condition_id1_matches_cpp_switch() {
+        let cases = [
+            (GAMEOBJECT_TYPE_DOOR, 7),
+            (GAMEOBJECT_TYPE_BUTTON, 9),
+            (GAMEOBJECT_TYPE_QUESTGIVER, 10),
+            (GAMEOBJECT_TYPE_CHEST, 17),
+            (GAMEOBJECT_TYPE_GENERIC, 6),
+            (GAMEOBJECT_TYPE_TRAP, 15),
+            (GAMEOBJECT_TYPE_CHAIR, 4),
+            (GAMEOBJECT_TYPE_SPELL_FOCUS, 8),
+            (GAMEOBJECT_TYPE_TEXT, 4),
+            (GAMEOBJECT_TYPE_GOOBER, 22),
+            (GAMEOBJECT_TYPE_CAMERA, 4),
+            (GAMEOBJECT_TYPE_RITUAL, 8),
+            (GAMEOBJECT_TYPE_MAILBOX, 0),
+            (GAMEOBJECT_TYPE_SPELLCASTER, 5),
+            (GAMEOBJECT_TYPE_FLAGSTAND, 8),
+            (GAMEOBJECT_TYPE_AURA_GENERATOR, 3),
+            (GAMEOBJECT_TYPE_GUILD_BANK, 0),
+            (GAMEOBJECT_TYPE_NEW_FLAG, 4),
+            (GAMEOBJECT_TYPE_ITEM_FORGE, 0),
+            (GAMEOBJECT_TYPE_GATHERING_NODE, 11),
+        ];
+
+        for (go_type, index) in cases {
+            let mut data = [0; MAX_GAMEOBJECT_DATA];
+            data[index] = 7_000 + go_type;
+            assert_eq!(
+                GameObjectTemplateData::new(go_type, data).get_condition_id1_like_cpp(),
+                7_000 + go_type
+            );
+        }
+
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[0] = 999;
+        assert_eq!(
+            GameObjectTemplateData::new(25, data).get_condition_id1_like_cpp(),
             0
         );
     }

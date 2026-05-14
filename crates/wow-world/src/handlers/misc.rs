@@ -1076,6 +1076,19 @@ impl crate::session::WorldSession {
         }
 
         let template = GameObjectTemplateData::new(go_type, data);
+        if !self
+            .represented_meets_player_condition_id_like_cpp(template.get_condition_id1_like_cpp())
+        {
+            debug!(
+                account = self.account_id,
+                guid = ?gameobject_guid,
+                go_type,
+                condition_id = template.get_condition_id1_like_cpp(),
+                "GameObjUse: represented gameobject interact condition not met"
+            );
+            return;
+        }
+
         if let Some(source) = template.chest_loot_source_like_cpp() {
             if source.is_empty() {
                 return;
