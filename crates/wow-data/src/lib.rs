@@ -118,7 +118,7 @@ pub use spawn_group::{
     SpawnGroupTemplate, SpawnGroupTemplateLoadReport, SpawnGroupTemplateRow,
     SpawnGroupTemplateStore,
 };
-pub use spell::{SpellInfo, SpellStore};
+pub use spell::{SpellEffectInfo, SpellInfo, SpellStore};
 pub use spell_item_enchantment::{SpellItemEnchantmentEntry, SpellItemEnchantmentStore};
 pub use terrain_swap::{TerrainSwapInfo, TerrainSwapStore, load_terrain_swaps};
 pub use ui_map::{UiMapXMapArtEntry, UiMapXMapArtStore};

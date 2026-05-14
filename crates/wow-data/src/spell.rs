@@ -22,7 +22,17 @@ use wow_database::HotfixDatabase;
 pub mod spell_effect_types {
     pub const SPELL_EFFECT_SCHOOL_DAMAGE: u32 = 2;
     pub const SPELL_EFFECT_HEAL: u32 = 6;
+    pub const SPELL_EFFECT_PERSISTENT_AREA_AURA: u32 = 27;
     pub const SPELL_EFFECT_APPLY_AURA: u32 = 35;
+    pub const SPELL_EFFECT_APPLY_AREA_AURA_PARTY: u32 = 35;
+    pub const SPELL_EFFECT_APPLY_AREA_AURA_RAID: u32 = 65;
+    pub const SPELL_EFFECT_APPLY_AREA_AURA_PET: u32 = 119;
+    pub const SPELL_EFFECT_APPLY_AREA_AURA_FRIEND: u32 = 128;
+    pub const SPELL_EFFECT_APPLY_AREA_AURA_ENEMY: u32 = 129;
+    pub const SPELL_EFFECT_APPLY_AREA_AURA_OWNER: u32 = 143;
+    pub const SPELL_EFFECT_APPLY_AURA_ON_PET: u32 = 174;
+    pub const SPELL_EFFECT_APPLY_AREA_AURA_SUMMONS: u32 = 202;
+    pub const SPELL_EFFECT_APPLY_AREA_AURA_PARTY_NONRANDOM: u32 = 271;
 }
 
 /// Aura types (from AuraType enum)
@@ -56,6 +66,18 @@ pub struct SpellInfo {
     pub aura_type: Option<i32>,
     /// Display flags (channelled, etc.)
     pub display_flags: u32,
+    /// Spell effects keyed by C++ `SpellEffectInfo::EffectIndex`.
+    pub effects: Vec<SpellEffectInfo>,
+}
+
+/// Minimal `SpellEffectInfo` fields needed by C++ ConditionMgr validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpellEffectInfo {
+    pub effect_index: u32,
+    pub effect: u32,
+    pub chain_targets: i32,
+    pub implicit_target_1: u32,
+    pub implicit_target_2: u32,
 }
 
 impl SpellInfo {
@@ -68,6 +90,105 @@ impl SpellInfo {
     pub fn has_cast_time(&self) -> bool {
         self.cast_time_ms > 0
     }
+
+    pub fn effects(&self) -> &[SpellEffectInfo] {
+        &self.effects
+    }
+
+    pub fn normalized_implicit_target_effect_mask_like_cpp(&self, mut effect_mask: u32) -> u32 {
+        let original_mask = effect_mask;
+        for effect in &self.effects {
+            let bit = 1u32.checked_shl(effect.effect_index).unwrap_or(0);
+            if bit == 0 || (original_mask & bit) == 0 {
+                continue;
+            }
+
+            if !effect.accepts_implicit_target_conditions_like_cpp() {
+                effect_mask &= !bit;
+            }
+        }
+        effect_mask
+    }
+}
+
+impl SpellEffectInfo {
+    pub fn accepts_implicit_target_conditions_like_cpp(&self) -> bool {
+        self.chain_targets > 0
+            || implicit_target_category_accepts_conditions_like_cpp(self.implicit_target_1)
+            || implicit_target_category_accepts_conditions_like_cpp(self.implicit_target_2)
+            || spell_effect_accepts_implicit_target_conditions_like_cpp(self.effect)
+    }
+}
+
+const fn spell_effect_accepts_implicit_target_conditions_like_cpp(effect: u32) -> bool {
+    use spell_effect_types::*;
+    matches!(
+        effect,
+        SPELL_EFFECT_PERSISTENT_AREA_AURA
+            | SPELL_EFFECT_APPLY_AREA_AURA_PARTY
+            | SPELL_EFFECT_APPLY_AREA_AURA_RAID
+            | SPELL_EFFECT_APPLY_AREA_AURA_FRIEND
+            | SPELL_EFFECT_APPLY_AREA_AURA_ENEMY
+            | SPELL_EFFECT_APPLY_AREA_AURA_PET
+            | SPELL_EFFECT_APPLY_AREA_AURA_OWNER
+            | SPELL_EFFECT_APPLY_AURA_ON_PET
+            | SPELL_EFFECT_APPLY_AREA_AURA_SUMMONS
+            | SPELL_EFFECT_APPLY_AREA_AURA_PARTY_NONRANDOM
+    )
+}
+
+const fn implicit_target_category_accepts_conditions_like_cpp(target: u32) -> bool {
+    matches!(
+        target,
+        2 | 3
+            | 4
+            | 7
+            | 8
+            | 15
+            | 16
+            | 20
+            | 24
+            | 30
+            | 31
+            | 33
+            | 34
+            | 37
+            | 38
+            | 40
+            | 46
+            | 51
+            | 52
+            | 54
+            | 56
+            | 58
+            | 59
+            | 60
+            | 61
+            | 89
+            | 93
+            | 104
+            | 105
+            | 107
+            | 108
+            | 109
+            | 110
+            | 115
+            | 116
+            | 118
+            | 119
+            | 120
+            | 122
+            | 123
+            | 128
+            | 129
+            | 130
+            | 133
+            | 134
+            | 135
+            | 136
+            | 142
+            | 151
+    )
 }
 
 /// In-memory store of all spells loaded from DB2 or hotfixes database.
@@ -112,11 +233,15 @@ SELECT
     CAST(COALESCE(se.Effect, 0) AS UNSIGNED) as effect_type,
     CAST(COALESCE(se.EffectBasePoints, 0) AS SIGNED) as effect_base_points,
     CAST(COALESCE(se.EffectBonusCoefficient, 0.0) AS DECIMAL(10,2)) as effect_bonus_coeff,
-    CAST(COALESCE(se.EffectAura, 0) AS SIGNED) as effect_aura
+    CAST(COALESCE(se.EffectAura, 0) AS SIGNED) as effect_aura,
+    CAST(COALESCE(se.EffectIndex, 0) AS UNSIGNED) as effect_index,
+    CAST(COALESCE(se.EffectChainTargets, 0) AS SIGNED) as effect_chain_targets,
+    CAST(COALESCE(se.ImplicitTarget1, 0) AS UNSIGNED) as implicit_target_1,
+    CAST(COALESCE(se.ImplicitTarget2, 0) AS UNSIGNED) as implicit_target_2
 FROM hotfixes.spell_misc sm
 LEFT JOIN hotfixes.spell_effect se 
     ON sm.ID = se.SpellID AND se.DifficultyID = 0
-LIMIT 10000
+ORDER BY sm.ID, se.EffectIndex
         "#;
 
         let mut result = db.direct_query(sql).await?;
@@ -131,8 +256,12 @@ LIMIT 10000
                 let effect_base_points: i32 = result.try_read(5).unwrap_or(0);
                 let effect_bonus_coefficient: f32 = result.try_read(6).unwrap_or(0.0);
                 let aura_type: Option<i32> = result.try_read(7);
+                let effect_index: u32 = result.try_read(8).unwrap_or(0);
+                let effect_chain_targets: i32 = result.try_read(9).unwrap_or(0);
+                let implicit_target_1: u32 = result.try_read(10).unwrap_or(0);
+                let implicit_target_2: u32 = result.try_read(11).unwrap_or(0);
 
-                let spell_info = SpellInfo {
+                let spell_info = store.spells.entry(spell_id).or_insert_with(|| SpellInfo {
                     spell_id,
                     cast_time_ms,
                     cooldown_ms,
@@ -142,9 +271,18 @@ LIMIT 10000
                     effect_bonus_coefficient,
                     aura_type,
                     display_flags: 0,
-                };
+                    effects: Vec::new(),
+                });
 
-                store.spells.insert(spell_id, spell_info);
+                if effect_type != 0 {
+                    spell_info.effects.push(SpellEffectInfo {
+                        effect_index,
+                        effect: effect_type,
+                        chain_targets: effect_chain_targets,
+                        implicit_target_1,
+                        implicit_target_2,
+                    });
+                }
 
                 if !result.next_row() {
                     break;
@@ -203,6 +341,7 @@ mod tests {
             effect_bonus_coefficient: 0.5,
             aura_type: None,
             display_flags: 0,
+            effects: Vec::new(),
         };
 
         // recovery_time_ms is larger
@@ -218,9 +357,64 @@ mod tests {
             effect_bonus_coefficient: 0.5,
             aura_type: None,
             display_flags: 0,
+            effects: Vec::new(),
         };
 
         // GCD is the limit
         assert_eq!(instant.effective_cooldown_ms(), 1500);
+    }
+
+    #[test]
+    fn spell_implicit_target_effect_mask_normalizes_like_cpp_conditionmgr() {
+        let spell = SpellInfo {
+            spell_id: 100,
+            cast_time_ms: 0,
+            cooldown_ms: 0,
+            recovery_time_ms: 0,
+            effect_type: 0,
+            effect_base_points: 0,
+            effect_bonus_coefficient: 0.0,
+            aura_type: None,
+            display_flags: 0,
+            effects: vec![
+                SpellEffectInfo {
+                    effect_index: 0,
+                    effect: 0,
+                    chain_targets: 0,
+                    implicit_target_1: 6,
+                    implicit_target_2: 0,
+                },
+                SpellEffectInfo {
+                    effect_index: 1,
+                    effect: 0,
+                    chain_targets: 0,
+                    implicit_target_1: 7,
+                    implicit_target_2: 0,
+                },
+                SpellEffectInfo {
+                    effect_index: 2,
+                    effect: spell_effect_types::SPELL_EFFECT_APPLY_AREA_AURA_RAID,
+                    chain_targets: 0,
+                    implicit_target_1: 0,
+                    implicit_target_2: 0,
+                },
+                SpellEffectInfo {
+                    effect_index: 3,
+                    effect: 0,
+                    chain_targets: 2,
+                    implicit_target_1: 0,
+                    implicit_target_2: 0,
+                },
+            ],
+        };
+
+        assert_eq!(
+            spell.normalized_implicit_target_effect_mask_like_cpp(0b1111),
+            0b1110
+        );
+        assert_eq!(
+            spell.normalized_implicit_target_effect_mask_like_cpp(0b0001),
+            0
+        );
     }
 }

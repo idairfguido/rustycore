@@ -28,8 +28,8 @@ pub struct ConditionAttachmentReportLikeCpp {
 /// C++ `ConditionMgr::LoadConditions` post-store source-type attachment pass.
 ///
 /// This applies the downstream builders already represented in `wow-data`. Spell implicit target
-/// conditions are counted but intentionally not mutated here until Rust has a real
-/// `SpellInfo`/`SpellEffectInfo` model equivalent to C++ `SpellMgr`.
+/// conditions are validated and normalized during the external validation pass, then counted here
+/// until Rust exposes the runtime `SpellEffectInfo::ImplicitTargetConditions` attachment surface.
 pub fn attach_loaded_conditions_like_cpp(
     condition_store: &ConditionEntriesByTypeStore,
     mut gossip_store: Option<&mut GossipStore>,

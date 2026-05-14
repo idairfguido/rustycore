@@ -1324,6 +1324,14 @@ pub fn validate_condition_source_external_like_cpp(
     condition: &Condition,
     stores: ConditionExternalValidationStoresLikeCpp<'_>,
 ) -> Result<(), ConditionSourceValidationErrorLikeCpp> {
+    let mut condition = condition.clone();
+    validate_and_normalize_condition_source_external_like_cpp(&mut condition, stores)
+}
+
+pub fn validate_and_normalize_condition_source_external_like_cpp(
+    condition: &mut Condition,
+    stores: ConditionExternalValidationStoresLikeCpp<'_>,
+) -> Result<(), ConditionSourceValidationErrorLikeCpp> {
     use ConditionSourceValidationErrorLikeCpp as Error;
 
     match condition.source_type {
@@ -1422,9 +1430,25 @@ pub fn validate_condition_source_external_like_cpp(
                 });
             }
         }
-        ConditionSourceType::SpellImplicitTarget
-        | ConditionSourceType::Spell
-        | ConditionSourceType::SpellProc => {
+        ConditionSourceType::SpellImplicitTarget => {
+            if let Some(store) = stores.spell_store {
+                let Some(spell) = store.get(condition.source_entry) else {
+                    return Err(Error::NonExistingSourceSpell {
+                        source_type: condition.source_type,
+                        spell_id: condition.source_entry,
+                    });
+                };
+                let normalized_mask =
+                    spell.normalized_implicit_target_effect_mask_like_cpp(condition.source_group);
+                if normalized_mask == 0 {
+                    return Err(Error::InvalidSpellImplicitTargetEffectMask(
+                        condition.source_group,
+                    ));
+                }
+                condition.source_group = normalized_mask;
+            }
+        }
+        ConditionSourceType::Spell | ConditionSourceType::SpellProc => {
             if let Some(store) = stores.spell_store
                 && store.get(condition.source_entry).is_none()
             {
@@ -1571,7 +1595,7 @@ pub fn apply_external_condition_validation_like_cpp(
     let mut kept = Vec::with_capacity(report.conditions.len());
     let mut skipped = Vec::new();
 
-    for condition in report.conditions.drain(..) {
+    for mut condition in report.conditions.drain(..) {
         if let Err(reason) = validate_condition_type_external_like_cpp(&condition, stores) {
             skipped.push(ExternallySkippedConditionLikeCpp {
                 condition,
@@ -1580,7 +1604,9 @@ pub fn apply_external_condition_validation_like_cpp(
             continue;
         }
 
-        if let Err(reason) = validate_condition_source_external_like_cpp(&condition, stores) {
+        if let Err(reason) =
+            validate_and_normalize_condition_source_external_like_cpp(&mut condition, stores)
+        {
             skipped.push(ExternallySkippedConditionLikeCpp {
                 condition,
                 reason: ConditionRowSkipReason::ConditionSourceValidationFailed(reason),
@@ -2241,6 +2267,7 @@ mod tests {
             effect_bonus_coefficient: 0.0,
             aura_type: None,
             display_flags: 0,
+            effects: Vec::new(),
         }
     }
 
@@ -3219,6 +3246,36 @@ mod tests {
             crate::quest::QuestStore::from_quests_like_cpp([quest_template(700, Vec::new())]);
         let mut spell_store = crate::SpellStore::new();
         spell_store.insert(200, spell_info(200));
+        spell_store.insert(
+            201,
+            crate::SpellInfo {
+                spell_id: 201,
+                cast_time_ms: 0,
+                cooldown_ms: 0,
+                recovery_time_ms: 0,
+                effect_type: 0,
+                effect_base_points: 0,
+                effect_bonus_coefficient: 0.0,
+                aura_type: None,
+                display_flags: 0,
+                effects: vec![
+                    crate::SpellEffectInfo {
+                        effect_index: 0,
+                        effect: 0,
+                        chain_targets: 0,
+                        implicit_target_1: 6,
+                        implicit_target_2: 0,
+                    },
+                    crate::SpellEffectInfo {
+                        effect_index: 1,
+                        effect: 0,
+                        chain_targets: 0,
+                        implicit_target_1: 7,
+                        implicit_target_2: 0,
+                    },
+                ],
+            },
+        );
         let mut area_trigger_store = crate::AreaTriggerStore::new();
         area_trigger_store.insert(crate::AreaTriggerData {
             trigger_id: 300,
@@ -3345,6 +3402,29 @@ mod tests {
             ),
             Ok(())
         );
+        let mut spell_implicit = Condition {
+            source_type: ConditionSourceType::SpellImplicitTarget,
+            source_group: 0b11,
+            source_entry: 201,
+            ..Condition::default()
+        };
+        assert_eq!(
+            validate_and_normalize_condition_source_external_like_cpp(&mut spell_implicit, stores),
+            Ok(())
+        );
+        assert_eq!(spell_implicit.source_group, 0b10);
+        assert!(matches!(
+            validate_condition_source_external_like_cpp(
+                &Condition {
+                    source_type: ConditionSourceType::SpellImplicitTarget,
+                    source_group: 0b1,
+                    source_entry: 201,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(ConditionSourceValidationErrorLikeCpp::InvalidSpellImplicitTargetEffectMask(1))
+        ));
         assert_eq!(
             validate_condition_source_external_like_cpp(
                 &Condition {
