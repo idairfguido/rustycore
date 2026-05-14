@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use wow_constants::TypeId;
+use wow_constants::{MovementFlag2, TypeId};
 pub use wow_constants::{VehicleExitParameter, VehicleFlag};
 use wow_core::{ObjectGuid, Position};
 
@@ -207,6 +207,26 @@ pub fn vehicle_accessory_install_plan_like_cpp(
             .filter(|accessory| !evading || accessory.is_minion)
             .collect(),
     }
+}
+
+pub fn vehicle_base_movement_flags_like_cpp(vehicle_flags: u32) -> MovementFlag2 {
+    let mut movement_flags = MovementFlag2::empty();
+    if vehicle_flags & VehicleFlag::NoStrafe as u32 != 0 {
+        movement_flags |= MovementFlag2::NO_STRAFE;
+    }
+    if vehicle_flags & VehicleFlag::NoJumping as u32 != 0 {
+        movement_flags |= MovementFlag2::NO_JUMPING;
+    }
+    if vehicle_flags & VehicleFlag::FullSpeedTurning as u32 != 0 {
+        movement_flags |= MovementFlag2::FULL_SPEED_TURNING;
+    }
+    if vehicle_flags & VehicleFlag::AllowPitching as u32 != 0 {
+        movement_flags |= MovementFlag2::ALWAYS_ALLOW_PITCHING;
+    }
+    if vehicle_flags & VehicleFlag::FullSpeedPitching as u32 != 0 {
+        movement_flags |= MovementFlag2::FULL_SPEED_PITCHING;
+    }
+    movement_flags
 }
 
 pub const SPELL_EFFECT_HEAL_LIKE_CPP: i32 = 6;
@@ -1018,6 +1038,26 @@ mod tests {
         let creature_evading = vehicle_accessory_install_plan_like_cpp(TypeId::Unit, true, &all);
         assert!(!creature_evading.remove_all_passengers);
         assert_eq!(creature_evading.accessories, vec![all[0]]);
+    }
+
+    #[test]
+    fn vehicle_base_movement_flags_match_cpp_init_movement_info() {
+        let flags = VehicleFlag::NoStrafe as u32
+            | VehicleFlag::NoJumping as u32
+            | VehicleFlag::FullSpeedTurning as u32
+            | VehicleFlag::AllowPitching as u32
+            | VehicleFlag::FullSpeedPitching as u32
+            | VehicleFlag::FixedPosition as u32;
+
+        assert_eq!(
+            vehicle_base_movement_flags_like_cpp(flags),
+            MovementFlag2::NO_STRAFE
+                | MovementFlag2::NO_JUMPING
+                | MovementFlag2::FULL_SPEED_TURNING
+                | MovementFlag2::ALWAYS_ALLOW_PITCHING
+                | MovementFlag2::FULL_SPEED_PITCHING
+        );
+        assert!(vehicle_base_movement_flags_like_cpp(0).is_empty());
     }
 
     #[test]

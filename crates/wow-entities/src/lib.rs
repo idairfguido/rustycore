@@ -283,7 +283,7 @@ pub use vehicle::{
     VehicleResetPlan, VehicleSeat, VehicleSeatAddon, VehicleSeatInfo, VehicleSpellImmunity,
     VehicleSpellImmunityKind, VehicleStatus, VehicleTemplate, calculate_passenger_offset,
     calculate_passenger_position, vehicle_accessory_install_plan_like_cpp,
-    vehicle_immunity_plan_like_cpp,
+    vehicle_base_movement_flags_like_cpp, vehicle_immunity_plan_like_cpp,
 };
 pub use world_object::{
     DEFAULT_HEIGHT_SEARCH, DEFAULT_VISIBILITY_DISTANCE, DEFAULT_VISIBILITY_INSTANCE,
