@@ -984,6 +984,8 @@ pub struct WorldSession {
     mount_vehicle_create_requests_like_cpp: u32,
     /// Count of C++ `RemoveVehicleKit` mount side effects represented until Vehicle runtime sends packets.
     mount_vehicle_remove_requests_like_cpp: u32,
+    /// Count of C++ `SendOnCancelExpectedVehicleRideAura` packets emitted after vehicle-kit creation.
+    mount_cancel_expected_vehicle_aura_packets_like_cpp: u32,
     /// Count of C++ `DisablePetControlsOnMount` side effects represented until pet runtime is canonical.
     mount_pet_control_disable_requests_like_cpp: u32,
     /// Count of C++ `EnablePetControlsOnDismount` side effects represented until pet runtime is canonical.
@@ -1595,6 +1597,7 @@ impl WorldSession {
             temporary_mount_pet_react_state_like_cpp: None,
             mount_vehicle_create_requests_like_cpp: 0,
             mount_vehicle_remove_requests_like_cpp: 0,
+            mount_cancel_expected_vehicle_aura_packets_like_cpp: 0,
             mount_pet_control_disable_requests_like_cpp: 0,
             mount_pet_control_enable_requests_like_cpp: 0,
             mount_pet_resummon_requests_like_cpp: 0,
@@ -4623,6 +4626,7 @@ impl WorldSession {
                 .mount_vehicle_create_requests_like_cpp
                 .saturating_add(1);
             self.send_set_vehicle_rec_id_like_cpp(vehicle_id);
+            self.send_on_cancel_expected_vehicle_ride_aura_like_cpp();
         }
         self.mount_pet_control_disable_requests_like_cpp = self
             .mount_pet_control_disable_requests_like_cpp
@@ -4664,6 +4668,13 @@ impl WorldSession {
             vehicle_guid: player_guid,
             vehicle_rec_id,
         });
+    }
+
+    fn send_on_cancel_expected_vehicle_ride_aura_like_cpp(&mut self) {
+        self.mount_cancel_expected_vehicle_aura_packets_like_cpp = self
+            .mount_cancel_expected_vehicle_aura_packets_like_cpp
+            .saturating_add(1);
+        self.send_packet(&wow_packet::packets::vehicle::OnCancelExpectedRideVehicleAura);
     }
 
     fn disable_pet_controls_on_mount_like_cpp(&mut self, react_state: u8, command_state: u8) {
@@ -9968,6 +9979,10 @@ mod tests {
         assert!(session.player_mounted_like_cpp);
         assert_eq!(session.mount_vehicle_create_requests_like_cpp, 1);
         assert_eq!(session.mount_vehicle_remove_requests_like_cpp, 0);
+        assert_eq!(
+            session.mount_cancel_expected_vehicle_aura_packets_like_cpp,
+            1
+        );
         assert_eq!(session.mount_pet_control_disable_requests_like_cpp, 1);
         assert_eq!(session.mount_pet_control_enable_requests_like_cpp, 0);
         assert_eq!(session.mount_pet_resummon_requests_like_cpp, 0);
@@ -9984,6 +9999,10 @@ mod tests {
         let opcodes = drain_server_opcodes(&send_rx);
         assert!(opcodes.contains(&(wow_constants::ServerOpcodes::MoveSetVehicleRecId as u16)));
         assert!(opcodes.contains(&(wow_constants::ServerOpcodes::SetVehicleRecId as u16)));
+        assert!(
+            opcodes
+                .contains(&(wow_constants::ServerOpcodes::OnCancelExpectedRideVehicleAura as u16))
+        );
         assert!(opcodes.contains(&(wow_constants::ServerOpcodes::PetMode as u16)));
         assert!(opcodes.contains(&(wow_constants::ServerOpcodes::MoveSetCollisionHeight as u16)));
         let broadcast = wow_packet::WorldPacket::from_bytes(&other_rx.try_recv().unwrap());

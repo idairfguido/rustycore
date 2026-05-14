@@ -43,6 +43,15 @@ impl ServerPacket for SetVehicleRecId {
     }
 }
 
+/// Mirrors C++ `WorldPackets::Vehicle::OnCancelExpectedRideVehicleAura`.
+pub struct OnCancelExpectedRideVehicleAura;
+
+impl ServerPacket for OnCancelExpectedRideVehicleAura {
+    const OPCODE: ServerOpcodes = ServerOpcodes::OnCancelExpectedRideVehicleAura;
+
+    fn write(&self, _pkt: &mut WorldPacket) {}
+}
+
 /// Mirrors C++ `WorldPackets::Vehicle::MoveSetVehicleRecIdAck`.
 #[derive(Debug, Clone)]
 pub struct MoveSetVehicleRecIdAck {
@@ -97,5 +106,13 @@ mod tests {
         assert_eq!(u16::from_le_bytes([bytes[0], bytes[1]]), 0x26f7);
         assert!(bytes.len() > 6);
         assert_eq!(&bytes[bytes.len() - 4..], &55i32.to_le_bytes());
+    }
+
+    #[test]
+    fn on_cancel_expected_ride_vehicle_aura_matches_cpp_empty_packet() {
+        let bytes = OnCancelExpectedRideVehicleAura.to_bytes();
+
+        assert_eq!(u16::from_le_bytes([bytes[0], bytes[1]]), 0x26e6);
+        assert_eq!(bytes.len(), 2);
     }
 }
