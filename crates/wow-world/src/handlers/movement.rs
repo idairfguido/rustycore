@@ -162,6 +162,7 @@ impl WorldSession {
         self.apply_movement_side_effects_like_cpp(opcode, &info.info);
         info.info.time = self.adjust_client_movement_time_like_cpp(info.info.time);
         self.set_player_movement_time_like_cpp(info.info.time);
+        self.set_player_movement_flags_like_cpp(info.info.flags);
 
         // Update server-side player position.
         self.set_player_position_like_cpp(info.info.position);

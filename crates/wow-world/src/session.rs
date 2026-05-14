@@ -339,6 +339,8 @@ pub(crate) enum RepresentedLootRollCriteriaEvent {
 
 pub type SharedObjectAccessor = Arc<RwLock<ObjectAccessor>>;
 pub(crate) const SKILL_RIDING_LIKE_CPP: u16 = 762;
+pub(crate) const LIQUID_MAP_IN_WATER_LIKE_CPP: u32 = 0x0000_0004;
+pub(crate) const LIQUID_MAP_UNDER_WATER_LIKE_CPP: u32 = 0x0000_0008;
 
 pub fn new_shared_object_accessor() -> SharedObjectAccessor {
     Arc::new(RwLock::new(ObjectAccessor::default()))
@@ -871,6 +873,10 @@ pub struct WorldSession {
     // ── Movement & World position ─────────────────────────────────
     /// Server-side position of the player (updated from CMSG_MOVE_*).
     player_position: Option<wow_core::Position>,
+    /// Last accepted player movement flags, mirroring C++ `Unit::m_movementInfo`.
+    player_movement_flags_like_cpp: MovementFlag,
+    /// Last terrain liquid status, mirroring C++ `WorldObject::m_liquidStatus`.
+    player_liquid_status_like_cpp: u32,
 
     /// Cached character name for chat messages.
     player_name: Option<String>,
@@ -1493,6 +1499,8 @@ impl WorldSession {
             realm_packet_rx: None,
             realm_send_tx: None,
             player_position: None,
+            player_movement_flags_like_cpp: MovementFlag::NONE,
+            player_liquid_status_like_cpp: 0,
             player_name: None,
             registered_addon_prefixes: Vec::new(),
             filter_addon_messages: false,
@@ -6060,6 +6068,15 @@ impl WorldSession {
         self.player_movement_time_like_cpp = time;
     }
 
+    pub(crate) fn set_player_movement_flags_like_cpp(&mut self, flags: MovementFlag) {
+        self.player_movement_flags_like_cpp = flags;
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn set_player_liquid_status_like_cpp(&mut self, status: u32) {
+        self.player_liquid_status_like_cpp = status;
+    }
+
     pub(crate) fn set_player_level_like_cpp(&mut self, level: u8) {
         self.player_level = level;
         if let Some(controller) = &mut self.player_controller {
@@ -6217,6 +6234,14 @@ impl WorldSession {
             .as_ref()
             .map(SessionPlayerController::map_id)
             .unwrap_or(self.current_map_id)
+    }
+
+    pub(crate) fn player_movement_flags_like_cpp(&self) -> MovementFlag {
+        self.player_movement_flags_like_cpp
+    }
+
+    pub(crate) fn player_liquid_status_like_cpp(&self) -> u32 {
+        self.player_liquid_status_like_cpp
     }
 
     pub(crate) fn player_race_like_cpp(&self) -> u8 {
@@ -6533,9 +6558,8 @@ impl WorldSession {
         &self,
         mount_type_id: u16,
         mount_restriction_flags: Option<u8>,
-        is_submerged: bool,
-        is_in_water: bool,
     ) -> Option<wow_data::MountCapabilityEntry> {
+        let (is_submerged, is_in_water) = self.represented_player_mount_liquid_state_like_cpp();
         self.represented_mount_capability_for_type_like_cpp(
             mount_type_id,
             u32::from(self.player_skill_value_like_cpp(SKILL_RIDING_LIKE_CPP)),
@@ -6543,6 +6567,17 @@ impl WorldSession {
             is_submerged,
             is_in_water,
         )
+    }
+
+    pub(crate) fn represented_player_mount_liquid_state_like_cpp(&self) -> (bool, bool) {
+        let liquid_status = self.player_liquid_status_like_cpp();
+        let is_submerged = liquid_status & LIQUID_MAP_UNDER_WATER_LIKE_CPP != 0
+            || self
+                .player_movement_flags_like_cpp()
+                .contains(MovementFlag::SWIMMING);
+        let is_in_water =
+            liquid_status & (LIQUID_MAP_IN_WATER_LIKE_CPP | LIQUID_MAP_UNDER_WATER_LIKE_CPP) != 0;
+        (is_submerged, is_in_water)
     }
 
     #[allow(dead_code)]
@@ -7093,6 +7128,7 @@ impl WorldSession {
         let mut status = ack.status.clone();
         status.time = self.adjust_client_movement_time_like_cpp(status.time);
         self.player_movement_time_like_cpp = status.time;
+        self.set_player_movement_flags_like_cpp(status.flags);
         self.set_player_position_like_cpp(status.position);
         self.record_movement_ack_event_like_cpp(MovementAckEventLikeCpp {
             opcode,
@@ -9302,15 +9338,44 @@ mod tests {
 
         assert_eq!(
             session
-                .represented_mount_capability_for_type_from_session_like_cpp(7, None, false, false)
+                .represented_mount_capability_for_type_from_session_like_cpp(7, None)
                 .map(|capability| capability.id),
             Some(11)
         );
         session.set_player_skill_values_like_cpp(HashMap::from([(SKILL_RIDING_LIKE_CPP, 74)]));
         assert!(
             session
-                .represented_mount_capability_for_type_from_session_like_cpp(7, None, false, false)
+                .represented_mount_capability_for_type_from_session_like_cpp(7, None)
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn represented_mount_liquid_state_uses_cpp_liquid_bits_and_swimming_flag() {
+        let (mut session, _, _) = make_session();
+
+        assert_eq!(
+            session.represented_player_mount_liquid_state_like_cpp(),
+            (false, false)
+        );
+
+        session.set_player_liquid_status_like_cpp(LIQUID_MAP_IN_WATER_LIKE_CPP);
+        assert_eq!(
+            session.represented_player_mount_liquid_state_like_cpp(),
+            (false, true)
+        );
+
+        session.set_player_liquid_status_like_cpp(LIQUID_MAP_UNDER_WATER_LIKE_CPP);
+        assert_eq!(
+            session.represented_player_mount_liquid_state_like_cpp(),
+            (true, true)
+        );
+
+        session.set_player_liquid_status_like_cpp(0);
+        session.set_player_movement_flags_like_cpp(MovementFlag::SWIMMING);
+        assert_eq!(
+            session.represented_player_mount_liquid_state_like_cpp(),
+            (true, false)
         );
     }
 
