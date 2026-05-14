@@ -7945,7 +7945,8 @@ impl WorldSession {
         }
     }
 
-    async fn load_account_mounts_like_cpp(&self) -> Vec<AccountMount> {
+    async fn load_account_mounts_like_cpp(&mut self) -> Vec<AccountMount> {
+        self.set_account_mounts_like_cpp(Vec::new());
         let Some(login_db) = self.login_db() else {
             return Vec::new();
         };
@@ -7988,6 +7989,7 @@ impl WorldSession {
             }
         }
 
+        self.set_account_mounts_like_cpp(mounts.clone());
         mounts
     }
 

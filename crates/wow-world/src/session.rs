@@ -70,7 +70,7 @@ use wow_packet::packets::item::{
     InventoryChangeFailure, ItemEnchantTimeUpdate, ItemInstance, ItemMod, ItemModList,
     ItemPushResult, ItemPushResultDisplayType, ItemTimeUpdate,
 };
-use wow_packet::packets::misc::{BuyFailed, SellResponse};
+use wow_packet::packets::misc::{AccountMount, AccountMountUpdate, BuyFailed, SellResponse};
 use wow_recastdetour::PathQueryFilterContext;
 
 fn rounded_median_u32(sorted_values: &[u32]) -> u32 {
@@ -859,6 +859,8 @@ pub struct WorldSession {
     loot_specialization_id: u32,
     /// All known spell IDs for the logged-in character (DB + DBC merged).
     known_spells: Vec<i32>,
+    /// C++ `CollectionMgr::_mounts` represented account mount collection.
+    account_mounts_like_cpp: HashMap<i32, u8>,
 
     // ── Dual-connection (realm + instance) ───────────────────────
     // After ConnectTo completes, the session uses the instance socket for
@@ -1496,6 +1498,7 @@ impl WorldSession {
             player_gender: 0,
             loot_specialization_id: 0,
             known_spells: Vec::new(),
+            account_mounts_like_cpp: HashMap::new(),
             realm_packet_rx: None,
             realm_send_tx: None,
             player_position: None,
@@ -6125,6 +6128,44 @@ impl WorldSession {
         if let Some(controller) = &mut self.player_controller {
             controller.set_known_spells(spells);
         }
+    }
+
+    pub(crate) fn set_account_mounts_like_cpp(&mut self, mounts: Vec<AccountMount>) {
+        self.account_mounts_like_cpp = mounts
+            .into_iter()
+            .map(|mount| (mount.spell_id, mount.flags))
+            .collect();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn account_mounts_like_cpp(&self) -> &HashMap<i32, u8> {
+        &self.account_mounts_like_cpp
+    }
+
+    pub(crate) fn mount_set_favorite_like_cpp(
+        &mut self,
+        mount_spell_id: u32,
+        is_favorite: bool,
+    ) -> bool {
+        let Ok(spell_id) = i32::try_from(mount_spell_id) else {
+            return false;
+        };
+        let Some(flags) = self.account_mounts_like_cpp.get_mut(&spell_id) else {
+            return false;
+        };
+
+        if is_favorite {
+            *flags |= 0x01;
+        } else {
+            *flags &= !0x01;
+        }
+        let updated_flags = *flags;
+
+        self.send_packet(&AccountMountUpdate::partial(vec![AccountMount {
+            spell_id,
+            flags: updated_flags,
+        }]));
+        true
     }
 
     pub(crate) fn set_player_skill_values_like_cpp(&mut self, skill_values: HashMap<u16, u16>) {

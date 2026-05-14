@@ -1113,6 +1113,13 @@ impl AccountMountUpdate {
         }
     }
 
+    pub fn partial(mounts: Vec<AccountMount>) -> Self {
+        Self {
+            is_full_update: false,
+            mounts,
+        }
+    }
+
     pub fn empty_full() -> Self {
         Self::full(Vec::new())
     }
@@ -1129,6 +1136,28 @@ impl ServerPacket for AccountMountUpdate {
             pkt.write_bits(u32::from(mount.flags & 0x0f), 4);
         }
         pkt.flush_bits();
+    }
+}
+
+// ── MountSetFavorite (CMSG 0x3633) ─────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MountSetFavorite {
+    pub mount_spell_id: u32,
+    pub is_favorite: bool,
+}
+
+impl ClientPacket for MountSetFavorite {
+    const OPCODE: ClientOpcodes = ClientOpcodes::MountSetFavorite;
+
+    fn read(pkt: &mut WorldPacket) -> Result<Self, PacketError> {
+        pkt.skip_opcode();
+        let mount_spell_id = pkt.read_uint32()?;
+        let is_favorite = pkt.read_bit()?;
+        Ok(Self {
+            mount_spell_id,
+            is_favorite,
+        })
     }
 }
 
@@ -2868,6 +2897,40 @@ mod tests {
             200
         );
         assert_eq!(bytes[16], 0x20);
+    }
+
+    #[test]
+    fn account_mount_update_partial_clears_full_update_bit_like_cpp() {
+        let pkt = AccountMountUpdate::partial(vec![AccountMount {
+            spell_id: 100,
+            flags: 0x01,
+        }]);
+        let bytes = pkt.to_bytes();
+
+        assert_eq!(u16::from_le_bytes([bytes[0], bytes[1]]), 0x25ae);
+        assert_eq!(bytes[2], 0x00);
+        assert_eq!(
+            i32::from_le_bytes([bytes[3], bytes[4], bytes[5], bytes[6]]),
+            1
+        );
+    }
+
+    #[test]
+    fn mount_set_favorite_reads_cpp_field_order() {
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_uint16(ClientOpcodes::MountSetFavorite as u16);
+        pkt.write_uint32(1234);
+        pkt.write_bit(true);
+        pkt.flush_bits();
+
+        let decoded = MountSetFavorite::read(&mut pkt).unwrap();
+        assert_eq!(
+            decoded,
+            MountSetFavorite {
+                mount_spell_id: 1234,
+                is_favorite: true,
+            }
+        );
     }
 
     #[test]

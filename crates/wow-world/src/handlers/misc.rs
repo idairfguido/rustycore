@@ -24,7 +24,7 @@ use wow_packet::packets::item::{
     GetItemPurchaseData, ItemPurchaseContents, ItemPurchaseRefundCurrency, ItemPurchaseRefundItem,
     SetItemPurchaseData,
 };
-use wow_packet::packets::misc::{RequestCemeteryListResponse, TaxiNodeStatusPkt};
+use wow_packet::packets::misc::{MountSetFavorite, RequestCemeteryListResponse, TaxiNodeStatusPkt};
 
 // ── inventory registrations ───────────────────────────────────────────────────
 
@@ -79,6 +79,24 @@ inventory::submit! {
         status: SessionStatus::LoggedIn,
         processing: PacketProcessing::Inplace,
         handler_name: "handle_chat_join_channel",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::MountSetFavorite,
+        status: SessionStatus::LoggedIn,
+        processing: PacketProcessing::ThreadUnsafe,
+        handler_name: "handle_mount_set_favorite",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::MountClearFanfare,
+        status: SessionStatus::LoggedIn,
+        processing: PacketProcessing::ThreadUnsafe,
+        handler_name: "handle_mount_clear_fanfare",
     }
 }
 
@@ -661,6 +679,31 @@ impl crate::session::WorldSession {
         // name_len bits(7), pass_len bits(7), channel_name, password.
     }
 
+    /// CMSG_MOUNT_SET_FAVORITE — toggle the favorite bit on a known account mount.
+    ///
+    /// C++ ref: `WorldSession::HandleMountSetFavorite` delegates to
+    /// `CollectionMgr::MountSetFavorite`, which silently ignores unknown mounts
+    /// and sends a partial `SMSG_ACCOUNT_MOUNT_UPDATE` for the changed mount.
+    pub async fn handle_mount_set_favorite(&mut self, mut pkt: wow_packet::WorldPacket) {
+        let request = match MountSetFavorite::read(&mut pkt) {
+            Ok(request) => request,
+            Err(error) => {
+                warn!(
+                    account = self.account_id,
+                    "MountSetFavorite parse failed: {error}"
+                );
+                return;
+            }
+        };
+
+        self.mount_set_favorite_like_cpp(request.mount_spell_id, request.is_favorite);
+    }
+
+    /// CMSG_MOUNT_CLEAR_FANFARE — C++ currently logs only.
+    pub async fn handle_mount_clear_fanfare(&mut self, _pkt: wow_packet::WorldPacket) {
+        debug!(account = self.account_id, "Mount fanfare cleared");
+    }
+
     // ── QueryTime ─────────────────────────────────────────────────────────────
 
     /// CMSG_QUERY_TIME — client requests current server time.
@@ -1137,7 +1180,7 @@ impl crate::session::WorldSession {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use wow_constants::ServerOpcodes;
+    use wow_constants::{ClientOpcodes, ServerOpcodes};
     use wow_core::{ObjectGuid, Position};
     use wow_data::{MapDifficultyEntry, MapDifficultyStore, MapEntry, MapStore};
     use wow_packet::WorldPacket;
@@ -1186,6 +1229,56 @@ mod tests {
             ),
             send_rx,
         )
+    }
+
+    #[tokio::test]
+    async fn mount_set_favorite_updates_known_mount_and_sends_partial_update_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        session.set_account_mounts_like_cpp(vec![wow_packet::packets::misc::AccountMount {
+            spell_id: 1234,
+            flags: 0,
+        }]);
+
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_uint16(ClientOpcodes::MountSetFavorite as u16);
+        pkt.write_uint32(1234);
+        pkt.write_bit(true);
+        pkt.flush_bits();
+
+        session.handle_mount_set_favorite(pkt).await;
+
+        assert_eq!(session.account_mounts_like_cpp().get(&1234), Some(&0x01));
+        let bytes = send_rx.try_recv().expect("partial mount update");
+        assert_eq!(
+            u16::from_le_bytes([bytes[0], bytes[1]]),
+            ServerOpcodes::AccountMountUpdate as u16
+        );
+        assert_eq!(bytes[2], 0x00);
+        assert_eq!(
+            i32::from_le_bytes([bytes[3], bytes[4], bytes[5], bytes[6]]),
+            1
+        );
+        assert_eq!(
+            i32::from_le_bytes([bytes[7], bytes[8], bytes[9], bytes[10]]),
+            1234
+        );
+        assert_eq!(bytes[11], 0x10);
+    }
+
+    #[tokio::test]
+    async fn mount_set_favorite_ignores_unknown_mount_like_cpp() {
+        let (mut session, send_rx) = make_session();
+
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_uint16(ClientOpcodes::MountSetFavorite as u16);
+        pkt.write_uint32(1234);
+        pkt.write_bit(true);
+        pkt.flush_bits();
+
+        session.handle_mount_set_favorite(pkt).await;
+
+        assert!(session.account_mounts_like_cpp().is_empty());
+        assert!(send_rx.try_recv().is_err());
     }
 
     #[tokio::test]
