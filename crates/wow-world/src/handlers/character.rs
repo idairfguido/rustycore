@@ -4152,7 +4152,7 @@ impl WorldSession {
         self.handle_npc_direct_interaction(hello).await;
     }
 
-    fn build_condition_player_object_like_cpp(&self) -> Option<WorldObject> {
+    pub(crate) fn build_condition_player_object_like_cpp(&self) -> Option<WorldObject> {
         let mut player = WorldObject::new(
             false,
             TypeId::Player,
@@ -4166,7 +4166,7 @@ impl WorldSession {
         Some(player)
     }
 
-    fn build_condition_creature_object_like_cpp(
+    pub(crate) fn build_condition_creature_object_like_cpp(
         &mut self,
         npc_guid: ObjectGuid,
     ) -> Option<(WorldObject, crate::conditions::ConditionUnitSnapshot)> {
@@ -4193,6 +4193,38 @@ impl WorldSession {
             };
             (source, snapshot)
         })
+    }
+
+    pub(crate) fn condition_player_unit_snapshot_like_cpp(
+        &self,
+    ) -> crate::conditions::ConditionUnitSnapshot {
+        crate::conditions::ConditionUnitSnapshot {
+            level: u32::from(self.player_level_like_cpp()),
+            health: 1,
+            max_health: 1,
+            class_mask: player_class_mask(self.player_class_like_cpp()),
+            race: self.player_race_like_cpp(),
+            creature_type: None,
+            is_alive: self.player_is_alive_like_cpp(),
+            is_charmed: false,
+            in_water: false,
+            unit_state: 0,
+            stand_state: UnitStandStateType::Stand as u32,
+        }
+    }
+
+    pub(crate) fn condition_player_snapshot_like_cpp(
+        &self,
+    ) -> crate::conditions::ConditionPlayerSnapshot {
+        crate::conditions::ConditionPlayerSnapshot {
+            team: player_team_for_race_cpp(self.player_race_like_cpp()) as u32,
+            native_gender: u32::from(self.player_gender_like_cpp()),
+            drunken_state: 0,
+            can_be_game_master: false,
+            is_game_master: false,
+            pet_type: None,
+            is_in_flight: false,
+        }
     }
 
     fn gossip_conditions_meet_like_cpp(
@@ -4226,28 +4258,8 @@ impl WorldSession {
             return false;
         };
 
-        let player_unit_snapshot = crate::conditions::ConditionUnitSnapshot {
-            level: u32::from(self.player_level_like_cpp()),
-            health: 1,
-            max_health: 1,
-            class_mask: player_class_mask(self.player_class_like_cpp()),
-            race: self.player_race_like_cpp(),
-            creature_type: None,
-            is_alive: self.player_is_alive_like_cpp(),
-            is_charmed: false,
-            in_water: false,
-            unit_state: 0,
-            stand_state: UnitStandStateType::Stand as u32,
-        };
-        let player_snapshot = crate::conditions::ConditionPlayerSnapshot {
-            team: player_team_for_race_cpp(self.player_race_like_cpp()) as u32,
-            native_gender: u32::from(self.player_gender_like_cpp()),
-            drunken_state: 0,
-            can_be_game_master: false,
-            is_game_master: false,
-            pet_type: None,
-            is_in_flight: false,
-        };
+        let player_unit_snapshot = self.condition_player_unit_snapshot_like_cpp();
+        let player_snapshot = self.condition_player_snapshot_like_cpp();
 
         let mut source_info = crate::conditions::ConditionSourceInfo::from_targets(
             Some(&player_object),

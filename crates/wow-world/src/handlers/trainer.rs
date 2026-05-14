@@ -35,6 +35,7 @@ use wow_packet::packets::trainer::{
     TrainerListSpell,
 };
 
+use crate::conditions;
 use crate::session::WorldSession;
 
 // ── Handler registrations ─────────────────────────────────────────────────────
@@ -184,6 +185,10 @@ impl WorldSession {
             };
 
         let player_level = self.player_level_like_cpp();
+        let condition_store = self.condition_store().cloned();
+        let player_condition_object = self.build_condition_player_object_like_cpp();
+        let player_unit_snapshot = self.condition_player_unit_snapshot_like_cpp();
+        let player_snapshot = self.condition_player_snapshot_like_cpp();
         let mut spells: Vec<TrainerListSpell> = Vec::new();
 
         if !ts_result.is_empty() {
@@ -196,6 +201,60 @@ impl WorldSession {
                 let req_ability2: i32 = ts_result.try_read(5).unwrap_or(0);
                 let req_ability3: i32 = ts_result.try_read(6).unwrap_or(0);
                 let req_level: u8 = ts_result.try_read::<u8>(7).unwrap_or(0);
+
+                if let Some(store) = condition_store.as_ref() {
+                    let Some(player_object) = player_condition_object.as_ref() else {
+                        warn!(
+                            account = self.account_id,
+                            trainer_id = trainer_id,
+                            spell_id = spell_id,
+                            "Trainer spell condition check failed closed: missing player object"
+                        );
+                        if !ts_result.next_row() {
+                            break;
+                        }
+                        continue;
+                    };
+                    let Some(spell_id_u32) = u32::try_from(spell_id).ok() else {
+                        if !ts_result.next_row() {
+                            break;
+                        }
+                        continue;
+                    };
+                    let meets = conditions::is_object_meeting_trainer_spell_conditions_like_cpp(
+                        store.as_ref(),
+                        trainer_id,
+                        spell_id_u32,
+                        Some(player_object),
+                        |condition, source_info| {
+                            source_info.set_unit_target_snapshot(0, player_unit_snapshot);
+                            source_info.set_player_target_snapshot(0, player_snapshot);
+                            match conditions::condition_meets_basic_like_cpp(
+                                condition,
+                                source_info,
+                                |current_area, required_area| current_area == required_area,
+                            ) {
+                                conditions::ConditionMeetResult::Evaluated(value) => value,
+                                conditions::ConditionMeetResult::Unsupported => {
+                                    warn!(
+                                        account = self.account_id,
+                                        trainer_id = trainer_id,
+                                        spell_id = spell_id,
+                                        condition_type = ?condition.condition_type,
+                                        "Trainer spell condition check failed closed: unsupported condition type"
+                                    );
+                                    false
+                                }
+                            }
+                        },
+                    );
+                    if !meets {
+                        if !ts_result.next_row() {
+                            break;
+                        }
+                        continue;
+                    }
+                }
 
                 // Determine usability:
                 // 2 = already known, 1 = available (level ok), 0 = unavailable (too low level)
