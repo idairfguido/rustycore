@@ -139,6 +139,22 @@ impl QuestTemplate {
     }
 }
 
+impl QuestObjective {
+    /// C++ `QuestObjective::IsStoringFlag`.
+    pub fn is_storing_flag_like_cpp(&self) -> bool {
+        matches!(self.obj_type, 10 | 11 | 12 | 14 | 19 | 20)
+    }
+
+    /// C++ condition validation limit for `CONDITION_QUEST_OBJECTIVE_PROGRESS`.
+    pub fn condition_progress_limit_like_cpp(&self) -> i32 {
+        if self.is_storing_flag_like_cpp() {
+            1
+        } else {
+            self.amount
+        }
+    }
+}
+
 // ── QuestStore ────────────────────────────────────────────────────────────────
 
 /// In-memory store of all quest templates and NPC relations.
@@ -160,8 +176,23 @@ impl QuestStore {
         }
     }
 
+    pub fn from_quests_like_cpp(quests: impl IntoIterator<Item = QuestTemplate>) -> Self {
+        Self {
+            quests: quests.into_iter().map(|quest| (quest.id, quest)).collect(),
+            starter_quests: HashMap::new(),
+            ender_quests: HashMap::new(),
+        }
+    }
+
     pub fn get(&self, id: u32) -> Option<&QuestTemplate> {
         self.quests.get(&id)
+    }
+
+    pub fn objective_like_cpp(&self, objective_id: u32) -> Option<&QuestObjective> {
+        self.quests
+            .values()
+            .flat_map(|quest| quest.objectives.iter())
+            .find(|objective| objective.id == objective_id)
     }
 
     /// Get all quests a given NPC can offer.

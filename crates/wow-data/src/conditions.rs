@@ -635,6 +635,16 @@ pub enum ConditionTypeValidationErrorLikeCpp {
         map_id: u32,
     },
     NonExistingPhase(u32),
+    NonExistingQuest {
+        condition_type: ConditionType,
+        quest_id: u32,
+    },
+    NonExistingQuestObjective(u32),
+    QuestObjectiveCountAboveLimit {
+        objective_id: u32,
+        count: u32,
+        limit: i32,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -658,6 +668,7 @@ pub enum ConditionSourceValidationErrorLikeCpp {
         source_group: u32,
         source_entry: i32,
     },
+    NonExistingQuestAvailable(u32),
     NonExistingTerrainSwapMap(u32),
     NonExistingPhaseArea(u32),
 }
@@ -676,6 +687,7 @@ pub struct ConditionExternalValidationStoresLikeCpp<'a> {
     pub skill_store: Option<&'a crate::SkillStore>,
     pub map_store: Option<&'a crate::MapStore>,
     pub phase_store: Option<&'a crate::PhaseStore>,
+    pub quest_store: Option<&'a crate::quest::QuestStore>,
     pub max_skill_value: Option<u32>,
     pub loot_template_exists: Option<&'a dyn Fn(ConditionSourceType, u32) -> bool>,
     pub loot_source_entry_exists: Option<&'a dyn Fn(ConditionSourceType, u32, i32) -> bool>,
@@ -1037,6 +1049,36 @@ pub fn validate_condition_type_external_like_cpp(
                 return Err(Error::NonExistingPhase(condition.condition_value1));
             }
         }
+        ConditionType::QuestState
+        | ConditionType::QuestRewarded
+        | ConditionType::QuestTaken
+        | ConditionType::QuestNone
+        | ConditionType::QuestComplete
+        | ConditionType::DailyQuestDone => {
+            if let Some(store) = stores.quest_store
+                && store.get(condition.condition_value1).is_none()
+            {
+                return Err(Error::NonExistingQuest {
+                    condition_type: condition.condition_type,
+                    quest_id: condition.condition_value1,
+                });
+            }
+        }
+        ConditionType::QuestObjectiveProgress => {
+            if let Some(store) = stores.quest_store {
+                let Some(objective) = store.objective_like_cpp(condition.condition_value1) else {
+                    return Err(Error::NonExistingQuestObjective(condition.condition_value1));
+                };
+                let limit = objective.condition_progress_limit_like_cpp();
+                if i32::try_from(condition.condition_value3).is_ok_and(|count| count > limit) {
+                    return Err(Error::QuestObjectiveCountAboveLimit {
+                        objective_id: condition.condition_value1,
+                        count: condition.condition_value3,
+                        limit,
+                    });
+                }
+            }
+        }
         _ => {}
     }
 
@@ -1085,6 +1127,15 @@ pub fn validate_condition_source_external_like_cpp(
                 && store.get(condition.source_entry as u32).is_none()
             {
                 return Err(Error::NonExistingPhaseArea(condition.source_entry as u32));
+            }
+        }
+        ConditionSourceType::QuestAvailable => {
+            if let Some(store) = stores.quest_store
+                && store.get(condition.source_entry as u32).is_none()
+            {
+                return Err(Error::NonExistingQuestAvailable(
+                    condition.source_entry as u32,
+                ));
             }
         }
         _ => {}
@@ -1791,6 +1842,65 @@ mod tests {
         }
     }
 
+    fn quest_template(
+        id: u32,
+        objectives: Vec<crate::quest::QuestObjective>,
+    ) -> crate::quest::QuestTemplate {
+        crate::quest::QuestTemplate {
+            id,
+            quest_type: 2,
+            quest_level: 1,
+            quest_max_scaling_level: 0,
+            min_level: 1,
+            quest_sort_id: 0,
+            quest_info_id: 0,
+            suggested_group_num: 0,
+            reward_next_quest: 0,
+            reward_xp_difficulty: 0,
+            reward_xp_multiplier: 1.0,
+            reward_money_difficulty: 0,
+            reward_money_multiplier: 1.0,
+            reward_bonus_money: 0,
+            reward_display_spell: [0; crate::quest::QUEST_REWARD_DISPLAY_SPELL_COUNT],
+            reward_spell: 0,
+            reward_honor: 0,
+            flags: 0,
+            flags_ex: 0,
+            flags_ex2: 0,
+            reward_items: [0; crate::quest::QUEST_REWARD_ITEM_COUNT],
+            reward_amounts: [0; crate::quest::QUEST_REWARD_ITEM_COUNT],
+            item_drop: [0; crate::quest::QUEST_ITEM_DROP_COUNT],
+            item_drop_quantity: [0; crate::quest::QUEST_ITEM_DROP_COUNT],
+            log_title: String::new(),
+            log_description: String::new(),
+            quest_description: String::new(),
+            area_description: String::new(),
+            quest_completion_log: String::new(),
+            objectives,
+            allowable_races: 0,
+            allowable_classes: 0,
+            max_level: 0,
+            prev_quest_id: 0,
+            reward_choice_items: [(0, 0); crate::quest::QUEST_REWARD_CHOICES_COUNT],
+        }
+    }
+
+    fn quest_objective(id: u32, obj_type: u8, amount: i32) -> crate::quest::QuestObjective {
+        crate::quest::QuestObjective {
+            id,
+            quest_id: 42,
+            obj_type,
+            order: 0,
+            storage_index: 0,
+            object_id: 0,
+            amount,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        }
+    }
+
     fn condition_row(
         source_type: ConditionSourceType,
         condition_type: ConditionType,
@@ -2207,6 +2317,10 @@ mod tests {
         }]);
         let phase_store =
             crate::PhaseStore::from_entries([crate::PhaseEntry { id: 600, flags: 0 }]);
+        let quest_store = crate::quest::QuestStore::from_quests_like_cpp([quest_template(
+            700,
+            vec![quest_objective(800, 0, 5), quest_objective(801, 10, 99)],
+        )]);
         let stores = ConditionExternalValidationStoresLikeCpp {
             item_store: Some(&item_store),
             spell_store: Some(&spell_store),
@@ -2214,6 +2328,7 @@ mod tests {
             skill_store: Some(&skill_store),
             map_store: Some(&map_store),
             phase_store: Some(&phase_store),
+            quest_store: Some(&quest_store),
             max_skill_value: Some(450),
             ..ConditionExternalValidationStoresLikeCpp::default()
         };
@@ -2249,6 +2364,23 @@ mod tests {
             Condition {
                 condition_type: ConditionType::PhaseId,
                 condition_value1: 600,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::QuestRewarded,
+                condition_value1: 700,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::QuestObjectiveProgress,
+                condition_value1: 800,
+                condition_value3: 5,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::QuestObjectiveProgress,
+                condition_value1: 801,
+                condition_value3: 1,
                 ..Condition::default()
             },
         ] {
@@ -2287,6 +2419,46 @@ mod tests {
                 }
             )
         ));
+        assert!(matches!(
+            validate_condition_type_external_like_cpp(
+                &Condition {
+                    condition_type: ConditionType::QuestComplete,
+                    condition_value1: 999,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(ConditionTypeValidationErrorLikeCpp::NonExistingQuest { quest_id: 999, .. })
+        ));
+        assert!(matches!(
+            validate_condition_type_external_like_cpp(
+                &Condition {
+                    condition_type: ConditionType::QuestObjectiveProgress,
+                    condition_value1: 999,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(ConditionTypeValidationErrorLikeCpp::NonExistingQuestObjective(999))
+        ));
+        assert!(matches!(
+            validate_condition_type_external_like_cpp(
+                &Condition {
+                    condition_type: ConditionType::QuestObjectiveProgress,
+                    condition_value1: 801,
+                    condition_value3: 2,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(
+                ConditionTypeValidationErrorLikeCpp::QuestObjectiveCountAboveLimit {
+                    objective_id: 801,
+                    count: 2,
+                    limit: 1
+                }
+            )
+        ));
     }
 
     #[test]
@@ -2302,6 +2474,8 @@ mod tests {
             instance_type: 0,
             flags1: 0,
         }]);
+        let quest_store =
+            crate::quest::QuestStore::from_quests_like_cpp([quest_template(700, Vec::new())]);
         let loot_template_exists = |source_type: ConditionSourceType, source_group: u32| {
             source_type == ConditionSourceType::CreatureLootTemplate && source_group == 123
         };
@@ -2314,11 +2488,34 @@ mod tests {
         let stores = ConditionExternalValidationStoresLikeCpp {
             area_table_store: Some(&area_store),
             map_store: Some(&map_store),
+            quest_store: Some(&quest_store),
             loot_template_exists: Some(&loot_template_exists),
             loot_source_entry_exists: Some(&loot_source_entry_exists),
             ..ConditionExternalValidationStoresLikeCpp::default()
         };
 
+        assert_eq!(
+            validate_condition_source_external_like_cpp(
+                &Condition {
+                    source_type: ConditionSourceType::QuestAvailable,
+                    source_entry: 700,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Ok(())
+        );
+        assert!(matches!(
+            validate_condition_source_external_like_cpp(
+                &Condition {
+                    source_type: ConditionSourceType::QuestAvailable,
+                    source_entry: 999,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(ConditionSourceValidationErrorLikeCpp::NonExistingQuestAvailable(999))
+        ));
         assert_eq!(
             validate_condition_source_external_like_cpp(
                 &Condition {

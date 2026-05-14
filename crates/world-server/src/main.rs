@@ -803,6 +803,7 @@ async fn main() -> Result<()> {
                 skill_store: Some(skill_store.as_ref()),
                 map_store: Some(map_store.as_ref()),
                 phase_store: Some(phase_store.as_ref()),
+                quest_store: Some(quest_store.as_ref()),
                 max_skill_value: Some(max_skill_value_like_cpp(&world_configs)),
                 loot_template_exists: Some(&loot_template_exists),
                 loot_source_entry_exists: Some(&loot_source_entry_exists),
