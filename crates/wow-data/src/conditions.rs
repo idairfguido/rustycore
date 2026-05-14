@@ -669,6 +669,11 @@ pub enum ConditionSourceValidationErrorLikeCpp {
         source_entry: i32,
     },
     NonExistingQuestAvailable(u32),
+    NonExistingSourceSpell {
+        source_type: ConditionSourceType,
+        spell_id: i32,
+    },
+    NonExistingClientAreaTrigger(i32),
     NonExistingTerrainSwapMap(u32),
     NonExistingPhaseArea(u32),
 }
@@ -688,6 +693,7 @@ pub struct ConditionExternalValidationStoresLikeCpp<'a> {
     pub map_store: Option<&'a crate::MapStore>,
     pub phase_store: Option<&'a crate::PhaseStore>,
     pub quest_store: Option<&'a crate::quest::QuestStore>,
+    pub area_trigger_store: Option<&'a crate::AreaTriggerStore>,
     pub max_skill_value: Option<u32>,
     pub loot_template_exists: Option<&'a dyn Fn(ConditionSourceType, u32) -> bool>,
     pub loot_source_entry_exists: Option<&'a dyn Fn(ConditionSourceType, u32, i32) -> bool>,
@@ -1136,6 +1142,31 @@ pub fn validate_condition_source_external_like_cpp(
                 return Err(Error::NonExistingQuestAvailable(
                     condition.source_entry as u32,
                 ));
+            }
+        }
+        ConditionSourceType::SpellImplicitTarget
+        | ConditionSourceType::Spell
+        | ConditionSourceType::SpellProc
+        | ConditionSourceType::VehicleSpell
+        | ConditionSourceType::SpellClickEvent
+        | ConditionSourceType::TrainerSpell => {
+            if let Some(store) = stores.spell_store
+                && store.get(condition.source_entry).is_none()
+            {
+                return Err(Error::NonExistingSourceSpell {
+                    source_type: condition.source_type,
+                    spell_id: condition.source_entry,
+                });
+            }
+        }
+        ConditionSourceType::AreaTriggerClientTriggered => {
+            if let Some(store) = stores.area_trigger_store
+                && u32::try_from(condition.source_entry)
+                    .ok()
+                    .and_then(|id| store.get_trigger(id))
+                    .is_none()
+            {
+                return Err(Error::NonExistingClientAreaTrigger(condition.source_entry));
             }
         }
         _ => {}
@@ -2476,6 +2507,21 @@ mod tests {
         }]);
         let quest_store =
             crate::quest::QuestStore::from_quests_like_cpp([quest_template(700, Vec::new())]);
+        let mut spell_store = crate::SpellStore::new();
+        spell_store.insert(200, spell_info(200));
+        let mut area_trigger_store = crate::AreaTriggerStore::new();
+        area_trigger_store.insert(crate::AreaTriggerData {
+            trigger_id: 300,
+            map_id: 571,
+            pos: wow_core::Position::ZERO,
+            shape: crate::TriggerShape::Sphere,
+            radius: 1.0,
+            extents: [0.0; 3],
+            height: 0.0,
+            yaw: 0.0,
+            vertices: Vec::new(),
+            teleport: None,
+        });
         let loot_template_exists = |source_type: ConditionSourceType, source_group: u32| {
             source_type == ConditionSourceType::CreatureLootTemplate && source_group == 123
         };
@@ -2489,6 +2535,8 @@ mod tests {
             area_table_store: Some(&area_store),
             map_store: Some(&map_store),
             quest_store: Some(&quest_store),
+            spell_store: Some(&spell_store),
+            area_trigger_store: Some(&area_trigger_store),
             loot_template_exists: Some(&loot_template_exists),
             loot_source_entry_exists: Some(&loot_source_entry_exists),
             ..ConditionExternalValidationStoresLikeCpp::default()
@@ -2515,6 +2563,55 @@ mod tests {
                 stores
             ),
             Err(ConditionSourceValidationErrorLikeCpp::NonExistingQuestAvailable(999))
+        ));
+        assert_eq!(
+            validate_condition_source_external_like_cpp(
+                &Condition {
+                    source_type: ConditionSourceType::Spell,
+                    source_entry: 200,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Ok(())
+        );
+        assert!(matches!(
+            validate_condition_source_external_like_cpp(
+                &Condition {
+                    source_type: ConditionSourceType::SpellClickEvent,
+                    source_entry: 999,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(
+                ConditionSourceValidationErrorLikeCpp::NonExistingSourceSpell {
+                    source_type: ConditionSourceType::SpellClickEvent,
+                    spell_id: 999
+                }
+            )
+        ));
+        assert_eq!(
+            validate_condition_source_external_like_cpp(
+                &Condition {
+                    source_type: ConditionSourceType::AreaTriggerClientTriggered,
+                    source_entry: 300,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Ok(())
+        );
+        assert!(matches!(
+            validate_condition_source_external_like_cpp(
+                &Condition {
+                    source_type: ConditionSourceType::AreaTriggerClientTriggered,
+                    source_entry: 999,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(ConditionSourceValidationErrorLikeCpp::NonExistingClientAreaTrigger(999))
         ));
         assert_eq!(
             validate_condition_source_external_like_cpp(
