@@ -18,3 +18,4 @@ pub mod quest;
 pub mod social;
 pub mod spell;
 pub mod trainer;
+pub mod vehicle;

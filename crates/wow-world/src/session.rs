@@ -5595,6 +5595,54 @@ impl WorldSession {
                     Err(e) => warn!("Failed to read MoveSetVehicleRecIdAck: {e}"),
                 }
             }
+            ClientOpcodes::MoveDismissVehicle => {
+                match wow_packet::packets::vehicle::MoveDismissVehicle::read(&mut pkt) {
+                    Ok(packet) => self.handle_move_dismiss_vehicle(packet).await,
+                    Err(e) => warn!("Failed to read MoveDismissVehicle: {e}"),
+                }
+            }
+            ClientOpcodes::RequestVehiclePrevSeat => {
+                match wow_packet::packets::vehicle::RequestVehiclePrevSeat::read(&mut pkt) {
+                    Ok(packet) => self.handle_request_vehicle_prev_seat(packet).await,
+                    Err(e) => warn!("Failed to read RequestVehiclePrevSeat: {e}"),
+                }
+            }
+            ClientOpcodes::RequestVehicleNextSeat => {
+                match wow_packet::packets::vehicle::RequestVehicleNextSeat::read(&mut pkt) {
+                    Ok(packet) => self.handle_request_vehicle_next_seat(packet).await,
+                    Err(e) => warn!("Failed to read RequestVehicleNextSeat: {e}"),
+                }
+            }
+            ClientOpcodes::MoveChangeVehicleSeats => {
+                match wow_packet::packets::vehicle::MoveChangeVehicleSeats::read(&mut pkt) {
+                    Ok(packet) => self.handle_move_change_vehicle_seats(packet).await,
+                    Err(e) => warn!("Failed to read MoveChangeVehicleSeats: {e}"),
+                }
+            }
+            ClientOpcodes::RequestVehicleSwitchSeat => {
+                match wow_packet::packets::vehicle::RequestVehicleSwitchSeat::read(&mut pkt) {
+                    Ok(packet) => self.handle_request_vehicle_switch_seat(packet).await,
+                    Err(e) => warn!("Failed to read RequestVehicleSwitchSeat: {e}"),
+                }
+            }
+            ClientOpcodes::RideVehicleInteract => {
+                match wow_packet::packets::vehicle::RideVehicleInteract::read(&mut pkt) {
+                    Ok(packet) => self.handle_ride_vehicle_interact(packet).await,
+                    Err(e) => warn!("Failed to read RideVehicleInteract: {e}"),
+                }
+            }
+            ClientOpcodes::EjectPassenger => {
+                match wow_packet::packets::vehicle::EjectPassenger::read(&mut pkt) {
+                    Ok(packet) => self.handle_eject_passenger(packet).await,
+                    Err(e) => warn!("Failed to read EjectPassenger: {e}"),
+                }
+            }
+            ClientOpcodes::RequestVehicleExit => {
+                match wow_packet::packets::vehicle::RequestVehicleExit::read(&mut pkt) {
+                    Ok(packet) => self.handle_request_vehicle_exit(packet).await,
+                    Err(e) => warn!("Failed to read RequestVehicleExit: {e}"),
+                }
+            }
             ClientOpcodes::MoveCollisionDisableAck
             | ClientOpcodes::MoveCollisionEnableAck
             | ClientOpcodes::MoveEnableDoubleJumpAck
@@ -13633,6 +13681,46 @@ mod tests {
             ),
             (
                 ClientOpcodes::TrainerBuySpell,
+                SessionStatus::LoggedIn,
+                PacketProcessing::Inplace,
+            ),
+            (
+                ClientOpcodes::MoveDismissVehicle,
+                SessionStatus::LoggedIn,
+                PacketProcessing::ThreadSafe,
+            ),
+            (
+                ClientOpcodes::RequestVehiclePrevSeat,
+                SessionStatus::LoggedIn,
+                PacketProcessing::Inplace,
+            ),
+            (
+                ClientOpcodes::RequestVehicleNextSeat,
+                SessionStatus::LoggedIn,
+                PacketProcessing::Inplace,
+            ),
+            (
+                ClientOpcodes::MoveChangeVehicleSeats,
+                SessionStatus::LoggedIn,
+                PacketProcessing::ThreadSafe,
+            ),
+            (
+                ClientOpcodes::RequestVehicleSwitchSeat,
+                SessionStatus::LoggedIn,
+                PacketProcessing::Inplace,
+            ),
+            (
+                ClientOpcodes::RideVehicleInteract,
+                SessionStatus::LoggedIn,
+                PacketProcessing::ThreadUnsafe,
+            ),
+            (
+                ClientOpcodes::EjectPassenger,
+                SessionStatus::LoggedIn,
+                PacketProcessing::ThreadUnsafe,
+            ),
+            (
+                ClientOpcodes::RequestVehicleExit,
                 SessionStatus::LoggedIn,
                 PacketProcessing::Inplace,
             ),

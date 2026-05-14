@@ -8,7 +8,7 @@
 use wow_constants::ServerOpcodes;
 use wow_core::ObjectGuid;
 
-use crate::packets::movement::MovementAck;
+use crate::packets::movement::{MovementAck, MovementInfo};
 use crate::{ClientPacket, PacketError, ServerPacket, WorldPacket};
 
 /// Mirrors C++ `WorldPackets::Vehicle::MoveSetVehicleRecID`.
@@ -71,6 +71,132 @@ impl ClientPacket for MoveSetVehicleRecIdAck {
     }
 }
 
+/// Mirrors C++ `WorldPackets::Vehicle::MoveDismissVehicle`.
+#[derive(Debug, Clone)]
+pub struct MoveDismissVehicle {
+    pub status: MovementInfo,
+}
+
+impl ClientPacket for MoveDismissVehicle {
+    const OPCODE: wow_constants::ClientOpcodes = wow_constants::ClientOpcodes::MoveDismissVehicle;
+
+    fn read(packet: &mut WorldPacket) -> Result<Self, PacketError> {
+        Ok(Self {
+            status: MovementInfo::read(packet)?,
+        })
+    }
+}
+
+/// Mirrors C++ `WorldPackets::Vehicle::RequestVehiclePrevSeat`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RequestVehiclePrevSeat;
+
+impl ClientPacket for RequestVehiclePrevSeat {
+    const OPCODE: wow_constants::ClientOpcodes =
+        wow_constants::ClientOpcodes::RequestVehiclePrevSeat;
+
+    fn read(_packet: &mut WorldPacket) -> Result<Self, PacketError> {
+        Ok(Self)
+    }
+}
+
+/// Mirrors C++ `WorldPackets::Vehicle::RequestVehicleNextSeat`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RequestVehicleNextSeat;
+
+impl ClientPacket for RequestVehicleNextSeat {
+    const OPCODE: wow_constants::ClientOpcodes =
+        wow_constants::ClientOpcodes::RequestVehicleNextSeat;
+
+    fn read(_packet: &mut WorldPacket) -> Result<Self, PacketError> {
+        Ok(Self)
+    }
+}
+
+/// Mirrors C++ `WorldPackets::Vehicle::MoveChangeVehicleSeats`.
+#[derive(Debug, Clone)]
+pub struct MoveChangeVehicleSeats {
+    pub status: MovementInfo,
+    pub dst_vehicle: ObjectGuid,
+    pub dst_seat_index: u8,
+}
+
+impl ClientPacket for MoveChangeVehicleSeats {
+    const OPCODE: wow_constants::ClientOpcodes =
+        wow_constants::ClientOpcodes::MoveChangeVehicleSeats;
+
+    fn read(packet: &mut WorldPacket) -> Result<Self, PacketError> {
+        Ok(Self {
+            status: MovementInfo::read(packet)?,
+            dst_vehicle: packet.read_packed_guid()?,
+            dst_seat_index: packet.read_uint8()?,
+        })
+    }
+}
+
+/// Mirrors C++ `WorldPackets::Vehicle::RequestVehicleSwitchSeat`.
+#[derive(Debug, Clone, Copy)]
+pub struct RequestVehicleSwitchSeat {
+    pub vehicle: ObjectGuid,
+    pub seat_index: u8,
+}
+
+impl ClientPacket for RequestVehicleSwitchSeat {
+    const OPCODE: wow_constants::ClientOpcodes =
+        wow_constants::ClientOpcodes::RequestVehicleSwitchSeat;
+
+    fn read(packet: &mut WorldPacket) -> Result<Self, PacketError> {
+        Ok(Self {
+            vehicle: packet.read_packed_guid()?,
+            seat_index: packet.read_uint8()?,
+        })
+    }
+}
+
+/// Mirrors C++ `WorldPackets::Vehicle::RideVehicleInteract`.
+#[derive(Debug, Clone, Copy)]
+pub struct RideVehicleInteract {
+    pub vehicle: ObjectGuid,
+}
+
+impl ClientPacket for RideVehicleInteract {
+    const OPCODE: wow_constants::ClientOpcodes = wow_constants::ClientOpcodes::RideVehicleInteract;
+
+    fn read(packet: &mut WorldPacket) -> Result<Self, PacketError> {
+        Ok(Self {
+            vehicle: packet.read_packed_guid()?,
+        })
+    }
+}
+
+/// Mirrors C++ `WorldPackets::Vehicle::EjectPassenger`.
+#[derive(Debug, Clone, Copy)]
+pub struct EjectPassenger {
+    pub passenger: ObjectGuid,
+}
+
+impl ClientPacket for EjectPassenger {
+    const OPCODE: wow_constants::ClientOpcodes = wow_constants::ClientOpcodes::EjectPassenger;
+
+    fn read(packet: &mut WorldPacket) -> Result<Self, PacketError> {
+        Ok(Self {
+            passenger: packet.read_packed_guid()?,
+        })
+    }
+}
+
+/// Mirrors C++ `WorldPackets::Vehicle::RequestVehicleExit`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RequestVehicleExit;
+
+impl ClientPacket for RequestVehicleExit {
+    const OPCODE: wow_constants::ClientOpcodes = wow_constants::ClientOpcodes::RequestVehicleExit;
+
+    fn read(_packet: &mut WorldPacket) -> Result<Self, PacketError> {
+        Ok(Self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,5 +240,30 @@ mod tests {
 
         assert_eq!(u16::from_le_bytes([bytes[0], bytes[1]]), 0x26e6);
         assert_eq!(bytes.len(), 2);
+    }
+
+    #[test]
+    fn request_vehicle_switch_seat_reads_cpp_layout() {
+        let guid = ObjectGuid::create_player(1, 42);
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_packed_guid(&guid);
+        pkt.write_uint8(3);
+
+        let parsed = RequestVehicleSwitchSeat::read(&mut pkt).unwrap();
+
+        assert_eq!(parsed.vehicle, guid);
+        assert_eq!(parsed.seat_index, 3);
+    }
+
+    #[test]
+    fn ride_vehicle_interact_and_eject_passenger_read_packed_guid() {
+        let guid = ObjectGuid::create_player(1, 42);
+        let mut ride = WorldPacket::new_empty();
+        ride.write_packed_guid(&guid);
+        let mut eject = WorldPacket::new_empty();
+        eject.write_packed_guid(&guid);
+
+        assert_eq!(RideVehicleInteract::read(&mut ride).unwrap().vehicle, guid);
+        assert_eq!(EjectPassenger::read(&mut eject).unwrap().passenger, guid);
     }
 }
