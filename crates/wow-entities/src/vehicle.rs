@@ -1,31 +1,10 @@
 use std::collections::BTreeMap;
 
 use wow_constants::TypeId;
+pub use wow_constants::{VehicleExitParameter, VehicleFlag};
 use wow_core::{ObjectGuid, Position};
 
 pub const MAX_VEHICLE_SEATS: usize = 8;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
-pub enum VehicleFlag {
-    NoStrafe = 0x0000_0001,
-    NoJumping = 0x0000_0002,
-    FullSpeedTurning = 0x0000_0004,
-    AllowPitching = 0x0000_0010,
-    FullSpeedPitching = 0x0000_0020,
-    CustomPitch = 0x0000_0040,
-    AdjustAimAngle = 0x0000_0400,
-    AdjustAimPower = 0x0000_0800,
-    FixedPosition = 0x0020_0000,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum VehicleExitParameter {
-    None = 0,
-    Offset = 1,
-    Destination = 2,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VehicleStatus {

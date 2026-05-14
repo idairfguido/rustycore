@@ -159,9 +159,9 @@ DBC stores:
 - `crates/wow-data/src/vehicle.rs` — `Vehicle.db2`/`VehicleSeat.db2` stores with hotfix overlays, C++ `vehicle_template` despawn-delay lookup, and C++ `vehicle_accessory`/`vehicle_template_accessory` lookup.
 - `crates/wow-world/src/session.rs` — represented mount VehicleKit create/remove path, owner vehicle-rec packets, movement ack validation, mount accessory row selection, collision-height and pet-mode side effects.
 - `crates/wow-packet/src/packets/movement.rs` / `crates/wow-packet/src/packets/vehicle.rs` — movement vehicle id and represented vehicle-rec packets.
-- `crates/wow-constants/src/opcodes.rs` — vehicle opcodes enumerated; full request handlers still pending.
+- `crates/wow-constants/src/vehicle.rs` / `crates/wow-constants/src/opcodes.rs` — C++ `VehicleDefines.h` power/flag/spell/exit constants and vehicle opcodes enumerated; full request handlers still pending.
 
-**What's implemented:** represented VehicleKit state and mount integration, DB2 seat construction, C++ vehicle template despawn-delay lookup, C++ vehicle accessory row lookup, movement/vehicle-rec packet coverage for the mount path, and focused unit tests for the represented state.
+**What's implemented:** represented VehicleKit state and mount integration, C++ `VehicleDefines.h` constants, DB2 seat construction, C++ vehicle template despawn-delay lookup, C++ vehicle accessory row lookup, movement/vehicle-rec packet coverage for the mount path, and focused unit tests for the represented state.
 
 **What's missing vs C++:** full live passenger runtime, accessory TempSummon/HandleSpellClick installation, transport-frame xform, immunities, despawn timer, and join event scheduling. `wow_entities::Vehicle` now represents install/uninstall status, seat maps, usable-seat counts, passenger insert/remove helpers, and vehicle accessory row selection is loaded in `wow-data` with C++ GUID-first/template fallback semantics.
 
@@ -201,7 +201,7 @@ DBC stores:
 <!-- REFINE.022:END task-wbs -->
 
 - [x] **#VEH.1** Define `VehicleEntry` / `VehicleSeatEntry` DBC readers in `wow-data` (L)
-- [ ] **#VEH.2** Port `VehicleFlags`, `PowerType`, `VehicleExitParameters`, `VehicleSpells` to `wow-constants` (L)
+- [x] **#VEH.2** Port `VehicleFlags`, `PowerType`, `VehicleExitParameters`, `VehicleSpells` to `wow-constants` (L)
 - [x] **#VEH.3** Define `VehicleSeat`, `VehicleSeatAddon`, `VehicleAccessory`, `VehicleTemplate`, `PassengerInfo` POD types in `wow-world` (L) — represented types live in `wow-entities`.
 - [x] **#VEH.4** Port `TransportBase` xform (`CalculatePassengerPosition`/`Offset`) as free fns in `wow-entities` (L)
 - [ ] **#VEH.5** Implement `Vehicle` struct + `Install/Uninstall/Reset` lifecycle (M) — partial: install/uninstall represented; `Reset(evading)` and live `Unit` ownership pending.
@@ -295,14 +295,14 @@ DBC stores:
 
 | C++ symbol | Found in Rust | File | Verdict |
 |---|---|---|---|
-| `class Vehicle` | no | — | ❌ missing |
+| `class Vehicle` | partial | `crates/wow-entities/src/vehicle.rs`; `crates/wow-world/src/session.rs` | ⚠️ represented state/lifecycle only; live Unit ownership and scripts pending |
 | `class VehicleJoinEvent` | no | — | ❌ missing |
-| `class TransportBase` | no | — | ❌ missing |
-| `enum VehicleFlags` | no | — | ❌ missing |
-| `enum PowerType` (vehicle powers) | no | — | ❌ missing |
-| `struct VehicleSeat` / `VehicleSeatAddon` / `VehicleAccessory` / `VehicleTemplate` / `PassengerInfo` | no | — | ❌ missing |
-| `enum VehicleExitParameters` | no | — | ❌ missing |
-| `VEHICLE_SPELL_RIDE_HARDCODED` (46598) | no | — | ❌ missing |
+| `class TransportBase` | partial | `crates/wow-entities/src/vehicle.rs` | ⚠️ offset/global transform helpers ported; trait integration pending |
+| `enum VehicleFlags` | yes | `crates/wow-constants/src/vehicle.rs` | ✅ present |
+| `enum PowerType` (vehicle powers) | yes | `crates/wow-constants/src/vehicle.rs` | ✅ present as `VehiclePowerType` |
+| `struct VehicleSeat` / `VehicleSeatAddon` / `VehicleAccessory` / `VehicleTemplate` / `PassengerInfo` | yes | `crates/wow-entities/src/vehicle.rs` | ✅ represented POD/state present |
+| `enum VehicleExitParameters` | yes | `crates/wow-constants/src/vehicle.rs` | ✅ present as `VehicleExitParameter` |
+| `VEHICLE_SPELL_RIDE_HARDCODED` (46598) | yes | `crates/wow-constants/src/vehicle.rs` | ✅ present as `VehicleSpell::RideHardcoded` |
 | `TypeId::Vehicle = 9` | yes | `crates/wow-constants/src/object.rs` | ✅ present (constant only) |
 | `CMSG_REQUEST_VEHICLE_*` opcodes | yes (constants) | `crates/wow-constants/src/opcodes.rs` | ⚠️ enumerated, no handler |
 | `MOVEMENT_INFO::Transport.vehicle_id` | yes | `crates/wow-packet/src/packets/movement.rs` | ✅ wire-format only |

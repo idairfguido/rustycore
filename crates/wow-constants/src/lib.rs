@@ -19,6 +19,7 @@ pub mod shared;
 pub mod spell;
 pub mod unit;
 pub mod update;
+pub mod vehicle;
 
 // Re-export key types for convenience
 pub use conditions::*;
@@ -32,3 +33,4 @@ pub use shared::*;
 pub use spell::*;
 pub use unit::*;
 pub use update::*;
+pub use vehicle::*;
