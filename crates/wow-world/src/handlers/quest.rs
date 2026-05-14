@@ -18,6 +18,7 @@
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 use wow_constants::ClientOpcodes;
+use wow_data::DISABLE_TYPE_QUEST;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::ServerPacket;
 use wow_packet::packets::quest::{
@@ -479,6 +480,14 @@ impl WorldSession {
             }
         };
 
+        if self.is_quest_disabled_like_cpp(quest_id) {
+            debug!(
+                account = self.account_id,
+                quest_id, "RequestReward: quest disabled"
+            );
+            return;
+        }
+
         // C#: if (GetPlayer().CanCompleteQuest(questID)) GetPlayer().CompleteQuest(questID)
         // We check if all objectives are done; if so, upgrade status to Complete (2).
         let is_complete = self
@@ -556,6 +565,14 @@ impl WorldSession {
                 return;
             }
         };
+
+        if self.is_quest_disabled_like_cpp(quest_id) {
+            debug!(
+                account = self.account_id,
+                quest_id, "QuestGiverCompleteQuest: quest disabled"
+            );
+            return;
+        }
 
         // Check if player has the quest active
         if !self.has_quest(quest_id) {
@@ -637,6 +654,14 @@ impl WorldSession {
                 }
             }
         };
+
+        if self.is_quest_disabled_like_cpp(quest_id) {
+            debug!(
+                account = self.account_id,
+                quest_id, "ChooseReward: quest disabled"
+            );
+            return;
+        }
 
         // SatisfyQuestStatus — C# HandleQuestgiverChooseReward line ~370
         // Player must have the quest active AND it must be complete (status=2)
@@ -740,9 +765,11 @@ impl WorldSession {
         // Check if NPC ends any quest the player has completed (blue ?)
         // C# ref: GetQuestDialogStatus → QuestGiverStatus.Reward
         let has_turn_in = store.quests_for_ender(npc_entry).iter().any(|q| {
-            self.player_quests
-                .get(&q.id)
-                .map_or(false, |qs| qs.status == 2)
+            !self.is_quest_disabled_like_cpp(q.id)
+                && self
+                    .player_quests
+                    .get(&q.id)
+                    .map_or(false, |qs| qs.status == 2)
         });
 
         if has_turn_in {
@@ -770,6 +797,15 @@ impl WorldSession {
     /// Full eligibility check before accepting a quest.
     /// C# ref: Player.CanTakeQuest (SatisfyQuestStatus + SatisfyQuestRace/Class/Level + PrevQuest)
     pub fn can_take_quest(&self, quest: &wow_data::quest::QuestTemplate) -> bool {
+        if self.is_quest_disabled_like_cpp(quest.id) {
+            debug!(
+                account = self.account_id,
+                quest_id = quest.id,
+                "CanTakeQuest: quest disabled"
+            );
+            return false;
+        }
+
         // SatisfyQuestStatus — C# lines 1624-1654
         // If quest is already rewarded (non-repeatable), cannot take again.
         if self.rewarded_quests.contains(&quest.id) && !quest.is_repeatable() {
@@ -829,6 +865,12 @@ impl WorldSession {
             self.player_class_like_cpp(),
             self.player_level_like_cpp(),
         )
+    }
+
+    fn is_quest_disabled_like_cpp(&self, quest_id: u32) -> bool {
+        self.disable_mgr().is_some_and(|disable_mgr| {
+            disable_mgr.is_disabled_for_like_cpp(DISABLE_TYPE_QUEST, quest_id, None, 0, None)
+        })
     }
 
     /// Save quest status to the characters database.
