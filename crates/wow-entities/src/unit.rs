@@ -34,6 +34,7 @@ pub const UNIT_DATA_COMBAT_REACH_BIT: usize = 47;
 pub const UNIT_DATA_DISPLAY_SCALE_BIT: usize = 48;
 pub const UNIT_DATA_NATIVE_DISPLAY_ID_BIT: usize = 49;
 pub const UNIT_DATA_NATIVE_DISPLAY_SCALE_BIT: usize = 50;
+pub const UNIT_DATA_MOUNT_DISPLAY_ID_BIT: usize = 51;
 pub const UNIT_DATA_STAND_STATE_BIT: usize = 56;
 pub const UNIT_DATA_TARGET_BIT: usize = 19;
 pub const UNIT_DATA_RACE_BIT: usize = 24;
@@ -70,6 +71,7 @@ pub struct UnitDataValues {
     pub display_scale: f32,
     pub native_display_id: i32,
     pub native_display_scale: f32,
+    pub mount_display_id: i32,
     pub stand_state: u8,
     pub power: [i32; MAX_POWERS_PER_CLASS],
     pub max_power: [i32; MAX_POWERS_PER_CLASS],
@@ -98,6 +100,7 @@ impl Default for UnitDataValues {
             display_scale: 0.0,
             native_display_id: 0,
             native_display_scale: 0.0,
+            mount_display_id: 0,
             stand_state: UnitStandStateType::Stand as u8,
             power: [0; MAX_POWERS_PER_CLASS],
             max_power: [0; MAX_POWERS_PER_CLASS],
@@ -444,6 +447,12 @@ impl Unit {
     pub fn set_display_power(&mut self, power: PowerType) {
         self.set_u8_field(UNIT_DATA_DISPLAY_POWER_BIT, power as u8, |data| {
             &mut data.display_power
+        });
+    }
+
+    pub fn set_mount_display_id(&mut self, display_id: u32) {
+        self.set_i32_field(UNIT_DATA_MOUNT_DISPLAY_ID_BIT, display_id as i32, |data| {
+            &mut data.mount_display_id
         });
     }
 

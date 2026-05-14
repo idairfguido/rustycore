@@ -963,6 +963,10 @@ pub struct WorldSession {
     taxi_unit_flags_like_cpp: UnitFlags,
     /// Represented mount state touched by `CleanupAfterTaxiFlight`.
     taxi_mounted_like_cpp: bool,
+    /// Represented `Unit::SetMountDisplayId` until UnitData owns live player fields.
+    player_mount_display_id_like_cpp: i32,
+    /// Represented `UNIT_FLAG_MOUNT` state until UnitData owns live player flags.
+    player_mounted_like_cpp: bool,
     /// Represented `pvpInfo.IsHostile` branch for Honorless Target after taxi landing.
     player_pvp_hostile_like_cpp: bool,
     /// Represented `Player::IsPvP()` branch for friendly-area near teleport handling.
@@ -1310,6 +1314,7 @@ pub enum RepresentedAuraEffectLikeCpp {
     SafeFall,
     Fly,
     Ghost,
+    Mounted,
     MountedFlightSpeed,
     ModifyFallDamagePct,
     WaterWalk,
@@ -1540,6 +1545,8 @@ impl WorldSession {
             taxi_flight_state_like_cpp: None,
             taxi_unit_flags_like_cpp: UnitFlags::empty(),
             taxi_mounted_like_cpp: false,
+            player_mount_display_id_like_cpp: 0,
+            player_mounted_like_cpp: false,
             player_pvp_hostile_like_cpp: false,
             player_pvp_enabled_like_cpp: false,
             player_in_pvp_flag_like_cpp: false,
@@ -4484,10 +4491,83 @@ impl WorldSession {
         Ok(())
     }
 
+    fn apply_represented_mounted_aura_like_cpp(
+        &mut self,
+        spell_id: i32,
+        caster_guid: ObjectGuid,
+        effect: &wow_data::SpellEffectInfo,
+    ) -> Result<(), &'static str> {
+        let display_id = u32::try_from(spell_id)
+            .ok()
+            .and_then(|spell_id| {
+                self.represented_mount_aura_display_candidates_like_cpp(spell_id)
+                    .into_iter()
+                    .next()
+            })
+            .unwrap_or(effect.effect_misc_value_1);
+
+        let mut slot = 0u8;
+        while self.visible_auras.contains_key(&slot) && slot < 255 {
+            slot += 1;
+        }
+
+        if slot >= 255 {
+            return Err("No free aura slots");
+        }
+
+        let aura = AuraApplication {
+            spell_id,
+            caster_guid,
+            slot,
+            duration_total: 0,
+            duration_remaining: 0,
+            stack_count: 1,
+            aura_flags: 0x0000_0001,
+            aura_interrupt_flags: 0,
+            aura_interrupt_flags2: 0,
+            represented_effect: Some(RepresentedAuraEffectLikeCpp::Mounted),
+            represented_amount: effect.effect_base_points,
+            represented_multiplier: 1.0,
+            applied_at: Instant::now(),
+        };
+
+        self.visible_auras.insert(slot, aura);
+        self.player_mount_display_id_like_cpp = display_id;
+        self.player_mounted_like_cpp = display_id != 0;
+
+        self.send_aura_update_applied(spell_id, slot, caster_guid, 0, 0x0000_0001);
+        self.send_represented_mount_display_update_like_cpp(display_id);
+
+        Ok(())
+    }
+
+    fn send_represented_mount_display_update_like_cpp(&mut self, display_id: i32) {
+        let Some(player_guid) = self.player_guid() else {
+            return;
+        };
+
+        use wow_packet::packets::update::{UnitDataValuesDeltaUpdate, UpdateObject};
+        let mut data = UnitDataValuesDeltaUpdate::default();
+        data.unit_data_mask[1] |= 1 << (51 - 32);
+        data.mount_display_id = display_id;
+
+        self.send_packet(&UpdateObject::unit_values_update(
+            player_guid,
+            self.player_map_id_like_cpp(),
+            data,
+        ));
+    }
+
     /// Remove an aura by slot and send SMSG_AURA_UPDATE.
     pub fn remove_aura(&mut self, slot: u8) -> Result<(), &'static str> {
-        if self.visible_auras.remove(&slot).is_none() {
+        let Some(aura) = self.visible_auras.remove(&slot) else {
             return Err("Aura slot not found");
+        };
+
+        if aura.represented_effect == Some(RepresentedAuraEffectLikeCpp::Mounted) {
+            self.player_mount_display_id_like_cpp = 0;
+            self.player_mounted_like_cpp = false;
+            self.send_represented_mount_display_update_like_cpp(0);
         }
 
         // Send SMSG_AURA_UPDATE (removal)
@@ -6552,6 +6632,41 @@ impl WorldSession {
             .contains(&mount.source_spell_id)
         {
             return Vec::new();
+        }
+
+        let Some(displays) = self
+            .mount_x_display_store
+            .as_ref()
+            .and_then(|store| store.displays_for_mount_like_cpp(mount.id))
+        else {
+            return Vec::new();
+        };
+
+        displays
+            .iter()
+            .filter(|display| {
+                display.player_condition_id == 0
+                    || self.represented_mount_x_display_usable_like_cpp(display.player_condition_id)
+            })
+            .map(|display| display.creature_display_info_id)
+            .collect()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn represented_mount_aura_display_candidates_like_cpp(
+        &self,
+        spell_id: u32,
+    ) -> Vec<i32> {
+        let Some(mount) = self
+            .mount_store
+            .as_ref()
+            .and_then(|store| store.get_by_source_spell_id_like_cpp(spell_id))
+        else {
+            return Vec::new();
+        };
+
+        if mount.flags & wow_data::MOUNT_FLAG_SELF_MOUNT != 0 {
+            return vec![wow_data::DISPLAYID_HIDDEN_MOUNT];
         }
 
         let Some(displays) = self
@@ -8749,12 +8864,19 @@ impl WorldSession {
             .spell_store()
             .and_then(|store| store.get(spell_id))
             .ok_or("Spell not found")?;
+        let mounted_aura_effect = spell_info
+            .effects()
+            .iter()
+            .find(|effect| effect.is_mounted_aura_like_cpp())
+            .cloned();
+        let effect_type = spell_info.effect_type;
+        let effect_base_points = spell_info.effect_base_points;
 
         info!(
             account = self.account_id,
             spell_id = spell_id,
             target = ?target_guid,
-            effect_type = spell_info.effect_type,
+            effect_type = effect_type,
             "Executing spell effect"
         );
 
@@ -8777,26 +8899,27 @@ impl WorldSession {
         self.send_packet(&go_pkt);
 
         // Aplicar efecto según type
-        match spell_info.effect_type {
+        match effect_type {
             6 => {
                 // SPELL_EFFECT_HEAL
-                let heal_amount = spell_info.effect_base_points as u32;
+                let heal_amount = effect_base_points as u32;
                 self.apply_heal(target_guid, heal_amount).await?;
             }
             2 => {
                 // SPELL_EFFECT_SCHOOL_DAMAGE
-                let damage_amount = spell_info.effect_base_points as u32;
+                let damage_amount = effect_base_points as u32;
                 self.apply_damage(target_guid, damage_amount).await?;
             }
             35 => {
                 // SPELL_EFFECT_APPLY_AURA
-                self.apply_aura(spell_id, player_guid, 30000, 0x00000001)?;
+                if let Some(effect) = mounted_aura_effect.as_ref() {
+                    self.apply_represented_mounted_aura_like_cpp(spell_id, player_guid, effect)?;
+                } else {
+                    self.apply_aura(spell_id, player_guid, 30000, 0x00000001)?;
+                }
             }
             _ => {
-                debug!(
-                    "Spell effect type {} not yet implemented",
-                    spell_info.effect_type
-                );
+                debug!("Spell effect type {} not yet implemented", effect_type);
             }
         }
 
@@ -9369,6 +9492,82 @@ mod tests {
         assert!(
             session
                 .represented_taxi_usable_mount_displays_like_cpp(99)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn represented_mount_aura_display_candidates_match_cpp_filter() {
+        let (mut session, _, _) = make_session();
+        session.player_class = 1;
+        session.set_mount_store(Arc::new(wow_data::MountStore::from_entries([
+            wow_data::MountEntry {
+                id: 7,
+                mount_type_id: 0,
+                flags: 0,
+                source_type_enum: 0,
+                source_spell_id: 100,
+                player_condition_id: 0,
+                mount_fly_ride_height: 0.0,
+                ui_model_scene_id: 0,
+            },
+            wow_data::MountEntry {
+                id: 8,
+                mount_type_id: 0,
+                flags: wow_data::MOUNT_FLAG_SELF_MOUNT,
+                source_type_enum: 0,
+                source_spell_id: 101,
+                player_condition_id: 0,
+                mount_fly_ride_height: 0.0,
+                ui_model_scene_id: 0,
+            },
+        ])));
+        session.set_mount_x_display_store(Arc::new(wow_data::MountXDisplayStore::from_entries([
+            wow_data::MountXDisplayEntry {
+                id: 1,
+                creature_display_info_id: 1000,
+                player_condition_id: 42,
+                mount_id: 7,
+            },
+            wow_data::MountXDisplayEntry {
+                id: 2,
+                creature_display_info_id: 1001,
+                player_condition_id: 43,
+                mount_id: 7,
+            },
+            wow_data::MountXDisplayEntry {
+                id: 3,
+                creature_display_info_id: 1002,
+                player_condition_id: 0,
+                mount_id: 7,
+            },
+        ])));
+        session.set_player_condition_store(Arc::new(wow_data::PlayerConditionStore::from_entries(
+            [
+                wow_data::PlayerConditionEntry {
+                    id: 42,
+                    class_mask: 1,
+                    ..Default::default()
+                },
+                wow_data::PlayerConditionEntry {
+                    id: 43,
+                    class_mask: 1 << 1,
+                    ..Default::default()
+                },
+            ],
+        )));
+
+        assert_eq!(
+            session.represented_mount_aura_display_candidates_like_cpp(100),
+            vec![1000, 1002]
+        );
+        assert_eq!(
+            session.represented_mount_aura_display_candidates_like_cpp(101),
+            vec![wow_data::DISPLAYID_HIDDEN_MOUNT]
+        );
+        assert!(
+            session
+                .represented_mount_aura_display_candidates_like_cpp(999)
                 .is_empty()
         );
     }

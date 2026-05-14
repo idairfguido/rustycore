@@ -372,6 +372,7 @@ fn unit_data_update_to_packet(update: &UnitDataUpdate) -> UnitDataValuesDeltaUpd
     packet_update.display_scale = update.values.display_scale;
     packet_update.native_display_id = update.values.native_display_id;
     packet_update.native_display_scale = update.values.native_display_scale;
+    packet_update.mount_display_id = update.values.mount_display_id;
     packet_update.stand_state = update.values.stand_state;
     packet_update.power = update.values.power;
     packet_update.max_power = update.values.max_power;

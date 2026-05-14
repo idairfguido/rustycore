@@ -3416,6 +3416,7 @@ mod tests {
                         chain_targets: 0,
                         implicit_target_1: 6,
                         implicit_target_2: 0,
+                        ..Default::default()
                     },
                     crate::SpellEffectInfo {
                         effect_index: 1,
@@ -3423,6 +3424,7 @@ mod tests {
                         chain_targets: 0,
                         implicit_target_1: 7,
                         implicit_target_2: 0,
+                        ..Default::default()
                     },
                 ],
             },

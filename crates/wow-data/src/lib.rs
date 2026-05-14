@@ -119,12 +119,12 @@ pub use map::{
 pub use mount::{
     AREA_MOUNT_FLAG_ALLOW_FLYING_MOUNTS, AREA_MOUNT_FLAG_ALLOW_GROUND_MOUNTS,
     AREA_MOUNT_FLAG_ALLOW_SURFACE_SWIMMING_MOUNTS,
-    AREA_MOUNT_FLAG_ALLOW_UNDERWATER_SWIMMING_MOUNTS, MOUNT_CAPABILITY_FLAG_FLOAT,
-    MOUNT_CAPABILITY_FLAG_FLYING, MOUNT_CAPABILITY_FLAG_GROUND,
+    AREA_MOUNT_FLAG_ALLOW_UNDERWATER_SWIMMING_MOUNTS, DISPLAYID_HIDDEN_MOUNT,
+    MOUNT_CAPABILITY_FLAG_FLOAT, MOUNT_CAPABILITY_FLAG_FLYING, MOUNT_CAPABILITY_FLAG_GROUND,
     MOUNT_CAPABILITY_FLAG_IGNORE_RESTRICTIONS, MOUNT_CAPABILITY_FLAG_UNDERWATER,
-    MountCapabilityContextLikeCpp, MountCapabilityEntry, MountCapabilityStore, MountEntry,
-    MountStore, MountTypeXCapabilityEntry, MountTypeXCapabilityStore, MountXDisplayEntry,
-    MountXDisplayStore,
+    MOUNT_FLAG_SELF_MOUNT, MountCapabilityContextLikeCpp, MountCapabilityEntry,
+    MountCapabilityStore, MountEntry, MountStore, MountTypeXCapabilityEntry,
+    MountTypeXCapabilityStore, MountXDisplayEntry, MountXDisplayStore,
 };
 pub use phase::{PhaseEntry, PhaseGroupStore, PhaseStore, PhaseXPhaseGroupEntry};
 pub use phasing::{

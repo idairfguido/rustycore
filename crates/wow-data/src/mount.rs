@@ -24,6 +24,8 @@ pub const MOUNT_CAPABILITY_FLAG_FLYING: u8 = 0x2;
 pub const MOUNT_CAPABILITY_FLAG_FLOAT: u8 = 0x4;
 pub const MOUNT_CAPABILITY_FLAG_UNDERWATER: u8 = 0x8;
 pub const MOUNT_CAPABILITY_FLAG_IGNORE_RESTRICTIONS: u8 = 0x20;
+pub const MOUNT_FLAG_SELF_MOUNT: u16 = 0x2;
+pub const DISPLAYID_HIDDEN_MOUNT: i32 = 73_200;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MountEntry {

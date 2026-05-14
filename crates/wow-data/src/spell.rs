@@ -45,6 +45,7 @@ pub mod aura_types {
     pub const SPELL_AURA_DUMMY_ABSORB: i32 = 3;
     pub const SPELL_AURA_MODIFY_DAMAGE_PERCENT_TAKEN: i32 = 31;
     pub const SPELL_AURA_HASTE_SPELLS: i32 = 73;
+    pub const SPELL_AURA_MOUNTED: i32 = 78;
 }
 
 /// Metadata for a spell from Spell.db2 and related tables.
@@ -73,10 +74,14 @@ pub struct SpellInfo {
 }
 
 /// Minimal `SpellEffectInfo` fields needed by C++ ConditionMgr validation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SpellEffectInfo {
     pub effect_index: u32,
     pub effect: u32,
+    pub effect_aura: i32,
+    pub effect_base_points: i32,
+    pub effect_misc_value_1: i32,
+    pub effect_misc_value_2: i32,
     pub chain_targets: i32,
     pub implicit_target_1: u32,
     pub implicit_target_2: u32,
@@ -114,6 +119,11 @@ impl SpellInfo {
 }
 
 impl SpellEffectInfo {
+    pub fn is_mounted_aura_like_cpp(&self) -> bool {
+        self.effect == spell_effect_types::SPELL_EFFECT_APPLY_AURA
+            && self.effect_aura == aura_types::SPELL_AURA_MOUNTED
+    }
+
     pub fn accepts_implicit_target_conditions_like_cpp(&self) -> bool {
         self.chain_targets > 0
             || implicit_target_category_accepts_conditions_like_cpp(self.implicit_target_1)
@@ -238,6 +248,8 @@ SELECT
     CAST(COALESCE(se.EffectBasePoints, 0) AS SIGNED) as effect_base_points,
     CAST(COALESCE(se.EffectBonusCoefficient, 0.0) AS DECIMAL(10,2)) as effect_bonus_coeff,
     CAST(COALESCE(se.EffectAura, 0) AS SIGNED) as effect_aura,
+    CAST(COALESCE(se.EffectMiscValue1, 0) AS SIGNED) as effect_misc_value_1,
+    CAST(COALESCE(se.EffectMiscValue2, 0) AS SIGNED) as effect_misc_value_2,
     CAST(COALESCE(se.EffectIndex, 0) AS UNSIGNED) as effect_index,
     CAST(COALESCE(se.EffectChainTargets, 0) AS SIGNED) as effect_chain_targets,
     CAST(COALESCE(se.ImplicitTarget1, 0) AS UNSIGNED) as implicit_target_1,
@@ -260,10 +272,12 @@ ORDER BY sm.ID, se.EffectIndex
                 let effect_base_points: i32 = result.try_read(5).unwrap_or(0);
                 let effect_bonus_coefficient: f32 = result.try_read(6).unwrap_or(0.0);
                 let aura_type: Option<i32> = result.try_read(7);
-                let effect_index: u32 = result.try_read(8).unwrap_or(0);
-                let effect_chain_targets: i32 = result.try_read(9).unwrap_or(0);
-                let implicit_target_1: u32 = result.try_read(10).unwrap_or(0);
-                let implicit_target_2: u32 = result.try_read(11).unwrap_or(0);
+                let effect_misc_value_1: i32 = result.try_read(8).unwrap_or(0);
+                let effect_misc_value_2: i32 = result.try_read(9).unwrap_or(0);
+                let effect_index: u32 = result.try_read(10).unwrap_or(0);
+                let effect_chain_targets: i32 = result.try_read(11).unwrap_or(0);
+                let implicit_target_1: u32 = result.try_read(12).unwrap_or(0);
+                let implicit_target_2: u32 = result.try_read(13).unwrap_or(0);
 
                 let spell_info = store.spells.entry(spell_id).or_insert_with(|| SpellInfo {
                     spell_id,
@@ -282,6 +296,10 @@ ORDER BY sm.ID, se.EffectIndex
                     spell_info.effects.push(SpellEffectInfo {
                         effect_index,
                         effect: effect_type,
+                        effect_aura: aura_type.unwrap_or(0),
+                        effect_base_points,
+                        effect_misc_value_1,
+                        effect_misc_value_2,
                         chain_targets: effect_chain_targets,
                         implicit_target_1,
                         implicit_target_2,
@@ -432,6 +450,7 @@ mod tests {
                     chain_targets: 0,
                     implicit_target_1: 6,
                     implicit_target_2: 0,
+                    ..Default::default()
                 },
                 SpellEffectInfo {
                     effect_index: 1,
@@ -439,6 +458,7 @@ mod tests {
                     chain_targets: 0,
                     implicit_target_1: 7,
                     implicit_target_2: 0,
+                    ..Default::default()
                 },
                 SpellEffectInfo {
                     effect_index: 2,
@@ -446,6 +466,7 @@ mod tests {
                     chain_targets: 0,
                     implicit_target_1: 0,
                     implicit_target_2: 0,
+                    ..Default::default()
                 },
                 SpellEffectInfo {
                     effect_index: 3,
@@ -453,6 +474,7 @@ mod tests {
                     chain_targets: 2,
                     implicit_target_1: 0,
                     implicit_target_2: 0,
+                    ..Default::default()
                 },
             ],
         };
@@ -465,6 +487,29 @@ mod tests {
             spell.normalized_implicit_target_effect_mask_like_cpp(0b0001),
             0
         );
+    }
+
+    #[test]
+    fn spell_effect_detects_mounted_aura_like_cpp() {
+        let mounted = SpellEffectInfo {
+            effect: spell_effect_types::SPELL_EFFECT_APPLY_AURA,
+            effect_aura: aura_types::SPELL_AURA_MOUNTED,
+            effect_base_points: 11,
+            effect_misc_value_1: 22,
+            effect_misc_value_2: 33,
+            ..Default::default()
+        };
+        let other_aura = SpellEffectInfo {
+            effect: spell_effect_types::SPELL_EFFECT_APPLY_AURA,
+            effect_aura: aura_types::SPELL_AURA_HASTE_SPELLS,
+            ..Default::default()
+        };
+
+        assert!(mounted.is_mounted_aura_like_cpp());
+        assert!(!other_aura.is_mounted_aura_like_cpp());
+        assert_eq!(mounted.effect_base_points, 11);
+        assert_eq!(mounted.effect_misc_value_1, 22);
+        assert_eq!(mounted.effect_misc_value_2, 33);
     }
 
     #[test]
@@ -489,6 +534,7 @@ mod tests {
                         chain_targets: 0,
                         implicit_target_1: 6,
                         implicit_target_2: 0,
+                        ..Default::default()
                     },
                     SpellEffectInfo {
                         effect_index: 1,
@@ -496,6 +542,7 @@ mod tests {
                         chain_targets: 0,
                         implicit_target_1: 7,
                         implicit_target_2: 0,
+                        ..Default::default()
                     },
                 ],
             },
