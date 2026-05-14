@@ -2827,11 +2827,13 @@ mod tests {
             crate::AreaTableEntry {
                 id: 300,
                 parent_area_id: 0,
+                mount_flags: 0,
                 flags: 0,
             },
             crate::AreaTableEntry {
                 id: 301,
                 parent_area_id: 300,
+                mount_flags: 0,
                 flags: crate::area::AREA_FLAG_IS_SUBZONE_LIKE_CPP,
             },
         ]);
@@ -3374,11 +3376,13 @@ mod tests {
             crate::AreaTableEntry {
                 id: 7,
                 parent_area_id: 0,
+                mount_flags: 0,
                 flags: 0,
             },
             crate::AreaTableEntry {
                 id: 8,
                 parent_area_id: 7,
+                mount_flags: 0,
                 flags: crate::area::AREA_FLAG_IS_SUBZONE_LIKE_CPP,
             },
         ]);

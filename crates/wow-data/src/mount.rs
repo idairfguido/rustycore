@@ -13,6 +13,17 @@ use tracing::info;
 
 use crate::wdc4::Wdc4Reader;
 
+pub const AREA_MOUNT_FLAG_ALLOW_GROUND_MOUNTS: u8 = 0x1;
+pub const AREA_MOUNT_FLAG_ALLOW_FLYING_MOUNTS: u8 = 0x2;
+pub const AREA_MOUNT_FLAG_ALLOW_SURFACE_SWIMMING_MOUNTS: u8 = 0x4;
+pub const AREA_MOUNT_FLAG_ALLOW_UNDERWATER_SWIMMING_MOUNTS: u8 = 0x8;
+
+pub const MOUNT_CAPABILITY_FLAG_GROUND: u8 = 0x1;
+pub const MOUNT_CAPABILITY_FLAG_FLYING: u8 = 0x2;
+pub const MOUNT_CAPABILITY_FLAG_FLOAT: u8 = 0x4;
+pub const MOUNT_CAPABILITY_FLAG_UNDERWATER: u8 = 0x8;
+pub const MOUNT_CAPABILITY_FLAG_IGNORE_RESTRICTIONS: u8 = 0x20;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MountEntry {
     pub id: u32,
@@ -44,6 +55,17 @@ pub struct MountCapabilityEntry {
 
 pub struct MountCapabilityStore {
     by_id: HashMap<u32, MountCapabilityEntry>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MountCapabilityContextLikeCpp {
+    pub riding_skill: u32,
+    pub mount_flags: u8,
+    pub is_submerged: bool,
+    pub is_in_water: bool,
+    pub map_id: i32,
+    pub cosmetic_parent_map_id: i32,
+    pub parent_map_id: i32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -187,6 +209,102 @@ impl MountCapabilityStore {
 
     pub fn get(&self, id: u32) -> Option<&MountCapabilityEntry> {
         self.by_id.get(&id)
+    }
+
+    /// C++ `Unit::GetMountCapability` selection over already-computed runtime state.
+    pub fn select_for_mount_type_like_cpp<AreaMatches, HasAura, HasSpell>(
+        &self,
+        type_store: &MountTypeXCapabilityStore,
+        mount_type_id: u16,
+        context: &MountCapabilityContextLikeCpp,
+        area_matches: AreaMatches,
+        has_aura: HasAura,
+        has_spell: HasSpell,
+    ) -> Option<&MountCapabilityEntry>
+    where
+        AreaMatches: Fn(u16) -> bool,
+        HasAura: Fn(u32) -> bool,
+        HasSpell: Fn(i32) -> bool,
+    {
+        if mount_type_id == 0 {
+            return None;
+        }
+
+        let capabilities = type_store.capabilities_for_mount_type_like_cpp(mount_type_id)?;
+
+        for mount_type_capability in capabilities {
+            let Some(capability) = self.get(u32::from(mount_type_capability.mount_capability_id))
+            else {
+                continue;
+            };
+
+            if context.riding_skill < u32::from(capability.req_riding_skill) {
+                continue;
+            }
+
+            if capability.flags & MOUNT_CAPABILITY_FLAG_IGNORE_RESTRICTIONS == 0 {
+                if capability.flags & MOUNT_CAPABILITY_FLAG_GROUND != 0
+                    && context.mount_flags & AREA_MOUNT_FLAG_ALLOW_GROUND_MOUNTS == 0
+                {
+                    continue;
+                }
+                if capability.flags & MOUNT_CAPABILITY_FLAG_FLYING != 0
+                    && context.mount_flags & AREA_MOUNT_FLAG_ALLOW_FLYING_MOUNTS == 0
+                {
+                    continue;
+                }
+                if capability.flags & MOUNT_CAPABILITY_FLAG_FLOAT != 0
+                    && context.mount_flags & AREA_MOUNT_FLAG_ALLOW_SURFACE_SWIMMING_MOUNTS == 0
+                {
+                    continue;
+                }
+                if capability.flags & MOUNT_CAPABILITY_FLAG_UNDERWATER != 0
+                    && context.mount_flags & AREA_MOUNT_FLAG_ALLOW_UNDERWATER_SWIMMING_MOUNTS == 0
+                {
+                    continue;
+                }
+            }
+
+            if !context.is_submerged {
+                if !context.is_in_water {
+                    if capability.flags & MOUNT_CAPABILITY_FLAG_GROUND == 0 {
+                        continue;
+                    }
+                } else if capability.flags & MOUNT_CAPABILITY_FLAG_FLOAT == 0 {
+                    continue;
+                }
+            } else if context.is_in_water {
+                if capability.flags & MOUNT_CAPABILITY_FLAG_UNDERWATER == 0 {
+                    continue;
+                }
+            } else if capability.flags & MOUNT_CAPABILITY_FLAG_FLOAT == 0 {
+                continue;
+            }
+
+            if capability.req_map_id != -1
+                && context.map_id != i32::from(capability.req_map_id)
+                && context.cosmetic_parent_map_id != i32::from(capability.req_map_id)
+                && context.parent_map_id != i32::from(capability.req_map_id)
+            {
+                continue;
+            }
+
+            if capability.req_area_id != 0 && !area_matches(capability.req_area_id) {
+                continue;
+            }
+
+            if capability.req_spell_aura_id != 0 && !has_aura(capability.req_spell_aura_id) {
+                continue;
+            }
+
+            if capability.req_spell_known_id != 0 && !has_spell(capability.req_spell_known_id) {
+                continue;
+            }
+
+            return Some(capability);
+        }
+
+        None
     }
 
     pub fn len(&self) -> usize {
@@ -437,5 +555,79 @@ mod tests {
         assert_eq!(displays.len(), 2);
         assert_eq!(displays[0].creature_display_info_id, 1000);
         assert!(store.displays_for_mount_like_cpp(99).is_none());
+    }
+
+    #[test]
+    fn mount_capability_selection_matches_cpp_filter_order() {
+        let capabilities = MountCapabilityStore::from_entries([
+            MountCapabilityEntry {
+                id: 10,
+                flags: MOUNT_CAPABILITY_FLAG_FLYING,
+                req_riding_skill: 0,
+                req_area_id: 0,
+                req_spell_aura_id: 0,
+                req_spell_known_id: 0,
+                mod_spell_aura_id: 1000,
+                req_map_id: -1,
+            },
+            MountCapabilityEntry {
+                id: 11,
+                flags: MOUNT_CAPABILITY_FLAG_GROUND,
+                req_riding_skill: 75,
+                req_area_id: 77,
+                req_spell_aura_id: 123,
+                req_spell_known_id: 456,
+                mod_spell_aura_id: 1001,
+                req_map_id: 1,
+            },
+        ]);
+        let type_caps = MountTypeXCapabilityStore::from_entries([
+            MountTypeXCapabilityEntry {
+                id: 1,
+                mount_type_id: 7,
+                mount_capability_id: 10,
+                order_index: 0,
+            },
+            MountTypeXCapabilityEntry {
+                id: 2,
+                mount_type_id: 7,
+                mount_capability_id: 11,
+                order_index: 1,
+            },
+        ]);
+        let context = MountCapabilityContextLikeCpp {
+            riding_skill: 75,
+            mount_flags: AREA_MOUNT_FLAG_ALLOW_GROUND_MOUNTS,
+            is_submerged: false,
+            is_in_water: false,
+            map_id: 1,
+            cosmetic_parent_map_id: -1,
+            parent_map_id: -1,
+        };
+
+        let selected = capabilities
+            .select_for_mount_type_like_cpp(
+                &type_caps,
+                7,
+                &context,
+                |area_id| area_id == 77,
+                |aura_id| aura_id == 123,
+                |spell_id| spell_id == 456,
+            )
+            .unwrap();
+        assert_eq!(selected.id, 11);
+
+        assert!(
+            capabilities
+                .select_for_mount_type_like_cpp(
+                    &type_caps,
+                    7,
+                    &context,
+                    |_| false,
+                    |_| true,
+                    |_| true,
+                )
+                .is_none()
+        );
     }
 }

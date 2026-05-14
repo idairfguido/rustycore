@@ -328,6 +328,7 @@ mod tests {
         let area_store = AreaTableStore::from_entries([AreaTableEntry {
             id: 100,
             parent_area_id: 0,
+            mount_flags: 0,
             flags: 0,
         }]);
         let phase_store = PhaseStore::from_entries([PhaseEntry { id: 10, flags: 0 }]);
@@ -351,11 +352,13 @@ mod tests {
             AreaTableEntry {
                 id: 100,
                 parent_area_id: 0,
+                mount_flags: 0,
                 flags: 0,
             },
             AreaTableEntry {
                 id: 101,
                 parent_area_id: 100,
+                mount_flags: 0,
                 flags: 0,
             },
         ]);
@@ -382,11 +385,13 @@ mod tests {
             AreaTableEntry {
                 id: 100,
                 parent_area_id: 0,
+                mount_flags: 0,
                 flags: 0,
             },
             AreaTableEntry {
                 id: 200,
                 parent_area_id: 0,
+                mount_flags: 0,
                 flags: 0,
             },
         ]);
@@ -426,11 +431,13 @@ mod tests {
             AreaTableEntry {
                 id: 100,
                 parent_area_id: 0,
+                mount_flags: 0,
                 flags: 0,
             },
             AreaTableEntry {
                 id: 200,
                 parent_area_id: 0,
+                mount_flags: 0,
                 flags: 0,
             },
         ]);
@@ -457,6 +464,7 @@ mod tests {
         let area_store = AreaTableStore::from_entries([AreaTableEntry {
             id: 100,
             parent_area_id: 0,
+            mount_flags: 0,
             flags: 0,
         }]);
         let phase_store = PhaseStore::from_entries([PhaseEntry { id: 10, flags: 0 }]);

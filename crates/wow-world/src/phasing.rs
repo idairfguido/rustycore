@@ -920,16 +920,19 @@ mod tests {
             AreaTableEntry {
                 id: 100,
                 parent_area_id: 0,
+                mount_flags: 0,
                 flags: 0,
             },
             AreaTableEntry {
                 id: 101,
                 parent_area_id: 100,
+                mount_flags: 0,
                 flags: 0,
             },
             AreaTableEntry {
                 id: 102,
                 parent_area_id: 100,
+                mount_flags: 0,
                 flags: 0,
             },
         ])

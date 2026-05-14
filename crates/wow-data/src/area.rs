@@ -18,6 +18,7 @@ use crate::wdc4::Wdc4Reader;
 pub struct AreaTableEntry {
     pub id: u32,
     pub parent_area_id: u16,
+    pub mount_flags: i32,
     pub flags: u32,
 }
 
@@ -65,6 +66,8 @@ impl AreaTableStore {
                     // WDC4 record ids supply C++ field 0 (`ID`), so
                     // `ParentAreaID` is DB2Meta field index 3.
                     parent_area_id: reader.get_field_u16(idx, 3),
+                    // `MountFlags` is C++ field index 17, DB2Meta field index 16.
+                    mount_flags: reader.get_field_i32(idx, 16),
                     // `Flags1` is C++ field index 22, DB2Meta field index 21
                     // when the record id supplies `ID`.
                     flags: reader.get_field_u32(idx, 21),
@@ -104,6 +107,7 @@ impl AreaTableStore {
                 AreaTableEntry {
                     id,
                     parent_area_id: result.read(4),
+                    mount_flags: result.read(17),
                     flags: result.read(22),
                 },
             );
@@ -122,6 +126,24 @@ impl AreaTableStore {
 
     pub fn contains(&self, id: u32) -> bool {
         self.entries.contains_key(&id)
+    }
+
+    /// C++ `DB2Manager::IsInArea(objectAreaId, areaId)`.
+    pub fn is_in_area_like_cpp(&self, mut object_area_id: u32, area_id: u32) -> bool {
+        loop {
+            if object_area_id == area_id {
+                return true;
+            }
+
+            let Some(object_area) = self.get(object_area_id) else {
+                return false;
+            };
+
+            object_area_id = u32::from(object_area.parent_area_id);
+            if object_area_id == 0 {
+                return false;
+            }
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -143,17 +165,22 @@ mod tests {
             AreaTableEntry {
                 id: 100,
                 parent_area_id: 0,
+                mount_flags: 0,
                 flags: 0,
             },
             AreaTableEntry {
                 id: 101,
                 parent_area_id: 100,
+                mount_flags: 0,
                 flags: AREA_FLAG_IS_SUBZONE_LIKE_CPP,
             },
         ]);
 
         assert!(store.contains(100));
         assert_eq!(store.get(101).map(|area| area.parent_area_id), Some(100));
+        assert!(store.is_in_area_like_cpp(101, 100));
+        assert!(store.is_in_area_like_cpp(101, 101));
+        assert!(!store.is_in_area_like_cpp(101, 999));
         assert_eq!(
             store.get(101).map(|area| area.is_subzone_like_cpp()),
             Some(true)
