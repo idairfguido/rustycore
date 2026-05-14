@@ -291,6 +291,22 @@ mod tests {
                 .sql()
                 .contains("area_table")
         );
+        assert!(HotfixStatements::SEL_MOUNT.sql().contains("mount"));
+        assert!(
+            HotfixStatements::SEL_MOUNT_CAPABILITY
+                .sql()
+                .contains("mount_capability")
+        );
+        assert!(
+            HotfixStatements::SEL_MOUNT_TYPE_X_CAPABILITY
+                .sql()
+                .contains("mount_type_x_capability")
+        );
+        assert!(
+            HotfixStatements::SEL_MOUNT_X_DISPLAY
+                .sql()
+                .contains("mount_x_display")
+        );
         assert!(HotfixStatements::SEL_PHASE.sql().contains("phase"));
         assert!(
             HotfixStatements::SEL_PHASE_X_PHASE_GROUP

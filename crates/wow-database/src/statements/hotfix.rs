@@ -10,6 +10,14 @@ use super::StatementDef;
 pub enum HotfixStatements {
     /// C++ `HOTFIX_SEL_AREA_TABLE`.
     SEL_AREA_TABLE,
+    /// C++ `HOTFIX_SEL_MOUNT`.
+    SEL_MOUNT,
+    /// C++ `HOTFIX_SEL_MOUNT_CAPABILITY`.
+    SEL_MOUNT_CAPABILITY,
+    /// C++ `HOTFIX_SEL_MOUNT_TYPE_X_CAPABILITY`.
+    SEL_MOUNT_TYPE_X_CAPABILITY,
+    /// C++ `HOTFIX_SEL_MOUNT_X_DISPLAY`.
+    SEL_MOUNT_X_DISPLAY,
     /// `DB2Manager::LoadHotfixData`.
     SEL_HOTFIX_DATA,
     /// `DB2Manager::LoadHotfixBlob`.
@@ -33,6 +41,20 @@ impl StatementDef for HotfixStatements {
                 "AmbientMultiplier, MountFlags, PvpCombatWorldStateID, WildBattlePetLevelMin, WildBattlePetLevelMax, WindSettingsID, Flags1, Flags2, ",
                 "LiquidTypeID1, LiquidTypeID2, LiquidTypeID3, LiquidTypeID4 FROM area_table WHERE VerifiedBuild > 0"
             ),
+            Self::SEL_MOUNT => concat!(
+                "SELECT Name, SourceText, Description, ID, MountTypeID, Flags, SourceTypeEnum, SourceSpellID, ",
+                "PlayerConditionID, MountFlyRideHeight, UiModelSceneID FROM mount WHERE VerifiedBuild > 0"
+            ),
+            Self::SEL_MOUNT_CAPABILITY => concat!(
+                "SELECT ID, Flags, ReqRidingSkill, ReqAreaID, ReqSpellAuraID, ReqSpellKnownID, ModSpellAuraID, ",
+                "ReqMapID FROM mount_capability WHERE VerifiedBuild > 0"
+            ),
+            Self::SEL_MOUNT_TYPE_X_CAPABILITY => {
+                "SELECT ID, MountTypeID, MountCapabilityID, OrderIndex FROM mount_type_x_capability WHERE VerifiedBuild > 0"
+            }
+            Self::SEL_MOUNT_X_DISPLAY => {
+                "SELECT ID, CreatureDisplayInfoID, PlayerConditionID, MountID FROM mount_x_display WHERE VerifiedBuild > 0"
+            }
             Self::SEL_HOTFIX_DATA => {
                 "SELECT Id, UniqueId, TableHash, RecordId, Status FROM hotfix_data ORDER BY Id"
             }

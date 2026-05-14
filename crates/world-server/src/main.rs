@@ -644,30 +644,33 @@ async fn main() -> Result<()> {
         map_difficulty_x_condition_store.len()
     );
     let mount_store = Arc::new(
-        wow_data::MountStore::load(&data_dir, &locale)
-            .context("Failed to load Mount.db2 — check DataDir and DBC.Locale config")?,
+        wow_data::MountStore::load_with_hotfixes(&data_dir, &locale, &hotfix_db)
+            .await
+            .context("Failed to load Mount.db2 / hotfix rows")?,
     );
     info!("Loaded {} mounts from Mount.db2", mount_store.len());
     let mount_capability_store = Arc::new(
-        wow_data::MountCapabilityStore::load(&data_dir, &locale)
-            .context("Failed to load MountCapability.db2 — check DataDir and DBC.Locale config")?,
+        wow_data::MountCapabilityStore::load_with_hotfixes(&data_dir, &locale, &hotfix_db)
+            .await
+            .context("Failed to load MountCapability.db2 / hotfix rows")?,
     );
     info!(
         "Loaded {} mount capabilities from MountCapability.db2",
         mount_capability_store.len()
     );
     let mount_type_x_capability_store = Arc::new(
-        wow_data::MountTypeXCapabilityStore::load(&data_dir, &locale).context(
-            "Failed to load MountTypeXCapability.db2 — check DataDir and DBC.Locale config",
-        )?,
+        wow_data::MountTypeXCapabilityStore::load_with_hotfixes(&data_dir, &locale, &hotfix_db)
+            .await
+            .context("Failed to load MountTypeXCapability.db2 / hotfix rows")?,
     );
     info!(
         "Loaded {} mount type capability rows from MountTypeXCapability.db2",
         mount_type_x_capability_store.len()
     );
     let mount_x_display_store = Arc::new(
-        wow_data::MountXDisplayStore::load(&data_dir, &locale)
-            .context("Failed to load MountXDisplay.db2 — check DataDir and DBC.Locale config")?,
+        wow_data::MountXDisplayStore::load_with_hotfixes(&data_dir, &locale, &hotfix_db)
+            .await
+            .context("Failed to load MountXDisplay.db2 / hotfix rows")?,
     );
     info!(
         "Loaded {} mount display rows from MountXDisplay.db2",

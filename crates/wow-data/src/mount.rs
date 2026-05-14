@@ -10,6 +10,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use tracing::info;
+use wow_database::{HotfixDatabase, HotfixStatements};
 
 use crate::wdc4::Wdc4Reader;
 
@@ -24,7 +25,7 @@ pub const MOUNT_CAPABILITY_FLAG_FLOAT: u8 = 0x4;
 pub const MOUNT_CAPABILITY_FLAG_UNDERWATER: u8 = 0x8;
 pub const MOUNT_CAPABILITY_FLAG_IGNORE_RESTRICTIONS: u8 = 0x20;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MountEntry {
     pub id: u32,
     pub mount_type_id: u16,
@@ -111,6 +112,15 @@ impl MountStore {
         }
     }
 
+    fn rebuild_source_spell_index(&mut self) {
+        self.by_source_spell_id.clear();
+        for entry in self.by_id.values() {
+            if let Ok(source_spell_id) = u32::try_from(entry.source_spell_id) {
+                self.by_source_spell_id.insert(source_spell_id, entry.id);
+            }
+        }
+    }
+
     /// Load Mount.db2 from `{data_dir}/dbc/{locale}/Mount.db2`.
     ///
     /// C++ refs:
@@ -142,6 +152,50 @@ impl MountStore {
         let store = Self::from_entries(entries);
         info!("Loaded {} mounts from {}", store.len(), path.display());
         Ok(store)
+    }
+
+    pub async fn load_with_hotfixes(
+        data_dir: &str,
+        locale: &str,
+        hotfix_db: &HotfixDatabase,
+    ) -> Result<Self> {
+        let mut store = Self::load(data_dir, locale)?;
+        let hotfix_rows = store.load_hotfix_rows(hotfix_db).await?;
+        if hotfix_rows != 0 {
+            info!("Loaded {hotfix_rows} Mount hotfix rows");
+        }
+        Ok(store)
+    }
+
+    async fn load_hotfix_rows(&mut self, db: &HotfixDatabase) -> Result<usize> {
+        let stmt = db.prepare(HotfixStatements::SEL_MOUNT);
+        let mut result = db.query(&stmt).await?;
+        if result.is_empty() {
+            return Ok(0);
+        }
+
+        let mut count = 0usize;
+        loop {
+            let entry = MountEntry {
+                id: result.read(3),
+                mount_type_id: result.read(4),
+                flags: result.read(5),
+                source_type_enum: result.read(6),
+                source_spell_id: result.read(7),
+                player_condition_id: result.read(8),
+                mount_fly_ride_height: result.read(9),
+                ui_model_scene_id: result.read(10),
+            };
+            self.by_id.insert(entry.id, entry);
+            count += 1;
+
+            if !result.next_row() {
+                break;
+            }
+        }
+
+        self.rebuild_source_spell_index();
+        Ok(count)
     }
 
     pub fn get_by_id(&self, id: u32) -> Option<&MountEntry> {
@@ -205,6 +259,49 @@ impl MountCapabilityStore {
             path.display()
         );
         Ok(store)
+    }
+
+    pub async fn load_with_hotfixes(
+        data_dir: &str,
+        locale: &str,
+        hotfix_db: &HotfixDatabase,
+    ) -> Result<Self> {
+        let mut store = Self::load(data_dir, locale)?;
+        let hotfix_rows = store.load_hotfix_rows(hotfix_db).await?;
+        if hotfix_rows != 0 {
+            info!("Loaded {hotfix_rows} MountCapability hotfix rows");
+        }
+        Ok(store)
+    }
+
+    async fn load_hotfix_rows(&mut self, db: &HotfixDatabase) -> Result<usize> {
+        let stmt = db.prepare(HotfixStatements::SEL_MOUNT_CAPABILITY);
+        let mut result = db.query(&stmt).await?;
+        if result.is_empty() {
+            return Ok(0);
+        }
+
+        let mut count = 0usize;
+        loop {
+            let entry = MountCapabilityEntry {
+                id: result.read(0),
+                flags: result.read(1),
+                req_riding_skill: result.read(2),
+                req_area_id: result.read(3),
+                req_spell_aura_id: result.read(4),
+                req_spell_known_id: result.read(5),
+                mod_spell_aura_id: result.read(6),
+                req_map_id: result.read(7),
+            };
+            self.by_id.insert(entry.id, entry);
+            count += 1;
+
+            if !result.next_row() {
+                break;
+            }
+        }
+
+        Ok(count)
     }
 
     pub fn get(&self, id: u32) -> Option<&MountCapabilityEntry> {
@@ -345,6 +442,11 @@ impl MountTypeXCapabilityStore {
         }
     }
 
+    fn rebuild_mount_type_index(&mut self) {
+        let rebuilt = Self::from_entries(self.by_id.values().copied());
+        self.by_mount_type = rebuilt.by_mount_type;
+    }
+
     /// Load MountTypeXCapability.db2 from `{data_dir}/dbc/{locale}/MountTypeXCapability.db2`.
     ///
     /// C++ refs:
@@ -376,6 +478,46 @@ impl MountTypeXCapabilityStore {
             path.display()
         );
         Ok(store)
+    }
+
+    pub async fn load_with_hotfixes(
+        data_dir: &str,
+        locale: &str,
+        hotfix_db: &HotfixDatabase,
+    ) -> Result<Self> {
+        let mut store = Self::load(data_dir, locale)?;
+        let hotfix_rows = store.load_hotfix_rows(hotfix_db).await?;
+        if hotfix_rows != 0 {
+            info!("Loaded {hotfix_rows} MountTypeXCapability hotfix rows");
+        }
+        Ok(store)
+    }
+
+    async fn load_hotfix_rows(&mut self, db: &HotfixDatabase) -> Result<usize> {
+        let stmt = db.prepare(HotfixStatements::SEL_MOUNT_TYPE_X_CAPABILITY);
+        let mut result = db.query(&stmt).await?;
+        if result.is_empty() {
+            return Ok(0);
+        }
+
+        let mut count = 0usize;
+        loop {
+            let entry = MountTypeXCapabilityEntry {
+                id: result.read(0),
+                mount_type_id: result.read(1),
+                mount_capability_id: result.read(2),
+                order_index: result.read(3),
+            };
+            self.by_id.insert(entry.id, entry);
+            count += 1;
+
+            if !result.next_row() {
+                break;
+            }
+        }
+
+        self.rebuild_mount_type_index();
+        Ok(count)
     }
 
     pub fn get(&self, id: u32) -> Option<&MountTypeXCapabilityEntry> {
@@ -413,6 +555,16 @@ impl MountXDisplayStore {
         Self { by_id, by_mount_id }
     }
 
+    fn rebuild_mount_index(&mut self) {
+        self.by_mount_id.clear();
+        for entry in self.by_id.values().copied() {
+            self.by_mount_id
+                .entry(entry.mount_id)
+                .or_default()
+                .push(entry);
+        }
+    }
+
     /// Load MountXDisplay.db2 from `{data_dir}/dbc/{locale}/MountXDisplay.db2`.
     ///
     /// C++ refs:
@@ -443,6 +595,46 @@ impl MountXDisplayStore {
             path.display()
         );
         Ok(store)
+    }
+
+    pub async fn load_with_hotfixes(
+        data_dir: &str,
+        locale: &str,
+        hotfix_db: &HotfixDatabase,
+    ) -> Result<Self> {
+        let mut store = Self::load(data_dir, locale)?;
+        let hotfix_rows = store.load_hotfix_rows(hotfix_db).await?;
+        if hotfix_rows != 0 {
+            info!("Loaded {hotfix_rows} MountXDisplay hotfix rows");
+        }
+        Ok(store)
+    }
+
+    async fn load_hotfix_rows(&mut self, db: &HotfixDatabase) -> Result<usize> {
+        let stmt = db.prepare(HotfixStatements::SEL_MOUNT_X_DISPLAY);
+        let mut result = db.query(&stmt).await?;
+        if result.is_empty() {
+            return Ok(0);
+        }
+
+        let mut count = 0usize;
+        loop {
+            let entry = MountXDisplayEntry {
+                id: result.read(0),
+                creature_display_info_id: result.read(1),
+                player_condition_id: result.read(2),
+                mount_id: result.read(3),
+            };
+            self.by_id.insert(entry.id, entry);
+            count += 1;
+
+            if !result.next_row() {
+                break;
+            }
+        }
+
+        self.rebuild_mount_index();
+        Ok(count)
     }
 
     pub fn get(&self, id: u32) -> Option<&MountXDisplayEntry> {
