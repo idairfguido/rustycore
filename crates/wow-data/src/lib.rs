@@ -11,6 +11,7 @@ pub mod chr_specialization;
 pub mod condition_attachments;
 pub mod conditions;
 pub mod currency;
+pub mod difficulty;
 pub mod dungeon_encounter;
 pub mod gossip;
 pub mod graveyard;
@@ -57,6 +58,7 @@ pub use conditions::{
     ConditionsByEntryMap, ConditionsReference, load_condition_rows_like_cpp,
 };
 pub use currency::{CurrencyTypesEntry, CurrencyTypesStore};
+pub use difficulty::DifficultyStore;
 pub use dungeon_encounter::{DungeonEncounterEntry, DungeonEncounterStore};
 pub use gossip::{GossipConditionAttachmentReport, GossipMenu, GossipMenuItem, GossipStore};
 pub use graveyard::{

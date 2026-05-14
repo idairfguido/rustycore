@@ -505,6 +505,14 @@ async fn main() -> Result<()> {
         "Loaded {} map difficulties from MapDifficulty.db2",
         map_difficulty_store.len()
     );
+    let difficulty_store = Arc::new(
+        wow_data::DifficultyStore::load(&data_dir, &locale)
+            .context("Failed to load Difficulty.db2 — check DataDir and DBC.Locale config")?,
+    );
+    info!(
+        "Loaded {} difficulties from Difficulty.db2",
+        difficulty_store.len()
+    );
 
     // Load ItemAppearance.db2 for item display-info resolution.
     let item_appearance_store = Arc::new(
@@ -806,6 +814,7 @@ async fn main() -> Result<()> {
                 quest_store: Some(quest_store.as_ref()),
                 area_trigger_store: Some(area_trigger_store.as_ref()),
                 graveyard_store: None,
+                difficulty_store: Some(difficulty_store.as_ref()),
                 max_skill_value: Some(max_skill_value_like_cpp(&world_configs)),
                 loot_template_exists: Some(&loot_template_exists),
                 loot_source_entry_exists: Some(&loot_source_entry_exists),

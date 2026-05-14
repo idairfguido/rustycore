@@ -645,6 +645,7 @@ pub enum ConditionTypeValidationErrorLikeCpp {
         count: u32,
         limit: i32,
     },
+    NonExistingDifficulty(u32),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -700,6 +701,7 @@ pub struct ConditionExternalValidationStoresLikeCpp<'a> {
     pub quest_store: Option<&'a crate::quest::QuestStore>,
     pub area_trigger_store: Option<&'a crate::AreaTriggerStore>,
     pub graveyard_store: Option<&'a crate::GraveyardStore>,
+    pub difficulty_store: Option<&'a crate::DifficultyStore>,
     pub max_skill_value: Option<u32>,
     pub loot_template_exists: Option<&'a dyn Fn(ConditionSourceType, u32) -> bool>,
     pub loot_source_entry_exists: Option<&'a dyn Fn(ConditionSourceType, u32, i32) -> bool>,
@@ -1089,6 +1091,13 @@ pub fn validate_condition_type_external_like_cpp(
                         limit,
                     });
                 }
+            }
+        }
+        ConditionType::DifficultyId => {
+            if let Some(store) = stores.difficulty_store
+                && !store.contains(condition.condition_value1)
+            {
+                return Err(Error::NonExistingDifficulty(condition.condition_value1));
             }
         }
         _ => {}
@@ -2388,6 +2397,7 @@ mod tests {
             700,
             vec![quest_objective(800, 0, 5), quest_objective(801, 10, 99)],
         )]);
+        let difficulty_store = crate::DifficultyStore::from_ids([900]);
         let stores = ConditionExternalValidationStoresLikeCpp {
             item_store: Some(&item_store),
             spell_store: Some(&spell_store),
@@ -2396,6 +2406,7 @@ mod tests {
             map_store: Some(&map_store),
             phase_store: Some(&phase_store),
             quest_store: Some(&quest_store),
+            difficulty_store: Some(&difficulty_store),
             max_skill_value: Some(450),
             ..ConditionExternalValidationStoresLikeCpp::default()
         };
@@ -2448,6 +2459,11 @@ mod tests {
                 condition_type: ConditionType::QuestObjectiveProgress,
                 condition_value1: 801,
                 condition_value3: 1,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::DifficultyId,
+                condition_value1: 900,
                 ..Condition::default()
             },
         ] {
@@ -2525,6 +2541,19 @@ mod tests {
                     limit: 1
                 }
             )
+        ));
+        assert!(matches!(
+            validate_condition_type_external_like_cpp(
+                &Condition {
+                    condition_type: ConditionType::DifficultyId,
+                    condition_value1: 999,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(ConditionTypeValidationErrorLikeCpp::NonExistingDifficulty(
+                999
+            ))
         ));
     }
 
