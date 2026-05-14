@@ -124,6 +124,13 @@ pub struct VehicleImmunityPlan {
     pub root: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VehicleResetPlan {
+    pub immunity_plan: VehicleImmunityPlan,
+    pub accessory_install_plan: Option<VehicleAccessoryInstallPlan>,
+    pub call_on_reset_script: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct VehicleTemplate {
     pub despawn_delay_ms: i32,
@@ -385,6 +392,30 @@ impl Vehicle {
             self.remove_all_passengers();
         }
         plan
+    }
+
+    pub fn reset_plan_like_cpp(
+        &mut self,
+        evading: bool,
+        base_is_alive: bool,
+        is_mechanical_creature: bool,
+        is_world_boss: bool,
+        accessories: &[VehicleAccessory],
+    ) -> Option<VehicleResetPlan> {
+        if self.base_type_id != TypeId::Unit {
+            return None;
+        }
+
+        let immunity_plan =
+            vehicle_immunity_plan_like_cpp(self.vehicle_id, is_mechanical_creature, is_world_boss);
+        let accessory_install_plan =
+            base_is_alive.then(|| self.install_all_accessories_plan_like_cpp(evading, accessories));
+
+        Some(VehicleResetPlan {
+            immunity_plan,
+            accessory_install_plan,
+            call_on_reset_script: true,
+        })
     }
 
     pub fn has_empty_seat(&self, seat_id: i8) -> bool {
@@ -713,6 +744,75 @@ mod tests {
             spell_or_mechanic: SPELL_AURA_MOD_DAMAGE_PERCENT_TAKEN_LIKE_CPP,
             apply: false,
         }));
+    }
+
+    #[test]
+    fn reset_plan_matches_cpp_unit_alive_and_dead_paths() {
+        let accessories = [
+            VehicleAccessory {
+                accessory_entry: 10,
+                is_minion: false,
+                summon_time_ms: 0,
+                seat_id: 0,
+                summoned_type: 1,
+            },
+            VehicleAccessory {
+                accessory_entry: 11,
+                is_minion: true,
+                summon_time_ms: 100,
+                seat_id: 1,
+                summoned_type: 2,
+            },
+        ];
+
+        let mut alive = vehicle();
+        assert!(alive.add_vehicle_passenger(passenger_guid(1), 0));
+        let plan = alive
+            .reset_plan_like_cpp(false, true, true, false, &accessories)
+            .expect("unit vehicles reset in C++");
+        assert!(plan.call_on_reset_script);
+        assert!(
+            plan.immunity_plan
+                .immunities
+                .contains(&VehicleSpellImmunity {
+                    kind: VehicleSpellImmunityKind::Effect,
+                    spell_or_mechanic: SPELL_EFFECT_HEAL_LIKE_CPP,
+                    apply: true,
+                })
+        );
+        assert_eq!(
+            plan.accessory_install_plan,
+            Some(VehicleAccessoryInstallPlan {
+                remove_all_passengers: true,
+                accessories: accessories.to_vec(),
+            })
+        );
+        assert!(alive.passenger(0).is_none());
+
+        let mut dead = vehicle();
+        assert!(dead.add_vehicle_passenger(passenger_guid(2), 0));
+        let plan = dead
+            .reset_plan_like_cpp(false, false, false, false, &accessories)
+            .expect("dead unit vehicles still reapply immunities in C++");
+        assert!(plan.accessory_install_plan.is_none());
+        assert_eq!(dead.passenger(0), Some(passenger_guid(2)));
+    }
+
+    #[test]
+    fn reset_plan_noops_for_non_unit_like_cpp() {
+        let mut player_vehicle = Vehicle::new(
+            base_guid(),
+            TypeId::Player,
+            Position::new(10.0, 20.0, 30.0, 1.0),
+            123,
+            456,
+            [(0, seat(1000, true), VehicleSeatAddon::default())],
+        );
+
+        assert_eq!(
+            player_vehicle.reset_plan_like_cpp(false, true, true, false, &[]),
+            None
+        );
     }
 
     #[test]

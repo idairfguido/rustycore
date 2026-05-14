@@ -162,9 +162,9 @@ DBC stores:
 - `crates/wow-constants/src/vehicle.rs` / `crates/wow-constants/src/opcodes.rs` — C++ `VehicleDefines.h` power/flag/spell/exit constants and vehicle opcodes enumerated.
 - `crates/wow-packet/src/packets/vehicle.rs` / `crates/wow-world/src/handlers/vehicle.rs` — vehicle packet layouts and dispatch metadata registered with C++ status/processing; handlers currently preserve C++ early-return behavior until live passenger/charm runtime exists.
 
-**What's implemented:** represented VehicleKit state and mount integration, C++ `VehicleDefines.h` constants, DB2 seat construction and handler helper flags, C++ vehicle template despawn-delay lookup, C++ vehicle accessory row lookup and `InstallAllAccessories` planning, C++ `ApplyAllImmunities` planning, movement/vehicle-rec packet coverage for the mount path, and focused unit tests for the represented state.
+**What's implemented:** represented VehicleKit state and mount integration, C++ `VehicleDefines.h` constants, DB2 seat construction and handler helper flags, C++ vehicle template despawn-delay lookup, C++ vehicle accessory row lookup and `InstallAllAccessories` planning, C++ `ApplyAllImmunities` and `Reset(bool evading)` planning, movement/vehicle-rec packet coverage for the mount path, and focused unit tests for the represented state.
 
-**What's missing vs C++:** full live passenger runtime, accessory TempSummon/HandleSpellClick installation, transport-frame xform, live immunity application, despawn timer, and join event scheduling. `wow_entities::Vehicle` now represents install/uninstall status, seat maps, usable-seat counts, passenger insert/remove helpers, C++ `InstallAllAccessories(bool evading)` remove/filter planning, and C++ `ApplyAllImmunities` effect/state/mechanic plans; vehicle accessory row selection is loaded in `wow-data` with C++ GUID-first/template fallback semantics.
+**What's missing vs C++:** full live passenger runtime, accessory TempSummon/HandleSpellClick installation, transport-frame xform, live immunity application, script hooks, despawn timer, and join event scheduling. `wow_entities::Vehicle` now represents install/uninstall status, seat maps, usable-seat counts, passenger insert/remove helpers, C++ `InstallAllAccessories(bool evading)` remove/filter planning, C++ `ApplyAllImmunities` effect/state/mechanic plans, and the C++ `Reset(bool evading)` unit/alive gates; vehicle accessory row selection is loaded in `wow-data` with C++ GUID-first/template fallback semantics.
 
 **Suspicious / likely divergent:** represented mount path records accessory rows but does not yet execute C++ `TempSummon` + `HandleSpellClick`; request handlers for exit/switch/eject/dismiss are registered and parse packets but are not wired to live passenger/charm state yet.
 
@@ -205,7 +205,7 @@ DBC stores:
 - [x] **#VEH.2** Port `VehicleFlags`, `PowerType`, `VehicleExitParameters`, `VehicleSpells` to `wow-constants` (L)
 - [x] **#VEH.3** Define `VehicleSeat`, `VehicleSeatAddon`, `VehicleAccessory`, `VehicleTemplate`, `PassengerInfo` POD types in `wow-world` (L) — represented types live in `wow-entities`.
 - [x] **#VEH.4** Port `TransportBase` xform (`CalculatePassengerPosition`/`Offset`) as free fns in `wow-entities` (L)
-- [ ] **#VEH.5** Implement `Vehicle` struct + `Install/Uninstall/Reset` lifecycle (M) — partial: install/uninstall represented; `Reset(evading)` and live `Unit` ownership pending.
+- [ ] **#VEH.5** Implement `Vehicle` struct + `Install/Uninstall/Reset` lifecycle (M) — partial: install/uninstall and C++ `Reset(evading)` planning represented; live `Unit` ownership, script hooks, and side-effect execution pending.
 - [ ] **#VEH.6** Implement `AddVehiclePassenger`/`RemovePassenger`/`HasEmptySeat`/`GetNextEmptySeat` (M) — partial: pure seat-map helpers represented; aura/script side effects pending.
 - [ ] **#VEH.7** Implement `InstallAllAccessories` + `InstallAccessory` (depends on TempSummon) (M) — partial: C++ accessory row load/selection plus `evading` minion filter/remove-passenger planning covered; TempSummon/HandleSpellClick pending.
 - [ ] **#VEH.8** Implement delayed join (`VehicleJoinEvent` analog) on session/map tick (M)

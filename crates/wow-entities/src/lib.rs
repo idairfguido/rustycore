@@ -277,9 +277,9 @@ pub use update_fields::{
 };
 pub use vehicle::{
     MAX_VEHICLE_SEATS, PassengerInfo, Vehicle, VehicleAccessory, VehicleAccessoryInstallPlan,
-    VehicleExitParameter, VehicleFlag, VehicleImmunityPlan, VehicleSeat, VehicleSeatAddon,
-    VehicleSeatInfo, VehicleSpellImmunity, VehicleSpellImmunityKind, VehicleStatus,
-    VehicleTemplate, calculate_passenger_offset, calculate_passenger_position,
+    VehicleExitParameter, VehicleFlag, VehicleImmunityPlan, VehicleResetPlan, VehicleSeat,
+    VehicleSeatAddon, VehicleSeatInfo, VehicleSpellImmunity, VehicleSpellImmunityKind,
+    VehicleStatus, VehicleTemplate, calculate_passenger_offset, calculate_passenger_position,
     vehicle_accessory_install_plan_like_cpp, vehicle_immunity_plan_like_cpp,
 };
 pub use world_object::{
