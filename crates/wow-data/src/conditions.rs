@@ -1958,6 +1958,16 @@ pub enum ConditionLoadWarningLikeCpp {
         source_type: ConditionSourceType,
         error_text_id: u32,
     },
+    UselessConditionValue {
+        condition_type: ConditionType,
+        field: u8,
+        value: u32,
+    },
+    UselessConditionStringValue {
+        condition_type: ConditionType,
+        field: u8,
+        value: String,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -2137,6 +2147,37 @@ fn condition_normalization_warnings_like_cpp(
     warnings
 }
 
+fn condition_type_useless_value_warnings_like_cpp(
+    condition: &Condition,
+) -> Vec<ConditionLoadWarningLikeCpp> {
+    useless_condition_value_fields_like_cpp(condition)
+        .into_iter()
+        .map(|field| match field {
+            1 => ConditionLoadWarningLikeCpp::UselessConditionValue {
+                condition_type: condition.condition_type,
+                field,
+                value: condition.condition_value1,
+            },
+            2 => ConditionLoadWarningLikeCpp::UselessConditionValue {
+                condition_type: condition.condition_type,
+                field,
+                value: condition.condition_value2,
+            },
+            3 => ConditionLoadWarningLikeCpp::UselessConditionValue {
+                condition_type: condition.condition_type,
+                field,
+                value: condition.condition_value3,
+            },
+            4 => ConditionLoadWarningLikeCpp::UselessConditionStringValue {
+                condition_type: condition.condition_type,
+                field,
+                value: condition.condition_string_value1.clone(),
+            },
+            _ => unreachable!("condition value field must be 1..=4"),
+        })
+        .collect()
+}
+
 pub fn normalize_loaded_condition_shape_like_cpp(
     condition: &mut Condition,
 ) -> Result<(), ConditionRowSkipReason> {
@@ -2216,7 +2257,14 @@ pub fn parse_condition_rows_like_cpp(
                     .warnings
                     .extend(condition_normalization_warnings_like_cpp(&condition));
                 match normalize_loaded_condition_shape_for_row_like_cpp(&mut condition, &row) {
-                    Ok(()) => report.conditions.push(condition),
+                    Ok(()) => {
+                        if condition.reference_id == 0 {
+                            report
+                                .warnings
+                                .extend(condition_type_useless_value_warnings_like_cpp(&condition));
+                        }
+                        report.conditions.push(condition);
+                    }
                     Err(reason) => report.skipped.push(SkippedConditionRow { row, reason }),
                 }
             }
@@ -4429,6 +4477,59 @@ mod tests {
                 condition_target: 1,
                 max_available_targets: 1,
             }
+        );
+    }
+
+    #[test]
+    fn parse_condition_rows_records_cpp_useless_condition_value_warnings() {
+        let mut alive = condition_row(ConditionSourceType::Phase, ConditionType::Alive);
+        alive.condition_value1 = 10;
+        alive.condition_value2 = 20;
+        alive.condition_value3 = 30;
+        alive.condition_string_value1 = "unused".to_string();
+        let mut player_guid =
+            condition_row(ConditionSourceType::Phase, ConditionType::ObjectEntryGuid);
+        player_guid.condition_value1 = TypeId::Player as u32;
+        player_guid.condition_value2 = 42;
+        player_guid.condition_value3 = 77;
+
+        let report = parse_condition_rows_like_cpp([alive, player_guid], |_| 0);
+
+        assert_eq!(report.conditions.len(), 2);
+        assert_eq!(
+            report.warnings,
+            vec![
+                ConditionLoadWarningLikeCpp::UselessConditionValue {
+                    condition_type: ConditionType::Alive,
+                    field: 1,
+                    value: 10,
+                },
+                ConditionLoadWarningLikeCpp::UselessConditionValue {
+                    condition_type: ConditionType::Alive,
+                    field: 2,
+                    value: 20,
+                },
+                ConditionLoadWarningLikeCpp::UselessConditionValue {
+                    condition_type: ConditionType::Alive,
+                    field: 3,
+                    value: 30,
+                },
+                ConditionLoadWarningLikeCpp::UselessConditionStringValue {
+                    condition_type: ConditionType::Alive,
+                    field: 4,
+                    value: "unused".to_string(),
+                },
+                ConditionLoadWarningLikeCpp::UselessConditionValue {
+                    condition_type: ConditionType::ObjectEntryGuid,
+                    field: 2,
+                    value: 42,
+                },
+                ConditionLoadWarningLikeCpp::UselessConditionValue {
+                    condition_type: ConditionType::ObjectEntryGuid,
+                    field: 3,
+                    value: 77,
+                },
+            ]
         );
     }
 
