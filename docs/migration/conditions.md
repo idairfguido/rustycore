@@ -424,7 +424,7 @@ Current downstream gaps still capable of silent permissive behaviour:
 | Consumer | File | Behaviour right now |
 |---|---|---|
 | Loot drops | `crates/wow-loot/`, `crates/wow-world/src/conditions.rs` | Loot condition link/reference checking and C++ key/target runtime bridge exist, but all production loot fill callsites still need to pass the ConditionMgr-backed predicate. |
-| NPC vendors | `wow-packet/src/packets/misc.rs:1686` | Vendor condition lookup exists in `wow-world`, but packet availability still needs full runtime evaluation before claiming parity. |
+| NPC vendors | `wow-packet/src/packets/misc.rs:1686` | Vendor list and buy paths now evaluate `CONDITION_SOURCE_TYPE_NPC_VENDOR` through the loaded `ConditionMgr` store with player+vendor targets; DB2 `PlayerConditionID` remains tracked separately under `#COND.23`. |
 | Gossip menus / options | `crates/wow-data/src/gossip.rs`, gossip dispatch in `wow-world/src/handlers/` | C++ gossip condition holders, startup attachment diagnostics and runtime gossip text/option filtering now consult the loaded `ConditionMgr` store while the handler still queries DB on demand. |
 | Trainer spells | `handlers/trainer.rs` | Trainer list spell visibility now consults the loaded `ConditionMgr` store using the corrected `TRAINER_SPELL` source type; purchase-side revalidation remains pending. |
 | Spell implicit targets | `wow-spell` | No filter on AoE / chained targets. |

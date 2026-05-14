@@ -4323,6 +4323,40 @@ impl WorldSession {
         )
     }
 
+    fn vendor_item_conditions_meet_like_cpp(
+        condition_store: &ConditionEntriesByTypeStore,
+        creature_entry: u32,
+        item_id: u32,
+        player_object: Option<&WorldObject>,
+        vendor_object: Option<&WorldObject>,
+        player_unit_snapshot: crate::conditions::ConditionUnitSnapshot,
+        player_snapshot: crate::conditions::ConditionPlayerSnapshot,
+        vendor_unit_snapshot: Option<crate::conditions::ConditionUnitSnapshot>,
+    ) -> bool {
+        crate::conditions::is_object_meeting_vendor_item_conditions_like_cpp(
+            condition_store,
+            creature_entry,
+            item_id,
+            player_object,
+            vendor_object,
+            |condition, source_info| {
+                source_info.set_unit_target_snapshot(0, player_unit_snapshot);
+                source_info.set_player_target_snapshot(0, player_snapshot);
+                if let Some(vendor_unit_snapshot) = vendor_unit_snapshot {
+                    source_info.set_unit_target_snapshot(1, vendor_unit_snapshot);
+                }
+                match crate::conditions::condition_meets_basic_like_cpp(
+                    condition,
+                    source_info,
+                    |current_area, required_area| current_area == required_area,
+                ) {
+                    crate::conditions::ConditionMeetResult::Evaluated(value) => value,
+                    crate::conditions::ConditionMeetResult::Unsupported => false,
+                }
+            },
+        )
+    }
+
     /// Build a GossipMessage from the database for a creature entry.
     /// Returns None if no gossip menu exists.
     async fn build_gossip_menu(
@@ -4803,6 +4837,11 @@ impl WorldSession {
         let mut expanded = std::collections::HashSet::<u32>::new();
         let mut queue = std::collections::VecDeque::new();
         queue.push_back(entry);
+        let condition_store = self.condition_store().cloned();
+        let player_condition_object = self.build_condition_player_object_like_cpp();
+        let vendor_condition_object = self.build_condition_creature_object_like_cpp(vendor_guid);
+        let player_unit_snapshot = self.condition_player_unit_snapshot_like_cpp();
+        let player_snapshot = self.condition_player_snapshot_like_cpp();
 
         'vendor_expansion: while let Some(vendor_entry) = queue.pop_front() {
             if !expanded.insert(vendor_entry) {
@@ -4945,10 +4984,35 @@ impl WorldSession {
                         continue;
                     }
                     if has_vendor_conditions {
-                        if !result.next_row() {
-                            break;
+                        let Some(store) = condition_store.as_ref() else {
+                            if !result.next_row() {
+                                break;
+                            }
+                            continue;
+                        };
+                        let (vendor_object, vendor_unit_snapshot) = vendor_condition_object
+                            .as_ref()
+                            .map(|(object, snapshot)| (Some(object), Some(*snapshot)))
+                            .unwrap_or((None, None));
+                        if !Self::vendor_item_conditions_meet_like_cpp(
+                            store.as_ref(),
+                            entry,
+                            item_id as u32,
+                            player_condition_object.as_ref(),
+                            vendor_object,
+                            player_unit_snapshot,
+                            player_snapshot,
+                            vendor_unit_snapshot,
+                        ) {
+                            warn!(
+                                "Vendor item condition not met for creature entry {} item {}",
+                                entry, item_id
+                            );
+                            if !result.next_row() {
+                                break;
+                            }
+                            continue;
                         }
-                        continue;
                     }
                     let refundable = vendor_list_item_refundable(
                         template.as_ref().map(|template| template.flags),
@@ -5231,6 +5295,38 @@ impl WorldSession {
             None => return,
         };
 
+        let condition_store = self.condition_store().cloned();
+        if let Some(store) = condition_store.as_ref() {
+            let player_condition_object = self.build_condition_player_object_like_cpp();
+            let vendor_condition_object =
+                self.build_condition_creature_object_like_cpp(buy.vendor_guid);
+            let (vendor_object, vendor_unit_snapshot) = vendor_condition_object
+                .as_ref()
+                .map(|(object, snapshot)| (Some(object), Some(*snapshot)))
+                .unwrap_or((None, None));
+            if !Self::vendor_item_conditions_meet_like_cpp(
+                store.as_ref(),
+                vendor_entry,
+                buy.item_id as u32,
+                player_condition_object.as_ref(),
+                vendor_object,
+                self.condition_player_unit_snapshot_like_cpp(),
+                self.condition_player_snapshot_like_cpp(),
+                vendor_unit_snapshot,
+            ) {
+                warn!(
+                    "BuyItem: conditions not met for creature entry {} item {}",
+                    vendor_entry, buy.item_id
+                );
+                self.send_buy_error(
+                    BuyResult::CantFindItem,
+                    Some(buy.vendor_guid),
+                    buy.item_id as u32,
+                );
+                return;
+            }
+        }
+
         if buy.item_type == ItemVendorType::Currency as i32 {
             if !vendor_currency_type_is_known(
                 self.currency_types_store().map(|store| store.as_ref()),
@@ -5466,7 +5562,9 @@ impl WorldSession {
             }
             return;
         }
-        if let Some(result) = vendor_conditions_block_result(vendor_item.has_vendor_conditions) {
+        if condition_store.is_none()
+            && let Some(result) = vendor_conditions_block_result(vendor_item.has_vendor_conditions)
+        {
             self.send_buy_error(result, Some(buy.vendor_guid), buy.item_id as u32);
             return;
         }
