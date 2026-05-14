@@ -579,6 +579,29 @@ async fn main() -> Result<()> {
         creature_spawn_store.len(),
         gameobject_spawn_store.len()
     );
+    let active_event_store = Arc::new(
+        wow_data::WorldIdStore::load_like_cpp(
+            world_db.as_ref(),
+            "game_event",
+            WorldStatements::SEL_VALID_GAME_EVENT_IDS,
+        )
+        .await
+        .context("Failed to load game_event ids for C++ ConditionMgr validation")?,
+    );
+    let world_state_store = Arc::new(
+        wow_data::WorldIdStore::load_like_cpp(
+            world_db.as_ref(),
+            "world_state",
+            WorldStatements::SEL_WORLD_STATE_IDS,
+        )
+        .await
+        .context("Failed to load world_state ids for C++ ConditionMgr validation")?,
+    );
+    info!(
+        "Loaded condition validation world id stores: {} valid game events, {} world states",
+        active_event_store.len(),
+        world_state_store.len()
+    );
     let trainer_store = Arc::new(
         wow_data::WorldIdStore::load_like_cpp(
             world_db.as_ref(),
@@ -985,6 +1008,8 @@ async fn main() -> Result<()> {
                 area_trigger_template_store: Some(area_trigger_template_store.as_ref()),
                 creature_spawn_store: Some(creature_spawn_store.as_ref()),
                 gameobject_spawn_store: Some(gameobject_spawn_store.as_ref()),
+                active_event_store: Some(active_event_store.as_ref()),
+                world_state_store: Some(world_state_store.as_ref()),
                 difficulty_store: Some(difficulty_store.as_ref()),
                 faction_store: Some(faction_store.as_ref()),
                 achievement_store: Some(achievement_store.as_ref()),

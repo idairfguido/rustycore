@@ -676,6 +676,8 @@ pub enum ConditionTypeValidationErrorLikeCpp {
         expected_entry: u32,
         actual_entry: u32,
     },
+    NonExistingActiveEvent(u32),
+    NonExistingWorldState(u32),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -755,6 +757,8 @@ pub struct ConditionExternalValidationStoresLikeCpp<'a> {
     pub area_trigger_template_store: Option<&'a crate::AreaTriggerTemplateStore>,
     pub creature_spawn_store: Option<&'a crate::WorldSpawnIdStore>,
     pub gameobject_spawn_store: Option<&'a crate::WorldSpawnIdStore>,
+    pub active_event_store: Option<&'a crate::WorldIdStore>,
+    pub world_state_store: Option<&'a crate::WorldIdStore>,
     pub difficulty_store: Option<&'a crate::DifficultyStore>,
     pub faction_store: Option<&'a crate::Db2IdStore>,
     pub achievement_store: Option<&'a crate::Db2IdStore>,
@@ -1296,6 +1300,20 @@ pub fn validate_condition_type_external_like_cpp(
             }
             _ => {}
         },
+        ConditionType::ActiveEvent => {
+            if let Some(store) = stores.active_event_store
+                && !store.contains(condition.condition_value1)
+            {
+                return Err(Error::NonExistingActiveEvent(condition.condition_value1));
+            }
+        }
+        ConditionType::WorldState => {
+            if let Some(store) = stores.world_state_store
+                && !store.contains(condition.condition_value1)
+            {
+                return Err(Error::NonExistingWorldState(condition.condition_value1));
+            }
+        }
         _ => {}
     }
 
@@ -2722,6 +2740,8 @@ mod tests {
             crate::WorldSpawnIdStore::from_entries("creature", [(1000, 980)]);
         let gameobject_spawn_store =
             crate::WorldSpawnIdStore::from_entries("gameobject", [(1001, 990)]);
+        let active_event_store = crate::WorldIdStore::from_ids("game_event", [1100]);
+        let world_state_store = crate::WorldIdStore::from_ids("world_state", [1200]);
         let stores = ConditionExternalValidationStoresLikeCpp {
             item_store: Some(&item_store),
             spell_store: Some(&spell_store),
@@ -2742,6 +2762,8 @@ mod tests {
             gameobject_template_store: Some(&gameobject_template_store),
             creature_spawn_store: Some(&creature_spawn_store),
             gameobject_spawn_store: Some(&gameobject_spawn_store),
+            active_event_store: Some(&active_event_store),
+            world_state_store: Some(&world_state_store),
             max_skill_value: Some(450),
             ..ConditionExternalValidationStoresLikeCpp::default()
         };
@@ -2864,6 +2886,16 @@ mod tests {
                 condition_value1: TypeId::GameObject as u32,
                 condition_value2: 990,
                 condition_value3: 1001,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::ActiveEvent,
+                condition_value1: 1100,
+                ..Condition::default()
+            },
+            Condition {
+                condition_type: ConditionType::WorldState,
+                condition_value1: 1200,
                 ..Condition::default()
             },
         ] {
@@ -3131,6 +3163,32 @@ mod tests {
                     actual_entry: 990
                 }
             )
+        ));
+        assert!(matches!(
+            validate_condition_type_external_like_cpp(
+                &Condition {
+                    condition_type: ConditionType::ActiveEvent,
+                    condition_value1: 999,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(ConditionTypeValidationErrorLikeCpp::NonExistingActiveEvent(
+                999
+            ))
+        ));
+        assert!(matches!(
+            validate_condition_type_external_like_cpp(
+                &Condition {
+                    condition_type: ConditionType::WorldState,
+                    condition_value1: 999,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(ConditionTypeValidationErrorLikeCpp::NonExistingWorldState(
+                999
+            ))
         ));
     }
 

@@ -57,6 +57,10 @@ pub enum WorldStatements {
     SEL_CREATURE_SPAWN_IDS,
     /// Load all gameobject spawn GUID/entry pairs for C++ ConditionMgr validation.
     SEL_GAMEOBJECT_SPAWN_IDS,
+    /// Load valid game event IDs for C++ ConditionMgr ActiveEvent validation.
+    SEL_VALID_GAME_EVENT_IDS,
+    /// Load world-state template IDs for C++ ConditionMgr WorldState validation.
+    SEL_WORLD_STATE_IDS,
     /// SELECT Experience FROM player_xp_for_level ORDER BY Level
     SEL_PLAYER_XP_FOR_LEVEL,
     SEL_CREATURE_BY_ID,
@@ -376,6 +380,10 @@ impl StatementDef for WorldStatements {
             Self::SEL_CREATURE_TEMPLATE_IDS => "SELECT entry FROM creature_template",
             Self::SEL_CREATURE_SPAWN_IDS => "SELECT guid, id FROM creature",
             Self::SEL_GAMEOBJECT_SPAWN_IDS => "SELECT guid, id FROM gameobject",
+            Self::SEL_VALID_GAME_EVENT_IDS => {
+                "SELECT eventEntry FROM game_event WHERE eventEntry <> 0 AND (`length` > 0 OR world_event > 0)"
+            }
+            Self::SEL_WORLD_STATE_IDS => "SELECT ID FROM world_state",
             Self::SEL_CREATURE_BY_ID => "SELECT guid FROM creature WHERE id = ?",
             Self::SEL_CREATURE_ENTRY_BY_GUID => "SELECT id FROM creature WHERE guid = ?",
             Self::SEL_GAMEOBJECT_NEAREST => {
