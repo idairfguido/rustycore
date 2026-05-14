@@ -139,7 +139,7 @@ Todas las rutas relativas a `/home/server/woltk-trinity-legacy/`.
 | `DB2Manager::GetItemSetSpells(itemSetId)` / `GetItemSpecOverrides(itemId)` | Set bonuses; class-spec drops | `sItemSetSpellStore` |
 | `DB2Manager::GetLfgDungeon(mapId, difficulty)` | LFG queue → dungeon resolution | `sLFGDungeonsStore` |
 | `DB2Manager::GetDefaultMapDifficulty(mapId, *outDifficulty)` / `GetMapDifficultyData(mapId, difficulty)` / `GetDownscaledMapDifficultyData(mapId, &difficulty)` | Map → difficulty resolution | `sMapDifficultyStore` |
-| `DB2Manager::GetMount(spellId)` / `GetMountById(id)` / `GetMountCapabilities(mountType)` / `GetMountDisplays(mountId)` | Mount system | `sMountStore`, `sMountTypeXCapabilityStore`, `sMountXDisplayStore` |
+| `DB2Manager::GetMount(spellId)` / `GetMountById(id)` / `GetMountCapabilities(mountType)` / `GetMountDisplays(mountId)` | Mount system | `sMountStore` is loaded and indexed by `SourceSpellID`; `sMountTypeXCapabilityStore` and `sMountXDisplayStore` still pending |
 | `DB2Manager::GetNameGenEntry(race, gender)` / `ValidateName(wname, locale)` | Random-name + name-validation | `sNameGenStore`, `sNamesProfanityStore`, `sNamesReservedStore` |
 | `DB2Manager::GetNumTalentsAtLevel(level, class)` | Talent slots per level | builtin table |
 | `DB2Manager::GetPhasesForGroup(group)` | Phasing | `sPhaseXPhaseGroupStore` |

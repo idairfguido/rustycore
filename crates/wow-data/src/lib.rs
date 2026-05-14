@@ -34,6 +34,7 @@ pub mod item_random_suffix;
 pub mod item_stats;
 pub mod lock;
 pub mod map;
+pub mod mount;
 pub mod phase;
 pub mod phasing;
 pub mod player_condition;
@@ -115,6 +116,7 @@ pub use map::{
     MapDifficultyEntry, MapDifficultyStore, MapDifficultyXConditionEntry,
     MapDifficultyXConditionStore, MapEntry, MapStore,
 };
+pub use mount::{MountEntry, MountStore};
 pub use phase::{PhaseEntry, PhaseGroupStore, PhaseStore, PhaseXPhaseGroupEntry};
 pub use phasing::{
     PhaseAreaInfo, PhaseConditionAttachmentReport, PhaseConditionContainer, PhaseInfoStore,

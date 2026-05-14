@@ -643,6 +643,11 @@ async fn main() -> Result<()> {
         "Loaded {} map difficulty conditions from MapDifficultyXCondition.db2",
         map_difficulty_x_condition_store.len()
     );
+    let mount_store = Arc::new(
+        wow_data::MountStore::load(&data_dir, &locale)
+            .context("Failed to load Mount.db2 — check DataDir and DBC.Locale config")?,
+    );
+    info!("Loaded {} mounts from Mount.db2", mount_store.len());
     let difficulty_store = Arc::new(
         wow_data::DifficultyStore::load(&data_dir, &locale)
             .context("Failed to load Difficulty.db2 — check DataDir and DBC.Locale config")?,
@@ -1202,6 +1207,7 @@ async fn main() -> Result<()> {
         map_store: Some(Arc::clone(&map_store)),
         map_difficulty_store: Some(Arc::clone(&map_difficulty_store)),
         map_difficulty_x_condition_store: Some(Arc::clone(&map_difficulty_x_condition_store)),
+        mount_store: Some(Arc::clone(&mount_store)),
         terrain_swap_store: Some(Arc::clone(&terrain_swap_store)),
         phase_store: Some(Arc::clone(&phase_store)),
         phase_group_store: Some(Arc::clone(&phase_group_store)),
@@ -2071,6 +2077,9 @@ async fn create_session(
     }
     if let Some(ref store) = resources.map_difficulty_x_condition_store {
         session.set_map_difficulty_x_condition_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.mount_store {
+        session.set_mount_store(Arc::clone(store));
     }
     if let Some(ref store) = resources.terrain_swap_store {
         session.set_terrain_swap_store(Arc::clone(store));

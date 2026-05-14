@@ -36,7 +36,7 @@ use wow_data::{
     ItemModifiedAppearanceStore, ItemPriceBaseStore, ItemRandomEnchantmentTemplateStore,
     ItemRandomPropertiesStore, ItemRandomPropertyTemplateEntry, ItemRandomSuffixStore,
     ItemStatsStore, ItemStore, LockStore, MapDifficultyStore, MapDifficultyXConditionStore,
-    MapStore, PhaseGroupStore, PhaseStore, PlayerConditionAuraLikeCpp,
+    MapStore, MountStore, PhaseGroupStore, PhaseStore, PlayerConditionAuraLikeCpp,
     PlayerConditionContextLikeCpp, PlayerConditionCountLikeCpp, PlayerConditionPartyStatusLikeCpp,
     PlayerConditionQuestKillLikeCpp, PlayerConditionReputationLikeCpp, PlayerConditionSkillLikeCpp,
     PlayerConditionStore, PlayerStatsStore, RandPropPointsStore, SkillStore,
@@ -709,6 +709,7 @@ pub struct WorldSession {
     map_store: Option<Arc<MapStore>>,
     map_difficulty_store: Option<Arc<MapDifficultyStore>>,
     map_difficulty_x_condition_store: Option<Arc<MapDifficultyXConditionStore>>,
+    mount_store: Option<Arc<MountStore>>,
     terrain_swap_store: Option<Arc<wow_data::TerrainSwapStore>>,
     phase_store: Option<Arc<PhaseStore>>,
     phase_group_store: Option<Arc<PhaseGroupStore>>,
@@ -1410,6 +1411,7 @@ impl WorldSession {
             map_store: None,
             map_difficulty_store: None,
             map_difficulty_x_condition_store: None,
+            mount_store: None,
             terrain_swap_store: None,
             phase_store: None,
             phase_group_store: None,
@@ -3474,6 +3476,14 @@ impl WorldSession {
         store: Arc<MapDifficultyXConditionStore>,
     ) {
         self.map_difficulty_x_condition_store = Some(store);
+    }
+
+    pub fn set_mount_store(&mut self, store: Arc<MountStore>) {
+        self.mount_store = Some(store);
+    }
+
+    pub(crate) fn mount_store(&self) -> Option<&Arc<MountStore>> {
+        self.mount_store.as_ref()
     }
 
     pub fn set_terrain_swap_store(&mut self, store: Arc<wow_data::TerrainSwapStore>) {
@@ -6369,6 +6379,19 @@ impl WorldSession {
     }
 
     #[allow(dead_code)]
+    pub(crate) fn represented_mount_source_spell_usable_like_cpp(&self, spell_id: u32) -> bool {
+        let Some(mount) = self
+            .mount_store
+            .as_ref()
+            .and_then(|store| store.get_by_source_spell_id_like_cpp(spell_id))
+        else {
+            return false;
+        };
+
+        self.represented_meets_player_condition_id_like_cpp(mount.player_condition_id)
+    }
+
+    #[allow(dead_code)]
     pub(crate) fn represented_failed_map_difficulty_x_condition_like_cpp(
         &self,
         map_difficulty_id: u32,
@@ -8982,6 +9005,52 @@ mod tests {
         assert!(session.represented_mount_x_display_usable_like_cpp(42));
         assert!(!session.represented_mount_x_display_usable_like_cpp(43));
         assert!(session.represented_mount_x_display_usable_like_cpp(999));
+    }
+
+    #[test]
+    fn represented_mount_source_spell_usable_matches_cpp_mount_condition_filter() {
+        let (mut session, _, _) = make_session();
+        session.player_class = 1;
+        session.set_mount_store(Arc::new(wow_data::MountStore::from_entries([
+            wow_data::MountEntry {
+                id: 1,
+                mount_type_id: 0,
+                flags: 0,
+                source_type_enum: 0,
+                source_spell_id: 100,
+                player_condition_id: 42,
+                mount_fly_ride_height: 0.0,
+                ui_model_scene_id: 0,
+            },
+            wow_data::MountEntry {
+                id: 2,
+                mount_type_id: 0,
+                flags: 0,
+                source_type_enum: 0,
+                source_spell_id: 101,
+                player_condition_id: 43,
+                mount_fly_ride_height: 0.0,
+                ui_model_scene_id: 0,
+            },
+        ])));
+        session.set_player_condition_store(Arc::new(wow_data::PlayerConditionStore::from_entries(
+            [
+                wow_data::PlayerConditionEntry {
+                    id: 42,
+                    class_mask: 1,
+                    ..Default::default()
+                },
+                wow_data::PlayerConditionEntry {
+                    id: 43,
+                    class_mask: 1 << 1,
+                    ..Default::default()
+                },
+            ],
+        )));
+
+        assert!(session.represented_mount_source_spell_usable_like_cpp(100));
+        assert!(!session.represented_mount_source_spell_usable_like_cpp(101));
+        assert!(!session.represented_mount_source_spell_usable_like_cpp(999));
     }
 
     #[test]

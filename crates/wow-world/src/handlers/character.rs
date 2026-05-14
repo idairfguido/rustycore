@@ -7969,7 +7969,13 @@ impl WorldSession {
         loop {
             let spell_id = result.try_read::<i32>(0).unwrap_or(0);
             let flags = result.try_read::<u8>(1).unwrap_or(0);
-            if spell_id > 0 {
+            let has_mount = spell_id > 0
+                && self.mount_store().is_none_or(|store| {
+                    store
+                        .get_by_source_spell_id_like_cpp(spell_id as u32)
+                        .is_some()
+                });
+            if has_mount {
                 mounts.push(AccountMount { spell_id, flags });
             }
 

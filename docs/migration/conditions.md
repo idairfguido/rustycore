@@ -223,6 +223,7 @@ ConditionMgr is server-internal — it emits no packets directly. Indirectly, wh
 - `world-server` now loads the C++ `conditions` table during startup, builds a shared `ConditionEntriesByTypeStore`, installs it into a process-wide C++ `sConditionMgr`-style accessor, logs skipped/warning rows, records the represented attachment-pass counts, and passes the store through `SessionResources` into each `WorldSession`. This is startup/store parity only; it does not close external-store validation or every downstream consumer callsite.
 - `wow-data::ConditionEntriesByTypeStore` groups parsed rows by `ConditionSourceType` and `ConditionId`, and `ConditionsReference` mirrors the C++ weak-reference holder used by downstream modules across reloads.
 - `wow-data::PhaseInfoStore::attach_phase_conditions_like_cpp` ports C++ `ConditionMgr::addToPhases`: `SourceEntry = 0` attaches a phase bucket to every area owned by the phase, non-zero `SourceEntry` attaches only to that concrete area/phase pair, and missing area/phase pairs are reported.
+- `wow-data::MountStore` now loads `Mount.db2` and builds the C++ `_mountsBySpellId` index. `CollectionMgr::LoadAccountMounts` parity is represented by filtering account mount rows through `GetMount(spellId)`, and `Mount.PlayerConditionID` has a represented session helper for the C++ `CollectionMgr::AddMount` use/learn gate. Full mount runtime handlers remain separate work.
 
 **What's missing vs C++:**
 - Remaining integration of condition validation/indexing into all runtime consumers and reload paths.
