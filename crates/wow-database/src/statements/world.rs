@@ -53,6 +53,10 @@ pub enum WorldStatements {
     SEL_COMMANDS,
     SEL_CREATURE_TEMPLATE,
     SEL_CREATURE_TEMPLATE_IDS,
+    /// Load all creature spawn GUID/entry pairs for C++ ConditionMgr validation.
+    SEL_CREATURE_SPAWN_IDS,
+    /// Load all gameobject spawn GUID/entry pairs for C++ ConditionMgr validation.
+    SEL_GAMEOBJECT_SPAWN_IDS,
     /// SELECT Experience FROM player_xp_for_level ORDER BY Level
     SEL_PLAYER_XP_FOR_LEVEL,
     SEL_CREATURE_BY_ID,
@@ -370,6 +374,8 @@ impl StatementDef for WorldStatements {
                 "LEFT JOIN creature_template_movement ctm ON ct.entry = ctm.CreatureId WHERE entry = ? OR 1 = ?",
             ),
             Self::SEL_CREATURE_TEMPLATE_IDS => "SELECT entry FROM creature_template",
+            Self::SEL_CREATURE_SPAWN_IDS => "SELECT guid, id FROM creature",
+            Self::SEL_GAMEOBJECT_SPAWN_IDS => "SELECT guid, id FROM gameobject",
             Self::SEL_CREATURE_BY_ID => "SELECT guid FROM creature WHERE id = ?",
             Self::SEL_CREATURE_ENTRY_BY_GUID => "SELECT id FROM creature WHERE guid = ?",
             Self::SEL_GAMEOBJECT_NEAREST => {

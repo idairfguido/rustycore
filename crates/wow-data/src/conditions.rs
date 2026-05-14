@@ -664,6 +664,18 @@ pub enum ConditionTypeValidationErrorLikeCpp {
         condition_type: ConditionType,
         entry: u32,
     },
+    NonExistingCreatureGuid(u32),
+    NonExistingGameObjectGuid(u32),
+    CreatureGuidEntryMismatch {
+        guid: u32,
+        expected_entry: u32,
+        actual_entry: u32,
+    },
+    GameObjectGuidEntryMismatch {
+        guid: u32,
+        expected_entry: u32,
+        actual_entry: u32,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -741,6 +753,8 @@ pub struct ConditionExternalValidationStoresLikeCpp<'a> {
     pub trainer_store: Option<&'a crate::WorldIdStore>,
     pub conversation_line_template_store: Option<&'a crate::WorldIdStore>,
     pub area_trigger_template_store: Option<&'a crate::AreaTriggerTemplateStore>,
+    pub creature_spawn_store: Option<&'a crate::WorldSpawnIdStore>,
+    pub gameobject_spawn_store: Option<&'a crate::WorldSpawnIdStore>,
     pub difficulty_store: Option<&'a crate::DifficultyStore>,
     pub faction_store: Option<&'a crate::Db2IdStore>,
     pub achievement_store: Option<&'a crate::Db2IdStore>,
@@ -1236,6 +1250,22 @@ pub fn validate_condition_type_external_like_cpp(
                         entry: condition.condition_value2,
                     });
                 }
+                if condition.condition_value3 != 0
+                    && let Some(store) = stores.creature_spawn_store
+                {
+                    let Some(actual_entry) = store.entry_for_guid(condition.condition_value3)
+                    else {
+                        return Err(Error::NonExistingCreatureGuid(condition.condition_value3));
+                    };
+                    if condition.condition_value2 != 0 && actual_entry != condition.condition_value2
+                    {
+                        return Err(Error::CreatureGuidEntryMismatch {
+                            guid: condition.condition_value3,
+                            expected_entry: condition.condition_value2,
+                            actual_entry,
+                        });
+                    }
+                }
             }
             value if value == TypeId::GameObject as u32 => {
                 if condition.condition_value2 != 0
@@ -1246,6 +1276,22 @@ pub fn validate_condition_type_external_like_cpp(
                         condition_type: condition.condition_type,
                         entry: condition.condition_value2,
                     });
+                }
+                if condition.condition_value3 != 0
+                    && let Some(store) = stores.gameobject_spawn_store
+                {
+                    let Some(actual_entry) = store.entry_for_guid(condition.condition_value3)
+                    else {
+                        return Err(Error::NonExistingGameObjectGuid(condition.condition_value3));
+                    };
+                    if condition.condition_value2 != 0 && actual_entry != condition.condition_value2
+                    {
+                        return Err(Error::GameObjectGuidEntryMismatch {
+                            guid: condition.condition_value3,
+                            expected_entry: condition.condition_value2,
+                            actual_entry,
+                        });
+                    }
                 }
             }
             _ => {}
@@ -2668,8 +2714,14 @@ mod tests {
         let scene_script_package_store =
             crate::Db2IdStore::from_ids("SceneScriptPackage.db2", [960]);
         let player_condition_store = crate::Db2IdStore::from_ids("PlayerCondition.db2", [970]);
-        let creature_template_store = crate::WorldIdStore::from_ids("creature_template", [980]);
-        let gameobject_template_store = crate::WorldIdStore::from_ids("gameobject_template", [990]);
+        let creature_template_store =
+            crate::WorldIdStore::from_ids("creature_template", [980, 981]);
+        let gameobject_template_store =
+            crate::WorldIdStore::from_ids("gameobject_template", [990, 991]);
+        let creature_spawn_store =
+            crate::WorldSpawnIdStore::from_entries("creature", [(1000, 980)]);
+        let gameobject_spawn_store =
+            crate::WorldSpawnIdStore::from_entries("gameobject", [(1001, 990)]);
         let stores = ConditionExternalValidationStoresLikeCpp {
             item_store: Some(&item_store),
             spell_store: Some(&spell_store),
@@ -2688,6 +2740,8 @@ mod tests {
             player_condition_store: Some(&player_condition_store),
             creature_template_store: Some(&creature_template_store),
             gameobject_template_store: Some(&gameobject_template_store),
+            creature_spawn_store: Some(&creature_spawn_store),
+            gameobject_spawn_store: Some(&gameobject_spawn_store),
             max_skill_value: Some(450),
             ..ConditionExternalValidationStoresLikeCpp::default()
         };
@@ -2797,6 +2851,7 @@ mod tests {
                 condition_type: ConditionType::ObjectEntryGuid,
                 condition_value1: TypeId::Unit as u32,
                 condition_value2: 980,
+                condition_value3: 1000,
                 ..Condition::default()
             },
             Condition {
@@ -2808,6 +2863,7 @@ mod tests {
                 condition_type: ConditionType::ObjectEntryGuid,
                 condition_value1: TypeId::GameObject as u32,
                 condition_value2: 990,
+                condition_value3: 1001,
                 ..Condition::default()
             },
         ] {
@@ -3011,6 +3067,68 @@ mod tests {
                 ConditionTypeValidationErrorLikeCpp::NonExistingGameObjectTemplate {
                     condition_type: ConditionType::ObjectEntryGuid,
                     entry: 999
+                }
+            )
+        ));
+        assert!(matches!(
+            validate_condition_type_external_like_cpp(
+                &Condition {
+                    condition_type: ConditionType::ObjectEntryGuid,
+                    condition_value1: TypeId::Unit as u32,
+                    condition_value3: 9999,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(ConditionTypeValidationErrorLikeCpp::NonExistingCreatureGuid(9999))
+        ));
+        assert!(matches!(
+            validate_condition_type_external_like_cpp(
+                &Condition {
+                    condition_type: ConditionType::ObjectEntryGuid,
+                    condition_value1: TypeId::Unit as u32,
+                    condition_value2: 981,
+                    condition_value3: 1000,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(
+                ConditionTypeValidationErrorLikeCpp::CreatureGuidEntryMismatch {
+                    guid: 1000,
+                    expected_entry: 981,
+                    actual_entry: 980
+                }
+            )
+        ));
+        assert!(matches!(
+            validate_condition_type_external_like_cpp(
+                &Condition {
+                    condition_type: ConditionType::ObjectEntryGuid,
+                    condition_value1: TypeId::GameObject as u32,
+                    condition_value3: 9999,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(ConditionTypeValidationErrorLikeCpp::NonExistingGameObjectGuid(9999))
+        ));
+        assert!(matches!(
+            validate_condition_type_external_like_cpp(
+                &Condition {
+                    condition_type: ConditionType::ObjectEntryGuid,
+                    condition_value1: TypeId::GameObject as u32,
+                    condition_value2: 991,
+                    condition_value3: 1001,
+                    ..Condition::default()
+                },
+                stores
+            ),
+            Err(
+                ConditionTypeValidationErrorLikeCpp::GameObjectGuidEntryMismatch {
+                    guid: 1001,
+                    expected_entry: 991,
+                    actual_entry: 990
                 }
             )
         ));

@@ -49,6 +49,7 @@ pub mod ui_map;
 pub mod wdc4;
 pub mod world_id_store;
 pub mod world_safe_locs;
+pub mod world_spawn_id_store;
 
 pub use area::{AreaTableEntry, AreaTableStore};
 pub use area_trigger::{
@@ -125,3 +126,4 @@ pub use world_id_store::WorldIdStore;
 pub use world_safe_locs::{
     WorldSafeLoc, WorldSafeLocLoadReport, WorldSafeLocRow, WorldSafeLocStore,
 };
+pub use world_spawn_id_store::WorldSpawnIdStore;
