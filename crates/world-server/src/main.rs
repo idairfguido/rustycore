@@ -584,6 +584,18 @@ async fn main() -> Result<()> {
         "Loaded {} creature model data rows",
         creature_model_data_store.len()
     );
+    let vehicle_store = Arc::new(
+        wow_data::VehicleStore::load_with_hotfixes(&data_dir, &locale, &hotfix_db)
+            .await
+            .context("Failed to load Vehicle.db2 / hotfix rows")?,
+    );
+    info!("Loaded {} vehicle rows", vehicle_store.len());
+    let vehicle_seat_store = Arc::new(
+        wow_data::VehicleSeatStore::load_with_hotfixes(&data_dir, &locale, &hotfix_db)
+            .await
+            .context("Failed to load VehicleSeat.db2 / hotfix rows")?,
+    );
+    info!("Loaded {} vehicle seat rows", vehicle_seat_store.len());
     let creature_spawn_store = Arc::new(
         wow_data::WorldSpawnIdStore::load_like_cpp(
             world_db.as_ref(),
@@ -1270,6 +1282,8 @@ async fn main() -> Result<()> {
         mount_capability_store: Some(Arc::clone(&mount_capability_store)),
         mount_type_x_capability_store: Some(Arc::clone(&mount_type_x_capability_store)),
         mount_x_display_store: Some(Arc::clone(&mount_x_display_store)),
+        vehicle_store: Some(Arc::clone(&vehicle_store)),
+        vehicle_seat_store: Some(Arc::clone(&vehicle_seat_store)),
         terrain_swap_store: Some(Arc::clone(&terrain_swap_store)),
         phase_store: Some(Arc::clone(&phase_store)),
         phase_group_store: Some(Arc::clone(&phase_group_store)),
@@ -2163,6 +2177,12 @@ async fn create_session(
     }
     if let Some(ref store) = resources.mount_x_display_store {
         session.set_mount_x_display_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.vehicle_store {
+        session.set_vehicle_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.vehicle_seat_store {
+        session.set_vehicle_seat_store(Arc::clone(store));
     }
     if let Some(ref store) = resources.terrain_swap_store {
         session.set_terrain_swap_store(Arc::clone(store));

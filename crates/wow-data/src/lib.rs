@@ -51,6 +51,7 @@ pub mod spell;
 pub mod spell_item_enchantment;
 pub mod terrain_swap;
 pub mod ui_map;
+pub mod vehicle;
 pub mod wdc4;
 pub mod world_id_store;
 pub mod world_safe_locs;
@@ -162,6 +163,10 @@ pub use spell::{SpellEffectInfo, SpellInfo, SpellStore};
 pub use spell_item_enchantment::{SpellItemEnchantmentEntry, SpellItemEnchantmentStore};
 pub use terrain_swap::{TerrainSwapInfo, TerrainSwapStore, load_terrain_swaps};
 pub use ui_map::{UiMapXMapArtEntry, UiMapXMapArtStore};
+pub use vehicle::{
+    VEHICLE_SEAT_FLAG_B_USABLE_FORCED, VEHICLE_SEAT_FLAG_CAN_ENTER_OR_EXIT, VehicleEntry,
+    VehicleSeatEntry, VehicleSeatStore, VehicleStore,
+};
 pub use world_id_store::WorldIdStore;
 pub use world_safe_locs::{
     WorldSafeLoc, WorldSafeLocLoadReport, WorldSafeLocRow, WorldSafeLocStore,

@@ -44,7 +44,7 @@ use wow_data::{
     PlayerConditionPartyStatusLikeCpp, PlayerConditionQuestKillLikeCpp,
     PlayerConditionReputationLikeCpp, PlayerConditionSkillLikeCpp, PlayerConditionStore,
     PlayerStatsStore, RandPropPointsStore, SkillStore, SpellItemEnchantmentStore, SpellStore,
-    is_player_meeting_condition_like_cpp,
+    VehicleSeatStore, VehicleStore, is_player_meeting_condition_like_cpp,
 };
 use wow_database::{
     CharStatements, CharacterDatabase, LoginDatabase, PreparedStatement, SqlTransaction,
@@ -736,6 +736,8 @@ pub struct WorldSession {
     mount_capability_store: Option<Arc<MountCapabilityStore>>,
     mount_type_x_capability_store: Option<Arc<MountTypeXCapabilityStore>>,
     mount_x_display_store: Option<Arc<MountXDisplayStore>>,
+    vehicle_store: Option<Arc<VehicleStore>>,
+    vehicle_seat_store: Option<Arc<VehicleSeatStore>>,
     terrain_swap_store: Option<Arc<wow_data::TerrainSwapStore>>,
     phase_store: Option<Arc<PhaseStore>>,
     phase_group_store: Option<Arc<PhaseGroupStore>>,
@@ -972,6 +974,10 @@ pub struct WorldSession {
     player_mount_display_id_like_cpp: i32,
     /// Represented vehicle id selected from mount creature template until VehicleKit exists.
     player_mount_vehicle_id_like_cpp: u32,
+    /// Represented number of VehicleSeat rows installed by C++ `Vehicle` constructor.
+    player_mount_vehicle_seat_count_like_cpp: u8,
+    /// Represented C++ `Vehicle::UsableSeatNum`.
+    player_mount_vehicle_usable_seat_count_like_cpp: u8,
     /// Represented current pet GUID until player-owned pet runtime is canonical.
     represented_pet_guid_like_cpp: Option<ObjectGuid>,
     /// Represented current pet react state for C++ mount/dismount PetMode side effects.
@@ -1491,6 +1497,8 @@ impl WorldSession {
             mount_capability_store: None,
             mount_type_x_capability_store: None,
             mount_x_display_store: None,
+            vehicle_store: None,
+            vehicle_seat_store: None,
             terrain_swap_store: None,
             phase_store: None,
             phase_group_store: None,
@@ -1589,6 +1597,8 @@ impl WorldSession {
             taxi_mounted_like_cpp: false,
             player_mount_display_id_like_cpp: 0,
             player_mount_vehicle_id_like_cpp: 0,
+            player_mount_vehicle_seat_count_like_cpp: 0,
+            player_mount_vehicle_usable_seat_count_like_cpp: 0,
             represented_pet_guid_like_cpp: None,
             represented_pet_react_state_like_cpp:
                 wow_packet::packets::pet::REACT_DEFENSIVE_LIKE_CPP,
@@ -3617,6 +3627,14 @@ impl WorldSession {
         self.mount_x_display_store = Some(store);
     }
 
+    pub fn set_vehicle_store(&mut self, store: Arc<VehicleStore>) {
+        self.vehicle_store = Some(store);
+    }
+
+    pub fn set_vehicle_seat_store(&mut self, store: Arc<VehicleSeatStore>) {
+        self.vehicle_seat_store = Some(store);
+    }
+
     #[allow(dead_code)]
     pub(crate) fn mount_capability_store(&self) -> Option<&Arc<MountCapabilityStore>> {
         self.mount_capability_store.as_ref()
@@ -4618,10 +4636,9 @@ impl WorldSession {
 
         self.visible_auras.insert(slot, aura);
         self.player_mount_display_id_like_cpp = display_id;
-        self.player_mount_vehicle_id_like_cpp = vehicle_id;
         self.player_mounted_like_cpp = true;
         self.player_unit_flags_like_cpp.insert(UnitFlags::MOUNT);
-        if vehicle_id != 0 {
+        if self.create_player_mount_vehicle_kit_like_cpp(vehicle_id) {
             self.mount_vehicle_create_requests_like_cpp = self
                 .mount_vehicle_create_requests_like_cpp
                 .saturating_add(1);
@@ -4647,6 +4664,41 @@ impl WorldSession {
         self.send_represented_mount_unit_update_like_cpp(display_id);
 
         Ok(())
+    }
+
+    fn create_player_mount_vehicle_kit_like_cpp(&mut self, vehicle_id: u32) -> bool {
+        if vehicle_id == 0 {
+            return false;
+        }
+
+        let Some(vehicle) = self
+            .vehicle_store
+            .as_ref()
+            .and_then(|store| store.get(vehicle_id))
+        else {
+            if self.vehicle_store.is_some() {
+                return false;
+            }
+            self.player_mount_vehicle_id_like_cpp = vehicle_id;
+            self.player_mount_vehicle_seat_count_like_cpp = 0;
+            self.player_mount_vehicle_usable_seat_count_like_cpp = 0;
+            return true;
+        };
+
+        let seat_defs = self
+            .vehicle_seat_store
+            .as_ref()
+            .map(|store| store.seat_defs_for_vehicle_like_cpp(vehicle))
+            .unwrap_or_default();
+        self.player_mount_vehicle_id_like_cpp = vehicle_id;
+        self.player_mount_vehicle_seat_count_like_cpp = seat_defs.len().min(u8::MAX as usize) as u8;
+        self.player_mount_vehicle_usable_seat_count_like_cpp = seat_defs
+            .iter()
+            .filter(|(_, seat, _)| seat.can_enter_or_exit)
+            .count()
+            .min(u8::MAX as usize)
+            as u8;
+        true
     }
 
     fn send_set_vehicle_rec_id_like_cpp(&mut self, vehicle_id: u32) {
@@ -4813,6 +4865,8 @@ impl WorldSession {
             let vehicle_id = self.player_mount_vehicle_id_like_cpp;
             self.player_mount_display_id_like_cpp = 0;
             self.player_mount_vehicle_id_like_cpp = 0;
+            self.player_mount_vehicle_seat_count_like_cpp = 0;
+            self.player_mount_vehicle_usable_seat_count_like_cpp = 0;
             self.player_mounted_like_cpp = false;
             self.player_unit_flags_like_cpp.remove(UnitFlags::MOUNT);
             if was_mounted {
@@ -9962,6 +10016,28 @@ mod tests {
                 },
             ]),
         ));
+        session.set_vehicle_store(Arc::new(wow_data::VehicleStore::from_entries([
+            wow_data::VehicleEntry {
+                id: 55,
+                flags: 0,
+                flags_b: 0,
+                seat_ids: [1000, 1001, 0, 0, 0, 0, 0, 0],
+            },
+        ])));
+        session.set_vehicle_seat_store(Arc::new(wow_data::VehicleSeatStore::from_entries([
+            wow_data::VehicleSeatEntry {
+                id: 1000,
+                flags: wow_data::VEHICLE_SEAT_FLAG_CAN_ENTER_OR_EXIT,
+                flags_b: 0,
+                flags_c: 0,
+            },
+            wow_data::VehicleSeatEntry {
+                id: 1001,
+                flags: 0,
+                flags_b: wow_data::VEHICLE_SEAT_FLAG_B_USABLE_FORCED,
+                flags_c: 0,
+            },
+        ])));
         let effect = wow_data::SpellEffectInfo {
             effect: wow_data::spell::spell_effect_types::SPELL_EFFECT_APPLY_AURA,
             effect_aura: wow_data::spell::aura_types::SPELL_AURA_MOUNTED,
@@ -9976,6 +10052,8 @@ mod tests {
 
         assert_eq!(session.player_mount_display_id_like_cpp, 4321);
         assert_eq!(session.player_mount_vehicle_id_like_cpp, 55);
+        assert_eq!(session.player_mount_vehicle_seat_count_like_cpp, 2);
+        assert_eq!(session.player_mount_vehicle_usable_seat_count_like_cpp, 1);
         assert!(session.player_mounted_like_cpp);
         assert_eq!(session.mount_vehicle_create_requests_like_cpp, 1);
         assert_eq!(session.mount_vehicle_remove_requests_like_cpp, 0);
@@ -10025,6 +10103,8 @@ mod tests {
 
         assert_eq!(session.player_mount_display_id_like_cpp, 0);
         assert_eq!(session.player_mount_vehicle_id_like_cpp, 0);
+        assert_eq!(session.player_mount_vehicle_seat_count_like_cpp, 0);
+        assert_eq!(session.player_mount_vehicle_usable_seat_count_like_cpp, 0);
         assert!(!session.player_mounted_like_cpp);
         assert_eq!(session.mount_vehicle_create_requests_like_cpp, 1);
         assert_eq!(session.mount_vehicle_remove_requests_like_cpp, 1);
