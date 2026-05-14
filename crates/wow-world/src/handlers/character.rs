@@ -19,7 +19,7 @@ use wow_core::{ObjectGuid, Position};
 use wow_crypto::rsa_sign::rsa_sign_connect_to;
 use wow_data::{
     ConditionEntriesByTypeStore, ConditionId, CurrencyTypesStore, HotfixRecordStatus,
-    ItemExtendedCostStore, hotfix_locale_mask,
+    ItemExtendedCostStore, PlayerConditionContextLikeCpp, PlayerConditionStore, hotfix_locale_mask,
 };
 use wow_database::{
     CharStatements, CharacterDatabase, LoginStatements, SqlTransaction, WorldDatabase,
@@ -4260,6 +4260,8 @@ impl WorldSession {
 
         let player_unit_snapshot = self.condition_player_unit_snapshot_like_cpp();
         let player_snapshot = self.condition_player_snapshot_like_cpp();
+        let player_condition_store = self.player_condition_store().cloned();
+        let player_condition_context = self.represented_player_condition_context_like_cpp();
 
         let mut source_info = crate::conditions::ConditionSourceInfo::from_targets(
             Some(&player_object),
@@ -4269,6 +4271,10 @@ impl WorldSession {
         source_info.set_unit_target_snapshot(0, player_unit_snapshot);
         source_info.set_player_target_snapshot(0, player_snapshot);
         source_info.set_unit_target_snapshot(1, source_unit_snapshot);
+        if let Some(store) = player_condition_store.as_ref() {
+            source_info.set_player_condition_store(store.as_ref());
+            source_info.set_player_condition_context(0, player_condition_context.as_context(self));
+        }
 
         crate::conditions::is_object_meet_to_conditions_like_cpp(
             &mut source_info,
@@ -4332,6 +4338,8 @@ impl WorldSession {
         player_unit_snapshot: crate::conditions::ConditionUnitSnapshot,
         player_snapshot: crate::conditions::ConditionPlayerSnapshot,
         vendor_unit_snapshot: Option<crate::conditions::ConditionUnitSnapshot>,
+        player_condition_store: Option<&PlayerConditionStore>,
+        player_condition_context: Option<PlayerConditionContextLikeCpp<'_>>,
     ) -> bool {
         crate::conditions::is_object_meeting_vendor_item_conditions_like_cpp(
             condition_store,
@@ -4344,6 +4352,12 @@ impl WorldSession {
                 source_info.set_player_target_snapshot(0, player_snapshot);
                 if let Some(vendor_unit_snapshot) = vendor_unit_snapshot {
                     source_info.set_unit_target_snapshot(1, vendor_unit_snapshot);
+                }
+                if let (Some(store), Some(context)) =
+                    (player_condition_store, player_condition_context)
+                {
+                    source_info.set_player_condition_store(store);
+                    source_info.set_player_condition_context(0, context);
                 }
                 match crate::conditions::condition_meets_basic_like_cpp(
                     condition,
@@ -4838,6 +4852,8 @@ impl WorldSession {
         let mut queue = std::collections::VecDeque::new();
         queue.push_back(entry);
         let condition_store = self.condition_store().cloned();
+        let player_condition_store = self.player_condition_store().cloned();
+        let player_condition_context = self.represented_player_condition_context_like_cpp();
         let player_condition_object = self.build_condition_player_object_like_cpp();
         let vendor_condition_object = self.build_condition_creature_object_like_cpp(vendor_guid);
         let player_unit_snapshot = self.condition_player_unit_snapshot_like_cpp();
@@ -5003,6 +5019,8 @@ impl WorldSession {
                             player_unit_snapshot,
                             player_snapshot,
                             vendor_unit_snapshot,
+                            player_condition_store.as_deref(),
+                            Some(player_condition_context.as_context(self)),
                         ) {
                             warn!(
                                 "Vendor item condition not met for creature entry {} item {}",
@@ -5296,6 +5314,8 @@ impl WorldSession {
         };
 
         let condition_store = self.condition_store().cloned();
+        let player_condition_store = self.player_condition_store().cloned();
+        let player_condition_context = self.represented_player_condition_context_like_cpp();
         if let Some(store) = condition_store.as_ref() {
             let player_condition_object = self.build_condition_player_object_like_cpp();
             let vendor_condition_object =
@@ -5313,6 +5333,8 @@ impl WorldSession {
                 self.condition_player_unit_snapshot_like_cpp(),
                 self.condition_player_snapshot_like_cpp(),
                 vendor_unit_snapshot,
+                player_condition_store.as_deref(),
+                Some(player_condition_context.as_context(self)),
             ) {
                 warn!(
                     "BuyItem: conditions not met for creature entry {} item {}",

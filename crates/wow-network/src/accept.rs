@@ -83,6 +83,7 @@ pub struct SessionResources {
     pub item_disenchant_loot_store: Option<Arc<wow_data::ItemDisenchantLootStore>>,
     pub loot_stores: Option<Arc<wow_loot::LootStores>>,
     pub condition_store: Option<Arc<wow_data::ConditionEntriesByTypeStore>>,
+    pub player_condition_store: Option<Arc<wow_data::PlayerConditionStore>>,
     pub disable_mgr: Option<Arc<wow_data::DisableMgrLikeCpp>>,
     pub lock_store: Option<Arc<wow_data::LockStore>>,
     pub spell_item_enchantment_store: Option<Arc<wow_data::SpellItemEnchantmentStore>>,

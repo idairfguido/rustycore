@@ -1180,6 +1180,7 @@ async fn main() -> Result<()> {
         item_disenchant_loot_store: Some(Arc::clone(&item_disenchant_loot_store)),
         loot_stores: Some(Arc::clone(&loot_stores)),
         condition_store: Some(Arc::clone(&condition_store)),
+        player_condition_store: Some(Arc::clone(&player_condition_store)),
         disable_mgr: Some(Arc::clone(&disable_mgr)),
         lock_store: Some(Arc::clone(&lock_store)),
         spell_item_enchantment_store: Some(Arc::clone(&spell_item_enchantment_store)),
@@ -2020,6 +2021,9 @@ async fn create_session(
     }
     if let Some(ref store) = resources.condition_store {
         session.set_condition_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.player_condition_store {
+        session.set_player_condition_store(Arc::clone(store));
     }
     if let Some(ref store) = resources.disable_mgr {
         session.set_disable_mgr(Arc::clone(store));

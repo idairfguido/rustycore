@@ -186,6 +186,8 @@ impl WorldSession {
 
         let player_level = self.player_level_like_cpp();
         let condition_store = self.condition_store().cloned();
+        let player_condition_store = self.player_condition_store().cloned();
+        let player_condition_context = self.represented_player_condition_context_like_cpp();
         let player_condition_object = self.build_condition_player_object_like_cpp();
         let player_unit_snapshot = self.condition_player_unit_snapshot_like_cpp();
         let player_snapshot = self.condition_player_snapshot_like_cpp();
@@ -229,6 +231,13 @@ impl WorldSession {
                         |condition, source_info| {
                             source_info.set_unit_target_snapshot(0, player_unit_snapshot);
                             source_info.set_player_target_snapshot(0, player_snapshot);
+                            if let Some(store) = player_condition_store.as_ref() {
+                                source_info.set_player_condition_store(store.as_ref());
+                                source_info.set_player_condition_context(
+                                    0,
+                                    player_condition_context.as_context(self),
+                                );
+                            }
                             match conditions::condition_meets_basic_like_cpp(
                                 condition,
                                 source_info,

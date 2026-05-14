@@ -36,8 +36,11 @@ use wow_data::{
     ItemModifiedAppearanceStore, ItemPriceBaseStore, ItemRandomEnchantmentTemplateStore,
     ItemRandomPropertiesStore, ItemRandomPropertyTemplateEntry, ItemRandomSuffixStore,
     ItemStatsStore, ItemStore, LockStore, MapDifficultyStore, MapStore, PhaseGroupStore,
-    PhaseStore, PlayerStatsStore, RandPropPointsStore, SkillStore, SpellItemEnchantmentStore,
-    SpellStore,
+    PhaseStore, PlayerConditionAuraLikeCpp, PlayerConditionContextLikeCpp,
+    PlayerConditionCountLikeCpp, PlayerConditionPartyStatusLikeCpp,
+    PlayerConditionQuestKillLikeCpp, PlayerConditionReputationLikeCpp, PlayerConditionSkillLikeCpp,
+    PlayerConditionStore, PlayerStatsStore, RandPropPointsStore, SkillStore,
+    SpellItemEnchantmentStore, SpellStore,
 };
 use wow_database::{
     CharStatements, CharacterDatabase, LoginDatabase, PreparedStatement, SqlTransaction,
@@ -46,13 +49,13 @@ use wow_database::{
 use wow_entities::{
     ApplyEnchantmentEffectRef, ApplyEnchantmentRandomSuffixRef, ApplyEnchantmentTemplateRef,
     BANK_SLOT_BAG_END, BANK_SLOT_BAG_START, BUYBACK_SLOT_COUNT, BUYBACK_SLOT_END,
-    BUYBACK_SLOT_START, CanStoreItemArgs, CanUnequipItemArgs, INVENTORY_DEFAULT_SIZE,
-    INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_BAG_END, INVENTORY_SLOT_BAG_START, Item, ItemCreateInfo,
-    ItemPosCount, ItemSlotRef, ItemStorageRef, ItemStorageTemplate, MAX_ITEM_SPELLS, NULL_BAG,
-    NULL_SLOT, ObjectAccessor, PLAYER_SLOT_END, PhaseShift, Player, PlayerEnchantTimeUpdate,
-    PlayerInventoryStorage, PlayerItemTimeUpdate, REAGENT_BAG_SLOT_END, REAGENT_BAG_SLOT_START,
-    SendNewItemDelivery, SendNewItemDisplayText, SendNewItemPlan, VisibleItemValues, WorldObject,
-    is_bag_pos, is_equipment_packed_pos, make_item_pos,
+    BUYBACK_SLOT_START, CanStoreItemArgs, CanUnequipItemArgs, EQUIPMENT_SLOT_MAINHAND,
+    INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_BAG_END, INVENTORY_SLOT_BAG_START,
+    Item, ItemCreateInfo, ItemPosCount, ItemSlotRef, ItemStorageRef, ItemStorageTemplate,
+    MAX_ITEM_SPELLS, NULL_BAG, NULL_SLOT, ObjectAccessor, PLAYER_SLOT_END, PhaseShift, Player,
+    PlayerEnchantTimeUpdate, PlayerInventoryStorage, PlayerItemTimeUpdate, REAGENT_BAG_SLOT_END,
+    REAGENT_BAG_SLOT_START, SendNewItemDelivery, SendNewItemDisplayText, SendNewItemPlan,
+    VisibleItemValues, WorldObject, is_bag_pos, is_equipment_packed_pos, make_item_pos,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus, build_dispatch_table};
 use wow_loot::LootStores;
@@ -674,6 +677,9 @@ pub struct WorldSession {
     // C++ ConditionMgr condition store loaded from world.conditions.
     condition_store: Option<Arc<ConditionEntriesByTypeStore>>,
 
+    // C++ PlayerCondition.db2 store used by ConditionMgr player-condition checks.
+    player_condition_store: Option<Arc<PlayerConditionStore>>,
+
     // C++ DisableMgr store loaded from world.disables.
     disable_mgr: Option<Arc<DisableMgrLikeCpp>>,
 
@@ -1115,6 +1121,91 @@ pub(crate) struct PlayerCurrency {
     pub flags: u8,
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RepresentedPlayerConditionContextLikeCpp {
+    spells: Vec<u32>,
+    items: Vec<PlayerConditionCountLikeCpp>,
+    currencies: Vec<PlayerConditionCountLikeCpp>,
+    completed_quests: Vec<u32>,
+    current_quests: Vec<u32>,
+    complete_quests: Vec<u32>,
+    auras: Vec<PlayerConditionAuraLikeCpp>,
+    skills: Vec<PlayerConditionSkillLikeCpp>,
+    reputations: Vec<PlayerConditionReputationLikeCpp>,
+    explored_area_ids: Vec<u16>,
+    parent_area_ids: Vec<u32>,
+    achievements: Vec<u16>,
+    lfg_values: Vec<PlayerConditionCountLikeCpp>,
+    modifier_tree_ids: Vec<u32>,
+    quest_kills: Vec<PlayerConditionQuestKillLikeCpp>,
+    avg_item_level: f32,
+    avg_equipped_item_level: f32,
+    mainhand_weapon_subclass: Option<u8>,
+}
+
+impl RepresentedPlayerConditionContextLikeCpp {
+    pub(crate) fn as_context<'a>(
+        &'a self,
+        session: &'a WorldSession,
+    ) -> PlayerConditionContextLikeCpp<'a> {
+        let class = session.player_class_like_cpp();
+        let (_, area_id) = session.player_zone_area_like_cpp();
+        PlayerConditionContextLikeCpp {
+            race: session.player_race_like_cpp(),
+            class_mask: if class == 0 {
+                0
+            } else {
+                1u32 << u32::from(class.saturating_sub(1))
+            },
+            gender: session.player_gender_like_cpp(),
+            native_gender: session.player_gender_like_cpp(),
+            power_type: -1,
+            power: 0,
+            max_power: 0,
+            primary_specialization_id: (session.loot_specialization_id != 0)
+                .then_some(session.loot_specialization_id),
+            skills: &self.skills,
+            language_skill: 0,
+            reputations: &self.reputations,
+            current_pvp_faction: 0,
+            pvp_medals_mask: 0,
+            lifetime_max_pvp_rank: 0,
+            movement_flags: [0, 0],
+            mainhand_weapon_subclass: self.mainhand_weapon_subclass,
+            party_status: if session.group_guid.is_some() {
+                PlayerConditionPartyStatusLikeCpp::InParty
+            } else {
+                PlayerConditionPartyStatusLikeCpp::Solo
+            },
+            completed_quests: &self.completed_quests,
+            current_quests: &self.current_quests,
+            complete_quests: &self.complete_quests,
+            spells: &self.spells,
+            items: &self.items,
+            currencies: &self.currencies,
+            explored_area_ids: &self.explored_area_ids,
+            auras: &self.auras,
+            weather_id: 0,
+            achievements: &self.achievements,
+            lfg_values: &self.lfg_values,
+            area_id,
+            parent_area_ids: &self.parent_area_ids,
+            expansion: session.expansion as i8,
+            server_expansion: session.account_expansion as i8,
+            is_game_master: session.security > 0,
+            phase_satisfied: true,
+            quest_kill_id: 0,
+            quest_kills: &self.quest_kills,
+            avg_item_level: self.avg_item_level,
+            avg_equipped_item_level: self.avg_equipped_item_level,
+            modifier_tree_ids: &self.modifier_tree_ids,
+            chr_specializations: session.chr_specialization_store.as_deref(),
+            world_state_expressions: None,
+            world_state_expression_context: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PlayerCurrencyDelta {
     pub currency_id: u32,
@@ -1304,6 +1395,7 @@ impl WorldSession {
             item_disenchant_loot_store: None,
             loot_stores: None,
             condition_store: None,
+            player_condition_store: None,
             disable_mgr: None,
             lock_store: None,
             spell_item_enchantment_store: None,
@@ -3189,6 +3281,16 @@ impl WorldSession {
     /// Get the loaded ConditionMgr store reference.
     pub fn condition_store(&self) -> Option<&Arc<ConditionEntriesByTypeStore>> {
         self.condition_store.as_ref()
+    }
+
+    /// Set the C++ PlayerCondition.db2 store for this session.
+    pub fn set_player_condition_store(&mut self, store: Arc<PlayerConditionStore>) {
+        self.player_condition_store = Some(store);
+    }
+
+    /// Get the loaded PlayerCondition.db2 store reference.
+    pub fn player_condition_store(&self) -> Option<&Arc<PlayerConditionStore>> {
+        self.player_condition_store.as_ref()
     }
 
     /// Set the C++ DisableMgr store loaded from the `disables` table.
@@ -6105,6 +6207,103 @@ impl WorldSession {
             .unwrap_or(&self.player_currencies)
     }
 
+    pub(crate) fn represented_player_condition_context_like_cpp(
+        &self,
+    ) -> RepresentedPlayerConditionContextLikeCpp {
+        let spells = self
+            .known_spells_like_cpp()
+            .iter()
+            .filter_map(|spell_id| u32::try_from(*spell_id).ok())
+            .collect();
+        let items = self
+            .represented_inventory_item_counts_like_cpp()
+            .into_iter()
+            .map(|(id, count)| PlayerConditionCountLikeCpp { id, count })
+            .collect();
+        let currencies = self
+            .player_currencies_like_cpp()
+            .iter()
+            .map(|(&id, currency)| PlayerConditionCountLikeCpp {
+                id,
+                count: currency.quantity,
+            })
+            .collect();
+        let completed_quests = self.rewarded_quests.iter().copied().collect();
+        let current_quests = self
+            .player_quests
+            .iter()
+            .filter_map(|(&quest_id, status)| {
+                (status.status == 1 || status.status == 2).then_some(quest_id)
+            })
+            .collect();
+        let complete_quests = self
+            .player_quests
+            .iter()
+            .filter_map(|(&quest_id, status)| (status.status == 2).then_some(quest_id))
+            .collect();
+        let auras = self
+            .visible_auras
+            .values()
+            .filter_map(|aura| {
+                Some(PlayerConditionAuraLikeCpp {
+                    spell_id: u32::try_from(aura.spell_id).ok()?,
+                    stacks: aura.stack_count,
+                })
+            })
+            .collect();
+
+        let mut item_level_sum = 0u32;
+        let mut item_level_count = 0u32;
+        let mut equipped_level_sum = 0u32;
+        let mut equipped_level_count = 0u32;
+        let mut mainhand_weapon_subclass = None;
+        for (&slot, inventory_item) in self.inventory_items_like_cpp() {
+            let Some(template) = self
+                .item_stats_store
+                .as_ref()
+                .and_then(|store| store.random_property_template(inventory_item.entry_id))
+            else {
+                continue;
+            };
+            item_level_sum = item_level_sum.saturating_add(u32::from(template.item_level));
+            item_level_count = item_level_count.saturating_add(1);
+            if is_equipment_packed_pos(make_item_pos(INVENTORY_SLOT_BAG_0, slot)) {
+                equipped_level_sum =
+                    equipped_level_sum.saturating_add(u32::from(template.item_level));
+                equipped_level_count = equipped_level_count.saturating_add(1);
+            }
+            if slot == EQUIPMENT_SLOT_MAINHAND {
+                mainhand_weapon_subclass = self
+                    .item_store
+                    .as_ref()
+                    .and_then(|store| store.get(inventory_item.entry_id))
+                    .map(|record| record.subclass_id);
+            }
+        }
+
+        RepresentedPlayerConditionContextLikeCpp {
+            spells,
+            items,
+            currencies,
+            completed_quests,
+            current_quests,
+            complete_quests,
+            auras,
+            avg_item_level: if item_level_count == 0 {
+                0.0
+            } else {
+                item_level_sum as f32 / item_level_count as f32
+            },
+            avg_equipped_item_level: if equipped_level_count == 0 {
+                0.0
+            } else {
+                equipped_level_sum as f32 / equipped_level_count as f32
+            },
+            mainhand_weapon_subclass,
+            ..Default::default()
+        }
+    }
+
     pub(crate) fn player_inventory_like_cpp(&self) -> Option<&SessionPlayerInventoryRuntime> {
         self.player_controller
             .as_ref()
@@ -8557,6 +8756,66 @@ mod tests {
         );
 
         (session, pkt_tx, send_rx)
+    }
+
+    #[test]
+    fn represented_player_condition_context_uses_live_session_state_like_cpp() {
+        let (mut session, _, _) = make_session();
+        session.player_race = 1;
+        session.player_class = 2;
+        session.player_gender = 1;
+        session.set_known_spells_like_cpp(vec![635, -1, 19740]);
+        session.player_currencies.insert(
+            81,
+            PlayerCurrency {
+                state: PlayerCurrencyState::Unchanged,
+                quantity: 25,
+                weekly_quantity: 0,
+                tracked_quantity: 0,
+                increased_cap_quantity: 0,
+                earned_quantity: 0,
+                flags: 0,
+            },
+        );
+        session.player_quests.insert(
+            100,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id: 100,
+                status: 1,
+                explored: false,
+                objective_counts: vec![],
+            },
+        );
+        session.player_quests.insert(
+            101,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id: 101,
+                status: 2,
+                explored: false,
+                objective_counts: vec![],
+            },
+        );
+        session.rewarded_quests.insert(200);
+        session.set_player_zone_area_like_cpp(12, 34);
+
+        let owned = session.represented_player_condition_context_like_cpp();
+        let context = owned.as_context(&session);
+
+        assert_eq!(context.race, 1);
+        assert_eq!(context.class_mask, 0b10);
+        assert_eq!(context.gender, 1);
+        assert_eq!(context.area_id, 34);
+        assert_eq!(context.expansion, 2);
+        assert_eq!(context.server_expansion, 9);
+        assert_eq!(context.spells, &[635, 19740]);
+        assert_eq!(
+            context.currencies,
+            &[PlayerConditionCountLikeCpp { id: 81, count: 25 }]
+        );
+        assert!(context.current_quests.contains(&100));
+        assert!(context.current_quests.contains(&101));
+        assert_eq!(context.complete_quests, &[101]);
+        assert_eq!(context.completed_quests, &[200]);
     }
 
     #[test]
