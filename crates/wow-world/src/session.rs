@@ -966,6 +966,8 @@ pub struct WorldSession {
     taxi_mounted_like_cpp: bool,
     /// Represented `Unit::SetMountDisplayId` until UnitData owns live player fields.
     player_mount_display_id_like_cpp: i32,
+    /// Represented `UnitData::Flags` for player deltas not yet backed by canonical Unit.
+    player_unit_flags_like_cpp: UnitFlags,
     /// Represented `UNIT_FLAG_MOUNT` state until UnitData owns live player flags.
     player_mounted_like_cpp: bool,
     /// Represented `pvpInfo.IsHostile` branch for Honorless Target after taxi landing.
@@ -1547,6 +1549,7 @@ impl WorldSession {
             taxi_unit_flags_like_cpp: UnitFlags::empty(),
             taxi_mounted_like_cpp: false,
             player_mount_display_id_like_cpp: 0,
+            player_unit_flags_like_cpp: UnitFlags::PLAYER_CONTROLLED,
             player_mounted_like_cpp: false,
             player_pvp_hostile_like_cpp: false,
             player_pvp_enabled_like_cpp: false,
@@ -4531,21 +4534,26 @@ impl WorldSession {
         self.visible_auras.insert(slot, aura);
         self.player_mount_display_id_like_cpp = display_id;
         self.player_mounted_like_cpp = display_id != 0;
+        if self.player_mounted_like_cpp {
+            self.player_unit_flags_like_cpp.insert(UnitFlags::MOUNT);
+        }
 
         self.send_aura_update_applied(spell_id, slot, caster_guid, 0, 0x0000_0001);
-        self.send_represented_mount_display_update_like_cpp(display_id);
+        self.send_represented_mount_unit_update_like_cpp(display_id);
 
         Ok(())
     }
 
-    fn send_represented_mount_display_update_like_cpp(&mut self, display_id: i32) {
+    fn send_represented_mount_unit_update_like_cpp(&mut self, display_id: i32) {
         let Some(player_guid) = self.player_guid() else {
             return;
         };
 
         use wow_packet::packets::update::{UnitDataValuesDeltaUpdate, UpdateObject};
         let mut data = UnitDataValuesDeltaUpdate::default();
+        data.unit_data_mask[1] |= 1 << (41 - 32);
         data.unit_data_mask[1] |= 1 << (51 - 32);
+        data.flags = self.player_unit_flags_like_cpp.bits();
         data.mount_display_id = display_id;
 
         self.send_packet(&UpdateObject::unit_values_update(
@@ -4564,7 +4572,8 @@ impl WorldSession {
         if aura.represented_effect == Some(RepresentedAuraEffectLikeCpp::Mounted) {
             self.player_mount_display_id_like_cpp = 0;
             self.player_mounted_like_cpp = false;
-            self.send_represented_mount_display_update_like_cpp(0);
+            self.player_unit_flags_like_cpp.remove(UnitFlags::MOUNT);
+            self.send_represented_mount_unit_update_like_cpp(0);
         }
 
         // Send SMSG_AURA_UPDATE (removal)
@@ -9575,6 +9584,50 @@ mod tests {
             session
                 .represented_mount_aura_display_candidates_like_cpp(999)
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn represented_mounted_aura_toggles_mount_flag_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let effect = wow_data::SpellEffectInfo {
+            effect: wow_data::spell::spell_effect_types::SPELL_EFFECT_APPLY_AURA,
+            effect_aura: wow_data::spell::aura_types::SPELL_AURA_MOUNTED,
+            effect_base_points: 77,
+            effect_misc_value_1: 1234,
+            ..Default::default()
+        };
+
+        session
+            .apply_represented_mounted_aura_like_cpp(100, ObjectGuid::EMPTY, &effect)
+            .unwrap();
+
+        assert_eq!(session.player_mount_display_id_like_cpp, 1234);
+        assert!(session.player_mounted_like_cpp);
+        assert!(
+            session
+                .player_unit_flags_like_cpp
+                .contains(UnitFlags::PLAYER_CONTROLLED | UnitFlags::MOUNT)
+        );
+
+        let slot = session
+            .visible_auras
+            .iter()
+            .find_map(|(&slot, aura)| (aura.spell_id == 100).then_some(slot))
+            .unwrap();
+        session.remove_aura(slot).unwrap();
+
+        assert_eq!(session.player_mount_display_id_like_cpp, 0);
+        assert!(!session.player_mounted_like_cpp);
+        assert!(
+            session
+                .player_unit_flags_like_cpp
+                .contains(UnitFlags::PLAYER_CONTROLLED)
+        );
+        assert!(
+            !session
+                .player_unit_flags_like_cpp
+                .contains(UnitFlags::MOUNT)
         );
     }
 
