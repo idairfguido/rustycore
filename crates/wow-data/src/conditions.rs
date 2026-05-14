@@ -2001,6 +2001,7 @@ pub fn parse_condition_row_like_cpp(
 
     if row.condition_type_or_reference >= 0 {
         condition.condition_type = ConditionType::from_i32(row.condition_type_or_reference)
+            .filter(|condition_type| *condition_type != ConditionType::Max)
             .ok_or_else(|| SkippedConditionRow {
                 row: row.clone(),
                 reason: ConditionRowSkipReason::InvalidConditionType(
@@ -3933,6 +3934,10 @@ mod tests {
 
     #[test]
     fn parse_condition_rows_applies_static_condition_type_validation_like_cpp() {
+        let max_condition_type = ConditionDbRowLikeCpp {
+            condition_type_or_reference: ConditionType::Max as i32,
+            ..condition_row(ConditionSourceType::SpellClickEvent, ConditionType::None)
+        };
         let mut deprecated = condition_row(
             ConditionSourceType::SpellClickEvent,
             ConditionType::SpawnMaskDeprecated,
@@ -3945,7 +3950,7 @@ mod tests {
         legacy.condition_target = 1;
         legacy.condition_value1 = 1 << 4;
 
-        let report = parse_condition_rows_like_cpp([deprecated, legacy], |_| 0);
+        let report = parse_condition_rows_like_cpp([max_condition_type, deprecated, legacy], |_| 0);
 
         assert_eq!(report.conditions.len(), 1);
         assert_eq!(report.conditions[0].condition_type, ConditionType::TypeMask);
@@ -3955,6 +3960,10 @@ mod tests {
         );
         assert_eq!(
             report.skipped[0].reason,
+            ConditionRowSkipReason::InvalidConditionType(ConditionType::Max as i32)
+        );
+        assert_eq!(
+            report.skipped[1].reason,
             ConditionRowSkipReason::ConditionTypeValidationFailed(
                 ConditionTypeValidationErrorLikeCpp::DeprecatedSpawnMask
             )
