@@ -11,6 +11,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use parking_lot::RwLock;
+use rand::seq::SliceRandom;
 use tracing::{debug, info, trace, warn};
 
 use crate::entity_update_bridge::player_values_update_to_update_object;
@@ -4499,11 +4500,7 @@ impl WorldSession {
     ) -> Result<(), &'static str> {
         let display_id = u32::try_from(spell_id)
             .ok()
-            .and_then(|spell_id| {
-                self.represented_mount_aura_display_candidates_like_cpp(spell_id)
-                    .into_iter()
-                    .next()
-            })
+            .and_then(|spell_id| self.select_represented_mount_aura_display_like_cpp(spell_id))
             .unwrap_or(effect.effect_misc_value_1);
 
         let mut slot = 0u8;
@@ -6685,6 +6682,15 @@ impl WorldSession {
             })
             .map(|display| display.creature_display_info_id)
             .collect()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn select_represented_mount_aura_display_like_cpp(
+        &self,
+        spell_id: u32,
+    ) -> Option<i32> {
+        let candidates = self.represented_mount_aura_display_candidates_like_cpp(spell_id);
+        candidates.choose(&mut rand::thread_rng()).copied()
     }
 
     #[allow(dead_code)]
