@@ -155,6 +155,13 @@ pub struct VehiclePassengerRemovePlan {
     pub call_on_remove_passenger_script: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VehiclePassengerRelocation {
+    pub passenger: ObjectGuid,
+    pub position: Position,
+    pub set_home_position: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VehicleSpellImmunityKind {
     Effect,
@@ -747,6 +754,29 @@ impl Vehicle {
         }
     }
 
+    pub fn relocate_passengers_plan_like_cpp(
+        &self,
+        passenger_transport_offsets: &[(ObjectGuid, Position)],
+    ) -> Vec<VehiclePassengerRelocation> {
+        self.seats
+            .values()
+            .filter_map(|seat| {
+                let passenger = seat.passenger.guid;
+                if passenger.is_empty() {
+                    return None;
+                }
+                let (_, offset) = passenger_transport_offsets
+                    .iter()
+                    .find(|(candidate, _)| *candidate == passenger)?;
+                Some(VehiclePassengerRelocation {
+                    passenger,
+                    position: self.calculate_passenger_position(*offset),
+                    set_home_position: false,
+                })
+            })
+            .collect()
+    }
+
     pub fn calculate_passenger_position(&self, offset: Position) -> Position {
         calculate_passenger_position(offset, self.base_position)
     }
@@ -1293,6 +1323,29 @@ mod tests {
         assert_eq!(vehicle.next_empty_seat(0, true), None);
         vehicle.remove_pending_events_for_seat(2);
         assert_eq!(vehicle.next_empty_seat(0, true), Some(2));
+    }
+
+    #[test]
+    fn relocate_passengers_plan_matches_cpp_transport_offsets() {
+        let mut vehicle = vehicle();
+        let first = passenger_guid(1);
+        let second = passenger_guid(2);
+        assert!(vehicle.add_vehicle_passenger(first, 0));
+        assert!(vehicle.add_vehicle_passenger(second, 1));
+
+        let first_offset = Position::new(1.0, 2.0, 3.0, 0.25);
+        let ignored = passenger_guid(3);
+        let relocations = vehicle
+            .relocate_passengers_plan_like_cpp(&[(first, first_offset), (ignored, first_offset)]);
+
+        assert_eq!(
+            relocations,
+            vec![VehiclePassengerRelocation {
+                passenger: first,
+                position: vehicle.calculate_passenger_position(first_offset),
+                set_home_position: false,
+            }]
+        );
     }
 
     #[test]
