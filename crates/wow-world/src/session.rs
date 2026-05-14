@@ -338,6 +338,7 @@ pub(crate) enum RepresentedLootRollCriteriaEvent {
 }
 
 pub type SharedObjectAccessor = Arc<RwLock<ObjectAccessor>>;
+pub(crate) const SKILL_RIDING_LIKE_CPP: u16 = 762;
 
 pub fn new_shared_object_accessor() -> SharedObjectAccessor {
     Arc::new(RwLock::new(ObjectAccessor::default()))
@@ -358,6 +359,7 @@ pub(crate) struct SessionPlayerController {
     next_level_xp: u32,
     selection_guid: Option<ObjectGuid>,
     known_spells: Vec<i32>,
+    skill_values: HashMap<u16, u16>,
     currencies: HashMap<u32, PlayerCurrency>,
     inventory: SessionPlayerInventoryRuntime,
 }
@@ -410,6 +412,7 @@ impl SessionPlayerController {
             next_level_xp: 400,
             selection_guid: None,
             known_spells: Vec::new(),
+            skill_values: HashMap::new(),
             currencies: HashMap::new(),
             inventory: SessionPlayerInventoryRuntime::default(),
         }
@@ -468,6 +471,10 @@ impl SessionPlayerController {
         &self.known_spells
     }
 
+    pub(crate) fn skill_values(&self) -> &HashMap<u16, u16> {
+        &self.skill_values
+    }
+
     pub(crate) fn currencies(&self) -> &HashMap<u32, PlayerCurrency> {
         &self.currencies
     }
@@ -507,6 +514,10 @@ impl SessionPlayerController {
 
     fn set_known_spells(&mut self, spells: Vec<i32>) {
         self.known_spells = spells;
+    }
+
+    fn set_skill_values(&mut self, skill_values: HashMap<u16, u16>) {
+        self.skill_values = skill_values;
     }
 
     fn learn_spell(&mut self, spell_id: i32) {
@@ -738,6 +749,7 @@ pub struct WorldSession {
     pub(crate) group_guid: Option<u64>,
     pub(crate) pass_on_group_loot: bool,
     pub(crate) represented_enchanting_skill: u16,
+    player_skill_values_like_cpp: HashMap<u16, u16>,
 
     // Realm ID for GUID creation
     realm_id: u16,
@@ -1434,6 +1446,7 @@ impl WorldSession {
             group_guid: None,
             pass_on_group_loot: false,
             represented_enchanting_skill: 0,
+            player_skill_values_like_cpp: HashMap::new(),
             realm_id: 1,
             guid_generator: None,
             legit_characters: Vec::new(),
@@ -6097,6 +6110,13 @@ impl WorldSession {
         }
     }
 
+    pub(crate) fn set_player_skill_values_like_cpp(&mut self, skill_values: HashMap<u16, u16>) {
+        self.player_skill_values_like_cpp = skill_values.clone();
+        if let Some(controller) = &mut self.player_controller {
+            controller.set_skill_values(skill_values);
+        }
+    }
+
     pub(crate) fn learn_known_spell_like_cpp(&mut self, spell_id: i32) {
         if !self.known_spells.contains(&spell_id) {
             self.known_spells.push(spell_id);
@@ -6272,6 +6292,20 @@ impl WorldSession {
             .unwrap_or(&self.known_spells)
     }
 
+    pub(crate) fn player_skill_values_like_cpp(&self) -> &HashMap<u16, u16> {
+        self.player_controller
+            .as_ref()
+            .map(SessionPlayerController::skill_values)
+            .unwrap_or(&self.player_skill_values_like_cpp)
+    }
+
+    pub(crate) fn player_skill_value_like_cpp(&self, skill_id: u16) -> u16 {
+        self.player_skill_values_like_cpp()
+            .get(&skill_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
     pub(crate) fn player_currencies_like_cpp(&self) -> &HashMap<u32, PlayerCurrency> {
         self.player_controller
             .as_ref()
@@ -6323,6 +6357,11 @@ impl WorldSession {
                 })
             })
             .collect();
+        let skills = self
+            .player_skill_values_like_cpp()
+            .iter()
+            .map(|(&id, &value)| PlayerConditionSkillLikeCpp { id, value })
+            .collect();
 
         let mut item_level_sum = 0u32;
         let mut item_level_count = 0u32;
@@ -6361,6 +6400,7 @@ impl WorldSession {
             current_quests,
             complete_quests,
             auras,
+            skills,
             avg_item_level: if item_level_count == 0 {
                 0.0
             } else {
@@ -6486,6 +6526,23 @@ impl WorldSession {
                 |spell_id| self.known_spells_like_cpp().contains(&spell_id),
             )
             .copied()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn represented_mount_capability_for_type_from_session_like_cpp(
+        &self,
+        mount_type_id: u16,
+        mount_restriction_flags: Option<u8>,
+        is_submerged: bool,
+        is_in_water: bool,
+    ) -> Option<wow_data::MountCapabilityEntry> {
+        self.represented_mount_capability_for_type_like_cpp(
+            mount_type_id,
+            u32::from(self.player_skill_value_like_cpp(SKILL_RIDING_LIKE_CPP)),
+            mount_restriction_flags,
+            is_submerged,
+            is_in_water,
+        )
     }
 
     #[allow(dead_code)]
@@ -8962,6 +9019,10 @@ mod tests {
         session.player_class = 2;
         session.player_gender = 1;
         session.set_known_spells_like_cpp(vec![635, -1, 19740]);
+        session.set_player_skill_values_like_cpp(HashMap::from([
+            (SKILL_RIDING_LIKE_CPP, 75),
+            (333, 125),
+        ]));
         session.player_currencies.insert(
             81,
             PlayerCurrency {
@@ -9005,6 +9066,14 @@ mod tests {
         assert_eq!(context.expansion, 2);
         assert_eq!(context.server_expansion, 9);
         assert_eq!(context.spells, &[635, 19740]);
+        assert!(context.skills.contains(&PlayerConditionSkillLikeCpp {
+            id: SKILL_RIDING_LIKE_CPP,
+            value: 75,
+        }));
+        assert_eq!(
+            session.player_skill_value_like_cpp(SKILL_RIDING_LIKE_CPP),
+            75
+        );
         assert_eq!(
             context.currencies,
             &[PlayerConditionCountLikeCpp { id: 81, count: 25 }]
@@ -9156,6 +9225,7 @@ mod tests {
         session.current_map_id = 1;
         session.set_player_zone_area_like_cpp(10, 77);
         session.set_known_spells_like_cpp(vec![456]);
+        session.set_player_skill_values_like_cpp(HashMap::from([(SKILL_RIDING_LIKE_CPP, 75)]));
         session
             .apply_aura(123, ObjectGuid::EMPTY, 30_000, 0)
             .unwrap();
@@ -9232,13 +9302,14 @@ mod tests {
 
         assert_eq!(
             session
-                .represented_mount_capability_for_type_like_cpp(7, 75, None, false, false)
+                .represented_mount_capability_for_type_from_session_like_cpp(7, None, false, false)
                 .map(|capability| capability.id),
             Some(11)
         );
+        session.set_player_skill_values_like_cpp(HashMap::from([(SKILL_RIDING_LIKE_CPP, 74)]));
         assert!(
             session
-                .represented_mount_capability_for_type_like_cpp(7, 74, None, false, false)
+                .represented_mount_capability_for_type_from_session_like_cpp(7, None, false, false)
                 .is_none()
         );
     }

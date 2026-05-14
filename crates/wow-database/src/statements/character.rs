@@ -67,7 +67,7 @@ pub enum CharStatements {
     /// DELETE FROM character_inventory WHERE guid = ? AND item = ?
     DEL_CHAR_INVENTORY_ITEM,
 
-    /// SELECT skill FROM character_skills WHERE guid = ?
+    /// SELECT skill, value, max, professionSlot FROM character_skills WHERE guid = ?
     SEL_CHARACTER_SKILLS,
 
     /// SELECT spell, active, disabled FROM character_spell WHERE guid = ?
@@ -276,7 +276,9 @@ impl StatementDef for CharStatements {
             Self::DEL_CHAR_INVENTORY_ITEM => {
                 "DELETE FROM character_inventory WHERE guid = ? AND item = ?"
             }
-            Self::SEL_CHARACTER_SKILLS => "SELECT skill FROM character_skills WHERE guid = ?",
+            Self::SEL_CHARACTER_SKILLS => {
+                "SELECT skill, value, max, professionSlot FROM character_skills WHERE guid = ?"
+            }
             Self::SEL_CHARACTER_SPELL => {
                 "SELECT spell, active, disabled FROM character_spell WHERE guid = ?"
             }

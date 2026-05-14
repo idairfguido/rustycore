@@ -64,6 +64,14 @@ mod tests {
     }
 
     #[test]
+    fn character_skill_statement_matches_cpp_shape() {
+        let sql = CharStatements::SEL_CHARACTER_SKILLS.sql();
+        assert!(sql.contains("skill, value, max, professionSlot"));
+        assert!(sql.contains("character_skills"));
+        assert_eq!(sql.matches('?').count(), 1);
+    }
+
+    #[test]
     fn world_statements_have_sql() {
         assert!(!WorldStatements::DEL_LINKED_RESPAWN.sql().is_empty());
         assert!(!WorldStatements::SEL_CREATURE_TEMPLATE.sql().is_empty());
