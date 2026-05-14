@@ -125,6 +125,10 @@ pub struct Wdc4Reader {
     record_offsets: Vec<usize>,
     /// Byte size of each record (variable for offset-map, uniform for fixed-size).
     record_sizes: Vec<usize>,
+    /// Per-section string tables, used by non-localized string fields.
+    string_tables: Vec<Vec<u8>>,
+    /// String table index for each direct record.
+    record_string_table_indices: Vec<Option<usize>>,
 }
 
 impl Wdc4Reader {
@@ -177,6 +181,8 @@ impl Wdc4Reader {
                 relationship_ids: Vec::new(),
                 record_offsets: Vec::new(),
                 record_sizes: Vec::new(),
+                string_tables: Vec::new(),
+                record_string_table_indices: Vec::new(),
             });
         }
 
@@ -225,6 +231,8 @@ impl Wdc4Reader {
         let mut record_offsets: Vec<usize> = Vec::new();
         let mut record_sizes: Vec<usize> = Vec::new();
         let mut relationship_ids: Vec<Option<u32>> = Vec::new();
+        let mut string_tables: Vec<Vec<u8>> = Vec::new();
+        let mut record_string_table_indices: Vec<Option<usize>> = Vec::new();
 
         for (si, sec) in sections.iter().enumerate() {
             if sec.record_count == 0 && sec.copy_table_count == 0 {
@@ -235,6 +243,7 @@ impl Wdc4Reader {
             let base_data_len = record_data.len();
 
             // Determine record data bounds and post-record cursor
+            let mut section_string_table_index = None;
             let after_records = if has_offset_map {
                 // Offset-map: records are variable-length, end at offset_records_end
                 let rec_end = sec._offset_records_end as usize;
@@ -243,6 +252,15 @@ impl Wdc4Reader {
                     "section {si} record data truncated (offset_map)"
                 );
                 record_data.extend_from_slice(&data[sec_offset..rec_end]);
+                if sec.string_table_size > 0 {
+                    let string_end = rec_end + sec.string_table_size as usize;
+                    ensure!(
+                        string_end <= data.len(),
+                        "section {si} string table truncated (offset_map)"
+                    );
+                    string_tables.push(data[rec_end..string_end].to_vec());
+                    section_string_table_index = Some(string_tables.len() - 1);
+                }
                 rec_end
             } else {
                 // Fixed-size records
@@ -250,7 +268,16 @@ impl Wdc4Reader {
                 let rec_end = sec_offset + rec_bytes;
                 ensure!(rec_end <= data.len(), "section {si} record data truncated");
                 record_data.extend_from_slice(&data[sec_offset..rec_end]);
-                rec_end + sec.string_table_size as usize
+                let string_end = rec_end + sec.string_table_size as usize;
+                ensure!(
+                    string_end <= data.len(),
+                    "section {si} string table truncated"
+                );
+                if sec.string_table_size > 0 {
+                    string_tables.push(data[rec_end..string_end].to_vec());
+                    section_string_table_index = Some(string_tables.len() - 1);
+                }
+                string_end
             };
 
             // ID list
@@ -374,6 +401,7 @@ impl Wdc4Reader {
                             record_offsets.push(0);
                             record_sizes.push(0);
                         }
+                        record_string_table_indices.push(section_string_table_index);
                     }
                 } else {
                     // No id_list — build both lists from offset map
@@ -386,6 +414,7 @@ impl Wdc4Reader {
                                 (file_off as usize).saturating_sub(sec_offset) + base_data_len;
                             record_offsets.push(data_relative);
                             record_sizes.push(rec_sz as usize);
+                            record_string_table_indices.push(section_string_table_index);
                         }
                     }
                 }
@@ -394,6 +423,7 @@ impl Wdc4Reader {
                 for i in 0..sec.record_count as usize {
                     record_offsets.push(base_data_len + i * record_size);
                     record_sizes.push(record_size);
+                    record_string_table_indices.push(section_string_table_index);
                 }
             }
 
@@ -430,6 +460,8 @@ impl Wdc4Reader {
             relationship_ids,
             record_offsets,
             record_sizes,
+            string_tables,
+            record_string_table_indices,
         })
     }
 
@@ -508,6 +540,27 @@ impl Wdc4Reader {
         let lo = read_bits(&self.record_data, record_start, bit_offset, 32) as u64;
         let hi = read_bits(&self.record_data, record_start, bit_offset + 32, 32) as u64;
         ((hi << 32) | lo) as i64
+    }
+
+    /// Read a non-localized string field from a record index.
+    pub fn get_field_string(&self, record_idx: usize, field: usize) -> String {
+        let offset = self.get_field_u32(record_idx, field) as usize;
+        let Some(Some(table_idx)) = self.record_string_table_indices.get(record_idx) else {
+            return String::new();
+        };
+        let Some(table) = self.string_tables.get(*table_idx) else {
+            return String::new();
+        };
+        if offset >= table.len() {
+            return String::new();
+        }
+
+        let end = table[offset..]
+            .iter()
+            .position(|byte| *byte == 0)
+            .map(|pos| offset + pos)
+            .unwrap_or(table.len());
+        String::from_utf8_lossy(&table[offset..end]).into_owned()
     }
 
     /// Read an element from an array field.

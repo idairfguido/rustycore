@@ -679,6 +679,11 @@ async fn main() -> Result<()> {
         wow_data::Db2IdStore::load(&data_dir, &locale, "PlayerCondition.db2")
             .context("Failed to load PlayerCondition.db2 — check DataDir and DBC.Locale config")?,
     );
+    let world_state_expression_store = Arc::new(
+        wow_data::WorldStateExpressionStore::load(&data_dir, &locale).context(
+            "Failed to load WorldStateExpression.db2 — check DataDir and DBC.Locale config",
+        )?,
+    );
     let conversation_line_store = Arc::new(
         wow_data::Db2IdStore::load(&data_dir, &locale, "ConversationLine.db2")
             .context("Failed to load ConversationLine.db2 — check DataDir and DBC.Locale config")?,
@@ -694,7 +699,7 @@ async fn main() -> Result<()> {
         .context("Failed to load conversation_line_template ids for C++ ConditionMgr validation")?,
     );
     info!(
-        "Loaded condition validation DB2 id stores: {} factions, {} achievements, {} criteria, {} battlemaster lists, {} titles, {} battle pet species, {} scenario steps, {} scene script packages, {} player conditions, {} conversation lines",
+        "Loaded condition validation DB2 id stores: {} factions, {} achievements, {} criteria, {} battlemaster lists, {} titles, {} battle pet species, {} scenario steps, {} scene script packages, {} player conditions, {} world state expressions, {} conversation lines",
         faction_store.len(),
         achievement_store.len(),
         criteria_store.len(),
@@ -704,6 +709,7 @@ async fn main() -> Result<()> {
         scenario_step_store.len(),
         scene_script_package_store.len(),
         player_condition_store.len(),
+        world_state_expression_store.len(),
         conversation_line_store.len()
     );
     info!(
