@@ -48,7 +48,8 @@ use wow_data::{
     PlayerStatsStore, RandPropPointsStore, SkillStore, SpellItemEnchantmentStore, SpellMiscStore,
     SpellRangeStore, SpellStore, VEHICLE_SEAT_FLAG_CAN_ATTACK, VehicleAccessoryStoreLikeCpp,
     VehicleSeatStore, VehicleStore, VehicleTemplateStoreLikeCpp,
-    is_player_meeting_condition_like_cpp, progression_rewards::FactionTemplateStore,
+    is_player_meeting_condition_like_cpp,
+    progression_rewards::{FactionStore, FactionTemplateStore},
 };
 use wow_database::{
     CharStatements, CharacterDatabase, LoginDatabase, PreparedStatement, SqlTransaction,
@@ -89,6 +90,13 @@ const ATTACK_DISPLAY_DELAY_LIKE_CPP_MS: u32 = 200;
 pub(crate) enum PlayerAttackStartLikeCppResult {
     Rejected,
     Accepted { send_attack_start: bool },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AttackReputationFactionSnapshotLikeCpp {
+    faction_id: u32,
+    contested_guard: bool,
+    can_have_reputation: Option<bool>,
 }
 
 fn rounded_median_u32(sorted_values: &[u32]) -> u32 {
@@ -784,6 +792,7 @@ pub struct WorldSession {
     map_store: Option<Arc<MapStore>>,
     map_difficulty_store: Option<Arc<MapDifficultyStore>>,
     map_difficulty_x_condition_store: Option<Arc<MapDifficultyXConditionStore>>,
+    faction_store: Option<Arc<FactionStore>>,
     faction_template_store: Option<Arc<FactionTemplateStore>>,
     creature_template_mount_store: Option<Arc<CreatureTemplateMountStoreLikeCpp>>,
     creature_display_info_store: Option<Arc<CreatureDisplayInfoStore>>,
@@ -1573,6 +1582,7 @@ impl WorldSession {
             map_store: None,
             map_difficulty_store: None,
             map_difficulty_x_condition_store: None,
+            faction_store: None,
             faction_template_store: None,
             creature_template_mount_store: None,
             creature_display_info_store: None,
@@ -1962,21 +1972,32 @@ impl WorldSession {
     fn attack_reputation_faction_snapshot_like_cpp(
         &self,
         creature: &wow_entities::Creature,
-    ) -> Option<(u32, bool)> {
+    ) -> Option<AttackReputationFactionSnapshotLikeCpp> {
         let faction_template_id = u32::try_from(creature.unit().data().faction_template).ok()?;
         self.faction_template_store
             .as_ref()
             .and_then(|store| store.get(faction_template_id))
             .map(|entry| {
-                (
-                    u32::from(entry.faction),
-                    entry.flags & FACTION_TEMPLATE_FLAG_CONTESTED_GUARD_LIKE_CPP != 0,
-                )
+                let faction_id = u32::from(entry.faction);
+                AttackReputationFactionSnapshotLikeCpp {
+                    faction_id,
+                    contested_guard: entry.flags & FACTION_TEMPLATE_FLAG_CONTESTED_GUARD_LIKE_CPP
+                        != 0,
+                    can_have_reputation: self.faction_store.as_ref().and_then(|store| {
+                        store
+                            .get(faction_id)
+                            .map(|faction| faction.can_have_reputation_like_cpp())
+                    }),
+                }
             })
             .or_else(|| {
                 creature
                     .attack_reputation_faction_id_like_cpp()
-                    .map(|faction_id| (faction_id, creature.is_contested_guard_like_cpp()))
+                    .map(|faction_id| AttackReputationFactionSnapshotLikeCpp {
+                        faction_id,
+                        contested_guard: creature.is_contested_guard_like_cpp(),
+                        can_have_reputation: None,
+                    })
             })
     }
 
@@ -2189,19 +2210,34 @@ impl WorldSession {
                     .can_see_phase_shift_like_cpp(creature.unit().world().phase_shift()),
                 ..Default::default()
             };
-            if let Some((reputation_faction_id, is_contested_guard)) =
+            if let Some(reputation_snapshot) =
                 self.attack_reputation_faction_snapshot_like_cpp(creature)
                 && let Some(attacker_guid) = self.player_guid()
                 && let Some(attacker) = map.map().get_typed_player(attacker_guid)
             {
-                context.player_creature_reputation_represented = true;
-                context.creature_is_contested_guard = is_contested_guard;
-                context.player_has_contested_pvp_flag =
+                let player_has_contested_pvp_flag =
                     attacker.has_player_flag(PLAYER_FLAGS_CONTESTED_PVP_LIKE_CPP);
-                context.creature_has_forced_reputation_rank =
-                    attacker.has_forced_reputation_rank_like_cpp(reputation_faction_id);
-                context.player_at_war_with_creature_faction =
-                    attacker.is_at_war_with_faction_like_cpp(reputation_faction_id);
+                let creature_has_forced_reputation_rank =
+                    attacker.has_forced_reputation_rank_like_cpp(reputation_snapshot.faction_id);
+                let player_has_reputation_state = match reputation_snapshot.can_have_reputation {
+                    Some(false) => false,
+                    Some(true) => {
+                        attacker.has_reputation_state_like_cpp(reputation_snapshot.faction_id)
+                    }
+                    None => true,
+                };
+                if (reputation_snapshot.contested_guard && player_has_contested_pvp_flag)
+                    || creature_has_forced_reputation_rank
+                    || player_has_reputation_state
+                {
+                    context.player_creature_reputation_represented = true;
+                    context.creature_is_contested_guard = reputation_snapshot.contested_guard;
+                    context.player_has_contested_pvp_flag = player_has_contested_pvp_flag;
+                    context.creature_has_forced_reputation_rank =
+                        creature_has_forced_reputation_rank;
+                    context.player_at_war_with_creature_faction = player_has_reputation_state
+                        && attacker.is_at_war_with_faction_like_cpp(reputation_snapshot.faction_id);
+                }
             }
             return (
                 creature.is_alive(),
@@ -4600,6 +4636,10 @@ impl WorldSession {
         store: Arc<MapDifficultyXConditionStore>,
     ) {
         self.map_difficulty_x_condition_store = Some(store);
+    }
+
+    pub fn set_faction_store(&mut self, store: Arc<FactionStore>) {
+        self.faction_store = Some(store);
     }
 
     pub fn set_faction_template_store(&mut self, store: Arc<FactionTemplateStore>) {
@@ -15273,6 +15313,28 @@ mod tests {
 
         canonical.lock().unwrap().create_world_map(0, 0);
         session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_faction_store(Arc::new(
+            wow_data::progression_rewards::FactionStore::from_entries([
+                wow_data::progression_rewards::FactionEntry {
+                    id: 72,
+                    reputation_index: 1,
+                },
+            ]),
+        ));
+        session.set_faction_template_store(Arc::new(
+            wow_data::progression_rewards::FactionTemplateStore::from_entries([
+                wow_data::progression_rewards::FactionTemplateEntry {
+                    id: 14,
+                    faction: 72,
+                    flags: 0,
+                    faction_group: 0,
+                    friend_group: 0,
+                    enemy_group: 0,
+                    enemies: [0; 8],
+                    friend: [0; 8],
+                },
+            ]),
+        ));
         session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
             wow_data::MapEntry {
                 id: 0,
@@ -15305,11 +15367,6 @@ mod tests {
             })
             .unwrap();
         register_test_creature(&mut session, manager, victim, 40);
-        session
-            .mutate_canonical_creature_by_guid_like_cpp(victim, |creature| {
-                creature.set_attack_reputation_faction_id_like_cpp(Some(72));
-            })
-            .unwrap();
 
         session.start_player_attack_like_cpp(victim);
 
@@ -15339,6 +15396,28 @@ mod tests {
 
         canonical.lock().unwrap().create_world_map(0, 0);
         session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_faction_store(Arc::new(
+            wow_data::progression_rewards::FactionStore::from_entries([
+                wow_data::progression_rewards::FactionEntry {
+                    id: 72,
+                    reputation_index: 1,
+                },
+            ]),
+        ));
+        session.set_faction_template_store(Arc::new(
+            wow_data::progression_rewards::FactionTemplateStore::from_entries([
+                wow_data::progression_rewards::FactionTemplateEntry {
+                    id: 14,
+                    faction: 72,
+                    flags: 0,
+                    faction_group: 0,
+                    friend_group: 0,
+                    enemy_group: 0,
+                    enemies: [0; 8],
+                    friend: [0; 8],
+                },
+            ]),
+        ));
         session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
             wow_data::MapEntry {
                 id: 0,
@@ -15371,11 +15450,6 @@ mod tests {
             })
             .unwrap();
         register_test_creature(&mut session, manager, victim, 40);
-        session
-            .mutate_canonical_creature_by_guid_like_cpp(victim, |creature| {
-                creature.set_attack_reputation_faction_id_like_cpp(Some(72));
-            })
-            .unwrap();
 
         session.start_player_attack_like_cpp(victim);
 
@@ -15444,6 +15518,78 @@ mod tests {
                 player.set_player_flag(PLAYER_FLAGS_CONTESTED_PVP_LIKE_CPP);
             })
             .unwrap();
+        register_test_creature(&mut session, manager, victim, 40);
+
+        session.start_player_attack_like_cpp(victim);
+
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(0, 0).unwrap().map();
+        assert_eq!(
+            map.get_typed_player(player).unwrap().unit().attacking(),
+            Some(victim)
+        );
+        assert!(
+            map.get_typed_creature(victim)
+                .unwrap()
+                .unit()
+                .has_attacker_like_cpp(player)
+        );
+        assert_eq!(session.combat_target, Some(victim));
+        assert!(session.in_combat);
+    }
+
+    #[test]
+    fn player_attack_creature_non_reputation_faction_does_not_require_at_war_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let player = ObjectGuid::create_player(1, 156);
+        let victim = test_creature_guid(18_113);
+
+        canonical.lock().unwrap().create_world_map(0, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_faction_store(Arc::new(
+            wow_data::progression_rewards::FactionStore::from_entries([
+                wow_data::progression_rewards::FactionEntry {
+                    id: 72,
+                    reputation_index: -1,
+                },
+            ]),
+        ));
+        session.set_faction_template_store(Arc::new(
+            wow_data::progression_rewards::FactionTemplateStore::from_entries([
+                wow_data::progression_rewards::FactionTemplateEntry {
+                    id: 14,
+                    faction: 72,
+                    flags: 0,
+                    faction_group: 0,
+                    friend_group: 0,
+                    enemy_group: 0,
+                    enemies: [0; 8],
+                    friend: [0; 8],
+                },
+            ]),
+        ));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            0,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
         register_test_creature(&mut session, manager, victim, 40);
 
         session.start_player_attack_like_cpp(victim);

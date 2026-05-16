@@ -3090,6 +3090,13 @@ impl Player {
             .is_some_and(|rep| rep.flags & REPUTATION_FLAG_AT_WAR_LIKE_CPP != 0)
     }
 
+    pub fn has_reputation_state_like_cpp(&self, faction_id: u32) -> bool {
+        self.gameplay_state
+            .reputations
+            .iter()
+            .any(|rep| rep.faction_id == faction_id)
+    }
+
     pub fn soulbound_tradeable_items(&self) -> &HashSet<ObjectGuid> {
         &self.soulbound_tradeable_items
     }
