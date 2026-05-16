@@ -1246,9 +1246,9 @@ pub struct WorldSession {
     pub(crate) represented_personal_loot_owners: std::collections::HashSet<wow_core::ObjectGuid>,
 
     // ── Dynamic visibility tracking ───────────────────────────────
-    /// GUIDs of all creatures currently visible to this client.
+    /// C++ `Player::m_clientGUIDs`: exact objects currently known by this client.
     /// Updated on login and each visibility refresh (player movement).
-    pub(crate) visible_creatures: std::collections::HashSet<wow_core::ObjectGuid>,
+    pub(crate) client_visible_guids_like_cpp: std::collections::HashSet<wow_core::ObjectGuid>,
     /// GUIDs of all game objects currently visible to this client.
     pub(crate) visible_gameobjects: std::collections::HashSet<wow_core::ObjectGuid>,
     /// Represented C++ `GameObject::GetPhaseShift()` for visible DB-spawned
@@ -1816,7 +1816,7 @@ impl WorldSession {
             represented_locked_dungeon_encounters: std::collections::HashSet::new(),
             represented_personal_loot_money: std::collections::HashMap::new(),
             represented_personal_loot_owners: std::collections::HashSet::new(),
-            visible_creatures: std::collections::HashSet::new(),
+            client_visible_guids_like_cpp: std::collections::HashSet::new(),
             visible_gameobjects: std::collections::HashSet::new(),
             represented_gameobject_phase_shifts: std::collections::HashMap::new(),
             represented_player_phase_shift: PhaseShift::default(),
@@ -10567,7 +10567,7 @@ impl WorldSession {
                         c.creature.ai_ownership().respawn_time_secs
                     );
                 }
-                self.visible_creatures.remove(g);
+                self.client_visible_guids_like_cpp.remove(g);
             }
             let pkt = UpdateObject::destroy_objects(despawn_guids, map_id);
             if let Err(e) = self.send_tx.send(pkt.to_bytes()) {
@@ -10628,7 +10628,7 @@ impl WorldSession {
                 r.phase_group_id,
                 r.terrain_swap_map,
             );
-            self.visible_creatures.insert(guid);
+            self.client_visible_guids_like_cpp.insert(guid);
         }
         // ──────────────────────────────────────────────────────────────────
 
@@ -12919,7 +12919,16 @@ mod tests {
 
         session.update_visibility().await;
 
-        assert!(session.visible_creatures.contains(&creature_guid));
+        assert!(
+            session
+                .client_visible_guids_like_cpp
+                .contains(&creature_guid)
+        );
+        assert!(
+            session
+                .client_visible_guids_like_cpp
+                .contains(&gameobject_guid)
+        );
         assert!(session.visible_gameobjects.contains(&gameobject_guid));
         assert_eq!(session.last_visibility_pos, Some(player_position));
         assert!(

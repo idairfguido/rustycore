@@ -3017,7 +3017,9 @@ impl WorldSession {
                 visible.insert(creature.guid());
             }
 
-            self.visible_creatures = visible;
+            self.client_visible_guids_like_cpp
+                .retain(|guid| !guid.is_any_type_creature());
+            self.client_visible_guids_like_cpp.extend(visible);
             self.last_visibility_pos = Some(*position);
             self.send_packet(&UpdateObject::create_creatures(blocks, map_id));
             debug!(
@@ -3230,7 +3232,10 @@ impl WorldSession {
         let count = blocks.len();
         // Mirror C++ Player::m_clientGUIDs semantics: this is the exact set
         // of creatures sent to this client, not every creature loaded on map.
-        self.visible_creatures = visible_guids.iter().copied().collect();
+        self.client_visible_guids_like_cpp
+            .retain(|guid| !guid.is_any_type_creature());
+        self.client_visible_guids_like_cpp
+            .extend(visible_guids.iter().copied());
         self.last_visibility_pos = Some(*position);
         let update = UpdateObject::create_creatures(blocks, map_id);
         self.send_packet(&update);
@@ -3294,7 +3299,7 @@ impl WorldSession {
             for creature in &map_creatures {
                 let guid = creature.guid();
                 new_visible_creatures.insert(guid);
-                if !self.visible_creatures.contains(&guid) {
+                if !self.client_visible_guids_like_cpp.contains(&guid) {
                     let mut create_data = creature.create_data.clone();
                     create_data.health = i64::from(creature.current_hp());
                     create_data.max_health = i64::from(creature.max_hp());
@@ -3307,9 +3312,9 @@ impl WorldSession {
             }
 
             let removed_creatures: Vec<ObjectGuid> = self
-                .visible_creatures
+                .client_visible_guids_like_cpp
                 .iter()
-                .filter(|g| !new_visible_creatures.contains(g))
+                .filter(|g| g.is_any_type_creature() && !new_visible_creatures.contains(g))
                 .copied()
                 .collect();
 
@@ -3330,7 +3335,10 @@ impl WorldSession {
                     map_id,
                 ));
             }
-            self.visible_creatures = new_visible_creatures;
+            self.client_visible_guids_like_cpp
+                .retain(|guid| !guid.is_any_type_creature());
+            self.client_visible_guids_like_cpp
+                .extend(new_visible_creatures.iter().copied());
 
             if let Some(gameobjects) = canonical_gameobjects {
                 let new_visible_gos: HashSet<_> = gameobjects.iter().map(|go| go.guid).collect();
@@ -3361,8 +3369,16 @@ impl WorldSession {
                         "Visibility update: {} canonical game objects out of range",
                         removed_gos.len()
                     );
-                    self.send_packet(&UpdateObject::out_of_range_objects(removed_gos, map_id));
+                    self.send_packet(&UpdateObject::out_of_range_objects(
+                        removed_gos.clone(),
+                        map_id,
+                    ));
                 }
+                for guid in &removed_gos {
+                    self.client_visible_guids_like_cpp.remove(guid);
+                }
+                self.client_visible_guids_like_cpp
+                    .extend(new_visible_gos.iter().copied());
                 self.visible_gameobjects = new_visible_gos;
             }
 
@@ -3371,7 +3387,10 @@ impl WorldSession {
                 "Visibility updated at ({:.1}, {:.1}): {} creatures / {} GOs in range",
                 pos.x,
                 pos.y,
-                self.visible_creatures.len(),
+                self.client_visible_guids_like_cpp
+                    .iter()
+                    .filter(|guid| guid.is_any_type_creature())
+                    .count(),
                 self.visible_gameobjects.len()
             );
             return;
@@ -3492,7 +3511,7 @@ impl WorldSession {
                 new_visible_creatures.insert(guid);
 
                 // Only create a new block if this creature isn't already visible.
-                if !self.visible_creatures.contains(&guid) {
+                if !self.client_visible_guids_like_cpp.contains(&guid) {
                     let creature_pos = Position::new(pos_x, pos_y, pos_z, orientation);
                     let create_data = CreatureCreateData {
                         guid,
@@ -3551,9 +3570,9 @@ impl WorldSession {
 
         // Creatures that left range → out-of-range
         let removed_creatures: Vec<ObjectGuid> = self
-            .visible_creatures
+            .client_visible_guids_like_cpp
             .iter()
-            .filter(|g| !new_visible_creatures.contains(g))
+            .filter(|g| g.is_any_type_creature() && !new_visible_creatures.contains(g))
             .cloned()
             .collect();
 
@@ -3574,7 +3593,10 @@ impl WorldSession {
                 map_id,
             ));
         }
-        self.visible_creatures = new_visible_creatures;
+        self.client_visible_guids_like_cpp
+            .retain(|guid| !guid.is_any_type_creature());
+        self.client_visible_guids_like_cpp
+            .extend(new_visible_creatures.iter().copied());
 
         // ── GAME OBJECTS ────────────────────────────────────────────────
         let mut go_stmt = world_db.prepare(WorldStatements::SEL_GAMEOBJECTS_IN_RANGE);
@@ -3783,8 +3805,16 @@ impl WorldSession {
                 "Visibility update: {} game objects out of range",
                 removed_gos.len()
             );
-            self.send_packet(&UpdateObject::out_of_range_objects(removed_gos, map_id));
+            self.send_packet(&UpdateObject::out_of_range_objects(
+                removed_gos.clone(),
+                map_id,
+            ));
         }
+        for guid in &removed_gos {
+            self.client_visible_guids_like_cpp.remove(guid);
+        }
+        self.client_visible_guids_like_cpp
+            .extend(new_visible_gos.iter().copied());
         self.visible_gameobjects = new_visible_gos;
 
         // ── Update position marker ──────────────────────────────────────
@@ -3793,7 +3823,10 @@ impl WorldSession {
             "Visibility updated at ({:.1}, {:.1}): {} creatures / {} GOs in range",
             pos.x,
             pos.y,
-            self.visible_creatures.len(),
+            self.client_visible_guids_like_cpp
+                .iter()
+                .filter(|guid| guid.is_any_type_creature())
+                .count(),
             self.visible_gameobjects.len()
         );
     }
@@ -4137,6 +4170,10 @@ impl WorldSession {
                 .map(UpdateObject::create_gameobject_block)
                 .collect::<Vec<_>>();
             let count = blocks.len();
+            self.client_visible_guids_like_cpp
+                .retain(|guid| !guid.is_game_object());
+            self.client_visible_guids_like_cpp
+                .extend(go_guids.iter().copied());
             self.visible_gameobjects = go_guids;
             self.send_packet(&UpdateObject::create_world_objects(blocks, map_id));
             debug!(
@@ -4338,6 +4375,10 @@ impl WorldSession {
             return;
         }
 
+        self.client_visible_guids_like_cpp
+            .retain(|guid| !guid.is_game_object());
+        self.client_visible_guids_like_cpp
+            .extend(go_guids.iter().copied());
         self.visible_gameobjects = go_guids.iter().cloned().collect();
         let count = blocks.len();
         let update = UpdateObject::create_world_objects(blocks, map_id);
@@ -8594,7 +8635,8 @@ impl WorldSession {
         self.login_time = Some(std::time::Instant::now());
         // Clear per-session loot/visibility state for fresh login. Creatures
         // remain map-owned, matching C++ Map ownership.
-        self.visible_creatures.clear();
+        self.client_visible_guids_like_cpp.clear();
+        self.visible_gameobjects.clear();
         self.loot_table.clear();
         self.set_active_loot_guid(ObjectGuid::EMPTY);
         self.combat_target = None;
