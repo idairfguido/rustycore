@@ -1080,6 +1080,26 @@ impl CombatReferenceState {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CombatBeginContextLikeCpp {
+    pub same_unit: bool,
+    pub attacker_in_world: bool,
+    pub victim_in_world: bool,
+    pub attacker_alive: bool,
+    pub victim_alive: bool,
+    pub same_map: bool,
+    pub same_phase: bool,
+    pub attacker_unit_state: u32,
+    pub victim_unit_state: u32,
+    pub attacker_combat_disallowed: bool,
+    pub victim_combat_disallowed: bool,
+    pub relation_represented: bool,
+    pub attacker_is_friendly_to_victim: bool,
+    pub victim_is_friendly_to_attacker: bool,
+    pub attacker_or_owner_player_is_game_master: bool,
+    pub victim_or_owner_player_is_game_master: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CombatSubsystem {
     pub threat: HashMap<ObjectGuid, f32>,
@@ -1120,6 +1140,48 @@ impl Default for CombatSubsystem {
 }
 
 impl CombatSubsystem {
+    pub fn can_begin_combat_like_cpp(context: CombatBeginContextLikeCpp) -> bool {
+        if context.same_unit {
+            return false;
+        }
+        if !context.attacker_in_world || !context.victim_in_world {
+            return false;
+        }
+        if !context.attacker_alive || !context.victim_alive {
+            return false;
+        }
+        if !context.same_map {
+            return false;
+        }
+        if !context.same_phase {
+            return false;
+        }
+        if context.attacker_unit_state & UnitState::EVADE.bits() != 0
+            || context.victim_unit_state & UnitState::EVADE.bits() != 0
+        {
+            return false;
+        }
+        if context.attacker_unit_state & UnitState::IN_FLIGHT.bits() != 0
+            || context.victim_unit_state & UnitState::IN_FLIGHT.bits() != 0
+        {
+            return false;
+        }
+        if context.attacker_combat_disallowed || context.victim_combat_disallowed {
+            return false;
+        }
+        if context.relation_represented
+            && (context.attacker_is_friendly_to_victim || context.victim_is_friendly_to_attacker)
+        {
+            return false;
+        }
+        if context.attacker_or_owner_player_is_game_master
+            || context.victim_or_owner_player_is_game_master
+        {
+            return false;
+        }
+        true
+    }
+
     pub fn initialize_threat_list_capability(&mut self, can_have_threat_list: bool) {
         self.owner_can_have_threat_list = can_have_threat_list;
     }
@@ -4041,6 +4103,82 @@ mod unit_subsystems_tests {
         combat.end_all_pve_combat();
         assert!(!combat.has_pve_combat());
         assert!(!combat.has_combat());
+    }
+
+    #[test]
+    fn combat_can_begin_matches_cpp_guard_order_shape() {
+        let valid = CombatBeginContextLikeCpp {
+            attacker_in_world: true,
+            victim_in_world: true,
+            attacker_alive: true,
+            victim_alive: true,
+            same_map: true,
+            same_phase: true,
+            ..Default::default()
+        };
+
+        assert!(CombatSubsystem::can_begin_combat_like_cpp(valid));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                same_unit: true,
+                ..valid
+            }
+        ));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                attacker_in_world: false,
+                ..valid
+            }
+        ));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                victim_alive: false,
+                ..valid
+            }
+        ));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                same_map: false,
+                ..valid
+            }
+        ));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                same_phase: false,
+                ..valid
+            }
+        ));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                attacker_unit_state: UnitState::EVADE.bits(),
+                ..valid
+            }
+        ));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                victim_unit_state: UnitState::IN_FLIGHT.bits(),
+                ..valid
+            }
+        ));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                attacker_combat_disallowed: true,
+                ..valid
+            }
+        ));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                relation_represented: true,
+                victim_is_friendly_to_attacker: true,
+                ..valid
+            }
+        ));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                attacker_or_owner_player_is_game_master: true,
+                ..valid
+            }
+        ));
     }
 
     #[test]
