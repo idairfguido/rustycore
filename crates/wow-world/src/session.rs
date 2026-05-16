@@ -2245,6 +2245,66 @@ impl WorldSession {
         )
     }
 
+    fn current_player_is_in_group_guid_like_cpp(&self, group_owner: ObjectGuid) -> bool {
+        let Some(group_guid) = self.group_guid else {
+            return false;
+        };
+        if ObjectGuid::create_group(group_guid) != group_owner {
+            return false;
+        }
+        let Some(group_registry) = self.group_registry.as_ref() else {
+            return false;
+        };
+        let Some(player_guid) = self.player_guid() else {
+            return false;
+        };
+        group_registry
+            .get(&group_guid)
+            .is_some_and(|group| group.members.contains(&player_guid))
+    }
+
+    fn current_player_is_group_visible_for_owner_like_cpp(&self, owner_guid: ObjectGuid) -> bool {
+        let (Some(group_guid), Some(group_registry), Some(player_guid)) = (
+            self.group_guid,
+            self.group_registry.as_ref(),
+            self.player_guid(),
+        ) else {
+            return false;
+        };
+        group_registry.get(&group_guid).is_some_and(|group| {
+            group.members.contains(&player_guid) && group.members.contains(&owner_guid)
+        })
+    }
+
+    fn apply_target_visibility_context_for_current_player_like_cpp(
+        &self,
+        target_unit: &mut wow_entities::Unit,
+        seer_unit: &mut wow_entities::Unit,
+    ) {
+        target_unit.set_object_id_visibility_conditions_met_like_cpp(
+            self.object_id_visibility_conditions_met_like_cpp(
+                target_unit.world(),
+                seer_unit.world(),
+            ),
+        );
+
+        let private_owner = target_unit.private_object_owner_like_cpp();
+        if !private_owner.is_empty() {
+            seer_unit.set_seer_group_visible_for_private_owner_like_cpp(
+                self.current_player_is_in_group_guid_like_cpp(private_owner),
+            );
+        }
+
+        let owner_group_visible = target_unit
+            .subsystems()
+            .control
+            .charmer_or_owner_guid()
+            .is_some_and(|owner_guid| {
+                self.current_player_is_group_visible_for_owner_like_cpp(owner_guid)
+            });
+        target_unit.set_target_owner_group_visible_for_seer_like_cpp(owner_group_visible);
+    }
+
     fn canonical_unit_attack_target_state_like_cpp(
         &self,
         guid: ObjectGuid,
@@ -2279,18 +2339,12 @@ impl WorldSession {
                     .and_then(|attacker_guid| map.map().get_typed_player(attacker_guid))
                     .map(|attacker| {
                         let mut target_unit = player.unit().clone();
-                        target_unit.set_object_id_visibility_conditions_met_like_cpp(
-                            self.object_id_visibility_conditions_met_like_cpp(
-                                target_unit.world(),
-                                attacker.unit().world(),
-                            ),
+                        let mut seer_unit = attacker.unit().clone();
+                        self.apply_target_visibility_context_for_current_player_like_cpp(
+                            &mut target_unit,
+                            &mut seer_unit,
                         );
-                        attacker.unit().can_see_or_detect_unit_like_cpp(
-                            &target_unit,
-                            false,
-                            true,
-                            false,
-                        )
+                        seer_unit.can_see_or_detect_unit_like_cpp(&target_unit, false, true, false)
                     })
                     .unwrap_or(true);
             return (
@@ -2319,18 +2373,12 @@ impl WorldSession {
                     .and_then(|attacker_guid| map.map().get_typed_player(attacker_guid))
                     .map(|attacker| {
                         let mut target_unit = creature.unit().clone();
-                        target_unit.set_object_id_visibility_conditions_met_like_cpp(
-                            self.object_id_visibility_conditions_met_like_cpp(
-                                target_unit.world(),
-                                attacker.unit().world(),
-                            ),
+                        let mut seer_unit = attacker.unit().clone();
+                        self.apply_target_visibility_context_for_current_player_like_cpp(
+                            &mut target_unit,
+                            &mut seer_unit,
                         );
-                        attacker.unit().can_see_or_detect_unit_like_cpp(
-                            &target_unit,
-                            false,
-                            true,
-                            false,
-                        )
+                        seer_unit.can_see_or_detect_unit_like_cpp(&target_unit, false, true, false)
                     })
                     .unwrap_or(true);
             let mut context = wow_entities::UnitAttackContextLikeCpp {
@@ -15062,6 +15110,187 @@ mod tests {
                     );
             })
             .unwrap();
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Accepted {
+                send_attack_start: true
+            }
+        );
+    }
+
+    #[test]
+    fn player_attack_uses_owner_group_visibility_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 61);
+        let owner = ObjectGuid::create_player(1, 62);
+        let victim = ObjectGuid::create_player(1, 63);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Hunter".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            3,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+
+        let mut victim_player = Player::new(Some(8), false);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(victim);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .set_map(571, 0)
+            .unwrap();
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::new(11.0, 20.0, 30.0, 0.0));
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .add_to_world();
+        victim_player
+            .unit_mut()
+            .set_pvp_flag_like_cpp(UnitPvpFlags::PVP);
+        victim_player.unit_mut().set_invisibility_like_cpp(0, 100);
+        victim_player
+            .unit_mut()
+            .subsystems_mut()
+            .control
+            .set_owner_guid(Some(owner));
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(571, 0)
+            .unwrap()
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_player(victim_player).unwrap(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Rejected
+        );
+
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(attacker);
+        group.add_member(owner);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Accepted {
+                send_attack_start: true
+            }
+        );
+    }
+
+    #[test]
+    fn player_attack_uses_private_object_group_visibility_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 64);
+        let victim = ObjectGuid::create_player(1, 65);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Hunter".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            3,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+
+        let mut victim_player = Player::new(Some(8), false);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(victim);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .set_map(571, 0)
+            .unwrap();
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::new(11.0, 20.0, 30.0, 0.0));
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .add_to_world();
+        victim_player
+            .unit_mut()
+            .set_pvp_flag_like_cpp(UnitPvpFlags::PVP);
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(571, 0)
+            .unwrap()
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_player(victim_player).unwrap(),
+            )
+            .unwrap();
+
+        let group_registry = Arc::new(GroupRegistry::default());
+        let group = GroupInfo::new(attacker);
+        let group_guid = group.group_guid;
+        session
+            .mutate_canonical_player_by_guid_like_cpp(victim, |player| {
+                player
+                    .unit_mut()
+                    .set_private_object_owner_like_cpp(ObjectGuid::create_group(group_guid));
+            })
+            .unwrap();
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Rejected
+        );
+
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
         assert_eq!(
             session.start_player_attack_like_cpp(victim),
             PlayerAttackStartLikeCppResult::Accepted {

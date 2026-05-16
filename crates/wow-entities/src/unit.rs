@@ -206,6 +206,7 @@ pub struct UnitVisibilityDetectionStateLikeCpp {
     seer_can_never_see_target: bool,
     always_visible_for_seer: bool,
     seer_can_always_see_target: bool,
+    target_owner_group_visible_for_seer: bool,
     always_detectable_for_seer: bool,
     invisible_due_to_despawn: bool,
     private_object_owner: ObjectGuid,
@@ -234,6 +235,7 @@ impl Default for UnitVisibilityDetectionStateLikeCpp {
             seer_can_never_see_target: false,
             always_visible_for_seer: false,
             seer_can_always_see_target: false,
+            target_owner_group_visible_for_seer: false,
             always_detectable_for_seer: false,
             invisible_due_to_despawn: false,
             private_object_owner: ObjectGuid::EMPTY,
@@ -344,6 +346,11 @@ impl Unit {
         self.visibility_detection.seer_can_always_see_target = can_always_see;
     }
 
+    pub fn set_target_owner_group_visible_for_seer_like_cpp(&mut self, visible: bool) {
+        self.visibility_detection
+            .target_owner_group_visible_for_seer = visible;
+    }
+
     pub fn set_seer_can_always_see_target_guid_like_cpp(&mut self, guid: ObjectGuid) {
         self.visibility_detection.seer_can_always_see_target_guid = guid;
     }
@@ -358,6 +365,10 @@ impl Unit {
 
     pub fn set_private_object_owner_like_cpp(&mut self, owner: ObjectGuid) {
         self.visibility_detection.private_object_owner = owner;
+    }
+
+    pub const fn private_object_owner_like_cpp(&self) -> ObjectGuid {
+        self.visibility_detection.private_object_owner
     }
 
     pub fn set_seer_private_object_owner_like_cpp(&mut self, owner: ObjectGuid) {
@@ -533,6 +544,14 @@ impl Unit {
         }
         if target.visibility_detection.always_visible_for_seer
             || self.visibility_detection.seer_can_always_see_target
+            || target
+                .subsystems
+                .control
+                .charmer_or_owner_guid()
+                .is_some_and(|owner_guid| owner_guid == seer_guid)
+            || target
+                .visibility_detection
+                .target_owner_group_visible_for_seer
             || (!self
                 .visibility_detection
                 .seer_can_always_see_target_guid
@@ -1972,6 +1991,20 @@ mod tests {
 
         seer.set_seer_can_never_see_target_like_cpp(false);
         target.set_always_visible_for_seer_like_cpp(false);
+        target
+            .subsystems_mut()
+            .control
+            .set_owner_guid(Some(seer_guid));
+        target.set_invisibility_like_cpp(0, 100);
+        assert!(seer.can_see_or_detect_unit_like_cpp(&target, false, true, false));
+
+        target.subsystems_mut().control.set_owner_guid(None);
+        assert!(!seer.can_see_or_detect_unit_like_cpp(&target, false, true, false));
+        target.set_target_owner_group_visible_for_seer_like_cpp(true);
+        assert!(seer.can_see_or_detect_unit_like_cpp(&target, false, true, false));
+
+        target.set_target_owner_group_visible_for_seer_like_cpp(false);
+        target.set_invisibility_like_cpp(0, 0);
         target.set_private_object_owner_like_cpp(owner_guid);
         assert!(!seer.can_see_or_detect_unit_like_cpp(&target, false, true, false));
 
