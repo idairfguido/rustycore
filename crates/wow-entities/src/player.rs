@@ -28,6 +28,7 @@ use crate::{
 };
 
 pub const PLAYER_EXTRA_GM_ON: u32 = 0x0001;
+pub const REPUTATION_FLAG_AT_WAR_LIKE_CPP: u32 = 0x0002;
 
 pub const MAX_MONEY_AMOUNT: u64 = 99_999_999_999;
 pub const TEAM_OTHER: u8 = 0;
@@ -2795,6 +2796,7 @@ pub struct Player {
     enchant_durations: Vec<PlayerEnchantDuration>,
     lifecycle_metadata: PlayerLifecycleMetadata,
     duel: Option<PlayerDuelInfoLikeCpp>,
+    forced_reaction_faction_ids: HashSet<u32>,
 }
 
 impl Player {
@@ -2831,6 +2833,7 @@ impl Player {
             enchant_durations: Vec::new(),
             lifecycle_metadata: PlayerLifecycleMetadata::default(),
             duel: None,
+            forced_reaction_faction_ids: HashSet::new(),
         }
     }
 
@@ -3057,6 +3060,34 @@ impl Player {
         self.duel.is_some_and(|duel| {
             duel.opponent == opponent && duel.state == PlayerDuelStateLikeCpp::InProgress
         })
+    }
+
+    pub fn set_forced_reputation_rank_like_cpp(&mut self, faction_id: u32, forced: bool) {
+        if forced {
+            self.forced_reaction_faction_ids.insert(faction_id);
+        } else {
+            self.forced_reaction_faction_ids.remove(&faction_id);
+        }
+    }
+
+    pub fn has_forced_reputation_rank_like_cpp(&self, faction_id: u32) -> bool {
+        self.forced_reaction_faction_ids.contains(&faction_id)
+    }
+
+    pub fn forced_reputation_faction_ids_like_cpp(&self) -> &HashSet<u32> {
+        &self.forced_reaction_faction_ids
+    }
+
+    pub fn replace_forced_reputation_faction_ids_like_cpp(&mut self, faction_ids: HashSet<u32>) {
+        self.forced_reaction_faction_ids = faction_ids;
+    }
+
+    pub fn is_at_war_with_faction_like_cpp(&self, faction_id: u32) -> bool {
+        self.gameplay_state
+            .reputations
+            .iter()
+            .find(|rep| rep.faction_id == faction_id)
+            .is_some_and(|rep| rep.flags & REPUTATION_FLAG_AT_WAR_LIKE_CPP != 0)
     }
 
     pub fn soulbound_tradeable_items(&self) -> &HashSet<ObjectGuid> {

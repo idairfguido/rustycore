@@ -81,6 +81,7 @@ use wow_packet::packets::misc::{AccountMount, AccountMountUpdate, BuyFailed, Sel
 use wow_recastdetour::PathQueryFilterContext;
 
 const PLAYER_FLAGS_UBER_LIKE_CPP: u32 = 0x0008_0000;
+const PLAYER_FLAGS_CONTESTED_PVP_LIKE_CPP: u32 = 0x0000_0100;
 const ATTACK_DISPLAY_DELAY_LIKE_CPP_MS: u32 = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1832,9 +1833,14 @@ impl WorldSession {
             let player_flags = existing.data().player_flags;
             let player_flags_ex = existing.data().player_flags_ex;
             let duel = existing.duel_info_like_cpp();
+            let gameplay_state = existing.gameplay_state().clone();
+            let forced_reaction_faction_ids =
+                existing.forced_reputation_faction_ids_like_cpp().clone();
             player.replace_all_player_flags(player_flags);
             player.replace_all_player_flags_ex(player_flags_ex);
             player.set_duel_info_like_cpp(duel);
+            *player.gameplay_state_mut() = gameplay_state;
+            player.replace_forced_reputation_faction_ids_like_cpp(forced_reaction_faction_ids);
             *existing = player;
             existing.unit_mut().set_attacking(attacking);
             existing.unit_mut().set_target(target);
@@ -2150,18 +2156,32 @@ impl WorldSession {
             );
         }
         if let Some(creature) = map.map().get_typed_creature(guid) {
+            let mut context = wow_entities::UnitAttackContextLikeCpp {
+                victim_is_evading_creature: creature.is_evading_attacks_like_cpp(),
+                victim_unit_state: creature.unit().unit_state(),
+                victim_unit_flags: creature.unit().unit_flags_like_cpp().bits(),
+                visibility_represented: true,
+                attacker_can_see_or_detect_target: self
+                    .can_see_phase_shift_like_cpp(creature.unit().world().phase_shift()),
+                ..Default::default()
+            };
+            if let Some(reputation_faction_id) = creature.attack_reputation_faction_id_like_cpp()
+                && let Some(attacker_guid) = self.player_guid()
+                && let Some(attacker) = map.map().get_typed_player(attacker_guid)
+            {
+                context.player_creature_reputation_represented = true;
+                context.creature_is_contested_guard = creature.is_contested_guard_like_cpp();
+                context.player_has_contested_pvp_flag =
+                    attacker.has_player_flag(PLAYER_FLAGS_CONTESTED_PVP_LIKE_CPP);
+                context.creature_has_forced_reputation_rank =
+                    attacker.has_forced_reputation_rank_like_cpp(reputation_faction_id);
+                context.player_at_war_with_creature_faction =
+                    attacker.is_at_war_with_faction_like_cpp(reputation_faction_id);
+            }
             return (
                 creature.is_alive(),
                 creature.unit().world().object().is_in_world(),
-                wow_entities::UnitAttackContextLikeCpp {
-                    victim_is_evading_creature: creature.is_evading_attacks_like_cpp(),
-                    victim_unit_state: creature.unit().unit_state(),
-                    victim_unit_flags: creature.unit().unit_flags_like_cpp().bits(),
-                    visibility_represented: true,
-                    attacker_can_see_or_detect_target: self
-                        .can_see_phase_shift_like_cpp(creature.unit().world().phase_shift()),
-                    ..Default::default()
-                },
+                context,
             );
         }
         (
@@ -15212,6 +15232,138 @@ mod tests {
         assert!(!victim_entity.unit().has_attacker_like_cpp(player));
         assert_eq!(session.combat_target, None);
         assert!(!session.in_combat);
+    }
+
+    #[test]
+    fn player_attack_creature_reputation_without_at_war_is_rejected_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let player = ObjectGuid::create_player(1, 153);
+        let victim = test_creature_guid(18_110);
+
+        canonical.lock().unwrap().create_world_map(0, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            0,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        session
+            .mutate_canonical_player_by_guid_like_cpp(player, |player| {
+                player.gameplay_state_mut().reputations.push(
+                    wow_entities::PlayerReputationRecord {
+                        faction_id: 72,
+                        standing: 0,
+                        flags: 0,
+                    },
+                );
+            })
+            .unwrap();
+        register_test_creature(&mut session, manager, victim, 40);
+        session
+            .mutate_canonical_creature_by_guid_like_cpp(victim, |creature| {
+                creature.set_attack_reputation_faction_id_like_cpp(Some(72));
+            })
+            .unwrap();
+
+        session.start_player_attack_like_cpp(victim);
+
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(0, 0).unwrap().map();
+        assert_eq!(
+            map.get_typed_player(player).unwrap().unit().attacking(),
+            None
+        );
+        assert!(
+            !map.get_typed_creature(victim)
+                .unwrap()
+                .unit()
+                .has_attacker_like_cpp(player)
+        );
+        assert_eq!(session.combat_target, None);
+        assert!(!session.in_combat);
+    }
+
+    #[test]
+    fn player_attack_creature_reputation_at_war_is_accepted_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let player = ObjectGuid::create_player(1, 154);
+        let victim = test_creature_guid(18_111);
+
+        canonical.lock().unwrap().create_world_map(0, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            0,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        session
+            .mutate_canonical_player_by_guid_like_cpp(player, |player| {
+                player.gameplay_state_mut().reputations.push(
+                    wow_entities::PlayerReputationRecord {
+                        faction_id: 72,
+                        standing: 0,
+                        flags: wow_entities::REPUTATION_FLAG_AT_WAR_LIKE_CPP,
+                    },
+                );
+            })
+            .unwrap();
+        register_test_creature(&mut session, manager, victim, 40);
+        session
+            .mutate_canonical_creature_by_guid_like_cpp(victim, |creature| {
+                creature.set_attack_reputation_faction_id_like_cpp(Some(72));
+            })
+            .unwrap();
+
+        session.start_player_attack_like_cpp(victim);
+
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(0, 0).unwrap().map();
+        assert_eq!(
+            map.get_typed_player(player).unwrap().unit().attacking(),
+            Some(victim)
+        );
+        assert!(
+            map.get_typed_creature(victim)
+                .unwrap()
+                .unit()
+                .has_attacker_like_cpp(player)
+        );
+        assert_eq!(session.combat_target, Some(victim));
+        assert!(session.in_combat);
     }
 
     #[test]

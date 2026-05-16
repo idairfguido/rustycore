@@ -605,6 +605,8 @@ pub struct Creature {
     runtime_state: CreatureRuntimeState,
     ai_ownership: CreatureAiOwnershipState,
     tap_list: Vec<ObjectGuid>,
+    attack_reputation_faction_id: Option<u32>,
+    is_contested_guard_faction: bool,
 }
 
 impl Creature {
@@ -664,6 +666,8 @@ impl Creature {
             runtime_state: CreatureRuntimeState::default(),
             ai_ownership: CreatureAiOwnershipState::default(),
             tap_list: Vec::new(),
+            attack_reputation_faction_id: None,
+            is_contested_guard_faction: false,
         }
     }
 
@@ -1449,6 +1453,22 @@ impl Creature {
     pub fn set_faction(&mut self, faction: u32) {
         self.ai_ownership.faction = faction;
         self.unit.set_faction(faction);
+    }
+
+    pub const fn attack_reputation_faction_id_like_cpp(&self) -> Option<u32> {
+        self.attack_reputation_faction_id
+    }
+
+    pub fn set_attack_reputation_faction_id_like_cpp(&mut self, faction_id: Option<u32>) {
+        self.attack_reputation_faction_id = faction_id;
+    }
+
+    pub const fn is_contested_guard_like_cpp(&self) -> bool {
+        self.is_contested_guard_faction
+    }
+
+    pub fn set_contested_guard_like_cpp(&mut self, contested_guard: bool) {
+        self.is_contested_guard_faction = contested_guard;
     }
 
     pub const fn runtime_state(&self) -> &CreatureRuntimeState {
