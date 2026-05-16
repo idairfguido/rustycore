@@ -71,7 +71,7 @@ use wow_entities::{
     WorldObject, is_bag_pos, is_equipment_packed_pos, make_item_pos,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus, build_dispatch_table};
-use wow_loot::LootStores;
+use wow_loot::{LootStoreKind, LootStores};
 use wow_network::session_mgr::{InstanceLink, SessionManager};
 use wow_network::{
     GroupRegistry, LootDropRatesLikeCpp, PendingInvites, PlayerBroadcastInfo, PlayerRegistry,
@@ -1594,6 +1594,7 @@ pub struct PendingRespawn {
     pub unit_flags: u32,
     pub map_id: u16,
     pub loot_id: u32,
+    pub skin_loot_id: u32,
     pub gold_min: u32,
     pub gold_max: u32,
     pub boss_id: Option<u32>,
@@ -3154,6 +3155,7 @@ impl WorldSession {
         max_dmg: u32,
         aggro_radius: f32,
         loot_id: u32,
+        skin_loot_id: u32,
         gold_min: u32,
         gold_max: u32,
         boss_id: Option<u32>,
@@ -3200,6 +3202,7 @@ impl WorldSession {
             creature.ai_ownership_mut().min_damage = min_dmg;
             creature.ai_ownership_mut().max_damage = max_dmg;
             creature.ai_ownership_mut().loot_id = loot_id;
+            creature.ai_ownership_mut().skin_loot_id = skin_loot_id;
             creature.ai_ownership_mut().gold_min = gold_min;
             creature.ai_ownership_mut().gold_max = gold_max;
             creature.ai_ownership_mut().boss_id = boss_id;
@@ -9542,6 +9545,24 @@ impl WorldSession {
         player_position.distance(&reward_position) <= GROUP_XP_DISTANCE_LIKE_CPP
     }
 
+    fn represented_creature_can_skin_after_death_state_like_cpp(
+        &mut self,
+        creature_guid: ObjectGuid,
+    ) -> bool {
+        let skin_loot_id = self
+            .mutate_world_creature(creature_guid, |creature| {
+                creature.creature.ai_ownership().skin_loot_id
+            })
+            .unwrap_or(0);
+        if skin_loot_id == 0 {
+            return false;
+        }
+        self.loot_stores
+            .as_ref()
+            .and_then(|stores| stores.get(&LootStoreKind::Skinning))
+            .is_some_and(|store| store.collect_loot_ids_like_cpp().contains(&skin_loot_id))
+    }
+
     #[cfg(test)]
     pub(crate) fn represented_creature_kill_events_like_cpp(
         &self,
@@ -9558,7 +9579,7 @@ impl WorldSession {
             .loot_table
             .get(&creature_guid)
             .is_some_and(|loot| loot.coins > 0 || loot.unlooted_count > 0);
-        let can_skin = false;
+        let can_skin = self.represented_creature_can_skin_after_death_state_like_cpp(creature_guid);
         let values_update = self.mutate_world_creature(creature_guid, |creature| {
             creature.complete_death_state_after_kill_hooks_like_cpp();
             creature.apply_corpse_loot_flags_after_death_state_like_cpp(lootable, can_skin);
@@ -10792,6 +10813,7 @@ impl WorldSession {
                         unit_flags: c.unit_flags(),
                         map_id,
                         loot_id: c.loot_id(),
+                        skin_loot_id: c.skin_loot_id(),
                         gold_min: c.gold_min(),
                         gold_max: c.gold_max(),
                         boss_id: c.boss_id(),
@@ -10860,6 +10882,7 @@ impl WorldSession {
                 r.max_dmg,
                 r.aggro_radius,
                 r.loot_id,
+                r.skin_loot_id,
                 r.gold_min,
                 r.gold_max,
                 r.boss_id,
@@ -13661,6 +13684,7 @@ mod tests {
             0,
             0,
             0,
+            0,
             None,
             0,
             0,
@@ -13688,6 +13712,7 @@ mod tests {
             3,
             5,
             20.0,
+            0,
             0,
             0,
             0,
@@ -13738,6 +13763,7 @@ mod tests {
             3,
             5,
             20.0,
+            0,
             0,
             0,
             0,
@@ -13821,6 +13847,7 @@ mod tests {
             0,
             0,
             0,
+            0,
             None,
             0,
             0,
@@ -13882,6 +13909,7 @@ mod tests {
             0,
             0,
             0,
+            0,
             None,
             0,
             0,
@@ -13926,6 +13954,7 @@ mod tests {
             3,
             5,
             20.0,
+            0,
             0,
             0,
             0,
@@ -14594,6 +14623,88 @@ mod tests {
                     killer_guid: player,
                 },
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn creature_kill_sets_skinning_flags_when_skin_loot_template_exists_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let guid = test_creature_guid(18_009);
+        let player = ObjectGuid::create_player(1, 52);
+        let skin_loot_id = 777;
+        let mut skinning_store = wow_loot::LootStore::for_kind_like_cpp(LootStoreKind::Skinning);
+        skinning_store
+            .load_rows_like_cpp(
+                [wow_loot::LootTemplateRow {
+                    entry: skin_loot_id,
+                    item: wow_loot::LootStoreItem {
+                        item_id: 9_002,
+                        reference: 0,
+                        chance: 100.0,
+                        needs_quest: false,
+                        loot_mode: 1,
+                        group_id: 0,
+                        min_count: 1,
+                        max_count: 1,
+                    },
+                }],
+                |_| true,
+            )
+            .unwrap();
+        let mut stores = LootStores::new();
+        stores.insert(LootStoreKind::Skinning, skinning_store);
+        session.set_loot_stores(Arc::new(stores));
+        session.player_guid = Some(player);
+        session.set_map_manager(manager);
+        session.current_map_id = 0;
+        session.register_world_creature(
+            0,
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            test_creature_create_data(guid, 9001, 40),
+            3,
+            5,
+            20.0,
+            0,
+            skin_loot_id,
+            0,
+            0,
+            None,
+            0,
+            0,
+            0,
+            0,
+            -1,
+        );
+
+        session.apply_damage(guid, 100).await.unwrap();
+
+        let manager = session.map_manager.as_ref().unwrap().read().unwrap();
+        let world_creature = manager.find_creature(0, 0, guid).unwrap();
+        assert!(
+            world_creature
+                .creature
+                .unit()
+                .world()
+                .object()
+                .has_dynamic_flag(UnitDynFlags::CanSkin as u32)
+        );
+        assert!(
+            world_creature
+                .creature
+                .unit()
+                .unit_flags_like_cpp()
+                .contains(UnitFlags::SKINNABLE)
+        );
+        assert!(
+            session
+                .represented_creature_kill_events_like_cpp()
+                .contains(&RepresentedCreatureKillEventLikeCpp::LootFlagsApplied {
+                    creature_guid: guid,
+                    lootable: true,
+                    can_skin: true,
+                    skinnable: true,
+                })
         );
     }
 
@@ -17218,6 +17329,7 @@ mod tests {
             0,
             0,
             0,
+            0,
             None,
             0,
             0,
@@ -17300,6 +17412,7 @@ mod tests {
             3,
             5,
             20.0,
+            0,
             0,
             0,
             0,
@@ -18216,6 +18329,7 @@ mod tests {
             0,
             0,
             0,
+            0,
             None,
             0,
             0,
@@ -18307,6 +18421,7 @@ mod tests {
             0,
             0,
             0,
+            0,
             None,
             0,
             0,
@@ -18386,6 +18501,7 @@ mod tests {
             3,
             5,
             20.0,
+            0,
             0,
             0,
             0,
@@ -18491,6 +18607,7 @@ mod tests {
             0,
             0,
             0,
+            0,
             None,
             0,
             0,
@@ -18562,6 +18679,7 @@ mod tests {
             3,
             5,
             20.0,
+            0,
             0,
             0,
             0,
@@ -18937,6 +19055,7 @@ mod tests {
             3,
             5,
             20.0,
+            0,
             0,
             0,
             0,

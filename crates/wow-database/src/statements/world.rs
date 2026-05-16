@@ -450,7 +450,7 @@ impl StatementDef for WorldStatements {
                 "ct.speed_walk, ct.speed_run, ct.scale, ct.unit_class, ",
                 "ct.BaseAttackTime, ct.RangeAttackTime, ",
                 "ctm.CreatureDisplayID, ",
-                "ctdiff.LootID, ctdiff.GoldMin, ctdiff.GoldMax, ",
+                "ctdiff.LootID, ctdiff.SkinLootID, ctdiff.GoldMin, ctdiff.GoldMax, ",
                 "c.phaseUseFlags, c.phaseid, c.phasegroup, c.terrainSwapMap ",
                 "FROM creature c ",
                 "JOIN creature_template ct ON c.id = ct.entry ",

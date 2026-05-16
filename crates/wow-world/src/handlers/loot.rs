@@ -7046,6 +7046,7 @@ mod tests {
             creature.max_dmg,
             creature.aggro_radius,
             creature.loot_id,
+            0,
             creature.gold_min,
             creature.gold_max,
             creature.boss_id,

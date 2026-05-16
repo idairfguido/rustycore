@@ -831,6 +831,10 @@ impl WorldCreature {
         self.creature.ai_ownership().loot_id
     }
 
+    pub fn skin_loot_id(&self) -> u32 {
+        self.creature.ai_ownership().skin_loot_id
+    }
+
     pub fn gold_min(&self) -> u32 {
         self.creature.ai_ownership().gold_min
     }

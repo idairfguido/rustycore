@@ -3118,21 +3118,22 @@ impl WorldSession {
             let template_display_id: u32 =
                 result.try_read::<Option<u32>>(22).flatten().unwrap_or(0);
             let loot_id: u32 = result.try_read::<Option<u32>>(23).flatten().unwrap_or(0);
-            let gold_min: u32 = result.try_read::<Option<u32>>(24).flatten().unwrap_or(0);
-            let gold_max: u32 = result.try_read::<Option<u32>>(25).flatten().unwrap_or(0);
+            let skin_loot_id: u32 = result.try_read::<Option<u32>>(24).flatten().unwrap_or(0);
+            let gold_min: u32 = result.try_read::<Option<u32>>(25).flatten().unwrap_or(0);
+            let gold_max: u32 = result.try_read::<Option<u32>>(26).flatten().unwrap_or(0);
             let phase_use_flags: u8 = result
-                .try_read::<u8>(26)
-                .or_else(|| result.try_read::<i16>(26).map(|value| value.max(0) as u8))
+                .try_read::<u8>(27)
+                .or_else(|| result.try_read::<i16>(27).map(|value| value.max(0) as u8))
                 .unwrap_or(0);
             let phase_id: u16 = result
-                .try_read::<u16>(27)
-                .or_else(|| result.try_read::<i32>(27).map(|value| value.max(0) as u16))
+                .try_read::<u16>(28)
+                .or_else(|| result.try_read::<i32>(28).map(|value| value.max(0) as u16))
                 .unwrap_or(0);
             let phase_group_id: u32 = result
-                .try_read::<u32>(28)
-                .or_else(|| result.try_read::<i32>(28).map(|value| value.max(0) as u32))
+                .try_read::<u32>(29)
+                .or_else(|| result.try_read::<i32>(29).map(|value| value.max(0) as u32))
                 .unwrap_or(0);
-            let terrain_swap_map: i32 = result.try_read(29).unwrap_or(-1);
+            let terrain_swap_map: i32 = result.try_read(30).unwrap_or(-1);
 
             let display_id = if model_id > 0 {
                 model_id
@@ -3217,6 +3218,7 @@ impl WorldSession {
                 max_dmg,
                 aggro_radius,
                 loot_id,
+                skin_loot_id,
                 gold_min,
                 gold_max,
                 None,
@@ -3461,21 +3463,22 @@ impl WorldSession {
                 let template_display_id: u32 =
                     cr.try_read::<Option<u32>>(22).flatten().unwrap_or(0);
                 let loot_id: u32 = cr.try_read::<Option<u32>>(23).flatten().unwrap_or(0);
-                let gold_min: u32 = cr.try_read::<Option<u32>>(24).flatten().unwrap_or(0);
-                let gold_max: u32 = cr.try_read::<Option<u32>>(25).flatten().unwrap_or(0);
+                let skin_loot_id: u32 = cr.try_read::<Option<u32>>(24).flatten().unwrap_or(0);
+                let gold_min: u32 = cr.try_read::<Option<u32>>(25).flatten().unwrap_or(0);
+                let gold_max: u32 = cr.try_read::<Option<u32>>(26).flatten().unwrap_or(0);
                 let phase_use_flags: u8 = cr
-                    .try_read::<u8>(26)
-                    .or_else(|| cr.try_read::<i16>(26).map(|value| value.max(0) as u8))
+                    .try_read::<u8>(27)
+                    .or_else(|| cr.try_read::<i16>(27).map(|value| value.max(0) as u8))
                     .unwrap_or(0);
                 let phase_id: u16 = cr
-                    .try_read::<u16>(27)
-                    .or_else(|| cr.try_read::<i32>(27).map(|value| value.max(0) as u16))
+                    .try_read::<u16>(28)
+                    .or_else(|| cr.try_read::<i32>(28).map(|value| value.max(0) as u16))
                     .unwrap_or(0);
                 let phase_group_id: u32 = cr
-                    .try_read::<u32>(28)
-                    .or_else(|| cr.try_read::<i32>(28).map(|value| value.max(0) as u32))
+                    .try_read::<u32>(29)
+                    .or_else(|| cr.try_read::<i32>(29).map(|value| value.max(0) as u32))
                     .unwrap_or(0);
-                let terrain_swap_map: i32 = cr.try_read(29).unwrap_or(-1);
+                let terrain_swap_map: i32 = cr.try_read(30).unwrap_or(-1);
 
                 let display_id = if model_id > 0 {
                     model_id
@@ -3560,6 +3563,7 @@ impl WorldSession {
                         max_dmg,
                         aggro_radius,
                         loot_id,
+                        skin_loot_id,
                         gold_min,
                         gold_max,
                         None,
