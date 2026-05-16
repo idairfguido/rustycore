@@ -9901,15 +9901,36 @@ impl WorldSession {
         // Check if target still exists. C++ `Unit::UpdateMeleeAttackingState`
         // is driven from `GetVictim()`; if the represented creature vanished,
         // clear the canonical player's attack state as well as session mirrors.
-        let Some(target_position) =
-            self.mutate_world_creature(combat_target, |creature| creature.position())
-        else {
+        #[derive(Clone, Copy)]
+        enum CombatTargetRuntimeLikeCpp {
+            WorldCreature { position: Position },
+            CanonicalPlayer { position: Position },
+        }
+
+        let target_runtime = self
+            .mutate_world_creature(combat_target, |creature| {
+                CombatTargetRuntimeLikeCpp::WorldCreature {
+                    position: creature.position(),
+                }
+            })
+            .or_else(|| {
+                self.mutate_canonical_player_by_guid_like_cpp(combat_target, |player| {
+                    CombatTargetRuntimeLikeCpp::CanonicalPlayer {
+                        position: player.unit().world().position(),
+                    }
+                })
+            });
+        let Some(target_runtime) = target_runtime else {
             let _ = self.mutate_canonical_player_like_cpp(|player| {
                 player.unit_mut().attack_stop_like_cpp()
             });
             self.combat_target = None;
             self.in_combat = false;
             return;
+        };
+        let target_position = match target_runtime {
+            CombatTargetRuntimeLikeCpp::WorldCreature { position }
+            | CombatTargetRuntimeLikeCpp::CanonicalPlayer { position } => position,
         };
         let player_position = self.player_position_like_cpp();
         let in_melee_range = player_position
@@ -9934,6 +9955,63 @@ impl WorldSession {
         };
         if let Some(swing_error) = swing_error_update {
             self.set_player_attack_swing_error_like_cpp(swing_error);
+        }
+
+        if let CombatTargetRuntimeLikeCpp::CanonicalPlayer { .. } = target_runtime {
+            let Some((swings, target_level)) = self
+                .mutate_canonical_player_by_guid_like_cpp(combat_target, |victim| {
+                    if !victim.unit().is_alive() {
+                        return None;
+                    }
+                    let damages = canonical_swing_damages.clone().unwrap_or_default();
+                    let target_level =
+                        victim.unit().data().level.clamp(0, i32::from(u8::MAX)) as u8;
+                    let mut sent_swings = Vec::new();
+                    for dmg in damages {
+                        let damage = dmg.max(1);
+                        let health_before = victim.unit().data().health;
+                        let health_after = health_before.saturating_sub(u64::from(damage));
+                        victim.unit_mut().set_health(health_after);
+                        let over_damage = if health_after == 0 {
+                            u64::from(damage).saturating_sub(health_before) as i32
+                        } else {
+                            -1
+                        };
+                        sent_swings.push((damage, over_damage));
+                    }
+                    Some((sent_swings, target_level))
+                })
+                .flatten()
+            else {
+                let _ = self.mutate_canonical_player_like_cpp(|player| {
+                    player.unit_mut().attack_stop_like_cpp()
+                });
+                self.combat_target = None;
+                self.in_combat = false;
+                return;
+            };
+
+            if !swings.is_empty() {
+                let _ = self.mutate_canonical_player_like_cpp(|player| {
+                    player
+                        .unit_mut()
+                        .set_last_damaged_target_like_cpp(Some(combat_target));
+                });
+            }
+            for (dmg, over_damage) in &swings {
+                let state_update = AttackerStateUpdate {
+                    attacker: player_guid,
+                    victim: combat_target,
+                    damage: *dmg as i32,
+                    over_damage: *over_damage,
+                    victim_state: VICTIM_STATE_HIT,
+                    school_mask: 1,
+                    target_level,
+                    expansion: 2,
+                };
+                let _ = self.send_tx.send(state_update.to_bytes());
+            }
+            return;
         }
 
         // Gather combat data from the canonical map-owned creature before
@@ -14084,6 +14162,98 @@ mod tests {
                 .unit()
                 .has_attacker_like_cpp(attacker)
         );
+    }
+
+    #[test]
+    fn combat_tick_keeps_and_damages_canonical_player_victim_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 83);
+        let victim = ObjectGuid::create_player(1, 84);
+
+        canonical.lock().unwrap().create_world_map(0, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Attacker".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            0,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+
+        let mut victim_player = Player::new(Some(10), false);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(victim);
+        victim_player.unit_mut().world_mut().set_map(0, 0).unwrap();
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::new(11.0, 20.0, 30.0, 0.0));
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .add_to_world();
+        victim_player.unit_mut().set_level(80);
+        victim_player.unit_mut().set_max_health(40);
+        victim_player.unit_mut().set_health(40);
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(0, 0)
+            .unwrap()
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_player(victim_player).unwrap(),
+            )
+            .unwrap();
+
+        session
+            .mutate_canonical_player_like_cpp(|player| {
+                let unit = player.unit_mut();
+                unit.set_attacking(Some(victim));
+                unit.set_target(victim);
+                unit.add_unit_state(UnitState::MELEE_ATTACKING.bits());
+                unit.set_base_attack_time_like_cpp(WeaponAttackType::BaseAttack, 2_000);
+                unit.set_weapon_damage(WeaponAttackType::BaseAttack, 7.0, 7.0);
+            })
+            .unwrap();
+        session.combat_target = Some(victim);
+        session.in_combat = true;
+
+        session.tick_combat_sync();
+
+        let sent = send_rx.try_recv().unwrap();
+        let opcode = u16::from_le_bytes([sent[0], sent[1]]);
+        assert_eq!(opcode, ServerOpcodes::AttackerStateUpdate as u16);
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(0, 0).unwrap().map();
+        let attacker_entity = map.get_typed_player(attacker).unwrap();
+        let victim_entity = map.get_typed_player(victim).unwrap();
+        assert_eq!(attacker_entity.unit().attacking(), Some(victim));
+        assert_eq!(
+            attacker_entity.unit().last_damaged_target_like_cpp(),
+            Some(victim)
+        );
+        assert_eq!(victim_entity.unit().data().health, 33);
+        assert_eq!(session.combat_target, Some(victim));
+        assert!(session.in_combat);
     }
 
     #[test]
