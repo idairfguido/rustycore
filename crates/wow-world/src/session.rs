@@ -9891,6 +9891,12 @@ impl WorldSession {
                         .add_threat(player_guid, damage as f32);
                     sent_swings.push((damage, died));
                     if died {
+                        creature
+                            .creature
+                            .unit_mut()
+                            .subsystems_mut()
+                            .combat
+                            .clear_threat();
                         move_stop = creature.stop_move_spline_like_cpp().map(|stop| {
                             MonsterMoveStop {
                                 mover_guid: combat_target,
@@ -13347,6 +13353,15 @@ mod tests {
             let manager = manager.read().unwrap();
             let world_creature = manager.find_creature(0, 0, guid).unwrap();
             assert_eq!(world_creature.current_hp(), 0);
+            assert!(
+                world_creature
+                    .creature
+                    .unit()
+                    .subsystems()
+                    .combat
+                    .threat
+                    .is_empty()
+            );
         }
 
         let guard = canonical.lock().unwrap();
