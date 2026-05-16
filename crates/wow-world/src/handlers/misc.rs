@@ -24,7 +24,9 @@ use wow_packet::packets::item::{
     GetItemPurchaseData, ItemPurchaseContents, ItemPurchaseRefundCurrency, ItemPurchaseRefundItem,
     SetItemPurchaseData,
 };
-use wow_packet::packets::misc::{MountSetFavorite, RequestCemeteryListResponse, TaxiNodeStatusPkt};
+use wow_packet::packets::misc::{
+    MountSetFavorite, RatedPvpInfo, RequestCemeteryListResponse, TaxiNodeStatusPkt,
+};
 
 // ── inventory registrations ───────────────────────────────────────────────────
 
@@ -802,7 +804,9 @@ impl crate::session::WorldSession {
     }
     pub async fn handle_request_forced_reactions(&mut self, _pkt: wow_packet::WorldPacket) {}
     pub async fn handle_request_battlefield_status(&mut self, _pkt: wow_packet::WorldPacket) {}
-    pub async fn handle_request_rated_pvp_info(&mut self, _pkt: wow_packet::WorldPacket) {}
+    pub async fn handle_request_rated_pvp_info(&mut self, _pkt: wow_packet::WorldPacket) {
+        self.send_packet(&RatedPvpInfo::default());
+    }
     pub async fn handle_request_pvp_rewards(&mut self, _pkt: wow_packet::WorldPacket) {}
     pub async fn handle_df_get_system_info(&mut self, _pkt: wow_packet::WorldPacket) {}
     pub async fn handle_df_get_join_status(&mut self, _pkt: wow_packet::WorldPacket) {}
@@ -1279,6 +1283,25 @@ mod tests {
 
         assert!(session.account_mounts_like_cpp().is_empty());
         assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn request_rated_pvp_info_sends_empty_cpp_default_packet() {
+        let (mut session, send_rx) = make_session();
+
+        session
+            .handle_request_rated_pvp_info(WorldPacket::new_empty())
+            .await;
+
+        let bytes = send_rx.try_recv().expect("rated pvp info packet");
+        assert_eq!(
+            u16::from_le_bytes([bytes[0], bytes[1]]),
+            ServerOpcodes::RatedPvpInfo as u16
+        );
+        assert_eq!(
+            bytes.len(),
+            2 + wow_packet::packets::misc::RATED_PVP_BRACKET_COUNT_LIKE_CPP * (19 * 4 + 1)
+        );
     }
 
     #[tokio::test]

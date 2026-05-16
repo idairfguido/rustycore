@@ -2438,6 +2438,83 @@ impl ServerPacket for MailQueryNextTimeResult {
     }
 }
 
+// ── RatedPvpInfo ─────────────────────────────────────────────────────────────
+
+/// C++ `WorldPackets::Battleground::RatedPvpInfo`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RatedPvpBracketInfo {
+    pub personal_rating: i32,
+    pub ranking: i32,
+    pub season_played: i32,
+    pub season_won: i32,
+    pub unused1: i32,
+    pub unused2: i32,
+    pub weekly_played: i32,
+    pub weekly_won: i32,
+    pub rounds_season_played: i32,
+    pub rounds_season_won: i32,
+    pub rounds_weekly_played: i32,
+    pub rounds_weekly_won: i32,
+    pub best_weekly_rating: i32,
+    pub last_weeks_best_rating: i32,
+    pub best_season_rating: i32,
+    pub pvp_tier_id: i32,
+    pub unused3: i32,
+    pub unused4: i32,
+    pub rank: i32,
+    pub disqualified: bool,
+}
+
+impl RatedPvpBracketInfo {
+    fn write_like_cpp(&self, pkt: &mut WorldPacket) {
+        pkt.write_int32(self.personal_rating);
+        pkt.write_int32(self.ranking);
+        pkt.write_int32(self.season_played);
+        pkt.write_int32(self.season_won);
+        pkt.write_int32(self.unused1);
+        pkt.write_int32(self.unused2);
+        pkt.write_int32(self.weekly_played);
+        pkt.write_int32(self.weekly_won);
+        pkt.write_int32(self.rounds_season_played);
+        pkt.write_int32(self.rounds_season_won);
+        pkt.write_int32(self.rounds_weekly_played);
+        pkt.write_int32(self.rounds_weekly_won);
+        pkt.write_int32(self.best_weekly_rating);
+        pkt.write_int32(self.last_weeks_best_rating);
+        pkt.write_int32(self.best_season_rating);
+        pkt.write_int32(self.pvp_tier_id);
+        pkt.write_int32(self.unused3);
+        pkt.write_int32(self.unused4);
+        pkt.write_int32(self.rank);
+        pkt.write_bit(self.disqualified);
+        pkt.flush_bits();
+    }
+}
+
+pub const RATED_PVP_BRACKET_COUNT_LIKE_CPP: usize = 7;
+
+pub struct RatedPvpInfo {
+    pub brackets: [RatedPvpBracketInfo; RATED_PVP_BRACKET_COUNT_LIKE_CPP],
+}
+
+impl Default for RatedPvpInfo {
+    fn default() -> Self {
+        Self {
+            brackets: [RatedPvpBracketInfo::default(); RATED_PVP_BRACKET_COUNT_LIKE_CPP],
+        }
+    }
+}
+
+impl ServerPacket for RatedPvpInfo {
+    const OPCODE: ServerOpcodes = ServerOpcodes::RatedPvpInfo;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        for bracket in &self.brackets {
+            bracket.write_like_cpp(pkt);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2456,6 +2533,27 @@ mod tests {
         let pkt = AccountDataTimes::for_player(guid);
         let bytes = pkt.to_bytes();
         assert!(bytes.len() > 76); // Bigger than empty GUID version
+    }
+
+    #[test]
+    fn rated_pvp_info_empty_matches_cpp_default_shape() {
+        let bytes = RatedPvpInfo::default().to_bytes();
+        assert_eq!(
+            u16::from_le_bytes([bytes[0], bytes[1]]),
+            ServerOpcodes::RatedPvpInfo as u16
+        );
+        assert_eq!(
+            bytes.len(),
+            2 + RATED_PVP_BRACKET_COUNT_LIKE_CPP * (19 * 4 + 1)
+        );
+
+        let mut pkt = WorldPacket::from_bytes(&bytes[2..]);
+        for _ in 0..RATED_PVP_BRACKET_COUNT_LIKE_CPP {
+            for _ in 0..19 {
+                assert_eq!(pkt.read_int32().unwrap(), 0);
+            }
+            assert!(!pkt.has_bit().unwrap());
+        }
     }
 
     #[test]
