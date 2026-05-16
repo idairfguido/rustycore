@@ -9891,12 +9891,9 @@ impl WorldSession {
                         .add_threat(player_guid, damage as f32);
                     sent_swings.push((damage, died));
                     if died {
-                        creature
-                            .creature
-                            .unit_mut()
-                            .subsystems_mut()
-                            .combat
-                            .clear_threat();
+                        let combat = &mut creature.creature.unit_mut().subsystems_mut().combat;
+                        combat.clear_threat();
+                        combat.clear_attackers();
                         move_stop = creature.stop_move_spline_like_cpp().map(|stop| {
                             MonsterMoveStop {
                                 mover_guid: combat_target,
@@ -13342,6 +13339,7 @@ mod tests {
         session
             .mutate_world_creature(guid, |creature| {
                 creature.enter_combat(player);
+                creature.creature.unit_mut().add_attacker_like_cpp(player);
                 creature.creature.ai_ownership_mut().last_swing_ms = 0;
                 creature.creature.ai_ownership_mut().swing_timer_ms = 0;
             })
@@ -13360,6 +13358,15 @@ mod tests {
                     .subsystems()
                     .combat
                     .threat
+                    .is_empty()
+            );
+            assert!(
+                world_creature
+                    .creature
+                    .unit()
+                    .subsystems()
+                    .combat
+                    .attackers
                     .is_empty()
             );
         }
