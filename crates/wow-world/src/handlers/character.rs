@@ -3070,6 +3070,7 @@ impl WorldSession {
 
         let realm_id = self.realm_id();
         let mut blocks = Vec::new();
+        let mut visible_guids = Vec::new();
         let mut result = result;
 
         loop {
@@ -3192,6 +3193,7 @@ impl WorldSession {
                 create_data.clone(),
                 &creature_pos,
             ));
+            visible_guids.push(guid);
 
             // Register through canonical map state when available; the legacy
             // per-session AI object remains a compatibility facade/cache.
@@ -3226,12 +3228,12 @@ impl WorldSession {
         }
 
         let count = blocks.len();
-        // Snapshot visible set from the map-owned creature store.
-        self.visible_creatures = self.world_creature_guids().into_iter().collect();
+        // Mirror C++ Player::m_clientGUIDs semantics: this is the exact set
+        // of creatures sent to this client, not every creature loaded on map.
+        self.visible_creatures = visible_guids.iter().copied().collect();
         self.last_visibility_pos = Some(*position);
         let update = UpdateObject::create_creatures(blocks, map_id);
         self.send_packet(&update);
-        let visible_guids: Vec<_> = self.visible_creatures.iter().copied().collect();
         let mob_count = visible_guids
             .iter()
             .filter(|g| {
@@ -3239,7 +3241,7 @@ impl WorldSession {
                     .unwrap_or(false)
             })
             .count();
-        let npc_count = self.visible_creatures.len().saturating_sub(mob_count);
+        let npc_count = visible_guids.len().saturating_sub(mob_count);
         debug!(
             "Sent {} creatures ({} mobs / {} npcs) to account {} on map {}",
             count, mob_count, npc_count, self.account_id, map_id
