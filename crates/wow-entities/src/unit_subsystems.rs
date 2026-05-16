@@ -1430,6 +1430,34 @@ impl CombatSubsystem {
         expired
     }
 
+    pub fn revalidate_combat_like_cpp(
+        &mut self,
+        mut can_begin_combat: impl FnMut(ObjectGuid, CombatReferenceState) -> bool,
+    ) -> Vec<ObjectGuid> {
+        let mut removed = Vec::new();
+        self.pve_refs.retain(|guid, reference| {
+            if can_begin_combat(*guid, *reference) {
+                true
+            } else {
+                removed.push(*guid);
+                false
+            }
+        });
+        self.pvp_refs.retain(|guid, reference| {
+            if can_begin_combat(*guid, *reference) {
+                true
+            } else {
+                removed.push(*guid);
+                false
+            }
+        });
+        for guid in &removed {
+            self.remove_threat(*guid);
+            self.threatened_by_me.remove(guid);
+        }
+        removed
+    }
+
     pub fn end_all_pve_combat(&mut self) {
         self.pve_refs.clear();
         self.clear_threat();
@@ -4013,6 +4041,34 @@ mod unit_subsystems_tests {
         combat.end_all_pve_combat();
         assert!(!combat.has_pve_combat());
         assert!(!combat.has_combat());
+    }
+
+    #[test]
+    fn combat_revalidate_removes_invalid_refs_and_related_threat_like_cpp() {
+        let mut combat = CombatSubsystem::default();
+        let valid_pve = guid(42);
+        let invalid_pve = guid(43);
+        let invalid_pvp = guid(44);
+
+        combat.set_in_combat_with(valid_pve, false, false);
+        combat.set_in_combat_with(invalid_pve, false, false);
+        combat.set_in_combat_with(invalid_pvp, true, false);
+        combat.add_threat(valid_pve, 10.0);
+        combat.add_threat(invalid_pve, 20.0);
+        combat.put_threatened_by_me_ref(invalid_pve, ThreatReferenceState::default());
+
+        let removed =
+            combat.revalidate_combat_like_cpp(|guid, _| guid != invalid_pve && guid != invalid_pvp);
+
+        assert_eq!(removed.len(), 2);
+        assert!(removed.contains(&invalid_pve));
+        assert!(removed.contains(&invalid_pvp));
+        assert!(combat.is_in_combat_with(valid_pve));
+        assert!(!combat.is_in_combat_with(invalid_pve));
+        assert!(!combat.is_in_combat_with(invalid_pvp));
+        assert_eq!(combat.threat_value(valid_pve), Some(10.0));
+        assert_eq!(combat.threat_value(invalid_pve), None);
+        assert!(!combat.is_threatening_to(invalid_pve, true));
     }
 
     #[test]
