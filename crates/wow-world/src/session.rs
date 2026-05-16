@@ -1945,9 +1945,17 @@ impl WorldSession {
                     }
                     if melee_state_update_allowed {
                         unit.remove_attacking_interrupt_auras_like_cpp();
-                        let [min_damage, max_damage] =
-                            unit.weapon_damage(WeaponAttackType::BaseAttack);
-                        swings.push(min_damage.max(1.0).min(max_damage.max(1.0)).round() as u32);
+                        if unit
+                            .current_spell(wow_entities::CurrentSpellSlot::Melee)
+                            .is_some()
+                        {
+                            let _ = unit.finish_spell(wow_entities::CurrentSpellSlot::Melee);
+                        } else {
+                            let [min_damage, max_damage] =
+                                unit.weapon_damage(WeaponAttackType::BaseAttack);
+                            swings
+                                .push(min_damage.max(1.0).min(max_damage.max(1.0)).round() as u32);
+                        }
                     }
                     unit.reset_attack_timer_like_cpp(WeaponAttackType::BaseAttack);
                 }
@@ -12691,6 +12699,88 @@ mod tests {
             .unwrap()
             .current_hp();
         assert_eq!(after_second, after_first);
+    }
+
+    #[test]
+    fn combat_tick_base_attack_casts_current_melee_spell_instead_of_damage_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let guid = test_creature_guid(18_023);
+        let player = ObjectGuid::create_player(1, 72);
+
+        canonical.lock().unwrap().create_world_map(0, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "MeleeSpell".to_string(),
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            0,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        let melee_spell = wow_entities::CurrentSpellRef::new(12_345, Some(player), None);
+        session
+            .mutate_canonical_player_like_cpp(|player| {
+                let unit = player.unit_mut();
+                unit.set_attacking(Some(guid));
+                unit.set_target(guid);
+                unit.set_base_attack_time_like_cpp(WeaponAttackType::BaseAttack, 2_000);
+                unit.set_weapon_damage(WeaponAttackType::BaseAttack, 7.0, 7.0);
+                unit.set_current_cast_spell(wow_entities::CurrentSpellSlot::Melee, melee_spell);
+            })
+            .unwrap();
+        session.combat_target = Some(guid);
+        session.in_combat = true;
+        register_test_creature(&mut session, manager.clone(), guid, 40);
+        session
+            .mutate_world_creature(guid, |creature| {
+                creature.enter_combat(player);
+                creature.creature.ai_ownership_mut().last_swing_ms = 0;
+                creature.creature.ai_ownership_mut().swing_timer_ms = 0;
+            })
+            .unwrap();
+
+        session.tick_combat_sync();
+
+        let hp = manager
+            .read()
+            .unwrap()
+            .find_creature(0, 0, guid)
+            .unwrap()
+            .current_hp();
+        assert_eq!(hp, 40);
+        let guard = canonical.lock().unwrap();
+        let player_entity = guard
+            .find_map(0, 0)
+            .unwrap()
+            .map()
+            .get_typed_player(player)
+            .unwrap();
+        assert_eq!(
+            player_entity
+                .unit()
+                .current_spell(wow_entities::CurrentSpellSlot::Melee),
+            None
+        );
+        assert_eq!(
+            player_entity
+                .unit()
+                .attack_timer(WeaponAttackType::BaseAttack),
+            2_000
+        );
     }
 
     #[test]
