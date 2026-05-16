@@ -26,6 +26,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use wow_constants::ClientOpcodes;
+use wow_constants::unit::NPCFlags1;
 use wow_database::statements::character::CharStatements;
 use wow_database::statements::world::WorldStatements;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
@@ -37,6 +38,11 @@ use wow_packet::packets::trainer::{
 
 use crate::conditions;
 use crate::session::WorldSession;
+
+const TRAINER_LIST_NPC_FLAGS_LIKE_CPP: u32 = NPCFlags1::TRAINER.bits();
+const TRAINER_BUY_NPC_FLAGS_LIKE_CPP: u32 = NPCFlags1::TRAINER.bits()
+    | NPCFlags1::TRAINER_CLASS.bits()
+    | NPCFlags1::TRAINER_PROFESSION.bits();
 
 // ── Handler registrations ─────────────────────────────────────────────────────
 
@@ -79,36 +85,53 @@ impl WorldSession {
         };
 
         // ── Resolve creature entry ─────────────────────────────────────────
-        let entry = match self.mutate_world_creature(trainer_guid, |creature| creature.entry()) {
-            Some(entry) => entry,
-            None => {
-                // Fallback: query DB by spawn GUID
-                let mut stmt = world_db.prepare(WorldStatements::SEL_CREATURE_ENTRY_BY_GUID);
-                stmt.set_u64(0, trainer_guid.low_value() as u64);
-                let fallback = match tokio::time::timeout(
-                    std::time::Duration::from_secs(2),
-                    world_db.query(&stmt),
-                )
-                .await
-                {
-                    Ok(Ok(r)) if !r.is_empty() => r.try_read::<u32>(0),
-                    _ => None,
-                };
-                match fallback {
-                    Some(e) => {
-                        info!(
-                            account = self.account_id,
-                            "Trainer entry {} resolved from DB (GUID not in tracker)", e
-                        );
-                        e
-                    }
-                    None => {
-                        warn!(
-                            account = self.account_id,
-                            trainer_guid = ?trainer_guid,
-                            "Trainer GUID not found in tracker or DB"
-                        );
-                        return;
+        let entry = if self.has_canonical_map_manager_like_cpp() {
+            match self.represented_npc_can_interact_with_like_cpp(
+                trainer_guid,
+                TRAINER_LIST_NPC_FLAGS_LIKE_CPP,
+            ) {
+                Some(access) => access.entry,
+                None => {
+                    warn!(
+                        account = self.account_id,
+                        trainer_guid = ?trainer_guid,
+                        "Trainer GUID not found or not interactable in canonical map"
+                    );
+                    return;
+                }
+            }
+        } else {
+            match self.mutate_world_creature(trainer_guid, |creature| creature.entry()) {
+                Some(entry) => entry,
+                None => {
+                    // Fallback: query DB by spawn GUID
+                    let mut stmt = world_db.prepare(WorldStatements::SEL_CREATURE_ENTRY_BY_GUID);
+                    stmt.set_u64(0, trainer_guid.low_value() as u64);
+                    let fallback = match tokio::time::timeout(
+                        std::time::Duration::from_secs(2),
+                        world_db.query(&stmt),
+                    )
+                    .await
+                    {
+                        Ok(Ok(r)) if !r.is_empty() => r.try_read::<u32>(0),
+                        _ => None,
+                    };
+                    match fallback {
+                        Some(e) => {
+                            info!(
+                                account = self.account_id,
+                                "Trainer entry {} resolved from DB (GUID not in tracker)", e
+                            );
+                            e
+                        }
+                        None => {
+                            warn!(
+                                account = self.account_id,
+                                trainer_guid = ?trainer_guid,
+                                "Trainer GUID not found in tracker or DB"
+                            );
+                            return;
+                        }
                     }
                 }
             }
@@ -344,6 +367,22 @@ impl WorldSession {
                 return;
             }
         };
+
+        if self.has_canonical_map_manager_like_cpp()
+            && self
+                .represented_npc_can_interact_with_like_cpp(
+                    trainer_guid,
+                    TRAINER_BUY_NPC_FLAGS_LIKE_CPP,
+                )
+                .is_none()
+        {
+            warn!(
+                account = self.account_id,
+                trainer_guid = ?trainer_guid,
+                "Trainer buy rejected: trainer not interactable in canonical map"
+            );
+            return;
+        }
 
         // ── Already known? ─────────────────────────────────────────────────
         if self.known_spells_like_cpp().contains(&spell_id) {

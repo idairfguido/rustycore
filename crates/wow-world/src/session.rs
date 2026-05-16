@@ -236,6 +236,13 @@ pub(crate) struct RepresentedGameObjectAccessLikeCpp {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RepresentedCreatureAccessLikeCpp {
+    pub entry: u32,
+    pub position: wow_core::Position,
+    pub npc_flags: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct MovementAckEventLikeCpp {
     pub opcode: ClientOpcodes,
     pub mover_guid: ObjectGuid,
@@ -3256,6 +3263,81 @@ impl WorldSession {
         } else {
             None
         }
+    }
+
+    pub(crate) fn has_canonical_map_manager_like_cpp(&self) -> bool {
+        self.canonical_map_manager.is_some()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn canonical_creature_access_like_cpp(
+        &self,
+        guid: ObjectGuid,
+    ) -> Option<RepresentedCreatureAccessLikeCpp> {
+        if guid.is_empty() || !guid.is_any_type_creature() {
+            return None;
+        }
+        let manager = self.canonical_map_manager.as_ref()?;
+        let Ok(manager) = manager.lock() else {
+            return None;
+        };
+        let map = manager.find_map(u32::from(self.player_map_id_like_cpp()), 0)?;
+        let creature = map.map().get_typed_creature(guid)?;
+        Some(RepresentedCreatureAccessLikeCpp {
+            entry: creature.entry(),
+            position: creature.unit().world().position(),
+            npc_flags: creature.ai_ownership().npc_flags,
+        })
+    }
+
+    pub(crate) fn represented_npc_can_interact_with_like_cpp(
+        &self,
+        guid: ObjectGuid,
+        npc_flags: u32,
+    ) -> Option<RepresentedCreatureAccessLikeCpp> {
+        if guid.is_empty() || !guid.is_any_type_creature() {
+            return None;
+        }
+        let player_guid = self.player_guid()?;
+        let player_position = self.player_position_like_cpp()?;
+        let manager = self.canonical_map_manager.as_ref()?;
+        let Ok(manager) = manager.lock() else {
+            return None;
+        };
+        let map = manager.find_map(u32::from(self.player_map_id_like_cpp()), 0)?;
+        let creature = map.map().get_typed_creature(guid)?;
+
+        if !creature.is_alive() {
+            return None;
+        }
+        if npc_flags != 0 && (creature.ai_ownership().npc_flags & npc_flags) == 0 {
+            return None;
+        }
+
+        let interaction_distance = creature.unit().world().combat_reach() + 4.0;
+        let in_range = if let Some(player) = map.map().get_typed_player(player_guid) {
+            creature.unit().world().is_within_dist_in_map(
+                player.unit().world(),
+                interaction_distance,
+                true,
+            )
+        } else {
+            let fallback_distance = interaction_distance + creature.unit().world().combat_reach();
+            creature
+                .unit()
+                .world()
+                .position()
+                .is_within_dist(&player_position, fallback_distance)
+        };
+        if !in_range {
+            return None;
+        }
+
+        Some(RepresentedCreatureAccessLikeCpp {
+            entry: creature.entry(),
+            position: creature.unit().world().position(),
+            npc_flags: creature.ai_ownership().npc_flags,
+        })
     }
 
     pub(crate) fn represented_gameobject_is_per_player_despawned_like_cpp(
@@ -12517,6 +12599,41 @@ mod tests {
         )
     }
 
+    fn add_canonical_test_creature(
+        canonical: &SharedCanonicalMapManager,
+        guid: ObjectGuid,
+        entry: u32,
+        position: Position,
+        npc_flags: u32,
+    ) {
+        let mut creature = wow_entities::Creature::new(false);
+        creature.unit_mut().world_mut().object_mut().create(guid);
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .set_entry(entry);
+        creature.unit_mut().world_mut().set_map(571, 0).unwrap();
+        creature.unit_mut().world_mut().relocate(position);
+        creature.unit_mut().world_mut().set_combat_reach(1.0);
+        creature.unit_mut().set_level(80);
+        creature.unit_mut().set_max_health(100);
+        creature.unit_mut().set_health(100);
+        creature.set_ai_identity_runtime(1, 35, npc_flags, 0);
+        creature.unit_mut().world_mut().object_mut().add_to_world();
+
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(571, 0)
+            .unwrap()
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_creature(creature).unwrap(),
+            )
+            .unwrap();
+    }
+
     #[test]
     fn gameobject_interaction_resolves_canonical_map_object_like_cpp() {
         let (mut session, _pkt_tx, _send_rx) = make_session();
@@ -12566,6 +12683,98 @@ mod tests {
         session.set_player_position_like_cpp(Position::new(20.1, 0.0, 0.0, 0.0));
         assert_eq!(
             session.represented_gameobject_can_interact_with_like_cpp(gameobject_guid, 5.0),
+            None
+        );
+    }
+
+    #[test]
+    fn npc_interaction_resolves_canonical_trainer_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let trainer_guid = test_creature_guid(10);
+        let vendor_guid = test_creature_guid(11);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Tester".to_string(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session
+            .ensure_canonical_world_map_for_current_player_like_cpp()
+            .expect("canonical map");
+
+        add_canonical_test_creature(
+            &canonical,
+            trainer_guid,
+            500,
+            Position::new(14.0, 0.0, 0.0, 0.0),
+            wow_constants::unit::NPCFlags1::TRAINER.bits(),
+        );
+        add_canonical_test_creature(
+            &canonical,
+            vendor_guid,
+            501,
+            Position::new(14.0, 0.0, 0.0, 0.0),
+            wow_constants::unit::NPCFlags1::VENDOR.bits(),
+        );
+
+        assert_eq!(
+            session.canonical_creature_access_like_cpp(trainer_guid),
+            Some(RepresentedCreatureAccessLikeCpp {
+                entry: 500,
+                position: Position::new(14.0, 0.0, 0.0, 0.0),
+                npc_flags: wow_constants::unit::NPCFlags1::TRAINER.bits(),
+            })
+        );
+        assert_eq!(
+            session.represented_npc_can_interact_with_like_cpp(
+                trainer_guid,
+                wow_constants::unit::NPCFlags1::TRAINER.bits(),
+            ),
+            Some(RepresentedCreatureAccessLikeCpp {
+                entry: 500,
+                position: Position::new(14.0, 0.0, 0.0, 0.0),
+                npc_flags: wow_constants::unit::NPCFlags1::TRAINER.bits(),
+            })
+        );
+        assert_eq!(
+            session.represented_npc_can_interact_with_like_cpp(
+                vendor_guid,
+                wow_constants::unit::NPCFlags1::TRAINER.bits(),
+            ),
+            None
+        );
+
+        session.set_player_position_like_cpp(Position::new(40.0, 0.0, 0.0, 0.0));
+        session
+            .mutate_canonical_player_like_cpp(|player| {
+                player
+                    .unit_mut()
+                    .world_mut()
+                    .relocate(Position::new(40.0, 0.0, 0.0, 0.0));
+            })
+            .unwrap();
+        assert_eq!(
+            session.represented_npc_can_interact_with_like_cpp(
+                trainer_guid,
+                wow_constants::unit::NPCFlags1::TRAINER.bits(),
+            ),
             None
         );
     }
