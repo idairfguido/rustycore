@@ -972,6 +972,8 @@ pub struct WorldSession {
     combat_tick_last_at_like_cpp: Instant,
     /// Represented result of C++ `IsWithinLOSInMap(victim)` for melee swings until LOS runtime is canonical.
     player_melee_los_to_target_like_cpp: Option<bool>,
+    /// C++ `Player::m_swingErrorMsg`; suppresses duplicate `SMSG_ATTACK_SWING_ERROR` packets.
+    player_swing_error_msg_like_cpp: Option<u8>,
 
     /// True when the player is engaged in combat.
     pub(crate) in_combat: bool,
@@ -1645,6 +1647,7 @@ impl WorldSession {
             combat_target: None,
             combat_tick_last_at_like_cpp: Instant::now(),
             player_melee_los_to_target_like_cpp: None,
+            player_swing_error_msg_like_cpp: None,
             in_combat: false,
             player_alive_like_cpp: true,
             player_game_master_like_cpp: false,
@@ -1913,18 +1916,31 @@ impl WorldSession {
         diff <= std::f32::consts::PI / 3.0
     }
 
+    fn set_player_attack_swing_error_like_cpp(&mut self, error: Option<u8>) {
+        use wow_packet::ServerPacket;
+        use wow_packet::packets::combat::AttackSwingError;
+
+        if let Some(reason) = error {
+            if self.player_swing_error_msg_like_cpp != Some(reason) {
+                let _ = self.send_tx.send(AttackSwingError { reason }.to_bytes());
+            }
+        }
+        self.player_swing_error_msg_like_cpp = error;
+    }
+
     fn take_canonical_player_attack_swings_like_cpp(
         &mut self,
         diff_ms: u32,
         in_melee_range: bool,
         facing_target: bool,
         within_los: bool,
-    ) -> Option<Vec<u32>> {
+    ) -> Option<(Vec<u32>, Option<u8>)> {
         self.mutate_canonical_player_like_cpp(|player| {
             let unit = player.unit_mut();
             unit.update_attack_timers_like_cpp(diff_ms);
             let mut swings = Vec::new();
             let mut processed_ready_attack = false;
+            let mut base_attack_error = None;
             let has_auto_attack_error = !in_melee_range || !facing_target;
             let melee_state_update_allowed =
                 within_los && unit.can_attacker_state_update_melee_like_cpp(false);
@@ -1932,6 +1948,7 @@ impl WorldSession {
             if unit.is_attack_ready_like_cpp(WeaponAttackType::BaseAttack) {
                 processed_ready_attack = true;
                 if has_auto_attack_error {
+                    base_attack_error = Some(if !in_melee_range { 0 } else { 1 });
                     unit.set_attack_timer(WeaponAttackType::BaseAttack, 100);
                 } else {
                     if unit.can_dual_wield_like_cpp()
@@ -1986,7 +2003,7 @@ impl WorldSession {
                 }
             }
 
-            processed_ready_attack.then_some(swings)
+            processed_ready_attack.then_some((swings, base_attack_error))
         })
         .flatten()
     }
@@ -9856,14 +9873,19 @@ impl WorldSession {
             })
             .unwrap_or(true);
         let within_los = self.player_melee_los_to_target_like_cpp.unwrap_or(true);
-        let canonical_swing_damages = self.take_canonical_player_attack_swings_like_cpp(
+        let canonical_attack_update = self.take_canonical_player_attack_swings_like_cpp(
             diff_ms,
             in_melee_range,
             facing_target,
             within_los,
         );
-        if self.canonical_map_manager.is_some() && canonical_swing_damages.is_none() {
-            return;
+        let (canonical_swing_damages, swing_error) = match canonical_attack_update {
+            Some((damages, swing_error)) => (Some(damages), swing_error),
+            None if self.canonical_map_manager.is_some() => return,
+            None => (None, None),
+        };
+        if canonical_swing_damages.is_some() {
+            self.set_player_attack_swing_error_like_cpp(swing_error);
         }
 
         // Gather combat data from the canonical map-owned creature before
@@ -13192,7 +13214,7 @@ mod tests {
 
     #[test]
     fn combat_tick_out_of_range_sets_short_retry_timer_like_cpp() {
-        let (mut session, _, _) = make_session();
+        let (mut session, _, send_rx) = make_session();
         let manager = shared_map_manager();
         let canonical = shared_canonical_map_manager();
         let guid = test_creature_guid(18_017);
@@ -13259,11 +13281,16 @@ mod tests {
                 .attack_timer(WeaponAttackType::BaseAttack),
             100
         );
+        let sent = send_rx.try_recv().unwrap();
+        let opcode = u16::from_le_bytes([sent[0], sent[1]]);
+        assert_eq!(opcode, ServerOpcodes::AttackSwingError as u16);
+        let mut pkt = WorldPacket::from_bytes(&sent[2..]);
+        assert_eq!(pkt.read_bits(3).unwrap(), 0);
     }
 
     #[test]
     fn combat_tick_bad_facing_sets_short_retry_timer_like_cpp() {
-        let (mut session, _, _) = make_session();
+        let (mut session, _, send_rx) = make_session();
         let manager = shared_map_manager();
         let canonical = shared_canonical_map_manager();
         let guid = test_creature_guid(18_018);
@@ -13333,6 +13360,11 @@ mod tests {
                 .attack_timer(WeaponAttackType::BaseAttack),
             100
         );
+        let sent = send_rx.try_recv().unwrap();
+        let opcode = u16::from_le_bytes([sent[0], sent[1]]);
+        assert_eq!(opcode, ServerOpcodes::AttackSwingError as u16);
+        let mut pkt = WorldPacket::from_bytes(&sent[2..]);
+        assert_eq!(pkt.read_bits(3).unwrap(), 1);
     }
 
     #[test]
