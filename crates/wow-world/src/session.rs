@@ -945,6 +945,7 @@ pub struct WorldSession {
     /// Creature kills observed from synchronous melee ticks and completed in `process_pending`.
     pending_creature_kill_loot_like_cpp: Vec<ObjectGuid>,
     pending_creature_kill_rewards_like_cpp: Vec<PendingCreatureKillRewardLikeCpp>,
+    represented_creature_kill_events_like_cpp: Vec<RepresentedCreatureKillEventLikeCpp>,
     /// Creatures waiting to respawn after corpse despawn.
     pub(crate) respawn_queue: Vec<PendingRespawn>,
 
@@ -1524,9 +1525,29 @@ pub struct PendingCreatureSpawn {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PendingCreatureKillRewardLikeCpp {
+    killer_guid: ObjectGuid,
     creature_guid: ObjectGuid,
     creature_entry: u32,
     creature_level: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepresentedCreatureKillEventLikeCpp {
+    KillerProc {
+        attacker_guid: ObjectGuid,
+        victim_guid: ObjectGuid,
+    },
+    TapperTargetDiesProc {
+        tapper_guid: ObjectGuid,
+        victim_guid: ObjectGuid,
+    },
+    VictimDeathProc {
+        victim_guid: ObjectGuid,
+    },
+    CreatureJustDiedAi {
+        creature_guid: ObjectGuid,
+        killer_guid: ObjectGuid,
+    },
 }
 
 /// A creature waiting to respawn after its corpse despawned.
@@ -1689,6 +1710,7 @@ impl WorldSession {
             pending_creature_spawn: None,
             pending_creature_kill_loot_like_cpp: Vec::new(),
             pending_creature_kill_rewards_like_cpp: Vec::new(),
+            represented_creature_kill_events_like_cpp: Vec::new(),
             respawn_queue: Vec::new(),
             inventory_items: HashMap::new(),
             buyback_items: HashMap::new(),
@@ -7006,6 +7028,10 @@ impl WorldSession {
             }
             self.on_creature_killed(reward.creature_entry, reward.creature_guid)
                 .await;
+            self.record_represented_creature_kill_hooks_like_cpp(
+                reward.killer_guid,
+                reward.creature_guid,
+            );
         }
     }
 
@@ -9377,6 +9403,62 @@ impl WorldSession {
         self.movement_jump_proc_requests_like_cpp
     }
 
+    fn record_represented_creature_kill_hooks_like_cpp(
+        &mut self,
+        attacker_guid: ObjectGuid,
+        creature_guid: ObjectGuid,
+    ) {
+        let mut tappers = self
+            .mutate_world_creature(creature_guid, |creature| {
+                creature.creature.tap_list().to_vec()
+            })
+            .unwrap_or_default();
+        if tappers.is_empty() {
+            tappers.push(attacker_guid);
+        }
+        let mut unique_tappers = Vec::with_capacity(tappers.len());
+        for tapper in tappers {
+            if !unique_tappers.contains(&tapper) {
+                unique_tappers.push(tapper);
+            }
+        }
+
+        self.represented_creature_kill_events_like_cpp.push(
+            RepresentedCreatureKillEventLikeCpp::KillerProc {
+                attacker_guid,
+                victim_guid: creature_guid,
+            },
+        );
+
+        for tapper_guid in unique_tappers {
+            self.represented_creature_kill_events_like_cpp.push(
+                RepresentedCreatureKillEventLikeCpp::TapperTargetDiesProc {
+                    tapper_guid,
+                    victim_guid: creature_guid,
+                },
+            );
+        }
+
+        self.represented_creature_kill_events_like_cpp.push(
+            RepresentedCreatureKillEventLikeCpp::VictimDeathProc {
+                victim_guid: creature_guid,
+            },
+        );
+        self.represented_creature_kill_events_like_cpp.push(
+            RepresentedCreatureKillEventLikeCpp::CreatureJustDiedAi {
+                creature_guid,
+                killer_guid: attacker_guid,
+            },
+        );
+    }
+
+    #[cfg(test)]
+    pub(crate) fn represented_creature_kill_events_like_cpp(
+        &self,
+    ) -> &[RepresentedCreatureKillEventLikeCpp] {
+        &self.represented_creature_kill_events_like_cpp
+    }
+
     pub(crate) fn apply_move_init_active_mover_complete_like_cpp(&mut self, ticks: u32) {
         self.active_player_local_flags_like_cpp |=
             PLAYER_LOCAL_FLAG_OVERRIDE_TRANSPORT_SERVER_TIME_LIKE_CPP;
@@ -11101,6 +11183,7 @@ impl WorldSession {
             {
                 self.pending_creature_kill_rewards_like_cpp.push(
                     PendingCreatureKillRewardLikeCpp {
+                        killer_guid: player_guid,
                         creature_guid: combat_target,
                         creature_entry: target_entry,
                         creature_level: target_level,
@@ -11615,6 +11698,7 @@ impl WorldSession {
                 self.give_xp(xp, guid, true).await;
             }
             self.on_creature_killed(entry, guid).await;
+            self.record_represented_creature_kill_hooks_like_cpp(player_guid, guid);
         }
 
         if self.client_visible_guids_like_cpp.contains(&target_guid)
@@ -14169,6 +14253,24 @@ mod tests {
         let manager = manager.read().unwrap();
         let world_creature = manager.find_creature(0, 0, guid).unwrap();
         assert!(world_creature.creature.is_tapped_by(player));
+        assert_eq!(
+            session.represented_creature_kill_events_like_cpp(),
+            &[
+                RepresentedCreatureKillEventLikeCpp::KillerProc {
+                    attacker_guid: player,
+                    victim_guid: guid,
+                },
+                RepresentedCreatureKillEventLikeCpp::TapperTargetDiesProc {
+                    tapper_guid: player,
+                    victim_guid: guid,
+                },
+                RepresentedCreatureKillEventLikeCpp::VictimDeathProc { victim_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::CreatureJustDiedAi {
+                    creature_guid: guid,
+                    killer_guid: player,
+                },
+            ]
+        );
     }
 
     #[tokio::test]
@@ -14414,6 +14516,24 @@ mod tests {
         let manager = manager.read().unwrap();
         let world_creature = manager.find_creature(0, 0, guid).unwrap();
         assert!(world_creature.creature.is_tapped_by(player));
+        assert_eq!(
+            session.represented_creature_kill_events_like_cpp(),
+            &[
+                RepresentedCreatureKillEventLikeCpp::KillerProc {
+                    attacker_guid: player,
+                    victim_guid: guid,
+                },
+                RepresentedCreatureKillEventLikeCpp::TapperTargetDiesProc {
+                    tapper_guid: player,
+                    victim_guid: guid,
+                },
+                RepresentedCreatureKillEventLikeCpp::VictimDeathProc { victim_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::CreatureJustDiedAi {
+                    creature_guid: guid,
+                    killer_guid: player,
+                },
+            ]
+        );
     }
 
     #[test]
