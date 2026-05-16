@@ -17,12 +17,19 @@ use crate::personal_phase::{MultiPersonalPhaseTracker, PhaseShift};
 use crate::spawn::Difficulty;
 use wow_core::{ObjectGuid, Position};
 use wow_entities::{
-    AccessorObjectKind, Creature, GameObject, MAX_VISIBILITY_DISTANCE, MapBindingError,
-    MapObjectRecord, ObjectAccessorError, ObjectAccessorMapSource, ObjectNotifyFlags, Player,
-    WorldObject,
+    AccessorObjectKind, CombatBeginContextLikeCpp, CombatSubsystem, Creature, GameObject,
+    MAX_VISIBILITY_DISTANCE, MapBindingError, MapObjectRecord, ObjectAccessorError,
+    ObjectAccessorMapSource, ObjectNotifyFlags, Player, Unit, WorldObject,
 };
 
 const GRID_SLOT_COUNT: usize = (MAX_NUMBER_OF_GRIDS * MAX_NUMBER_OF_GRIDS) as usize;
+
+#[derive(Clone, Copy)]
+struct CombatUnitSnapshotLikeCpp<'a> {
+    guid: ObjectGuid,
+    unit: &'a Unit,
+    game_master_player: bool,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveObjectKind {
@@ -1114,6 +1121,129 @@ where
         record.player_mut()
     }
 
+    fn combat_unit_snapshot_like_cpp(
+        &self,
+        guid: ObjectGuid,
+    ) -> Option<CombatUnitSnapshotLikeCpp<'_>> {
+        if let Some(player) = self.get_typed_player(guid) {
+            return Some(CombatUnitSnapshotLikeCpp {
+                guid,
+                unit: player.unit(),
+                game_master_player: player.is_game_master_like_cpp(),
+            });
+        }
+        self.get_typed_creature(guid)
+            .map(|creature| CombatUnitSnapshotLikeCpp {
+                guid,
+                unit: creature.unit(),
+                game_master_player: false,
+            })
+    }
+
+    fn combat_begin_context_like_cpp(
+        &self,
+        owner: CombatUnitSnapshotLikeCpp<'_>,
+        target: CombatUnitSnapshotLikeCpp<'_>,
+    ) -> CombatBeginContextLikeCpp {
+        let owner_world = owner.unit.world();
+        let target_world = target.unit.world();
+        CombatBeginContextLikeCpp {
+            same_unit: owner.guid == target.guid,
+            attacker_in_world: owner_world.object().is_in_world(),
+            victim_in_world: target_world.object().is_in_world(),
+            attacker_alive: owner.unit.is_alive(),
+            victim_alive: target.unit.is_alive(),
+            same_map: owner_world.is_in_map(target_world),
+            same_phase: owner_world.in_same_phase(target_world),
+            attacker_unit_state: owner.unit.unit_state(),
+            victim_unit_state: target.unit.unit_state(),
+            attacker_combat_disallowed: owner.unit.subsystems().combat.combat_disallowed,
+            victim_combat_disallowed: target.unit.subsystems().combat.combat_disallowed,
+            relation_represented: false,
+            attacker_is_friendly_to_victim: false,
+            victim_is_friendly_to_attacker: false,
+            attacker_or_owner_player_is_game_master: owner.game_master_player,
+            victim_or_owner_player_is_game_master: target.game_master_player,
+        }
+    }
+
+    pub fn typed_combat_unit_guids_like_cpp(&self) -> Vec<ObjectGuid> {
+        self.map_objects
+            .iter()
+            .filter_map(|(guid, record)| {
+                matches!(
+                    record.kind(),
+                    AccessorObjectKind::Player | AccessorObjectKind::Creature
+                )
+                .then_some(*guid)
+            })
+            .collect()
+    }
+
+    pub fn revalidate_all_combat_refs_like_cpp(&mut self) -> Vec<(ObjectGuid, ObjectGuid)> {
+        let owner_guids = self.typed_combat_unit_guids_like_cpp();
+        let mut invalid = Vec::new();
+
+        for owner_guid in owner_guids {
+            let Some(owner) = self.combat_unit_snapshot_like_cpp(owner_guid) else {
+                continue;
+            };
+            let refs: Vec<_> = owner
+                .unit
+                .subsystems()
+                .combat
+                .pve_refs
+                .keys()
+                .chain(owner.unit.subsystems().combat.pvp_refs.keys())
+                .copied()
+                .collect();
+
+            for target_guid in refs {
+                let Some(target) = self.combat_unit_snapshot_like_cpp(target_guid) else {
+                    invalid.push((owner_guid, target_guid));
+                    continue;
+                };
+                if !CombatSubsystem::can_begin_combat_like_cpp(
+                    self.combat_begin_context_like_cpp(owner, target),
+                ) {
+                    invalid.push((owner_guid, target_guid));
+                }
+            }
+        }
+
+        for (owner_guid, target_guid) in &invalid {
+            if let Some(owner) = self.get_typed_player_mut(*owner_guid) {
+                owner
+                    .unit_mut()
+                    .subsystems_mut()
+                    .combat
+                    .purge_combat_ref_like_cpp(*target_guid);
+            } else if let Some(owner) = self.get_typed_creature_mut(*owner_guid) {
+                owner
+                    .unit_mut()
+                    .subsystems_mut()
+                    .combat
+                    .purge_combat_ref_like_cpp(*target_guid);
+            }
+
+            if let Some(target) = self.get_typed_player_mut(*target_guid) {
+                target
+                    .unit_mut()
+                    .subsystems_mut()
+                    .combat
+                    .purge_combat_ref_like_cpp(*owner_guid);
+            } else if let Some(target) = self.get_typed_creature_mut(*target_guid) {
+                target
+                    .unit_mut()
+                    .subsystems_mut()
+                    .combat
+                    .purge_combat_ref_like_cpp(*owner_guid);
+            }
+        }
+
+        invalid
+    }
+
     pub fn get_transport(&self, guid: ObjectGuid) -> Option<&WorldObject> {
         self.map_object_by_kind(guid, &[AccessorObjectKind::Transport])
     }
@@ -2079,7 +2209,7 @@ pub const fn total_cell_count() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wow_constants::{TypeId, TypeMask};
+    use wow_constants::{DeathState, TypeId, TypeMask};
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
     use wow_entities::{AccessorObjectRef, Creature, ObjectAccessor, ObjectNotifyFlags, Player};
 
@@ -2376,6 +2506,131 @@ mod tests {
                 .unit()
                 .attacking(),
             None
+        );
+    }
+
+    #[test]
+    fn map_revalidates_all_typed_combat_refs_like_cpp_multi_owner_sweep() {
+        let mut map = test_map();
+        let alive_player_guid = guid(HighGuid::Player, 501);
+        let dead_player_guid = guid(HighGuid::Player, 502);
+        let creature_guid = guid(HighGuid::Creature, 503);
+
+        let mut alive_player = Player::new(Some(7), false);
+        alive_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(alive_player_guid);
+        alive_player.unit_mut().world_mut().set_map(571, 7).unwrap();
+        alive_player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::xyz(10.0, 20.0, 30.0));
+        alive_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .add_to_world();
+
+        let mut dead_player = Player::new(Some(7), false);
+        dead_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(dead_player_guid);
+        dead_player.unit_mut().world_mut().set_map(571, 7).unwrap();
+        dead_player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::xyz(11.0, 20.0, 30.0));
+        dead_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .add_to_world();
+        dead_player.unit_mut().set_death_state(DeathState::Dead);
+
+        let mut creature = Creature::new(false);
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(creature_guid);
+        creature.unit_mut().world_mut().set_map(571, 7).unwrap();
+        creature
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::xyz(12.0, 20.0, 30.0));
+        creature.unit_mut().world_mut().object_mut().add_to_world();
+
+        map.insert_map_object_record(MapObjectRecord::new_player(alive_player).unwrap())
+            .unwrap();
+        map.insert_map_object_record(MapObjectRecord::new_player(dead_player).unwrap())
+            .unwrap();
+        map.insert_map_object_record(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+
+        map.get_typed_player_mut(alive_player_guid)
+            .unwrap()
+            .unit_mut()
+            .subsystems_mut()
+            .combat
+            .set_in_combat_with(creature_guid, false, false);
+        map.get_typed_creature_mut(creature_guid)
+            .unwrap()
+            .unit_mut()
+            .subsystems_mut()
+            .combat
+            .set_in_combat_with(alive_player_guid, false, false);
+        map.get_typed_player_mut(dead_player_guid)
+            .unwrap()
+            .unit_mut()
+            .subsystems_mut()
+            .combat
+            .set_in_combat_with(creature_guid, false, false);
+        map.get_typed_creature_mut(creature_guid)
+            .unwrap()
+            .unit_mut()
+            .subsystems_mut()
+            .combat
+            .set_in_combat_with(dead_player_guid, false, false);
+
+        let invalid = map.revalidate_all_combat_refs_like_cpp();
+
+        assert!(invalid.contains(&(dead_player_guid, creature_guid)));
+        assert!(invalid.contains(&(creature_guid, dead_player_guid)));
+        assert!(
+            map.get_typed_player(alive_player_guid)
+                .unwrap()
+                .unit()
+                .subsystems()
+                .combat
+                .is_in_combat_with(creature_guid)
+        );
+        assert!(
+            map.get_typed_creature(creature_guid)
+                .unwrap()
+                .unit()
+                .subsystems()
+                .combat
+                .is_in_combat_with(alive_player_guid)
+        );
+        assert!(
+            !map.get_typed_player(dead_player_guid)
+                .unwrap()
+                .unit()
+                .subsystems()
+                .combat
+                .is_in_combat_with(creature_guid)
+        );
+        assert!(
+            !map.get_typed_creature(creature_guid)
+                .unwrap()
+                .unit()
+                .subsystems()
+                .combat
+                .is_in_combat_with(dead_player_guid)
         );
     }
 
