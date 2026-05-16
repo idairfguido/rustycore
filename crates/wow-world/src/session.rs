@@ -1544,8 +1544,16 @@ pub(crate) enum RepresentedCreatureKillEventLikeCpp {
     VictimDeathProc {
         victim_guid: ObjectGuid,
     },
+    DeliveredKillingBlowCriteria {
+        player_guid: ObjectGuid,
+        victim_guid: ObjectGuid,
+        quantity: u32,
+    },
     DeathStateJustDied {
         victim_guid: ObjectGuid,
+    },
+    ZoneScriptUnitDeath {
+        unit_guid: ObjectGuid,
     },
     LootFlagsApplied {
         creature_guid: ObjectGuid,
@@ -9469,6 +9477,13 @@ impl WorldSession {
                 victim_guid: creature_guid,
             },
         );
+        self.represented_creature_kill_events_like_cpp.push(
+            RepresentedCreatureKillEventLikeCpp::DeliveredKillingBlowCriteria {
+                player_guid: attacker_guid,
+                victim_guid: creature_guid,
+                quantity: 1,
+            },
+        );
     }
 
     #[cfg(test)]
@@ -9496,6 +9511,11 @@ impl WorldSession {
         self.represented_creature_kill_events_like_cpp.push(
             RepresentedCreatureKillEventLikeCpp::DeathStateJustDied {
                 victim_guid: creature_guid,
+            },
+        );
+        self.represented_creature_kill_events_like_cpp.push(
+            RepresentedCreatureKillEventLikeCpp::ZoneScriptUnitDeath {
+                unit_guid: creature_guid,
             },
         );
         self.represented_creature_kill_events_like_cpp.push(
@@ -14353,7 +14373,13 @@ mod tests {
                     victim_guid: guid,
                 },
                 RepresentedCreatureKillEventLikeCpp::VictimDeathProc { victim_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::DeliveredKillingBlowCriteria {
+                    player_guid: player,
+                    victim_guid: guid,
+                    quantity: 1,
+                },
                 RepresentedCreatureKillEventLikeCpp::DeathStateJustDied { victim_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::ZoneScriptUnitDeath { unit_guid: guid },
                 RepresentedCreatureKillEventLikeCpp::LootFlagsApplied {
                     creature_guid: guid,
                     lootable: true,
@@ -14638,7 +14664,13 @@ mod tests {
                     victim_guid: guid,
                 },
                 RepresentedCreatureKillEventLikeCpp::VictimDeathProc { victim_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::DeliveredKillingBlowCriteria {
+                    player_guid: player,
+                    victim_guid: guid,
+                    quantity: 1,
+                },
                 RepresentedCreatureKillEventLikeCpp::DeathStateJustDied { victim_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::ZoneScriptUnitDeath { unit_guid: guid },
                 RepresentedCreatureKillEventLikeCpp::LootFlagsApplied {
                     creature_guid: guid,
                     lootable: true,
