@@ -631,15 +631,16 @@ impl Unit {
             {
                 return false;
             }
-            if context.pvp_represented {
-                if context.victim_is_pvp {
-                    return true;
-                }
-                if context.attacker_is_ffa_pvp && context.victim_is_ffa_pvp {
-                    return true;
-                }
-                return context.attacker_has_pvp_unk1_flag || context.victim_has_pvp_unk1_flag;
+            if !context.pvp_represented {
+                return false;
             }
+            if context.victim_is_pvp {
+                return true;
+            }
+            if context.attacker_is_ffa_pvp && context.victim_is_ffa_pvp {
+                return true;
+            }
+            return context.attacker_has_pvp_unk1_flag || context.victim_has_pvp_unk1_flag;
         }
 
         true
@@ -1532,6 +1533,16 @@ mod tests {
                 ..Default::default()
             }
         ));
+        assert!(!Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                attacker_has_affecting_player: true,
+                victim_unit_flags: UnitFlags::PLAYER_CONTROLLED.bits(),
+                victim_has_affecting_player: true,
+                victim_is_pet: true,
+                victim_affecting_player_is_mounted: true,
+                ..Default::default()
+            }
+        ));
         assert!(Unit::is_valid_attack_target_represented_like_cpp(
             &UnitAttackContextLikeCpp {
                 attacker_has_affecting_player: true,
@@ -1539,6 +1550,8 @@ mod tests {
                 victim_has_affecting_player: true,
                 victim_is_pet: true,
                 victim_affecting_player_is_mounted: true,
+                pvp_represented: true,
+                victim_is_pvp: true,
                 ..Default::default()
             }
         ));
@@ -1602,6 +1615,11 @@ mod tests {
             &UnitAttackContextLikeCpp {
                 sanctuary_represented: true,
                 victim_in_sanctuary: true,
+                ..player_pair.clone()
+            }
+        ));
+        assert!(!Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
                 ..player_pair.clone()
             }
         ));

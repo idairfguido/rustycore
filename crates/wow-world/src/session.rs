@@ -1944,7 +1944,18 @@ impl WorldSession {
     ) -> Option<(Vec<u32>, Option<Option<u8>>)> {
         self.mutate_canonical_player_like_cpp(|player| {
             let unit = player.unit_mut();
-            unit.update_attack_timers_like_cpp(diff_ms);
+            let spell_pauses_combat_timer = [
+                wow_entities::CurrentSpellSlot::Generic,
+                wow_entities::CurrentSpellSlot::Channeled,
+            ]
+            .into_iter()
+            .any(|slot| {
+                unit.current_spell(slot)
+                    .is_some_and(|spell| spell.delay_combat_timer_during_cast)
+            });
+            if !spell_pauses_combat_timer {
+                unit.update_attack_timers_like_cpp(diff_ms);
+            }
             let mut swings = Vec::new();
             let mut processed_ready_attack = false;
             let mut base_attack_error_update = None;
@@ -13479,6 +13490,73 @@ mod tests {
     }
 
     #[test]
+    fn combat_tick_spell_delay_combat_timer_pauses_attack_timer_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let guid = test_creature_guid(18_034);
+        let player = ObjectGuid::create_player(1, 85);
+
+        canonical.lock().unwrap().create_world_map(0, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "TimerPause".to_string(),
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            0,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        let generic_cast = wow_entities::CurrentSpellRef::new(12_347, Some(player), None)
+            .with_cast_time_ms(1_500)
+            .with_delay_combat_timer_during_cast(true);
+        session
+            .mutate_canonical_player_like_cpp(|player| {
+                let unit = player.unit_mut();
+                unit.set_attacking(Some(guid));
+                unit.set_target(guid);
+                unit.add_unit_state(UnitState::MELEE_ATTACKING.bits());
+                unit.set_base_attack_time_like_cpp(WeaponAttackType::BaseAttack, 2_000);
+                unit.set_attack_timer(WeaponAttackType::BaseAttack, 250);
+                unit.set_current_cast_spell(wow_entities::CurrentSpellSlot::Generic, generic_cast);
+            })
+            .unwrap();
+        session.combat_tick_last_at_like_cpp =
+            Instant::now() - std::time::Duration::from_millis(100);
+        session.combat_target = Some(guid);
+        session.in_combat = true;
+        register_test_creature(&mut session, manager.clone(), guid, 40);
+
+        session.tick_combat_sync();
+
+        let guard = canonical.lock().unwrap();
+        let player_entity = guard
+            .find_map(0, 0)
+            .unwrap()
+            .map()
+            .get_typed_player(player)
+            .unwrap();
+        assert_eq!(
+            player_entity
+                .unit()
+                .attack_timer(WeaponAttackType::BaseAttack),
+            250
+        );
+    }
+
+    #[test]
     fn combat_tick_pacified_player_resets_timer_without_damage_like_cpp() {
         let (mut session, _, _) = make_session();
         let manager = shared_map_manager();
@@ -14078,7 +14156,7 @@ mod tests {
     }
 
     #[test]
-    fn player_attack_tracks_typed_player_victim_attacker_set_like_cpp() {
+    fn player_attack_rejects_typed_player_victim_without_pvp_snapshot_like_cpp() {
         let (mut session, _, _) = make_session();
         let canonical = shared_canonical_map_manager();
         let attacker = ObjectGuid::create_player(1, 47);
@@ -14142,26 +14220,14 @@ mod tests {
         {
             let guard = canonical.lock().unwrap();
             let map = guard.find_map(571, 0).unwrap().map();
-            assert!(
-                map.get_typed_player(victim)
-                    .unwrap()
-                    .unit()
-                    .has_attacker_like_cpp(attacker)
-            );
+            let attacker_entity = map.get_typed_player(attacker).unwrap();
+            let victim_entity = map.get_typed_player(victim).unwrap();
+            assert_eq!(attacker_entity.unit().attacking(), None);
+            assert_eq!(attacker_entity.unit().data().target, ObjectGuid::EMPTY);
+            assert!(!victim_entity.unit().has_attacker_like_cpp(attacker));
         }
-
-        assert_eq!(session.stop_player_attack_like_cpp(), Some(victim));
-        let guard = canonical.lock().unwrap();
-        assert!(
-            !guard
-                .find_map(571, 0)
-                .unwrap()
-                .map()
-                .get_typed_player(victim)
-                .unwrap()
-                .unit()
-                .has_attacker_like_cpp(attacker)
-        );
+        assert_eq!(session.combat_target, None);
+        assert!(!session.in_combat);
     }
 
     #[test]

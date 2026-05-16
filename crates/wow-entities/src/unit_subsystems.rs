@@ -438,6 +438,7 @@ pub struct CurrentSpellRef {
     pub state: SpellState,
     pub interruptible: bool,
     pub allow_actions_during_channel: bool,
+    pub delay_combat_timer_during_cast: bool,
 }
 
 impl CurrentSpellRef {
@@ -454,6 +455,7 @@ impl CurrentSpellRef {
             state: SpellState::None,
             interruptible: true,
             allow_actions_during_channel: false,
+            delay_combat_timer_during_cast: false,
         }
     }
 
@@ -477,6 +479,14 @@ impl CurrentSpellRef {
         allow_actions_during_channel: bool,
     ) -> Self {
         self.allow_actions_during_channel = allow_actions_during_channel;
+        self
+    }
+
+    pub const fn with_delay_combat_timer_during_cast(
+        mut self,
+        delay_combat_timer_during_cast: bool,
+    ) -> Self {
+        self.delay_combat_timer_during_cast = delay_combat_timer_during_cast;
         self
     }
 }
