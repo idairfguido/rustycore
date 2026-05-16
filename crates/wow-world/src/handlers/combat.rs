@@ -90,12 +90,21 @@ impl WorldSession {
             return;
         }
 
-        // Start combat with the canonical map-owned creature.
-        let _ = self.mutate_world_creature(swing.victim, |creature| {
-            creature.enter_combat(player_guid.clone());
-        });
+        if !self.start_player_attack_like_cpp(swing.victim) {
+            let stop = SAttackStop {
+                attacker: player_guid,
+                victim: swing.victim,
+                now_dead: false,
+            };
+            self.send_packet(&stop);
+            return;
+        }
 
-        self.start_player_attack_like_cpp(swing.victim);
+        // Start combat with the canonical map-owned creature after C++-style
+        // attack validation succeeds.
+        let _ = self.mutate_world_creature(swing.victim, |creature| {
+            creature.enter_combat(player_guid);
+        });
 
         // Notify client that combat started.
         let start = AttackStart {
