@@ -944,6 +944,7 @@ pub struct WorldSession {
     pub(crate) pending_creature_spawn: Option<PendingCreatureSpawn>,
     /// Creature kills observed from synchronous melee ticks and completed in `process_pending`.
     pending_creature_kill_loot_like_cpp: Vec<ObjectGuid>,
+    pending_creature_kill_rewards_like_cpp: Vec<PendingCreatureKillRewardLikeCpp>,
     /// Creatures waiting to respawn after corpse despawn.
     pub(crate) respawn_queue: Vec<PendingRespawn>,
 
@@ -1521,6 +1522,13 @@ pub struct PendingCreatureSpawn {
     pub zone_id: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PendingCreatureKillRewardLikeCpp {
+    creature_guid: ObjectGuid,
+    creature_entry: u32,
+    creature_level: u8,
+}
+
 /// A creature waiting to respawn after its corpse despawned.
 ///
 /// Stored in `WorldSession::respawn_queue`; processed by `tick_creatures_sync`.
@@ -1680,6 +1688,7 @@ impl WorldSession {
             player_controller: None,
             pending_creature_spawn: None,
             pending_creature_kill_loot_like_cpp: Vec::new(),
+            pending_creature_kill_rewards_like_cpp: Vec::new(),
             respawn_queue: Vec::new(),
             inventory_items: HashMap::new(),
             buyback_items: HashMap::new(),
@@ -6947,7 +6956,7 @@ impl WorldSession {
     /// Process pending packets asynchronously. Call after `update()`.
     pub async fn process_pending(&mut self) {
         self.process_represented_session_commands_like_cpp().await;
-        self.process_pending_creature_kill_loot_like_cpp().await;
+        self.process_pending_creature_kills_like_cpp().await;
 
         // ── Spell casting tick ─────────────────────────────────────────
         // Check if an active spell cast has completed and execute it.
@@ -6973,16 +6982,29 @@ impl WorldSession {
         }
     }
 
-    async fn process_pending_creature_kill_loot_like_cpp(&mut self) {
-        if self.pending_creature_kill_loot_like_cpp.is_empty() {
-            return;
-        }
-
+    async fn process_pending_creature_kills_like_cpp(&mut self) {
         let mut pending = std::mem::take(&mut self.pending_creature_kill_loot_like_cpp);
         pending.sort_by_key(|guid| (guid.high_value(), guid.low_value()));
         pending.dedup();
         for creature_guid in pending {
             self.ensure_represented_creature_kill_loot_like_cpp(creature_guid)
+                .await;
+        }
+
+        let mut rewards = std::mem::take(&mut self.pending_creature_kill_rewards_like_cpp);
+        rewards.sort_by_key(|reward| {
+            (
+                reward.creature_guid.high_value(),
+                reward.creature_guid.low_value(),
+            )
+        });
+        rewards.dedup_by_key(|reward| reward.creature_guid);
+        for reward in rewards {
+            let xp = self.creature_kill_xp(reward.creature_level);
+            if xp > 0 {
+                self.give_xp(xp, reward.creature_guid, true).await;
+            }
+            self.on_creature_killed(reward.creature_entry, reward.creature_guid)
                 .await;
         }
     }
@@ -10955,7 +10977,7 @@ impl WorldSession {
 
         // Gather combat data from the canonical map-owned creature before
         // emitting combat packets.
-        let Some((swings, target_level, now_dead, move_stop, values_update)) = self
+        let Some((swings, target_entry, target_level, now_dead, move_stop, values_update)) = self
             .mutate_world_creature(combat_target, |creature| {
                 if !creature.is_alive() {
                     return None;
@@ -10972,6 +10994,7 @@ impl WorldSession {
                         vec![creature.roll_damage().max(1)]
                     }
                 };
+                let entry = creature.entry();
                 let level = creature.level();
                 let mut sent_swings = Vec::new();
                 let mut died = false;
@@ -11017,7 +11040,7 @@ impl WorldSession {
                     creature.record_swing();
                 }
                 let values_update = creature.creature.unit().values_update();
-                Some((sent_swings, level, died, move_stop, values_update))
+                Some((sent_swings, entry, level, died, move_stop, values_update))
             })
             .flatten()
         else {
@@ -11070,6 +11093,19 @@ impl WorldSession {
                 .contains(&combat_target)
             {
                 self.pending_creature_kill_loot_like_cpp.push(combat_target);
+            }
+            if !self
+                .pending_creature_kill_rewards_like_cpp
+                .iter()
+                .any(|reward| reward.creature_guid == combat_target)
+            {
+                self.pending_creature_kill_rewards_like_cpp.push(
+                    PendingCreatureKillRewardLikeCpp {
+                        creature_guid: combat_target,
+                        creature_entry: target_entry,
+                        creature_level: target_level,
+                    },
+                );
             }
             if let Some(bytes) = move_stop {
                 let _ = self.send_tx.send(bytes);
@@ -14281,8 +14317,74 @@ mod tests {
         let guid = test_creature_guid(18_015);
         let player = ObjectGuid::create_player(1, 63);
         session.player_guid = Some(player);
+        session.set_player_level_like_cpp(1);
+        session.set_player_xp_like_cpp(0);
+        session.set_player_next_level_xp_like_cpp(400);
         session.combat_target = Some(guid);
         session.in_combat = true;
+        let mut quest_store = wow_data::quest::QuestStore::new();
+        quest_store.quests.insert(
+            9_001,
+            wow_data::quest::QuestTemplate {
+                id: 9_001,
+                quest_type: 0,
+                quest_level: 1,
+                quest_max_scaling_level: 0,
+                min_level: 1,
+                quest_sort_id: 0,
+                quest_info_id: 0,
+                suggested_group_num: 0,
+                reward_next_quest: 0,
+                reward_xp_difficulty: 0,
+                reward_xp_multiplier: 1.0,
+                reward_money_difficulty: 0,
+                reward_money_multiplier: 1.0,
+                reward_bonus_money: 0,
+                reward_display_spell: [0; wow_data::quest::QUEST_REWARD_DISPLAY_SPELL_COUNT],
+                reward_spell: 0,
+                reward_honor: 0,
+                flags: 0,
+                flags_ex: 0,
+                flags_ex2: 0,
+                reward_items: [0; wow_data::quest::QUEST_REWARD_ITEM_COUNT],
+                reward_amounts: [0; wow_data::quest::QUEST_REWARD_ITEM_COUNT],
+                item_drop: [0; wow_data::quest::QUEST_ITEM_DROP_COUNT],
+                item_drop_quantity: [0; wow_data::quest::QUEST_ITEM_DROP_COUNT],
+                log_title: String::new(),
+                log_description: String::new(),
+                quest_description: String::new(),
+                area_description: String::new(),
+                quest_completion_log: String::new(),
+                objectives: vec![wow_data::quest::QuestObjective {
+                    id: 1,
+                    quest_id: 9_001,
+                    obj_type: 0,
+                    order: 0,
+                    storage_index: 0,
+                    object_id: 9001,
+                    amount: 1,
+                    flags: 0,
+                    flags2: 0,
+                    progress_bar_weight: 0.0,
+                    description: String::new(),
+                }],
+                allowable_races: 0,
+                allowable_classes: 0,
+                max_level: 0,
+                prev_quest_id: 0,
+                reward_choice_items: [(0, 0); wow_data::quest::QUEST_REWARD_CHOICES_COUNT],
+            },
+        );
+        session.set_quest_store(Arc::new(quest_store));
+        session.player_quests.insert(
+            9_001,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id: 9_001,
+                status: 1,
+                explored: false,
+                objective_counts: vec![0],
+            },
+        );
         register_test_creature(&mut session, manager.clone(), guid, 3);
         session
             .mutate_world_creature(guid, |creature| {
@@ -14305,6 +14407,10 @@ mod tests {
             .expect("melee kill loot is generated from pending bridge");
         assert!(loot.allowed_looters.contains(&player));
         assert_eq!(loot.loot_type, LOOT_TYPE_CORPSE_LIKE_CPP);
+        assert!(session.player_xp_like_cpp() > 0);
+        let quest = session.player_quests.get(&9_001).unwrap();
+        assert_eq!(quest.status, 2);
+        assert_eq!(quest.objective_counts, vec![1]);
         let manager = manager.read().unwrap();
         let world_creature = manager.find_creature(0, 0, guid).unwrap();
         assert!(world_creature.creature.is_tapped_by(player));
