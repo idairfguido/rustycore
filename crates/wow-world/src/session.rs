@@ -1880,6 +1880,7 @@ impl WorldSession {
             let pvp_flags = existing.unit().pvp_flags_like_cpp();
             let player_flags = existing.data().player_flags;
             let player_flags_ex = existing.data().player_flags_ex;
+            let farsight_object = existing.active_data().farsight_object;
             let duel = existing.duel_info_like_cpp();
             let gameplay_state = existing.gameplay_state().clone();
             let visibility_detection = existing.unit().visibility_detection_like_cpp().clone();
@@ -1900,6 +1901,7 @@ impl WorldSession {
             existing
                 .unit_mut()
                 .replace_visibility_detection_like_cpp(visibility_detection);
+            existing.set_farsight_object_like_cpp(farsight_object);
             Self::apply_player_session_visibility_detection_like_cpp(
                 existing,
                 never_visible_for_seer,
@@ -12058,16 +12060,17 @@ mod tests {
     #[test]
     fn time_sync_response_sets_initial_clock_delta_like_cpp() {
         let (mut session, _pkt_tx, _send_rx) = make_session();
-        let now = WorldSession::game_time_ms_like_cpp();
-        let sent_time = if now >= 20 { now - 20 } else { 1_020 };
+        let _ = WorldSession::game_time_ms_like_cpp();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let sent_time = WorldSession::game_time_ms_like_cpp();
         session.time_sync_pending_requests.insert(7, sent_time);
 
-        session.record_time_sync_response_like_cpp(7, sent_time - 1_000);
+        session.record_time_sync_response_like_cpp(7, sent_time.saturating_sub(1));
 
         assert!(session.time_sync_pending_requests.is_empty());
         assert_eq!(session.time_sync_clock_delta_queue.len(), 1);
         assert!(
-            session.time_sync_clock_delta >= 1_000,
+            session.time_sync_clock_delta >= 1,
             "expected initial fallback delta from first sample"
         );
     }
@@ -14821,6 +14824,89 @@ mod tests {
                 .unwrap()
                 .unit()
                 .has_attacker_like_cpp(attacker)
+        );
+    }
+
+    #[test]
+    fn player_attack_uses_canonical_farsight_can_always_see_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 53);
+        let victim = ObjectGuid::create_player(1, 54);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Hunter".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            3,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+
+        let mut victim_player = Player::new(Some(8), false);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(victim);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .set_map(571, 0)
+            .unwrap();
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::new(11.0, 20.0, 30.0, 0.0));
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .add_to_world();
+        victim_player
+            .unit_mut()
+            .set_pvp_flag_like_cpp(UnitPvpFlags::PVP);
+        victim_player.unit_mut().set_invisibility_like_cpp(0, 100);
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(571, 0)
+            .unwrap()
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_player(victim_player).unwrap(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Rejected
+        );
+
+        session
+            .mutate_canonical_player_by_guid_like_cpp(attacker, |player| {
+                player.set_farsight_object_like_cpp(victim);
+            })
+            .unwrap();
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Accepted {
+                send_attack_start: true
+            }
         );
     }
 

@@ -672,6 +672,7 @@ pub const PLAYER_DATA_VISIBLE_ITEMS_PARENT_BIT: usize = 61;
 pub const PLAYER_DATA_VISIBLE_ITEMS_FIRST_BIT: usize = 62;
 
 pub const ACTIVE_PLAYER_DATA_PARENT_BIT: usize = 0;
+pub const ACTIVE_PLAYER_DATA_FARSIGHT_OBJECT_BIT: usize = 26;
 pub const ACTIVE_PLAYER_DATA_COINAGE_BIT: usize = 28;
 pub const ACTIVE_PLAYER_DATA_XP_BIT: usize = 29;
 pub const ACTIVE_PLAYER_DATA_NEXT_LEVEL_XP_BIT: usize = 30;
@@ -2717,6 +2718,7 @@ impl Default for PlayerDataValues {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ActivePlayerDataValues {
+    pub farsight_object: ObjectGuid,
     pub coinage: u64,
     pub xp: i32,
     pub next_level_xp: i32,
@@ -2730,6 +2732,7 @@ pub struct ActivePlayerDataValues {
 impl Default for ActivePlayerDataValues {
     fn default() -> Self {
         Self {
+            farsight_object: ObjectGuid::EMPTY,
             coinage: 0,
             xp: 0,
             next_level_xp: 0,
@@ -3291,6 +3294,20 @@ impl Player {
 
     pub fn mark_money_changed(&mut self) {
         self.mark_active_player_data(ACTIVE_PLAYER_DATA_COINAGE_BIT);
+    }
+
+    pub fn set_farsight_object_like_cpp(&mut self, guid: ObjectGuid) {
+        self.set_active_guid(ACTIVE_PLAYER_DATA_FARSIGHT_OBJECT_BIT, guid, |data| {
+            &mut data.farsight_object
+        });
+        self.unit_mut()
+            .set_seer_can_always_see_target_guid_like_cpp(guid);
+    }
+
+    pub fn sync_farsight_visibility_detection_like_cpp(&mut self) {
+        let farsight_object = self.active_data.farsight_object;
+        self.unit_mut()
+            .set_seer_can_always_see_target_guid_like_cpp(farsight_object);
     }
 
     pub fn modify_money(&mut self, amount: i64) -> bool {
@@ -7703,6 +7720,19 @@ impl Player {
         bit: usize,
         value: u64,
         field: impl FnOnce(&mut ActivePlayerDataValues) -> &mut u64,
+    ) {
+        let target = field(&mut self.active_data);
+        if *target != value {
+            *target = value;
+            self.mark_active_player_data(bit);
+        }
+    }
+
+    fn set_active_guid(
+        &mut self,
+        bit: usize,
+        value: ObjectGuid,
+        field: impl FnOnce(&mut ActivePlayerDataValues) -> &mut ObjectGuid,
     ) {
         let target = field(&mut self.active_data);
         if *target != value {

@@ -835,6 +835,7 @@ fn active_player_data_update_to_packet(
     packet_update.next_level_xp = update.values.next_level_xp;
     packet_update.character_points = update.values.character_points;
     packet_update.num_backpack_slots = update.values.num_backpack_slots;
+    packet_update.farsight_object = update.values.farsight_object;
     packet_update
         .inv_slots
         .copy_from_slice(&update.values.inv_slots);

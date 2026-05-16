@@ -214,6 +214,7 @@ pub struct UnitVisibilityDetectionStateLikeCpp {
     server_side_visibility_ghost: u32,
     server_side_visibility_detect_ghost: u32,
     ghost_visible_to_seer_by_group: bool,
+    seer_can_always_see_target_guid: ObjectGuid,
     invisibility_flags: u64,
     invisibility: [i32; MAX_VISIBILITY_AURA_TYPES_LIKE_CPP],
     invisibility_detect_flags: u64,
@@ -239,6 +240,7 @@ impl Default for UnitVisibilityDetectionStateLikeCpp {
             server_side_visibility_ghost: GHOST_VISIBILITY_ALIVE_LIKE_CPP,
             server_side_visibility_detect_ghost: GHOST_VISIBILITY_ALIVE_LIKE_CPP,
             ghost_visible_to_seer_by_group: false,
+            seer_can_always_see_target_guid: ObjectGuid::EMPTY,
             invisibility_flags: 0,
             invisibility: [0; MAX_VISIBILITY_AURA_TYPES_LIKE_CPP],
             invisibility_detect_flags: 0,
@@ -331,6 +333,10 @@ impl Unit {
 
     pub fn set_seer_can_always_see_target_like_cpp(&mut self, can_always_see: bool) {
         self.visibility_detection.seer_can_always_see_target = can_always_see;
+    }
+
+    pub fn set_seer_can_always_see_target_guid_like_cpp(&mut self, guid: ObjectGuid) {
+        self.visibility_detection.seer_can_always_see_target_guid = guid;
     }
 
     pub fn set_always_detectable_for_seer_like_cpp(&mut self, always_detectable: bool) {
@@ -512,6 +518,12 @@ impl Unit {
         }
         if target.visibility_detection.always_visible_for_seer
             || self.visibility_detection.seer_can_always_see_target
+            || (!self
+                .visibility_detection
+                .seer_can_always_see_target_guid
+                .is_empty()
+                && self.visibility_detection.seer_can_always_see_target_guid
+                    == target.world.object().guid())
         {
             return true;
         }
@@ -1929,6 +1941,12 @@ mod tests {
 
         seer.set_seer_private_object_owner_like_cpp(ObjectGuid::EMPTY);
         target.set_private_object_owner_like_cpp(seer_guid);
+        assert!(seer.can_see_or_detect_unit_like_cpp(&target, false, true, false));
+
+        target.set_private_object_owner_like_cpp(ObjectGuid::EMPTY);
+        target.set_invisibility_like_cpp(0, 100);
+        assert!(!seer.can_see_or_detect_unit_like_cpp(&target, false, true, false));
+        seer.set_seer_can_always_see_target_guid_like_cpp(target.world().object().guid());
         assert!(seer.can_see_or_detect_unit_like_cpp(&target, false, true, false));
     }
 
