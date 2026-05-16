@@ -1831,13 +1831,17 @@ impl WorldSession {
             let pvp_flags = existing.unit().pvp_flags_like_cpp();
             let player_flags = existing.data().player_flags;
             let player_flags_ex = existing.data().player_flags_ex;
+            let duel = existing.duel_info_like_cpp();
             player.replace_all_player_flags(player_flags);
             player.replace_all_player_flags_ex(player_flags_ex);
+            player.set_duel_info_like_cpp(duel);
             *existing = player;
             existing.unit_mut().set_attacking(attacking);
             existing.unit_mut().set_target(target);
             existing.unit_mut().add_unit_state(unit_state);
-            existing.unit_mut().replace_all_pvp_flags_like_cpp(pvp_flags);
+            existing
+                .unit_mut()
+                .replace_all_pvp_flags_like_cpp(pvp_flags);
             return;
         }
 
@@ -1905,6 +1909,26 @@ impl WorldSession {
                     .map()
                     .get_typed_player(guid)
                     .map(|player| player.unit().pvp_flags_like_cpp());
+            }
+        });
+        result
+    }
+
+    fn canonical_player_duel_in_progress_like_cpp(
+        &self,
+        guid: ObjectGuid,
+        opponent: ObjectGuid,
+    ) -> Option<bool> {
+        let map_id = u32::from(self.player_map_id_like_cpp());
+        let manager = Arc::clone(self.canonical_map_manager.as_ref()?);
+        let manager = manager.lock().ok()?;
+        let mut result = None;
+        manager.do_for_all_maps_with_map_id(map_id, |managed| {
+            if result.is_none() {
+                result = managed
+                    .map()
+                    .get_typed_player(guid)
+                    .map(|player| player.is_dueling_opponent_in_progress_like_cpp(opponent));
             }
         });
         result
@@ -2205,14 +2229,15 @@ impl WorldSession {
         let attacker_pvp_flags = player_guid
             .and_then(|guid| self.canonical_player_pvp_flags_like_cpp(guid))
             .unwrap_or_default();
-        attack_context.attacker_in_sanctuary =
-            attacker_pvp_flags.contains(UnitPvpFlags::SANCTUARY);
+        attack_context.attacker_in_sanctuary = attacker_pvp_flags.contains(UnitPvpFlags::SANCTUARY);
         attack_context.attacker_is_ffa_pvp = attacker_pvp_flags.contains(UnitPvpFlags::FFA_PVP);
-        attack_context.attacker_has_pvp_unk1_flag =
-            attacker_pvp_flags.contains(UnitPvpFlags::UNK1);
+        attack_context.attacker_has_pvp_unk1_flag = attacker_pvp_flags.contains(UnitPvpFlags::UNK1);
         if attack_context.victim_has_affecting_player {
             attack_context.sanctuary_represented = true;
             attack_context.pvp_represented = true;
+            attack_context.player_player_duel_in_progress = player_guid
+                .and_then(|guid| self.canonical_player_duel_in_progress_like_cpp(guid, victim))
+                .unwrap_or(false);
         }
         attack_context.attacker_is_player_uber = player_guid
             .and_then(|guid| {
@@ -14328,6 +14353,92 @@ mod tests {
         victim_player
             .unit_mut()
             .set_pvp_flag_like_cpp(UnitPvpFlags::PVP);
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(571, 0)
+            .unwrap()
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_player(victim_player).unwrap(),
+            )
+            .unwrap();
+
+        session.start_player_attack_like_cpp(victim);
+        {
+            let guard = canonical.lock().unwrap();
+            let map = guard.find_map(571, 0).unwrap().map();
+            let attacker_entity = map.get_typed_player(attacker).unwrap();
+            let victim_entity = map.get_typed_player(victim).unwrap();
+            assert_eq!(attacker_entity.unit().attacking(), Some(victim));
+            assert_eq!(attacker_entity.unit().data().target, victim);
+            assert!(victim_entity.unit().has_attacker_like_cpp(attacker));
+        }
+        assert_eq!(session.combat_target, Some(victim));
+        assert!(session.in_combat);
+    }
+
+    #[test]
+    fn player_attack_accepts_in_progress_duel_before_sanctuary_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 87);
+        let victim = ObjectGuid::create_player(1, 88);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        session
+            .mutate_canonical_player_by_guid_like_cpp(attacker, |player| {
+                player.set_duel_opponent_in_progress_like_cpp(victim);
+                player
+                    .unit_mut()
+                    .set_pvp_flag_like_cpp(UnitPvpFlags::SANCTUARY);
+            })
+            .unwrap();
+
+        let mut victim_player = Player::new(Some(8), false);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(victim);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .set_map(571, 0)
+            .unwrap();
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::new(11.0, 20.0, 30.0, 0.0));
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .add_to_world();
+        victim_player
+            .unit_mut()
+            .set_pvp_flag_like_cpp(UnitPvpFlags::SANCTUARY);
         canonical
             .lock()
             .unwrap()

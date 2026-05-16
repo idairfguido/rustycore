@@ -576,6 +576,20 @@ pub struct PlayerRestState {
     pub is_resting_now: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayerDuelStateLikeCpp {
+    Challenged,
+    Countdown,
+    InProgress,
+    Completed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlayerDuelInfoLikeCpp {
+    pub opponent: ObjectGuid,
+    pub state: PlayerDuelStateLikeCpp,
+}
+
 /// Canonical `wow-entities` bridge snapshot for gameplay data loaded by TrinityCore
 /// `Player::LoadFromDB` after the base `characters` row.
 ///
@@ -2780,6 +2794,7 @@ pub struct Player {
     item_durations: Vec<ObjectGuid>,
     enchant_durations: Vec<PlayerEnchantDuration>,
     lifecycle_metadata: PlayerLifecycleMetadata,
+    duel: Option<PlayerDuelInfoLikeCpp>,
 }
 
 impl Player {
@@ -2815,6 +2830,7 @@ impl Player {
             item_durations: Vec::new(),
             enchant_durations: Vec::new(),
             lifecycle_metadata: PlayerLifecycleMetadata::default(),
+            duel: None,
         }
     }
 
@@ -3017,6 +3033,31 @@ impl Player {
     /// Gameplay bridge state is not update-mask tracked yet; this is a documented no-op baseline
     /// hook for future DB/session integration.
     pub fn clear_gameplay_changes(&mut self) {}
+
+    pub const fn duel_info_like_cpp(&self) -> Option<PlayerDuelInfoLikeCpp> {
+        self.duel
+    }
+
+    pub fn set_duel_info_like_cpp(&mut self, duel: Option<PlayerDuelInfoLikeCpp>) {
+        self.duel = duel;
+    }
+
+    pub fn set_duel_opponent_in_progress_like_cpp(&mut self, opponent: ObjectGuid) {
+        self.duel = Some(PlayerDuelInfoLikeCpp {
+            opponent,
+            state: PlayerDuelStateLikeCpp::InProgress,
+        });
+    }
+
+    pub fn clear_duel_like_cpp(&mut self) {
+        self.duel = None;
+    }
+
+    pub fn is_dueling_opponent_in_progress_like_cpp(&self, opponent: ObjectGuid) -> bool {
+        self.duel.is_some_and(|duel| {
+            duel.opponent == opponent && duel.state == PlayerDuelStateLikeCpp::InProgress
+        })
+    }
 
     pub fn soulbound_tradeable_items(&self) -> &HashSet<ObjectGuid> {
         &self.soulbound_tradeable_items
