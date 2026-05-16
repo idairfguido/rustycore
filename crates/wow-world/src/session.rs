@@ -1037,6 +1037,8 @@ pub struct WorldSession {
     active_player_local_flags_like_cpp: u32,
     /// Represented `ActivePlayerData::TransportServerTime`.
     active_player_transport_server_time_like_cpp: i32,
+    /// C++ `Player::GetUnitBeingMoved()` represented GUID.
+    player_moved_unit_guid_like_cpp: ObjectGuid,
     /// Count of visibility refreshes requested by movement initialization.
     movement_visibility_refresh_requests_like_cpp: u32,
     /// ACKs accepted by represented movement handling until full Unit movement runtime/broadcasts exist.
@@ -1694,6 +1696,7 @@ impl WorldSession {
             movement_jump_proc_requests_like_cpp: 0,
             active_player_local_flags_like_cpp: 0,
             active_player_transport_server_time_like_cpp: 0,
+            player_moved_unit_guid_like_cpp: ObjectGuid::EMPTY,
             movement_visibility_refresh_requests_like_cpp: 0,
             movement_ack_events_like_cpp: Vec::new(),
             taxi_destinations_like_cpp: Vec::new(),
@@ -2346,6 +2349,12 @@ impl WorldSession {
                 seer_unit.world(),
             ),
         );
+
+        let target_guid = target_unit.world().object().guid();
+        let moved_unit_guid = self.player_moved_unit_guid_like_cpp();
+        if !moved_unit_guid.is_empty() && moved_unit_guid == target_guid {
+            seer_unit.set_seer_can_always_see_target_like_cpp(true);
+        }
 
         let private_owner = target_unit.private_object_owner_like_cpp();
         if !private_owner.is_empty() {
@@ -8022,6 +8031,7 @@ impl WorldSession {
         self.player_class = controller.class();
         self.player_level = controller.level();
         self.player_gender = controller.gender();
+        self.player_moved_unit_guid_like_cpp = controller.guid();
         self.player_controller = Some(controller);
     }
 
@@ -9040,6 +9050,18 @@ impl WorldSession {
             .movement_visibility_refresh_requests_like_cpp
             .saturating_add(1);
         self.send_active_player_transport_server_time_update_like_cpp();
+    }
+
+    pub(crate) fn player_moved_unit_guid_like_cpp(&self) -> ObjectGuid {
+        if !self.player_moved_unit_guid_like_cpp.is_empty() {
+            self.player_moved_unit_guid_like_cpp
+        } else {
+            self.player_guid().unwrap_or(ObjectGuid::EMPTY)
+        }
+    }
+
+    pub fn set_player_moved_unit_guid_like_cpp(&mut self, guid: ObjectGuid) {
+        self.player_moved_unit_guid_like_cpp = guid;
     }
 
     fn send_active_player_transport_server_time_update_like_cpp(&self) {
@@ -15481,6 +15503,73 @@ mod tests {
         session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
         assert_eq!(
             session.start_player_attack_like_cpp(summon),
+            PlayerAttackStartLikeCppResult::Accepted {
+                send_attack_start: true
+            }
+        );
+    }
+
+    #[test]
+    fn player_attack_can_always_see_unit_being_moved_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 69);
+        let controlled = test_creature_guid(670);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Hunter".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            3,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        session.apply_move_init_active_mover_complete_like_cpp(0);
+        session.register_world_creature(
+            571,
+            Position::new(11.0, 20.0, 30.0, 0.0),
+            test_creature_create_data(controlled, 9001, 25),
+            3,
+            5,
+            20.0,
+            0,
+            0,
+            0,
+            None,
+            0,
+            0,
+            0,
+            0,
+            -1,
+        );
+        session
+            .mutate_canonical_creature_by_guid_like_cpp(controlled, |creature| {
+                creature.unit_mut().set_invisibility_like_cpp(0, 100);
+            })
+            .unwrap();
+
+        assert_eq!(
+            session.start_player_attack_like_cpp(controlled),
+            PlayerAttackStartLikeCppResult::Rejected
+        );
+
+        session.set_player_moved_unit_guid_like_cpp(controlled);
+        assert_eq!(
+            session.start_player_attack_like_cpp(controlled),
             PlayerAttackStartLikeCppResult::Accepted {
                 send_attack_start: true
             }
