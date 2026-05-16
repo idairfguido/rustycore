@@ -1,6 +1,6 @@
 use wow_constants::{
-    DeathState, Gender, PowerType, SpellState, TypeId, TypeMask, UnitStandStateType, UnitState,
-    WeaponAttackType,
+    DeathState, Gender, PowerType, SpellState, TypeId, TypeMask, UnitFlags, UnitStandStateType,
+    UnitState, WeaponAttackType,
 };
 use wow_core::ObjectGuid;
 
@@ -19,6 +19,8 @@ pub const BASE_MAXDAMAGE: f32 = 2.0;
 pub const DEFAULT_PLAYER_DISPLAY_SCALE: f32 = 1.0;
 pub const AUTO_SHOT_SPELL_ID: u32 = 75;
 pub const SPELL_AURA_MOD_UNATTACKABLE_LIKE_CPP: i32 = 93;
+pub const SPELL_AURA_DISABLE_ATTACKING_EXCEPT_ABILITIES_LIKE_CPP: i32 = 264;
+pub const SPELL_AURA_INTERRUPT_FLAG_ATTACKING_LIKE_CPP: u32 = 0x0000_1000;
 
 pub const UNIT_DATA_PARENT_BIT: usize = 0;
 pub const UNIT_DATA_HEALTH_BIT: usize = 5;
@@ -143,6 +145,7 @@ pub enum UnitAttackStartOutcome {
     InvalidAttackerEvading,
     InvalidVictimGameMaster,
     InvalidVictimEvading,
+    InvalidAttackTarget,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,12 +154,43 @@ pub enum UnitAttackStopOutcome {
     NoVictim,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UnitAttackContextLikeCpp {
     pub attacker_is_mounted_player: bool,
     pub attacker_is_evading_creature: bool,
     pub victim_is_game_master_player: bool,
     pub victim_is_evading_creature: bool,
+    pub controlled_creatures_with_ai: Vec<ObjectGuid>,
+    pub visibility_represented: bool,
+    pub attacker_can_see_or_detect_target: bool,
+    pub victim_unit_state: u32,
+    pub attacker_unit_flags: u32,
+    pub victim_unit_flags: u32,
+    pub attacker_is_player_uber: bool,
+    pub relation_represented: bool,
+    pub attacker_is_hostile_to_victim: bool,
+    pub victim_is_hostile_to_attacker: bool,
+    pub attacker_is_friendly_to_victim: bool,
+    pub victim_is_friendly_to_attacker: bool,
+    pub attacker_has_affecting_player: bool,
+    pub victim_has_affecting_player: bool,
+    pub victim_is_pet: bool,
+    pub victim_affecting_player_is_mounted: bool,
+    pub player_creature_reputation_represented: bool,
+    pub creature_is_contested_guard: bool,
+    pub player_has_contested_pvp_flag: bool,
+    pub creature_has_forced_reputation_rank: bool,
+    pub player_at_war_with_creature_faction: bool,
+    pub player_player_duel_in_progress: bool,
+    pub sanctuary_represented: bool,
+    pub attacker_in_sanctuary: bool,
+    pub victim_in_sanctuary: bool,
+    pub pvp_represented: bool,
+    pub victim_is_pvp: bool,
+    pub attacker_is_ffa_pvp: bool,
+    pub victim_is_ffa_pvp: bool,
+    pub attacker_has_pvp_unk1_flag: bool,
+    pub victim_has_pvp_unk1_flag: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -452,6 +486,9 @@ impl Unit {
         if context.victim_is_evading_creature {
             return UnitAttackStartOutcome::InvalidVictimEvading;
         }
+        if !Self::is_valid_attack_target_represented_like_cpp(&context) {
+            return UnitAttackStartOutcome::InvalidAttackTarget;
+        }
 
         if self
             .subsystems
@@ -491,8 +528,111 @@ impl Unit {
         }
         self.apply_creature_attack_ai_side_effects_like_cpp(victim_guid);
         self.delay_offhand_attack_like_cpp();
+        self.apply_player_controlled_owner_attacked_like_cpp(
+            victim_guid,
+            &context.controlled_creatures_with_ai,
+        );
 
         UnitAttackStartOutcome::NewTarget { previous }
+    }
+
+    pub fn is_valid_attack_target_represented_like_cpp(context: &UnitAttackContextLikeCpp) -> bool {
+        let attacker_flags = UnitFlags::from_bits_truncate(context.attacker_unit_flags);
+        let victim_flags = UnitFlags::from_bits_truncate(context.victim_unit_flags);
+
+        if context.visibility_represented && !context.attacker_can_see_or_detect_target {
+            return false;
+        }
+        if context.victim_unit_state & UnitState::IN_FLIGHT.bits() != 0 {
+            return false;
+        }
+        if context.attacker_is_player_uber {
+            return false;
+        }
+        if victim_flags.intersects(
+            UnitFlags::NON_ATTACKABLE
+                | UnitFlags::NON_ATTACKABLE_2
+                | UnitFlags::ON_TAXI
+                | UnitFlags::NOT_ATTACKABLE_1
+                | UnitFlags::UNINTERACTIBLE,
+        ) {
+            return false;
+        }
+        if !attacker_flags.contains(UnitFlags::PLAYER_CONTROLLED)
+            && victim_flags.contains(UnitFlags::IMMUNE_TO_NPC)
+        {
+            return false;
+        }
+        if !victim_flags.contains(UnitFlags::PLAYER_CONTROLLED)
+            && attacker_flags.contains(UnitFlags::IMMUNE_TO_NPC)
+        {
+            return false;
+        }
+        if attacker_flags.contains(UnitFlags::PLAYER_CONTROLLED)
+            && victim_flags.contains(UnitFlags::IMMUNE_TO_PC)
+        {
+            return false;
+        }
+        if victim_flags.contains(UnitFlags::PLAYER_CONTROLLED)
+            && attacker_flags.contains(UnitFlags::IMMUNE_TO_PC)
+        {
+            return false;
+        }
+        if context.relation_represented {
+            let attacker_player_controlled = attacker_flags.contains(UnitFlags::PLAYER_CONTROLLED);
+            let victim_player_controlled = victim_flags.contains(UnitFlags::PLAYER_CONTROLLED);
+            if !attacker_player_controlled && !victim_player_controlled {
+                return context.attacker_is_hostile_to_victim
+                    || context.victim_is_hostile_to_attacker;
+            }
+            if context.attacker_is_friendly_to_victim || context.victim_is_friendly_to_attacker {
+                return false;
+            }
+        }
+        if !context.attacker_has_affecting_player
+            && context.victim_has_affecting_player
+            && context.victim_is_pet
+            && context.victim_affecting_player_is_mounted
+        {
+            return false;
+        }
+
+        let attacker_has_player = context.attacker_has_affecting_player;
+        let victim_has_player = context.victim_has_affecting_player;
+        if attacker_has_player ^ victim_has_player {
+            if context.player_creature_reputation_represented {
+                if context.creature_is_contested_guard && context.player_has_contested_pvp_flag {
+                    return true;
+                }
+                if !context.creature_has_forced_reputation_rank
+                    && !context.player_at_war_with_creature_faction
+                {
+                    return false;
+                }
+            }
+        }
+
+        if attacker_has_player && victim_has_player {
+            if context.player_player_duel_in_progress {
+                return true;
+            }
+            if context.sanctuary_represented
+                && (context.attacker_in_sanctuary || context.victim_in_sanctuary)
+            {
+                return false;
+            }
+            if context.pvp_represented {
+                if context.victim_is_pvp {
+                    return true;
+                }
+                if context.attacker_is_ffa_pvp && context.victim_is_ffa_pvp {
+                    return true;
+                }
+                return context.attacker_has_pvp_unk1_flag || context.victim_has_pvp_unk1_flag;
+            }
+        }
+
+        true
     }
 
     pub fn attack_stop_like_cpp(&mut self) -> UnitAttackStopOutcome {
@@ -543,6 +683,40 @@ impl Unit {
         }
     }
 
+    pub fn update_attack_timers_like_cpp(&mut self, diff_ms: u32) {
+        for timer in &mut self.attack_timer {
+            *timer = timer.saturating_sub(diff_ms);
+        }
+    }
+
+    pub fn is_attack_ready_like_cpp(&self, attack: WeaponAttackType) -> bool {
+        self.attack_timer(attack) == 0
+    }
+
+    pub fn can_attacker_state_update_melee_like_cpp(&self, extra: bool) -> bool {
+        if self.unit_flags_like_cpp().contains(UnitFlags::PACIFIED) {
+            return false;
+        }
+        if !extra && self.has_unit_state((UnitState::CONTROLLED | UnitState::CHARGING).bits()) {
+            return false;
+        }
+        if self
+            .subsystems
+            .auras
+            .has_aura_type_like_cpp(SPELL_AURA_DISABLE_ATTACKING_EXCEPT_ABILITIES_LIKE_CPP)
+        {
+            return false;
+        }
+        true
+    }
+
+    pub fn remove_attacking_interrupt_auras_like_cpp(&mut self) -> usize {
+        self.subsystems
+            .auras
+            .remove_interruptible_auras(SPELL_AURA_INTERRUPT_FLAG_ATTACKING_LIKE_CPP, 0)
+            .len()
+    }
+
     pub fn set_base_attack_time_like_cpp(&mut self, attack: WeaponAttackType, time_ms: u32) {
         let slot = attack as usize;
         if slot < MAX_ATTACK {
@@ -578,6 +752,20 @@ impl Unit {
         self.subsystems.ai.call_assistance_like_cpp();
         self.set_emote_state_like_cpp(0);
         self.set_stand_state_like_cpp(UnitStandStateType::Stand);
+    }
+
+    fn apply_player_controlled_owner_attacked_like_cpp(
+        &mut self,
+        victim_guid: ObjectGuid,
+        controlled_creatures_with_ai: &[ObjectGuid],
+    ) {
+        if self.world().object().type_id() != TypeId::Player {
+            return;
+        }
+
+        self.subsystems
+            .control
+            .notify_controlled_owner_attacked_like_cpp(controlled_creatures_with_ai, victim_guid);
     }
 
     fn has_offhand_weapon_for_attack_like_cpp(&self) -> bool {
@@ -683,6 +871,17 @@ impl Unit {
 
     pub fn set_target(&mut self, target: ObjectGuid) {
         self.set_guid_field(UNIT_DATA_TARGET_BIT, target, |data| &mut data.target);
+    }
+
+    pub fn set_unit_flags_like_cpp(&mut self, flags: UnitFlags) {
+        if self.data.flags != flags.bits() {
+            self.data.flags = flags.bits();
+            self.mark_unit_data(UNIT_DATA_FLAGS_BIT);
+        }
+    }
+
+    pub fn unit_flags_like_cpp(&self) -> UnitFlags {
+        UnitFlags::from_bits_truncate(self.data.flags)
     }
 
     pub fn set_race(&mut self, race: u8) {
@@ -1202,6 +1401,255 @@ mod tests {
     }
 
     #[test]
+    fn valid_attack_target_represented_rejects_cpp_unit_state_flags_and_immunities() {
+        assert!(!Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                visibility_represented: true,
+                attacker_can_see_or_detect_target: false,
+                ..Default::default()
+            }
+        ));
+        assert!(!Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                victim_unit_state: UnitState::IN_FLIGHT.bits(),
+                ..Default::default()
+            }
+        ));
+        for flag in [
+            UnitFlags::NON_ATTACKABLE,
+            UnitFlags::NON_ATTACKABLE_2,
+            UnitFlags::ON_TAXI,
+            UnitFlags::NOT_ATTACKABLE_1,
+            UnitFlags::UNINTERACTIBLE,
+        ] {
+            assert!(!Unit::is_valid_attack_target_represented_like_cpp(
+                &UnitAttackContextLikeCpp {
+                    victim_unit_flags: flag.bits(),
+                    ..Default::default()
+                }
+            ));
+        }
+        assert!(!Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                attacker_is_player_uber: true,
+                ..Default::default()
+            }
+        ));
+        assert!(!Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                victim_unit_flags: UnitFlags::IMMUNE_TO_NPC.bits(),
+                ..Default::default()
+            }
+        ));
+        assert!(!Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                attacker_unit_flags: UnitFlags::IMMUNE_TO_NPC.bits(),
+                ..Default::default()
+            }
+        ));
+        assert!(!Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                attacker_unit_flags: UnitFlags::PLAYER_CONTROLLED.bits(),
+                victim_unit_flags: UnitFlags::IMMUNE_TO_PC.bits(),
+                ..Default::default()
+            }
+        ));
+        assert!(!Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                attacker_unit_flags: UnitFlags::IMMUNE_TO_PC.bits(),
+                victim_unit_flags: UnitFlags::PLAYER_CONTROLLED.bits(),
+                ..Default::default()
+            }
+        ));
+        assert!(Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                attacker_unit_flags: UnitFlags::PLAYER_CONTROLLED.bits(),
+                victim_unit_flags: UnitFlags::IMMUNE_TO_NPC.bits(),
+                ..Default::default()
+            }
+        ));
+    }
+
+    #[test]
+    fn valid_attack_target_represented_applies_cpp_relation_rules_when_known() {
+        assert!(!Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                relation_represented: true,
+                ..Default::default()
+            }
+        ));
+        assert!(Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                relation_represented: true,
+                attacker_is_hostile_to_victim: true,
+                ..Default::default()
+            }
+        ));
+        assert!(Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                relation_represented: true,
+                victim_is_hostile_to_attacker: true,
+                ..Default::default()
+            }
+        ));
+        assert!(!Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                relation_represented: true,
+                attacker_unit_flags: UnitFlags::PLAYER_CONTROLLED.bits(),
+                victim_is_friendly_to_attacker: true,
+                ..Default::default()
+            }
+        ));
+        assert!(Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                relation_represented: true,
+                attacker_unit_flags: UnitFlags::PLAYER_CONTROLLED.bits(),
+                victim_unit_flags: UnitFlags::PLAYER_CONTROLLED.bits(),
+                attacker_is_hostile_to_victim: true,
+                ..Default::default()
+            }
+        ));
+    }
+
+    #[test]
+    fn valid_attack_target_represented_rejects_npc_attacking_mounted_player_pet_like_cpp() {
+        assert!(!Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                victim_unit_flags: UnitFlags::PLAYER_CONTROLLED.bits(),
+                victim_has_affecting_player: true,
+                victim_is_pet: true,
+                victim_affecting_player_is_mounted: true,
+                ..Default::default()
+            }
+        ));
+        assert!(Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                attacker_has_affecting_player: true,
+                victim_unit_flags: UnitFlags::PLAYER_CONTROLLED.bits(),
+                victim_has_affecting_player: true,
+                victim_is_pet: true,
+                victim_affecting_player_is_mounted: true,
+                ..Default::default()
+            }
+        ));
+    }
+
+    #[test]
+    fn valid_attack_target_represented_applies_cpp_player_creature_reputation_rules() {
+        assert!(!Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                attacker_has_affecting_player: true,
+                player_creature_reputation_represented: true,
+                ..Default::default()
+            }
+        ));
+        assert!(Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                attacker_has_affecting_player: true,
+                player_creature_reputation_represented: true,
+                player_at_war_with_creature_faction: true,
+                ..Default::default()
+            }
+        ));
+        assert!(Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                attacker_has_affecting_player: true,
+                player_creature_reputation_represented: true,
+                creature_has_forced_reputation_rank: true,
+                ..Default::default()
+            }
+        ));
+        assert!(Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                attacker_has_affecting_player: true,
+                player_creature_reputation_represented: true,
+                creature_is_contested_guard: true,
+                player_has_contested_pvp_flag: true,
+                ..Default::default()
+            }
+        ));
+    }
+
+    #[test]
+    fn valid_attack_target_represented_applies_cpp_duel_sanctuary_and_pvp_rules() {
+        let player_pair = UnitAttackContextLikeCpp {
+            attacker_unit_flags: UnitFlags::PLAYER_CONTROLLED.bits(),
+            victim_unit_flags: UnitFlags::PLAYER_CONTROLLED.bits(),
+            attacker_has_affecting_player: true,
+            victim_has_affecting_player: true,
+            ..Default::default()
+        };
+
+        assert!(Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                player_player_duel_in_progress: true,
+                sanctuary_represented: true,
+                attacker_in_sanctuary: true,
+                ..player_pair.clone()
+            }
+        ));
+        assert!(!Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                sanctuary_represented: true,
+                victim_in_sanctuary: true,
+                ..player_pair.clone()
+            }
+        ));
+        assert!(!Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                pvp_represented: true,
+                ..player_pair.clone()
+            }
+        ));
+        assert!(Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                pvp_represented: true,
+                victim_is_pvp: true,
+                ..player_pair.clone()
+            }
+        ));
+        assert!(Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                pvp_represented: true,
+                attacker_is_ffa_pvp: true,
+                victim_is_ffa_pvp: true,
+                ..player_pair.clone()
+            }
+        ));
+        assert!(Unit::is_valid_attack_target_represented_like_cpp(
+            &UnitAttackContextLikeCpp {
+                pvp_represented: true,
+                attacker_has_pvp_unk1_flag: true,
+                ..player_pair
+            }
+        ));
+    }
+
+    #[test]
+    fn attack_like_cpp_rejects_represented_invalid_attack_target() {
+        let mut unit = Unit::new(true);
+        let attacker = ObjectGuid::new(1, 9);
+        let victim = ObjectGuid::new(1, 10);
+        unit.world_mut().object_mut().create(attacker);
+
+        assert_eq!(
+            unit.attack_with_context_like_cpp(
+                victim,
+                true,
+                true,
+                true,
+                UnitAttackContextLikeCpp {
+                    victim_unit_flags: UnitFlags::NON_ATTACKABLE.bits(),
+                    ..Default::default()
+                },
+            ),
+            UnitAttackStartOutcome::InvalidAttackTarget
+        );
+        assert_eq!(unit.attacking(), None);
+        assert_eq!(unit.data().target, ObjectGuid::EMPTY);
+    }
+
+    #[test]
     fn attack_like_cpp_removes_unattackable_aura_type_before_melee_state() {
         let mut unit = Unit::new(true);
         let attacker = ObjectGuid::new(1, 9);
@@ -1232,6 +1680,70 @@ mod tests {
         );
         assert_eq!(unit.subsystems().auras.removed_count(), 1);
         assert_eq!(unit.attacking(), Some(victim));
+    }
+
+    #[test]
+    fn attacker_state_update_melee_guards_match_cpp() {
+        let mut unit = Unit::new(true);
+        let attacker = ObjectGuid::new(1, 30);
+        unit.world_mut().object_mut().create(attacker);
+        assert!(unit.can_attacker_state_update_melee_like_cpp(false));
+
+        unit.set_unit_flags_like_cpp(UnitFlags::PACIFIED);
+        assert!(!unit.can_attacker_state_update_melee_like_cpp(false));
+        unit.set_unit_flags_like_cpp(UnitFlags::empty());
+
+        unit.add_unit_state(UnitState::STUNNED.bits());
+        assert!(!unit.can_attacker_state_update_melee_like_cpp(false));
+        assert!(unit.can_attacker_state_update_melee_like_cpp(true));
+        unit.clear_unit_state(UnitState::STUNNED.bits());
+
+        let aura = AppliedAuraRef::new(402, attacker, 0, 0x1);
+        unit.subsystems_mut()
+            .auras
+            .register_applied_aura_type_like_cpp(
+                aura,
+                SPELL_AURA_DISABLE_ATTACKING_EXCEPT_ABILITIES_LIKE_CPP,
+            );
+        assert!(!unit.can_attacker_state_update_melee_like_cpp(false));
+    }
+
+    #[test]
+    fn attacker_state_update_removes_attacking_interrupt_auras_like_cpp() {
+        let mut unit = Unit::new(true);
+        let attacker = ObjectGuid::new(1, 31);
+        unit.world_mut().object_mut().create(attacker);
+        let removed_by_attacking = AppliedAuraRef::new(403, attacker, 0, 0x1);
+        let kept = AppliedAuraRef::new(404, attacker, 0, 0x2);
+        unit.subsystems_mut().auras.register_applied_aura(
+            removed_by_attacking,
+            None,
+            SPELL_AURA_INTERRUPT_FLAG_ATTACKING_LIKE_CPP,
+            0,
+        );
+        unit.subsystems_mut()
+            .auras
+            .register_applied_aura(kept, None, 0x20, 0);
+
+        assert_eq!(unit.remove_attacking_interrupt_auras_like_cpp(), 1);
+        assert!(!unit.subsystems().auras.has_applied(removed_by_attacking));
+        assert!(unit.subsystems().auras.has_applied(kept));
+    }
+
+    #[test]
+    fn attack_timers_update_ready_and_reset_like_cpp() {
+        let mut unit = Unit::new(true);
+        unit.set_base_attack_time_like_cpp(WeaponAttackType::BaseAttack, 2_000);
+        unit.set_attack_timer(WeaponAttackType::BaseAttack, 250);
+
+        assert!(!unit.is_attack_ready_like_cpp(WeaponAttackType::BaseAttack));
+        unit.update_attack_timers_like_cpp(100);
+        assert_eq!(unit.attack_timer(WeaponAttackType::BaseAttack), 150);
+        unit.update_attack_timers_like_cpp(200);
+        assert_eq!(unit.attack_timer(WeaponAttackType::BaseAttack), 0);
+        assert!(unit.is_attack_ready_like_cpp(WeaponAttackType::BaseAttack));
+        unit.reset_attack_timer_like_cpp(WeaponAttackType::BaseAttack);
+        assert_eq!(unit.attack_timer(WeaponAttackType::BaseAttack), 2_000);
     }
 
     #[test]
@@ -1329,6 +1841,58 @@ mod tests {
         assert!(!unit.subsystems().combat.is_threatened_by(victim));
         assert_eq!(unit.subsystems().ai.hostile_reaction_count, 0);
         assert_eq!(unit.subsystems().ai.call_assistance_count, 0);
+    }
+
+    #[test]
+    fn player_attack_like_cpp_notifies_controlled_creature_ai_owner_attacked() {
+        let mut player_unit = Unit::new(true);
+        let player = ObjectGuid::create_player(1, 19);
+        let victim = ObjectGuid::new(1, 20);
+        let controlled_creature = ObjectGuid::new(1, 21);
+        let controlled_without_ai = ObjectGuid::new(1, 22);
+        let uncontrolled_creature = ObjectGuid::new(1, 23);
+        player_unit.set_type(
+            TypeId::Player,
+            TypeMask::OBJECT | TypeMask::UNIT | TypeMask::PLAYER,
+        );
+        player_unit.world_mut().object_mut().create(player);
+        assert!(
+            player_unit
+                .subsystems_mut()
+                .control
+                .add_controlled(controlled_creature)
+        );
+        assert!(
+            player_unit
+                .subsystems_mut()
+                .control
+                .add_controlled(controlled_without_ai)
+        );
+
+        assert_eq!(
+            player_unit.attack_with_context_like_cpp(
+                victim,
+                true,
+                true,
+                true,
+                UnitAttackContextLikeCpp {
+                    controlled_creatures_with_ai: vec![controlled_creature, uncontrolled_creature],
+                    ..Default::default()
+                },
+            ),
+            UnitAttackStartOutcome::NewTarget { previous: None }
+        );
+
+        assert_eq!(
+            player_unit
+                .subsystems()
+                .control
+                .owner_attacked_notifications,
+            vec![crate::ControlledOwnerAttackedNotification {
+                controlled: controlled_creature,
+                victim,
+            }]
+        );
     }
 
     #[test]

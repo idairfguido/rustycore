@@ -3191,6 +3191,7 @@ pub struct ControlSubsystem {
     pub unit_moved_by_me: Option<ObjectGuid>,
     pub player_moving_me: Option<ObjectGuid>,
     pub shared_vision_guids: HashSet<ObjectGuid>,
+    pub owner_attacked_notifications: Vec<ControlledOwnerAttackedNotification>,
     pub charm_info: Option<CharmInfoState>,
     pub old_faction_id: Option<u32>,
     pub walking_before_charm: bool,
@@ -3211,6 +3212,7 @@ impl Default for ControlSubsystem {
             unit_moved_by_me: None,
             player_moving_me: None,
             shared_vision_guids: HashSet::new(),
+            owner_attacked_notifications: Vec::new(),
             charm_info: None,
             old_faction_id: None,
             walking_before_charm: false,
@@ -3426,6 +3428,28 @@ impl ControlSubsystem {
     pub fn has_shared_vision(&self) -> bool {
         !self.shared_vision_guids.is_empty()
     }
+
+    pub fn notify_controlled_owner_attacked_like_cpp(
+        &mut self,
+        controlled_creatures_with_ai: &[ObjectGuid],
+        victim: ObjectGuid,
+    ) {
+        for controlled in controlled_creatures_with_ai {
+            if self.controlled_guids.contains(controlled) {
+                self.owner_attacked_notifications
+                    .push(ControlledOwnerAttackedNotification {
+                        controlled: *controlled,
+                        victim,
+                    });
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ControlledOwnerAttackedNotification {
+    pub controlled: ObjectGuid,
+    pub victim: ObjectGuid,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4923,6 +4947,23 @@ mod unit_subsystems_tests {
 
         controller.remove_charm_as_controller(minion, true, false, false);
         assert!(!controller.controlled_guids.contains(&minion));
+    }
+
+    #[test]
+    fn control_remove_vehicle_charm_does_not_mark_last_charmer_like_cpp() {
+        let mut passenger = ControlSubsystem::default();
+        let vehicle = guid(65);
+
+        assert!(passenger.apply_charmed_by(vehicle, CharmType::Vehicle, true, Some(321), false,));
+        assert_eq!(passenger.charmer_guid, Some(vehicle));
+        assert_eq!(passenger.charm_type, Some(CharmType::Vehicle));
+        assert!(!passenger.has_charm_info());
+
+        assert!(passenger.remove_charmed_by(Some(vehicle), false));
+        assert_eq!(passenger.charmer_guid, None);
+        assert_eq!(passenger.last_charmer_guid, None);
+        assert_eq!(passenger.charm_type, None);
+        assert_eq!(passenger.old_faction_id, None);
     }
 
     #[test]

@@ -283,7 +283,7 @@ pub use spell_item_enchantment::{SpellItemEnchantmentEntry, SpellItemEnchantment
 pub use terrain_swap::{TerrainSwapInfo, TerrainSwapStore, load_terrain_swaps};
 pub use ui_map::{UiMapXMapArtEntry, UiMapXMapArtStore};
 pub use vehicle::{
-    VEHICLE_SEAT_FLAG_B_EJECTABLE, VEHICLE_SEAT_FLAG_B_USABLE_FORCED,
+    VEHICLE_SEAT_FLAG_B_EJECTABLE, VEHICLE_SEAT_FLAG_B_USABLE_FORCED, VEHICLE_SEAT_FLAG_CAN_ATTACK,
     VEHICLE_SEAT_FLAG_CAN_ENTER_OR_EXIT, VEHICLE_SEAT_FLAG_CAN_SWITCH,
     VehicleAccessoryStoreLikeCpp, VehicleEntry, VehicleSeatEntry, VehicleSeatStore, VehicleStore,
     VehicleTemplateStoreLikeCpp,
