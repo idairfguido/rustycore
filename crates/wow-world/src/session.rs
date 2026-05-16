@@ -19839,7 +19839,7 @@ mod tests {
                 round_robin_player: ObjectGuid::EMPTY,
                 player_ffa_items: Vec::new(),
                 players_looting: Vec::new(),
-                allowed_looters: Vec::new(),
+                allowed_looters: vec![player_guid],
                 items: vec![LootEntry {
                     loot_list_id: 1,
                     item_id: 700,
@@ -19881,7 +19881,7 @@ mod tests {
                 round_robin_player: ObjectGuid::EMPTY,
                 player_ffa_items: Vec::new(),
                 players_looting: Vec::new(),
-                allowed_looters: Vec::new(),
+                allowed_looters: vec![player_guid],
                 items: Vec::new(),
                 looted_by_player: false,
             },
