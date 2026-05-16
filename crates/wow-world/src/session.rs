@@ -126,6 +126,7 @@ const MAX_PACKETS_PER_UPDATE: usize = 100;
 const TRANSFER_ABORT_MAP_NOT_ALLOWED_LIKE_CPP: u32 = 16;
 const MAP_BATTLEGROUND_LIKE_CPP: i8 = 3;
 const MAP_ARENA_LIKE_CPP: i8 = 4;
+const GROUP_XP_DISTANCE_LIKE_CPP: f32 = 74.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MMapRuntimeConfigLikeCpp {
@@ -9441,6 +9442,16 @@ impl WorldSession {
         attacker_guid: ObjectGuid,
         creature_guid: ObjectGuid,
     ) {
+        let reward_source = self
+            .mutate_world_creature(creature_guid, |creature| {
+                (creature.map_id() as u16, creature.position())
+            })
+            .unwrap_or_else(|| {
+                (
+                    self.player_map_id_like_cpp(),
+                    self.player_position_like_cpp().unwrap_or(Position::ZERO),
+                )
+            });
         let mut tappers = self
             .mutate_world_creature(creature_guid, |creature| {
                 creature.creature.tap_list().to_vec()
@@ -9464,6 +9475,13 @@ impl WorldSession {
         );
 
         for tapper_guid in unique_tappers {
+            if !self.represented_player_at_group_reward_distance_like_cpp(
+                tapper_guid,
+                reward_source.0,
+                reward_source.1,
+            ) {
+                continue;
+            }
             self.represented_creature_kill_events_like_cpp.push(
                 RepresentedCreatureKillEventLikeCpp::TapperTargetDiesProc {
                     tapper_guid,
@@ -9484,6 +9502,39 @@ impl WorldSession {
                 quantity: 1,
             },
         );
+    }
+
+    fn represented_player_at_group_reward_distance_like_cpp(
+        &self,
+        player_guid: ObjectGuid,
+        reward_map_id: u16,
+        reward_position: Position,
+    ) -> bool {
+        let player_state = if self.player_guid() == Some(player_guid) {
+            self.player_position_like_cpp()
+                .map(|position| (self.player_map_id_like_cpp(), position))
+        } else {
+            self.player_registry.as_ref().and_then(|registry| {
+                registry
+                    .get(&player_guid)
+                    .map(|entry| (entry.map_id, entry.position))
+            })
+        };
+        let Some((player_map_id, player_position)) = player_state else {
+            return self.player_guid() == Some(player_guid);
+        };
+        if player_map_id != reward_map_id {
+            return false;
+        }
+        if self
+            .map_store
+            .as_ref()
+            .and_then(|store| store.get(u32::from(player_map_id)))
+            .is_some_and(|entry| entry.is_dungeon())
+        {
+            return true;
+        }
+        player_position.distance(&reward_position) <= GROUP_XP_DISTANCE_LIKE_CPP
     }
 
     #[cfg(test)]
@@ -14392,6 +14443,70 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn creature_kill_target_dies_proc_filters_group_reward_distance_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let guid = test_creature_guid(18_007);
+        let player = ObjectGuid::create_player(1, 48);
+        let near_member = ObjectGuid::create_player(1, 49);
+        let far_member = ObjectGuid::create_player(1, 50);
+        let (near_tx, _near_rx) = flume::bounded(10);
+        let (far_tx, _far_rx) = flume::bounded(10);
+        let player_registry = Arc::new(PlayerRegistry::default());
+        let mut near_info = broadcast_info(near_member, near_tx);
+        near_info.position = Position::new(20.0, 10.0, 0.0, 0.0);
+        let mut far_info = broadcast_info(far_member, far_tx);
+        far_info.position = Position::new(200.0, 10.0, 0.0, 0.0);
+        player_registry.insert(near_member, near_info);
+        player_registry.insert(far_member, far_info);
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(player);
+        group.add_member(near_member);
+        group.add_member(far_member);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.player_guid = Some(player);
+        session.player_position = Some(Position::new(10.0, 10.0, 0.0, 0.0));
+        session.group_guid = Some(group_guid);
+        session.set_player_registry(player_registry);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        register_test_creature(&mut session, manager.clone(), guid, 40);
+
+        session.apply_damage(guid, 100).await.unwrap();
+
+        let target_dies_tappers: Vec<_> = session
+            .represented_creature_kill_events_like_cpp()
+            .iter()
+            .filter_map(|event| match event {
+                RepresentedCreatureKillEventLikeCpp::TapperTargetDiesProc {
+                    tapper_guid,
+                    victim_guid,
+                } if *victim_guid == guid => Some(*tapper_guid),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(target_dies_tappers, vec![player, near_member]);
+        assert!(
+            !target_dies_tappers.contains(&far_member),
+            "C++ Player::IsAtGroupRewardDistance suppresses TARGET_DIES proc for far tappers"
+        );
+        let loot = session
+            .loot_table
+            .get(&guid)
+            .expect("loot still uses the original tap list");
+        assert!(loot.allowed_looters.contains(&far_member));
     }
 
     #[tokio::test]
