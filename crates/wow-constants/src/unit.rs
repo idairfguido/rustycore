@@ -140,6 +140,21 @@ pub enum Stats {
 }
 
 bitflags! {
+    /// Trinity `UnitPVPStateFlags`, stored in `UnitData::PvpFlags`.
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+    pub struct UnitPvpFlags: u8 {
+        const PVP       = 0x01;
+        const UNK1      = 0x02;
+        const FFA_PVP   = 0x04;
+        const SANCTUARY = 0x08;
+        const UNK4      = 0x10;
+        const UNK5      = 0x20;
+        const UNK6      = 0x40;
+        const UNK7      = 0x80;
+    }
+}
+
+bitflags! {
     /// Primary unit flags.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct UnitFlags: u32 {
@@ -596,4 +611,21 @@ pub enum Team {
     Horde = 67,
     Alliance = 469,
     Other = 0,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UnitPvpFlags;
+
+    #[test]
+    fn unit_pvp_flags_match_cpp_values() {
+        assert_eq!(UnitPvpFlags::PVP.bits(), 0x01);
+        assert_eq!(UnitPvpFlags::UNK1.bits(), 0x02);
+        assert_eq!(UnitPvpFlags::FFA_PVP.bits(), 0x04);
+        assert_eq!(UnitPvpFlags::SANCTUARY.bits(), 0x08);
+        assert_eq!(UnitPvpFlags::UNK4.bits(), 0x10);
+        assert_eq!(UnitPvpFlags::UNK5.bits(), 0x20);
+        assert_eq!(UnitPvpFlags::UNK6.bits(), 0x40);
+        assert_eq!(UnitPvpFlags::UNK7.bits(), 0x80);
+    }
 }

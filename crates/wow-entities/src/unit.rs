@@ -1,6 +1,6 @@
 use wow_constants::{
-    DeathState, Gender, PowerType, SpellState, TypeId, TypeMask, UnitFlags, UnitStandStateType,
-    UnitState, WeaponAttackType,
+    DeathState, Gender, PowerType, SpellState, TypeId, TypeMask, UnitFlags, UnitPvpFlags,
+    UnitStandStateType, UnitState, WeaponAttackType,
 };
 use wow_core::ObjectGuid;
 
@@ -39,6 +39,7 @@ pub const UNIT_DATA_NATIVE_DISPLAY_ID_BIT: usize = 49;
 pub const UNIT_DATA_NATIVE_DISPLAY_SCALE_BIT: usize = 50;
 pub const UNIT_DATA_MOUNT_DISPLAY_ID_BIT: usize = 51;
 pub const UNIT_DATA_STAND_STATE_BIT: usize = 56;
+pub const UNIT_DATA_PVP_FLAGS_BIT: usize = 78;
 pub const UNIT_DATA_TARGET_BIT: usize = 19;
 pub const UNIT_DATA_RACE_BIT: usize = 24;
 pub const UNIT_DATA_CLASS_ID_BIT: usize = 25;
@@ -76,6 +77,7 @@ pub struct UnitDataValues {
     pub native_display_scale: f32,
     pub mount_display_id: i32,
     pub stand_state: u8,
+    pub pvp_flags: u8,
     pub power: [i32; MAX_POWERS_PER_CLASS],
     pub max_power: [i32; MAX_POWERS_PER_CLASS],
     pub virtual_items: [VisibleItemValues; MAX_ATTACK],
@@ -105,6 +107,7 @@ impl Default for UnitDataValues {
             native_display_scale: 0.0,
             mount_display_id: 0,
             stand_state: UnitStandStateType::Stand as u8,
+            pvp_flags: 0,
             power: [0; MAX_POWERS_PER_CLASS],
             max_power: [0; MAX_POWERS_PER_CLASS],
             virtual_items: [VisibleItemValues::default(); MAX_ATTACK],
@@ -946,6 +949,40 @@ impl Unit {
         self.set_u8_field(UNIT_DATA_STAND_STATE_BIT, state as u8, |data| {
             &mut data.stand_state
         });
+    }
+
+    pub fn replace_all_pvp_flags_like_cpp(&mut self, flags: UnitPvpFlags) {
+        self.set_u8_field(UNIT_DATA_PVP_FLAGS_BIT, flags.bits(), |data| {
+            &mut data.pvp_flags
+        });
+    }
+
+    pub fn set_pvp_flag_like_cpp(&mut self, flags: UnitPvpFlags) {
+        self.replace_all_pvp_flags_like_cpp(self.pvp_flags_like_cpp() | flags);
+    }
+
+    pub fn remove_pvp_flag_like_cpp(&mut self, flags: UnitPvpFlags) {
+        self.replace_all_pvp_flags_like_cpp(self.pvp_flags_like_cpp() & !flags);
+    }
+
+    pub fn pvp_flags_like_cpp(&self) -> UnitPvpFlags {
+        UnitPvpFlags::from_bits_retain(self.data.pvp_flags)
+    }
+
+    pub fn has_pvp_flag_like_cpp(&self, flags: UnitPvpFlags) -> bool {
+        self.pvp_flags_like_cpp().intersects(flags)
+    }
+
+    pub fn is_pvp_like_cpp(&self) -> bool {
+        self.has_pvp_flag_like_cpp(UnitPvpFlags::PVP)
+    }
+
+    pub fn is_ffa_pvp_like_cpp(&self) -> bool {
+        self.has_pvp_flag_like_cpp(UnitPvpFlags::FFA_PVP)
+    }
+
+    pub fn is_in_sanctuary_like_cpp(&self) -> bool {
+        self.has_pvp_flag_like_cpp(UnitPvpFlags::SANCTUARY)
     }
 
     pub fn set_health(&mut self, mut value: u64) {
@@ -2379,5 +2416,28 @@ mod tests {
         let unit_data = update.unit_data.unwrap();
         assert_eq!(unit_data.values.level, 12);
         assert!(unit_data.mask.is_set(UNIT_DATA_LEVEL_BIT));
+    }
+
+    #[test]
+    fn pvp_flags_match_cpp_unit_pvp_state_helpers() {
+        let mut unit = Unit::new(true);
+
+        unit.set_pvp_flag_like_cpp(UnitPvpFlags::PVP | UnitPvpFlags::FFA_PVP);
+        assert!(unit.is_pvp_like_cpp());
+        assert!(unit.is_ffa_pvp_like_cpp());
+        assert!(!unit.is_in_sanctuary_like_cpp());
+        assert!(
+            unit.unit_data_changes_mask()
+                .is_set(UNIT_DATA_PVP_FLAGS_BIT)
+        );
+
+        unit.remove_pvp_flag_like_cpp(UnitPvpFlags::FFA_PVP);
+        assert!(unit.is_pvp_like_cpp());
+        assert!(!unit.is_ffa_pvp_like_cpp());
+
+        unit.replace_all_pvp_flags_like_cpp(UnitPvpFlags::SANCTUARY | UnitPvpFlags::UNK1);
+        assert!(!unit.is_pvp_like_cpp());
+        assert!(unit.is_in_sanctuary_like_cpp());
+        assert!(unit.has_pvp_flag_like_cpp(UnitPvpFlags::UNK1));
     }
 }

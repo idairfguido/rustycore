@@ -374,6 +374,7 @@ fn unit_data_update_to_packet(update: &UnitDataUpdate) -> UnitDataValuesDeltaUpd
     packet_update.native_display_scale = update.values.native_display_scale;
     packet_update.mount_display_id = update.values.mount_display_id;
     packet_update.stand_state = update.values.stand_state;
+    packet_update.pvp_flags = update.values.pvp_flags;
     packet_update.power = update.values.power;
     packet_update.max_power = update.values.max_power;
 
@@ -993,6 +994,7 @@ mod tests {
         unit.set_max_health(123);
         unit.set_health(123);
         unit.set_stand_state_like_cpp(wow_constants::UnitStandStateType::Sit);
+        unit.set_pvp_flag_like_cpp(wow_constants::UnitPvpFlags::PVP);
 
         let update = unit.values_update();
         let packet_update = unit_values_update_to_packet(&update).unwrap();
@@ -1014,10 +1016,18 @@ mod tests {
             &packet_update.unit_data_mask,
             UNIT_DATA_STAND_STATE_BIT
         ));
+        assert!(mask_has(
+            &packet_update.unit_data_mask,
+            wow_entities::UNIT_DATA_PVP_FLAGS_BIT
+        ));
         assert_eq!(packet_update.health, 123);
         assert_eq!(
             packet_update.stand_state,
             wow_constants::UnitStandStateType::Sit as u8
+        );
+        assert_eq!(
+            packet_update.pvp_flags,
+            wow_constants::UnitPvpFlags::PVP.bits()
         );
     }
 
