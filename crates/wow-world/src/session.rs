@@ -14981,6 +14981,96 @@ mod tests {
     }
 
     #[test]
+    fn player_attack_uses_stalked_aura_as_always_detectable_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 59);
+        let victim = ObjectGuid::create_player(1, 60);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Hunter".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            3,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+
+        let mut victim_player = Player::new(Some(8), false);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(victim);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .set_map(571, 0)
+            .unwrap();
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::new(11.0, 20.0, 30.0, 0.0));
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .add_to_world();
+        victim_player
+            .unit_mut()
+            .set_pvp_flag_like_cpp(UnitPvpFlags::PVP);
+        victim_player.unit_mut().set_invisibility_like_cpp(0, 100);
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(571, 0)
+            .unwrap()
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_player(victim_player).unwrap(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Rejected
+        );
+
+        session
+            .mutate_canonical_player_by_guid_like_cpp(victim, |player| {
+                player
+                    .unit_mut()
+                    .subsystems_mut()
+                    .auras
+                    .register_applied_aura_type_like_cpp(
+                        wow_entities::AppliedAuraRef::new(53338, attacker, 0, 0x1),
+                        wow_entities::SPELL_AURA_MOD_STALKED_LIKE_CPP,
+                    );
+            })
+            .unwrap();
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Accepted {
+                send_attack_start: true
+            }
+        );
+    }
+
+    #[test]
     fn player_attack_waits_for_active_mover_visibility_flag_like_cpp() {
         let (mut session, _, _) = make_session();
         let canonical = shared_canonical_map_manager();

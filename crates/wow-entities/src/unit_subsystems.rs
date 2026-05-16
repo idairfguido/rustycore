@@ -194,6 +194,16 @@ impl AuraSubsystem {
             .is_some_and(|auras| !auras.is_empty())
     }
 
+    pub fn has_aura_type_with_caster_like_cpp(
+        &self,
+        aura_type: i32,
+        caster_guid: ObjectGuid,
+    ) -> bool {
+        self.applied_aura_types
+            .get(&aura_type)
+            .is_some_and(|auras| auras.iter().any(|aura| aura.caster_guid == caster_guid))
+    }
+
     pub fn remove_auras_by_type_like_cpp(&mut self, aura_type: i32) -> Vec<AppliedAuraRef> {
         let removed = self
             .applied_aura_types

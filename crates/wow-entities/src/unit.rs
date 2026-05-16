@@ -20,6 +20,7 @@ pub const DEFAULT_PLAYER_DISPLAY_SCALE: f32 = 1.0;
 pub const AUTO_SHOT_SPELL_ID: u32 = 75;
 pub const SPELL_AURA_MOD_UNATTACKABLE_LIKE_CPP: i32 = 93;
 pub const SPELL_AURA_DISABLE_ATTACKING_EXCEPT_ABILITIES_LIKE_CPP: i32 = 264;
+pub const SPELL_AURA_MOD_STALKED_LIKE_CPP: i32 = 68;
 pub const SPELL_AURA_INTERRUPT_FLAG_ATTACKING_LIKE_CPP: u32 = 0x0000_1000;
 pub const MAX_VISIBILITY_AURA_TYPES_LIKE_CPP: usize = 38;
 pub const MAX_PLAYER_STEALTH_DETECT_RANGE_LIKE_CPP: f32 = 30.0;
@@ -592,7 +593,12 @@ impl Unit {
         if target.visibility_detection.invisible_due_to_despawn {
             return false;
         }
-        if target.visibility_detection.always_detectable_for_seer {
+        if target.visibility_detection.always_detectable_for_seer
+            || target
+                .subsystems
+                .auras
+                .has_aura_type_with_caster_like_cpp(SPELL_AURA_MOD_STALKED_LIKE_CPP, seer_guid)
+        {
             return true;
         }
         if !implicit_detect && !self.can_detect_invisibility_of_like_cpp(target) {
@@ -2009,6 +2015,20 @@ mod tests {
         target.set_always_detectable_for_seer_like_cpp(false);
         target.set_invisibility_like_cpp(0, 100);
         assert!(!seer.can_see_or_detect_unit_like_cpp(&target, false, true, false));
+
+        target
+            .subsystems_mut()
+            .auras
+            .register_applied_aura_type_like_cpp(
+                AppliedAuraRef::new(53338, seer_guid, 0, 0x1),
+                SPELL_AURA_MOD_STALKED_LIKE_CPP,
+            );
+        assert!(seer.can_see_or_detect_unit_like_cpp(&target, false, true, false));
+
+        target
+            .subsystems_mut()
+            .auras
+            .remove_auras_by_type_like_cpp(SPELL_AURA_MOD_STALKED_LIKE_CPP);
         seer.set_seer_can_always_see_target_guid_like_cpp(target.world().object().guid());
         assert!(seer.can_see_or_detect_unit_like_cpp(&target, false, true, false));
     }
