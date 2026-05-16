@@ -1847,6 +1847,7 @@ impl WorldSession {
             let player_flags_ex = existing.data().player_flags_ex;
             let duel = existing.duel_info_like_cpp();
             let gameplay_state = existing.gameplay_state().clone();
+            let visibility_detection = existing.unit().visibility_detection_like_cpp().clone();
             let forced_reaction_faction_ids =
                 existing.forced_reputation_faction_ids_like_cpp().clone();
             player.replace_all_player_flags(player_flags);
@@ -1861,6 +1862,9 @@ impl WorldSession {
             existing
                 .unit_mut()
                 .replace_all_pvp_flags_like_cpp(pvp_flags);
+            existing
+                .unit_mut()
+                .replace_visibility_detection_like_cpp(visibility_detection);
             return;
         }
 
@@ -2181,6 +2185,20 @@ impl WorldSession {
         };
         if let Some(player) = map.map().get_typed_player(guid) {
             let pvp_flags = player.unit().pvp_flags_like_cpp();
+            let attacker_can_see_or_detect_target = self
+                .can_see_phase_shift_like_cpp(player.unit().world().phase_shift())
+                && self
+                    .player_guid()
+                    .and_then(|attacker_guid| map.map().get_typed_player(attacker_guid))
+                    .map(|attacker| {
+                        attacker.unit().can_see_or_detect_unit_like_cpp(
+                            player.unit(),
+                            false,
+                            true,
+                            false,
+                        )
+                    })
+                    .unwrap_or(true);
             return (
                 player.unit().is_alive(),
                 player.unit().world().object().is_in_world(),
@@ -2190,8 +2208,7 @@ impl WorldSession {
                     victim_unit_flags: player.unit().unit_flags_like_cpp().bits(),
                     victim_has_affecting_player: true,
                     visibility_represented: true,
-                    attacker_can_see_or_detect_target: self
-                        .can_see_phase_shift_like_cpp(player.unit().world().phase_shift()),
+                    attacker_can_see_or_detect_target,
                     victim_in_sanctuary: pvp_flags.contains(UnitPvpFlags::SANCTUARY),
                     victim_is_pvp: pvp_flags.contains(UnitPvpFlags::PVP),
                     victim_is_ffa_pvp: pvp_flags.contains(UnitPvpFlags::FFA_PVP),
@@ -2201,13 +2218,26 @@ impl WorldSession {
             );
         }
         if let Some(creature) = map.map().get_typed_creature(guid) {
+            let attacker_can_see_or_detect_target = self
+                .can_see_phase_shift_like_cpp(creature.unit().world().phase_shift())
+                && self
+                    .player_guid()
+                    .and_then(|attacker_guid| map.map().get_typed_player(attacker_guid))
+                    .map(|attacker| {
+                        attacker.unit().can_see_or_detect_unit_like_cpp(
+                            creature.unit(),
+                            false,
+                            true,
+                            false,
+                        )
+                    })
+                    .unwrap_or(true);
             let mut context = wow_entities::UnitAttackContextLikeCpp {
                 victim_is_evading_creature: creature.is_evading_attacks_like_cpp(),
                 victim_unit_state: creature.unit().unit_state(),
                 victim_unit_flags: creature.unit().unit_flags_like_cpp().bits(),
                 visibility_represented: true,
-                attacker_can_see_or_detect_target: self
-                    .can_see_phase_shift_like_cpp(creature.unit().world().phase_shift()),
+                attacker_can_see_or_detect_target,
                 ..Default::default()
             };
             if let Some(reputation_snapshot) =
@@ -14541,6 +14571,69 @@ mod tests {
         let guard = manager.read().unwrap();
         let creature = guard.find_creature(0, 0, victim).unwrap();
         assert!(!creature.creature.unit().has_attacker_like_cpp(attacker));
+    }
+
+    #[test]
+    fn player_attack_uses_canonical_invisibility_detection_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 95);
+        let victim = test_creature_guid(18_095);
+
+        canonical.lock().unwrap().create_world_map(0, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Rogue".to_string(),
+            Position::new(9.0, 10.0, 0.0, 0.0),
+            0,
+            1,
+            4,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        register_test_creature(&mut session, manager, victim, 40);
+        session
+            .mutate_canonical_creature_by_guid_like_cpp(victim, |creature| {
+                creature.unit_mut().set_invisibility_like_cpp(1, 50);
+            })
+            .unwrap();
+
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Rejected
+        );
+        assert_eq!(session.combat_target, None);
+
+        session
+            .mutate_canonical_player_by_guid_like_cpp(attacker, |player| {
+                player.unit_mut().set_invisibility_detect_like_cpp(1, 50);
+            })
+            .unwrap();
+
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Accepted {
+                send_attack_start: true
+            }
+        );
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(0, 0).unwrap().map();
+        assert_eq!(
+            map.get_typed_player(attacker).unwrap().unit().attacking(),
+            Some(victim)
+        );
     }
 
     #[test]

@@ -21,6 +21,8 @@ pub const AUTO_SHOT_SPELL_ID: u32 = 75;
 pub const SPELL_AURA_MOD_UNATTACKABLE_LIKE_CPP: i32 = 93;
 pub const SPELL_AURA_DISABLE_ATTACKING_EXCEPT_ABILITIES_LIKE_CPP: i32 = 264;
 pub const SPELL_AURA_INTERRUPT_FLAG_ATTACKING_LIKE_CPP: u32 = 0x0000_1000;
+pub const MAX_VISIBILITY_AURA_TYPES_LIKE_CPP: usize = 32;
+pub const MAX_PLAYER_STEALTH_DETECT_RANGE_LIKE_CPP: f32 = 30.0;
 
 pub const UNIT_DATA_PARENT_BIT: usize = 0;
 pub const UNIT_DATA_HEALTH_BIT: usize = 5;
@@ -196,6 +198,35 @@ pub struct UnitAttackContextLikeCpp {
     pub victim_has_pvp_unk1_flag: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnitVisibilityDetectionStateLikeCpp {
+    server_side_visibility_gm: u32,
+    server_side_visibility_detect_gm: u32,
+    invisibility_flags: u32,
+    invisibility: [i32; MAX_VISIBILITY_AURA_TYPES_LIKE_CPP],
+    invisibility_detect_flags: u32,
+    invisibility_detect: [i32; MAX_VISIBILITY_AURA_TYPES_LIKE_CPP],
+    stealth_flags: u32,
+    stealth: [i32; MAX_VISIBILITY_AURA_TYPES_LIKE_CPP],
+    stealth_detect: [i32; MAX_VISIBILITY_AURA_TYPES_LIKE_CPP],
+}
+
+impl Default for UnitVisibilityDetectionStateLikeCpp {
+    fn default() -> Self {
+        Self {
+            server_side_visibility_gm: 0,
+            server_side_visibility_detect_gm: 0,
+            invisibility_flags: 0,
+            invisibility: [0; MAX_VISIBILITY_AURA_TYPES_LIKE_CPP],
+            invisibility_detect_flags: 0,
+            invisibility_detect: [0; MAX_VISIBILITY_AURA_TYPES_LIKE_CPP],
+            stealth_flags: 0,
+            stealth: [0; MAX_VISIBILITY_AURA_TYPES_LIKE_CPP],
+            stealth_detect: [0; MAX_VISIBILITY_AURA_TYPES_LIKE_CPP],
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Unit {
     world: WorldObject,
@@ -211,6 +242,7 @@ pub struct Unit {
     emote_state: u32,
     speed_rate: [f32; MAX_MOVE_TYPE],
     power_index: [Option<usize>; MAX_POWERS],
+    visibility_detection: UnitVisibilityDetectionStateLikeCpp,
     subsystems: UnitSubsystems,
 }
 
@@ -240,6 +272,7 @@ impl Unit {
             emote_state: 0,
             speed_rate: [1.0; MAX_MOVE_TYPE],
             power_index: [None; MAX_POWERS],
+            visibility_detection: UnitVisibilityDetectionStateLikeCpp::default(),
             subsystems: UnitSubsystems::default(),
         };
         unit.set_power_index(PowerType::Mana, Some(0));
@@ -252,6 +285,164 @@ impl Unit {
 
     pub fn world_mut(&mut self) -> &mut WorldObject {
         &mut self.world
+    }
+
+    pub const fn visibility_detection_like_cpp(&self) -> &UnitVisibilityDetectionStateLikeCpp {
+        &self.visibility_detection
+    }
+
+    pub fn replace_visibility_detection_like_cpp(
+        &mut self,
+        state: UnitVisibilityDetectionStateLikeCpp,
+    ) {
+        self.visibility_detection = state;
+    }
+
+    pub fn set_server_side_gm_visibility_like_cpp(&mut self, visibility: u32) {
+        self.visibility_detection.server_side_visibility_gm = visibility;
+    }
+
+    pub fn set_server_side_gm_visibility_detect_like_cpp(&mut self, detect: u32) {
+        self.visibility_detection.server_side_visibility_detect_gm = detect;
+    }
+
+    pub fn set_invisibility_like_cpp(&mut self, aura_type: usize, value: i32) {
+        if aura_type >= MAX_VISIBILITY_AURA_TYPES_LIKE_CPP {
+            return;
+        }
+        let flag = 1_u32 << aura_type;
+        self.visibility_detection.invisibility[aura_type] = value;
+        if value > 0 {
+            self.visibility_detection.invisibility_flags |= flag;
+        } else {
+            self.visibility_detection.invisibility_flags &= !flag;
+        }
+    }
+
+    pub fn set_invisibility_detect_like_cpp(&mut self, aura_type: usize, value: i32) {
+        if aura_type >= MAX_VISIBILITY_AURA_TYPES_LIKE_CPP {
+            return;
+        }
+        let flag = 1_u32 << aura_type;
+        self.visibility_detection.invisibility_detect[aura_type] = value;
+        if value > 0 {
+            self.visibility_detection.invisibility_detect_flags |= flag;
+        } else {
+            self.visibility_detection.invisibility_detect_flags &= !flag;
+        }
+    }
+
+    pub fn set_stealth_like_cpp(&mut self, aura_type: usize, value: i32) {
+        if aura_type >= MAX_VISIBILITY_AURA_TYPES_LIKE_CPP {
+            return;
+        }
+        let flag = 1_u32 << aura_type;
+        self.visibility_detection.stealth[aura_type] = value;
+        if value > 0 {
+            self.visibility_detection.stealth_flags |= flag;
+        } else {
+            self.visibility_detection.stealth_flags &= !flag;
+        }
+    }
+
+    pub fn set_stealth_detect_like_cpp(&mut self, aura_type: usize, value: i32) {
+        if aura_type < MAX_VISIBILITY_AURA_TYPES_LIKE_CPP {
+            self.visibility_detection.stealth_detect[aura_type] = value;
+        }
+    }
+
+    pub fn can_detect_invisibility_of_like_cpp(&self, target: &Self) -> bool {
+        let target_flags = target.visibility_detection.invisibility_flags;
+        if target_flags == 0 {
+            return true;
+        }
+        if target_flags & self.visibility_detection.invisibility_detect_flags != target_flags {
+            return false;
+        }
+
+        for aura_type in 0..MAX_VISIBILITY_AURA_TYPES_LIKE_CPP {
+            let flag = 1_u32 << aura_type;
+            if target_flags & flag == 0 {
+                continue;
+            }
+            if self.visibility_detection.invisibility_detect[aura_type]
+                < target.visibility_detection.invisibility[aura_type]
+            {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub fn can_detect_stealth_of_like_cpp(
+        &self,
+        target: &Self,
+        seer_is_player: bool,
+        check_alert: bool,
+    ) -> bool {
+        let target_flags = target.visibility_detection.stealth_flags;
+        if target_flags == 0 {
+            return true;
+        }
+
+        let distance = self.world.exact_distance(&target.world);
+        let combat_reach = self.data.combat_reach.max(0.0);
+        if distance < combat_reach {
+            return true;
+        }
+        if !self
+            .world
+            .has_in_arc(std::f32::consts::PI, &target.world, 2.0)
+        {
+            return false;
+        }
+
+        for aura_type in 0..MAX_VISIBILITY_AURA_TYPES_LIKE_CPP {
+            let flag = 1_u32 << aura_type;
+            if target_flags & flag == 0 {
+                continue;
+            }
+
+            let level = self.data.level.max(1);
+            let detection_value =
+                30 + (level - 1) * 5 + self.visibility_detection.stealth_detect[aura_type]
+                    - target.visibility_detection.stealth[aura_type];
+            let mut visibility_range = detection_value as f32 * 0.3 + combat_reach;
+            if seer_is_player {
+                visibility_range = visibility_range.min(MAX_PLAYER_STEALTH_DETECT_RANGE_LIKE_CPP);
+            }
+            if check_alert {
+                visibility_range += visibility_range * 0.08 + 1.5;
+            }
+            if distance > visibility_range {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub fn can_see_or_detect_unit_like_cpp(
+        &self,
+        target: &Self,
+        implicit_detect: bool,
+        seer_is_player: bool,
+        check_alert: bool,
+    ) -> bool {
+        let gm_visibility = target.visibility_detection.server_side_visibility_gm;
+        if gm_visibility != 0
+            && self.visibility_detection.server_side_visibility_detect_gm < gm_visibility
+        {
+            return false;
+        }
+        if !implicit_detect && !self.can_detect_invisibility_of_like_cpp(target) {
+            return false;
+        }
+        if !implicit_detect
+            && !self.can_detect_stealth_of_like_cpp(target, seer_is_player, check_alert)
+        {
+            return false;
+        }
+        true
     }
 
     pub(crate) fn set_type(&mut self, type_id: TypeId, type_mask: TypeMask) {
@@ -1516,6 +1707,71 @@ mod tests {
                 ..Default::default()
             }
         ));
+    }
+
+    #[test]
+    fn can_see_or_detect_unit_like_cpp_rejects_gm_visibility_above_detect() {
+        let mut seer = Unit::new(true);
+        let mut target = Unit::new(true);
+
+        target.set_server_side_gm_visibility_like_cpp(2);
+        seer.set_server_side_gm_visibility_detect_like_cpp(1);
+        assert!(!seer.can_see_or_detect_unit_like_cpp(&target, false, true, false));
+
+        seer.set_server_side_gm_visibility_detect_like_cpp(2);
+        assert!(seer.can_see_or_detect_unit_like_cpp(&target, false, true, false));
+    }
+
+    #[test]
+    fn can_detect_invisibility_like_cpp_requires_flag_and_sufficient_value() {
+        let mut seer = Unit::new(true);
+        let mut target = Unit::new(true);
+
+        target.set_invisibility_like_cpp(3, 25);
+        assert!(!seer.can_see_or_detect_unit_like_cpp(&target, false, true, false));
+
+        seer.set_invisibility_detect_like_cpp(2, 100);
+        assert!(!seer.can_detect_invisibility_of_like_cpp(&target));
+
+        seer.set_invisibility_detect_like_cpp(3, 24);
+        assert!(!seer.can_detect_invisibility_of_like_cpp(&target));
+
+        seer.set_invisibility_detect_like_cpp(3, 25);
+        assert!(seer.can_see_or_detect_unit_like_cpp(&target, false, true, false));
+        assert!(seer.can_see_or_detect_unit_like_cpp(&target, true, true, false));
+    }
+
+    #[test]
+    fn can_detect_stealth_like_cpp_uses_front_arc_level_distance_and_player_cap() {
+        let mut seer = Unit::new(true);
+        let mut target = Unit::new(true);
+        seer.set_level(10);
+        seer.world_mut()
+            .relocate(wow_core::Position::new(0.0, 0.0, 0.0, 0.0));
+        target
+            .world_mut()
+            .relocate(wow_core::Position::new(20.0, 0.0, 0.0, 0.0));
+        target.set_stealth_like_cpp(0, 1);
+        assert!(seer.can_detect_stealth_of_like_cpp(&target, true, false));
+
+        target.set_stealth_like_cpp(0, 100);
+        assert!(!seer.can_detect_stealth_of_like_cpp(&target, true, false));
+
+        seer.set_stealth_detect_like_cpp(0, 100);
+        assert!(seer.can_detect_stealth_of_like_cpp(&target, true, false));
+
+        target
+            .world_mut()
+            .relocate(wow_core::Position::new(-20.0, 0.0, 0.0, 0.0));
+        assert!(!seer.can_detect_stealth_of_like_cpp(&target, true, false));
+
+        target
+            .world_mut()
+            .relocate(wow_core::Position::new(35.0, 0.0, 0.0, 0.0));
+        seer.set_level(80);
+        target.set_stealth_like_cpp(0, 1);
+        assert!(!seer.can_detect_stealth_of_like_cpp(&target, true, false));
+        assert!(seer.can_detect_stealth_of_like_cpp(&target, false, false));
     }
 
     #[test]
