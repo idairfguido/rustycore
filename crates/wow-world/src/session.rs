@@ -1957,6 +1957,14 @@ impl WorldSession {
             if unit.has_unit_state(UnitState::CHARGING.bits()) {
                 return None;
             }
+            // C++: Unit::DoMeleeAttackIfReady returns while casting unless
+            // the active channeled spell explicitly allows actions.
+            if unit.has_unit_state(UnitState::CASTING.bits()) {
+                let channeled = unit.current_spell(wow_entities::CurrentSpellSlot::Channeled);
+                if !channeled.is_some_and(|spell| spell.allow_actions_during_channel) {
+                    return None;
+                }
+            }
             let has_auto_attack_error = !in_melee_range || !facing_target;
             let melee_state_update_allowed =
                 within_los && unit.can_attacker_state_update_melee_like_cpp(false);
@@ -13273,6 +13281,86 @@ mod tests {
                 unit.add_unit_state(UnitState::CHARGING.bits());
                 unit.set_base_attack_time_like_cpp(WeaponAttackType::BaseAttack, 2_000);
                 unit.set_weapon_damage(WeaponAttackType::BaseAttack, 7.0, 7.0);
+            })
+            .unwrap();
+        session.combat_target = Some(guid);
+        session.in_combat = true;
+        register_test_creature(&mut session, manager.clone(), guid, 40);
+        session
+            .mutate_world_creature(guid, |creature| {
+                creature.enter_combat(player);
+                creature.creature.ai_ownership_mut().last_swing_ms = 0;
+                creature.creature.ai_ownership_mut().swing_timer_ms = 0;
+            })
+            .unwrap();
+
+        session.tick_combat_sync();
+
+        assert_eq!(
+            manager
+                .read()
+                .unwrap()
+                .find_creature(0, 0, guid)
+                .unwrap()
+                .current_hp(),
+            40
+        );
+        let guard = canonical.lock().unwrap();
+        let player_entity = guard
+            .find_map(0, 0)
+            .unwrap()
+            .map()
+            .get_typed_player(player)
+            .unwrap();
+        assert_eq!(
+            player_entity
+                .unit()
+                .attack_timer(WeaponAttackType::BaseAttack),
+            0
+        );
+    }
+
+    #[test]
+    fn combat_tick_casting_player_skips_melee_update_without_reset_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let guid = test_creature_guid(18_033);
+        let player = ObjectGuid::create_player(1, 82);
+
+        canonical.lock().unwrap().create_world_map(0, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Caster".to_string(),
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            0,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        let generic_cast =
+            wow_entities::CurrentSpellRef::new(12_346, Some(player), None).with_cast_time_ms(1_500);
+        session
+            .mutate_canonical_player_like_cpp(|player| {
+                let unit = player.unit_mut();
+                unit.set_attacking(Some(guid));
+                unit.set_target(guid);
+                unit.add_unit_state(UnitState::MELEE_ATTACKING.bits());
+                unit.set_base_attack_time_like_cpp(WeaponAttackType::BaseAttack, 2_000);
+                unit.set_weapon_damage(WeaponAttackType::BaseAttack, 7.0, 7.0);
+                unit.set_current_cast_spell(wow_entities::CurrentSpellSlot::Generic, generic_cast);
             })
             .unwrap();
         session.combat_target = Some(guid);
