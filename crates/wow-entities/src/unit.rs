@@ -202,6 +202,7 @@ pub struct UnitAttackContextLikeCpp {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnitVisibilityDetectionStateLikeCpp {
     never_visible_for_seer: bool,
+    seer_can_never_see_target: bool,
     always_visible_for_seer: bool,
     seer_can_always_see_target: bool,
     always_detectable_for_seer: bool,
@@ -228,6 +229,7 @@ impl Default for UnitVisibilityDetectionStateLikeCpp {
     fn default() -> Self {
         Self {
             never_visible_for_seer: false,
+            seer_can_never_see_target: false,
             always_visible_for_seer: false,
             seer_can_always_see_target: false,
             always_detectable_for_seer: false,
@@ -325,6 +327,10 @@ impl Unit {
 
     pub fn set_never_visible_for_seer_like_cpp(&mut self, never_visible: bool) {
         self.visibility_detection.never_visible_for_seer = never_visible;
+    }
+
+    pub fn set_seer_can_never_see_target_like_cpp(&mut self, can_never_see: bool) {
+        self.visibility_detection.seer_can_never_see_target = can_never_see;
     }
 
     pub fn set_always_visible_for_seer_like_cpp(&mut self, always_visible: bool) {
@@ -509,6 +515,7 @@ impl Unit {
             return true;
         }
         if target.visibility_detection.never_visible_for_seer
+            || self.visibility_detection.seer_can_never_see_target
             || (self.world.has_current_map()
                 && target.world.has_current_map()
                 && !self.world.is_in_map(&target.world))
@@ -1928,6 +1935,11 @@ mod tests {
         assert!(!seer.can_see_or_detect_unit_like_cpp(&target, false, true, false));
 
         target.set_never_visible_for_seer_like_cpp(false);
+        seer.set_seer_can_never_see_target_like_cpp(true);
+        target.set_always_visible_for_seer_like_cpp(true);
+        assert!(!seer.can_see_or_detect_unit_like_cpp(&target, false, true, false));
+
+        seer.set_seer_can_never_see_target_like_cpp(false);
         target.set_always_visible_for_seer_like_cpp(false);
         target.set_private_object_owner_like_cpp(owner_guid);
         assert!(!seer.can_see_or_detect_unit_like_cpp(&target, false, true, false));

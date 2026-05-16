@@ -1839,13 +1839,23 @@ impl WorldSession {
         self.player_logout_like_cpp || self.player_loading == Some(guid)
     }
 
+    fn player_can_never_see_target_like_cpp(&self) -> bool {
+        self.active_player_local_flags_like_cpp
+            & PLAYER_LOCAL_FLAG_OVERRIDE_TRANSPORT_SERVER_TIME_LIKE_CPP
+            == 0
+    }
+
     fn apply_player_session_visibility_detection_like_cpp(
         player: &mut Player,
         never_visible_for_seer: bool,
+        seer_can_never_see_target: bool,
     ) {
         player
             .unit_mut()
             .set_never_visible_for_seer_like_cpp(never_visible_for_seer);
+        player
+            .unit_mut()
+            .set_seer_can_never_see_target_like_cpp(seer_can_never_see_target);
     }
 
     fn sync_current_player_session_visibility_detection_like_cpp(&mut self) {
@@ -1853,10 +1863,12 @@ impl WorldSession {
             return;
         };
         let never_visible_for_seer = self.player_session_never_visible_for_seer_like_cpp(guid);
+        let seer_can_never_see_target = self.player_can_never_see_target_like_cpp();
         let _ = self.mutate_canonical_player_by_guid_like_cpp(guid, |player| {
             Self::apply_player_session_visibility_detection_like_cpp(
                 player,
                 never_visible_for_seer,
+                seer_can_never_see_target,
             );
         });
     }
@@ -1868,9 +1880,11 @@ impl WorldSession {
     ) {
         let guid = player.guid();
         let never_visible_for_seer = self.player_session_never_visible_for_seer_like_cpp(guid);
+        let seer_can_never_see_target = self.player_can_never_see_target_like_cpp();
         Self::apply_player_session_visibility_detection_like_cpp(
             &mut player,
             never_visible_for_seer,
+            seer_can_never_see_target,
         );
         let map = managed.map_mut();
         if let Some(existing) = map.get_typed_player_mut(guid) {
@@ -1905,6 +1919,7 @@ impl WorldSession {
             Self::apply_player_session_visibility_detection_like_cpp(
                 existing,
                 never_visible_for_seer,
+                seer_can_never_see_target,
             );
             return;
         }
@@ -8868,6 +8883,7 @@ impl WorldSession {
             PLAYER_LOCAL_FLAG_OVERRIDE_TRANSPORT_SERVER_TIME_LIKE_CPP;
         self.active_player_transport_server_time_like_cpp =
             Self::game_time_ms_like_cpp().saturating_sub(ticks) as i32;
+        self.sync_current_player_session_visibility_detection_like_cpp();
         self.movement_visibility_refresh_requests_like_cpp = self
             .movement_visibility_refresh_requests_like_cpp
             .saturating_add(1);
@@ -8898,6 +8914,12 @@ impl WorldSession {
     #[cfg(test)]
     pub(crate) fn active_player_local_flags_like_cpp(&self) -> u32 {
         self.active_player_local_flags_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_active_player_local_flags_like_cpp(&mut self, flags: u32) {
+        self.active_player_local_flags_like_cpp = flags;
+        self.sync_current_player_session_visibility_detection_like_cpp();
     }
 
     #[cfg(test)]
@@ -11174,7 +11196,7 @@ mod tests {
         let (pkt_tx, pkt_rx) = flume::bounded(100);
         let (send_tx, send_rx) = flume::bounded(100);
 
-        let session = WorldSession::new(
+        let mut session = WorldSession::new(
             1,
             "TestAccount".into(),
             0,
@@ -11185,6 +11207,9 @@ mod tests {
             "esES".into(),
             pkt_rx,
             send_tx,
+        );
+        session.set_active_player_local_flags_like_cpp(
+            PLAYER_LOCAL_FLAG_OVERRIDE_TRANSPORT_SERVER_TIME_LIKE_CPP,
         );
 
         (session, pkt_tx, send_rx)
@@ -14902,6 +14927,86 @@ mod tests {
                 player.set_farsight_object_like_cpp(victim);
             })
             .unwrap();
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Accepted {
+                send_attack_start: true
+            }
+        );
+    }
+
+    #[test]
+    fn player_attack_waits_for_active_mover_visibility_flag_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 55);
+        let victim = ObjectGuid::create_player(1, 56);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+
+        let mut victim_player = Player::new(Some(8), false);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(victim);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .set_map(571, 0)
+            .unwrap();
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::new(11.0, 20.0, 30.0, 0.0));
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .add_to_world();
+        victim_player
+            .unit_mut()
+            .set_pvp_flag_like_cpp(UnitPvpFlags::PVP);
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(571, 0)
+            .unwrap()
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_player(victim_player).unwrap(),
+            )
+            .unwrap();
+
+        session.set_active_player_local_flags_like_cpp(0);
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Rejected
+        );
+        assert_eq!(session.combat_target, None);
+
+        session.apply_move_init_active_mover_complete_like_cpp(0);
         assert_eq!(
             session.start_player_attack_like_cpp(victim),
             PlayerAttackStartLikeCppResult::Accepted {
