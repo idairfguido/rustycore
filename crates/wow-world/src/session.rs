@@ -1797,6 +1797,8 @@ impl WorldSession {
             .set_map(u32::from(self.player_map_id_like_cpp()), 0)
             .ok()?;
         player.unit_mut().world_mut().relocate(position);
+        *player.unit_mut().world_mut().phase_shift_mut() =
+            self.represented_player_phase_shift.clone();
         player.unit_mut().world_mut().object_mut().add_to_world();
         player.set_race_class_gender(
             self.player_race_like_cpp(),
@@ -1826,6 +1828,7 @@ impl WorldSession {
             let attacking = existing.unit().attacking();
             let target = existing.unit().data().target;
             let unit_state = existing.unit().unit_state();
+            let pvp_flags = existing.unit().pvp_flags_like_cpp();
             let player_flags = existing.data().player_flags;
             let player_flags_ex = existing.data().player_flags_ex;
             player.replace_all_player_flags(player_flags);
@@ -1834,6 +1837,7 @@ impl WorldSession {
             existing.unit_mut().set_attacking(attacking);
             existing.unit_mut().set_target(target);
             existing.unit_mut().add_unit_state(unit_state);
+            existing.unit_mut().replace_all_pvp_flags_like_cpp(pvp_flags);
             return;
         }
 
@@ -2110,6 +2114,9 @@ impl WorldSession {
                     victim_unit_state: player.unit().unit_state(),
                     victim_unit_flags: player.unit().unit_flags_like_cpp().bits(),
                     victim_has_affecting_player: true,
+                    visibility_represented: true,
+                    attacker_can_see_or_detect_target: self
+                        .can_see_phase_shift_like_cpp(player.unit().world().phase_shift()),
                     victim_in_sanctuary: pvp_flags.contains(UnitPvpFlags::SANCTUARY),
                     victim_is_pvp: pvp_flags.contains(UnitPvpFlags::PVP),
                     victim_is_ffa_pvp: pvp_flags.contains(UnitPvpFlags::FFA_PVP),
@@ -2126,6 +2133,9 @@ impl WorldSession {
                     victim_is_evading_creature: creature.is_evading_attacks_like_cpp(),
                     victim_unit_state: creature.unit().unit_state(),
                     victim_unit_flags: creature.unit().unit_flags_like_cpp().bits(),
+                    visibility_represented: true,
+                    attacker_can_see_or_detect_target: self
+                        .can_see_phase_shift_like_cpp(creature.unit().world().phase_shift()),
                     ..Default::default()
                 },
             );
@@ -15018,6 +15028,77 @@ mod tests {
                 .unit()
                 .has_attacker_like_cpp(player)
         );
+        assert_eq!(session.combat_target, None);
+        assert!(!session.in_combat);
+    }
+
+    #[test]
+    fn player_attack_unseen_phase_creature_is_rejected_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let player = ObjectGuid::create_player(1, 151);
+        let victim = test_creature_guid(18_109);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_map_manager(manager);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        let mut player_phase = PhaseShift::default();
+        player_phase.add_phase_like_cpp(10, wow_constants::PhaseFlags::empty(), 1);
+        session.set_represented_player_phase_shift_like_cpp(player_phase);
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.register_world_creature(
+            571,
+            Position::new(11.0, 20.0, 30.0, 0.0),
+            test_creature_create_data(victim, 9001, 25),
+            3,
+            5,
+            20.0,
+            0,
+            0,
+            0,
+            None,
+            0,
+            0,
+            0,
+            0,
+            -1,
+        );
+        session
+            .mutate_canonical_creature_by_guid_like_cpp(victim, |creature| {
+                let mut victim_phase = PhaseShift::default();
+                victim_phase.add_phase_like_cpp(20, wow_constants::PhaseFlags::empty(), 1);
+                *creature.unit_mut().world_mut().phase_shift_mut() = victim_phase;
+            })
+            .unwrap();
+
+        session.start_player_attack_like_cpp(victim);
+
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(571, 0).unwrap().map();
+        let player_entity = map.get_typed_player(player).unwrap();
+        let victim_entity = map.get_typed_creature(victim).unwrap();
+        assert_eq!(player_entity.unit().attacking(), None);
+        assert_eq!(player_entity.unit().data().target, ObjectGuid::EMPTY);
+        assert!(!victim_entity.unit().has_attacker_like_cpp(player));
         assert_eq!(session.combat_target, None);
         assert!(!session.in_combat);
     }
