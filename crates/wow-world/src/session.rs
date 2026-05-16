@@ -12846,6 +12846,60 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn send_nearby_creatures_empty_map_source_is_authoritative_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let manager = shared_map_manager();
+        let player_position = Position::new(10.0, 10.0, 0.0, 0.0);
+        let stale_creature = test_creature_guid(44);
+
+        session.set_map_manager(Arc::clone(&manager));
+        session.client_visible_guids_like_cpp.insert(stale_creature);
+
+        session
+            .send_nearby_creatures(571, &player_position, 0)
+            .await;
+
+        assert!(
+            !session
+                .client_visible_guids_like_cpp
+                .contains(&stale_creature)
+        );
+        assert_eq!(session.last_visibility_pos, Some(player_position));
+        assert!(
+            send_rx.try_recv().is_err(),
+            "empty map-owned creature source should not fall back to SQL or send creates"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_nearby_gameobjects_empty_canonical_source_is_authoritative_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_position = Position::new(10.0, 10.0, 0.0, 0.0);
+        let stale_gameobject = test_gameobject_guid(913, 45);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session
+            .client_visible_guids_like_cpp
+            .insert(stale_gameobject);
+
+        session
+            .send_nearby_gameobjects(571, &player_position, 0)
+            .await;
+
+        assert!(
+            !session
+                .client_visible_guids_like_cpp
+                .contains(&stale_gameobject)
+        );
+        assert!(
+            send_rx.try_recv().is_err(),
+            "empty canonical gameobject source should not fall back to SQL or send creates"
+        );
+    }
+
     #[test]
     fn npc_interaction_resolves_canonical_trainer_like_cpp() {
         let (mut session, _pkt_tx, _send_rx) = make_session();

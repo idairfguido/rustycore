@@ -3001,7 +3001,14 @@ impl WorldSession {
         const VISIBILITY_RANGE: f32 = 800.0;
 
         let map_creatures = self.visible_world_creatures_from_map_like_cpp(map_id, position);
-        if !map_creatures.is_empty() {
+        if self.has_world_map_manager_like_cpp() {
+            if map_creatures.is_empty() {
+                self.client_visible_guids_like_cpp
+                    .retain(|guid| !guid.is_any_type_creature());
+                self.last_visibility_pos = Some(*position);
+                return;
+            }
+
             let mut blocks = Vec::with_capacity(map_creatures.len());
             let mut visible = HashSet::with_capacity(map_creatures.len());
             for creature in &map_creatures {
@@ -4166,8 +4173,13 @@ impl WorldSession {
 
         if let Some(gameobjects) =
             self.visible_gameobjects_from_canonical_map_like_cpp(map_id, position, VISIBILITY_RANGE)
-            && !gameobjects.is_empty()
         {
+            if gameobjects.is_empty() {
+                self.client_visible_guids_like_cpp
+                    .retain(|guid| !guid.is_game_object());
+                return;
+            }
+
             let go_guids: HashSet<_> = gameobjects.iter().map(|go| go.guid).collect();
             let blocks = gameobjects
                 .into_iter()
