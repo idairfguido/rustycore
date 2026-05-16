@@ -413,6 +413,15 @@ pub(crate) enum RepresentedLootRollCriteriaEvent {
     },
 }
 
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepresentedGameObjectCriteriaEvent {
+    UseGameobject {
+        player_guid: ObjectGuid,
+        gameobject_entry: u32,
+    },
+}
+
 pub type SharedObjectAccessor = Arc<RwLock<ObjectAccessor>>;
 pub(crate) const SKILL_RIDING_LIKE_CPP: u16 = 762;
 pub(crate) const LIQUID_MAP_IN_WATER_LIKE_CPP: u32 = 0x0000_0004;
@@ -1196,6 +1205,8 @@ pub struct WorldSession {
         std::collections::HashMap<(wow_core::ObjectGuid, u8), RepresentedLootRollState>,
     #[cfg(test)]
     pub(crate) represented_loot_roll_criteria_events: Vec<RepresentedLootRollCriteriaEvent>,
+    #[cfg(test)]
+    pub(crate) represented_gameobject_criteria_events: Vec<RepresentedGameObjectCriteriaEvent>,
     /// C++ `sWorld->getRate(...)` subset used by represented loot generation.
     loot_drop_rates: LootDropRatesLikeCpp,
     /// C++ `CONFIG_ENABLE_AE_LOOT` represented switch.
@@ -1783,6 +1794,8 @@ impl WorldSession {
             represented_loot_rolls: std::collections::HashMap::new(),
             #[cfg(test)]
             represented_loot_roll_criteria_events: Vec::new(),
+            #[cfg(test)]
+            represented_gameobject_criteria_events: Vec::new(),
             loot_drop_rates: LootDropRatesLikeCpp::default(),
             enable_ae_loot_like_cpp: false,
             mmap_runtime_config_like_cpp: MMapRuntimeConfigLikeCpp::default(),

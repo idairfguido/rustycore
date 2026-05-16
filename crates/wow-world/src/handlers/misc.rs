@@ -1218,8 +1218,67 @@ impl crate::session::WorldSession {
     }
 
     /// CMSG_GAME_OBJ_REPORT_USE — client reports a game object use event.
-    /// C# ref: SpellHandler.HandleGameobjectReportUse → UpdateCriteria
-    pub async fn handle_game_obj_report_use(&mut self, _pkt: wow_packet::WorldPacket) {}
+    /// C++ ref: `WorldSession::HandleGameobjectReportUse`.
+    pub async fn handle_game_obj_report_use(&mut self, mut pkt: wow_packet::WorldPacket) {
+        let gameobject_guid = match pkt.read_packed_guid() {
+            Ok(guid) => guid,
+            Err(e) => {
+                warn!("GameObjReportUse: failed to read gameobject guid: {e}");
+                return;
+            }
+        };
+
+        if !gameobject_guid.is_game_object() {
+            return;
+        }
+
+        let state = self.represented_gameobject_use_states.get(&gameobject_guid);
+        let interaction_distance = represented_gameobject_interaction_distance_like_cpp(
+            state.and_then(|state| state.go_type),
+            state.and_then(|state| state.interact_radius_override),
+        );
+
+        let gameobject_access = if self.canonical_map_manager.is_some() {
+            match self.represented_gameobject_can_interact_with_like_cpp(
+                gameobject_guid,
+                interaction_distance,
+            ) {
+                Some(access) => access,
+                None => return,
+            }
+        } else {
+            if !self.visible_gameobjects.contains(&gameobject_guid) {
+                return;
+            }
+            let Some(position) = state.and_then(|state| state.position) else {
+                return;
+            };
+            let Some(player_position) = self.player_position_like_cpp() else {
+                return;
+            };
+            if !position.is_within_dist(&player_position, interaction_distance) {
+                return;
+            }
+            RepresentedGameObjectAccessLikeCpp {
+                entry: gameobject_guid.entry(),
+                position,
+            }
+        };
+        #[cfg(not(test))]
+        let _ = gameobject_access;
+
+        #[cfg(test)]
+        {
+            if let Some(player_guid) = self.player_guid() {
+                self.represented_gameobject_criteria_events.push(
+                    crate::session::RepresentedGameObjectCriteriaEvent::UseGameobject {
+                        player_guid,
+                        gameobject_entry: gameobject_access.entry,
+                    },
+                );
+            }
+        }
+    }
 
     /// CMSG_CLOSE_INTERACTION — player closed an NPC interaction window.
     /// C# ref: MiscHandler.HandleCloseInteraction → resets interaction data.
@@ -1281,6 +1340,66 @@ mod tests {
             ),
             send_rx,
         )
+    }
+
+    #[tokio::test]
+    async fn game_obj_report_use_records_use_criteria_from_canonical_go_like_cpp() {
+        let (mut session, _send_rx) = make_session();
+        let canonical = Arc::new(std::sync::Mutex::new(wow_map::MapManager::default()));
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid = ObjectGuid::create_world_object(
+            wow_core::guid::HighGuid::GameObject,
+            0,
+            1,
+            571,
+            0,
+            777,
+            5,
+        );
+
+        session.set_player_guid(Some(player_guid));
+        session.set_loaded_player_identity_like_cpp(571, 1, 1, 10, 0);
+        session.set_player_position_like_cpp(Position::new(10.0, 0.0, 0.0, 0.0));
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            571,
+            gameobject_guid,
+            777,
+            Position::new(14.0, 0.0, 0.0, 0.0),
+            3,
+        );
+
+        let mut gameobject = wow_entities::GameObject::new();
+        gameobject.world_mut().object_mut().create(gameobject_guid);
+        gameobject.world_mut().object_mut().set_entry(777);
+        gameobject.world_mut().set_map(571, 0).unwrap();
+        gameobject
+            .world_mut()
+            .relocate(Position::new(14.0, 0.0, 0.0, 0.0));
+        gameobject.world_mut().object_mut().add_to_world();
+        canonical
+            .lock()
+            .unwrap()
+            .create_world_map(571, 0)
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_game_object(gameobject).unwrap(),
+            )
+            .unwrap();
+
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_packed_guid(&gameobject_guid);
+        session.handle_game_obj_report_use(pkt).await;
+
+        assert_eq!(
+            session.represented_gameobject_criteria_events,
+            vec![
+                crate::session::RepresentedGameObjectCriteriaEvent::UseGameobject {
+                    player_guid,
+                    gameobject_entry: 777,
+                }
+            ]
+        );
     }
 
     #[tokio::test]
