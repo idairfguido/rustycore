@@ -9883,6 +9883,12 @@ impl WorldSession {
                     }
                     let damage = dmg.max(1);
                     died = creature.take_damage(damage);
+                    creature
+                        .creature
+                        .unit_mut()
+                        .subsystems_mut()
+                        .combat
+                        .add_threat(player_guid, damage as f32);
                     sent_swings.push((damage, died));
                     if died {
                         move_stop = creature.stop_move_spline_like_cpp().map(|stop| {
@@ -12699,6 +12705,71 @@ mod tests {
             .unwrap()
             .current_hp();
         assert_eq!(after_second, after_first);
+    }
+
+    #[test]
+    fn combat_tick_damage_adds_creature_threat_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let guid = test_creature_guid(18_024);
+        let player = ObjectGuid::create_player(1, 73);
+
+        canonical.lock().unwrap().create_world_map(0, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Threat".to_string(),
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            0,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        session
+            .mutate_canonical_player_like_cpp(|player| {
+                let unit = player.unit_mut();
+                unit.set_attacking(Some(guid));
+                unit.set_target(guid);
+                unit.set_base_attack_time_like_cpp(WeaponAttackType::BaseAttack, 2_000);
+                unit.set_weapon_damage(WeaponAttackType::BaseAttack, 7.0, 7.0);
+            })
+            .unwrap();
+        session.combat_target = Some(guid);
+        session.in_combat = true;
+        register_test_creature(&mut session, manager.clone(), guid, 40);
+        session
+            .mutate_world_creature(guid, |creature| {
+                creature.enter_combat(player);
+                creature.creature.ai_ownership_mut().last_swing_ms = 0;
+                creature.creature.ai_ownership_mut().swing_timer_ms = 0;
+            })
+            .unwrap();
+
+        session.tick_combat_sync();
+
+        let guard = manager.read().unwrap();
+        let world_creature = guard.find_creature(0, 0, guid).unwrap();
+        assert_eq!(
+            world_creature
+                .creature
+                .unit()
+                .subsystems()
+                .combat
+                .threat_value(player),
+            Some(7.0)
+        );
     }
 
     #[test]
