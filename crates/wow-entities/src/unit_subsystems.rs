@@ -1458,6 +1458,16 @@ impl CombatSubsystem {
         self.pve_refs.contains_key(&target) || self.pvp_refs.contains_key(&target)
     }
 
+    pub fn purge_combat_ref_like_cpp(&mut self, target: ObjectGuid) -> bool {
+        let removed =
+            self.pve_refs.remove(&target).is_some() || self.pvp_refs.remove(&target).is_some();
+        if removed {
+            self.remove_threat(target);
+            self.threatened_by_me.remove(&target);
+        }
+        removed
+    }
+
     pub fn has_pve_combat(&self) -> bool {
         self.pve_refs
             .values()
@@ -4207,6 +4217,21 @@ mod unit_subsystems_tests {
         assert_eq!(combat.threat_value(valid_pve), Some(10.0));
         assert_eq!(combat.threat_value(invalid_pve), None);
         assert!(!combat.is_threatening_to(invalid_pve, true));
+    }
+
+    #[test]
+    fn combat_purge_ref_removes_ref_and_related_threat_like_cpp_end_combat_side() {
+        let mut combat = CombatSubsystem::default();
+        let target = guid(45);
+        combat.set_in_combat_with(target, false, false);
+        combat.add_threat(target, 30.0);
+        combat.put_threatened_by_me_ref(target, ThreatReferenceState::default());
+
+        assert!(combat.purge_combat_ref_like_cpp(target));
+        assert!(!combat.is_in_combat_with(target));
+        assert_eq!(combat.threat_value(target), None);
+        assert!(!combat.is_threatening_to(target, true));
+        assert!(!combat.purge_combat_ref_like_cpp(target));
     }
 
     #[test]

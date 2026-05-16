@@ -2400,6 +2400,111 @@ impl WorldSession {
         attacker_started && victim_started
     }
 
+    fn revalidate_canonical_player_combat_refs_like_cpp(&mut self, player_guid: ObjectGuid) {
+        let Some(manager) = self.canonical_map_manager.as_ref().cloned() else {
+            return;
+        };
+        let Ok(mut manager) = manager.lock() else {
+            return;
+        };
+        let Some(managed) = manager.find_map_mut(u32::from(self.player_map_id_like_cpp()), 0)
+        else {
+            return;
+        };
+        let map = managed.map_mut();
+        let Some(player) = map.get_typed_player(player_guid) else {
+            return;
+        };
+        let player_unit = player.unit();
+        let player_world = player_unit.world();
+        let player_combat = &player_unit.subsystems().combat;
+        let refs: Vec<_> = player_combat
+            .pve_refs
+            .iter()
+            .chain(player_combat.pvp_refs.iter())
+            .map(|(guid, reference)| (*guid, *reference))
+            .collect();
+
+        let mut invalid = Vec::new();
+        for (target_guid, _reference) in refs {
+            let context = if let Some(target) = map.get_typed_player(target_guid) {
+                let target_unit = target.unit();
+                let target_world = target_unit.world();
+                let target_combat = &target_unit.subsystems().combat;
+                wow_entities::CombatBeginContextLikeCpp {
+                    same_unit: player_guid == target_guid,
+                    attacker_in_world: player_world.object().is_in_world(),
+                    victim_in_world: target_world.object().is_in_world(),
+                    attacker_alive: player_unit.is_alive(),
+                    victim_alive: target_unit.is_alive(),
+                    same_map: player_world.is_in_map(target_world),
+                    same_phase: player_world.in_same_phase(target_world),
+                    attacker_unit_state: player_unit.unit_state(),
+                    victim_unit_state: target_unit.unit_state(),
+                    attacker_combat_disallowed: player_combat.combat_disallowed,
+                    victim_combat_disallowed: target_combat.combat_disallowed,
+                    relation_represented: false,
+                    attacker_is_friendly_to_victim: false,
+                    victim_is_friendly_to_attacker: false,
+                    attacker_or_owner_player_is_game_master: player.is_game_master_like_cpp(),
+                    victim_or_owner_player_is_game_master: target.is_game_master_like_cpp(),
+                }
+            } else if let Some(target) = map.get_typed_creature(target_guid) {
+                let target_unit = target.unit();
+                let target_world = target_unit.world();
+                let target_combat = &target_unit.subsystems().combat;
+                wow_entities::CombatBeginContextLikeCpp {
+                    same_unit: false,
+                    attacker_in_world: player_world.object().is_in_world(),
+                    victim_in_world: target_world.object().is_in_world(),
+                    attacker_alive: player_unit.is_alive(),
+                    victim_alive: target_unit.is_alive(),
+                    same_map: player_world.is_in_map(target_world),
+                    same_phase: player_world.in_same_phase(target_world),
+                    attacker_unit_state: player_unit.unit_state(),
+                    victim_unit_state: target_unit.unit_state(),
+                    attacker_combat_disallowed: player_combat.combat_disallowed,
+                    victim_combat_disallowed: target_combat.combat_disallowed,
+                    relation_represented: false,
+                    attacker_is_friendly_to_victim: false,
+                    victim_is_friendly_to_attacker: false,
+                    attacker_or_owner_player_is_game_master: player.is_game_master_like_cpp(),
+                    victim_or_owner_player_is_game_master: false,
+                }
+            } else {
+                invalid.push(target_guid);
+                continue;
+            };
+
+            if !wow_entities::CombatSubsystem::can_begin_combat_like_cpp(context) {
+                invalid.push(target_guid);
+            }
+        }
+
+        for target_guid in invalid {
+            if let Some(player) = map.get_typed_player_mut(player_guid) {
+                player
+                    .unit_mut()
+                    .subsystems_mut()
+                    .combat
+                    .purge_combat_ref_like_cpp(target_guid);
+            }
+            if let Some(target) = map.get_typed_player_mut(target_guid) {
+                target
+                    .unit_mut()
+                    .subsystems_mut()
+                    .combat
+                    .purge_combat_ref_like_cpp(player_guid);
+            } else if let Some(target) = map.get_typed_creature_mut(target_guid) {
+                target
+                    .unit_mut()
+                    .subsystems_mut()
+                    .combat
+                    .purge_combat_ref_like_cpp(player_guid);
+            }
+        }
+    }
+
     pub(crate) fn start_player_attack_like_cpp(
         &mut self,
         victim: ObjectGuid,
@@ -10172,6 +10277,7 @@ impl WorldSession {
         let Some(player_guid) = self.player_guid() else {
             return;
         };
+        self.revalidate_canonical_player_combat_refs_like_cpp(player_guid);
         let canonical_attack_state = self.canonical_player_attack_state_like_cpp();
         let Some(combat_target) = (match canonical_attack_state {
             Some(Some(target)) => Some(target),
@@ -15383,6 +15489,108 @@ mod tests {
                 .subsystems()
                 .combat
                 .is_in_combat_with(player)
+        );
+    }
+
+    #[test]
+    fn combat_tick_revalidates_and_purges_invalid_combat_refs_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let player = ObjectGuid::create_player(1, 158);
+        let victim = test_creature_guid(18_115);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_map_manager(manager);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.register_world_creature(
+            571,
+            Position::new(11.0, 20.0, 30.0, 0.0),
+            test_creature_create_data(victim, 9001, 25),
+            3,
+            5,
+            20.0,
+            0,
+            0,
+            0,
+            None,
+            0,
+            0,
+            0,
+            0,
+            -1,
+        );
+        session.start_player_attack_like_cpp(victim);
+        {
+            let guard = canonical.lock().unwrap();
+            let map = guard.find_map(571, 0).unwrap().map();
+            assert!(
+                map.get_typed_player(player)
+                    .unwrap()
+                    .unit()
+                    .subsystems()
+                    .combat
+                    .is_in_combat_with(victim)
+            );
+            assert!(
+                map.get_typed_creature(victim)
+                    .unwrap()
+                    .unit()
+                    .subsystems()
+                    .combat
+                    .is_in_combat_with(player)
+            );
+        }
+        session
+            .mutate_world_creature(victim, |creature| {
+                let mut victim_phase = PhaseShift::default();
+                victim_phase.add_phase_like_cpp(20, wow_constants::PhaseFlags::empty(), 1);
+                *creature.creature.unit_mut().world_mut().phase_shift_mut() = victim_phase;
+            })
+            .unwrap();
+
+        session.tick_combat_sync();
+
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(571, 0).unwrap().map();
+        assert!(
+            !map.get_typed_player(player)
+                .unwrap()
+                .unit()
+                .subsystems()
+                .combat
+                .is_in_combat_with(victim)
+        );
+        assert!(
+            !map.get_typed_creature(victim)
+                .unwrap()
+                .unit()
+                .subsystems()
+                .combat
+                .is_in_combat_with(player)
+        );
+        assert_eq!(
+            map.get_typed_player(player).unwrap().unit().attacking(),
+            Some(victim)
         );
     }
 
