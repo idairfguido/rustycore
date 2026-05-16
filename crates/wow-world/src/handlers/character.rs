@@ -50,6 +50,7 @@ const GO_SPAWN_PHASE_USE_FLAGS_COLUMN: usize = GO_SPAWN_TEMPLATE_DATA_START + MA
 const GO_SPAWN_PHASE_ID_COLUMN: usize = GO_SPAWN_PHASE_USE_FLAGS_COLUMN + 1;
 const GO_SPAWN_PHASE_GROUP_COLUMN: usize = GO_SPAWN_PHASE_USE_FLAGS_COLUMN + 2;
 const GO_SPAWN_TERRAIN_SWAP_MAP_COLUMN: usize = GO_SPAWN_PHASE_USE_FLAGS_COLUMN + 3;
+const TACT_KEY_TABLE_HASH_LIKE_CPP: u32 = 0xD3F6_1A9E;
 
 inventory::submit! {
     PacketHandlerEntry {
@@ -1981,10 +1982,17 @@ impl WorldSession {
             // Not found anywhere → send Invalid(3) so the client uses its local DB2 copy.
             // RecordRemoved(2) would tell the client to DELETE the record from its cache,
             // which is wrong for items that exist in the client's DB2 but not on the server.
-            info!(
-                "DbQueryBulk: NOT_FOUND table=0x{:08X} record={} → Invalid(3)",
-                query.table_hash, record_id
-            );
+            if query.table_hash == TACT_KEY_TABLE_HASH_LIKE_CPP {
+                debug!(
+                    "DbQueryBulk: NOT_FOUND TactKey.db2 record={} → Invalid(3), client may use local DB2 cache",
+                    record_id
+                );
+            } else {
+                info!(
+                    "DbQueryBulk: NOT_FOUND table=0x{:08X} record={} → Invalid(3)",
+                    query.table_hash, record_id
+                );
+            }
             self.send_packet(&DBReply::not_found(query.table_hash, *record_id));
         }
     }
@@ -8517,6 +8525,30 @@ mod tests {
                 assert!(id > 0, "Race {race} sex {sex} has zero display ID");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn tact_key_db_query_bulk_miss_returns_invalid_like_cpp_client_cache_fallback() {
+        let (mut session, send_rx) = make_session_with_send_capacity(1);
+
+        session
+            .handle_db_query_bulk(wow_packet::packets::misc::DbQueryBulk {
+                table_hash: TACT_KEY_TABLE_HASH_LIKE_CPP,
+                queries: vec![3909],
+            })
+            .await;
+
+        let bytes = send_rx.try_recv().expect("db reply");
+        assert_eq!(
+            u16::from_le_bytes([bytes[0], bytes[1]]),
+            wow_constants::ServerOpcodes::DbReply as u16
+        );
+        let mut pkt = WorldPacket::from_bytes(&bytes[2..]);
+        assert_eq!(pkt.read_uint32().unwrap(), TACT_KEY_TABLE_HASH_LIKE_CPP);
+        assert_eq!(pkt.read_int32().unwrap(), 3909);
+        let _timestamp = pkt.read_int32().unwrap();
+        assert_eq!(pkt.read_bits(3).unwrap(), 3);
+        assert_eq!(pkt.read_uint32().unwrap(), 0);
     }
 
     #[tokio::test]
