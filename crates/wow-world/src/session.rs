@@ -3489,6 +3489,27 @@ impl WorldSession {
         }
     }
 
+    pub(crate) fn visible_world_creatures_from_map_like_cpp(
+        &self,
+        map_id: u16,
+        position: &wow_core::Position,
+    ) -> Vec<crate::map_manager::WorldCreature> {
+        let Some(manager) = &self.map_manager else {
+            return Vec::new();
+        };
+        manager
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get_visible_creatures_in_phase(
+                map_id,
+                0,
+                position.x,
+                position.y,
+                position.z,
+                Some(&self.represented_player_phase_shift),
+            )
+    }
+
     #[cfg(test)]
     fn test_world_creature_from_legacy(
         map_id: u16,
@@ -12685,6 +12706,36 @@ mod tests {
             session.represented_gameobject_can_interact_with_like_cpp(gameobject_guid, 5.0),
             None
         );
+    }
+
+    #[test]
+    fn visible_world_creatures_use_map_grid_and_phase_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let manager = shared_map_manager();
+        let player_position = Position::new(10.0, 10.0, 0.0, 0.0);
+        let visible_guid = test_creature_guid(20);
+        let far_guid = test_creature_guid(21);
+        let visible_pos = Position::new(20.0, 20.0, 0.0, 0.0);
+        let far_pos = Position::new(5000.0, 5000.0, 0.0, 0.0);
+
+        session.set_map_manager(Arc::clone(&manager));
+        for (guid, position) in [(visible_guid, visible_pos), (far_guid, far_pos)] {
+            let (grid_x, grid_y) = crate::map_manager::world_to_grid_coords(position.x, position.y);
+            manager.write().unwrap().add_creature(
+                571,
+                0,
+                grid_x,
+                grid_y,
+                crate::map_manager::WorldCreature::new(
+                    guid, 900, position, 100, 80, 1, 2, 0.0, 1, 35, 0, 0,
+                ),
+            );
+        }
+
+        let visible = session.visible_world_creatures_from_map_like_cpp(571, &player_position);
+
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].guid(), visible_guid);
     }
 
     #[test]

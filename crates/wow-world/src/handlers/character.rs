@@ -5,6 +5,7 @@
 
 //! Character handlers: enum, create, delete, and player login.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use rand::Rng;
@@ -2997,6 +2998,37 @@ impl WorldSession {
     /// on the player's map, builds CreatureCreateData for each, and sends
     /// a batched UpdateObject.
     pub async fn send_nearby_creatures(&mut self, map_id: u16, position: &Position, zone_id: u32) {
+        const VISIBILITY_RANGE: f32 = 800.0;
+
+        let map_creatures = self.visible_world_creatures_from_map_like_cpp(map_id, position);
+        if !map_creatures.is_empty() {
+            let mut blocks = Vec::with_capacity(map_creatures.len());
+            let mut visible = HashSet::with_capacity(map_creatures.len());
+            for creature in &map_creatures {
+                let mut create_data = creature.create_data.clone();
+                create_data.health = i64::from(creature.current_hp());
+                create_data.max_health = i64::from(creature.max_hp());
+                create_data.level = creature.level();
+                create_data.zone_id = zone_id;
+                blocks.push(UpdateObject::create_creature_block(
+                    create_data,
+                    &creature.position(),
+                ));
+                visible.insert(creature.guid());
+            }
+
+            self.visible_creatures = visible;
+            self.last_visibility_pos = Some(*position);
+            self.send_packet(&UpdateObject::create_creatures(blocks, map_id));
+            debug!(
+                "Sent {} map-owned creatures to account {} on map {}",
+                map_creatures.len(),
+                self.account_id,
+                map_id
+            );
+            return;
+        }
+
         let world_db = match self.world_db() {
             Some(db) => Arc::clone(db),
             None => {
@@ -3005,7 +3037,6 @@ impl WorldSession {
             }
         };
 
-        const VISIBILITY_RANGE: f32 = 800.0;
         let x_min = position.x - VISIBILITY_RANGE;
         let x_max = position.x + VISIBILITY_RANGE;
         let y_min = position.y - VISIBILITY_RANGE;
@@ -3273,7 +3304,23 @@ impl WorldSession {
         let mut new_visible_creatures: HashSet<ObjectGuid> = HashSet::new();
         let mut new_creature_blocks: Vec<UpdateBlock> = Vec::new();
 
-        if !cr.is_empty() {
+        let map_creatures = self.visible_world_creatures_from_map_like_cpp(map_id, &pos);
+        if !map_creatures.is_empty() {
+            for creature in &map_creatures {
+                let guid = creature.guid();
+                new_visible_creatures.insert(guid);
+                if !self.visible_creatures.contains(&guid) {
+                    let mut create_data = creature.create_data.clone();
+                    create_data.health = i64::from(creature.current_hp());
+                    create_data.max_health = i64::from(creature.max_hp());
+                    create_data.level = creature.level();
+                    new_creature_blocks.push(UpdateObject::create_creature_block(
+                        create_data,
+                        &creature.position(),
+                    ));
+                }
+            }
+        } else if !cr.is_empty() {
             let mut cr = cr;
             loop {
                 let spawn_guid: u64 = cr
