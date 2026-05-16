@@ -9882,14 +9882,20 @@ impl WorldSession {
                         break;
                     }
                     let damage = dmg.max(1);
+                    let health_before = creature.current_hp();
                     died = creature.take_damage(damage);
+                    let over_damage = if died {
+                        damage.saturating_sub(health_before) as i32
+                    } else {
+                        -1
+                    };
                     creature
                         .creature
                         .unit_mut()
                         .subsystems_mut()
                         .combat
                         .add_threat(player_guid, damage as f32);
-                    sent_swings.push((damage, died));
+                    sent_swings.push((damage, died, over_damage));
                     if died {
                         let combat = &mut creature.creature.unit_mut().subsystems_mut().combat;
                         combat.clear_threat();
@@ -9915,13 +9921,12 @@ impl WorldSession {
             return;
         };
 
-        for (dmg, swing_killed) in &swings {
-            let over_damage = if *swing_killed { 0i32 } else { -1i32 };
+        for (dmg, _swing_killed, over_damage) in &swings {
             let state_update = AttackerStateUpdate {
                 attacker: player_guid,
                 victim: combat_target,
                 damage: *dmg as i32,
-                over_damage,
+                over_damage: *over_damage,
                 victim_state: VICTIM_STATE_HIT,
                 school_mask: 1,
                 target_level,
@@ -13382,6 +13387,73 @@ mod tests {
         assert_eq!(player_entity.unit().data().target, ObjectGuid::EMPTY);
         assert_eq!(session.combat_target, None);
         assert!(!session.in_combat);
+    }
+
+    #[test]
+    fn combat_tick_reports_cpp_like_over_damage_on_killing_swing() {
+        let (mut session, _, send_rx) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let guid = test_creature_guid(18_025);
+        let player = ObjectGuid::create_player(1, 74);
+
+        canonical.lock().unwrap().create_world_map(0, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Overkill".to_string(),
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            0,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        session
+            .mutate_canonical_player_like_cpp(|player| {
+                let unit = player.unit_mut();
+                unit.set_attacking(Some(guid));
+                unit.set_target(guid);
+                unit.set_base_attack_time_like_cpp(WeaponAttackType::BaseAttack, 2_000);
+                unit.set_weapon_damage(WeaponAttackType::BaseAttack, 7.0, 7.0);
+            })
+            .unwrap();
+        session.combat_target = Some(guid);
+        session.in_combat = true;
+        register_test_creature(&mut session, manager.clone(), guid, 3);
+        session
+            .mutate_world_creature(guid, |creature| {
+                creature.enter_combat(player);
+                creature.creature.ai_ownership_mut().last_swing_ms = 0;
+                creature.creature.ai_ownership_mut().swing_timer_ms = 0;
+            })
+            .unwrap();
+
+        session.tick_combat_sync();
+
+        let sent = send_rx.try_recv().unwrap();
+        let opcode = u16::from_le_bytes([sent[0], sent[1]]);
+        assert_eq!(opcode, ServerOpcodes::AttackerStateUpdate as u16);
+        let mut outer = WorldPacket::from_bytes(&sent[2..]);
+        let size = outer.read_uint32().unwrap() as usize;
+        let data = outer.read_bytes(size).unwrap();
+        let mut info = WorldPacket::from_bytes(&data);
+        assert_eq!(info.read_uint32().unwrap(), 0x0000_0002);
+        assert_eq!(info.read_packed_guid().unwrap(), player);
+        assert_eq!(info.read_packed_guid().unwrap(), guid);
+        assert_eq!(info.read_int32().unwrap(), 7);
+        assert_eq!(info.read_int32().unwrap(), 7);
+        assert_eq!(info.read_int32().unwrap(), 4);
     }
 
     #[tokio::test]
