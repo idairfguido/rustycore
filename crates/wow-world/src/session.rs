@@ -1556,6 +1556,11 @@ pub(crate) enum RepresentedCreatureKillEventLikeCpp {
     ZoneScriptUnitDeath {
         unit_guid: ObjectGuid,
     },
+    TapperPetKilledUnitAi {
+        tapper_guid: ObjectGuid,
+        pet_guid: ObjectGuid,
+        victim_guid: ObjectGuid,
+    },
     LootFlagsApplied {
         creature_guid: ObjectGuid,
         lootable: bool,
@@ -9569,6 +9574,7 @@ impl WorldSession {
                 unit_guid: creature_guid,
             },
         );
+        self.record_represented_tapper_pet_killed_unit_hooks_like_cpp(creature_guid);
         self.represented_creature_kill_events_like_cpp.push(
             RepresentedCreatureKillEventLikeCpp::LootFlagsApplied {
                 creature_guid,
@@ -9584,6 +9590,32 @@ impl WorldSession {
             },
         );
         Some(values_update)
+    }
+
+    fn record_represented_tapper_pet_killed_unit_hooks_like_cpp(
+        &mut self,
+        creature_guid: ObjectGuid,
+    ) {
+        let (Some(player_guid), Some(pet_guid)) =
+            (self.player_guid(), self.represented_pet_guid_like_cpp)
+        else {
+            return;
+        };
+        let tapper_has_current_player = self
+            .mutate_world_creature(creature_guid, |creature| {
+                creature.creature.tap_list().contains(&player_guid)
+            })
+            .unwrap_or(true);
+        if !tapper_has_current_player {
+            return;
+        }
+        self.represented_creature_kill_events_like_cpp.push(
+            RepresentedCreatureKillEventLikeCpp::TapperPetKilledUnitAi {
+                tapper_guid: player_guid,
+                pet_guid,
+                victim_guid: creature_guid,
+            },
+        );
     }
 
     pub(crate) fn apply_move_init_active_mover_complete_like_cpp(&mut self, ticks: u32) {
@@ -14507,6 +14539,62 @@ mod tests {
             .get(&guid)
             .expect("loot still uses the original tap list");
         assert!(loot.allowed_looters.contains(&far_member));
+    }
+
+    #[tokio::test]
+    async fn creature_kill_notifies_current_tapper_pet_after_death_state_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let guid = test_creature_guid(18_008);
+        let player = ObjectGuid::create_player(1, 51);
+        let pet_guid =
+            ObjectGuid::create_world_object(wow_core::guid::HighGuid::Pet, 0, 1, 0, 0, 500, 52);
+        session.player_guid = Some(player);
+        session.set_represented_pet_mode_state_like_cpp(
+            Some(pet_guid),
+            wow_packet::packets::pet::REACT_DEFENSIVE_LIKE_CPP,
+            wow_packet::packets::pet::COMMAND_FOLLOW_LIKE_CPP,
+        );
+        register_test_creature(&mut session, manager.clone(), guid, 40);
+
+        session.apply_damage(guid, 100).await.unwrap();
+
+        assert_eq!(
+            session.represented_creature_kill_events_like_cpp(),
+            &[
+                RepresentedCreatureKillEventLikeCpp::KillerProc {
+                    attacker_guid: player,
+                    victim_guid: guid,
+                },
+                RepresentedCreatureKillEventLikeCpp::TapperTargetDiesProc {
+                    tapper_guid: player,
+                    victim_guid: guid,
+                },
+                RepresentedCreatureKillEventLikeCpp::VictimDeathProc { victim_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::DeliveredKillingBlowCriteria {
+                    player_guid: player,
+                    victim_guid: guid,
+                    quantity: 1,
+                },
+                RepresentedCreatureKillEventLikeCpp::DeathStateJustDied { victim_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::ZoneScriptUnitDeath { unit_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::TapperPetKilledUnitAi {
+                    tapper_guid: player,
+                    pet_guid,
+                    victim_guid: guid,
+                },
+                RepresentedCreatureKillEventLikeCpp::LootFlagsApplied {
+                    creature_guid: guid,
+                    lootable: true,
+                    can_skin: false,
+                    skinnable: false,
+                },
+                RepresentedCreatureKillEventLikeCpp::CreatureJustDiedAi {
+                    creature_guid: guid,
+                    killer_guid: player,
+                },
+            ]
+        );
     }
 
     #[tokio::test]
