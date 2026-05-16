@@ -46,8 +46,8 @@ use wow_data::{
     PlayerConditionPartyStatusLikeCpp, PlayerConditionQuestKillLikeCpp,
     PlayerConditionReputationLikeCpp, PlayerConditionSkillLikeCpp, PlayerConditionStore,
     PlayerStatsStore, RandPropPointsStore, SkillStore, SpellItemEnchantmentStore, SpellMiscStore,
-    SpellRangeStore, SpellStore, VEHICLE_SEAT_FLAG_CAN_ATTACK, VehicleAccessoryStoreLikeCpp,
-    VehicleSeatStore, VehicleStore, VehicleTemplateStoreLikeCpp,
+    SpellRangeStore, SpellStore, SummonPropertiesEntry, VEHICLE_SEAT_FLAG_CAN_ATTACK,
+    VehicleAccessoryStoreLikeCpp, VehicleSeatStore, VehicleStore, VehicleTemplateStoreLikeCpp,
     is_player_meeting_condition_like_cpp,
     progression_rewards::{FactionStore, FactionTemplateStore},
 };
@@ -85,6 +85,8 @@ const PLAYER_FLAGS_UBER_LIKE_CPP: u32 = 0x0008_0000;
 const PLAYER_FLAGS_CONTESTED_PVP_LIKE_CPP: u32 = 0x0000_0100;
 const FACTION_TEMPLATE_FLAG_CONTESTED_GUARD_LIKE_CPP: u16 = 0x0000_1000;
 const ATTACK_DISPLAY_DELAY_LIKE_CPP_MS: u32 = 200;
+const SUMMON_PROPERTIES_ONLY_VISIBLE_TO_SUMMONER_LIKE_CPP: u32 = 0x0000_0010;
+const SUMMON_PROPERTIES_ONLY_VISIBLE_TO_SUMMONER_GROUP_LIKE_CPP: u32 = 0x0001_0000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PlayerAttackStartLikeCppResult {
@@ -2274,6 +2276,63 @@ impl WorldSession {
         group_registry.get(&group_guid).is_some_and(|group| {
             group.members.contains(&player_guid) && group.members.contains(&owner_guid)
         })
+    }
+
+    pub fn summon_private_object_owner_like_cpp(
+        &self,
+        caster_guid: ObjectGuid,
+        caster_private_object_owner: ObjectGuid,
+        properties: &SummonPropertiesEntry,
+    ) -> ObjectGuid {
+        let flags = u32::try_from(properties.flags[0]).unwrap_or(0);
+        let only_visible_to_summoner =
+            flags & SUMMON_PROPERTIES_ONLY_VISIBLE_TO_SUMMONER_LIKE_CPP != 0;
+        let only_visible_to_summoner_group =
+            flags & SUMMON_PROPERTIES_ONLY_VISIBLE_TO_SUMMONER_GROUP_LIKE_CPP != 0;
+        if !only_visible_to_summoner && !only_visible_to_summoner_group {
+            return ObjectGuid::EMPTY;
+        }
+
+        if !caster_private_object_owner.is_empty() {
+            return caster_private_object_owner;
+        }
+
+        if only_visible_to_summoner_group && caster_guid.is_player() {
+            if let Some(group_guid) = self.group_guid {
+                return ObjectGuid::create_group(group_guid);
+            }
+        }
+
+        caster_guid
+    }
+
+    pub fn set_canonical_creature_private_object_owner_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        owner: ObjectGuid,
+    ) -> bool {
+        let mut updated = self
+            .mutate_canonical_creature_by_guid_like_cpp(guid, |creature| {
+                creature.unit_mut().set_private_object_owner_like_cpp(owner);
+            })
+            .is_some();
+
+        if let Some(manager) = self.map_manager.as_ref() {
+            let mut manager = manager
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(creature) =
+                manager.find_creature_mut(self.player_map_id_like_cpp(), 0, guid)
+            {
+                creature
+                    .creature
+                    .unit_mut()
+                    .set_private_object_owner_like_cpp(owner);
+                updated = true;
+            }
+        }
+
+        updated
     }
 
     fn apply_target_visibility_context_for_current_player_like_cpp(
@@ -15293,6 +15352,135 @@ mod tests {
         session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
         assert_eq!(
             session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Accepted {
+                send_attack_start: true
+            }
+        );
+    }
+
+    #[test]
+    fn summon_private_object_owner_derives_from_properties_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let caster = ObjectGuid::create_player(1, 66);
+        let inherited_private_owner = ObjectGuid::create_player(1, 67);
+
+        let mut properties = SummonPropertiesEntry {
+            id: 1,
+            control: 0,
+            faction: 0,
+            title: 0,
+            slot: 0,
+            flags: [0, 0],
+        };
+        assert_eq!(
+            session.summon_private_object_owner_like_cpp(caster, ObjectGuid::EMPTY, &properties),
+            ObjectGuid::EMPTY
+        );
+
+        properties.flags[0] = SUMMON_PROPERTIES_ONLY_VISIBLE_TO_SUMMONER_LIKE_CPP as i32;
+        assert_eq!(
+            session.summon_private_object_owner_like_cpp(caster, ObjectGuid::EMPTY, &properties),
+            caster
+        );
+        assert_eq!(
+            session.summon_private_object_owner_like_cpp(
+                caster,
+                inherited_private_owner,
+                &properties
+            ),
+            inherited_private_owner
+        );
+
+        properties.flags[0] = SUMMON_PROPERTIES_ONLY_VISIBLE_TO_SUMMONER_GROUP_LIKE_CPP as i32;
+        assert_eq!(
+            session.summon_private_object_owner_like_cpp(caster, ObjectGuid::EMPTY, &properties),
+            caster
+        );
+        session.group_guid = Some(77);
+        assert_eq!(
+            session.summon_private_object_owner_like_cpp(caster, ObjectGuid::EMPTY, &properties),
+            ObjectGuid::create_group(77)
+        );
+    }
+
+    #[test]
+    fn player_attack_uses_private_summon_group_owner_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 68);
+        let summon = test_creature_guid(669);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Hunter".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            3,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        session.register_world_creature(
+            571,
+            Position::new(11.0, 20.0, 30.0, 0.0),
+            test_creature_create_data(summon, 9001, 25),
+            3,
+            5,
+            20.0,
+            0,
+            0,
+            0,
+            None,
+            0,
+            0,
+            0,
+            0,
+            -1,
+        );
+
+        let group_registry = Arc::new(GroupRegistry::default());
+        let group = GroupInfo::new(attacker);
+        let group_guid = group.group_guid;
+        session.group_guid = Some(group_guid);
+        let properties = SummonPropertiesEntry {
+            id: 2,
+            control: 0,
+            faction: 0,
+            title: 0,
+            slot: 0,
+            flags: [
+                SUMMON_PROPERTIES_ONLY_VISIBLE_TO_SUMMONER_GROUP_LIKE_CPP as i32,
+                0,
+            ],
+        };
+        let private_owner =
+            session.summon_private_object_owner_like_cpp(attacker, ObjectGuid::EMPTY, &properties);
+        assert_eq!(private_owner, ObjectGuid::create_group(group_guid));
+        assert!(
+            session.set_canonical_creature_private_object_owner_like_cpp(summon, private_owner)
+        );
+
+        assert_eq!(
+            session.start_player_attack_like_cpp(summon),
+            PlayerAttackStartLikeCppResult::Rejected
+        );
+
+        group_registry.insert(group_guid, group);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+        assert_eq!(
+            session.start_player_attack_like_cpp(summon),
             PlayerAttackStartLikeCppResult::Accepted {
                 send_attack_start: true
             }
