@@ -902,6 +902,16 @@ impl WorldCreature {
         self.creature.take_ai_damage(damage, self.now_ms())
     }
 
+    pub fn take_damage_before_death_state_like_cpp(&mut self, damage: u32) -> bool {
+        self.creature
+            .apply_ai_damage_before_death_state_like_cpp(damage, self.now_ms())
+    }
+
+    pub fn complete_death_state_after_kill_hooks_like_cpp(&mut self) {
+        self.creature
+            .complete_ai_death_state_after_kill_hooks_like_cpp(self.now_ms());
+    }
+
     pub fn die(&mut self) {
         self.creature.mark_ai_dead(self.now_ms());
     }

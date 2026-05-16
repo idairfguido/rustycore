@@ -974,6 +974,19 @@ impl Creature {
 
     /// Apply damage and return `true` when this call killed the creature.
     pub fn take_ai_damage(&mut self, damage: u32, now_ms: u64) -> bool {
+        if self.apply_ai_damage_before_death_state_like_cpp(damage, now_ms) {
+            self.mark_ai_dead(now_ms);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn apply_ai_damage_before_death_state_like_cpp(
+        &mut self,
+        damage: u32,
+        now_ms: u64,
+    ) -> bool {
         if !self.ai_is_alive() {
             return false;
         }
@@ -982,7 +995,12 @@ impl Creature {
         self.unit.set_health(remaining);
         self.last_damaged_time = now_ms.min(i64::MAX as u64) as i64;
         if remaining == 0 {
-            self.mark_ai_dead(now_ms);
+            self.ai_ownership.state = CreatureAiState::Dead;
+            self.ai_ownership.combat_target = None;
+            self.ai_ownership.move_target = None;
+            self.ai_ownership.death_time_ms = Some(now_ms);
+            self.respawn_delay =
+                self.ai_ownership.respawn_time_secs.min(u64::from(u32::MAX)) as u32;
             true
         } else {
             false
@@ -996,6 +1014,14 @@ impl Creature {
         self.ai_ownership.death_time_ms = Some(now_ms);
         self.unit.set_health(0);
         self.respawn_delay = self.ai_ownership.respawn_time_secs.min(u64::from(u32::MAX)) as u32;
+        self.set_death_state_runtime(DeathState::JustDied, now_ms.min(i64::MAX as u64) as i64);
+        self.unit.set_health(0);
+    }
+
+    pub fn complete_ai_death_state_after_kill_hooks_like_cpp(&mut self, now_ms: u64) {
+        if self.ai_ownership.state != CreatureAiState::Dead || self.unit.is_dead() {
+            return;
+        }
         self.set_death_state_runtime(DeathState::JustDied, now_ms.min(i64::MAX as u64) as i64);
         self.unit.set_health(0);
     }
@@ -2101,6 +2127,31 @@ mod tests {
         assert!(creature.runtime_state().save_respawn_requested);
         assert!(!creature.should_ai_respawn(29_999));
         assert!(creature.should_ai_respawn(30_020));
+    }
+
+    #[test]
+    fn creature_ai_lethal_damage_can_defer_death_state_until_kill_hooks_like_cpp() {
+        let mut creature = Creature::new(false);
+        creature.unit_mut().set_max_health(40);
+        creature.unit_mut().set_health(40);
+        creature.ai_ownership_mut().respawn_time_secs = 30;
+
+        assert!(creature.apply_ai_damage_before_death_state_like_cpp(100, 20));
+        assert_eq!(creature.current_health(), 0);
+        assert_eq!(creature.ai_state(), CreatureAiState::Dead);
+        assert_eq!(creature.ai_ownership().death_time_ms, Some(20));
+        assert_eq!(creature.unit().death_state(), DeathState::Alive);
+        assert_eq!(creature.corpse_remove_time(), 0);
+        assert!(!creature.runtime_state().save_respawn_requested);
+
+        creature.complete_ai_death_state_after_kill_hooks_like_cpp(20);
+        assert_eq!(creature.unit().death_state(), DeathState::Corpse);
+        assert_eq!(
+            creature.corpse_remove_time(),
+            20 + i64::from(DEFAULT_CORPSE_DELAY_SECS)
+        );
+        assert_eq!(creature.respawn_time(), 20 + 30);
+        assert!(creature.runtime_state().save_respawn_requested);
     }
 
     #[test]

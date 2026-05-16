@@ -1544,6 +1544,9 @@ pub(crate) enum RepresentedCreatureKillEventLikeCpp {
     VictimDeathProc {
         victim_guid: ObjectGuid,
     },
+    DeathStateJustDied {
+        victim_guid: ObjectGuid,
+    },
     CreatureJustDiedAi {
         creature_guid: ObjectGuid,
         killer_guid: ObjectGuid,
@@ -7032,6 +7035,22 @@ impl WorldSession {
                 reward.killer_guid,
                 reward.creature_guid,
             );
+            if let Some(values_update) = self
+                .complete_represented_creature_death_state_after_kill_hooks_like_cpp(
+                    reward.killer_guid,
+                    reward.creature_guid,
+                )
+                && self
+                    .client_visible_guids_like_cpp
+                    .contains(&reward.creature_guid)
+                && let Some(update) = unit_values_update_to_update_object(
+                    reward.creature_guid,
+                    self.player_map_id_like_cpp(),
+                    &values_update,
+                )
+            {
+                self.send_packet(&update);
+            }
         }
     }
 
@@ -9444,12 +9463,6 @@ impl WorldSession {
                 victim_guid: creature_guid,
             },
         );
-        self.represented_creature_kill_events_like_cpp.push(
-            RepresentedCreatureKillEventLikeCpp::CreatureJustDiedAi {
-                creature_guid,
-                killer_guid: attacker_guid,
-            },
-        );
     }
 
     #[cfg(test)]
@@ -9457,6 +9470,29 @@ impl WorldSession {
         &self,
     ) -> &[RepresentedCreatureKillEventLikeCpp] {
         &self.represented_creature_kill_events_like_cpp
+    }
+
+    fn complete_represented_creature_death_state_after_kill_hooks_like_cpp(
+        &mut self,
+        attacker_guid: ObjectGuid,
+        creature_guid: ObjectGuid,
+    ) -> Option<wow_entities::UnitValuesUpdate> {
+        let values_update = self.mutate_world_creature(creature_guid, |creature| {
+            creature.complete_death_state_after_kill_hooks_like_cpp();
+            creature.creature.unit().values_update()
+        })?;
+        self.represented_creature_kill_events_like_cpp.push(
+            RepresentedCreatureKillEventLikeCpp::DeathStateJustDied {
+                victim_guid: creature_guid,
+            },
+        );
+        self.represented_creature_kill_events_like_cpp.push(
+            RepresentedCreatureKillEventLikeCpp::CreatureJustDiedAi {
+                creature_guid,
+                killer_guid: attacker_guid,
+            },
+        );
+        Some(values_update)
     }
 
     pub(crate) fn apply_move_init_active_mover_complete_like_cpp(&mut self, ticks: u32) {
@@ -10941,7 +10977,11 @@ impl WorldSession {
             });
         let Some(target_runtime) = target_runtime else {
             let _ = self.mutate_canonical_player_like_cpp(|player| {
-                player.unit_mut().attack_stop_like_cpp()
+                let unit = player.unit_mut();
+                unit.attack_stop_like_cpp();
+                unit.subsystems_mut()
+                    .combat
+                    .purge_combat_ref_like_cpp(combat_target);
             });
             self.combat_target = None;
             self.in_combat = false;
@@ -11090,7 +11130,7 @@ impl WorldSession {
                     creature
                         .creature
                         .set_tapped_by_player(player_guid, &tap_group_guids);
-                    died = creature.take_damage(damage);
+                    died = creature.take_damage_before_death_state_like_cpp(damage);
                     let over_damage = if died {
                         damage.saturating_sub(health_before) as i32
                     } else {
@@ -11200,7 +11240,11 @@ impl WorldSession {
             };
             let _ = self.send_tx.send(stop.to_bytes());
             let _ = self.mutate_canonical_player_like_cpp(|player| {
-                player.unit_mut().attack_stop_like_cpp()
+                let unit = player.unit_mut();
+                unit.attack_stop_like_cpp();
+                unit.subsystems_mut()
+                    .combat
+                    .purge_combat_ref_like_cpp(combat_target);
             });
             self.revalidate_canonical_player_combat_refs_like_cpp(player_guid);
             self.combat_target = None;
@@ -11647,7 +11691,7 @@ impl WorldSession {
         let tap_group_guids = self.current_group_member_guids_for_tap_like_cpp(player_guid);
 
         // Si target es otra criatura — mutate canonical shared map state.
-        let (kill_info, values_update) = self
+        let (kill_info, mut values_update) = self
             .mutate_world_creature(target_guid, |creature| {
                 info!(
                     account = account_id,
@@ -11659,7 +11703,7 @@ impl WorldSession {
                 creature
                     .creature
                     .set_tapped_by_player(player_guid, &tap_group_guids);
-                let died = creature.take_damage(damage_amount);
+                let died = creature.take_damage_before_death_state_like_cpp(damage_amount);
                 let kill_info = if died {
                     info!(
                         "Creature {} (entry={}) killed",
@@ -11699,6 +11743,14 @@ impl WorldSession {
             }
             self.on_creature_killed(entry, guid).await;
             self.record_represented_creature_kill_hooks_like_cpp(player_guid, guid);
+            if let Some(death_values_update) = self
+                .complete_represented_creature_death_state_after_kill_hooks_like_cpp(
+                    player_guid,
+                    guid,
+                )
+            {
+                values_update = death_values_update;
+            }
         }
 
         if self.client_visible_guids_like_cpp.contains(&target_guid)
@@ -14265,6 +14317,7 @@ mod tests {
                     victim_guid: guid,
                 },
                 RepresentedCreatureKillEventLikeCpp::VictimDeathProc { victim_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::DeathStateJustDied { victim_guid: guid },
                 RepresentedCreatureKillEventLikeCpp::CreatureJustDiedAi {
                     creature_guid: guid,
                     killer_guid: player,
@@ -14528,6 +14581,7 @@ mod tests {
                     victim_guid: guid,
                 },
                 RepresentedCreatureKillEventLikeCpp::VictimDeathProc { victim_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::DeathStateJustDied { victim_guid: guid },
                 RepresentedCreatureKillEventLikeCpp::CreatureJustDiedAi {
                     creature_guid: guid,
                     killer_guid: player,
