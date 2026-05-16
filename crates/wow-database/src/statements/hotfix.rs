@@ -38,6 +38,46 @@ pub enum HotfixStatements {
     SEL_PHASE_X_PHASE_GROUP,
     /// C++ `HOTFIX_SEL_UI_MAP_X_MAP_ART`.
     SEL_UI_MAP_X_MAP_ART,
+    /// Generated C++ base hotfix statement.
+    GENERATED_BASE {
+        /// Exact SQL from C++ `PrepareStatement(HOTFIX_SEL_..., ...)`.
+        sql: &'static str,
+    },
+    /// Generated C++ `*_MAX_ID` statement for a hotfix table.
+    GENERATED_MAX_ID {
+        /// Hotfix table name, e.g. `area_table`.
+        table: &'static str,
+    },
+    /// Generated C++ `*_LOCALE` statement for a hotfix table.
+    GENERATED_LOCALE {
+        /// Base hotfix table name without `_locale`, e.g. `area_table`.
+        table: &'static str,
+        /// Locale columns after `ID`, preserving C++ selected order.
+        columns: &'static str,
+    },
+}
+
+impl HotfixStatements {
+    /// Build a generated C++ base hotfix statement from exact SQL.
+    pub const fn base(sql: &'static str) -> Self {
+        Self::GENERATED_BASE { sql }
+    }
+
+    /// Build a generated C++ `PREPARE_MAX_ID_STMT` equivalent.
+    ///
+    /// C++ generates these as `SELECT MAX(ID) + 1 FROM <table>` immediately
+    /// after the base hotfix statement.
+    pub const fn max_id(table: &'static str) -> Self {
+        Self::GENERATED_MAX_ID { table }
+    }
+
+    /// Build a generated C++ `PREPARE_LOCALE_STMT` equivalent.
+    ///
+    /// C++ generated locale statements select `ID` plus localized columns from
+    /// `<table>_locale` with the same `VerifiedBuild`/`locale` parameters.
+    pub const fn locale(table: &'static str, columns: &'static str) -> Self {
+        Self::GENERATED_LOCALE { table, columns }
+    }
 }
 
 impl StatementDef for HotfixStatements {
@@ -119,6 +159,165 @@ impl StatementDef for HotfixStatements {
             Self::SEL_UI_MAP_X_MAP_ART => {
                 "SELECT ID, PhaseID, UiMapArtID, UiMapID FROM ui_map_x_map_art WHERE VerifiedBuild > 0"
             }
+            Self::GENERATED_BASE { sql } => sql,
+            Self::GENERATED_MAX_ID { table } => {
+                Box::leak(format!("SELECT MAX(ID) + 1 FROM {table}").into_boxed_str())
+            }
+            Self::GENERATED_LOCALE { table, columns } => Box::leak(
+                format!(
+                    "SELECT ID, {columns} FROM {table}_locale WHERE (`VerifiedBuild` > 0) = ? AND locale = ?"
+                )
+                .into_boxed_str(),
+            ),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cpp_hotfix_database_cpp() -> &'static str {
+        "/home/server/woltk-trinity-legacy/src/server/database/Database/Implementation/HotfixDatabase.cpp"
+    }
+
+    fn cpp_max_id_tables() -> Vec<String> {
+        let contents = std::fs::read_to_string(cpp_hotfix_database_cpp())
+            .expect("C++ HotfixDatabase.cpp must be available for parity tests");
+        let marker = "SELECT MAX(ID) + 1 FROM ";
+        contents
+            .lines()
+            .filter_map(|line| {
+                if !line.contains("PREPARE_MAX_ID_STMT") {
+                    return None;
+                }
+                let start = line.find(marker)? + marker.len();
+                let tail = &line[start..];
+                let end = tail.find('"')?;
+                Some(tail[..end].to_string())
+            })
+            .collect()
+    }
+
+    fn cpp_string_literals(block: &str) -> String {
+        let mut output = String::new();
+        let bytes = block.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] != b'"' {
+                i += 1;
+                continue;
+            }
+
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' {
+                    if i + 1 < bytes.len() {
+                        output.push(bytes[i + 1] as char);
+                        i += 2;
+                        continue;
+                    }
+                }
+                if bytes[i] == b'"' {
+                    i += 1;
+                    break;
+                }
+                output.push(bytes[i] as char);
+                i += 1;
+            }
+        }
+        output
+    }
+
+    fn cpp_locale_sql() -> Vec<String> {
+        let contents = std::fs::read_to_string(cpp_hotfix_database_cpp())
+            .expect("C++ HotfixDatabase.cpp must be available for parity tests");
+        let mut sql = Vec::new();
+        let mut offset = 0;
+        while let Some(relative_start) = contents[offset..].find("PREPARE_LOCALE_STMT(") {
+            let start = offset + relative_start;
+            let Some(relative_end) = contents[start..].find("CONNECTION_SYNCH);") else {
+                break;
+            };
+            let end = start + relative_end + "CONNECTION_SYNCH);".len();
+            let block = &contents[start..end];
+            if block.contains("SELECT ID") {
+                sql.push(cpp_string_literals(block));
+            }
+            offset = end;
+        }
+        sql
+    }
+
+    fn cpp_base_sql() -> Vec<String> {
+        let contents = std::fs::read_to_string(cpp_hotfix_database_cpp())
+            .expect("C++ HotfixDatabase.cpp must be available for parity tests");
+        let mut sql = Vec::new();
+        let mut offset = 0;
+        while let Some(relative_start) = contents[offset..].find("PrepareStatement(HOTFIX_SEL_") {
+            let start = offset + relative_start;
+            let Some(relative_end) = contents[start..].find("CONNECTION_SYNCH);") else {
+                break;
+            };
+            let end = start + relative_end + "CONNECTION_SYNCH);".len();
+            let block = &contents[start..end];
+            sql.push(cpp_string_literals(block));
+            offset = end;
+        }
+        sql
+    }
+
+    fn locale_parts(sql: &str) -> (&str, &str) {
+        let rest = sql
+            .strip_prefix("SELECT ID, ")
+            .expect("C++ locale SQL must select ID first");
+        let from = rest
+            .find(" FROM ")
+            .expect("C++ locale SQL must contain FROM");
+        let columns = &rest[..from];
+        let table_tail = &rest[from + " FROM ".len()..];
+        let table = table_tail
+            .strip_suffix("_locale WHERE (`VerifiedBuild` > 0) = ? AND locale = ?")
+            .expect("C++ locale SQL must target table_locale with VerifiedBuild and locale");
+        (table, columns)
+    }
+
+    #[test]
+    fn generated_max_id_statements_cover_cpp_hotfix_tables() {
+        let tables = cpp_max_id_tables();
+        assert_eq!(tables.len(), 325);
+
+        for table in tables {
+            let table: &'static str = Box::leak(table.into_boxed_str());
+            assert_eq!(
+                HotfixStatements::max_id(table).sql(),
+                format!("SELECT MAX(ID) + 1 FROM {table}")
+            );
+        }
+    }
+
+    #[test]
+    fn generated_base_statements_cover_cpp_hotfix_tables() {
+        let statements = cpp_base_sql();
+        assert_eq!(statements.len(), 325);
+
+        for cpp_sql in statements {
+            let sql: &'static str = Box::leak(cpp_sql.into_boxed_str());
+            assert_eq!(HotfixStatements::base(sql).sql(), sql);
+            assert!(sql.contains(" WHERE (`VerifiedBuild` > 0) = ?"));
+        }
+    }
+
+    #[test]
+    fn generated_locale_statements_cover_cpp_hotfix_tables() {
+        let statements = cpp_locale_sql();
+        assert_eq!(statements.len(), 95);
+
+        for cpp_sql in statements {
+            let (table, columns) = locale_parts(&cpp_sql);
+            let table: &'static str = Box::leak(table.to_string().into_boxed_str());
+            let columns: &'static str = Box::leak(columns.to_string().into_boxed_str());
+            assert_eq!(HotfixStatements::locale(table, columns).sql(), cpp_sql);
         }
     }
 }

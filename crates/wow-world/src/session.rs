@@ -7,7 +7,7 @@
 //! [`WorldSocket`](wow_network::WorldSocket) and dispatches them to handlers.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 use parking_lot::RwLock;
@@ -22,7 +22,7 @@ use crate::phasing::{
 };
 use wow_constants::item::{CurrencyTypes, CurrencyTypesFlags};
 use wow_constants::movement::MovementFlag;
-use wow_constants::unit::{Team, UnitFlags, UnitStandStateType};
+use wow_constants::unit::{Gender, Team, UnitFlags, UnitStandStateType};
 use wow_constants::{
     BagFamilyMask, BuyResult, ClientOpcodes, InventoryResult, InventoryType, ItemBondingType,
     ItemClass, ItemContext, ItemEnchantmentType, ItemFlags, ItemFlags2, ItemQuality, SellResult,
@@ -33,35 +33,35 @@ use wow_data::{
     AreaTableStore, AreaTriggerStore, ChrSpecializationStore, ConditionEntriesByTypeStore,
     CreatureDisplayInfoStore, CreatureModelDataStore, CreatureTemplateMountStoreLikeCpp,
     CurrencyTypesEntry, CurrencyTypesStore, DISABLE_TYPE_MAP, DisableMgrLikeCpp,
-    DisableWorldObjectRefLikeCpp, DungeonEncounterStore, HotfixBlobCache, ImportPriceStores,
-    ItemAppearanceStore, ItemClassStore, ItemCurrencyCostStore, ItemDisenchantLootStore,
-    ItemExtendedCostStore, ItemModifiedAppearanceStore, ItemPriceBaseStore,
-    ItemRandomEnchantmentTemplateStore, ItemRandomPropertiesStore, ItemRandomPropertyTemplateEntry,
-    ItemRandomSuffixStore, ItemStatsStore, ItemStore, LockStore, MapDifficultyStore,
-    MapDifficultyXConditionStore, MapStore, MountCapabilityStore, MountStore,
+    DisableWorldObjectRefLikeCpp, DungeonEncounterStore, GameObjectDisplayInfoStore,
+    HotfixBlobCache, ImportPriceStores, ItemAppearanceStore, ItemClassStore, ItemCurrencyCostStore,
+    ItemDisenchantLootStore, ItemExtendedCostStore, ItemModifiedAppearanceStore,
+    ItemPriceBaseStore, ItemRandomEnchantmentTemplateStore, ItemRandomPropertiesStore,
+    ItemRandomPropertyTemplateEntry, ItemRandomSuffixStore, ItemStatsStore, ItemStore, LockStore,
+    MapDifficultyStore, MapDifficultyXConditionStore, MapStore, MountCapabilityStore, MountStore,
     MountTypeXCapabilityStore, MountXDisplayStore, PhaseGroupStore, PhaseStore,
     PlayerConditionAuraLikeCpp, PlayerConditionContextLikeCpp, PlayerConditionCountLikeCpp,
     PlayerConditionPartyStatusLikeCpp, PlayerConditionQuestKillLikeCpp,
     PlayerConditionReputationLikeCpp, PlayerConditionSkillLikeCpp, PlayerConditionStore,
-    PlayerStatsStore, RandPropPointsStore, SkillStore, SpellItemEnchantmentStore, SpellStore,
-    VehicleAccessoryStoreLikeCpp, VehicleSeatStore, VehicleStore, VehicleTemplateStoreLikeCpp,
-    is_player_meeting_condition_like_cpp,
+    PlayerStatsStore, RandPropPointsStore, SkillStore, SpellItemEnchantmentStore, SpellMiscStore,
+    SpellRangeStore, SpellStore, VehicleAccessoryStoreLikeCpp, VehicleSeatStore, VehicleStore,
+    VehicleTemplateStoreLikeCpp, is_player_meeting_condition_like_cpp,
 };
 use wow_database::{
     CharStatements, CharacterDatabase, LoginDatabase, PreparedStatement, SqlTransaction,
     StatementDef, WorldDatabase,
 };
 use wow_entities::{
-    ApplyEnchantmentEffectRef, ApplyEnchantmentRandomSuffixRef, ApplyEnchantmentTemplateRef,
-    BANK_SLOT_BAG_END, BANK_SLOT_BAG_START, BUYBACK_SLOT_COUNT, BUYBACK_SLOT_END,
-    BUYBACK_SLOT_START, CanStoreItemArgs, CanUnequipItemArgs, EQUIPMENT_SLOT_MAINHAND,
-    INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_BAG_END, INVENTORY_SLOT_BAG_START,
-    Item, ItemCreateInfo, ItemPosCount, ItemSlotRef, ItemStorageRef, ItemStorageTemplate,
-    MAX_ITEM_SPELLS, NULL_BAG, NULL_SLOT, ObjectAccessor, PLAYER_SLOT_END, PhaseShift, Player,
-    PlayerEnchantTimeUpdate, PlayerInventoryStorage, PlayerItemTimeUpdate, REAGENT_BAG_SLOT_END,
-    REAGENT_BAG_SLOT_START, SendNewItemDelivery, SendNewItemDisplayText, SendNewItemPlan, Vehicle,
-    VehicleAccessory, VisibleItemValues, WorldObject, is_bag_pos, is_equipment_packed_pos,
-    make_item_pos,
+    AccessorObjectKind, ApplyEnchantmentEffectRef, ApplyEnchantmentRandomSuffixRef,
+    ApplyEnchantmentTemplateRef, BANK_SLOT_BAG_END, BANK_SLOT_BAG_START, BUYBACK_SLOT_COUNT,
+    BUYBACK_SLOT_END, BUYBACK_SLOT_START, CanStoreItemArgs, CanUnequipItemArgs,
+    EQUIPMENT_SLOT_MAINHAND, GameObject, INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0,
+    INVENTORY_SLOT_BAG_END, INVENTORY_SLOT_BAG_START, Item, ItemCreateInfo, ItemPosCount,
+    ItemSlotRef, ItemStorageRef, ItemStorageTemplate, MAX_ITEM_SPELLS, NULL_BAG, NULL_SLOT,
+    ObjectAccessor, PLAYER_SLOT_END, PhaseShift, Player, PlayerEnchantTimeUpdate,
+    PlayerInventoryStorage, PlayerItemTimeUpdate, REAGENT_BAG_SLOT_END, REAGENT_BAG_SLOT_START,
+    SendNewItemDelivery, SendNewItemDisplayText, SendNewItemPlan, Vehicle, VehicleAccessory,
+    VisibleItemValues, WorldObject, is_bag_pos, is_equipment_packed_pos, make_item_pos,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus, build_dispatch_table};
 use wow_loot::LootStores;
@@ -168,14 +168,29 @@ pub(crate) struct RepresentedPendingBind {
     pub time_until_lock_ms: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct RepresentedGameObjectUseState {
     pub loot_state: Option<wow_entities::LootState>,
     pub loot_state_unit_guid: wow_core::ObjectGuid,
+    pub owner_guid: Option<wow_core::ObjectGuid>,
     pub go_state: Option<wow_entities::GoState>,
     pub dynamic_flags: u32,
     pub despawn_delay_secs: Option<u32>,
+    pub per_player_despawn_secs: Option<u32>,
+    pub per_player_despawn_until: Option<Instant>,
     pub personal_loot_uses: u32,
+    pub chest_restock_time_secs: Option<u32>,
+    pub chest_consumable: Option<bool>,
+    pub chest_personal_loot_id: Option<u32>,
+    pub map_id: Option<u16>,
+    pub position: Option<wow_core::Position>,
+    pub display_id: Option<u32>,
+    pub scale: f32,
+    pub rotation: [f32; 4],
+    pub go_type: Option<u8>,
+    pub interact_radius_override: Option<u32>,
+    pub lock_id: Option<u32>,
+    pub fishing_hole_max_opens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -306,10 +321,25 @@ impl Default for RepresentedGameObjectUseState {
         Self {
             loot_state: None,
             loot_state_unit_guid: wow_core::ObjectGuid::EMPTY,
+            owner_guid: None,
             go_state: None,
             dynamic_flags: 0,
             despawn_delay_secs: None,
+            per_player_despawn_secs: None,
+            per_player_despawn_until: None,
             personal_loot_uses: 0,
+            chest_restock_time_secs: None,
+            chest_consumable: None,
+            chest_personal_loot_id: None,
+            map_id: None,
+            position: None,
+            display_id: None,
+            scale: 1.0,
+            rotation: [0.0, 0.0, 0.0, 1.0],
+            go_type: None,
+            interact_radius_override: None,
+            lock_id: None,
+            fishing_hole_max_opens: None,
         }
     }
 }
@@ -345,9 +375,18 @@ pub type SharedObjectAccessor = Arc<RwLock<ObjectAccessor>>;
 pub(crate) const SKILL_RIDING_LIKE_CPP: u16 = 762;
 pub(crate) const LIQUID_MAP_IN_WATER_LIKE_CPP: u32 = 0x0000_0004;
 pub(crate) const LIQUID_MAP_UNDER_WATER_LIKE_CPP: u32 = 0x0000_0008;
+pub type SharedCanonicalMapManager = Arc<Mutex<wow_map::MapManager>>;
 
 pub fn new_shared_object_accessor() -> SharedObjectAccessor {
     Arc::new(RwLock::new(ObjectAccessor::default()))
+}
+
+fn gender_from_u8(value: u8) -> Gender {
+    match value {
+        1 => Gender::Female,
+        2 => Gender::None,
+        _ => Gender::Male,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -733,6 +772,7 @@ pub struct WorldSession {
     map_difficulty_x_condition_store: Option<Arc<MapDifficultyXConditionStore>>,
     creature_template_mount_store: Option<Arc<CreatureTemplateMountStoreLikeCpp>>,
     creature_display_info_store: Option<Arc<CreatureDisplayInfoStore>>,
+    gameobject_display_info_store: Option<Arc<GameObjectDisplayInfoStore>>,
     creature_model_data_store: Option<Arc<CreatureModelDataStore>>,
     mount_store: Option<Arc<MountStore>>,
     mount_capability_store: Option<Arc<MountCapabilityStore>>,
@@ -912,6 +952,9 @@ pub struct WorldSession {
     /// route through here so all sessions on the same map see the same world.
     /// `None` until the world server injects the manager (see `set_map_manager`).
     pub(crate) map_manager: Option<crate::map_manager::SharedMapManager>,
+    /// Canonical C++-style `wow-map` manager. This is injected separately from
+    /// the legacy `wow-world` manager while handlers migrate to `wow-map`.
+    pub(crate) canonical_map_manager: Option<SharedCanonicalMapManager>,
     /// Dedicated Detour owner handle. The underlying `MMapManager` remains on
     /// its worker thread because Detour state is not `Send + Sync`.
     mmap_pathfinder_like_cpp: Option<Arc<WorldMMapPathfinderWorkerLikeCpp>>,
@@ -1063,6 +1106,8 @@ pub struct WorldSession {
     // ── Spell casting ──────────────────────────────────────────────
     /// Spell store (metadata for all known spells: cast time, cooldown, effects, etc.)
     pub spell_store: Option<Arc<SpellStore>>,
+    spell_misc_store: Option<Arc<SpellMiscStore>>,
+    spell_range_store: Option<Arc<SpellRangeStore>>,
     /// Currently active spell cast (if any). Set when a cast starts, cleared when it completes.
     pub(crate) active_spell_cast: Option<SpellCastState>,
     /// Last time a spell was executed (used to enforce global cooldown timers).
@@ -1312,6 +1357,13 @@ fn player_team_for_race_cpp(race: u8) -> Team {
     }
 }
 
+fn player_team_id_for_race_cpp(race: u8) -> u32 {
+    match player_team_for_race_cpp(race) {
+        Team::Horde => 1,
+        _ => 0,
+    }
+}
+
 fn currency_max_quantity_cpp(entry: &CurrencyTypesEntry, currency: &PlayerCurrency) -> u32 {
     if !entry.has_max_quantity(false, false) {
         return 0;
@@ -1500,6 +1552,7 @@ impl WorldSession {
             map_difficulty_x_condition_store: None,
             creature_template_mount_store: None,
             creature_display_info_store: None,
+            gameobject_display_info_store: None,
             creature_model_data_store: None,
             mount_store: None,
             mount_capability_store: None,
@@ -1577,6 +1630,7 @@ impl WorldSession {
             creatures: std::collections::HashMap::new(),
             vendor_item_counts: HashMap::new(),
             map_manager: None,
+            canonical_map_manager: None,
             mmap_pathfinder_like_cpp: None,
             combat_target: None,
             in_combat: false,
@@ -1650,6 +1704,8 @@ impl WorldSession {
             movement_speed_ack_events_like_cpp: Vec::new(),
             visible_auras: HashMap::new(),
             spell_store: None,
+            spell_misc_store: None,
+            spell_range_store: None,
             quest_store: None,
             quest_xp_store: None,
             player_quests: HashMap::new(),
@@ -1698,6 +1754,311 @@ impl WorldSession {
     /// Inject the shared map manager. Call once at session creation, before login.
     pub fn set_map_manager(&mut self, mgr: crate::map_manager::SharedMapManager) {
         self.map_manager = Some(mgr);
+    }
+
+    pub fn set_canonical_map_manager(&mut self, mgr: SharedCanonicalMapManager) {
+        self.canonical_map_manager = Some(mgr);
+    }
+
+    fn canonical_player_entity_snapshot_like_cpp(&self) -> Option<Player> {
+        let guid = self.player_guid()?;
+        let position = self.player_position_like_cpp()?;
+        let name = self.player_name_like_cpp()?;
+        let mut player = Player::new(Some(u64::from(self.account_id)), false);
+        player.unit_mut().world_mut().object_mut().create(guid);
+        player.unit_mut().world_mut().set_name(name);
+        player
+            .unit_mut()
+            .world_mut()
+            .set_map(u32::from(self.player_map_id_like_cpp()), 0)
+            .ok()?;
+        player.unit_mut().world_mut().relocate(position);
+        player.unit_mut().world_mut().object_mut().add_to_world();
+        player.set_race_class_gender(
+            self.player_race_like_cpp(),
+            self.player_class_like_cpp(),
+            gender_from_u8(self.player_gender_like_cpp()),
+        );
+        player.unit_mut().set_level(self.player_level_like_cpp());
+        if let Some(selection) = self.selection_guid_like_cpp() {
+            player.set_selection(selection);
+        }
+        Some(player)
+    }
+
+    fn sync_canonical_player_entity_like_cpp(managed: &mut wow_map::ManagedMap, player: Player) {
+        let guid = player.guid();
+        let map = managed.map_mut();
+        if let Some(existing) = map.get_typed_player_mut(guid) {
+            let attacking = existing.unit().attacking();
+            let target = existing.unit().data().target;
+            *existing = player;
+            existing.unit_mut().set_attacking(attacking);
+            existing.unit_mut().set_target(target);
+            return;
+        }
+
+        let Ok(record) = wow_entities::MapObjectRecord::new_player(player) else {
+            return;
+        };
+        let _ = map.insert_map_object_record(record);
+    }
+
+    pub(crate) fn mutate_canonical_player_like_cpp<R>(
+        &mut self,
+        f: impl FnOnce(&mut Player) -> R,
+    ) -> Option<R> {
+        let guid = self.player_guid()?;
+        self.mutate_canonical_player_by_guid_like_cpp(guid, f)
+    }
+
+    pub(crate) fn mutate_canonical_player_by_guid_like_cpp<R>(
+        &mut self,
+        guid: ObjectGuid,
+        f: impl FnOnce(&mut Player) -> R,
+    ) -> Option<R> {
+        let map_id = u32::from(self.player_map_id_like_cpp());
+        let manager = Arc::clone(self.canonical_map_manager.as_ref()?);
+        let mut manager = manager.lock().ok()?;
+        let mut instance_id = None;
+        manager.do_for_all_maps_with_map_id(map_id, |managed| {
+            if instance_id.is_none() && managed.map().get_typed_player(guid).is_some() {
+                instance_id = Some(managed.instance_id());
+            }
+        });
+        let managed = manager.find_map_mut(map_id, instance_id.unwrap_or(0))?;
+        let player = managed.map_mut().get_typed_player_mut(guid)?;
+        Some(f(player))
+    }
+
+    pub(crate) fn mutate_canonical_creature_by_guid_like_cpp<R>(
+        &mut self,
+        guid: ObjectGuid,
+        f: impl FnOnce(&mut wow_entities::Creature) -> R,
+    ) -> Option<R> {
+        let map_id = u32::from(self.player_map_id_like_cpp());
+        let manager = Arc::clone(self.canonical_map_manager.as_ref()?);
+        let mut manager = manager.lock().ok()?;
+        let managed = manager.find_map_mut(map_id, 0)?;
+        let creature = managed.map_mut().get_typed_creature_mut(guid)?;
+        Some(f(creature))
+    }
+
+    fn canonical_unit_attack_target_state_like_cpp(
+        &self,
+        guid: ObjectGuid,
+    ) -> (bool, bool, wow_entities::UnitAttackContextLikeCpp) {
+        let Some(manager) = self.canonical_map_manager.as_ref() else {
+            return (
+                true,
+                true,
+                wow_entities::UnitAttackContextLikeCpp::default(),
+            );
+        };
+        let Ok(manager) = manager.lock() else {
+            return (
+                true,
+                true,
+                wow_entities::UnitAttackContextLikeCpp::default(),
+            );
+        };
+        let Some(map) = manager.find_map(u32::from(self.player_map_id_like_cpp()), 0) else {
+            return (
+                true,
+                true,
+                wow_entities::UnitAttackContextLikeCpp::default(),
+            );
+        };
+        if let Some(player) = map.map().get_typed_player(guid) {
+            return (
+                player.unit().is_alive(),
+                player.unit().world().object().is_in_world(),
+                wow_entities::UnitAttackContextLikeCpp {
+                    victim_is_game_master_player: player.is_game_master_like_cpp(),
+                    ..Default::default()
+                },
+            );
+        }
+        if let Some(creature) = map.map().get_typed_creature(guid) {
+            return (
+                creature.is_alive(),
+                creature.unit().world().object().is_in_world(),
+                wow_entities::UnitAttackContextLikeCpp {
+                    victim_is_evading_creature: creature.is_evading_attacks_like_cpp(),
+                    ..Default::default()
+                },
+            );
+        }
+        (
+            true,
+            true,
+            wow_entities::UnitAttackContextLikeCpp::default(),
+        )
+    }
+
+    fn add_canonical_attacker_like_cpp(&mut self, victim: ObjectGuid, attacker: ObjectGuid) {
+        if self
+            .mutate_canonical_player_by_guid_like_cpp(victim, |victim| {
+                victim.unit_mut().add_attacker_like_cpp(attacker)
+            })
+            .is_some()
+        {
+            return;
+        }
+        let _ = self.mutate_canonical_creature_by_guid_like_cpp(victim, |victim| {
+            victim.unit_mut().add_attacker_like_cpp(attacker)
+        });
+    }
+
+    fn remove_canonical_attacker_like_cpp(&mut self, victim: ObjectGuid, attacker: ObjectGuid) {
+        if self
+            .mutate_canonical_player_by_guid_like_cpp(victim, |victim| {
+                victim.unit_mut().remove_attacker_like_cpp(attacker)
+            })
+            .is_some()
+        {
+            return;
+        }
+        let _ = self.mutate_canonical_creature_by_guid_like_cpp(victim, |victim| {
+            victim.unit_mut().remove_attacker_like_cpp(attacker)
+        });
+    }
+
+    pub(crate) fn start_player_attack_like_cpp(&mut self, victim: ObjectGuid) {
+        let _ = self.ensure_canonical_world_map_for_current_player_like_cpp();
+        let player_guid = self.player_guid();
+        let attacker_is_mounted_player = self.player_mounted_like_cpp;
+        let (victim_alive, victim_in_world, mut attack_context) =
+            self.canonical_unit_attack_target_state_like_cpp(victim);
+        attack_context.attacker_is_mounted_player = attacker_is_mounted_player;
+        self.combat_target = Some(victim);
+        self.in_combat = true;
+        self.set_selection_guid_like_cpp(Some(victim));
+        let outcome = self.mutate_canonical_player_like_cpp(|player| {
+            player.unit_mut().attack_with_context_like_cpp(
+                victim,
+                victim_alive,
+                victim_in_world,
+                true,
+                attack_context,
+            )
+        });
+        let previous = match outcome {
+            Some(wow_entities::UnitAttackStartOutcome::NewTarget { previous }) => previous,
+            Some(
+                wow_entities::UnitAttackStartOutcome::MeleeStartedSameTarget
+                | wow_entities::UnitAttackStartOutcome::MeleeStoppedSameTarget
+                | wow_entities::UnitAttackStartOutcome::NoChangeSameTarget,
+            ) => None,
+            Some(
+                wow_entities::UnitAttackStartOutcome::InvalidSelfTarget
+                | wow_entities::UnitAttackStartOutcome::InvalidDeadAttacker
+                | wow_entities::UnitAttackStartOutcome::InvalidDeadVictim
+                | wow_entities::UnitAttackStartOutcome::InvalidVictimNotInWorld
+                | wow_entities::UnitAttackStartOutcome::InvalidMountedAttacker
+                | wow_entities::UnitAttackStartOutcome::InvalidAttackerEvading
+                | wow_entities::UnitAttackStartOutcome::InvalidVictimGameMaster
+                | wow_entities::UnitAttackStartOutcome::InvalidVictimEvading,
+            )
+            | None => {
+                self.combat_target = None;
+                self.in_combat = false;
+                if self.selection_guid_like_cpp() == Some(victim) {
+                    self.set_selection_guid_like_cpp(None);
+                }
+                return;
+            }
+        };
+        if let Some(player_guid) = player_guid {
+            if let Some(previous) = previous {
+                self.remove_canonical_attacker_like_cpp(previous, player_guid);
+            }
+            self.add_canonical_attacker_like_cpp(victim, player_guid);
+        }
+    }
+
+    pub(crate) fn stop_player_attack_like_cpp(&mut self) -> Option<ObjectGuid> {
+        let player_guid = self.player_guid()?;
+        let target = self
+            .mutate_canonical_player_like_cpp(|player| {
+                match player.unit_mut().attack_stop_like_cpp() {
+                    wow_entities::UnitAttackStopOutcome::Stopped { victim } => Some(victim),
+                    wow_entities::UnitAttackStopOutcome::NoVictim => None,
+                }
+            })
+            .flatten()
+            .or_else(|| self.combat_target.take())?;
+        self.combat_target = None;
+        self.in_combat = false;
+        if self.selection_guid_like_cpp() == Some(target) {
+            self.set_selection_guid_like_cpp(None);
+        }
+        self.remove_canonical_attacker_like_cpp(target, player_guid);
+        Some(target)
+    }
+
+    pub(crate) fn ensure_canonical_world_map_for_current_player_like_cpp(
+        &mut self,
+    ) -> Option<wow_map::CreateMapDecision> {
+        let map_id = u32::from(self.player_map_id_like_cpp());
+        let map_entry = self.map_store.as_ref()?.get(map_id).copied()?;
+        if map_entry.is_dungeon() || map_entry.is_battleground_or_arena() || map_entry.is_garrison()
+        {
+            return None;
+        }
+
+        let player_guid = self.player_guid?;
+        let player = wow_map::CreateMapPlayerContext {
+            guid_counter: player_guid.counter() as u64,
+            team_id: player_team_id_for_race_cpp(self.player_race_like_cpp()),
+            battleground_id: 0,
+            has_battleground: false,
+            player_difficulty_id: 0,
+            player_recent_instance_id: 0,
+            group: None,
+        };
+        let entry = wow_map::CreateMapEntryContext {
+            map_id,
+            kind: wow_map::CreateMapEntryKind::World,
+            split_by_faction: map_entry.is_split_by_faction(),
+            flex_locking: map_entry.is_flex_locking(),
+        };
+
+        let player_entity = self.canonical_player_entity_snapshot_like_cpp();
+        let manager = Arc::clone(self.canonical_map_manager.as_ref()?);
+        let mut manager = manager.lock().ok()?;
+        let decision = manager.create_map_decision_like_cpp(
+            Some(entry),
+            Some(player),
+            |_, _| None,
+            None,
+            |_, _| None,
+        );
+
+        if let wow_map::CreateMapDecision::Create {
+            key,
+            difficulty_id,
+            kind,
+            ..
+        } = &decision
+        {
+            manager.create_map_entry(key.map_id, key.instance_id, *difficulty_id, *kind);
+        }
+
+        if let Some(player) = player_entity {
+            let key = match &decision {
+                wow_map::CreateMapDecision::Existing { key, .. }
+                | wow_map::CreateMapDecision::Create { key, .. } => Some(*key),
+                wow_map::CreateMapDecision::Reject { .. } => None,
+            };
+            if let Some(key) = key {
+                if let Some(managed) = manager.find_map_mut(key.map_id, key.instance_id) {
+                    Self::sync_canonical_player_entity_like_cpp(managed, player);
+                }
+            }
+        }
+
+        Some(decision)
     }
 
     /// Inject the dedicated Detour worker handle. The session only sends
@@ -1753,6 +2114,39 @@ impl WorldSession {
             phase_group_id,
             terrain_swap_map,
         );
+        let canonical_creature = {
+            let mut creature = wow_entities::Creature::new(false);
+            creature.unit_mut().world_mut().object_mut().create(guid);
+            creature
+                .unit_mut()
+                .world_mut()
+                .object_mut()
+                .set_entry(entry);
+            let _ = creature
+                .unit_mut()
+                .world_mut()
+                .set_map(u32::from(map_id), 0);
+            creature.unit_mut().world_mut().relocate(position);
+            *creature.unit_mut().world_mut().phase_shift_mut() = db_phase_shift.clone();
+            creature.unit_mut().set_level(level);
+            creature.unit_mut().set_max_health(u64::from(hp));
+            creature.unit_mut().set_health(u64::from(hp));
+            creature.set_ai_identity_runtime(display_id, faction, npc_flags, unit_flags);
+            creature.configure_ai_runtime(position, aggro_radius, 5.0, 30);
+            creature.ai_ownership_mut().min_damage = min_dmg;
+            creature.ai_ownership_mut().max_damage = max_dmg;
+            creature.ai_ownership_mut().loot_id = loot_id;
+            creature.ai_ownership_mut().gold_min = gold_min;
+            creature.ai_ownership_mut().gold_max = gold_max;
+            creature.ai_ownership_mut().boss_id = boss_id;
+            creature.ai_ownership_mut().dungeon_encounter_id = dungeon_encounter_id;
+            creature.ai_ownership_mut().phase_use_flags = phase_use_flags;
+            creature.ai_ownership_mut().phase_id = phase_id;
+            creature.ai_ownership_mut().phase_group_id = phase_group_id;
+            creature.ai_ownership_mut().terrain_swap_map = validated_terrain_swap_map;
+            creature
+        };
+        self.insert_canonical_creature_map_object_like_cpp(map_id, canonical_creature.clone());
 
         if let Some(manager) = &self.map_manager {
             let (grid_x, grid_y) = crate::map_manager::world_to_grid_coords(position.x, position.y);
@@ -1761,36 +2155,7 @@ impl WorldSession {
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             if manager.find_creature(map_id, 0, guid).is_none() {
                 let world_creature = crate::map_manager::WorldCreature::from_canonical(
-                    {
-                        let mut creature = wow_entities::Creature::new(false);
-                        creature.unit_mut().world_mut().object_mut().create(guid);
-                        creature
-                            .unit_mut()
-                            .world_mut()
-                            .object_mut()
-                            .set_entry(entry);
-                        let _ = creature.unit_mut().world_mut().set_map(map_id as u32, 0);
-                        creature.unit_mut().world_mut().relocate(position);
-                        *creature.unit_mut().world_mut().phase_shift_mut() = db_phase_shift.clone();
-                        creature.unit_mut().set_level(level);
-                        creature.unit_mut().set_max_health(u64::from(hp));
-                        creature.unit_mut().set_health(u64::from(hp));
-                        creature
-                            .set_ai_identity_runtime(display_id, faction, npc_flags, unit_flags);
-                        creature.configure_ai_runtime(position, aggro_radius, 5.0, 30);
-                        creature.ai_ownership_mut().min_damage = min_dmg;
-                        creature.ai_ownership_mut().max_damage = max_dmg;
-                        creature.ai_ownership_mut().loot_id = loot_id;
-                        creature.ai_ownership_mut().gold_min = gold_min;
-                        creature.ai_ownership_mut().gold_max = gold_max;
-                        creature.ai_ownership_mut().boss_id = boss_id;
-                        creature.ai_ownership_mut().dungeon_encounter_id = dungeon_encounter_id;
-                        creature.ai_ownership_mut().phase_use_flags = phase_use_flags;
-                        creature.ai_ownership_mut().phase_id = phase_id;
-                        creature.ai_ownership_mut().phase_group_id = phase_group_id;
-                        creature.ai_ownership_mut().terrain_swap_map = validated_terrain_swap_map;
-                        creature
-                    },
+                    canonical_creature,
                     create_data.clone(),
                 );
                 manager.add_creature(map_id, 0, grid_x, grid_y, world_creature);
@@ -1798,29 +2163,267 @@ impl WorldSession {
         }
     }
 
+    fn insert_canonical_creature_map_object_like_cpp(
+        &mut self,
+        map_id: u16,
+        mut creature: wow_entities::Creature,
+    ) {
+        let guid = creature.unit().world().object().guid();
+        let Some(manager) = self.canonical_map_manager.as_ref() else {
+            return;
+        };
+        let Ok(mut manager) = manager.lock() else {
+            return;
+        };
+        let Some(map) = manager.find_map_mut(u32::from(map_id), 0) else {
+            return;
+        };
+        if map.map().get_creature(guid).is_some() {
+            return;
+        }
+
+        let object = creature.unit().world().clone();
+        let _ = map
+            .map_mut()
+            .add_to_map_like_cpp(AccessorObjectKind::Creature, object);
+        creature.unit_mut().world_mut().object_mut().add_to_world();
+        let Ok(record) = wow_entities::MapObjectRecord::new_creature(creature) else {
+            return;
+        };
+        let _ = map.map_mut().insert_map_object_record(record);
+    }
+
     pub(crate) fn remove_world_creature(
         &mut self,
         guid: ObjectGuid,
     ) -> Option<crate::map_manager::WorldCreature> {
-        let manager = self.map_manager.as_ref()?;
-        let mut manager = manager
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        manager.remove_creature_any(self.player_map_id_like_cpp(), 0, guid)
+        let manager = self.map_manager.as_ref().cloned()?;
+        let removed = {
+            let mut manager = manager
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            manager.remove_creature_any(self.player_map_id_like_cpp(), 0, guid)
+        };
+        if removed.is_some() {
+            self.remove_canonical_creature_map_object_like_cpp(guid);
+        }
+        removed
+    }
+
+    fn remove_canonical_creature_map_object_like_cpp(&mut self, guid: ObjectGuid) {
+        let Some(manager) = self.canonical_map_manager.as_ref() else {
+            return;
+        };
+        let Ok(mut manager) = manager.lock() else {
+            return;
+        };
+        let Some(map) = manager.find_map_mut(u32::from(self.player_map_id_like_cpp()), 0) else {
+            return;
+        };
+        let _ = map.map_mut().remove_from_map_like_cpp(guid, true);
+    }
+
+    fn relocate_canonical_creature_map_object_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        position: wow_core::Position,
+    ) {
+        let Some(manager) = self.canonical_map_manager.as_ref() else {
+            return;
+        };
+        let Ok(mut manager) = manager.lock() else {
+            return;
+        };
+        let Some(map) = manager.find_map_mut(u32::from(self.player_map_id_like_cpp()), 0) else {
+            return;
+        };
+        let _ = map.map_mut().relocate_map_object_like_cpp(guid, position);
+    }
+
+    fn sync_canonical_creature_entity_like_cpp(&mut self, mut creature: wow_entities::Creature) {
+        let guid = creature.unit().world().object().guid();
+        let Some(manager) = self.canonical_map_manager.as_ref() else {
+            return;
+        };
+        let Ok(mut manager) = manager.lock() else {
+            return;
+        };
+        let Some(map) = manager.find_map_mut(u32::from(self.player_map_id_like_cpp()), 0) else {
+            return;
+        };
+        if map.map().get_creature(guid).is_none() {
+            return;
+        }
+        creature.unit_mut().world_mut().object_mut().add_to_world();
+        let Ok(record) = wow_entities::MapObjectRecord::new_creature(creature) else {
+            return;
+        };
+        let _ = map.map_mut().insert_map_object_record(record);
+    }
+
+    pub(crate) fn record_represented_gameobject_runtime_state_like_cpp(
+        &mut self,
+        map_id: u16,
+        guid: ObjectGuid,
+        entry: u32,
+        position: wow_core::Position,
+        go_type: u8,
+    ) {
+        let state = self
+            .represented_gameobject_use_states
+            .entry(guid)
+            .or_default();
+        state.map_id = Some(map_id);
+        state.position = Some(position);
+        state.go_type = Some(go_type);
+        self.upsert_canonical_gameobject_map_object_like_cpp(map_id, guid, entry, position);
+    }
+
+    pub(crate) fn record_represented_gameobject_interact_radius_override_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        interact_radius_override: u32,
+    ) {
+        self.represented_gameobject_use_states
+            .entry(guid)
+            .or_default()
+            .interact_radius_override =
+            (interact_radius_override != 0).then_some(interact_radius_override);
+    }
+
+    pub(crate) fn record_represented_gameobject_lock_id_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        lock_id: u32,
+    ) {
+        self.represented_gameobject_use_states
+            .entry(guid)
+            .or_default()
+            .lock_id = (lock_id != 0).then_some(lock_id);
+    }
+
+    pub(crate) fn record_represented_gameobject_display_model_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        display_id: u32,
+        scale: f32,
+        rotation: [f32; 4],
+    ) {
+        let state = self
+            .represented_gameobject_use_states
+            .entry(guid)
+            .or_default();
+        state.display_id = (display_id != 0).then_some(display_id);
+        state.scale = scale;
+        state.rotation = rotation;
+    }
+
+    pub(crate) fn represented_gameobject_is_per_player_despawned_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+    ) -> bool {
+        let Some(state) = self.represented_gameobject_use_states.get_mut(&guid) else {
+            return false;
+        };
+        match state.per_player_despawn_until {
+            Some(until) if until > Instant::now() => true,
+            Some(_) => {
+                state.per_player_despawn_until = None;
+                state.per_player_despawn_secs = None;
+                false
+            }
+            None => false,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_represented_gameobject_owner_guid_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        owner_guid: ObjectGuid,
+    ) {
+        self.represented_gameobject_use_states
+            .entry(guid)
+            .or_default()
+            .owner_guid = (!owner_guid.is_empty()).then_some(owner_guid);
+    }
+
+    pub(crate) fn record_represented_fishing_hole_max_opens_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        max_opens: u32,
+    ) {
+        self.represented_gameobject_use_states
+            .entry(guid)
+            .or_default()
+            .fishing_hole_max_opens = Some(max_opens);
+    }
+
+    fn upsert_canonical_gameobject_map_object_like_cpp(
+        &mut self,
+        map_id: u16,
+        guid: ObjectGuid,
+        entry: u32,
+        position: wow_core::Position,
+    ) {
+        let Some(manager) = self.canonical_map_manager.as_ref() else {
+            return;
+        };
+        let Ok(mut manager) = manager.lock() else {
+            return;
+        };
+        let Some(map) = manager.find_map_mut(u32::from(map_id), 0) else {
+            return;
+        };
+        if map.map().get_game_object(guid).is_some() {
+            let _ = map.map_mut().relocate_map_object_like_cpp(guid, position);
+            return;
+        }
+
+        let mut game_object = GameObject::new();
+        game_object.world_mut().object_mut().create(guid);
+        game_object.world_mut().object_mut().set_entry(entry);
+        if game_object
+            .world_mut()
+            .set_map(u32::from(map_id), 0)
+            .is_err()
+        {
+            return;
+        }
+        game_object.world_mut().relocate(position);
+        let _ = map
+            .map_mut()
+            .add_to_map_like_cpp(AccessorObjectKind::GameObject, game_object.world().clone());
+        game_object.world_mut().object_mut().add_to_world();
+        let Ok(record) = wow_entities::MapObjectRecord::new_game_object(game_object) else {
+            return;
+        };
+        let _ = map.map_mut().insert_map_object_record(record);
     }
 
     pub(crate) fn mutate_world_creature<F, R>(&mut self, guid: ObjectGuid, f: F) -> Option<R>
     where
         F: FnOnce(&mut crate::map_manager::WorldCreature) -> R,
     {
-        if let Some(manager) = &self.map_manager {
-            let mut manager = manager
-                .write()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if let Some(creature) =
-                manager.find_creature_mut(self.player_map_id_like_cpp(), 0, guid)
-            {
-                return Some(f(creature));
+        let mut f = Some(f);
+        if let Some(manager) = self.map_manager.as_ref().cloned() {
+            let result = {
+                let mut manager = manager
+                    .write()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if let Some(creature) =
+                    manager.find_creature_mut(self.player_map_id_like_cpp(), 0, guid)
+                {
+                    let result = f.take().expect("creature mutator is called once")(creature);
+                    Some((result, creature.position(), creature.creature.clone()))
+                } else {
+                    None
+                }
+            };
+            if let Some((result, position, creature)) = result {
+                self.relocate_canonical_creature_map_object_like_cpp(guid, position);
+                self.sync_canonical_creature_entity_like_cpp(creature);
+                return Some(result);
             }
         }
 
@@ -1829,9 +2432,13 @@ impl WorldSession {
             let mut legacy = self.creatures.remove(&guid)?;
             let mut creature =
                 Self::test_world_creature_from_legacy(self.player_map_id_like_cpp(), &legacy);
-            let result = f(&mut creature);
+            let result = f.take().expect("creature mutator is called once")(&mut creature);
             Self::sync_test_world_creature_to_legacy(&creature, &mut legacy);
+            let position = creature.position();
+            let canonical_creature = creature.creature.clone();
             self.creatures.insert(guid, legacy);
+            self.relocate_canonical_creature_map_object_like_cpp(guid, position);
+            self.sync_canonical_creature_entity_like_cpp(canonical_creature);
             return Some(result);
         }
 
@@ -3448,6 +4055,10 @@ impl WorldSession {
         self.lock_store = Some(store);
     }
 
+    pub(crate) fn lock_store(&self) -> Option<&Arc<LockStore>> {
+        self.lock_store.as_ref()
+    }
+
     /// C++ `sLockStore.LookupEntry(lockId)`.
     pub fn lock_entry_exists_like_cpp(&self, lock_id: u32) -> bool {
         self.lock_store
@@ -3613,6 +4224,14 @@ impl WorldSession {
 
     pub fn set_creature_display_info_store(&mut self, store: Arc<CreatureDisplayInfoStore>) {
         self.creature_display_info_store = Some(store);
+    }
+
+    pub fn set_gameobject_display_info_store(&mut self, store: Arc<GameObjectDisplayInfoStore>) {
+        self.gameobject_display_info_store = Some(store);
+    }
+
+    pub(crate) fn gameobject_display_info_store(&self) -> Option<&Arc<GameObjectDisplayInfoStore>> {
+        self.gameobject_display_info_store.as_ref()
     }
 
     pub fn set_creature_model_data_store(&mut self, store: Arc<CreatureModelDataStore>) {
@@ -3788,6 +4407,22 @@ impl WorldSession {
     /// Get the spell store reference.
     pub fn spell_store(&self) -> Option<&Arc<SpellStore>> {
         self.spell_store.as_ref()
+    }
+
+    pub fn set_spell_misc_store(&mut self, store: Arc<SpellMiscStore>) {
+        self.spell_misc_store = Some(store);
+    }
+
+    pub(crate) fn spell_misc_store(&self) -> Option<&Arc<SpellMiscStore>> {
+        self.spell_misc_store.as_ref()
+    }
+
+    pub fn set_spell_range_store(&mut self, store: Arc<SpellRangeStore>) {
+        self.spell_range_store = Some(store);
+    }
+
+    pub(crate) fn spell_range_store(&self) -> Option<&Arc<SpellRangeStore>> {
+        self.spell_range_store.as_ref()
     }
 
     pub fn set_area_table_store(&mut self, store: Arc<AreaTableStore>) {
@@ -7335,6 +7970,12 @@ impl WorldSession {
     }
 
     #[cfg(test)]
+    pub(crate) fn set_player_mounted_like_cpp(&mut self, mounted: bool) {
+        self.player_mounted_like_cpp = mounted;
+        self.player_mount_display_id_like_cpp = if mounted { 1 } else { 0 };
+    }
+
+    #[cfg(test)]
     pub(crate) fn set_player_cheat_god_like_cpp(&mut self, enabled: bool) {
         self.player_cheat_god_like_cpp = enabled;
     }
@@ -10650,8 +11291,90 @@ mod tests {
         Arc::new(std::sync::RwLock::new(crate::map_manager::MapManager::new()))
     }
 
+    fn shared_canonical_map_manager() -> SharedCanonicalMapManager {
+        Arc::new(Mutex::new(wow_map::MapManager::default()))
+    }
+
     fn test_creature_guid(counter: i64) -> ObjectGuid {
         ObjectGuid::create_world_object(wow_core::guid::HighGuid::Creature, 0, 1, 0, 0, 1, counter)
+    }
+
+    #[test]
+    fn canonical_world_map_login_binding_uses_cpp_split_faction_instance() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let guid = ObjectGuid::create_player(1, 42);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 609,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: 571,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            guid,
+            "Orc".to_string(),
+            Position::new(1.0, 2.0, 3.0, 0.0),
+            609,
+            2,
+            1,
+            10,
+            0,
+        ));
+
+        let decision = session
+            .ensure_canonical_world_map_for_current_player_like_cpp()
+            .expect("world map decision");
+
+        assert_eq!(
+            decision,
+            wow_map::CreateMapDecision::Create {
+                key: wow_map::MapKey::new(609, 1),
+                difficulty_id: 0,
+                kind: wow_map::ManagedMapKind::World,
+                side_effects: Vec::new(),
+            }
+        );
+        assert!(canonical.lock().unwrap().find_map(609, 1).is_some());
+    }
+
+    #[test]
+    fn canonical_world_map_login_binding_skips_dungeons_until_runtime_fields_exist() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let guid = ObjectGuid::create_player(1, 42);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 33,
+                instance_type: wow_data::map::MAP_INSTANCE,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            guid,
+            "Player".to_string(),
+            Position::new(1.0, 2.0, 3.0, 0.0),
+            33,
+            1,
+            1,
+            10,
+            0,
+        ));
+
+        assert!(
+            session
+                .ensure_canonical_world_map_for_current_player_like_cpp()
+                .is_none()
+        );
+        assert!(canonical.lock().unwrap().find_map(33, 0).is_none());
     }
 
     #[test]
@@ -10808,6 +11531,177 @@ mod tests {
             0,
             0,
             -1,
+        );
+    }
+
+    #[test]
+    fn register_world_creature_mirrors_existing_canonical_map_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let guid = test_creature_guid(611);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_map_manager(manager);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.current_map_id = 571;
+        session.register_world_creature(
+            571,
+            Position::new(10.0, 20.0, 30.0, 1.0),
+            test_creature_create_data(guid, 9001, 25),
+            3,
+            5,
+            20.0,
+            0,
+            0,
+            0,
+            None,
+            0,
+            0,
+            0,
+            0,
+            -1,
+        );
+
+        let guard = canonical.lock().unwrap();
+        let creature = guard
+            .find_map(571, 0)
+            .unwrap()
+            .map()
+            .get_creature(guid)
+            .expect("creature inserted into canonical map");
+        assert_eq!(creature.guid(), guid);
+        assert_eq!(creature.object().entry(), 9001);
+        assert_eq!(creature.position(), Position::new(10.0, 20.0, 30.0, 1.0));
+        assert!(creature.object().is_in_world());
+        let typed = guard
+            .find_map(571, 0)
+            .unwrap()
+            .map()
+            .get_typed_creature(guid)
+            .expect("creature stored as typed Creature entity");
+        assert_eq!(typed.unit().world().object().entry(), 9001);
+        assert_eq!(typed.current_health(), 25);
+    }
+
+    #[test]
+    fn mutate_world_creature_relocates_canonical_map_object_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let guid = test_creature_guid(612);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_map_manager(manager);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.current_map_id = 571;
+        session.register_world_creature(
+            571,
+            Position::new(10.0, 20.0, 30.0, 1.0),
+            test_creature_create_data(guid, 9001, 25),
+            3,
+            5,
+            20.0,
+            0,
+            0,
+            0,
+            None,
+            0,
+            0,
+            0,
+            0,
+            -1,
+        );
+
+        let moved = Position::new(15.0, 25.0, 35.0, 2.0);
+        session.mutate_world_creature(guid, |creature| {
+            creature.creature.set_ai_position(moved);
+        });
+
+        let guard = canonical.lock().unwrap();
+        let creature = guard
+            .find_map(571, 0)
+            .unwrap()
+            .map()
+            .get_creature(guid)
+            .expect("creature remains in canonical map");
+        assert_eq!(creature.position(), moved);
+        let typed = guard
+            .find_map(571, 0)
+            .unwrap()
+            .map()
+            .get_typed_creature(guid)
+            .expect("creature remains a typed Creature entity");
+        assert_eq!(typed.position(), moved);
+    }
+
+    #[test]
+    fn represented_gameobject_runtime_state_uses_typed_canonical_map_object_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let guid = ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 9001, 44);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            571,
+            guid,
+            9001,
+            Position::new(10.0, 20.0, 30.0, 1.0),
+            wow_entities::GAMEOBJECT_TYPE_CHEST as u8,
+        );
+
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(571, 0).unwrap().map();
+        assert_eq!(map.get_game_object(guid).unwrap().guid(), guid);
+        let typed = map
+            .get_typed_game_object(guid)
+            .expect("gameobject stored as typed GameObject entity");
+        assert_eq!(typed.world().object().entry(), 9001);
+        assert_eq!(
+            typed.world().position(),
+            Position::new(10.0, 20.0, 30.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn remove_world_creature_removes_canonical_map_object_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let guid = test_creature_guid(613);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_map_manager(manager);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.current_map_id = 571;
+        session.register_world_creature(
+            571,
+            Position::new(10.0, 20.0, 30.0, 1.0),
+            test_creature_create_data(guid, 9001, 25),
+            3,
+            5,
+            20.0,
+            0,
+            0,
+            0,
+            None,
+            0,
+            0,
+            0,
+            0,
+            -1,
+        );
+
+        assert!(session.remove_world_creature(guid).is_some());
+        let guard = canonical.lock().unwrap();
+        assert!(
+            guard
+                .find_map(571, 0)
+                .unwrap()
+                .map()
+                .get_creature(guid)
+                .is_none()
         );
     }
 
@@ -11462,6 +12356,485 @@ mod tests {
             wow_entities::CreatureAiState::Returning
         );
         assert_eq!(world_creature.creature.ai_ownership().combat_target, None);
+    }
+
+    #[test]
+    fn player_attack_start_stop_updates_canonical_unit_combat_state_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player = ObjectGuid::create_player(1, 45);
+        let victim = test_creature_guid(18_006);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+
+        session.start_player_attack_like_cpp(victim);
+        {
+            let guard = canonical.lock().unwrap();
+            let player_entity = guard
+                .find_map(571, 0)
+                .unwrap()
+                .map()
+                .get_typed_player(player)
+                .expect("player stored as canonical typed Player");
+            assert_eq!(player_entity.unit().attacking(), Some(victim));
+            assert_eq!(player_entity.unit().data().target, victim);
+        }
+
+        assert_eq!(session.stop_player_attack_like_cpp(), Some(victim));
+        let guard = canonical.lock().unwrap();
+        let player_entity = guard
+            .find_map(571, 0)
+            .unwrap()
+            .map()
+            .get_typed_player(player)
+            .expect("player remains canonical typed Player");
+        assert_eq!(player_entity.unit().attacking(), None);
+        assert_eq!(player_entity.unit().data().target, ObjectGuid::EMPTY);
+    }
+
+    #[test]
+    fn player_attack_tracks_typed_player_victim_attacker_set_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 47);
+        let victim = ObjectGuid::create_player(1, 48);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+
+        let mut victim_player = Player::new(Some(8), false);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(victim);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .set_map(571, 0)
+            .unwrap();
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::new(11.0, 20.0, 30.0, 0.0));
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .add_to_world();
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(571, 0)
+            .unwrap()
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_player(victim_player).unwrap(),
+            )
+            .unwrap();
+
+        session.start_player_attack_like_cpp(victim);
+        {
+            let guard = canonical.lock().unwrap();
+            let map = guard.find_map(571, 0).unwrap().map();
+            assert!(
+                map.get_typed_player(victim)
+                    .unwrap()
+                    .unit()
+                    .has_attacker_like_cpp(attacker)
+            );
+        }
+
+        assert_eq!(session.stop_player_attack_like_cpp(), Some(victim));
+        let guard = canonical.lock().unwrap();
+        assert!(
+            !guard
+                .find_map(571, 0)
+                .unwrap()
+                .map()
+                .get_typed_player(victim)
+                .unwrap()
+                .unit()
+                .has_attacker_like_cpp(attacker)
+        );
+    }
+
+    #[test]
+    fn player_attack_game_master_typed_player_is_rejected_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 52);
+        let victim = ObjectGuid::create_player(1, 53);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+
+        let mut victim_player = Player::new(Some(9), false);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(victim);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .set_map(571, 0)
+            .unwrap();
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::new(11.0, 20.0, 30.0, 0.0));
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .add_to_world();
+        victim_player.set_game_master_like_cpp(true);
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(571, 0)
+            .unwrap()
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_player(victim_player).unwrap(),
+            )
+            .unwrap();
+
+        session.start_player_attack_like_cpp(victim);
+
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(571, 0).unwrap().map();
+        assert_eq!(
+            map.get_typed_player(attacker).unwrap().unit().attacking(),
+            None
+        );
+        assert!(
+            !map.get_typed_player(victim)
+                .unwrap()
+                .unit()
+                .has_attacker_like_cpp(attacker)
+        );
+        assert_eq!(session.combat_target, None);
+        assert!(!session.in_combat);
+    }
+
+    #[test]
+    fn mounted_player_attack_is_rejected_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player = ObjectGuid::create_player(1, 49);
+        let victim = test_creature_guid(18_007);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Mounted".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.set_player_mounted_like_cpp(true);
+
+        session.start_player_attack_like_cpp(victim);
+
+        let guard = canonical.lock().unwrap();
+        let player_entity = guard
+            .find_map(571, 0)
+            .unwrap()
+            .map()
+            .get_typed_player(player)
+            .unwrap();
+        assert_eq!(player_entity.unit().attacking(), None);
+        assert_eq!(player_entity.unit().data().target, ObjectGuid::EMPTY);
+        assert_eq!(session.combat_target, None);
+        assert!(!session.in_combat);
+    }
+
+    #[test]
+    fn player_attack_tracks_typed_creature_victim_attacker_set_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let player = ObjectGuid::create_player(1, 50);
+        let victim = test_creature_guid(18_008);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_map_manager(manager);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.register_world_creature(
+            571,
+            Position::new(11.0, 20.0, 30.0, 0.0),
+            test_creature_create_data(victim, 9001, 25),
+            3,
+            5,
+            20.0,
+            0,
+            0,
+            0,
+            None,
+            0,
+            0,
+            0,
+            0,
+            -1,
+        );
+
+        session.start_player_attack_like_cpp(victim);
+        {
+            let guard = canonical.lock().unwrap();
+            let creature = guard
+                .find_map(571, 0)
+                .unwrap()
+                .map()
+                .get_typed_creature(victim)
+                .unwrap();
+            assert!(creature.unit().has_attacker_like_cpp(player));
+        }
+
+        assert_eq!(session.stop_player_attack_like_cpp(), Some(victim));
+        let guard = canonical.lock().unwrap();
+        let creature = guard
+            .find_map(571, 0)
+            .unwrap()
+            .map()
+            .get_typed_creature(victim)
+            .unwrap();
+        assert!(!creature.unit().has_attacker_like_cpp(player));
+    }
+
+    #[test]
+    fn player_attack_dead_typed_creature_is_rejected_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let player = ObjectGuid::create_player(1, 51);
+        let victim = test_creature_guid(18_009);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_map_manager(manager);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.register_world_creature(
+            571,
+            Position::new(11.0, 20.0, 30.0, 0.0),
+            test_creature_create_data(victim, 9001, 25),
+            3,
+            5,
+            20.0,
+            0,
+            0,
+            0,
+            None,
+            0,
+            0,
+            0,
+            0,
+            -1,
+        );
+        session
+            .mutate_world_creature(victim, |creature| {
+                creature.take_damage(25);
+            })
+            .unwrap();
+
+        session.start_player_attack_like_cpp(victim);
+
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(571, 0).unwrap().map();
+        assert_eq!(
+            map.get_typed_player(player).unwrap().unit().attacking(),
+            None
+        );
+        assert!(
+            !map.get_typed_creature(victim)
+                .unwrap()
+                .unit()
+                .has_attacker_like_cpp(player)
+        );
+        assert_eq!(session.combat_target, None);
+        assert!(!session.in_combat);
+    }
+
+    #[test]
+    fn player_attack_evading_typed_creature_is_rejected_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let player = ObjectGuid::create_player(1, 54);
+        let victim = test_creature_guid(18_010);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_map_manager(manager);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.register_world_creature(
+            571,
+            Position::new(11.0, 20.0, 30.0, 0.0),
+            test_creature_create_data(victim, 9001, 25),
+            3,
+            5,
+            20.0,
+            0,
+            0,
+            0,
+            None,
+            0,
+            0,
+            0,
+            0,
+            -1,
+        );
+        session
+            .mutate_world_creature(victim, |creature| {
+                creature.creature.set_in_evade_mode_like_cpp(true);
+            })
+            .unwrap();
+
+        session.start_player_attack_like_cpp(victim);
+
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(571, 0).unwrap().map();
+        assert_eq!(
+            map.get_typed_player(player).unwrap().unit().attacking(),
+            None
+        );
+        assert!(
+            !map.get_typed_creature(victim)
+                .unwrap()
+                .unit()
+                .has_attacker_like_cpp(player)
+        );
+        assert_eq!(session.combat_target, None);
+        assert!(!session.in_combat);
     }
 
     #[test]
@@ -13647,99 +15020,82 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_metadata_matches_cpp_for_touched_opcodes() {
+    fn dispatch_metadata_matches_cpp_for_registered_active_opcodes() {
         let (session, _, _) = make_session();
         let table = &session.dispatch_table;
 
-        let cases = [
-            (
-                ClientOpcodes::AreaTrigger,
-                SessionStatus::LoggedIn,
-                PacketProcessing::Inplace,
-            ),
-            (
-                ClientOpcodes::SetSelection,
-                SessionStatus::LoggedIn,
-                PacketProcessing::ThreadUnsafe,
-            ),
-            (
-                ClientOpcodes::TaxiNodeStatusQuery,
-                SessionStatus::LoggedIn,
-                PacketProcessing::ThreadSafe,
-            ),
-            (
-                ClientOpcodes::TimeSyncResponse,
-                SessionStatus::LoggedIn,
-                PacketProcessing::ThreadSafe,
-            ),
-            (
-                ClientOpcodes::TimeSyncResponseDropped,
-                SessionStatus::LoggedIn,
-                PacketProcessing::ThreadSafe,
-            ),
-            (
-                ClientOpcodes::TimeSyncResponseFailed,
-                SessionStatus::LoggedIn,
-                PacketProcessing::ThreadSafe,
-            ),
-            (
-                ClientOpcodes::TrainerList,
-                SessionStatus::LoggedIn,
-                PacketProcessing::Inplace,
-            ),
-            (
-                ClientOpcodes::TrainerBuySpell,
-                SessionStatus::LoggedIn,
-                PacketProcessing::Inplace,
-            ),
-            (
-                ClientOpcodes::MoveDismissVehicle,
-                SessionStatus::LoggedIn,
-                PacketProcessing::ThreadSafe,
-            ),
-            (
-                ClientOpcodes::RequestVehiclePrevSeat,
-                SessionStatus::LoggedIn,
-                PacketProcessing::Inplace,
-            ),
-            (
-                ClientOpcodes::RequestVehicleNextSeat,
-                SessionStatus::LoggedIn,
-                PacketProcessing::Inplace,
-            ),
-            (
-                ClientOpcodes::MoveChangeVehicleSeats,
-                SessionStatus::LoggedIn,
-                PacketProcessing::ThreadSafe,
-            ),
-            (
-                ClientOpcodes::RequestVehicleSwitchSeat,
-                SessionStatus::LoggedIn,
-                PacketProcessing::Inplace,
-            ),
-            (
-                ClientOpcodes::RideVehicleInteract,
-                SessionStatus::LoggedIn,
-                PacketProcessing::ThreadUnsafe,
-            ),
-            (
-                ClientOpcodes::EjectPassenger,
-                SessionStatus::LoggedIn,
-                PacketProcessing::ThreadUnsafe,
-            ),
-            (
-                ClientOpcodes::RequestVehicleExit,
-                SessionStatus::LoggedIn,
-                PacketProcessing::Inplace,
-            ),
+        fn status_from_cpp(value: &str) -> Option<SessionStatus> {
+            match value {
+                "STATUS_AUTHED" => Some(SessionStatus::Authed),
+                "STATUS_LOGGEDIN" => Some(SessionStatus::LoggedIn),
+                "STATUS_TRANSFER" => Some(SessionStatus::Transfer),
+                "STATUS_LOGGEDIN_OR_RECENTLY_LOGGOUT" => {
+                    Some(SessionStatus::LoggedInOrRecentlyLogout)
+                }
+                "STATUS_NEVER" | "STATUS_UNHANDLED" => None,
+                other => panic!("unknown C++ session status {other}"),
+            }
+        }
+
+        fn processing_from_cpp(value: &str) -> PacketProcessing {
+            match value {
+                "PROCESS_INPLACE" => PacketProcessing::Inplace,
+                "PROCESS_THREADUNSAFE" => PacketProcessing::ThreadUnsafe,
+                "PROCESS_THREADSAFE" => PacketProcessing::ThreadSafe,
+                other => panic!("unknown C++ packet processing {other}"),
+            }
+        }
+
+        let cpp_metadata =
+            include_str!("../../../docs/migration/inventory/cpp-client-handlers.tsv");
+        let mut expected = std::collections::HashMap::new();
+        let mut cpp_never_or_unhandled = std::collections::HashSet::new();
+
+        for line in cpp_metadata.lines().skip(1) {
+            let columns: Vec<_> = line.split('\t').collect();
+            let rust_const = columns[9];
+            if rust_const == "-" {
+                continue;
+            }
+
+            let cpp_status = columns[3];
+            let cpp_processing = columns[4];
+            if let Some(status) = status_from_cpp(cpp_status) {
+                expected.insert(rust_const, (status, processing_from_cpp(cpp_processing)));
+            } else {
+                cpp_never_or_unhandled.insert(rust_const);
+            }
+        }
+
+        let compatibility_exceptions = [
+            "BattlePayGetPurchaseList",
+            "ConnectToFailed",
+            "GetAccountCharacterList",
+            "OverrideScreenFlash",
+            "Ping",
+            "QueryCountdownTimer",
+            "ReportClientVariables",
+            "ReportEnabledAddons",
+            "ReportKeybindingExecutionCounts",
+            "RequestConquestFormulaConstants",
+            "UpdateVasPurchaseStates",
         ];
 
-        for (opcode, status, processing) in cases {
-            let entry = table
-                .get(&opcode)
-                .unwrap_or_else(|| panic!("missing dispatch entry for {opcode:?}"));
-            assert_eq!(entry.status, status, "{opcode:?} status");
-            assert_eq!(entry.processing, processing, "{opcode:?} processing");
+        for entry in table.values() {
+            let opcode_name = format!("{:?}", entry.opcode);
+            if compatibility_exceptions.contains(&opcode_name.as_str()) {
+                assert!(
+                    cpp_never_or_unhandled.contains(opcode_name.as_str()),
+                    "{opcode_name} is listed as a compatibility exception but C++ metadata is active"
+                );
+                continue;
+            }
+
+            let (status, processing) = expected
+                .get(opcode_name.as_str())
+                .unwrap_or_else(|| panic!("missing C++ metadata row for {opcode_name}"));
+            assert_eq!(entry.status, *status, "{opcode_name} status");
+            assert_eq!(entry.processing, *processing, "{opcode_name} processing");
         }
     }
 

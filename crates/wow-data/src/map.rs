@@ -14,7 +14,15 @@ use tracing::info;
 use crate::{PlayerConditionEntry, PlayerConditionStore, wdc4::Wdc4Reader};
 
 pub const MAP_FLAG_FLEXIBLE_RAID_LOCKING: u32 = 0x0000_8000;
+pub const MAP_FLAG_GARRISON: u32 = 0x0400_0000;
 pub const MAP_DIFFICULTY_FLAG_USE_LOOT_BASED_LOCK: u8 = 0x02;
+
+pub const MAP_COMMON: i8 = 0;
+pub const MAP_INSTANCE: i8 = 1;
+pub const MAP_RAID: i8 = 2;
+pub const MAP_BATTLEGROUND: i8 = 3;
+pub const MAP_ARENA: i8 = 4;
+pub const MAP_SCENARIO: i8 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MapEntry {
@@ -28,6 +36,26 @@ pub struct MapEntry {
 impl MapEntry {
     pub const fn is_flex_locking(self) -> bool {
         self.flags1 & MAP_FLAG_FLEXIBLE_RAID_LOCKING != 0
+    }
+
+    pub const fn is_garrison(self) -> bool {
+        self.flags1 & MAP_FLAG_GARRISON != 0
+    }
+
+    pub const fn is_dungeon(self) -> bool {
+        matches!(self.instance_type, MAP_INSTANCE | MAP_RAID | MAP_SCENARIO) && !self.is_garrison()
+    }
+
+    pub const fn is_battleground_or_arena(self) -> bool {
+        matches!(self.instance_type, MAP_BATTLEGROUND | MAP_ARENA)
+    }
+
+    pub const fn is_world_map(self) -> bool {
+        self.instance_type == MAP_COMMON
+    }
+
+    pub const fn is_split_by_faction(self) -> bool {
+        matches!(self.id, 609 | 1265 | 1481 | 2175 | 2570)
     }
 }
 
@@ -364,6 +392,68 @@ mod tests {
 
         assert!(store.get(631).unwrap().is_flex_locking());
         assert!(store.get(1).is_none());
+    }
+
+    #[test]
+    fn map_entry_classification_matches_cpp_helpers() {
+        let world = MapEntry {
+            id: 0,
+            instance_type: MAP_COMMON,
+            parent_map_id: -1,
+            cosmetic_parent_map_id: -1,
+            flags1: 0,
+        };
+        let dungeon = MapEntry {
+            id: 33,
+            instance_type: MAP_INSTANCE,
+            parent_map_id: -1,
+            cosmetic_parent_map_id: -1,
+            flags1: 0,
+        };
+        let raid = MapEntry {
+            id: 631,
+            instance_type: MAP_RAID,
+            parent_map_id: -1,
+            cosmetic_parent_map_id: -1,
+            flags1: 0,
+        };
+        let battleground = MapEntry {
+            id: 489,
+            instance_type: MAP_BATTLEGROUND,
+            parent_map_id: -1,
+            cosmetic_parent_map_id: -1,
+            flags1: 0,
+        };
+        let arena = MapEntry {
+            id: 562,
+            instance_type: MAP_ARENA,
+            parent_map_id: -1,
+            cosmetic_parent_map_id: -1,
+            flags1: 0,
+        };
+        let garrison = MapEntry {
+            id: 1152,
+            instance_type: MAP_INSTANCE,
+            parent_map_id: -1,
+            cosmetic_parent_map_id: -1,
+            flags1: MAP_FLAG_GARRISON,
+        };
+        let split = MapEntry {
+            id: 609,
+            instance_type: MAP_COMMON,
+            parent_map_id: 571,
+            cosmetic_parent_map_id: -1,
+            flags1: 0,
+        };
+
+        assert!(world.is_world_map());
+        assert!(dungeon.is_dungeon());
+        assert!(raid.is_dungeon());
+        assert!(battleground.is_battleground_or_arena());
+        assert!(arena.is_battleground_or_arena());
+        assert!(garrison.is_garrison());
+        assert!(!garrison.is_dungeon());
+        assert!(split.is_split_by_faction());
     }
 
     #[test]

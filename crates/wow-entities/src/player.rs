@@ -27,6 +27,8 @@ use crate::{
     },
 };
 
+pub const PLAYER_EXTRA_GM_ON: u32 = 0x0001;
+
 pub const MAX_MONEY_AMOUNT: u64 = 99_999_999_999;
 pub const TEAM_OTHER: u8 = 0;
 pub const TEAM_HORDE_ID: u32 = 67;
@@ -3062,6 +3064,18 @@ impl Player {
 
     pub const fn extra_flags(&self) -> u32 {
         self.extra_flags
+    }
+
+    pub const fn is_game_master_like_cpp(&self) -> bool {
+        (self.extra_flags & PLAYER_EXTRA_GM_ON) != 0
+    }
+
+    pub fn set_game_master_like_cpp(&mut self, on: bool) {
+        if on {
+            self.extra_flags |= PLAYER_EXTRA_GM_ON;
+        } else {
+            self.extra_flags &= !PLAYER_EXTRA_GM_ON;
+        }
     }
 
     pub const fn lifecycle_metadata(&self) -> PlayerLifecycleMetadata {
@@ -8863,6 +8877,7 @@ mod tests {
         assert_eq!(player.ingame_time(), 0);
         assert_eq!(player.shared_quest_id(), 0);
         assert_eq!(player.extra_flags(), 0);
+        assert!(!player.is_game_master_like_cpp());
         assert_eq!(player.team(), TEAM_OTHER);
         assert!(player.is_active());
         assert!(player.controlled_by_player());
@@ -8873,6 +8888,22 @@ mod tests {
         );
         assert!(!player.player_data_changes_mask().is_any_set());
         assert!(!player.active_player_data_changes_mask().is_any_set());
+    }
+
+    #[test]
+    fn game_master_flag_matches_cpp_extra_flag() {
+        let mut player = Player::new(Some(42), false);
+
+        player.set_game_master_like_cpp(true);
+        assert!(player.is_game_master_like_cpp());
+        assert_eq!(
+            player.extra_flags() & PLAYER_EXTRA_GM_ON,
+            PLAYER_EXTRA_GM_ON
+        );
+
+        player.set_game_master_like_cpp(false);
+        assert!(!player.is_game_master_like_cpp());
+        assert_eq!(player.extra_flags() & PLAYER_EXTRA_GM_ON, 0);
     }
 
     #[test]

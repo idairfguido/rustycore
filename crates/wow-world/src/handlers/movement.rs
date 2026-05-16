@@ -42,7 +42,7 @@ macro_rules! register_move {
             PacketHandlerEntry {
                 opcode: ClientOpcodes::$opcode,
                 status: SessionStatus::LoggedIn,
-                processing: PacketProcessing::ThreadUnsafe,
+                processing: PacketProcessing::ThreadSafe,
                 handler_name: concat!("handle_movement_", stringify!($opcode)),
             }
         }
@@ -1249,7 +1249,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::SetActiveMover,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_set_active_mover",
     }
 }
@@ -1260,7 +1260,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::MoveInitActiveMoverComplete,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadSafe,
         handler_name: "handle_move_init_active_mover_complete",
     }
 }
@@ -1271,7 +1271,7 @@ macro_rules! register_movement_ack_message {
             PacketHandlerEntry {
                 opcode: ClientOpcodes::$opcode,
                 status: SessionStatus::LoggedIn,
-                processing: PacketProcessing::Inplace,
+                processing: PacketProcessing::ThreadSafe,
                 handler_name: "handle_movement_ack_message",
             }
         }
@@ -1284,7 +1284,7 @@ macro_rules! register_movement_speed_ack {
             PacketHandlerEntry {
                 opcode: ClientOpcodes::$opcode,
                 status: SessionStatus::LoggedIn,
-                processing: PacketProcessing::Inplace,
+                processing: PacketProcessing::ThreadSafe,
                 handler_name: "handle_movement_speed_ack",
             }
         }
@@ -1323,7 +1323,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::MoveKnockBackAck,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadSafe,
         handler_name: "handle_move_knock_back_ack",
     }
 }
@@ -1332,7 +1332,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::MoveSetCollisionHeightAck,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadSafe,
         handler_name: "handle_move_set_collision_height_ack",
     }
 }
@@ -1341,7 +1341,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::MoveApplyMovementForceAck,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadSafe,
         handler_name: "handle_move_apply_movement_force_ack",
     }
 }
@@ -1350,7 +1350,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::MoveRemoveMovementForceAck,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadSafe,
         handler_name: "handle_move_remove_movement_force_ack",
     }
 }
@@ -1368,7 +1368,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::MoveSplineDone,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadSafe,
         handler_name: "handle_move_spline_done",
     }
 }
@@ -1377,7 +1377,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::MoveTeleportAck,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadSafe,
         handler_name: "handle_move_teleport_ack",
     }
 }

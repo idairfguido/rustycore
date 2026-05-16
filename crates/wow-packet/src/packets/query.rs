@@ -131,28 +131,21 @@ impl ServerPacket for QueryCreatureResponse {
             return;
         }
 
+        let default_stats;
         let stats = match &self.stats {
             Some(s) => s,
-            None => return,
+            None => {
+                default_stats = CreatureStats::default();
+                &default_stats
+            }
         };
 
         // ── Bit-packed string lengths ────────────────────────────
-        // Must match C# QueryCreatureResponse.Write() EXACTLY.
-        let title_len = if stats.title.is_empty() {
-            0u32
-        } else {
-            stats.title.len() as u32 + 1
-        };
-        let title_alt_len = if stats.title_alt.is_empty() {
-            0u32
-        } else {
-            stats.title_alt.len() as u32 + 1
-        };
-        let cursor_name_len = if stats.cursor_name.is_empty() {
-            0u32
-        } else {
-            stats.cursor_name.len() as u32 + 1
-        };
+        // C++ writes length() + 1 for every nullable string length bitfield,
+        // including empty strings, but only emits string bytes when non-empty.
+        let title_len = stats.title.len() as u32 + 1;
+        let title_alt_len = stats.title_alt.len() as u32 + 1;
+        let cursor_name_len = stats.cursor_name.len() as u32 + 1;
 
         pkt.write_bits(title_len, 11);
         pkt.write_bits(title_alt_len, 11);
@@ -162,21 +155,12 @@ impl ServerPacket for QueryCreatureResponse {
 
         // C# interleaves Name[i] and NameAlt[i] lengths in one loop
         for i in 0..MAX_CREATURE_NAMES {
-            let name_len = if stats.names[i].is_empty() {
-                0u32
-            } else {
-                stats.names[i].len() as u32 + 1
-            };
-            let alt_len = if stats.name_alts[i].is_empty() {
-                0u32
-            } else {
-                stats.name_alts[i].len() as u32 + 1
-            };
+            let name_len = stats.names[i].len() as u32 + 1;
+            let alt_len = stats.name_alts[i].len() as u32 + 1;
             pkt.write_bits(name_len, 11);
             pkt.write_bits(alt_len, 11);
         }
-        // NOTE: C# does NOT FlushBits here — the first WriteString/WriteCString
-        // call (or the first integer write) will flush automatically.
+        pkt.flush_bits();
 
         // ── Name strings (BEFORE integer fields!) ────────────────
         // C# writes names interleaved: Name[0], NameAlt[0], Name[1], NameAlt[1], ...
@@ -328,6 +312,7 @@ impl ServerPacket for QueryGameObjectResponse {
         pkt.flush_bits();
 
         if !self.allow {
+            pkt.write_uint32(0);
             return;
         }
 
@@ -421,6 +406,20 @@ mod tests {
     }
 
     #[test]
+    fn query_creature_response_empty_string_lengths_match_cpp() {
+        let resp = QueryCreatureResponse {
+            creature_id: 100,
+            allow: true,
+            stats: Some(CreatureStats::default()),
+        };
+        let bytes = resp.to_bytes();
+
+        // C++ writes 118 bits of string-length metadata after Allow, then
+        // flushes to 15 bytes even when all strings are empty (length = 1).
+        assert_eq!(bytes.len(), 106);
+    }
+
+    #[test]
     fn query_game_object_response_not_found() {
         let resp = QueryGameObjectResponse {
             game_object_id: 999,
@@ -429,8 +428,9 @@ mod tests {
             stats: None,
         };
         let bytes = resp.to_bytes();
-        // Should contain opcode + id + guid + allow bit
+        // C++ always writes uint32(statsData.size()), even when Allow=false.
         assert!(bytes.len() > 6);
+        assert_eq!(&bytes[bytes.len() - 4..], &[0, 0, 0, 0]);
     }
 
     #[test]

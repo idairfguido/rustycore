@@ -1,4 +1,4 @@
-use wow_constants::{DeathState, PowerType, TypeId, TypeMask, WeaponAttackType};
+use wow_constants::{DeathState, PowerType, TypeId, TypeMask, UnitState, WeaponAttackType};
 use wow_core::{ObjectGuid, Position};
 
 use crate::{BASE_MAXDAMAGE, BASE_MINDAMAGE, Unit};
@@ -1215,8 +1215,31 @@ impl Creature {
         self.cannot_reach_target
     }
 
+    pub fn set_cannot_reach_target_like_cpp(&mut self, cannot_reach: bool) {
+        self.cannot_reach_target = cannot_reach;
+        if !cannot_reach {
+            self.cannot_reach_timer = 0;
+        }
+    }
+
     pub const fn cannot_reach_timer(&self) -> u32 {
         self.cannot_reach_timer
+    }
+
+    pub fn is_in_evade_mode_like_cpp(&self) -> bool {
+        self.unit.has_unit_state(UnitState::EVADE.bits())
+    }
+
+    pub fn set_in_evade_mode_like_cpp(&mut self, in_evade_mode: bool) {
+        if in_evade_mode {
+            self.unit.add_unit_state(UnitState::EVADE.bits());
+        } else {
+            self.unit.clear_unit_state(UnitState::EVADE.bits());
+        }
+    }
+
+    pub fn is_evading_attacks_like_cpp(&self) -> bool {
+        self.is_in_evade_mode_like_cpp() || self.cannot_reach_target
     }
 
     pub const fn melee_damage_school_mask(&self) -> u32 {
@@ -2647,6 +2670,31 @@ mod tests {
         spawned_creature.set_spawn_id(99);
         spawned_creature.set_dont_clear_tap_list_on_evade(true);
         assert!(!spawned_creature.dont_clear_tap_list_on_evade());
+    }
+
+    #[test]
+    fn creature_evading_attacks_matches_cpp_evade_or_cannot_reach() {
+        let mut creature = Creature::new(false);
+
+        assert!(!creature.is_in_evade_mode_like_cpp());
+        assert!(!creature.is_evading_attacks_like_cpp());
+
+        creature.set_in_evade_mode_like_cpp(true);
+        assert!(creature.is_in_evade_mode_like_cpp());
+        assert!(creature.is_evading_attacks_like_cpp());
+
+        creature.set_in_evade_mode_like_cpp(false);
+        assert!(!creature.is_evading_attacks_like_cpp());
+
+        creature.set_cannot_reach_target_like_cpp(true);
+        assert!(creature.cannot_reach_target());
+        assert!(creature.is_evading_attacks_like_cpp());
+
+        creature.cannot_reach_timer = 500;
+        creature.set_cannot_reach_target_like_cpp(false);
+        assert!(!creature.cannot_reach_target());
+        assert_eq!(creature.cannot_reach_timer(), 0);
+        assert!(!creature.is_evading_attacks_like_cpp());
     }
 
     #[test]

@@ -25,6 +25,13 @@ use wow_core::{ObjectGuid, guid::HighGuid};
 use wow_data::{ItemRandomEnchantmentTemplateEntry, ItemRandomPropertyTemplateEntry};
 use wow_database::{CharStatements, SqlTransaction, WorldStatements};
 use wow_entities::{
+    AccessorObjectKind, GAMEOBJECT_TYPE_AREADAMAGE, GAMEOBJECT_TYPE_BARBER_CHAIR,
+    GAMEOBJECT_TYPE_BINDER, GAMEOBJECT_TYPE_CAMERA, GAMEOBJECT_TYPE_CHAIR, GAMEOBJECT_TYPE_CHEST,
+    GAMEOBJECT_TYPE_DESTRUCTIBLE_BUILDING, GAMEOBJECT_TYPE_DOOR,
+    GAMEOBJECT_TYPE_DUNGEON_DIFFICULTY, GAMEOBJECT_TYPE_FISHING_HOLE, GAMEOBJECT_TYPE_FISHING_NODE,
+    GAMEOBJECT_TYPE_FLAGDROP, GAMEOBJECT_TYPE_FLAGSTAND, GAMEOBJECT_TYPE_GATHERING_NODE,
+    GAMEOBJECT_TYPE_GUILD_BANK, GAMEOBJECT_TYPE_MAILBOX, GAMEOBJECT_TYPE_MAP_OBJECT,
+    GAMEOBJECT_TYPE_MINI_GAME, GAMEOBJECT_TYPE_QUESTGIVER, GAMEOBJECT_TYPE_TEXT,
     GO_DYNFLAG_LO_NO_INTERACT, GameObjectLootSource, GatheringNodeUseSource, GoState,
     INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_ITEM_END,
     INVENTORY_SLOT_ITEM_START, Item, ItemPosCount, LootState, make_item_pos,
@@ -96,6 +103,9 @@ const CONDITION_OBJECT_ENTRY_GUID_LIKE_CPP: i32 = 51;
 const CONDITION_TYPE_MASK_LIKE_CPP: i32 = 52;
 const TYPEID_PLAYER_LIKE_CPP: u32 = 6;
 const PLAYER_TYPE_MASK_LIKE_CPP: u32 = 0x0001 | 0x0020 | 0x0040;
+const LOCK_KEY_SKILL_LIKE_CPP: u8 = 2;
+const LOCK_KEY_SPELL_LIKE_CPP: u8 = 3;
+const SPELL_EFFECT_OPEN_LOCK_LIKE_CPP: u32 = 33;
 const REMOTE_MASTER_LOOT_COMMAND_TIMEOUT: Duration = Duration::from_millis(250);
 
 // ── Handler registrations ─────────────────────────────────────────
@@ -192,10 +202,7 @@ impl WorldSession {
         }
 
         // Check creature exists and is dead.
-        let (creature_alive, creature_position) = match self
-            .mutate_world_creature(req.unit, |creature| {
-                (creature.is_alive(), creature.position())
-            }) {
+        let creature_state = match self.represented_creature_loot_state_like_cpp(req.unit) {
             Some(state) => state,
             None => {
                 warn!("LootUnit: creature {:?} not found", req.unit);
@@ -203,13 +210,13 @@ impl WorldSession {
             }
         };
 
-        if creature_alive {
+        if creature_state.is_alive {
             return;
         }
 
         if self
             .player_position_like_cpp()
-            .is_some_and(|player| !player.is_within_dist(&creature_position, 30.0))
+            .is_some_and(|player| !player.is_within_dist(&creature_state.position, 30.0))
         {
             return;
         }
@@ -271,10 +278,11 @@ impl WorldSession {
         if !self.player_is_alive_like_cpp() {
             return;
         }
-        if !gameobject_guid.is_game_object() || !self.visible_gameobjects.contains(&gameobject_guid)
-        {
+        if !self.represented_gameobject_exists_for_loot_like_cpp(gameobject_guid) {
             return;
         }
+
+        self.record_represented_gameobject_chest_release_metadata_like_cpp(gameobject_guid, source);
 
         let is_first_represented_unique_use = !self
             .represented_unique_gameobject_uses
@@ -386,8 +394,7 @@ impl WorldSession {
         if !self.player_is_alive_like_cpp() {
             return;
         }
-        if !gameobject_guid.is_game_object() || !self.visible_gameobjects.contains(&gameobject_guid)
-        {
+        if !self.represented_gameobject_exists_for_loot_like_cpp(gameobject_guid) {
             return;
         }
 
@@ -443,6 +450,20 @@ impl WorldSession {
         state.loot_state = Some(LootState::Activated);
         state.loot_state_unit_guid = player_guid;
         true
+    }
+
+    fn record_represented_gameobject_chest_release_metadata_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        source: GameObjectLootSource,
+    ) {
+        let state = self
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        state.chest_restock_time_secs = Some(source.chest_restock_time_secs);
+        state.chest_consumable = Some(source.chest_consumable);
+        state.chest_personal_loot_id = Some(source.personal_loot_id);
     }
 
     fn record_represented_gathering_node_runtime_state_like_cpp(
@@ -544,8 +565,7 @@ impl WorldSession {
         if loot_id == 0 || !self.player_is_alive_like_cpp() {
             return;
         }
-        if !gameobject_guid.is_game_object() || !self.visible_gameobjects.contains(&gameobject_guid)
-        {
+        if !self.represented_gameobject_exists_for_loot_like_cpp(gameobject_guid) {
             return;
         }
 
@@ -648,7 +668,12 @@ impl WorldSession {
 
             self.ensure_represented_player_looting_like_cpp(owner_guid, player_guid);
 
-            if owner_guid.is_game_object() && !self.visible_gameobjects.contains(&owner_guid) {
+            if owner_guid.is_game_object()
+                && !self.represented_gameobject_can_autostore_loot_item_like_cpp(
+                    owner_guid,
+                    player_guid,
+                )
+            {
                 self.send_packet(&SLootRelease {
                     loot_obj: owner_guid,
                     owner: player_guid,
@@ -658,7 +683,7 @@ impl WorldSession {
 
             if owner_guid.is_creature_or_vehicle() {
                 let Some(creature_position) =
-                    self.mutate_world_creature(owner_guid, |creature| creature.position())
+                    self.represented_creature_position_for_loot_like_cpp(owner_guid)
                 else {
                     self.send_loot_error_like_cpp(
                         loot_req.object,
@@ -2479,41 +2504,30 @@ impl WorldSession {
                 if *guid == main_loot_target || !guid.is_creature_or_vehicle() {
                     return false;
                 }
-                self.mutate_world_creature(*guid, |creature| {
-                    !creature.is_alive()
-                        && player_position.is_within_dist(&creature.position(), 30.0)
-                })
-                .unwrap_or(false)
+                self.represented_creature_loot_state_like_cpp(*guid)
+                    .is_some_and(|creature| {
+                        !creature.is_alive
+                            && player_position.is_within_dist(&creature.position, 30.0)
+                    })
             })
             .collect();
         candidates.sort_by_key(|guid| (guid.high_value(), guid.low_value()));
 
         let mut result = Vec::new();
         for owner_guid in candidates {
-            let Some((level, entry, loot_id, gold_min, gold_max, dungeon_encounter_id)) = self
-                .mutate_world_creature(owner_guid, |creature| {
-                    (
-                        creature.level(),
-                        creature.entry(),
-                        creature.loot_id(),
-                        creature.gold_min(),
-                        creature.gold_max(),
-                        creature.dungeon_encounter_id(),
-                    )
-                })
-            else {
+            let Some(creature) = self.represented_creature_loot_state_like_cpp(owner_guid) else {
                 continue;
             };
 
             self.ensure_represented_creature_loot_like_cpp(
                 owner_guid,
                 player_guid,
-                level,
-                entry,
-                loot_id,
-                gold_min,
-                gold_max,
-                dungeon_encounter_id,
+                creature.level,
+                creature.entry,
+                creature.loot_id,
+                creature.gold_min,
+                creature.gold_max,
+                creature.dungeon_encounter_id,
             )
             .await;
             if let Some(loot) = self.loot_table.get_mut(&owner_guid) {
@@ -2540,26 +2554,16 @@ impl WorldSession {
         player_guid: ObjectGuid,
         ae_looting: bool,
     ) -> Option<LootResponse> {
-        let (level, entry, loot_id, gold_min, gold_max, dungeon_encounter_id) = self
-            .mutate_world_creature(owner_guid, |creature| {
-                (
-                    creature.level(),
-                    creature.entry(),
-                    creature.loot_id(),
-                    creature.gold_min(),
-                    creature.gold_max(),
-                    creature.dungeon_encounter_id(),
-                )
-            })?;
+        let creature = self.represented_creature_loot_state_like_cpp(owner_guid)?;
         self.ensure_represented_creature_loot_like_cpp(
             owner_guid,
             player_guid,
-            level,
-            entry,
-            loot_id,
-            gold_min,
-            gold_max,
-            dungeon_encounter_id,
+            creature.level,
+            creature.entry,
+            creature.loot_id,
+            creature.gold_min,
+            creature.gold_max,
+            creature.dungeon_encounter_id,
         )
         .await;
 
@@ -4391,6 +4395,269 @@ impl WorldSession {
         })
     }
 
+    fn canonical_map_object_position_for_loot_like_cpp(
+        &self,
+        guid: ObjectGuid,
+        allowed: &[AccessorObjectKind],
+    ) -> Option<wow_core::Position> {
+        let manager = self.canonical_map_manager.as_ref()?;
+        let manager = manager.lock().ok()?;
+        let map = manager
+            .find_map(u32::from(self.player_map_id_like_cpp()), 0)?
+            .map();
+        map.map_object_by_kind(guid, allowed)
+            .map(|object| object.position())
+    }
+
+    fn represented_creature_loot_state_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+    ) -> Option<RepresentedCreatureLootStateLikeCpp> {
+        self.mutate_world_creature(guid, |creature| RepresentedCreatureLootStateLikeCpp {
+            is_alive: creature.is_alive(),
+            position: creature.position(),
+            level: creature.level(),
+            entry: creature.entry(),
+            loot_id: creature.loot_id(),
+            gold_min: creature.gold_min(),
+            gold_max: creature.gold_max(),
+            dungeon_encounter_id: creature.dungeon_encounter_id(),
+        })
+    }
+
+    fn represented_creature_position_for_loot_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+    ) -> Option<wow_core::Position> {
+        if let Some(position) = self
+            .canonical_map_object_position_for_loot_like_cpp(guid, &[AccessorObjectKind::Creature])
+        {
+            return Some(position);
+        }
+
+        self.represented_creature_loot_state_like_cpp(guid)
+            .map(|creature| creature.position)
+    }
+
+    fn represented_gameobject_loot_state_like_cpp(
+        &self,
+        guid: ObjectGuid,
+    ) -> Option<RepresentedGameObjectLootStateLikeCpp> {
+        if !guid.is_game_object() {
+            return None;
+        }
+
+        let canonical_position = self.canonical_map_object_position_for_loot_like_cpp(
+            guid,
+            &[
+                AccessorObjectKind::GameObject,
+                AccessorObjectKind::Transport,
+            ],
+        );
+        let represented_state = self.represented_gameobject_use_states.get(&guid);
+        if canonical_position.is_none()
+            && represented_state.and_then(|state| state.position).is_none()
+            && !self.visible_gameobjects.contains(&guid)
+        {
+            return None;
+        }
+
+        Some(RepresentedGameObjectLootStateLikeCpp {
+            position: canonical_position
+                .or_else(|| represented_state.and_then(|state| state.position)),
+            display_id: represented_state.and_then(|state| state.display_id),
+            scale: represented_state.map(|state| state.scale).unwrap_or(1.0),
+            rotation: represented_state
+                .map(|state| state.rotation)
+                .unwrap_or([0.0, 0.0, 0.0, 1.0]),
+            go_type: represented_state.and_then(|state| state.go_type),
+            interact_radius_override: represented_state
+                .and_then(|state| state.interact_radius_override),
+            lock_id: represented_state.and_then(|state| state.lock_id),
+            owner_guid: represented_state.and_then(|state| state.owner_guid),
+        })
+    }
+
+    fn represented_gameobject_exists_for_loot_like_cpp(&self, guid: ObjectGuid) -> bool {
+        self.represented_gameobject_loot_state_like_cpp(guid)
+            .is_some()
+    }
+
+    fn represented_spell_max_range_like_cpp(&self, spell_id: i32) -> Option<f32> {
+        let spell_store = self.spell_store()?;
+        let spell_misc_store = self.spell_misc_store()?;
+        let spell_range_store = self.spell_range_store()?;
+        spell_store.get(spell_id)?;
+        let spell_id = u32::try_from(spell_id).ok()?;
+        let range_index = spell_misc_store.get(spell_id)?.range_index;
+        let range = spell_range_store.get(u32::from(range_index))?;
+        Some(range.range_max[1].max(range.range_max[0]))
+    }
+
+    fn represented_gameobject_spell_lock_range_like_cpp(
+        &self,
+        lock_id: Option<u32>,
+    ) -> Option<f32> {
+        let lock_id = lock_id?;
+        let lock = self.lock_store()?.get(lock_id)?;
+        for i in 0..wow_data::lock::MAX_LOCK_CASE {
+            let lock_type = lock.lock_type[i];
+            if lock_type == 0 {
+                continue;
+            }
+
+            if lock_type == LOCK_KEY_SPELL_LIKE_CPP {
+                if let Some(range) = self.represented_spell_max_range_like_cpp(lock.index[i]) {
+                    return Some(range);
+                }
+            }
+
+            if lock_type != LOCK_KEY_SKILL_LIKE_CPP {
+                break;
+            }
+
+            for spell_id in self.known_spells_like_cpp() {
+                let Some(spell) = self.spell_store().and_then(|store| store.get(*spell_id)) else {
+                    continue;
+                };
+                let can_open_lock = spell.effects().iter().any(|effect| {
+                    effect.effect == SPELL_EFFECT_OPEN_LOCK_LIKE_CPP
+                        && effect.effect_misc_value_1 == lock.index[i]
+                        && effect.effect_base_points >= i32::from(lock.skill[i])
+                });
+                if can_open_lock {
+                    if let Some(range) = self.represented_spell_max_range_like_cpp(*spell_id) {
+                        return Some(range);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    fn represented_gameobject_can_autostore_loot_item_like_cpp(
+        &self,
+        guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    ) -> bool {
+        let Some(state) = self.represented_gameobject_loot_state_like_cpp(guid) else {
+            return false;
+        };
+
+        // C++ ref: LootHandler.cpp HandleAutostoreLootItemOpcode skips distance
+        // for owned GameObjects and GAMEOBJECT_TYPE_FISHINGHOLE. DB spawns do
+        // not carry CreatedBy; apply the owner exception only when runtime GO
+        // state explicitly recorded GetOwnerGUID.
+        if state.owner_guid == Some(player_guid)
+            || state.go_type == Some(GAMEOBJECT_TYPE_FISHING_HOLE as u8)
+        {
+            return true;
+        }
+
+        match (self.player_position_like_cpp(), state.position) {
+            (Some(player), Some(position)) => {
+                let radius = represented_gameobject_interaction_distance_like_cpp(
+                    state.go_type,
+                    state.interact_radius_override,
+                );
+                let radius = self
+                    .represented_gameobject_spell_lock_range_like_cpp(state.lock_id)
+                    .unwrap_or(radius);
+                if let Some(display_info) = self.gameobject_display_info_store().and_then(|store| {
+                    state
+                        .display_id
+                        .and_then(|display_id| store.get(display_id))
+                }) {
+                    represented_gameobject_display_box_contains_like_cpp(
+                        position,
+                        player,
+                        display_info,
+                        state.scale,
+                        state.rotation,
+                        radius,
+                    )
+                } else {
+                    player.is_within_dist(&position, radius)
+                }
+            }
+            _ => true,
+        }
+    }
+
+    fn apply_represented_gameobject_loot_release_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        fully_looted: bool,
+    ) {
+        let state = self
+            .represented_gameobject_use_states
+            .entry(guid)
+            .or_default();
+        let go_type = state.go_type.map(u32::from);
+        match go_type {
+            Some(GAMEOBJECT_TYPE_FISHING_NODE) => {
+                state.loot_state = Some(LootState::JustDeactivated);
+                state.loot_state_unit_guid = ObjectGuid::EMPTY;
+            }
+            Some(GAMEOBJECT_TYPE_FISHING_HOLE) => {
+                state.personal_loot_uses = state.personal_loot_uses.saturating_add(1);
+                state.loot_state = if state
+                    .fishing_hole_max_opens
+                    .is_some_and(|max_opens| state.personal_loot_uses >= max_opens)
+                {
+                    Some(LootState::JustDeactivated)
+                } else {
+                    Some(LootState::Ready)
+                };
+                state.loot_state_unit_guid = ObjectGuid::EMPTY;
+            }
+            Some(GAMEOBJECT_TYPE_GATHERING_NODE) if fully_looted => {}
+            _ if fully_looted => {
+                state.loot_state = Some(LootState::JustDeactivated);
+                state.loot_state_unit_guid = ObjectGuid::EMPTY;
+            }
+            _ => {
+                state.loot_state = Some(LootState::Activated);
+                state.loot_state_unit_guid = player_guid;
+            }
+        }
+        if go_type == Some(GAMEOBJECT_TYPE_GATHERING_NODE) {
+            state.go_state = Some(GoState::Active);
+        }
+        if go_type == Some(GAMEOBJECT_TYPE_CHEST)
+            && state.chest_consumable == Some(false)
+            && state
+                .chest_personal_loot_id
+                .is_some_and(|loot_id| loot_id != 0)
+        {
+            let delay_secs = state
+                .chest_restock_time_secs
+                .filter(|restock_time| *restock_time != 0)
+                .unwrap_or(wow_entities::DEFAULT_GAMEOBJECT_RESPAWN_DELAY_SECS);
+            state.per_player_despawn_secs = Some(delay_secs);
+            state.per_player_despawn_until =
+                Some(Instant::now() + Duration::from_secs(u64::from(delay_secs)));
+        }
+    }
+
+    fn hide_represented_gameobject_for_player_after_loot_release_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+    ) {
+        let Some(map_id) = self
+            .represented_gameobject_use_states
+            .get(&guid)
+            .and_then(|state| state.per_player_despawn_until.map(|_| state.map_id))
+            .flatten()
+        else {
+            return;
+        };
+        self.visible_gameobjects.remove(&guid);
+        self.send_packet(&UpdateObject::out_of_range_objects(vec![guid], map_id));
+    }
+
     fn send_loot_error_like_cpp(&self, loot_obj: ObjectGuid, owner: ObjectGuid, error: u8) {
         self.send_packet(&LootResponse {
             owner,
@@ -4471,6 +4738,27 @@ impl WorldSession {
             owner: player_guid,
         };
         self.send_packet(&release);
+
+        if owner_guid.is_game_object() {
+            self.clear_active_loot_guid_if(owner_guid);
+            if !self
+                .represented_gameobject_can_autostore_loot_item_like_cpp(owner_guid, player_guid)
+            {
+                return true;
+            }
+            self.apply_represented_gameobject_loot_release_like_cpp(
+                owner_guid,
+                player_guid,
+                fully_looted,
+            );
+            if !fully_looted {
+                return true;
+            }
+
+            self.hide_represented_gameobject_for_player_after_loot_release_like_cpp(owner_guid);
+            self.loot_table.remove(&owner_guid);
+            return true;
+        }
 
         if owner_guid.is_item() && !fully_looted {
             self.clear_active_loot_guid_if(owner_guid);
@@ -5209,6 +5497,99 @@ fn generated_creature_loot_item_to_entry_like_cpp(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct RepresentedCreatureLootStateLikeCpp {
+    is_alive: bool,
+    position: wow_core::Position,
+    level: u8,
+    entry: u32,
+    loot_id: u32,
+    gold_min: u32,
+    gold_max: u32,
+    dungeon_encounter_id: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RepresentedGameObjectLootStateLikeCpp {
+    position: Option<wow_core::Position>,
+    display_id: Option<u32>,
+    scale: f32,
+    rotation: [f32; 4],
+    go_type: Option<u8>,
+    interact_radius_override: Option<u32>,
+    lock_id: Option<u32>,
+    owner_guid: Option<ObjectGuid>,
+}
+
+fn represented_gameobject_interaction_distance_like_cpp(
+    go_type: Option<u8>,
+    interact_radius_override: Option<u32>,
+) -> f32 {
+    // C++ ref: GameObject.cpp GetInteractionDistance().
+    // Spell-lock range remains with the typed GameObject/SpellInfo port.
+    if let Some(override_hundredths) = interact_radius_override.filter(|value| *value != 0) {
+        return override_hundredths as f32 / 100.0;
+    }
+
+    match go_type.map(u32::from) {
+        Some(GAMEOBJECT_TYPE_AREADAMAGE) => 0.0,
+        Some(GAMEOBJECT_TYPE_QUESTGIVER)
+        | Some(GAMEOBJECT_TYPE_TEXT)
+        | Some(GAMEOBJECT_TYPE_FLAGSTAND)
+        | Some(GAMEOBJECT_TYPE_FLAGDROP)
+        | Some(GAMEOBJECT_TYPE_MINI_GAME) => 5.5555553,
+        Some(GAMEOBJECT_TYPE_BINDER) => 10.0,
+        Some(GAMEOBJECT_TYPE_CHAIR) | Some(GAMEOBJECT_TYPE_BARBER_CHAIR) => 3.0,
+        Some(GAMEOBJECT_TYPE_FISHING_NODE) => 100.0,
+        Some(GAMEOBJECT_TYPE_FISHING_HOLE) => 20.0 + wow_movement::CONTACT_DISTANCE_LIKE_CPP,
+        Some(GAMEOBJECT_TYPE_CAMERA)
+        | Some(GAMEOBJECT_TYPE_MAP_OBJECT)
+        | Some(GAMEOBJECT_TYPE_DUNGEON_DIFFICULTY)
+        | Some(GAMEOBJECT_TYPE_DESTRUCTIBLE_BUILDING)
+        | Some(GAMEOBJECT_TYPE_DOOR) => 5.0,
+        Some(GAMEOBJECT_TYPE_GUILD_BANK) | Some(GAMEOBJECT_TYPE_MAILBOX) => 10.0,
+        _ => 5.0,
+    }
+}
+
+fn represented_gameobject_display_box_contains_like_cpp(
+    go_position: wow_core::Position,
+    player_position: wow_core::Position,
+    display_info: &wow_data::GameObjectDisplayInfoEntry,
+    scale: f32,
+    rotation: [f32; 4],
+    radius: f32,
+) -> bool {
+    let min_x = display_info.geo_box_min.x * scale - radius;
+    let min_y = display_info.geo_box_min.y * scale - radius;
+    let min_z = display_info.geo_box_min.z * scale - radius;
+    let max_x = display_info.geo_box_max.x * scale + radius;
+    let max_y = display_info.geo_box_max.y * scale + radius;
+    let max_z = display_info.geo_box_max.z * scale + radius;
+
+    let dx = player_position.x - go_position.x;
+    let dy = player_position.y - go_position.y;
+    let dz = player_position.z - go_position.z;
+    let [qx, qy, qz, qw] = rotation;
+    let iqx = -qx;
+    let iqy = -qy;
+    let iqz = -qz;
+
+    let tx = 2.0 * (iqy * dz - iqz * dy);
+    let ty = 2.0 * (iqz * dx - iqx * dz);
+    let tz = 2.0 * (iqx * dy - iqy * dx);
+    let local_x = dx + qw * tx + (iqy * tz - iqz * ty);
+    let local_y = dy + qw * ty + (iqz * tx - iqx * tz);
+    let local_z = dz + qw * tz + (iqx * ty - iqy * tx);
+
+    local_x >= min_x
+        && local_x <= max_x
+        && local_y >= min_y
+        && local_y <= max_y
+        && local_z >= min_z
+        && local_z <= max_z
+}
+
 fn represented_loot_object_guid_like_cpp(owner: ObjectGuid) -> ObjectGuid {
     if owner.is_empty() {
         return ObjectGuid::EMPTY;
@@ -5935,17 +6316,22 @@ struct PlannedLootNewStack {
 #[cfg(test)]
 mod tests {
     use super::{
+        GAMEOBJECT_TYPE_AREADAMAGE, GAMEOBJECT_TYPE_BINDER, GAMEOBJECT_TYPE_CHAIR,
+        GAMEOBJECT_TYPE_DOOR, GAMEOBJECT_TYPE_GUILD_BANK, GAMEOBJECT_TYPE_QUESTGIVER,
         INVENTORY_SLOT_BAG_0, ITEM_FLAGS_CU_FOLLOW_LOOT_RULES_LIKE_CPP,
-        ItemTemplateAddonLootMetadataLikeCpp, LOOT_METHOD_GROUP_LIKE_CPP,
-        LOOT_METHOD_MASTER_LIKE_CPP, LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP,
-        LOOT_SLOT_TYPE_ROLL_ONGOING_LIKE_CPP, LootStoreRandomProperties,
-        ROLL_ALL_TYPE_NO_DISENCHANT_LIKE_CPP, ROLL_FLAG_TYPE_NEED_LIKE_CPP,
-        ROLL_VOTE_GREED_LIKE_CPP, ROLL_VOTE_NEED_LIKE_CPP, ROLL_VOTE_NOT_EMITTED_YET_LIKE_CPP,
-        ROLL_VOTE_NOT_VALID_LIKE_CPP, ROLL_VOTE_PASS_LIKE_CPP, RepresentedLootPlayerContext,
+        ItemTemplateAddonLootMetadataLikeCpp, LOCK_KEY_SKILL_LIKE_CPP, LOCK_KEY_SPELL_LIKE_CPP,
+        LOOT_METHOD_GROUP_LIKE_CPP, LOOT_METHOD_MASTER_LIKE_CPP,
+        LOOT_SLOT_TYPE_ALLOW_LOOT_LIKE_CPP, LOOT_SLOT_TYPE_ROLL_ONGOING_LIKE_CPP,
+        LootStoreRandomProperties, ROLL_ALL_TYPE_NO_DISENCHANT_LIKE_CPP,
+        ROLL_FLAG_TYPE_NEED_LIKE_CPP, ROLL_VOTE_GREED_LIKE_CPP, ROLL_VOTE_NEED_LIKE_CPP,
+        ROLL_VOTE_NOT_EMITTED_YET_LIKE_CPP, ROLL_VOTE_NOT_VALID_LIKE_CPP, ROLL_VOTE_PASS_LIKE_CPP,
+        RepresentedLootPlayerContext, SPELL_EFFECT_OPEN_LOCK_LIKE_CPP,
         assign_represented_personal_loot_items_like_cpp,
         generated_creature_loot_item_to_entry_like_cpp, loot_is_looted_like_cpp, loot_item_context,
         loot_store_data_can_stack_with_item, loot_type_for_client_like_cpp,
         mark_loot_allowed_for_player_like_cpp, mark_loot_item_looted_for_player_like_cpp,
+        represented_gameobject_display_box_contains_like_cpp,
+        represented_gameobject_interaction_distance_like_cpp,
         represented_loot_object_guid_like_cpp, represented_loot_response_items_like_cpp,
         select_weighted_random_enchantment_like_cpp, start_loot_roll_packet_like_cpp,
     };
@@ -5954,12 +6340,12 @@ mod tests {
     use std::time::{Duration, Instant};
     use std::{
         collections::{HashMap, HashSet},
-        sync::Arc,
+        sync::{Arc, Mutex},
     };
     use wow_ai::CreatureAI;
     use wow_constants::{
         InventoryResult, InventoryType, ItemBondingType, ItemClass, ItemContext, ItemFlags2,
-        ItemQuality,
+        ItemQuality, TypeId, TypeMask,
     };
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
     use wow_data::quest::{QuestObjective, QuestStore, QuestTemplate};
@@ -5969,12 +6355,15 @@ mod tests {
         ItemRandomEnchantmentTemplateStore, ItemRandomPropertiesEntry, ItemRandomPropertiesStore,
         ItemRandomPropertyTemplateEntry, ItemRandomSuffixEntry, ItemRandomSuffixStore, ItemRecord,
         ItemSparseTemplateEntry, ItemStatsStore, ItemStore, RandPropPointsEntry,
-        RandPropPointsStore,
+        RandPropPointsStore, SpellEffectInfo, SpellInfo, SpellMiscEntry, SpellMiscStore,
+        SpellRangeEntry, SpellRangeStore, SpellStore,
     };
     use wow_database::{CharStatements, StatementDef};
     use wow_entities::{
-        GO_DYNFLAG_LO_NO_INTERACT, GameObjectLootSource, GatheringNodeUseSource, GoState, Item,
-        ItemCreateInfo, LootState, MAX_ITEM_SPELLS,
+        AccessorObjectKind, GAMEOBJECT_TYPE_CHEST, GAMEOBJECT_TYPE_FISHING_HOLE,
+        GAMEOBJECT_TYPE_FISHING_NODE, GAMEOBJECT_TYPE_GATHERING_NODE, GO_DYNFLAG_LO_NO_INTERACT,
+        GameObjectLootSource, GatheringNodeUseSource, GoState, Item, ItemCreateInfo, LootState,
+        MAX_ITEM_SPELLS, WorldObject,
     };
     use wow_loot::{
         GeneratedLootItem, LOOT_SLOT_TYPE_OWNER_LIKE_CPP, LootConditionRowLikeCpp, LootStoreItem,
@@ -6029,6 +6418,39 @@ mod tests {
 
     fn make_session() -> WorldSession {
         make_session_with_send().0
+    }
+
+    fn canonical_world_object(guid: ObjectGuid, map_id: u32, position: Position) -> WorldObject {
+        let (type_id, type_mask) = if guid.is_game_object() {
+            (TypeId::GameObject, TypeMask::GAME_OBJECT)
+        } else {
+            (TypeId::Unit, TypeMask::UNIT)
+        };
+        let mut object = WorldObject::new(false, type_id, type_mask);
+        object.object_mut().create(guid);
+        object.set_map(map_id, 0).unwrap();
+        object.relocate(position);
+        object.object_mut().add_to_world();
+        object
+    }
+
+    fn attach_canonical_map_object(
+        session: &mut WorldSession,
+        kind: AccessorObjectKind,
+        object: WorldObject,
+    ) {
+        let map_id = object.map_id();
+        let instance_id = object.instance_id();
+        let manager = Arc::new(Mutex::new(wow_map::MapManager::default()));
+        {
+            let mut manager = manager.lock().unwrap();
+            manager
+                .create_world_map(map_id, instance_id)
+                .map_mut()
+                .add_to_map_like_cpp(kind, object)
+                .unwrap();
+        }
+        session.set_canonical_map_manager(manager);
     }
 
     fn loot_item_packet(object: ObjectGuid, loot_list_id: u8) -> WorldPacket {
@@ -7162,6 +7584,7 @@ mod tests {
             push_loot_id: 0,
             triggered_event_id: 0,
             linked_trap_entry: 0,
+            ..Default::default()
         };
 
         let loot = session
@@ -7191,6 +7614,7 @@ mod tests {
             push_loot_id: 0,
             triggered_event_id: 0,
             linked_trap_entry: 0,
+            ..Default::default()
         };
 
         let loot = session
@@ -7244,6 +7668,7 @@ mod tests {
             push_loot_id: 0,
             triggered_event_id: 0,
             linked_trap_entry: 0,
+            ..Default::default()
         };
 
         let loot = session
@@ -7298,6 +7723,7 @@ mod tests {
             push_loot_id: 0,
             triggered_event_id: 0,
             linked_trap_entry: 0,
+            ..Default::default()
         };
 
         let loot = session
@@ -7336,6 +7762,7 @@ mod tests {
             push_loot_id: 0,
             triggered_event_id: 0,
             linked_trap_entry: 0,
+            ..Default::default()
         };
 
         session
@@ -7394,6 +7821,7 @@ mod tests {
             push_loot_id: 0,
             triggered_event_id: 0,
             linked_trap_entry: 0,
+            ..Default::default()
         };
 
         session
@@ -7554,6 +7982,7 @@ mod tests {
             push_loot_id: 0,
             triggered_event_id: 777,
             linked_trap_entry: 888,
+            ..Default::default()
         };
 
         session
@@ -7596,6 +8025,7 @@ mod tests {
             push_loot_id: 99,
             triggered_event_id: 321,
             linked_trap_entry: 654,
+            ..Default::default()
         };
 
         session
@@ -7638,6 +8068,7 @@ mod tests {
             push_loot_id: 0,
             triggered_event_id: 901,
             linked_trap_entry: 902,
+            ..Default::default()
         };
 
         session
@@ -8022,6 +8453,345 @@ mod tests {
         assert_eq!(
             select_weighted_random_enchantment_like_cpp(&group, &mut StdRng::seed_from_u64(5)),
             Some(11)
+        );
+    }
+
+    #[test]
+    fn gameobject_interaction_distance_uses_cpp_type_branches() {
+        assert_eq!(
+            represented_gameobject_interaction_distance_like_cpp(
+                Some(GAMEOBJECT_TYPE_CHEST as u8),
+                Some(725)
+            ),
+            7.25
+        );
+        assert_eq!(
+            represented_gameobject_interaction_distance_like_cpp(
+                Some(GAMEOBJECT_TYPE_AREADAMAGE as u8),
+                None
+            ),
+            0.0
+        );
+        assert_eq!(
+            represented_gameobject_interaction_distance_like_cpp(
+                Some(GAMEOBJECT_TYPE_QUESTGIVER as u8),
+                None
+            ),
+            5.5555553
+        );
+        assert_eq!(
+            represented_gameobject_interaction_distance_like_cpp(
+                Some(GAMEOBJECT_TYPE_BINDER as u8),
+                None
+            ),
+            10.0
+        );
+        assert_eq!(
+            represented_gameobject_interaction_distance_like_cpp(
+                Some(GAMEOBJECT_TYPE_CHAIR as u8),
+                None
+            ),
+            3.0
+        );
+        assert_eq!(
+            represented_gameobject_interaction_distance_like_cpp(
+                Some(GAMEOBJECT_TYPE_FISHING_NODE as u8),
+                None
+            ),
+            100.0
+        );
+        assert_eq!(
+            represented_gameobject_interaction_distance_like_cpp(
+                Some(GAMEOBJECT_TYPE_FISHING_HOLE as u8),
+                None
+            ),
+            20.0 + wow_movement::CONTACT_DISTANCE_LIKE_CPP
+        );
+        assert_eq!(
+            represented_gameobject_interaction_distance_like_cpp(
+                Some(GAMEOBJECT_TYPE_DOOR as u8),
+                None
+            ),
+            5.0
+        );
+        assert_eq!(
+            represented_gameobject_interaction_distance_like_cpp(
+                Some(GAMEOBJECT_TYPE_GUILD_BANK as u8),
+                None
+            ),
+            10.0
+        );
+        assert_eq!(
+            represented_gameobject_interaction_distance_like_cpp(None, None),
+            5.0
+        );
+    }
+
+    #[test]
+    fn gameobject_display_box_interaction_matches_cpp_contains_branch() {
+        let display_info = wow_data::GameObjectDisplayInfoEntry {
+            id: 77,
+            model_name: "test".to_string(),
+            geo_box_min: wow_data::Db2Pos3 {
+                x: -2.0,
+                y: -1.0,
+                z: -0.5,
+            },
+            geo_box_max: wow_data::Db2Pos3 {
+                x: 2.0,
+                y: 1.0,
+                z: 0.5,
+            },
+            file_data_id: 0,
+            object_effect_package_id: 0,
+            override_loot_effect_scale: 0.0,
+            override_name_scale: 0.0,
+        };
+        let go_position = Position::ZERO;
+
+        assert!(represented_gameobject_display_box_contains_like_cpp(
+            go_position,
+            Position::xyz(6.9, 0.0, 0.0),
+            &display_info,
+            1.0,
+            [0.0, 0.0, 0.0, 1.0],
+            5.0,
+        ));
+        assert!(!represented_gameobject_display_box_contains_like_cpp(
+            go_position,
+            Position::xyz(7.1, 0.0, 0.0),
+            &display_info,
+            1.0,
+            [0.0, 0.0, 0.0, 1.0],
+            5.0,
+        ));
+    }
+
+    #[test]
+    fn gameobject_loot_distance_uses_display_box_when_db2_exists_like_cpp() {
+        let mut session = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let gameobject_guid = test_gameobject_guid(19_041);
+        session.set_player_guid(Some(player_guid));
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            0,
+            gameobject_guid,
+            gameobject_guid.entry(),
+            Position::ZERO,
+            GAMEOBJECT_TYPE_CHEST as u8,
+        );
+        session.record_represented_gameobject_display_model_like_cpp(
+            gameobject_guid,
+            77,
+            1.0,
+            [0.0, 0.0, 0.0, 1.0],
+        );
+        session.set_gameobject_display_info_store(Arc::new(
+            wow_data::GameObjectDisplayInfoStore::from_entries([
+                wow_data::GameObjectDisplayInfoEntry {
+                    id: 77,
+                    model_name: "test".to_string(),
+                    geo_box_min: wow_data::Db2Pos3 {
+                        x: -2.0,
+                        y: -1.0,
+                        z: -0.5,
+                    },
+                    geo_box_max: wow_data::Db2Pos3 {
+                        x: 2.0,
+                        y: 1.0,
+                        z: 0.5,
+                    },
+                    file_data_id: 0,
+                    object_effect_package_id: 0,
+                    override_loot_effect_scale: 0.0,
+                    override_name_scale: 0.0,
+                },
+            ]),
+        ));
+
+        session.set_player_position_like_cpp(Position::xyz(6.9, 0.0, 0.0));
+        assert!(
+            session.represented_gameobject_can_autostore_loot_item_like_cpp(
+                gameobject_guid,
+                player_guid
+            )
+        );
+
+        session.set_player_position_like_cpp(Position::xyz(7.1, 0.0, 0.0));
+        assert!(
+            !session.represented_gameobject_can_autostore_loot_item_like_cpp(
+                gameobject_guid,
+                player_guid
+            )
+        );
+    }
+
+    #[test]
+    fn gameobject_loot_distance_uses_spell_lock_range_like_cpp() {
+        let mut session = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let gameobject_guid = test_gameobject_guid(19_042);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_position_like_cpp(Position::xyz(11.0, 0.0, 0.0));
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            0,
+            gameobject_guid,
+            gameobject_guid.entry(),
+            Position::ZERO,
+            GAMEOBJECT_TYPE_CHEST as u8,
+        );
+        session.record_represented_gameobject_lock_id_like_cpp(gameobject_guid, 501);
+        session.set_lock_store(Arc::new(wow_data::LockStore::from_entries([
+            wow_data::LockEntry {
+                id: 501,
+                index: [7001, 0, 0, 0, 0, 0, 0, 0],
+                skill: [0; wow_data::lock::MAX_LOCK_CASE],
+                lock_type: [LOCK_KEY_SPELL_LIKE_CPP, 0, 0, 0, 0, 0, 0, 0],
+                action: [0; wow_data::lock::MAX_LOCK_CASE],
+            },
+        ])));
+        let mut spell_store = SpellStore::new();
+        spell_store.insert(
+            7001,
+            SpellInfo {
+                spell_id: 7001,
+                cast_time_ms: 0,
+                cooldown_ms: 0,
+                recovery_time_ms: 0,
+                effect_type: 0,
+                effect_base_points: 0,
+                effect_bonus_coefficient: 0.0,
+                aura_type: None,
+                display_flags: 0,
+                effects: Vec::new(),
+            },
+        );
+        session.set_spell_store(Arc::new(spell_store));
+        session.set_spell_misc_store(Arc::new(SpellMiscStore::from_entries([SpellMiscEntry {
+            id: 7001,
+            attributes: [0; 15],
+            difficulty_id: 0,
+            casting_time_index: 0,
+            duration_index: 0,
+            range_index: 77,
+            school_mask: 0,
+            speed: 0.0,
+            launch_delay: 0.0,
+            min_duration: 0.0,
+            spell_icon_file_data_id: 0,
+            active_icon_file_data_id: 0,
+            content_tuning_id: 0,
+            show_future_spell_player_condition_id: 0,
+            spell_id: 7001,
+        }])));
+        session.set_spell_range_store(Arc::new(SpellRangeStore::from_entries([SpellRangeEntry {
+            id: 77,
+            display_name: "lock".to_string(),
+            display_name_short: "lock".to_string(),
+            flags: 0,
+            range_min: [0.0, 0.0],
+            range_max: [12.0, 12.0],
+        }])));
+
+        assert!(
+            session.represented_gameobject_can_autostore_loot_item_like_cpp(
+                gameobject_guid,
+                player_guid
+            )
+        );
+
+        session.set_player_position_like_cpp(Position::xyz(12.1, 0.0, 0.0));
+        assert!(
+            !session.represented_gameobject_can_autostore_loot_item_like_cpp(
+                gameobject_guid,
+                player_guid
+            )
+        );
+    }
+
+    #[test]
+    fn gameobject_loot_distance_uses_known_open_lock_skill_spell_like_cpp() {
+        let mut session = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let gameobject_guid = test_gameobject_guid(19_043);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_position_like_cpp(Position::xyz(8.0, 0.0, 0.0));
+        session.set_known_spells_like_cpp(vec![8001]);
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            0,
+            gameobject_guid,
+            gameobject_guid.entry(),
+            Position::ZERO,
+            GAMEOBJECT_TYPE_CHEST as u8,
+        );
+        session.record_represented_gameobject_lock_id_like_cpp(gameobject_guid, 502);
+        session.set_lock_store(Arc::new(wow_data::LockStore::from_entries([
+            wow_data::LockEntry {
+                id: 502,
+                index: [333, 0, 0, 0, 0, 0, 0, 0],
+                skill: [50, 0, 0, 0, 0, 0, 0, 0],
+                lock_type: [LOCK_KEY_SKILL_LIKE_CPP, 0, 0, 0, 0, 0, 0, 0],
+                action: [0; wow_data::lock::MAX_LOCK_CASE],
+            },
+        ])));
+        let mut spell_store = SpellStore::new();
+        spell_store.insert(
+            8001,
+            SpellInfo {
+                spell_id: 8001,
+                cast_time_ms: 0,
+                cooldown_ms: 0,
+                recovery_time_ms: 0,
+                effect_type: SPELL_EFFECT_OPEN_LOCK_LIKE_CPP,
+                effect_base_points: 75,
+                effect_bonus_coefficient: 0.0,
+                aura_type: None,
+                display_flags: 0,
+                effects: vec![SpellEffectInfo {
+                    effect_index: 0,
+                    effect: SPELL_EFFECT_OPEN_LOCK_LIKE_CPP,
+                    effect_aura: 0,
+                    effect_base_points: 75,
+                    effect_misc_value_1: 333,
+                    effect_misc_value_2: 0,
+                    chain_targets: 0,
+                    implicit_target_1: 0,
+                    implicit_target_2: 0,
+                }],
+            },
+        );
+        session.set_spell_store(Arc::new(spell_store));
+        session.set_spell_misc_store(Arc::new(SpellMiscStore::from_entries([SpellMiscEntry {
+            id: 8001,
+            attributes: [0; 15],
+            difficulty_id: 0,
+            casting_time_index: 0,
+            duration_index: 0,
+            range_index: 88,
+            school_mask: 0,
+            speed: 0.0,
+            launch_delay: 0.0,
+            min_duration: 0.0,
+            spell_icon_file_data_id: 0,
+            active_icon_file_data_id: 0,
+            content_tuning_id: 0,
+            show_future_spell_player_condition_id: 0,
+            spell_id: 8001,
+        }])));
+        session.set_spell_range_store(Arc::new(SpellRangeStore::from_entries([SpellRangeEntry {
+            id: 88,
+            display_name: "skill".to_string(),
+            display_name_short: "skill".to_string(),
+            flags: 0,
+            range_min: [0.0, 0.0],
+            range_max: [9.0, 9.0],
+        }])));
+
+        assert!(
+            session.represented_gameobject_can_autostore_loot_item_like_cpp(
+                gameobject_guid,
+                player_guid
+            )
         );
     }
 
@@ -11255,6 +12025,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn loot_item_creature_distance_can_use_canonical_map_object_like_cpp() {
+        let (mut session, send_rx) = make_session_with_send();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let loot_guid = test_creature_guid(19_018);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_position_like_cpp(Position::ZERO);
+        session.set_active_loot_guid(loot_guid);
+        attach_canonical_map_object(
+            &mut session,
+            AccessorObjectKind::Creature,
+            canonical_world_object(loot_guid, 0, Position::new(31.0, 0.0, 0.0, 0.0)),
+        );
+        session.loot_table.insert(
+            loot_guid,
+            CreatureLoot {
+                loot_guid,
+                coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CORPSE_LIKE_CPP,
+                dungeon_encounter_id: 0,
+                loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
+                allowed_looters: Vec::new(),
+                items: vec![LootEntry {
+                    loot_list_id: 0,
+                    item_id: 25,
+                    quantity: 1,
+                    random_properties_id: 0,
+                    random_properties_seed: 0,
+                    item_context: 0,
+                    flags: LootEntryFlags::default(),
+                    allowed_looters: vec![player_guid],
+                    roll_winner: ObjectGuid::EMPTY,
+                    ffa_looted_by: Vec::new(),
+                    taken: false,
+                }],
+                looted_by_player: false,
+            },
+        );
+
+        session
+            .handle_loot_item(loot_item_packet(loot_guid, 0))
+            .await;
+
+        let sent = send_rx.try_recv().unwrap();
+        assert_eq!(
+            loot_response_failure_reason(&sent),
+            LOOT_ERROR_TOO_FAR_LIKE_CPP
+        );
+        assert!(!session.loot_table.get(&loot_guid).unwrap().items[0].taken);
+        assert!(session.is_active_loot_guid(loot_guid));
+    }
+
+    #[tokio::test]
     async fn loot_item_missing_creature_uses_cpp_no_loot_error() {
         let (mut session, send_rx) = make_session_with_send();
         let player_guid = ObjectGuid::create_player(1, 42);
@@ -11475,6 +12302,210 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn loot_item_gameobject_too_far_uses_cpp_release() {
+        let (mut session, send_rx) = make_session_with_send();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let loot_guid = test_gameobject_guid(19_029);
+        let go_position = Position::new(6.0, 0.0, 0.0, 0.0);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_position_like_cpp(Position::ZERO);
+        session.set_active_loot_guid(loot_guid);
+        attach_canonical_map_object(
+            &mut session,
+            AccessorObjectKind::GameObject,
+            canonical_world_object(loot_guid, 0, go_position),
+        );
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            0,
+            loot_guid,
+            loot_guid.entry(),
+            go_position,
+            GAMEOBJECT_TYPE_CHEST as u8,
+        );
+        session.loot_table.insert(
+            loot_guid,
+            CreatureLoot {
+                loot_guid,
+                coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CHEST_LIKE_CPP,
+                dungeon_encounter_id: 0,
+                loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
+                allowed_looters: Vec::new(),
+                items: vec![LootEntry {
+                    loot_list_id: 0,
+                    item_id: 25,
+                    quantity: 1,
+                    random_properties_id: 0,
+                    random_properties_seed: 0,
+                    item_context: 0,
+                    flags: LootEntryFlags::default(),
+                    allowed_looters: vec![player_guid],
+                    roll_winner: ObjectGuid::EMPTY,
+                    ffa_looted_by: Vec::new(),
+                    taken: false,
+                }],
+                looted_by_player: false,
+            },
+        );
+
+        session
+            .handle_loot_item(loot_item_packet(loot_guid, 0))
+            .await;
+
+        let sent = send_rx.try_recv().unwrap();
+        let mut sent = WorldPacket::from_bytes(&sent);
+        assert_eq!(
+            sent.read_uint16().unwrap(),
+            wow_constants::ServerOpcodes::LootRelease as u16
+        );
+        assert_eq!(sent.read_packed_guid().unwrap(), loot_guid);
+        assert_eq!(sent.read_packed_guid().unwrap(), player_guid);
+        assert!(!session.loot_table.get(&loot_guid).unwrap().items[0].taken);
+        assert!(session.is_active_loot_guid(loot_guid));
+    }
+
+    #[tokio::test]
+    async fn loot_item_fishing_hole_skips_gameobject_distance_like_cpp() {
+        let (mut session, send_rx) = make_session_with_send();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let loot_guid = test_gameobject_guid(19_030);
+        let go_position = Position::new(100.0, 0.0, 0.0, 0.0);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_position_like_cpp(Position::ZERO);
+        session.set_active_loot_guid(loot_guid);
+        attach_canonical_map_object(
+            &mut session,
+            AccessorObjectKind::GameObject,
+            canonical_world_object(loot_guid, 0, go_position),
+        );
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            0,
+            loot_guid,
+            loot_guid.entry(),
+            go_position,
+            GAMEOBJECT_TYPE_FISHING_HOLE as u8,
+        );
+        session.loot_table.insert(
+            loot_guid,
+            CreatureLoot {
+                loot_guid,
+                coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_FISHINGHOLE_LIKE_CPP,
+                dungeon_encounter_id: 0,
+                loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
+                allowed_looters: Vec::new(),
+                items: vec![LootEntry {
+                    loot_list_id: 0,
+                    item_id: 25,
+                    quantity: 1,
+                    random_properties_id: 0,
+                    random_properties_seed: 0,
+                    item_context: 0,
+                    flags: LootEntryFlags {
+                        blocked: true,
+                        ..Default::default()
+                    },
+                    allowed_looters: vec![player_guid],
+                    roll_winner: ObjectGuid::EMPTY,
+                    ffa_looted_by: Vec::new(),
+                    taken: false,
+                }],
+                looted_by_player: false,
+            },
+        );
+
+        session
+            .handle_loot_item(loot_item_packet(loot_guid, 0))
+            .await;
+
+        let sent = send_rx.try_recv().unwrap();
+        let mut sent = WorldPacket::from_bytes(&sent);
+        assert_eq!(
+            sent.read_uint16().unwrap(),
+            wow_constants::ServerOpcodes::LootReleaseAll as u16
+        );
+        assert_eq!(sent.remaining(), 0);
+        assert!(!session.loot_table.get(&loot_guid).unwrap().items[0].taken);
+        assert!(session.is_active_loot_guid(loot_guid));
+    }
+
+    #[tokio::test]
+    async fn loot_item_owned_gameobject_skips_distance_like_cpp() {
+        let (mut session, send_rx) = make_session_with_send();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let loot_guid = test_gameobject_guid(19_035);
+        let go_position = Position::new(100.0, 0.0, 0.0, 0.0);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_position_like_cpp(Position::ZERO);
+        session.set_active_loot_guid(loot_guid);
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            0,
+            loot_guid,
+            loot_guid.entry(),
+            go_position,
+            GAMEOBJECT_TYPE_CHEST as u8,
+        );
+        session.record_represented_gameobject_owner_guid_like_cpp(loot_guid, player_guid);
+        session.loot_table.insert(
+            loot_guid,
+            CreatureLoot {
+                loot_guid,
+                coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CHEST_LIKE_CPP,
+                dungeon_encounter_id: 0,
+                loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
+                allowed_looters: Vec::new(),
+                items: vec![LootEntry {
+                    loot_list_id: 0,
+                    item_id: 25,
+                    quantity: 1,
+                    random_properties_id: 0,
+                    random_properties_seed: 0,
+                    item_context: 0,
+                    flags: LootEntryFlags {
+                        blocked: true,
+                        ..Default::default()
+                    },
+                    allowed_looters: vec![player_guid],
+                    roll_winner: ObjectGuid::EMPTY,
+                    ffa_looted_by: Vec::new(),
+                    taken: false,
+                }],
+                looted_by_player: false,
+            },
+        );
+
+        session
+            .handle_loot_item(loot_item_packet(loot_guid, 0))
+            .await;
+
+        let sent = send_rx.try_recv().unwrap();
+        let mut sent = WorldPacket::from_bytes(&sent);
+        assert_eq!(
+            sent.read_uint16().unwrap(),
+            wow_constants::ServerOpcodes::LootReleaseAll as u16
+        );
+        assert_eq!(sent.remaining(), 0);
+        assert!(!session.loot_table.get(&loot_guid).unwrap().items[0].taken);
+        assert!(session.is_active_loot_guid(loot_guid));
+    }
+
+    #[tokio::test]
     async fn loot_release_ignores_guid_outside_active_view_like_cpp() {
         let (mut session, send_rx) = make_session_with_send();
         let player_guid = ObjectGuid::create_player(1, 42);
@@ -11638,6 +12669,13 @@ mod tests {
         session.set_player_guid(Some(player_guid));
         session.set_active_loot_guid(loot_guid);
         session.visible_gameobjects.insert(loot_guid);
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            0,
+            loot_guid,
+            loot_guid.entry(),
+            Position::ZERO,
+            GAMEOBJECT_TYPE_CHEST as u8,
+        );
         session.loot_table.insert(
             loot_guid,
             CreatureLoot {
@@ -11683,5 +12721,465 @@ mod tests {
         assert_eq!(sent.read_packed_guid().unwrap(), player_guid);
         assert!(!session.is_active_loot_guid(loot_guid));
         assert!(!session.loot_table.get(&loot_guid).unwrap().items[0].taken);
+        let state = session
+            .represented_gameobject_use_states
+            .get(&loot_guid)
+            .unwrap();
+        assert_eq!(state.loot_state, Some(LootState::Activated));
+        assert_eq!(state.loot_state_unit_guid, player_guid);
+    }
+
+    #[tokio::test]
+    async fn loot_release_gameobject_too_far_keeps_state_and_loot_like_cpp() {
+        let (mut session, send_rx) = make_session_with_send();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let loot_guid = test_gameobject_guid(19_031);
+        let go_position = Position::new(6.0, 0.0, 0.0, 0.0);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_position_like_cpp(Position::ZERO);
+        session.set_active_loot_guid(loot_guid);
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            0,
+            loot_guid,
+            loot_guid.entry(),
+            go_position,
+            GAMEOBJECT_TYPE_CHEST as u8,
+        );
+        session.loot_table.insert(
+            loot_guid,
+            CreatureLoot {
+                loot_guid,
+                coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CHEST_LIKE_CPP,
+                dungeon_encounter_id: 0,
+                loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
+                allowed_looters: Vec::new(),
+                items: Vec::new(),
+                looted_by_player: false,
+            },
+        );
+
+        session
+            .handle_loot_release(loot_release_packet(loot_guid))
+            .await;
+
+        let sent = send_rx.try_recv().unwrap();
+        let mut sent = WorldPacket::from_bytes(&sent);
+        assert_eq!(
+            sent.read_uint16().unwrap(),
+            wow_constants::ServerOpcodes::LootRelease as u16
+        );
+        assert_eq!(sent.read_packed_guid().unwrap(), loot_guid);
+        assert_eq!(sent.read_packed_guid().unwrap(), player_guid);
+        assert!(!session.is_active_loot_guid(loot_guid));
+        assert!(session.loot_table.contains_key(&loot_guid));
+        assert_eq!(
+            session
+                .represented_gameobject_use_states
+                .get(&loot_guid)
+                .unwrap()
+                .loot_state,
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn loot_release_owned_gameobject_skips_distance_like_cpp() {
+        let (mut session, send_rx) = make_session_with_send();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let loot_guid = test_gameobject_guid(19_036);
+        let go_position = Position::new(100.0, 0.0, 0.0, 0.0);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_position_like_cpp(Position::ZERO);
+        session.set_active_loot_guid(loot_guid);
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            0,
+            loot_guid,
+            loot_guid.entry(),
+            go_position,
+            GAMEOBJECT_TYPE_CHEST as u8,
+        );
+        session.record_represented_gameobject_owner_guid_like_cpp(loot_guid, player_guid);
+        session.loot_table.insert(
+            loot_guid,
+            CreatureLoot {
+                loot_guid,
+                coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CHEST_LIKE_CPP,
+                dungeon_encounter_id: 0,
+                loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
+                allowed_looters: Vec::new(),
+                items: Vec::new(),
+                looted_by_player: false,
+            },
+        );
+
+        session
+            .handle_loot_release(loot_release_packet(loot_guid))
+            .await;
+
+        let sent = send_rx.try_recv().unwrap();
+        let mut sent = WorldPacket::from_bytes(&sent);
+        assert_eq!(
+            sent.read_uint16().unwrap(),
+            wow_constants::ServerOpcodes::LootRelease as u16
+        );
+        assert!(!session.loot_table.contains_key(&loot_guid));
+        assert_eq!(
+            session
+                .represented_gameobject_use_states
+                .get(&loot_guid)
+                .unwrap()
+                .loot_state,
+            Some(LootState::JustDeactivated)
+        );
+    }
+
+    #[tokio::test]
+    async fn loot_release_fully_looted_gameobject_just_deactivates_like_cpp() {
+        let (mut session, send_rx) = make_session_with_send();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let loot_guid = test_gameobject_guid(19_032);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_position_like_cpp(Position::ZERO);
+        session.set_active_loot_guid(loot_guid);
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            0,
+            loot_guid,
+            loot_guid.entry(),
+            Position::ZERO,
+            GAMEOBJECT_TYPE_CHEST as u8,
+        );
+        session.loot_table.insert(
+            loot_guid,
+            CreatureLoot {
+                loot_guid,
+                coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_CHEST_LIKE_CPP,
+                dungeon_encounter_id: 0,
+                loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
+                allowed_looters: Vec::new(),
+                items: Vec::new(),
+                looted_by_player: false,
+            },
+        );
+
+        session
+            .handle_loot_release(loot_release_packet(loot_guid))
+            .await;
+
+        let sent = send_rx.try_recv().unwrap();
+        let mut sent = WorldPacket::from_bytes(&sent);
+        assert_eq!(
+            sent.read_uint16().unwrap(),
+            wow_constants::ServerOpcodes::LootRelease as u16
+        );
+        assert!(!session.loot_table.contains_key(&loot_guid));
+        assert_eq!(
+            session
+                .represented_gameobject_use_states
+                .get(&loot_guid)
+                .unwrap()
+                .loot_state,
+            Some(LootState::JustDeactivated)
+        );
+    }
+
+    #[tokio::test]
+    async fn loot_release_fishing_gameobjects_follow_cpp_state_branches() {
+        let (mut session, send_rx) = make_session_with_send_capacity(2);
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let fishing_node = test_gameobject_guid(19_033);
+        let fishing_hole = test_gameobject_guid(19_034);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_position_like_cpp(Position::ZERO);
+        session.set_active_loot_guid(fishing_node);
+        session.add_active_loot_view_owner_like_cpp(fishing_hole);
+        for (guid, go_type, loot_type) in [
+            (
+                fishing_node,
+                GAMEOBJECT_TYPE_FISHING_NODE as u8,
+                LOOT_TYPE_FISHING_LIKE_CPP,
+            ),
+            (
+                fishing_hole,
+                GAMEOBJECT_TYPE_FISHING_HOLE as u8,
+                LOOT_TYPE_FISHINGHOLE_LIKE_CPP,
+            ),
+        ] {
+            session.record_represented_gameobject_runtime_state_like_cpp(
+                0,
+                guid,
+                guid.entry(),
+                Position::ZERO,
+                go_type,
+            );
+            session.loot_table.insert(
+                guid,
+                CreatureLoot {
+                    loot_guid: guid,
+                    coins: 0,
+                    unlooted_count: 1,
+                    loot_type,
+                    dungeon_encounter_id: 0,
+                    loot_method: 0,
+                    loot_master: ObjectGuid::EMPTY,
+                    round_robin_player: ObjectGuid::EMPTY,
+                    player_ffa_items: Vec::new(),
+                    players_looting: Vec::new(),
+                    allowed_looters: Vec::new(),
+                    items: vec![LootEntry {
+                        loot_list_id: 0,
+                        item_id: 25,
+                        quantity: 1,
+                        random_properties_id: 0,
+                        random_properties_seed: 0,
+                        item_context: 0,
+                        flags: LootEntryFlags::default(),
+                        allowed_looters: vec![player_guid],
+                        roll_winner: ObjectGuid::EMPTY,
+                        ffa_looted_by: Vec::new(),
+                        taken: false,
+                    }],
+                    looted_by_player: false,
+                },
+            );
+        }
+
+        session
+            .handle_loot_release(loot_release_packet(fishing_node))
+            .await;
+        session
+            .handle_loot_release(loot_release_packet(fishing_hole))
+            .await;
+
+        assert!(send_rx.try_recv().is_ok());
+        assert!(send_rx.try_recv().is_ok());
+        assert_eq!(
+            session
+                .represented_gameobject_use_states
+                .get(&fishing_node)
+                .unwrap()
+                .loot_state,
+            Some(LootState::JustDeactivated)
+        );
+        let hole_state = session
+            .represented_gameobject_use_states
+            .get(&fishing_hole)
+            .unwrap();
+        assert_eq!(hole_state.loot_state, Some(LootState::Ready));
+        assert_eq!(hole_state.personal_loot_uses, 1);
+    }
+
+    #[tokio::test]
+    async fn loot_release_fishing_hole_just_deactivates_at_max_opens_like_cpp() {
+        let (mut session, send_rx) = make_session_with_send();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let fishing_hole = test_gameobject_guid(19_037);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_position_like_cpp(Position::ZERO);
+        session.set_active_loot_guid(fishing_hole);
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            0,
+            fishing_hole,
+            fishing_hole.entry(),
+            Position::ZERO,
+            GAMEOBJECT_TYPE_FISHING_HOLE as u8,
+        );
+        session.record_represented_fishing_hole_max_opens_like_cpp(fishing_hole, 1);
+        session.loot_table.insert(
+            fishing_hole,
+            CreatureLoot {
+                loot_guid: fishing_hole,
+                coins: 0,
+                unlooted_count: 1,
+                loot_type: LOOT_TYPE_FISHINGHOLE_LIKE_CPP,
+                dungeon_encounter_id: 0,
+                loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
+                allowed_looters: Vec::new(),
+                items: vec![LootEntry {
+                    loot_list_id: 0,
+                    item_id: 25,
+                    quantity: 1,
+                    random_properties_id: 0,
+                    random_properties_seed: 0,
+                    item_context: 0,
+                    flags: LootEntryFlags::default(),
+                    allowed_looters: vec![player_guid],
+                    roll_winner: ObjectGuid::EMPTY,
+                    ffa_looted_by: Vec::new(),
+                    taken: false,
+                }],
+                looted_by_player: false,
+            },
+        );
+
+        session
+            .handle_loot_release(loot_release_packet(fishing_hole))
+            .await;
+
+        assert!(send_rx.try_recv().is_ok());
+        let hole_state = session
+            .represented_gameobject_use_states
+            .get(&fishing_hole)
+            .unwrap();
+        assert_eq!(hole_state.personal_loot_uses, 1);
+        assert_eq!(hole_state.loot_state, Some(LootState::JustDeactivated));
+    }
+
+    #[tokio::test]
+    async fn loot_release_gathering_node_sets_local_active_state_like_cpp() {
+        let (mut session, send_rx) = make_session_with_send();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let gathering_node = test_gameobject_guid(19_038);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_position_like_cpp(Position::ZERO);
+        session.set_active_loot_guid(gathering_node);
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            0,
+            gathering_node,
+            gathering_node.entry(),
+            Position::ZERO,
+            GAMEOBJECT_TYPE_GATHERING_NODE as u8,
+        );
+        session.loot_table.insert(
+            gathering_node,
+            CreatureLoot {
+                loot_guid: gathering_node,
+                coins: 0,
+                unlooted_count: 0,
+                loot_type: LOOT_TYPE_GATHERING_NODE_LIKE_CPP,
+                dungeon_encounter_id: 0,
+                loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
+                allowed_looters: Vec::new(),
+                items: Vec::new(),
+                looted_by_player: false,
+            },
+        );
+
+        session
+            .handle_loot_release(loot_release_packet(gathering_node))
+            .await;
+
+        assert!(send_rx.try_recv().is_ok());
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gathering_node)
+            .unwrap();
+        assert_eq!(state.go_state, Some(GoState::Active));
+        assert_eq!(state.loot_state, None);
+    }
+
+    #[tokio::test]
+    async fn loot_release_personal_chest_records_per_player_despawn_like_cpp() {
+        let (mut session, send_rx) = make_session_with_send_capacity(4);
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let restocked_chest = test_gameobject_guid(19_039);
+        let fallback_chest = test_gameobject_guid(19_040);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_position_like_cpp(Position::ZERO);
+        session.set_active_loot_guid(restocked_chest);
+        session.add_active_loot_view_owner_like_cpp(fallback_chest);
+        session.visible_gameobjects.insert(restocked_chest);
+        session.visible_gameobjects.insert(fallback_chest);
+
+        for (guid, restock_time) in [(restocked_chest, 45), (fallback_chest, 0)] {
+            session.record_represented_gameobject_runtime_state_like_cpp(
+                0,
+                guid,
+                guid.entry(),
+                Position::ZERO,
+                GAMEOBJECT_TYPE_CHEST as u8,
+            );
+            session.record_represented_gameobject_chest_release_metadata_like_cpp(
+                guid,
+                GameObjectLootSource {
+                    personal_loot_id: 7_001,
+                    chest_restock_time_secs: restock_time,
+                    chest_consumable: false,
+                    ..Default::default()
+                },
+            );
+            session.loot_table.insert(
+                guid,
+                CreatureLoot {
+                    loot_guid: guid,
+                    coins: 0,
+                    unlooted_count: 0,
+                    loot_type: LOOT_TYPE_CHEST_LIKE_CPP,
+                    dungeon_encounter_id: 0,
+                    loot_method: 0,
+                    loot_master: ObjectGuid::EMPTY,
+                    round_robin_player: ObjectGuid::EMPTY,
+                    player_ffa_items: Vec::new(),
+                    players_looting: Vec::new(),
+                    allowed_looters: Vec::new(),
+                    items: Vec::new(),
+                    looted_by_player: false,
+                },
+            );
+        }
+
+        session
+            .handle_loot_release(loot_release_packet(restocked_chest))
+            .await;
+        session
+            .handle_loot_release(loot_release_packet(fallback_chest))
+            .await;
+
+        assert!(send_rx.try_recv().is_ok());
+        assert!(send_rx.try_recv().is_ok());
+        assert!(send_rx.try_recv().is_ok());
+        assert!(send_rx.try_recv().is_ok());
+        assert!(!session.visible_gameobjects.contains(&restocked_chest));
+        assert!(!session.visible_gameobjects.contains(&fallback_chest));
+        assert_eq!(
+            session
+                .represented_gameobject_use_states
+                .get(&restocked_chest)
+                .unwrap()
+                .per_player_despawn_secs,
+            Some(45)
+        );
+        assert_eq!(
+            session
+                .represented_gameobject_use_states
+                .get(&fallback_chest)
+                .unwrap()
+                .per_player_despawn_secs,
+            Some(wow_entities::DEFAULT_GAMEOBJECT_RESPAWN_DELAY_SECS)
+        );
+        assert!(
+            session
+                .represented_gameobject_use_states
+                .get(&restocked_chest)
+                .unwrap()
+                .per_player_despawn_until
+                .is_some()
+        );
+        assert!(session.represented_gameobject_is_per_player_despawned_like_cpp(restocked_chest));
     }
 }

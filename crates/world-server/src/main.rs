@@ -37,11 +37,9 @@ use wow_network::{
     GroupRegistry, LootDropRatesLikeCpp, PendingInvites, PlayerRegistry, SessionResources,
 };
 use wow_world::{
-    MMapRuntimeConfigLikeCpp, MapManager as LegacyMapManager, SharedMapManager,
-    WorldMMapPathfinderWorkerLikeCpp, WorldSession,
+    MMapRuntimeConfigLikeCpp, MapManager as LegacyMapManager, SharedCanonicalMapManager,
+    SharedMapManager, WorldMMapPathfinderWorkerLikeCpp, WorldSession,
 };
-
-type SharedCanonicalMapManager = Arc<Mutex<wow_map::MapManager>>;
 
 const WORLD_CONFIG_CANDIDATES: &[&str] = &[
     "worldserver.conf",
@@ -575,6 +573,14 @@ async fn main() -> Result<()> {
         "Loaded {} creature display info rows",
         creature_display_info_store.len()
     );
+    let gameobject_display_info_store = Arc::new(
+        wow_data::GameObjectDisplayInfoStore::load(&data_dir, &locale)
+            .context("Failed to load GameObjectDisplayInfo.db2")?,
+    );
+    info!(
+        "Loaded {} gameobject display info rows",
+        gameobject_display_info_store.len()
+    );
     let creature_model_data_store = Arc::new(
         wow_data::CreatureModelDataStore::load_with_hotfixes(&data_dir, &locale, &hotfix_db)
             .await
@@ -953,6 +959,16 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to load SpellStore")?;
     info!("Loaded {} spells from SpellStore", spell_store.len());
+    let spell_misc_store = Arc::new(
+        wow_data::SpellMiscStore::load(&data_dir, &locale)
+            .context("Failed to load SpellMisc.db2")?,
+    );
+    info!("Loaded {} spell misc rows", spell_misc_store.len());
+    let spell_range_store = Arc::new(
+        wow_data::SpellRangeStore::load(&data_dir, &locale)
+            .context("Failed to load SpellRange.db2")?,
+    );
+    info!("Loaded {} spell range rows", spell_range_store.len());
 
     // Load area trigger store (collision detection + teleportation)
     let area_trigger_store = Arc::new(
@@ -1278,6 +1294,8 @@ async fn main() -> Result<()> {
         hotfix_blob_cache: Some(Arc::clone(&hotfix_blob_cache)),
         skill_store: Some(Arc::clone(&skill_store)),
         spell_store: Some(Arc::clone(&spell_store)),
+        spell_misc_store: Some(Arc::clone(&spell_misc_store)),
+        spell_range_store: Some(Arc::clone(&spell_range_store)),
         area_table_store: Some(Arc::clone(&area_table_store)),
         area_trigger_store: Some(Arc::clone(&area_trigger_store)),
         chr_specialization_store: Some(Arc::clone(&chr_specialization_store)),
@@ -1287,6 +1305,7 @@ async fn main() -> Result<()> {
         map_difficulty_x_condition_store: Some(Arc::clone(&map_difficulty_x_condition_store)),
         creature_template_mount_store: Some(Arc::clone(&creature_template_mount_store)),
         creature_display_info_store: Some(Arc::clone(&creature_display_info_store)),
+        gameobject_display_info_store: Some(Arc::clone(&gameobject_display_info_store)),
         creature_model_data_store: Some(Arc::clone(&creature_model_data_store)),
         mount_store: Some(Arc::clone(&mount_store)),
         mount_capability_store: Some(Arc::clone(&mount_capability_store)),
@@ -1355,6 +1374,7 @@ async fn main() -> Result<()> {
         let resources = Arc::clone(&session_resources);
         let mgr = Arc::clone(&session_mgr);
         let smap = Arc::clone(&shared_map);
+        let canonical_map = Arc::clone(&canonical_map_manager);
         let accessor = Arc::clone(&object_accessor);
         let port = instance_port;
         let mmap_config = mmap_runtime_config.clone();
@@ -1367,6 +1387,7 @@ async fn main() -> Result<()> {
                 move |account, pkt_rx, send_tx, res| {
                     let mgr = Arc::clone(&mgr);
                     let smap = Arc::clone(&smap);
+                    let canonical_map = Arc::clone(&canonical_map);
                     let accessor = Arc::clone(&accessor);
                     let mmap_pathfinder = mmap_pathfinder.clone();
                     create_session(
@@ -1376,6 +1397,7 @@ async fn main() -> Result<()> {
                         res,
                         mgr,
                         smap,
+                        canonical_map,
                         accessor,
                         port,
                         max_expansion,
@@ -2019,6 +2041,7 @@ async fn create_session(
     resources: Arc<SessionResources>,
     session_mgr: Arc<SessionManager>,
     shared_map: SharedMapManager,
+    canonical_map_manager: SharedCanonicalMapManager,
     object_accessor: wow_world::SharedObjectAccessor,
     instance_port: u16,
     max_expansion: u8,
@@ -2148,6 +2171,12 @@ async fn create_session(
     if let Some(ref store) = resources.spell_store {
         session.set_spell_store(Arc::clone(store));
     }
+    if let Some(ref store) = resources.spell_misc_store {
+        session.set_spell_misc_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.spell_range_store {
+        session.set_spell_range_store(Arc::clone(store));
+    }
     if let Some(ref store) = resources.area_table_store {
         session.set_area_table_store(Arc::clone(store));
     }
@@ -2174,6 +2203,9 @@ async fn create_session(
     }
     if let Some(ref store) = resources.creature_display_info_store {
         session.set_creature_display_info_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.gameobject_display_info_store {
+        session.set_gameobject_display_info_store(Arc::clone(store));
     }
     if let Some(ref store) = resources.creature_model_data_store {
         session.set_creature_model_data_store(Arc::clone(store));
@@ -2235,6 +2267,7 @@ async fn create_session(
     }
     session.set_realm_id(resources.realm_id);
     session.set_map_manager(shared_map);
+    session.set_canonical_map_manager(canonical_map_manager);
 
     // Select the correct realm IP for ConnectTo based on client address.
     // C# logic: loopback → localAddress, otherwise → externalAddress.

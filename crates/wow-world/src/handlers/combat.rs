@@ -13,8 +13,8 @@ use tracing::{debug, warn};
 
 use wow_constants::ClientOpcodes;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
+use wow_packet::ClientPacket;
 use wow_packet::packets::combat::{AttackStart, AttackSwing, SAttackStop, SetSheathed};
-use wow_packet::{ClientPacket, ServerPacket};
 
 use crate::session::WorldSession;
 
@@ -95,9 +95,7 @@ impl WorldSession {
             creature.enter_combat(player_guid.clone());
         });
 
-        // Set the player's current combat target.
-        self.combat_target = Some(swing.victim);
-        self.in_combat = true;
+        self.start_player_attack_like_cpp(swing.victim);
 
         // Notify client that combat started.
         let start = AttackStart {
@@ -116,9 +114,7 @@ impl WorldSession {
 
         debug!(account = self.account_id, "CMSG_ATTACK_STOP");
 
-        if let Some(target) = self.combat_target.take() {
-            self.in_combat = false;
-
+        if let Some(target) = self.stop_player_attack_like_cpp() {
             // Reset creature combat if it was fighting us.
             let _ = self.mutate_world_creature(target, |creature| {
                 if creature.state() == wow_entities::CreatureAiState::InCombat {

@@ -114,7 +114,7 @@ impl ClientPacket for ChatMessage {
         ) {
             pkt.has_bit()?
         } else {
-            true
+            false
         };
         // bit reader auto-resets on next byte read
         let text = pkt.read_string(len)?;
@@ -450,5 +450,21 @@ mod tests {
         assert_eq!(packet.prefix, "ABC");
         assert_eq!(packet.text, "hello");
         assert!(packet.is_logged);
+    }
+
+    #[test]
+    fn chat_message_without_secure_bit_defaults_like_cpp() {
+        let mut writer = WorldPacket::new_empty();
+        writer.write_uint16(ClientOpcodes::ChatMessageYell as u16);
+        writer.write_int32(0);
+        writer.write_bits(5, 11);
+        writer.write_string("hello");
+
+        let mut reader = WorldPacket::from_bytes(writer.data());
+        reader.skip_opcode();
+        let packet = ChatMessage::read(&mut reader).unwrap();
+
+        assert_eq!(packet.text, "hello");
+        assert!(!packet.is_secure);
     }
 }

@@ -11,6 +11,7 @@ use wow_core::ObjectGuid;
 pub struct AuraSubsystem {
     pub owned_auras: Vec<OwnedAuraRef>,
     pub applied_auras: Vec<AppliedAuraRef>,
+    pub applied_aura_types: HashMap<i32, Vec<AppliedAuraRef>>,
     pub visible_auras: HashMap<u8, AuraRef>,
     pub visible_auras_to_update: HashSet<u8>,
     pub removed_auras: Vec<AuraRef>,
@@ -157,9 +158,22 @@ impl AuraSubsystem {
         }
     }
 
+    pub fn register_applied_aura_type_like_cpp(&mut self, aura: AppliedAuraRef, aura_type: i32) {
+        self.add_applied(aura);
+        let typed_auras = self.applied_aura_types.entry(aura_type).or_default();
+        if !typed_auras.contains(&aura) {
+            typed_auras.push(aura);
+        }
+    }
+
     pub fn remove_applied(&mut self, aura: AppliedAuraRef) -> bool {
         let before = self.applied_auras.len();
         self.applied_auras.retain(|known| *known != aura);
+        for typed_auras in self.applied_aura_types.values_mut() {
+            typed_auras.retain(|known| *known != aura);
+        }
+        self.applied_aura_types
+            .retain(|_, typed_auras| !typed_auras.is_empty());
         self.interruptible_auras.retain(|known| *known != aura);
         self.aura_interrupt_flags.remove(&aura);
         for auras in self.aura_state_auras.values_mut() {
@@ -172,6 +186,23 @@ impl AuraSubsystem {
 
     pub fn has_applied(&self, aura: AppliedAuraRef) -> bool {
         self.applied_auras.contains(&aura)
+    }
+
+    pub fn has_aura_type_like_cpp(&self, aura_type: i32) -> bool {
+        self.applied_aura_types
+            .get(&aura_type)
+            .is_some_and(|auras| !auras.is_empty())
+    }
+
+    pub fn remove_auras_by_type_like_cpp(&mut self, aura_type: i32) -> Vec<AppliedAuraRef> {
+        let removed = self
+            .applied_aura_types
+            .remove(&aura_type)
+            .unwrap_or_default();
+        for aura in &removed {
+            self.unapply_aura(*aura, 1);
+        }
+        removed
     }
 
     pub fn set_visible(&mut self, slot: u8, aura: AuraRef) {
@@ -3439,6 +3470,8 @@ pub struct AiSubsystem {
     pub scheduled_change_pending: bool,
     pub update_ticks: u64,
     pub last_update_diff_ms: u32,
+    pub hostile_reaction_count: u32,
+    pub call_assistance_count: u32,
 }
 
 impl AiSubsystem {
@@ -3486,6 +3519,14 @@ impl AiSubsystem {
         self.last_update_diff_ms = diff_ms;
         self.locked = false;
         true
+    }
+
+    pub fn send_hostile_reaction_like_cpp(&mut self) {
+        self.hostile_reaction_count = self.hostile_reaction_count.saturating_add(1);
+    }
+
+    pub fn call_assistance_like_cpp(&mut self) {
+        self.call_assistance_count = self.call_assistance_count.saturating_add(1);
     }
 
     pub fn schedule_change(&mut self) {
@@ -3669,6 +3710,32 @@ mod unit_subsystems_tests {
             auras.diminishing[DIMINISHING_STUN],
             DiminishingReturnState::default()
         );
+    }
+
+    #[test]
+    fn aura_type_removal_matches_cpp_remove_auras_by_type_shape() {
+        let mut auras = AuraSubsystem::default();
+        let caster = guid(1);
+        let unattackable = AppliedAuraRef::new(300, caster, 0, 0x1);
+        let other_same_type = AppliedAuraRef::new(301, caster, 1, 0x2);
+        let different = AppliedAuraRef::new(302, caster, 2, 0x4);
+
+        auras.register_applied_aura_type_like_cpp(unattackable, 93);
+        auras.register_applied_aura_type_like_cpp(other_same_type, 93);
+        auras.register_applied_aura_type_like_cpp(different, 8);
+
+        assert!(auras.has_aura_type_like_cpp(93));
+        assert_eq!(
+            auras.remove_auras_by_type_like_cpp(93),
+            vec![unattackable, other_same_type]
+        );
+
+        assert!(!auras.has_applied(unattackable));
+        assert!(!auras.has_applied(other_same_type));
+        assert!(auras.has_applied(different));
+        assert!(!auras.has_aura_type_like_cpp(93));
+        assert!(auras.has_aura_type_like_cpp(8));
+        assert_eq!(auras.removed_count(), 2);
     }
 
     #[test]

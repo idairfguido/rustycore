@@ -502,6 +502,7 @@ impl ServerPacket for ResumeComms {
 #[derive(Debug, Clone)]
 pub struct ConnectToFailed {
     pub serial: ConnectToSerial,
+    pub con: u8,
 }
 
 impl ClientPacket for ConnectToFailed {
@@ -519,7 +520,8 @@ impl ClientPacket for ConnectToFailed {
             89 => ConnectToSerial::WorldAttempt5,
             _ => ConnectToSerial::None,
         };
-        Ok(Self { serial })
+        let con = pkt.read_uint8()?;
+        Ok(Self { serial, con })
     }
 }
 
@@ -784,10 +786,12 @@ mod tests {
     fn connect_to_failed_read() {
         let mut pkt = WorldPacket::new_empty();
         pkt.write_uint32(17); // WorldAttempt1
+        pkt.write_uint8(1); // Con
 
         pkt.reset_read();
         let failed = ConnectToFailed::read(&mut pkt).unwrap();
         assert_eq!(failed.serial, ConnectToSerial::WorldAttempt1);
+        assert_eq!(failed.con, 1);
     }
 
     #[test]

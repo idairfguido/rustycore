@@ -21,18 +21,39 @@ This mini-phase closes the R4 `L1_INFRA` gate enough to unblock packet and map w
 - [x] **#NEXT.L1.INFRA.001.b** Refine prepared-statement closure by DB/runtime blocker.
   C++ refs: `docs/migration/inventory/r3-database-registry.md`, `/home/server/woltk-trinity-legacy/src/server/database/Database/Implementation/*.cpp`.
   Acceptance: the 1461 prepared statements are split into executable subtasks by owner DB and runtime dependency, with no optimistic “covered” marker unless SQL is registered and tested.
-  Result from R3 inventory: `auth_login` has 136 named Rust statements; `world` has 57 named Rust statements; `characters` has 511 missing and 12 named; `hotfixes` had 745 missing before `#NEXT.L1.INFRA.001.a` added the three DB2Manager control statements.
+  Result from R3 inventory was refined into owner batches; CharacterDatabase and HotfixDatabase are now covered at the prepared-statement layer, with direct named variants preferred when runtime code consumes a statement.
 
 - [x] **#NEXT.L1.INFRA.001.c** Refine DB2 store closure.
   C++ refs: `docs/migration/inventory/r3-database-registry.md`, `/home/server/woltk-trinity-legacy/src/server/game/DataStores/DB2Stores.cpp`.
   Acceptance: current hand-written stores, hotfix overlay, and deferred generated DB2 stores are explicitly separated so later Maps/Entities tasks cannot assume missing stores exist.
-  Result from R3 inventory: 318 DB2 stores are still missing, 5 have file loaders, and 2 are direct SQL hotfix flows.
+  Result from R3 inventory was refined into DB2 store batches; Rust now has typed readers for all 325 C++ `DB2Storage` exact-file stores. Runtime consumer wiring and hotfix overlays remain downstream owner work.
 
 ## Follow-Up Work Items
 
-- [ ] **#NEXT.L1.DB.PREP.CHARACTER** Split the 511 missing C++ `CharacterDatabase` prepared statements into boot/login/save/social/guild/mail/auction/instance batches.
-- [ ] **#NEXT.L1.DB.PREP.HOTFIX** Split or generate HotfixDatabase per-table statements from C++ `HotfixDatabase.cpp`/`DB2LoadInfo.h`; `#NEXT.L1.INFRA.001.a` only covers DB2Manager control queries.
-- [ ] **#NEXT.L1.DB2.STORES** Define DB2 store implementation order: minimal runtime stores for Maps/Entities first, then full generated 325-store plan.
+- [x] **#NEXT.L1.DB.PREP.CHARACTER** Split the missing C++ `CharacterDatabase` prepared statements into boot/login/save/social/guild/mail/auction/instance batches.
+  Result: live extraction found 523 C++ `PrepareStatement(CHAR_...)` entries; Rust now covers all 523 at the prepared-statement layer via direct statements plus generated C++ SQL support. Runtime subsystem usage remains owned by Player/Mail/Guild/Auction/Quest/etc.
+  Batch plan: `docs/migration/inventory/r7-l1-character-prep-batches.md` and `.tsv`.
+- [x] **#NEXT.L1.DB.PREP.HOTFIX** Split or generate HotfixDatabase per-table statements from C++ `HotfixDatabase.cpp`/`DB2LoadInfo.h`; `#NEXT.L1.INFRA.001.a` only covers DB2Manager control queries.
+  Result: C++ has 745 generated enum entries; Rust has 12 direct DB2 hotfix entries plus 3 DB2Manager control statements; generated support now covers all 325 C++ base statements, all 325 max-id statements and all 95 locale macros. Runtime hotfix overlay application remains owned by DB2 consumers.
+  Batch plan: `docs/migration/inventory/r7-l1-hotfix-prep-batches.md` and `.tsv`.
+- [x] **#NEXT.L1.DB2.STORES** Define DB2 store implementation order: minimal runtime stores for Maps/Entities first, then full generated 325-store plan.
+  Result: C++ declares 325 `DB2Storage` files; Rust now has 325 exact DB2 filename references matching C++ stores, all implemented as typed readers and fixture-open tested.
+  Batch plan: `docs/migration/inventory/r7-l1-db2-store-batches.md` and `.tsv`.
+- [x] **#NEXT.L1.DB2.STORES.001_MAPS_WORLD** Implement typed DB2 readers for the 16 Maps/World exact-file gaps.
+  Result: `crates/wow-data/src/maps_world.rs` covers C++ `DB2Structure.h`/`DB2LoadInfo.h`/`DB2Metadata.h` field shapes and opens every present fixture file in tests.
+  Parking: downstream L3 consumers still own runtime wiring and hotfix overlays where C++ `DB2Manager` reads field-level data.
+- [x] **#NEXT.L1.DB2.STORES.002_ENTITIES_MOVEMENT** Implement typed DB2 readers for the 14 Entities/Movement exact-file gaps.
+  Result: `crates/wow-data/src/entities_movement.rs` covers C++ `DB2Structure.h`/`DB2LoadInfo.h`/`DB2Metadata.h` field shapes and opens every present fixture file in tests.
+  Parking: downstream L4/L5 consumers still own runtime wiring and hotfix overlays where C++ reads field-level data.
+- [x] **#NEXT.L1.DB2.STORES.003_ITEMS_COLLECTIONS** Implement typed DB2 readers for item/collection exact-file gaps.
+  Result: `crates/wow-data/src/item_equipment.rs` covers the equipment/armor/damage/durability subbatch; `crates/wow-data/src/item_bonus.rs` covers the bonus/level-selector/limit/name/set/spec subbatch; `crates/wow-data/src/item_collections.rs` covers the economy/collection/cosmetic/battle-pet subbatch; `crates/wow-data/src/artifact_azerite.rs` covers artifact/azerite. All open every present fixture file in tests.
+  Remaining: no live item/collection exact-file gaps remain in this scope.
+- [x] **#NEXT.L1.DB2.STORES.004_PLAYER_SPELLS_PROGRESSION** Implement typed DB2 readers for player/spell/progression exact-file gaps.
+  Result: `crates/wow-data/src/character_progression.rs` covers character/class/race/customization/power/namegen; `crates/wow-data/src/trait_tree.rs` covers trait tree; `crates/wow-data/src/progression_rewards.rs` covers quest/reward/criteria/faction/curve/scaling; `crates/wow-data/src/skill_talent.rs` covers skill/talent/PvP/glyph/journal; `crates/wow-data/src/spell_db2.rs` covers all 38 scoped `Spell*` stores. All open every present fixture file in tests.
+  Remaining: no exact-file gaps remain in this scope; downstream runtime tasks still own consumer wiring and hotfix overlay behavior where C++ reads field-level data.
+- [x] **#NEXT.L1.DB2.STORES.005_MISC_GENERATED** Implement typed DB2 readers for the remaining generated/misc exact-file gaps.
+  Result: `crates/wow-data/src/misc_generated.rs` covers all 59 remaining stores, including Garrison, text/config/cinematic/language/holiday/PvP/scenario/sound/script/misc stores. All open every present fixture file in tests.
+  Remaining: no C++ DB2Storage exact-file gaps remain; downstream runtime tasks still own consumer wiring and hotfix overlay behavior where C++ reads field-level data.
 - [x] **#NEXT.L1.DB.PREP.MAP_SPAWNS** Add map-spawn prepared SQL and the runtime spawn index needed by Maps.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:2167`, `:2449`, `:2492`; `/home/server/woltk-trinity-legacy/src/server/game/Globals/AreaTriggerDataStore.cpp:312`.
   Rust targets: `crates/wow-database/src/statements/world.rs`, `crates/wow-map/src/spawn.rs`.

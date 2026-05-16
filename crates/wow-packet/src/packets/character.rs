@@ -336,6 +336,7 @@ impl ClientPacket for CreateCharacter {
                 choice_id: packet.read_int32()?,
             });
         }
+        customizations.sort_by_key(|choice| choice.option_id);
 
         Ok(CreateCharacter {
             name,
@@ -521,6 +522,36 @@ mod tests {
         assert_eq!(result.class, 1);
         assert_eq!(result.sex, 0);
         assert!(result.template_set.is_none());
+    }
+
+    #[test]
+    fn create_character_sorts_customizations_like_cpp() {
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_bits(4, 6);
+        pkt.write_bit(false); // has_template_set
+        pkt.write_bit(false); // is_trial_boost
+        pkt.write_bit(false); // use_npe
+
+        pkt.write_uint8(1);
+        pkt.write_uint8(1);
+        pkt.write_int8(0);
+        pkt.write_uint32(3);
+        pkt.write_string("Test");
+        pkt.write_int32(20);
+        pkt.write_int32(200);
+        pkt.write_int32(10);
+        pkt.write_int32(100);
+        pkt.write_int32(20);
+        pkt.write_int32(201);
+
+        pkt.reset_read();
+        let result = CreateCharacter::read(&mut pkt).unwrap();
+        let choices: Vec<(i32, i32)> = result
+            .customizations
+            .iter()
+            .map(|choice| (choice.option_id, choice.choice_id))
+            .collect();
+        assert_eq!(choices, vec![(10, 100), (20, 200), (20, 201)]);
     }
 
     #[test]

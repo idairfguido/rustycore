@@ -16,5 +16,6 @@ pub use map_manager::{
     GridCoord, MapManager, SharedMapManager, WorldCreature, WorldMMapPathfinderWorkerLikeCpp,
 };
 pub use session::{
-    MMapRuntimeConfigLikeCpp, SharedObjectAccessor, WorldSession, new_shared_object_accessor,
+    MMapRuntimeConfigLikeCpp, SharedCanonicalMapManager, SharedObjectAccessor, WorldSession,
+    new_shared_object_accessor,
 };

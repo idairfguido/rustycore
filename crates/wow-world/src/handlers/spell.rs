@@ -72,7 +72,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::CastSpell,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::ThreadSafe,
         handler_name: "handle_cast_spell",
     }
 }
@@ -81,7 +81,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::CancelCast,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadSafe,
         handler_name: "handle_cancel_cast",
     }
 }

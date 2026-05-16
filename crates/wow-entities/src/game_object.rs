@@ -12,19 +12,28 @@ pub const GAMEOBJECT_TYPE_DOOR: u32 = 0;
 pub const GAMEOBJECT_TYPE_BUTTON: u32 = 1;
 pub const GAMEOBJECT_TYPE_QUESTGIVER: u32 = 2;
 pub const GAMEOBJECT_TYPE_CHEST: u32 = 3;
+pub const GAMEOBJECT_TYPE_BINDER: u32 = 4;
 pub const GAMEOBJECT_TYPE_GENERIC: u32 = 5;
 pub const GAMEOBJECT_TYPE_TRAP: u32 = 6;
 pub const GAMEOBJECT_TYPE_CHAIR: u32 = 7;
 pub const GAMEOBJECT_TYPE_SPELL_FOCUS: u32 = 8;
 pub const GAMEOBJECT_TYPE_TEXT: u32 = 9;
 pub const GAMEOBJECT_TYPE_GOOBER: u32 = 10;
+pub const GAMEOBJECT_TYPE_AREADAMAGE: u32 = 12;
 pub const GAMEOBJECT_TYPE_CAMERA: u32 = 13;
+pub const GAMEOBJECT_TYPE_MAP_OBJECT: u32 = 14;
+pub const GAMEOBJECT_TYPE_FISHING_NODE: u32 = 17;
 pub const GAMEOBJECT_TYPE_RITUAL: u32 = 18;
 pub const GAMEOBJECT_TYPE_MAILBOX: u32 = 19;
 pub const GAMEOBJECT_TYPE_SPELLCASTER: u32 = 22;
 pub const GAMEOBJECT_TYPE_FLAGSTAND: u32 = 24;
 pub const GAMEOBJECT_TYPE_FISHING_HOLE: u32 = 25;
+pub const GAMEOBJECT_TYPE_FLAGDROP: u32 = 26;
+pub const GAMEOBJECT_TYPE_MINI_GAME: u32 = 27;
 pub const GAMEOBJECT_TYPE_AURA_GENERATOR: u32 = 30;
+pub const GAMEOBJECT_TYPE_DUNGEON_DIFFICULTY: u32 = 31;
+pub const GAMEOBJECT_TYPE_BARBER_CHAIR: u32 = 32;
+pub const GAMEOBJECT_TYPE_DESTRUCTIBLE_BUILDING: u32 = 33;
 pub const GAMEOBJECT_TYPE_GUILD_BANK: u32 = 34;
 pub const GAMEOBJECT_TYPE_NEW_FLAG: u32 = 36;
 pub const GAMEOBJECT_TYPE_ITEM_FORGE: u32 = 47;
@@ -34,6 +43,8 @@ pub const GO_DYNFLAG_LO_NO_INTERACT: u32 = 0x0080;
 
 pub const MAX_GAMEOBJECT_DATA: usize = 35;
 pub const GAMEOBJECT_DATA_CHEST_LOOT: usize = 1;
+pub const GAMEOBJECT_DATA_CHEST_RESTOCK_TIME: usize = 2;
+pub const GAMEOBJECT_DATA_CHEST_CONSUMABLE: usize = 3;
 pub const GAMEOBJECT_DATA_CHEST_TRIGGERED_EVENT: usize = 6;
 pub const GAMEOBJECT_DATA_CHEST_LINKED_TRAP: usize = 7;
 pub const GAMEOBJECT_DATA_CHEST_USE_GROUP_LOOT_RULES: usize = 15;
@@ -49,6 +60,7 @@ pub const GAMEOBJECT_DATA_GATHERING_NODE_LINKED_TRAP: usize = 20;
 
 pub const GAME_OBJECT_DATA_PARENT_BIT: usize = 0;
 pub const GAME_OBJECT_DATA_DISPLAY_ID_BIT: usize = 4;
+pub const GAME_OBJECT_DATA_CREATED_BY_BIT: usize = 9;
 pub const GAME_OBJECT_DATA_FLAGS_BIT: usize = 11;
 pub const GAME_OBJECT_DATA_FACTION_TEMPLATE_BIT: usize = 13;
 pub const GAME_OBJECT_DATA_LEVEL_BIT: usize = 14;
@@ -86,6 +98,8 @@ pub struct GameObjectLootSource {
     pub push_loot_id: u32,
     pub triggered_event_id: u32,
     pub linked_trap_entry: u32,
+    pub chest_restock_time_secs: u32,
+    pub chest_consumable: bool,
 }
 
 impl GameObjectLootSource {
@@ -172,6 +186,58 @@ impl GameObjectTemplateData {
         self.data[index]
     }
 
+    pub const fn get_interact_radius_override_like_cpp(&self) -> u32 {
+        let index = match self.go_type {
+            GAMEOBJECT_TYPE_DOOR => 12,
+            GAMEOBJECT_TYPE_BUTTON => 10,
+            GAMEOBJECT_TYPE_QUESTGIVER => 12,
+            GAMEOBJECT_TYPE_CHEST => 9,
+            GAMEOBJECT_TYPE_BINDER => 0,
+            GAMEOBJECT_TYPE_GENERIC => 9,
+            GAMEOBJECT_TYPE_TRAP => 21,
+            GAMEOBJECT_TYPE_CHAIR => 5,
+            GAMEOBJECT_TYPE_SPELL_FOCUS => 9,
+            GAMEOBJECT_TYPE_TEXT => 6,
+            GAMEOBJECT_TYPE_GOOBER => 33,
+            GAMEOBJECT_TYPE_AREADAMAGE => 8,
+            GAMEOBJECT_TYPE_CAMERA => 5,
+            GAMEOBJECT_TYPE_FISHING_NODE => 0,
+            GAMEOBJECT_TYPE_RITUAL => 9,
+            GAMEOBJECT_TYPE_MAILBOX => 1,
+            GAMEOBJECT_TYPE_SPELLCASTER => 8,
+            GAMEOBJECT_TYPE_FLAGSTAND => 13,
+            GAMEOBJECT_TYPE_FISHING_HOLE => 5,
+            GAMEOBJECT_TYPE_FLAGDROP => 10,
+            GAMEOBJECT_TYPE_AURA_GENERATOR => 7,
+            GAMEOBJECT_TYPE_DUNGEON_DIFFICULTY => 11,
+            GAMEOBJECT_TYPE_BARBER_CHAIR => 3,
+            GAMEOBJECT_TYPE_DESTRUCTIBLE_BUILDING => 27,
+            GAMEOBJECT_TYPE_GUILD_BANK => 1,
+            GAMEOBJECT_TYPE_GATHERING_NODE => 24,
+            _ => return 0,
+        };
+        self.data[index]
+    }
+
+    pub const fn get_lock_id_like_cpp(&self) -> u32 {
+        let index = match self.go_type {
+            GAMEOBJECT_TYPE_DOOR => 1,
+            GAMEOBJECT_TYPE_BUTTON => 1,
+            GAMEOBJECT_TYPE_QUESTGIVER => 0,
+            GAMEOBJECT_TYPE_CHEST => 0,
+            GAMEOBJECT_TYPE_TRAP => 0,
+            GAMEOBJECT_TYPE_GOOBER => 0,
+            GAMEOBJECT_TYPE_AREADAMAGE => 0,
+            GAMEOBJECT_TYPE_CAMERA => 0,
+            GAMEOBJECT_TYPE_FLAGSTAND => 0,
+            GAMEOBJECT_TYPE_FISHING_HOLE => 4,
+            GAMEOBJECT_TYPE_FLAGDROP => 0,
+            GAMEOBJECT_TYPE_GATHERING_NODE => 3,
+            _ => return 0,
+        };
+        self.data[index]
+    }
+
     pub const fn chest_loot_source_like_cpp(&self) -> Option<GameObjectLootSource> {
         if self.go_type != GAMEOBJECT_TYPE_CHEST {
             return None;
@@ -185,6 +251,8 @@ impl GameObjectTemplateData {
             push_loot_id: self.data[GAMEOBJECT_DATA_CHEST_PUSH_LOOT],
             triggered_event_id: self.data[GAMEOBJECT_DATA_CHEST_TRIGGERED_EVENT],
             linked_trap_entry: self.data[GAMEOBJECT_DATA_CHEST_LINKED_TRAP],
+            chest_restock_time_secs: self.data[GAMEOBJECT_DATA_CHEST_RESTOCK_TIME],
+            chest_consumable: self.data[GAMEOBJECT_DATA_CHEST_CONSUMABLE] != 0,
         })
     }
 
@@ -208,6 +276,7 @@ impl GameObjectTemplateData {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GameObjectDataValues {
     pub display_id: i32,
+    pub created_by: ObjectGuid,
     pub flags: u32,
     pub faction_template: i32,
     pub level: i32,
@@ -222,6 +291,7 @@ impl Default for GameObjectDataValues {
     fn default() -> Self {
         Self {
             display_id: 0,
+            created_by: ObjectGuid::EMPTY,
             flags: 0,
             faction_template: 0,
             level: 0,
@@ -550,6 +620,16 @@ impl GameObject {
         });
     }
 
+    pub fn set_created_by(&mut self, created_by: ObjectGuid) {
+        self.set_guid_field(GAME_OBJECT_DATA_CREATED_BY_BIT, created_by, |data| {
+            &mut data.created_by
+        });
+    }
+
+    pub const fn owner_guid(&self) -> ObjectGuid {
+        self.data.created_by
+    }
+
     pub fn set_path_progress_for_client(&mut self, progress: f32) {
         let had_dynamic_flags_change = self
             .world
@@ -637,6 +717,19 @@ impl GameObject {
         bit: usize,
         value: u8,
         field: impl FnOnce(&mut GameObjectDataValues) -> &mut u8,
+    ) {
+        let target = field(&mut self.data);
+        if *target != value {
+            *target = value;
+            self.mark_game_object_data(bit);
+        }
+    }
+
+    fn set_guid_field(
+        &mut self,
+        bit: usize,
+        value: ObjectGuid,
+        field: impl FnOnce(&mut GameObjectDataValues) -> &mut ObjectGuid,
     ) {
         let target = field(&mut self.data);
         if *target != value {
@@ -779,9 +872,94 @@ mod tests {
     }
 
     #[test]
+    fn gameobject_template_interact_radius_override_matches_cpp_switch() {
+        let cases = [
+            (GAMEOBJECT_TYPE_DOOR, 12),
+            (GAMEOBJECT_TYPE_BUTTON, 10),
+            (GAMEOBJECT_TYPE_QUESTGIVER, 12),
+            (GAMEOBJECT_TYPE_CHEST, 9),
+            (GAMEOBJECT_TYPE_BINDER, 0),
+            (GAMEOBJECT_TYPE_GENERIC, 9),
+            (GAMEOBJECT_TYPE_TRAP, 21),
+            (GAMEOBJECT_TYPE_CHAIR, 5),
+            (GAMEOBJECT_TYPE_SPELL_FOCUS, 9),
+            (GAMEOBJECT_TYPE_TEXT, 6),
+            (GAMEOBJECT_TYPE_GOOBER, 33),
+            (GAMEOBJECT_TYPE_AREADAMAGE, 8),
+            (GAMEOBJECT_TYPE_CAMERA, 5),
+            (GAMEOBJECT_TYPE_FISHING_NODE, 0),
+            (GAMEOBJECT_TYPE_RITUAL, 9),
+            (GAMEOBJECT_TYPE_MAILBOX, 1),
+            (GAMEOBJECT_TYPE_SPELLCASTER, 8),
+            (GAMEOBJECT_TYPE_FLAGSTAND, 13),
+            (GAMEOBJECT_TYPE_FISHING_HOLE, 5),
+            (GAMEOBJECT_TYPE_FLAGDROP, 10),
+            (GAMEOBJECT_TYPE_AURA_GENERATOR, 7),
+            (GAMEOBJECT_TYPE_DUNGEON_DIFFICULTY, 11),
+            (GAMEOBJECT_TYPE_BARBER_CHAIR, 3),
+            (GAMEOBJECT_TYPE_DESTRUCTIBLE_BUILDING, 27),
+            (GAMEOBJECT_TYPE_GUILD_BANK, 1),
+            (GAMEOBJECT_TYPE_GATHERING_NODE, 24),
+        ];
+
+        for (go_type, index) in cases {
+            let mut data = [0; MAX_GAMEOBJECT_DATA];
+            data[index] = 10_000 + go_type;
+            assert_eq!(
+                GameObjectTemplateData::new(go_type, data).get_interact_radius_override_like_cpp(),
+                10_000 + go_type
+            );
+        }
+
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[0] = 999;
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_MAP_OBJECT, data)
+                .get_interact_radius_override_like_cpp(),
+            0
+        );
+    }
+
+    #[test]
+    fn gameobject_template_lock_id_matches_cpp_switch() {
+        let cases = [
+            (GAMEOBJECT_TYPE_DOOR, 1),
+            (GAMEOBJECT_TYPE_BUTTON, 1),
+            (GAMEOBJECT_TYPE_QUESTGIVER, 0),
+            (GAMEOBJECT_TYPE_CHEST, 0),
+            (GAMEOBJECT_TYPE_TRAP, 0),
+            (GAMEOBJECT_TYPE_GOOBER, 0),
+            (GAMEOBJECT_TYPE_AREADAMAGE, 0),
+            (GAMEOBJECT_TYPE_CAMERA, 0),
+            (GAMEOBJECT_TYPE_FLAGSTAND, 0),
+            (GAMEOBJECT_TYPE_FISHING_HOLE, 4),
+            (GAMEOBJECT_TYPE_FLAGDROP, 0),
+            (GAMEOBJECT_TYPE_GATHERING_NODE, 3),
+        ];
+
+        for (go_type, index) in cases {
+            let mut data = [0; MAX_GAMEOBJECT_DATA];
+            data[index] = 20_000 + go_type;
+            assert_eq!(
+                GameObjectTemplateData::new(go_type, data).get_lock_id_like_cpp(),
+                20_000 + go_type
+            );
+        }
+
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[0] = 999;
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_MAP_OBJECT, data).get_lock_id_like_cpp(),
+            0
+        );
+    }
+
+    #[test]
     fn chest_loot_source_uses_cpp_data_indices() {
         let mut data = [0; MAX_GAMEOBJECT_DATA];
         data[GAMEOBJECT_DATA_CHEST_LOOT] = 10;
+        data[GAMEOBJECT_DATA_CHEST_RESTOCK_TIME] = 60;
+        data[GAMEOBJECT_DATA_CHEST_CONSUMABLE] = 1;
         data[GAMEOBJECT_DATA_CHEST_TRIGGERED_EVENT] = 40;
         data[GAMEOBJECT_DATA_CHEST_LINKED_TRAP] = 50;
         data[GAMEOBJECT_DATA_CHEST_USE_GROUP_LOOT_RULES] = 1;
@@ -803,6 +981,8 @@ mod tests {
                 push_loot_id: 30,
                 triggered_event_id: 40,
                 linked_trap_entry: 50,
+                chest_restock_time_secs: 60,
+                chest_consumable: true,
             }
         );
         assert!(!source.is_empty());
@@ -879,8 +1059,12 @@ mod tests {
         go.set_percent_health(80);
         go.set_art_kit(4);
         go.set_custom_param(99);
+        let owner = ObjectGuid::create_player(1, 42);
+        go.set_created_by(owner);
 
         assert_eq!(go.data().display_id, 1234);
+        assert_eq!(go.owner_guid(), owner);
+        assert_eq!(go.data().created_by, owner);
         assert_eq!(go.data().faction_template, 35);
         assert_eq!(go.data().state, GoState::Ready as i8);
         assert_eq!(go.data().type_id, 3);
@@ -896,6 +1080,10 @@ mod tests {
         assert!(
             go.game_object_data_changes_mask()
                 .is_set(GAME_OBJECT_DATA_DISPLAY_ID_BIT)
+        );
+        assert!(
+            go.game_object_data_changes_mask()
+                .is_set(GAME_OBJECT_DATA_CREATED_BY_BIT)
         );
         assert!(
             go.game_object_data_changes_mask()

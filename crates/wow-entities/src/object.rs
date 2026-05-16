@@ -43,6 +43,16 @@ bitflags! {
     }
 }
 
+bitflags! {
+    /// Rust representation of TrinityCore `NotifyFlags`.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct ObjectNotifyFlags: u16 {
+        const AI_RELOCATION = 0x01;
+        const VISIBILITY_CHANGED = 0x02;
+        const ALL = 0xFF;
+    }
+}
+
 /// Minimal canonical `Object` state from TrinityCore `Object`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EntityObject {
@@ -59,6 +69,7 @@ pub struct EntityObject {
     is_destroyed_object: bool,
     object_updated: bool,
     changed_fields: ObjectChangedFields,
+    notify_flags: ObjectNotifyFlags,
     map_id: Option<u32>,
     instance_id: Option<u32>,
 }
@@ -85,6 +96,7 @@ impl EntityObject {
             is_destroyed_object: false,
             object_updated: false,
             changed_fields: ObjectChangedFields::empty(),
+            notify_flags: ObjectNotifyFlags::empty(),
             map_id: None,
             instance_id: None,
         }
@@ -158,6 +170,22 @@ impl EntityObject {
 
     pub const fn changed_fields(&self) -> ObjectChangedFields {
         self.changed_fields
+    }
+
+    pub const fn notify_flags(&self) -> ObjectNotifyFlags {
+        self.notify_flags
+    }
+
+    pub fn add_to_notify(&mut self, flags: ObjectNotifyFlags) {
+        self.notify_flags.insert(flags);
+    }
+
+    pub fn is_need_notify(&self, flags: ObjectNotifyFlags) -> bool {
+        self.notify_flags.intersects(flags)
+    }
+
+    pub fn reset_all_notifies(&mut self) {
+        self.notify_flags = ObjectNotifyFlags::empty();
     }
 
     pub fn object_data_values(&self) -> ObjectDataValues {
@@ -440,6 +468,29 @@ mod tests {
 
         object.replace_all_dynamic_flags(0x80);
         assert_eq!(object.dynamic_flags(), 0x80);
+    }
+
+    #[test]
+    fn notify_flags_match_cpp_relocation_visibility_helpers() {
+        let mut object = EntityObject::default();
+
+        assert_eq!(object.notify_flags(), ObjectNotifyFlags::empty());
+        assert!(!object.is_need_notify(ObjectNotifyFlags::VISIBILITY_CHANGED));
+
+        object.add_to_notify(ObjectNotifyFlags::VISIBILITY_CHANGED);
+        assert!(object.is_need_notify(ObjectNotifyFlags::VISIBILITY_CHANGED));
+        assert!(!object.is_need_notify(ObjectNotifyFlags::AI_RELOCATION));
+        assert_eq!(object.notify_flags(), ObjectNotifyFlags::VISIBILITY_CHANGED);
+
+        object.add_to_notify(ObjectNotifyFlags::AI_RELOCATION);
+        assert!(object.is_need_notify(ObjectNotifyFlags::ALL));
+        assert_eq!(
+            object.notify_flags(),
+            ObjectNotifyFlags::AI_RELOCATION | ObjectNotifyFlags::VISIBILITY_CHANGED
+        );
+
+        object.reset_all_notifies();
+        assert_eq!(object.notify_flags(), ObjectNotifyFlags::empty());
     }
 
     #[test]

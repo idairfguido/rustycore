@@ -8,6 +8,8 @@
 //!
 //! Wire format matches RustyCore C# for WoW 3.4.3.54261.
 
+use std::collections::BTreeSet;
+
 use wow_constants::ServerOpcodes;
 use wow_core::guid::TypeId;
 use wow_core::{ObjectGuid, Position};
@@ -2510,6 +2512,7 @@ pub struct GameObjectCreateData {
     pub rotation: [f32; 4], // rotation0..3 (quaternion)
     pub anim_progress: u8,
     pub state: i8,
+    pub created_by: ObjectGuid,
     pub faction_template: i32,
     pub scale: f32,
 }
@@ -2537,7 +2540,7 @@ impl GameObjectCreateData {
         buf.write_int32(0); // SpawnTrackingStateAnimKitID
         buf.write_int32(0); // StateWorldEffectIDs.Count
         // No StateWorldEffectIDs entries (count=0)
-        write_empty_guid(&mut buf); // CreatedBy
+        buf.write_packed_guid(&self.created_by); // CreatedBy
         write_empty_guid(&mut buf); // GuildGUID
         buf.write_uint32(0); // Flags
         // ParentRotation (Quaternion: x, y, z, w)
@@ -3208,19 +3211,21 @@ impl ServerPacket for UpdateObject {
 
         // Build the Data buffer (matches C# UpdateData.BuildPacket)
         let mut data_buf = WorldPacket::new_empty();
+        let destroy_guids: BTreeSet<ObjectGuid> = self.destroy_guids.iter().copied().collect();
+        let out_of_range_guids: BTreeSet<ObjectGuid> =
+            self.out_of_range_guids.iter().copied().collect();
 
         // HasDestroyOrOutOfRange bit
-        let has_destroy_or_oor =
-            !self.destroy_guids.is_empty() || !self.out_of_range_guids.is_empty();
+        let has_destroy_or_oor = !destroy_guids.is_empty() || !out_of_range_guids.is_empty();
         data_buf.write_bit(has_destroy_or_oor);
 
         if has_destroy_or_oor {
-            data_buf.write_uint16(self.destroy_guids.len() as u16);
-            data_buf.write_int32((self.destroy_guids.len() + self.out_of_range_guids.len()) as i32);
-            for g in &self.destroy_guids {
+            data_buf.write_uint16(destroy_guids.len() as u16);
+            data_buf.write_uint32((destroy_guids.len() + out_of_range_guids.len()) as u32);
+            for g in &destroy_guids {
                 data_buf.write_packed_guid(g);
             }
-            for g in &self.out_of_range_guids {
+            for g in &out_of_range_guids {
                 data_buf.write_packed_guid(g);
             }
         }
@@ -3333,7 +3338,7 @@ impl ServerPacket for UpdateObject {
         }
 
         let blocks_data = blocks_buf.into_data();
-        data_buf.write_int32(blocks_data.len() as i32); // Data block size
+        data_buf.write_uint32(blocks_data.len() as u32); // Data block size
         data_buf.write_bytes(&blocks_data);
 
         // Write the assembled Data buffer into the packet
@@ -7397,6 +7402,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gameobject_create_values_serializes_created_by_guid_like_cpp() {
+        let base = GameObjectCreateData {
+            guid: ObjectGuid::create_world_object(
+                wow_core::guid::HighGuid::GameObject,
+                0,
+                1,
+                0,
+                0,
+                123,
+                456,
+            ),
+            entry: 123,
+            display_id: 456,
+            go_type: 3,
+            position: Position::ZERO,
+            rotation: [0.0, 0.0, 0.0, 1.0],
+            anim_progress: 255,
+            state: 1,
+            created_by: ObjectGuid::EMPTY,
+            faction_template: 0,
+            scale: 1.0,
+        };
+
+        let mut empty_owner_packet = WorldPacket::new_empty();
+        base.write_values_create(&mut empty_owner_packet);
+
+        let mut owned = base;
+        owned.created_by = ObjectGuid::create_player(1, 42);
+        let mut owned_packet = WorldPacket::new_empty();
+        owned.write_values_create(&mut owned_packet);
+
+        assert!(owned_packet.data().len() > empty_owner_packet.data().len());
+        assert_ne!(owned_packet.data(), empty_owner_packet.data());
+    }
+
+    #[test]
     fn update_object_create_player_serializes() {
         let guid = ObjectGuid::create_player(1, 42);
         let pos = Position::new(-8949.95, -132.493, 83.5312, 0.0);
@@ -7559,6 +7600,27 @@ mod tests {
         let bytes = pkt.to_bytes();
         // Should contain destroy + oor data
         assert!(bytes.len() > 20);
+    }
+
+    #[test]
+    fn update_object_destroy_sets_dedupe_like_cpp() {
+        let guid1 = ObjectGuid::create_player(1, 1);
+        let guid2 = ObjectGuid::create_player(1, 2);
+        let guid3 = ObjectGuid::create_player(1, 3);
+        let pkt = UpdateObject {
+            map_id: 0,
+            num_updates: 0,
+            destroy_guids: vec![guid2, guid1, guid1],
+            out_of_range_guids: vec![guid3, guid3],
+            blocks: Vec::new(),
+        };
+        let bytes = pkt.to_bytes();
+
+        // opcode(2) + NumObjUpdates(4) + MapID(2) + HasDestroy bit byte(1)
+        let destroy_count = u16::from_le_bytes([bytes[9], bytes[10]]);
+        let total_count = u32::from_le_bytes([bytes[11], bytes[12], bytes[13], bytes[14]]);
+        assert_eq!(destroy_count, 2);
+        assert_eq!(total_count, 3);
     }
 
     #[test]

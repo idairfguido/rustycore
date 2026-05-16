@@ -38,12 +38,103 @@ impl ManagedMapKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateMapEntryKind {
+    World,
+    Dungeon,
+    BattlegroundOrArena,
+    Garrison,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CreateMapEntryContext {
+    pub map_id: u32,
+    pub kind: CreateMapEntryKind,
+    pub split_by_faction: bool,
+    pub flex_locking: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CreateMapDifficultyContext {
+    pub difficulty_id: Difficulty,
+    pub has_reset_schedule: bool,
+    pub is_instance_id_bound: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CreateMapInstanceLockContext {
+    pub instance_id: u32,
+    pub difficulty_id: Difficulty,
+    pub token: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CreateMapPlayerContext {
+    pub guid_counter: u64,
+    pub team_id: u32,
+    pub battleground_id: u32,
+    pub has_battleground: bool,
+    pub player_difficulty_id: Difficulty,
+    pub player_recent_instance_id: u32,
+    pub group: Option<CreateMapGroupContext>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CreateMapGroupContext {
+    pub difficulty_id: Difficulty,
+    pub recent_instance_owner_guid_counter: u64,
+    pub recent_instance_id: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateMapSideEffect {
+    TeleportToBattlegroundEntryPoint,
+    CreateInstanceLockForNewInstance {
+        owner_guid_counter: u64,
+        instance_id: u32,
+    },
+    SetInstanceLockInstanceId {
+        instance_id: u32,
+    },
+    SetGroupRecentInstance {
+        owner_guid_counter: u64,
+        instance_id: u32,
+    },
+    SetPlayerRecentInstance {
+        instance_id: u32,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CreateMapDecision {
+    Existing {
+        key: MapKey,
+        difficulty_id: Difficulty,
+        side_effects: Vec<CreateMapSideEffect>,
+    },
+    Create {
+        key: MapKey,
+        difficulty_id: Difficulty,
+        kind: ManagedMapKind,
+        side_effects: Vec<CreateMapSideEffect>,
+    },
+    Reject {
+        side_effects: Vec<CreateMapSideEffect>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExistingInstanceMapContext {
+    pub instance_lock_token: Option<u64>,
+}
+
 #[derive(Debug)]
 pub struct ManagedMap {
     map: Map<NoopTerrainGridLoader, NoopGridLifecycle>,
     kind: ManagedMapKind,
     can_unload: bool,
     player_count: u32,
+    instance_lock_token: Option<u64>,
     update_calls: Vec<u32>,
     delayed_update_calls: Vec<u32>,
     unload_all_calls: u32,
@@ -62,6 +153,7 @@ impl ManagedMap {
             kind,
             can_unload: false,
             player_count: 0,
+            instance_lock_token: None,
             update_calls: Vec::new(),
             delayed_update_calls: Vec::new(),
             unload_all_calls: 0,
@@ -98,6 +190,14 @@ impl ManagedMap {
 
     pub const fn player_count(&self) -> u32 {
         self.player_count
+    }
+
+    pub const fn instance_lock_token(&self) -> Option<u64> {
+        self.instance_lock_token
+    }
+
+    pub fn set_instance_lock_token(&mut self, token: Option<u64>) {
+        self.instance_lock_token = token;
     }
 
     pub fn update_calls(&self) -> &[u32] {
@@ -319,6 +419,247 @@ impl MapManager {
                 kind,
             )
         })
+    }
+
+    pub fn create_map_decision_like_cpp(
+        &mut self,
+        entry: Option<CreateMapEntryContext>,
+        player: Option<CreateMapPlayerContext>,
+        map_difficulty: impl FnOnce(u32, Difficulty) -> Option<CreateMapDifficultyContext>,
+        active_instance_lock: Option<CreateMapInstanceLockContext>,
+        existing_instance_map: impl FnOnce(u32, u32) -> Option<ExistingInstanceMapContext>,
+    ) -> CreateMapDecision {
+        let Some(player) = player else {
+            return CreateMapDecision::Reject {
+                side_effects: Vec::new(),
+            };
+        };
+        let Some(entry) = entry else {
+            return CreateMapDecision::Reject {
+                side_effects: Vec::new(),
+            };
+        };
+
+        match entry.kind {
+            CreateMapEntryKind::BattlegroundOrArena => {
+                let instance_id = player.battleground_id;
+                if instance_id == 0 {
+                    return CreateMapDecision::Reject {
+                        side_effects: Vec::new(),
+                    };
+                }
+
+                let key = MapKey::new(entry.map_id, instance_id);
+                if self.find_map(entry.map_id, instance_id).is_some() {
+                    return CreateMapDecision::Existing {
+                        key,
+                        difficulty_id: 0,
+                        side_effects: Vec::new(),
+                    };
+                }
+
+                if !player.has_battleground {
+                    return CreateMapDecision::Reject {
+                        side_effects: vec![CreateMapSideEffect::TeleportToBattlegroundEntryPoint],
+                    };
+                }
+
+                CreateMapDecision::Create {
+                    key,
+                    difficulty_id: 0,
+                    kind: ManagedMapKind::Battleground,
+                    side_effects: Vec::new(),
+                }
+            }
+            CreateMapEntryKind::Dungeon => {
+                let group = player.group;
+                let mut difficulty = group
+                    .map(|group| group.difficulty_id)
+                    .unwrap_or(player.player_difficulty_id);
+                let Some(difficulty_context) = map_difficulty(entry.map_id, difficulty) else {
+                    return CreateMapDecision::Reject {
+                        side_effects: Vec::new(),
+                    };
+                };
+
+                let owner_guid_counter = group
+                    .map(|group| group.recent_instance_owner_guid_counter)
+                    .unwrap_or(player.guid_counter);
+                let mut side_effects = Vec::new();
+                let instance_lock = active_instance_lock;
+                let mut instance_id = 0;
+
+                if let Some(lock) = instance_lock {
+                    instance_id = lock.instance_id;
+                    if !entry.flex_locking {
+                        difficulty = lock.difficulty_id;
+                    }
+                } else {
+                    if !difficulty_context.has_reset_schedule {
+                        instance_id = group
+                            .map(|group| group.recent_instance_id)
+                            .unwrap_or(player.player_recent_instance_id);
+                    }
+
+                    if instance_id == 0 {
+                        let Some(generated) = self.generate_instance_id() else {
+                            return CreateMapDecision::Reject {
+                                side_effects: Vec::new(),
+                            };
+                        };
+                        instance_id = generated;
+                    }
+
+                    if difficulty_context.has_reset_schedule {
+                        side_effects.push(CreateMapSideEffect::CreateInstanceLockForNewInstance {
+                            owner_guid_counter,
+                            instance_id,
+                        });
+                    }
+                }
+
+                let existing = self.find_map(entry.map_id, instance_id).map(|map| {
+                    ExistingInstanceMapContext {
+                        instance_lock_token: map.instance_lock_token(),
+                    }
+                });
+                let existing =
+                    existing.or_else(|| existing_instance_map(entry.map_id, instance_id));
+
+                if !difficulty_context.is_instance_id_bound
+                    && let (Some(lock), Some(existing)) = (instance_lock, existing)
+                    && existing.instance_lock_token != Some(lock.token)
+                {
+                    let Some(generated) = self.generate_instance_id() else {
+                        return CreateMapDecision::Reject { side_effects };
+                    };
+                    instance_id = generated;
+                    side_effects
+                        .push(CreateMapSideEffect::SetInstanceLockInstanceId { instance_id });
+                }
+
+                let key = MapKey::new(entry.map_id, instance_id);
+                if self.find_map(entry.map_id, instance_id).is_some() {
+                    return CreateMapDecision::Existing {
+                        key,
+                        difficulty_id: difficulty,
+                        side_effects,
+                    };
+                }
+
+                if let Some(group) = group {
+                    side_effects.push(CreateMapSideEffect::SetGroupRecentInstance {
+                        owner_guid_counter: group.recent_instance_owner_guid_counter,
+                        instance_id,
+                    });
+                } else {
+                    side_effects.push(CreateMapSideEffect::SetPlayerRecentInstance { instance_id });
+                }
+
+                CreateMapDecision::Create {
+                    key,
+                    difficulty_id: difficulty,
+                    kind: ManagedMapKind::Dungeon {
+                        has_reset_schedule: difficulty_context.has_reset_schedule,
+                    },
+                    side_effects,
+                }
+            }
+            CreateMapEntryKind::Garrison => CreateMapDecision::Create {
+                key: MapKey::new(entry.map_id, player.guid_counter as u32),
+                difficulty_id: 0,
+                kind: ManagedMapKind::World,
+                side_effects: Vec::new(),
+            },
+            CreateMapEntryKind::World => {
+                let instance_id = if entry.split_by_faction {
+                    player.team_id
+                } else {
+                    0
+                };
+                let key = MapKey::new(entry.map_id, instance_id);
+                if self.find_map(entry.map_id, instance_id).is_some() {
+                    CreateMapDecision::Existing {
+                        key,
+                        difficulty_id: 0,
+                        side_effects: Vec::new(),
+                    }
+                } else {
+                    CreateMapDecision::Create {
+                        key,
+                        difficulty_id: 0,
+                        kind: ManagedMapKind::World,
+                        side_effects: Vec::new(),
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn find_instance_id_for_player_like_cpp(
+        &self,
+        entry: Option<CreateMapEntryContext>,
+        player: Option<CreateMapPlayerContext>,
+        map_difficulty: impl FnOnce(u32, Difficulty) -> Option<CreateMapDifficultyContext>,
+        active_instance_lock: Option<CreateMapInstanceLockContext>,
+        existing_instance_map: impl FnOnce(u32, u32) -> Option<ExistingInstanceMapContext>,
+    ) -> u32 {
+        let Some(player) = player else {
+            return 0;
+        };
+        let Some(entry) = entry else {
+            return 0;
+        };
+
+        match entry.kind {
+            CreateMapEntryKind::BattlegroundOrArena => player.battleground_id,
+            CreateMapEntryKind::Dungeon => {
+                let group = player.group;
+                let difficulty = group
+                    .map(|group| group.difficulty_id)
+                    .unwrap_or(player.player_difficulty_id);
+                let Some(difficulty_context) = map_difficulty(entry.map_id, difficulty) else {
+                    return 0;
+                };
+
+                let mut instance_id = 0;
+                if let Some(lock) = active_instance_lock {
+                    instance_id = lock.instance_id;
+                } else if !difficulty_context.has_reset_schedule {
+                    instance_id = group
+                        .map(|group| group.recent_instance_id)
+                        .unwrap_or(player.player_recent_instance_id);
+                }
+
+                if instance_id == 0 {
+                    return 0;
+                }
+
+                let existing = self.find_map(entry.map_id, instance_id).map(|map| {
+                    ExistingInstanceMapContext {
+                        instance_lock_token: map.instance_lock_token(),
+                    }
+                });
+                let existing =
+                    existing.or_else(|| existing_instance_map(entry.map_id, instance_id));
+                if !difficulty_context.is_instance_id_bound
+                    && let (Some(lock), Some(existing)) = (active_instance_lock, existing)
+                    && existing.instance_lock_token != Some(lock.token)
+                {
+                    return 0;
+                }
+
+                instance_id
+            }
+            CreateMapEntryKind::Garrison => player.guid_counter as u32,
+            CreateMapEntryKind::World => {
+                if entry.split_by_faction {
+                    player.team_id
+                } else {
+                    0
+                }
+            }
+        }
     }
 
     pub fn find_map(&self, map_id: u32, instance_id: u32) -> Option<&ManagedMap> {
@@ -679,5 +1020,424 @@ mod tests {
 
         manager.map_updater_mut().deactivate();
         assert!(!manager.map_updater().activated());
+    }
+
+    fn world_entry(map_id: u32) -> CreateMapEntryContext {
+        CreateMapEntryContext {
+            map_id,
+            kind: CreateMapEntryKind::World,
+            split_by_faction: false,
+            flex_locking: false,
+        }
+    }
+
+    fn dungeon_entry(map_id: u32, flex_locking: bool) -> CreateMapEntryContext {
+        CreateMapEntryContext {
+            map_id,
+            kind: CreateMapEntryKind::Dungeon,
+            split_by_faction: false,
+            flex_locking,
+        }
+    }
+
+    fn player() -> CreateMapPlayerContext {
+        CreateMapPlayerContext {
+            guid_counter: 77,
+            team_id: 469,
+            battleground_id: 0,
+            has_battleground: false,
+            player_difficulty_id: 1,
+            player_recent_instance_id: 0,
+            group: None,
+        }
+    }
+
+    fn difficulty(
+        difficulty_id: Difficulty,
+        has_reset_schedule: bool,
+        is_instance_id_bound: bool,
+    ) -> CreateMapDifficultyContext {
+        CreateMapDifficultyContext {
+            difficulty_id,
+            has_reset_schedule,
+            is_instance_id_bound,
+        }
+    }
+
+    #[test]
+    fn create_map_decision_rejects_missing_player_or_map_entry_like_cpp() {
+        let mut manager = MapManager::default();
+
+        assert_eq!(
+            manager.create_map_decision_like_cpp(
+                Some(world_entry(1)),
+                None,
+                |_, _| None,
+                None,
+                |_, _| None,
+            ),
+            CreateMapDecision::Reject {
+                side_effects: Vec::new(),
+            }
+        );
+        assert_eq!(
+            manager.create_map_decision_like_cpp(
+                None,
+                Some(player()),
+                |_, _| None,
+                None,
+                |_, _| None
+            ),
+            CreateMapDecision::Reject {
+                side_effects: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn create_map_decision_world_uses_zero_or_team_instance_like_cpp() {
+        let mut manager = MapManager::default();
+        let mut split_entry = world_entry(530);
+        split_entry.split_by_faction = true;
+
+        assert_eq!(
+            manager.create_map_decision_like_cpp(
+                Some(world_entry(0)),
+                Some(player()),
+                |_, _| None,
+                None,
+                |_, _| None,
+            ),
+            CreateMapDecision::Create {
+                key: MapKey::new(0, 0),
+                difficulty_id: 0,
+                kind: ManagedMapKind::World,
+                side_effects: Vec::new(),
+            }
+        );
+        assert_eq!(
+            manager.create_map_decision_like_cpp(
+                Some(split_entry),
+                Some(player()),
+                |_, _| None,
+                None,
+                |_, _| None,
+            ),
+            CreateMapDecision::Create {
+                key: MapKey::new(530, 469),
+                difficulty_id: 0,
+                kind: ManagedMapKind::World,
+                side_effects: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn create_map_decision_battleground_requires_instance_and_bg_pointer_like_cpp() {
+        let mut manager = MapManager::default();
+        let entry = CreateMapEntryContext {
+            map_id: 489,
+            kind: CreateMapEntryKind::BattlegroundOrArena,
+            split_by_faction: false,
+            flex_locking: false,
+        };
+
+        assert_eq!(
+            manager.create_map_decision_like_cpp(
+                Some(entry),
+                Some(player()),
+                |_, _| None,
+                None,
+                |_, _| None,
+            ),
+            CreateMapDecision::Reject {
+                side_effects: Vec::new(),
+            }
+        );
+
+        let mut bg_player = player();
+        bg_player.battleground_id = 12;
+        assert_eq!(
+            manager.create_map_decision_like_cpp(
+                Some(entry),
+                Some(bg_player),
+                |_, _| None,
+                None,
+                |_, _| None,
+            ),
+            CreateMapDecision::Reject {
+                side_effects: vec![CreateMapSideEffect::TeleportToBattlegroundEntryPoint],
+            }
+        );
+
+        bg_player.has_battleground = true;
+        assert_eq!(
+            manager.create_map_decision_like_cpp(
+                Some(entry),
+                Some(bg_player),
+                |_, _| None,
+                None,
+                |_, _| None,
+            ),
+            CreateMapDecision::Create {
+                key: MapKey::new(489, 12),
+                difficulty_id: 0,
+                kind: ManagedMapKind::Battleground,
+                side_effects: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn create_map_decision_dungeon_uses_active_lock_and_resets_difficulty_like_cpp() {
+        let mut manager = MapManager::default();
+        manager
+            .create_map_entry(
+                33,
+                42,
+                2,
+                ManagedMapKind::Dungeon {
+                    has_reset_schedule: true,
+                },
+            )
+            .set_instance_lock_token(Some(9));
+
+        assert_eq!(
+            manager.create_map_decision_like_cpp(
+                Some(dungeon_entry(33, false)),
+                Some(player()),
+                |_, requested| Some(difficulty(requested, true, true)),
+                Some(CreateMapInstanceLockContext {
+                    instance_id: 42,
+                    difficulty_id: 2,
+                    token: 9,
+                }),
+                |_, _| None,
+            ),
+            CreateMapDecision::Existing {
+                key: MapKey::new(33, 42),
+                difficulty_id: 2,
+                side_effects: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn create_map_decision_normal_dungeon_reuses_recent_instance_like_cpp() {
+        let mut manager = MapManager::default();
+        let mut player = player();
+        player.player_recent_instance_id = 7;
+
+        assert_eq!(
+            manager.create_map_decision_like_cpp(
+                Some(dungeon_entry(33, false)),
+                Some(player),
+                |_, requested| Some(difficulty(requested, false, true)),
+                None,
+                |_, _| None,
+            ),
+            CreateMapDecision::Create {
+                key: MapKey::new(33, 7),
+                difficulty_id: 1,
+                kind: ManagedMapKind::Dungeon {
+                    has_reset_schedule: false,
+                },
+                side_effects: vec![CreateMapSideEffect::SetPlayerRecentInstance { instance_id: 7 }],
+            }
+        );
+    }
+
+    #[test]
+    fn create_map_decision_dungeon_generates_instance_and_lock_side_effect_like_cpp() {
+        let mut manager = MapManager::default();
+        manager.init_instance_ids(3);
+        manager.register_instance_id(1);
+
+        assert_eq!(
+            manager.create_map_decision_like_cpp(
+                Some(dungeon_entry(631, false)),
+                Some(player()),
+                |_, requested| Some(difficulty(requested, true, true)),
+                None,
+                |_, _| None,
+            ),
+            CreateMapDecision::Create {
+                key: MapKey::new(631, 2),
+                difficulty_id: 1,
+                kind: ManagedMapKind::Dungeon {
+                    has_reset_schedule: true,
+                },
+                side_effects: vec![
+                    CreateMapSideEffect::CreateInstanceLockForNewInstance {
+                        owner_guid_counter: 77,
+                        instance_id: 2,
+                    },
+                    CreateMapSideEffect::SetPlayerRecentInstance { instance_id: 2 },
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn create_map_decision_flex_lock_conflict_regenerates_instance_like_cpp() {
+        let mut manager = MapManager::default();
+        manager.init_instance_ids(50);
+        for instance_id in 1..=42 {
+            manager.register_instance_id(instance_id);
+        }
+        manager
+            .create_map_entry(
+                631,
+                42,
+                3,
+                ManagedMapKind::Dungeon {
+                    has_reset_schedule: true,
+                },
+            )
+            .set_instance_lock_token(Some(100));
+
+        assert_eq!(
+            manager.create_map_decision_like_cpp(
+                Some(dungeon_entry(631, true)),
+                Some(player()),
+                |_, requested| Some(difficulty(requested, true, false)),
+                Some(CreateMapInstanceLockContext {
+                    instance_id: 42,
+                    difficulty_id: 3,
+                    token: 200,
+                }),
+                |_, _| None,
+            ),
+            CreateMapDecision::Create {
+                key: MapKey::new(631, 43),
+                difficulty_id: 1,
+                kind: ManagedMapKind::Dungeon {
+                    has_reset_schedule: true,
+                },
+                side_effects: vec![
+                    CreateMapSideEffect::SetInstanceLockInstanceId { instance_id: 43 },
+                    CreateMapSideEffect::SetPlayerRecentInstance { instance_id: 43 },
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn find_instance_id_for_player_matches_cpp_world_bg_and_garrison_branches() {
+        let manager = MapManager::default();
+        let mut split = world_entry(609);
+        split.split_by_faction = true;
+        let bg = CreateMapEntryContext {
+            map_id: 489,
+            kind: CreateMapEntryKind::BattlegroundOrArena,
+            split_by_faction: false,
+            flex_locking: false,
+        };
+        let garrison = CreateMapEntryContext {
+            map_id: 1152,
+            kind: CreateMapEntryKind::Garrison,
+            split_by_faction: false,
+            flex_locking: false,
+        };
+        let mut player = player();
+        player.team_id = 1;
+        player.battleground_id = 12;
+
+        assert_eq!(
+            manager.find_instance_id_for_player_like_cpp(
+                Some(world_entry(0)),
+                Some(player),
+                |_, _| None,
+                None,
+                |_, _| None,
+            ),
+            0
+        );
+        assert_eq!(
+            manager.find_instance_id_for_player_like_cpp(
+                Some(split),
+                Some(player),
+                |_, _| None,
+                None,
+                |_, _| None,
+            ),
+            1
+        );
+        assert_eq!(
+            manager.find_instance_id_for_player_like_cpp(
+                Some(bg),
+                Some(player),
+                |_, _| None,
+                None,
+                |_, _| None,
+            ),
+            12
+        );
+        assert_eq!(
+            manager.find_instance_id_for_player_like_cpp(
+                Some(garrison),
+                Some(player),
+                |_, _| None,
+                None,
+                |_, _| None,
+            ),
+            77
+        );
+    }
+
+    #[test]
+    fn find_instance_id_for_player_matches_cpp_dungeon_lock_and_recent_rules() {
+        let mut manager = MapManager::default();
+        manager
+            .create_map_entry(
+                631,
+                42,
+                3,
+                ManagedMapKind::Dungeon {
+                    has_reset_schedule: true,
+                },
+            )
+            .set_instance_lock_token(Some(100));
+        let mut player = player();
+        player.player_recent_instance_id = 7;
+
+        assert_eq!(
+            manager.find_instance_id_for_player_like_cpp(
+                Some(dungeon_entry(33, false)),
+                Some(player),
+                |_, requested| Some(difficulty(requested, false, true)),
+                None,
+                |_, _| None,
+            ),
+            7
+        );
+        assert_eq!(
+            manager.find_instance_id_for_player_like_cpp(
+                Some(dungeon_entry(631, true)),
+                Some(player),
+                |_, requested| Some(difficulty(requested, true, false)),
+                Some(CreateMapInstanceLockContext {
+                    instance_id: 42,
+                    difficulty_id: 3,
+                    token: 200,
+                }),
+                |_, _| None,
+            ),
+            0
+        );
+        assert_eq!(
+            manager.find_instance_id_for_player_like_cpp(
+                Some(dungeon_entry(631, true)),
+                Some(player),
+                |_, requested| Some(difficulty(requested, true, false)),
+                Some(CreateMapInstanceLockContext {
+                    instance_id: 42,
+                    difficulty_id: 3,
+                    token: 100,
+                }),
+                |_, _| None,
+            ),
+            42
+        );
     }
 }

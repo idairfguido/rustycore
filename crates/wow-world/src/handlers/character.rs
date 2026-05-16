@@ -27,10 +27,11 @@ use wow_database::{
     WorldStatements,
 };
 use wow_entities::{
-    BANK_SLOT_BAG_END, BANK_SLOT_BAG_START, BUYBACK_SLOT_START, INVENTORY_DEFAULT_SIZE,
-    INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_BAG_END, INVENTORY_SLOT_BAG_START,
-    INVENTORY_SLOT_ITEM_START, MAX_BAG_SIZE, NULL_BAG, NULL_SLOT, REAGENT_BAG_SLOT_END,
-    REAGENT_BAG_SLOT_START, WorldObject, is_equipment_pos, is_inventory_pos,
+    BANK_SLOT_BAG_END, BANK_SLOT_BAG_START, BUYBACK_SLOT_START, GAMEOBJECT_TYPE_FISHING_HOLE,
+    GameObjectTemplateData, INVENTORY_DEFAULT_SIZE, INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_BAG_END,
+    INVENTORY_SLOT_BAG_START, INVENTORY_SLOT_ITEM_START, MAX_BAG_SIZE, MAX_GAMEOBJECT_DATA,
+    NULL_BAG, NULL_SLOT, REAGENT_BAG_SLOT_END, REAGENT_BAG_SLOT_START, WorldObject,
+    is_equipment_pos, is_inventory_pos,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::packets::auth::{
@@ -43,6 +44,12 @@ use wow_packet::packets::misc::*;
 use wow_packet::packets::update::*;
 
 // ── Handler registration ────────────────────────────────────────────
+
+const GO_SPAWN_TEMPLATE_DATA_START: usize = 16;
+const GO_SPAWN_PHASE_USE_FLAGS_COLUMN: usize = GO_SPAWN_TEMPLATE_DATA_START + MAX_GAMEOBJECT_DATA;
+const GO_SPAWN_PHASE_ID_COLUMN: usize = GO_SPAWN_PHASE_USE_FLAGS_COLUMN + 1;
+const GO_SPAWN_PHASE_GROUP_COLUMN: usize = GO_SPAWN_PHASE_USE_FLAGS_COLUMN + 2;
+const GO_SPAWN_TERRAIN_SWAP_MAP_COLUMN: usize = GO_SPAWN_PHASE_USE_FLAGS_COLUMN + 3;
 
 inventory::submit! {
     PacketHandlerEntry {
@@ -122,7 +129,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::BattlePayGetProductList,
         status: SessionStatus::Authed,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_battle_pay_stub",
     }
 }
@@ -131,7 +138,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::BattlePayGetPurchaseList,
         status: SessionStatus::Authed,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_battle_pay_stub",
     }
 }
@@ -149,7 +156,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::SocialContractRequest,
         status: SessionStatus::Authed,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_social_contract_stub",
     }
 }
@@ -167,7 +174,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::HotfixRequest,
         status: SessionStatus::Authed,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_hotfix_request",
     }
 }
@@ -203,7 +210,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::LogoutRequest,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_logout_request",
     }
 }
@@ -212,7 +219,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::LogoutCancel,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_logout_cancel",
     }
 }
@@ -220,7 +227,7 @@ inventory::submit! {
 inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::QueryCreature,
-        status: SessionStatus::Authed,
+        status: SessionStatus::LoggedIn,
         processing: PacketProcessing::Inplace,
         handler_name: "handle_query_creature",
     }
@@ -229,7 +236,7 @@ inventory::submit! {
 inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::QueryGameObject,
-        status: SessionStatus::Authed,
+        status: SessionStatus::LoggedIn,
         processing: PacketProcessing::Inplace,
         handler_name: "handle_query_game_object",
     }
@@ -238,7 +245,7 @@ inventory::submit! {
 inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::QueryPlayerNames,
-        status: SessionStatus::Authed,
+        status: SessionStatus::LoggedIn,
         processing: PacketProcessing::Inplace,
         handler_name: "handle_query_player_names",
     }
@@ -247,7 +254,7 @@ inventory::submit! {
 inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::QueryRealmName,
-        status: SessionStatus::Authed,
+        status: SessionStatus::LoggedIn,
         processing: PacketProcessing::Inplace,
         handler_name: "handle_query_realm_name",
     }
@@ -283,7 +290,7 @@ inventory::submit! {
 inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::QueryNpcText,
-        status: SessionStatus::Authed,
+        status: SessionStatus::LoggedIn,
         processing: PacketProcessing::Inplace,
         handler_name: "handle_query_npc_text",
     }
@@ -293,7 +300,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::ListInventory,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::Inplace,
         handler_name: "handle_list_inventory",
     }
 }
@@ -302,7 +309,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::BuyItem,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::Inplace,
         handler_name: "handle_buy_item",
     }
 }
@@ -311,7 +318,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::BuyBackItem,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::Inplace,
         handler_name: "handle_buy_back_item",
     }
 }
@@ -320,7 +327,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::SellItem,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::Inplace,
         handler_name: "handle_sell_item",
     }
 }
@@ -329,7 +336,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::ItemPurchaseRefund,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::Inplace,
         handler_name: "handle_item_purchase_refund",
     }
 }
@@ -338,7 +345,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::AuctionHelloRequest,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_auction_hello_request",
     }
 }
@@ -374,7 +381,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::SpiritHealerActivate,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_spirit_healer_activate",
     }
 }
@@ -392,7 +399,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::RequestStabledPets,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_request_stabled_pets",
     }
 }
@@ -401,7 +408,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::QuestGiverStatusMultipleQuery,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_quest_giver_status_multiple_query",
     }
 }
@@ -410,7 +417,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::SwapInvItem,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::Inplace,
         handler_name: "handle_swap_inv_item",
     }
 }
@@ -419,7 +426,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::AutoEquipItem,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::Inplace,
         handler_name: "handle_auto_equip_item",
     }
 }
@@ -428,7 +435,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::SwapItem,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::Inplace,
         handler_name: "handle_swap_item",
     }
 }
@@ -437,7 +444,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::AutoStoreBagItem,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::Inplace,
         handler_name: "handle_auto_store_bag_item",
     }
 }
@@ -446,7 +453,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::DestroyItem,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::Inplace,
         handler_name: "handle_destroy_item",
     }
 }
@@ -3477,33 +3484,43 @@ impl WorldSession {
                 let go_type: u8 = go_result.try_read(12).unwrap_or(0);
                 let display_id: u32 = go_result.try_read(13).unwrap_or(0);
                 let scale: f32 = go_result.try_read(15).unwrap_or(1.0);
-                let _data0: u32 = go_result.try_read(16).unwrap_or(0);
-                let _data1: u32 = go_result.try_read(17).unwrap_or(0);
+                let mut template_data = [0_u32; MAX_GAMEOBJECT_DATA];
+                for (index, value) in template_data.iter_mut().enumerate() {
+                    *value = go_result
+                        .try_read::<i32>(GO_SPAWN_TEMPLATE_DATA_START + index)
+                        .and_then(|raw| u32::try_from(raw).ok())
+                        .unwrap_or(0);
+                }
+                let data2 = template_data[2];
+                let data3 = template_data[3];
+                let template = GameObjectTemplateData::new(u32::from(go_type), template_data);
                 let phase_use_flags: u8 = go_result
-                    .try_read::<u8>(18)
+                    .try_read::<u8>(GO_SPAWN_PHASE_USE_FLAGS_COLUMN)
                     .or_else(|| {
                         go_result
-                            .try_read::<i16>(18)
+                            .try_read::<i16>(GO_SPAWN_PHASE_USE_FLAGS_COLUMN)
                             .map(|value| value.max(0) as u8)
                     })
                     .unwrap_or(0);
                 let phase_id: u16 = go_result
-                    .try_read::<u16>(19)
+                    .try_read::<u16>(GO_SPAWN_PHASE_ID_COLUMN)
                     .or_else(|| {
                         go_result
-                            .try_read::<i32>(19)
+                            .try_read::<i32>(GO_SPAWN_PHASE_ID_COLUMN)
                             .map(|value| value.max(0) as u16)
                     })
                     .unwrap_or(0);
                 let phase_group_id: u32 = go_result
-                    .try_read::<u32>(20)
+                    .try_read::<u32>(GO_SPAWN_PHASE_GROUP_COLUMN)
                     .or_else(|| {
                         go_result
-                            .try_read::<i32>(20)
+                            .try_read::<i32>(GO_SPAWN_PHASE_GROUP_COLUMN)
                             .map(|value| value.max(0) as u32)
                     })
                     .unwrap_or(0);
-                let terrain_swap_map: i32 = go_result.try_read(21).unwrap_or(-1);
+                let terrain_swap_map: i32 = go_result
+                    .try_read(GO_SPAWN_TERRAIN_SWAP_MAP_COLUMN)
+                    .unwrap_or(-1);
 
                 if display_id == 0 {
                     if !go_result.next_row() {
@@ -3535,6 +3552,12 @@ impl WorldSession {
                     entry,
                     spawn_guid as i64,
                 );
+                if self.represented_gameobject_is_per_player_despawned_like_cpp(guid) {
+                    if !go_result.next_row() {
+                        break;
+                    }
+                    continue;
+                }
                 new_visible_gos.insert(guid);
                 self.record_represented_gameobject_db_phase_shift_like_cpp(
                     guid,
@@ -3556,11 +3579,45 @@ impl WorldSession {
                         rotation: [rot0, rot1, rot2, rot3],
                         anim_progress,
                         state,
+                        created_by: ObjectGuid::EMPTY,
                         faction_template: 0,
                         scale,
                     };
                     new_go_blocks.push(UpdateObject::create_gameobject_block(create_data));
+                    self.record_represented_gameobject_runtime_state_like_cpp(
+                        map_id, guid, entry, go_pos, go_type,
+                    );
+                } else {
+                    self.record_represented_gameobject_runtime_state_like_cpp(
+                        map_id,
+                        guid,
+                        entry,
+                        Position::new(pos_x, pos_y, pos_z, orientation),
+                        go_type,
+                    );
                 }
+                if u32::from(go_type) == GAMEOBJECT_TYPE_FISHING_HOLE {
+                    let max_opens = if data2 <= data3 {
+                        rand::thread_rng().gen_range(data2..=data3)
+                    } else {
+                        data2
+                    };
+                    self.record_represented_fishing_hole_max_opens_like_cpp(guid, max_opens);
+                }
+                self.record_represented_gameobject_interact_radius_override_like_cpp(
+                    guid,
+                    template.get_interact_radius_override_like_cpp(),
+                );
+                self.record_represented_gameobject_lock_id_like_cpp(
+                    guid,
+                    template.get_lock_id_like_cpp(),
+                );
+                self.record_represented_gameobject_display_model_like_cpp(
+                    guid,
+                    display_id,
+                    scale,
+                    [rot0, rot1, rot2, rot3],
+                );
 
                 if !go_result.next_row() {
                     break;
@@ -3947,19 +4004,43 @@ impl WorldSession {
             let display_id: u32 = result.try_read(13).unwrap_or(0);
             let _name: String = result.read_string(14);
             let scale: f32 = result.try_read(15).unwrap_or(1.0);
+            let mut template_data = [0_u32; MAX_GAMEOBJECT_DATA];
+            for (index, value) in template_data.iter_mut().enumerate() {
+                *value = result
+                    .try_read::<i32>(GO_SPAWN_TEMPLATE_DATA_START + index)
+                    .and_then(|raw| u32::try_from(raw).ok())
+                    .unwrap_or(0);
+            }
+            let data2 = template_data[2];
+            let data3 = template_data[3];
+            let template = GameObjectTemplateData::new(u32::from(go_type), template_data);
             let phase_use_flags: u8 = result
-                .try_read::<u8>(18)
-                .or_else(|| result.try_read::<i16>(18).map(|value| value.max(0) as u8))
+                .try_read::<u8>(GO_SPAWN_PHASE_USE_FLAGS_COLUMN)
+                .or_else(|| {
+                    result
+                        .try_read::<i16>(GO_SPAWN_PHASE_USE_FLAGS_COLUMN)
+                        .map(|value| value.max(0) as u8)
+                })
                 .unwrap_or(0);
             let phase_id: u16 = result
-                .try_read::<u16>(19)
-                .or_else(|| result.try_read::<i32>(19).map(|value| value.max(0) as u16))
+                .try_read::<u16>(GO_SPAWN_PHASE_ID_COLUMN)
+                .or_else(|| {
+                    result
+                        .try_read::<i32>(GO_SPAWN_PHASE_ID_COLUMN)
+                        .map(|value| value.max(0) as u16)
+                })
                 .unwrap_or(0);
             let phase_group_id: u32 = result
-                .try_read::<u32>(20)
-                .or_else(|| result.try_read::<i32>(20).map(|value| value.max(0) as u32))
+                .try_read::<u32>(GO_SPAWN_PHASE_GROUP_COLUMN)
+                .or_else(|| {
+                    result
+                        .try_read::<i32>(GO_SPAWN_PHASE_GROUP_COLUMN)
+                        .map(|value| value.max(0) as u32)
+                })
                 .unwrap_or(0);
-            let terrain_swap_map: i32 = result.try_read(21).unwrap_or(-1);
+            let terrain_swap_map: i32 = result
+                .try_read(GO_SPAWN_TERRAIN_SWAP_MAP_COLUMN)
+                .unwrap_or(-1);
 
             // Skip gameobjects with no display
             if display_id == 0 {
@@ -4003,6 +4084,7 @@ impl WorldSession {
                 rotation: [rot0, rot1, rot2, rot3],
                 anim_progress,
                 state,
+                created_by: ObjectGuid::EMPTY,
                 faction_template: 0,
                 scale,
             };
@@ -4016,6 +4098,31 @@ impl WorldSession {
                 phase_id,
                 phase_group_id,
                 terrain_swap_map,
+            );
+            self.record_represented_gameobject_runtime_state_like_cpp(
+                map_id, guid, entry, go_pos, go_type,
+            );
+            if u32::from(go_type) == GAMEOBJECT_TYPE_FISHING_HOLE {
+                let max_opens = if data2 <= data3 {
+                    rand::thread_rng().gen_range(data2..=data3)
+                } else {
+                    data2
+                };
+                self.record_represented_fishing_hole_max_opens_like_cpp(guid, max_opens);
+            }
+            self.record_represented_gameobject_interact_radius_override_like_cpp(
+                guid,
+                template.get_interact_radius_override_like_cpp(),
+            );
+            self.record_represented_gameobject_lock_id_like_cpp(
+                guid,
+                template.get_lock_id_like_cpp(),
+            );
+            self.record_represented_gameobject_display_model_like_cpp(
+                guid,
+                display_id,
+                scale,
+                [rot0, rot1, rot2, rot3],
             );
 
             if !result.next_row() {
@@ -8275,6 +8382,7 @@ impl WorldSession {
             level,
             sex,
         ));
+        let _ = self.ensure_canonical_world_map_for_current_player_like_cpp();
         self.set_player_health_like_cpp(
             combat.health.max(0).min(u32::MAX as i64) as u32,
             combat.max_health.max(1).min(u32::MAX as i64) as u32,

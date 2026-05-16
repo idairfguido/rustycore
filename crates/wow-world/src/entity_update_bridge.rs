@@ -554,7 +554,7 @@ fn game_object_data_update_to_packet(update: &GameObjectDataUpdate) -> GameObjec
         state_spell_visual_id: 0,
         spawn_tracking_state_anim_id: 0,
         spawn_tracking_state_anim_kit_id: 0,
-        created_by: wow_core::ObjectGuid::EMPTY,
+        created_by: update.values.created_by,
         guild_guid: wow_core::ObjectGuid::EMPTY,
         flags: update.values.flags,
         parent_rotation: [0.0; 4],
@@ -867,11 +867,12 @@ mod tests {
         CONTAINER_DATA_NUM_SLOTS_BIT, CONVERSATION_DATA_LAST_LINE_END_TIME_BIT,
         CONVERSATION_DATA_PARENT_BIT, CORPSE_DATA_DISPLAY_ID_BIT, CORPSE_DATA_PARENT_BIT, Corpse,
         CorpseType, DYNAMIC_OBJECT_DATA_PARENT_BIT, DYNAMIC_OBJECT_DATA_RADIUS_BIT, DynamicObject,
-        GAME_OBJECT_DATA_DISPLAY_ID_BIT, GAME_OBJECT_DATA_PARENT_BIT, GameObject,
-        ITEM_DATA_STACK_COUNT_BIT, Item, PLAYER_DATA_FLAGS_BIT, PLAYER_DATA_PARENT_BIT, Player,
-        SCENE_OBJECT_DATA_PARENT_BIT, SCENE_OBJECT_DATA_SCRIPT_PACKAGE_ID_BIT, SceneObject,
-        UNIT_DATA_HEALTH_BIT, UNIT_DATA_PARENT_BIT, UNIT_DATA_STAND_STATE_BIT,
-        UNIT_DATA_VIRTUAL_ITEMS_FIRST_BIT, UNIT_DATA_VIRTUAL_ITEMS_PARENT_BIT, VisibleItemValues,
+        GAME_OBJECT_DATA_CREATED_BY_BIT, GAME_OBJECT_DATA_DISPLAY_ID_BIT,
+        GAME_OBJECT_DATA_PARENT_BIT, GameObject, ITEM_DATA_STACK_COUNT_BIT, Item,
+        PLAYER_DATA_FLAGS_BIT, PLAYER_DATA_PARENT_BIT, Player, SCENE_OBJECT_DATA_PARENT_BIT,
+        SCENE_OBJECT_DATA_SCRIPT_PACKAGE_ID_BIT, SceneObject, UNIT_DATA_HEALTH_BIT,
+        UNIT_DATA_PARENT_BIT, UNIT_DATA_STAND_STATE_BIT, UNIT_DATA_VIRTUAL_ITEMS_FIRST_BIT,
+        UNIT_DATA_VIRTUAL_ITEMS_PARENT_BIT, VisibleItemValues,
     };
     use wow_packet::ServerPacket;
 
@@ -1068,6 +1069,8 @@ mod tests {
         let mut go = GameObject::new();
         go.world_mut().object_mut().set_entry(1001);
         go.set_display_id(22);
+        let owner = wow_core::ObjectGuid::create_player(1, 42);
+        go.set_created_by(owner);
 
         let packet_update = game_object_values_update_to_packet(&go.values_update()).unwrap();
 
@@ -1084,7 +1087,12 @@ mod tests {
             packet_update.game_object_data_mask as u64,
             GAME_OBJECT_DATA_DISPLAY_ID_BIT
         ));
+        assert!(mask_has_u64(
+            packet_update.game_object_data_mask as u64,
+            GAME_OBJECT_DATA_CREATED_BY_BIT
+        ));
         assert_eq!(packet_update.display_id, 22);
+        assert_eq!(packet_update.created_by, owner);
     }
 
     #[test]

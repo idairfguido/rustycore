@@ -2061,6 +2061,7 @@ impl ClientPacket for BuyItem {
         let _seed = pkt.read_int32()?;
         let _rand_prop = pkt.read_int32()?;
         let has_bonus = pkt.read_bit()?;
+        pkt.reset_bits();
         let mod_count = pkt.read_bits(6)? as u32;
         for _ in 0..mod_count {
             let _val = pkt.read_int32()?;
@@ -3224,6 +3225,48 @@ mod tests {
 
         assert_eq!(pkt.vendor_guid, vendor_guid);
         assert_eq!(pkt.slot, 94);
+    }
+
+    #[test]
+    fn buy_item_resets_bitpos_between_item_bonus_and_mod_list_like_cpp() {
+        let vendor_guid = ObjectGuid::create_world_object(
+            wow_core::guid::HighGuid::Creature,
+            0,
+            1,
+            0,
+            1,
+            123,
+            456,
+        );
+        let container_guid = ObjectGuid::create_player(1, 42);
+        let mut writer = WorldPacket::new_server(ServerOpcodes::DbReply);
+        writer.write_packed_guid(&vendor_guid);
+        writer.write_packed_guid(&container_guid);
+        writer.write_int32(2);
+        writer.write_int32(7);
+        writer.write_int32(3);
+        writer.write_int32(1);
+        writer.write_int32(700);
+        writer.write_int32(11);
+        writer.write_int32(-22);
+        writer.write_bit(false);
+        writer.flush_bits();
+        writer.write_bits(1, 6);
+        writer.flush_bits();
+        writer.write_int32(1234);
+        writer.write_uint8(5);
+
+        let mut reader = WorldPacket::from_bytes(writer.data());
+        reader.skip_opcode();
+        let pkt = BuyItem::read(&mut reader).unwrap();
+
+        assert_eq!(pkt.vendor_guid, vendor_guid);
+        assert_eq!(pkt.container_guid, container_guid);
+        assert_eq!(pkt.quantity, 2);
+        assert_eq!(pkt.muid, 7);
+        assert_eq!(pkt.slot, 3);
+        assert_eq!(pkt.item_type, 1);
+        assert_eq!(pkt.item_id, 700);
     }
 
     #[test]

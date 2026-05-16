@@ -8,6 +8,8 @@
 pub mod area;
 pub mod area_trigger;
 pub mod area_trigger_template;
+pub mod artifact_azerite;
+pub mod character_progression;
 pub mod chr_specialization;
 pub mod condition_attachments;
 pub mod conditions;
@@ -18,15 +20,19 @@ pub mod db2_id_store;
 pub mod difficulty;
 pub mod disable_mgr;
 pub mod dungeon_encounter;
+pub mod entities_movement;
 pub mod gossip;
 pub mod graveyard;
 pub mod hotfix_cache;
 pub mod import_price;
 pub mod item;
 pub mod item_appearance;
+pub mod item_bonus;
 pub mod item_class;
+pub mod item_collections;
 pub mod item_currency_cost;
 pub mod item_disenchant_loot;
+pub mod item_equipment;
 pub mod item_extended_cost;
 pub mod item_modified_appearance;
 pub mod item_price_base;
@@ -36,20 +42,26 @@ pub mod item_random_suffix;
 pub mod item_stats;
 pub mod lock;
 pub mod map;
+pub mod maps_world;
+pub mod misc_generated;
 pub mod mount;
 pub mod phase;
 pub mod phasing;
 pub mod player_condition;
 pub mod player_power;
 pub mod player_stats;
+pub mod progression_rewards;
 pub mod quest;
 pub mod quest_xp;
 pub mod rand_prop_points;
 pub mod skill;
+pub mod skill_talent;
 pub mod spawn_group;
 pub mod spell;
+pub mod spell_db2;
 pub mod spell_item_enchantment;
 pub mod terrain_swap;
+pub mod trait_tree;
 pub mod ui_map;
 pub mod vehicle;
 pub mod wdc4;
@@ -89,6 +101,15 @@ pub use disable_mgr::{
     DisableMgrRefsLikeCpp, DisableWorldObjectRefLikeCpp,
 };
 pub use dungeon_encounter::{DungeonEncounterEntry, DungeonEncounterStore};
+pub use entities_movement::{
+    AnimKitEntry, AnimKitStore, AnimationDataEntry, AnimationDataStore,
+    CreatureDisplayInfoExtraEntry, CreatureDisplayInfoExtraStore, CreatureFamilyEntry,
+    CreatureFamilyStore, CreatureTypeEntry, CreatureTypeStore, Db2Pos3, DestructibleModelDataEntry,
+    DestructibleModelDataStore, EmotesEntry, EmotesStore, EmotesTextEntry, EmotesTextSoundEntry,
+    EmotesTextSoundStore, EmotesTextStore, GameObjectArtKitEntry, GameObjectArtKitStore,
+    GameObjectDisplayInfoEntry, GameObjectDisplayInfoStore, GameObjectsEntry, GameObjectsStore,
+    UnitConditionEntry, UnitConditionStore, UnitPowerBarEntry, UnitPowerBarStore,
+};
 pub use gossip::{GossipConditionAttachmentReport, GossipMenu, GossipMenuItem, GossipStore};
 pub use graveyard::{
     GraveyardConditionAttachmentReport, GraveyardData, GraveyardLoadReport, GraveyardStore,
@@ -105,9 +126,30 @@ pub use import_price::{
 };
 pub use item::{ItemRecord, ItemStore};
 pub use item_appearance::{ItemAppearanceEntry, ItemAppearanceStore};
+pub use item_bonus::{
+    ItemBonusDb2Entry, ItemBonusDb2Store, ItemBonusListLevelDeltaEntry,
+    ItemBonusListLevelDeltaStore, ItemBonusTreeNodeEntry, ItemBonusTreeNodeStore,
+    ItemContextPickerEntry, ItemContextPickerStore, ItemLevelSelectorEntry,
+    ItemLevelSelectorQualityEntry, ItemLevelSelectorQualitySetEntry,
+    ItemLevelSelectorQualitySetStore, ItemLevelSelectorQualityStore, ItemLevelSelectorStore,
+    ItemLimitCategoryConditionEntry, ItemLimitCategoryConditionStore, ItemLimitCategoryEntry,
+    ItemLimitCategoryStore, ItemModifiedAppearanceExtraEntry, ItemModifiedAppearanceExtraStore,
+    ItemNameDescriptionEntry, ItemNameDescriptionStore, ItemSearchNameEntry, ItemSearchNameStore,
+    ItemSetEntry, ItemSetSpellEntry, ItemSetSpellStore, ItemSetStore, ItemSpecEntry,
+    ItemSpecOverrideEntry, ItemSpecOverrideStore, ItemSpecStore, ItemXBonusTreeEntry,
+    ItemXBonusTreeStore,
+};
 pub use item_class::{ItemClassEntry, ItemClassStore};
 pub use item_currency_cost::{ItemCurrencyCostEntry, ItemCurrencyCostStore};
 pub use item_disenchant_loot::{ItemDisenchantLootEntry, ItemDisenchantLootStore};
+pub use item_equipment::{
+    ArmorLocationEntry, ArmorLocationStore, DurabilityCostsEntry, DurabilityCostsStore,
+    DurabilityQualityEntry, DurabilityQualityStore, ItemArmorQualityEntry, ItemArmorQualityStore,
+    ItemArmorShieldEntry, ItemArmorShieldStore, ItemArmorTotalEntry, ItemArmorTotalStore,
+    ItemBagFamilyEntry, ItemBagFamilyStore, ItemChildEquipmentEntry, ItemChildEquipmentStore,
+    ItemDamageAmmoStore, ItemDamageEntry, ItemDamageOneHandCasterStore, ItemDamageOneHandStore,
+    ItemDamageTwoHandCasterStore, ItemDamageTwoHandStore, ItemEffectEntry, ItemEffectStore,
+};
 pub use item_extended_cost::{
     ItemExtendedCostEntry, ItemExtendedCostStore, MAX_ITEM_EXT_COST_CURRENCIES,
     MAX_ITEM_EXT_COST_ITEMS,
@@ -126,6 +168,48 @@ pub use lock::{LockEntry, LockStore};
 pub use map::{
     MapDifficultyEntry, MapDifficultyStore, MapDifficultyXConditionEntry,
     MapDifficultyXConditionStore, MapEntry, MapStore,
+};
+pub use maps_world::{
+    AreaGroupMemberEntry, AreaGroupMemberStore, AreaTriggerDb2Entry, AreaTriggerDb2Store,
+    Db2Position2, Db2Position3, LightEntry, LightStore, LiquidTypeEntry, LiquidTypeStore,
+    MapChallengeModeEntry, MapChallengeModeStore, TaxiNodesDb2Entry, TaxiNodesDb2Store,
+    TaxiPathEntry, TaxiPathNodeEntry, TaxiPathNodeStore, TaxiPathStore, TransportAnimationEntry,
+    TransportAnimationStore, TransportRotationEntry, TransportRotationStore, UiMapAssignmentEntry,
+    UiMapAssignmentStore, UiMapEntry, UiMapLinkEntry, UiMapLinkStore, UiMapStore,
+    WmoAreaTableEntry, WmoAreaTableStore, WorldEffectEntry, WorldEffectStore, WorldMapOverlayEntry,
+    WorldMapOverlayStore,
+};
+pub use misc_generated::{
+    AdventureJournalEntry, AdventureJournalStore, AdventureMapPoiEntry, AdventureMapPoiStore,
+    BannedAddonsEntry, BannedAddonsStore, BroadcastTextEntry, BroadcastTextStore,
+    CfgCategoriesEntry, CfgCategoriesStore, CfgRegionsEntry, CfgRegionsStore, ChatChannelsEntry,
+    ChatChannelsStore, CinematicCameraEntry, CinematicCameraStore, CinematicSequencesEntry,
+    CinematicSequencesStore, ConditionalChrModelEntry, ConditionalChrModelStore,
+    ConditionalContentTuningEntry, ConditionalContentTuningStore, ExpectedStatEntry,
+    ExpectedStatModEntry, ExpectedStatModStore, ExpectedStatStore, GarrAbilityEntry,
+    GarrAbilityStore, GarrBuildingEntry, GarrBuildingPlotInstEntry, GarrBuildingPlotInstStore,
+    GarrBuildingStore, GarrClassSpecEntry, GarrClassSpecStore, GarrFollowerEntry,
+    GarrFollowerStore, GarrFollowerXAbilityEntry, GarrFollowerXAbilityStore, GarrMissionEntry,
+    GarrMissionStore, GarrPlotBuildingEntry, GarrPlotBuildingStore, GarrPlotEntry,
+    GarrPlotInstanceEntry, GarrPlotInstanceStore, GarrPlotStore, GarrSiteLevelEntry,
+    GarrSiteLevelPlotInstEntry, GarrSiteLevelPlotInstStore, GarrSiteLevelStore,
+    GarrTalentTreeEntry, GarrTalentTreeStore, GemPropertiesEntry, GemPropertiesStore,
+    GossipNpcOptionEntry, GossipNpcOptionStore, GuildColorBackgroundStore, GuildColorBorderStore,
+    GuildColorEmblemStore, GuildColorEntry, GuildPerkSpellsEntry, GuildPerkSpellsStore,
+    HolidaysEntry, HolidaysStore, KEYCHAIN_SIZE, KeychainEntry, KeychainStore, KeystoneAffixEntry,
+    KeystoneAffixStore, LanguageWordsEntry, LanguageWordsStore, LanguagesEntry, LanguagesStore,
+    LfgDungeonsEntry, LfgDungeonsStore, MAX_BROADCAST_TEXT_EMOTES, MAX_HOLIDAY_DATES,
+    MAX_HOLIDAY_DURATIONS, MAX_HOLIDAY_FLAGS, MAX_OVERRIDE_SPELL, MailTemplateEntry,
+    MailTemplateStore, MovieEntry, MovieStore, MythicPlusSeasonEntry, MythicPlusSeasonStore,
+    NamesProfanityEntry, NamesProfanityStore, NamesReservedEntry, NamesReservedLocaleEntry,
+    NamesReservedLocaleStore, NamesReservedStore, OverrideSpellDataEntry, OverrideSpellDataStore,
+    PrestigeLevelInfoEntry, PrestigeLevelInfoStore, PvpDifficultyEntry, PvpDifficultyStore,
+    PvpItemEntry, PvpItemStore, ScenarioEntry, ScenarioStore, SceneScriptEntry,
+    SceneScriptGlobalTextStore, SceneScriptStore, SceneScriptTextEntry, SceneScriptTextStore,
+    ServerMessagesEntry, ServerMessagesStore, SoundKitEntry, SoundKitStore, SpecSetMemberEntry,
+    SpecSetMemberStore, SpecializationSpellsEntry, SpecializationSpellsStore,
+    SummonPropertiesEntry, SummonPropertiesStore, TACTKEY_SIZE, TactKeyEntry, TactKeyStore,
+    TotemCategoryEntry, TotemCategoryStore,
 };
 pub use mount::{
     AREA_MOUNT_FLAG_ALLOW_FLYING_MOUNTS, AREA_MOUNT_FLAG_ALLOW_GROUND_MOUNTS,
@@ -155,11 +239,46 @@ pub use player_power::{
 pub use player_stats::{PlayerLevelStats, PlayerStatsStore};
 pub use rand_prop_points::{RandPropPointsEntry, RandPropPointsStore};
 pub use skill::{SkillInfoEntry, SkillStore};
+pub use skill_talent::{
+    GlyphBindableSpellEntry, GlyphBindableSpellStore, GlyphPropertiesEntry, GlyphPropertiesStore,
+    GlyphRequiredSpecEntry, GlyphRequiredSpecStore, GlyphSlotEntry, GlyphSlotStore,
+    JournalEncounterEntry, JournalEncounterSectionEntry, JournalEncounterSectionStore,
+    JournalEncounterStore, JournalInstanceEntry, JournalInstanceStore, JournalTierEntry,
+    JournalTierStore, PvpSeasonEntry, PvpSeasonStore, PvpTalentCategoryEntry,
+    PvpTalentCategoryStore, PvpTalentEntry, PvpTalentSlotUnlockEntry, PvpTalentSlotUnlockStore,
+    PvpTalentStore, PvpTierEntry, PvpTierStore, SkillLineEntry, SkillLineStore,
+    SkillLineXTraitTreeEntry, SkillLineXTraitTreeStore, TalentEntry, TalentStore, TalentTabEntry,
+    TalentTabStore,
+};
 pub use spawn_group::{
     SpawnGroupTemplate, SpawnGroupTemplateLoadReport, SpawnGroupTemplateRow,
     SpawnGroupTemplateStore,
 };
 pub use spell::{SpellEffectInfo, SpellInfo, SpellStore};
+pub use spell_db2::{
+    MAX_SHAPESHIFT_SPELLS, MAX_SPELL_AURA_INTERRUPT_FLAGS, MAX_SPELL_REAGENTS, MAX_SPELL_TOTEMS,
+    SpellAuraOptionsEntry, SpellAuraOptionsStore, SpellAuraRestrictionsEntry,
+    SpellAuraRestrictionsStore, SpellCastTimesEntry, SpellCastTimesStore,
+    SpellCastingRequirementsEntry, SpellCastingRequirementsStore, SpellCategoriesEntry,
+    SpellCategoriesStore, SpellCategoryEntry, SpellCategoryStore, SpellClassOptionsEntry,
+    SpellClassOptionsStore, SpellCooldownsEntry, SpellCooldownsStore, SpellDurationEntry,
+    SpellDurationStore, SpellEffectDb2Entry, SpellEffectDb2Store, SpellEquippedItemsEntry,
+    SpellEquippedItemsStore, SpellFocusObjectEntry, SpellFocusObjectStore, SpellInterruptsEntry,
+    SpellInterruptsStore, SpellItemEnchantmentConditionEntry, SpellItemEnchantmentConditionStore,
+    SpellKeyboundOverrideEntry, SpellKeyboundOverrideStore, SpellLabelEntry, SpellLabelStore,
+    SpellLearnSpellEntry, SpellLearnSpellStore, SpellLevelsEntry, SpellLevelsStore, SpellMiscEntry,
+    SpellMiscStore, SpellNameEntry, SpellNameStore, SpellPowerDifficultyEntry,
+    SpellPowerDifficultyStore, SpellPowerEntry, SpellPowerStore, SpellProcsPerMinuteEntry,
+    SpellProcsPerMinuteModEntry, SpellProcsPerMinuteModStore, SpellProcsPerMinuteStore,
+    SpellRadiusEntry, SpellRadiusStore, SpellRangeEntry, SpellRangeStore,
+    SpellReagentsCurrencyEntry, SpellReagentsCurrencyStore, SpellReagentsEntry, SpellReagentsStore,
+    SpellScalingEntry, SpellScalingStore, SpellShapeshiftEntry, SpellShapeshiftFormEntry,
+    SpellShapeshiftFormStore, SpellShapeshiftStore, SpellTargetRestrictionsEntry,
+    SpellTargetRestrictionsStore, SpellTotemsEntry, SpellTotemsStore, SpellVisualEffectNameEntry,
+    SpellVisualEffectNameStore, SpellVisualEntry, SpellVisualKitEntry, SpellVisualKitStore,
+    SpellVisualMissileEntry, SpellVisualMissileStore, SpellVisualStore, SpellXSpellVisualEntry,
+    SpellXSpellVisualStore,
+};
 pub use spell_item_enchantment::{SpellItemEnchantmentEntry, SpellItemEnchantmentStore};
 pub use terrain_swap::{TerrainSwapInfo, TerrainSwapStore, load_terrain_swaps};
 pub use ui_map::{UiMapXMapArtEntry, UiMapXMapArtStore};

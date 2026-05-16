@@ -77,7 +77,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::ChatJoinChannel,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_chat_join_channel",
     }
 }
@@ -113,7 +113,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::QueryNextMailTime,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_query_next_mail_time",
     }
 }
@@ -122,7 +122,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::LoadingScreenNotify,
         status: SessionStatus::Authed,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_loading_screen_notify",
     }
 }
@@ -158,7 +158,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::ChatUnregisterAllAddonPrefixes,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_chat_unregister_all_addon_prefixes",
     }
 }
@@ -167,7 +167,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::SetActionBarToggles,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_set_action_bar_toggles",
     }
 }
@@ -185,7 +185,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::GuildSetAchievementTracking,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_guild_set_achievement_tracking",
     }
 }
@@ -203,7 +203,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::RequestForcedReactions,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_request_forced_reactions",
     }
 }
@@ -212,7 +212,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::RequestBattlefieldStatus,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_request_battlefield_status",
     }
 }
@@ -221,7 +221,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::RequestRatedPvpInfo,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_request_rated_pvp_info",
     }
 }
@@ -239,7 +239,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::DfGetSystemInfo,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadSafe,
         handler_name: "handle_df_get_system_info",
     }
 }
@@ -248,7 +248,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::DfGetJoinStatus,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadSafe,
         handler_name: "handle_df_get_join_status",
     }
 }
@@ -257,7 +257,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::CalendarGetNumPending,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_calendar_get_num_pending",
     }
 }
@@ -275,7 +275,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::GuildBankRemainingWithdrawMoneyQuery,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_guild_bank_remaining_withdraw_money_query",
     }
 }
@@ -284,7 +284,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::BattlePetRequestJournal,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_battle_pet_request_journal",
     }
 }
@@ -293,7 +293,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::ArenaTeamRoster,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_arena_team_roster",
     }
 }
@@ -302,7 +302,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::RequestRaidInfo,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_request_raid_info",
     }
 }
@@ -338,7 +338,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::RequestLfgListBlacklist,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_request_lfg_list_blacklist",
     }
 }
@@ -347,7 +347,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::LfgListGetStatus,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_lfg_list_get_status",
     }
 }
@@ -356,7 +356,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::GetAccountCharacterList,
         status: SessionStatus::Authed,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_get_account_character_list",
     }
 }
@@ -410,7 +410,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::CalendarGet,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_calendar_get",
     }
 }
@@ -419,7 +419,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::CloseInteraction,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_close_interaction",
     }
 }
@@ -428,7 +428,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::AuctionListBidderItems,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_auction_list_bidder_items",
     }
 }
@@ -437,7 +437,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::AuctionListOwnerItems,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_auction_list_owner_items",
     }
 }
@@ -446,7 +446,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::AuctionListPendingSales,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_auction_list_pending_sales",
     }
 }
@@ -455,7 +455,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::CommerceTokenGetLog,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::Inplace,
+        processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_commerce_token_get_log",
     }
 }

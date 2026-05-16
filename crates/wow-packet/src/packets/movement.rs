@@ -302,6 +302,9 @@ impl MovementInfo {
         pkt.flush_bits();
 
         if let Some(t) = &self.transport {
+            let prev_time = t.prev_time.filter(|time| *time != 0);
+            let vehicle_id = t.vehicle_id.filter(|id| *id != 0);
+
             pkt.write_packed_guid(&t.guid);
             pkt.write_float(t.x);
             pkt.write_float(t.y);
@@ -309,13 +312,13 @@ impl MovementInfo {
             pkt.write_float(t.o);
             pkt.write_int8(t.seat);
             pkt.write_uint32(t.time);
-            pkt.write_bit(t.prev_time.is_some());
-            pkt.write_bit(t.vehicle_id.is_some());
+            pkt.write_bit(prev_time.is_some());
+            pkt.write_bit(vehicle_id.is_some());
             pkt.flush_bits();
-            if let Some(pt) = t.prev_time {
+            if let Some(pt) = prev_time {
                 pkt.write_uint32(pt);
             }
-            if let Some(vid) = t.vehicle_id {
+            if let Some(vid) = vehicle_id {
                 pkt.write_int32(vid);
             }
         }
@@ -1293,6 +1296,36 @@ mod tests {
         assert_eq!(inertia.y, 2.0);
         assert_eq!(inertia.z, 3.0);
         assert_eq!(inertia.lifetime, 400);
+    }
+
+    #[test]
+    fn movement_transport_write_skips_zero_optional_values_like_cpp() {
+        let info = MovementInfo {
+            guid: ObjectGuid::create_player(1, 42),
+            time: 77,
+            position: Position::new(10.0, 20.0, 30.0, 1.5),
+            transport: Some(TransportInfo {
+                guid: ObjectGuid::create_world_object(HighGuid::Transport, 0, 1, 0, 0, 9, 100),
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+                o: 4.0,
+                seat: 2,
+                time: 55,
+                prev_time: Some(0),
+                vehicle_id: Some(0),
+            }),
+            ..MovementInfo::default()
+        };
+
+        let mut pkt = WorldPacket::new_empty();
+        info.write(&mut pkt);
+
+        let mut pkt = WorldPacket::from_bytes(pkt.data());
+        let decoded = MovementInfo::read(&mut pkt).unwrap();
+        let transport = decoded.transport.unwrap();
+        assert_eq!(transport.prev_time, None);
+        assert_eq!(transport.vehicle_id, None);
     }
 
     #[test]

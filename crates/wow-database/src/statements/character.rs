@@ -222,6 +222,19 @@ pub enum CharStatements {
 
     /// INSERT IGNORE INTO character_spell (guid, spell, active, disabled) VALUES (?, ?, 1, 0)
     INS_CHARACTER_SPELL,
+
+    /// Generated C++ `CharacterDatabase` prepared statement.
+    GENERATED_CPP {
+        /// Exact SQL from C++ `PrepareStatement(CHAR_..., ...)`.
+        sql: &'static str,
+    },
+}
+
+impl CharStatements {
+    /// Build a generated C++ CharacterDatabase statement from exact SQL.
+    pub const fn cpp(sql: &'static str) -> Self {
+        Self::GENERATED_CPP { sql }
+    }
 }
 
 impl StatementDef for CharStatements {
@@ -442,6 +455,7 @@ impl StatementDef for CharStatements {
             Self::INS_CHARACTER_SPELL => {
                 "INSERT IGNORE INTO character_spell (guid, spell, active, disabled) VALUES (?, ?, 1, 0)"
             }
+            Self::GENERATED_CPP { sql } => sql,
             Self::SEL_CHAR_QUEST_STATUS => {
                 "SELECT quest, status, explored FROM character_queststatus WHERE guid = ?"
             }
@@ -460,6 +474,91 @@ impl StatementDef for CharStatements {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cpp_character_database_cpp() -> &'static str {
+        "/home/server/woltk-trinity-legacy/src/server/database/Database/Implementation/CharacterDatabase.cpp"
+    }
+
+    fn cpp_string_literals(block: &str) -> String {
+        let mut output = String::new();
+        let bytes = block.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] != b'"' {
+                i += 1;
+                continue;
+            }
+
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' {
+                    if i + 1 < bytes.len() {
+                        output.push(bytes[i + 1] as char);
+                        i += 2;
+                        continue;
+                    }
+                }
+                if bytes[i] == b'"' {
+                    i += 1;
+                    break;
+                }
+                output.push(bytes[i] as char);
+                i += 1;
+            }
+        }
+        output
+    }
+
+    fn select_item_instance_content(cpp: &str) -> String {
+        let start = cpp
+            .find("#define SelectItemInstanceContent")
+            .expect("C++ SelectItemInstanceContent macro must exist");
+        let end = cpp[start..]
+            .find("\n\n")
+            .map(|offset| start + offset)
+            .expect("C++ SelectItemInstanceContent macro block must end before statements");
+        cpp_string_literals(&cpp[start..end])
+    }
+
+    fn cpp_character_sql() -> Vec<String> {
+        let contents = std::fs::read_to_string(cpp_character_database_cpp())
+            .expect("C++ CharacterDatabase.cpp must be available for parity tests");
+        let item_content = select_item_instance_content(&contents);
+        let mut sql = Vec::new();
+        let mut offset = 0;
+        while let Some(relative_start) = contents[offset..].find("PrepareStatement(CHAR_") {
+            let start = offset + relative_start;
+            let Some(relative_end) = contents[start..].find("CONNECTION_") else {
+                break;
+            };
+            let after_connection = start + relative_end;
+            let Some(relative_stmt_end) = contents[after_connection..].find(");") else {
+                break;
+            };
+            let end = after_connection + relative_stmt_end + 2;
+            let block = &contents[start..end];
+            let mut statement_sql = cpp_string_literals(block);
+            if block.contains("SelectItemInstanceContent") {
+                statement_sql =
+                    statement_sql.replacen("SELECT ,", &format!("SELECT {item_content},"), 1);
+            }
+            sql.push(statement_sql);
+            offset = end;
+        }
+        sql
+    }
+
+    #[test]
+    fn generated_cpp_statements_cover_character_database() {
+        let statements = cpp_character_sql();
+        assert_eq!(statements.len(), 523);
+
+        for cpp_sql in statements {
+            let sql: &'static str = Box::leak(cpp_sql.into_boxed_str());
+            assert_eq!(CharStatements::cpp(sql).sql(), sql);
+            assert!(!sql.is_empty());
+        }
+    }
 
     #[test]
     fn char_statements_have_sql() {

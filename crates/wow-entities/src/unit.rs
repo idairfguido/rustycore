@@ -18,6 +18,7 @@ pub const BASE_MINDAMAGE: f32 = 1.0;
 pub const BASE_MAXDAMAGE: f32 = 2.0;
 pub const DEFAULT_PLAYER_DISPLAY_SCALE: f32 = 1.0;
 pub const AUTO_SHOT_SPELL_ID: u32 = 75;
+pub const SPELL_AURA_MOD_UNATTACKABLE_LIKE_CPP: i32 = 93;
 
 pub const UNIT_DATA_PARENT_BIT: usize = 0;
 pub const UNIT_DATA_HEALTH_BIT: usize = 5;
@@ -128,6 +129,36 @@ impl UnitValuesUpdate {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitAttackStartOutcome {
+    NewTarget { previous: Option<ObjectGuid> },
+    MeleeStartedSameTarget,
+    MeleeStoppedSameTarget,
+    NoChangeSameTarget,
+    InvalidSelfTarget,
+    InvalidDeadAttacker,
+    InvalidDeadVictim,
+    InvalidVictimNotInWorld,
+    InvalidMountedAttacker,
+    InvalidAttackerEvading,
+    InvalidVictimGameMaster,
+    InvalidVictimEvading,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitAttackStopOutcome {
+    Stopped { victim: ObjectGuid },
+    NoVictim,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UnitAttackContextLikeCpp {
+    pub attacker_is_mounted_player: bool,
+    pub attacker_is_evading_creature: bool,
+    pub victim_is_game_master_player: bool,
+    pub victim_is_evading_creature: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Unit {
     world: WorldObject,
@@ -137,7 +168,10 @@ pub struct Unit {
     unit_state: u32,
     base_attack_speed: [u32; MAX_ATTACK],
     mod_attack_speed_pct: [f32; MAX_ATTACK],
+    attack_timer: [u32; MAX_ATTACK],
     weapon_damage: [[f32; 2]; MAX_ATTACK],
+    can_dual_wield: bool,
+    emote_state: u32,
     speed_rate: [f32; MAX_MOVE_TYPE],
     power_index: [Option<usize>; MAX_POWERS],
     subsystems: UnitSubsystems,
@@ -163,7 +197,10 @@ impl Unit {
             unit_state: 0,
             base_attack_speed: [0; MAX_ATTACK],
             mod_attack_speed_pct: [1.0; MAX_ATTACK],
+            attack_timer: [0; MAX_ATTACK],
             weapon_damage: [[BASE_MINDAMAGE, BASE_MAXDAMAGE]; MAX_ATTACK],
+            can_dual_wield: false,
+            emote_state: 0,
             speed_rate: [1.0; MAX_MOVE_TYPE],
             power_index: [None; MAX_POWERS],
             subsystems: UnitSubsystems::default(),
@@ -354,6 +391,123 @@ impl Unit {
         self.subsystems.combat.set_attacking(victim);
     }
 
+    pub fn add_attacker_like_cpp(&mut self, attacker: ObjectGuid) -> bool {
+        self.subsystems.combat.add_attacker(attacker)
+    }
+
+    pub fn remove_attacker_like_cpp(&mut self, attacker: ObjectGuid) -> bool {
+        self.subsystems.combat.remove_attacker(attacker)
+    }
+
+    pub fn has_attacker_like_cpp(&self, attacker: ObjectGuid) -> bool {
+        self.subsystems.combat.attackers.contains(&attacker)
+    }
+
+    pub fn attack_like_cpp(
+        &mut self,
+        victim_guid: ObjectGuid,
+        victim_alive: bool,
+        victim_in_world: bool,
+        melee_attack: bool,
+    ) -> UnitAttackStartOutcome {
+        self.attack_with_context_like_cpp(
+            victim_guid,
+            victim_alive,
+            victim_in_world,
+            melee_attack,
+            UnitAttackContextLikeCpp::default(),
+        )
+    }
+
+    pub fn attack_with_context_like_cpp(
+        &mut self,
+        victim_guid: ObjectGuid,
+        victim_alive: bool,
+        victim_in_world: bool,
+        melee_attack: bool,
+        context: UnitAttackContextLikeCpp,
+    ) -> UnitAttackStartOutcome {
+        let self_guid = self.world().object().guid();
+        if victim_guid.is_empty() || victim_guid == self_guid {
+            return UnitAttackStartOutcome::InvalidSelfTarget;
+        }
+        if !self.is_alive() {
+            return UnitAttackStartOutcome::InvalidDeadAttacker;
+        }
+        if !victim_in_world {
+            return UnitAttackStartOutcome::InvalidVictimNotInWorld;
+        }
+        if !victim_alive {
+            return UnitAttackStartOutcome::InvalidDeadVictim;
+        }
+        if context.attacker_is_mounted_player {
+            return UnitAttackStartOutcome::InvalidMountedAttacker;
+        }
+        if context.attacker_is_evading_creature {
+            return UnitAttackStartOutcome::InvalidAttackerEvading;
+        }
+        if context.victim_is_game_master_player {
+            return UnitAttackStartOutcome::InvalidVictimGameMaster;
+        }
+        if context.victim_is_evading_creature {
+            return UnitAttackStartOutcome::InvalidVictimEvading;
+        }
+
+        if self
+            .subsystems
+            .auras
+            .has_aura_type_like_cpp(SPELL_AURA_MOD_UNATTACKABLE_LIKE_CPP)
+        {
+            self.subsystems
+                .auras
+                .remove_auras_by_type_like_cpp(SPELL_AURA_MOD_UNATTACKABLE_LIKE_CPP);
+        }
+
+        if self.attacking() == Some(victim_guid) {
+            if melee_attack {
+                if !self.has_unit_state(UnitState::MELEE_ATTACKING.bits()) {
+                    self.add_unit_state(UnitState::MELEE_ATTACKING.bits());
+                    return UnitAttackStartOutcome::MeleeStartedSameTarget;
+                }
+            } else if self.has_unit_state(UnitState::MELEE_ATTACKING.bits()) {
+                self.clear_unit_state(UnitState::MELEE_ATTACKING.bits());
+                return UnitAttackStartOutcome::MeleeStoppedSameTarget;
+            }
+            return UnitAttackStartOutcome::NoChangeSameTarget;
+        }
+
+        let previous = self.attacking();
+        if previous.is_some() {
+            self.interrupt_spell(CurrentSpellSlot::Melee, true, true);
+            if !melee_attack {
+                self.clear_unit_state(UnitState::MELEE_ATTACKING.bits());
+            }
+        }
+
+        self.set_attacking(Some(victim_guid));
+        self.set_target(victim_guid);
+        if melee_attack {
+            self.add_unit_state(UnitState::MELEE_ATTACKING.bits());
+        }
+        self.apply_creature_attack_ai_side_effects_like_cpp(victim_guid);
+        self.delay_offhand_attack_like_cpp();
+
+        UnitAttackStartOutcome::NewTarget { previous }
+    }
+
+    pub fn attack_stop_like_cpp(&mut self) -> UnitAttackStopOutcome {
+        let Some(victim) = self.attacking() else {
+            return UnitAttackStopOutcome::NoVictim;
+        };
+
+        self.set_attacking(None);
+        self.set_target(ObjectGuid::EMPTY);
+        self.clear_unit_state(UnitState::MELEE_ATTACKING.bits());
+        self.interrupt_spell(CurrentSpellSlot::Melee, true, true);
+
+        UnitAttackStopOutcome::Stopped { victim }
+    }
+
     pub const fn subsystems(&self) -> &UnitSubsystems {
         &self.subsystems
     }
@@ -368,6 +522,77 @@ impl Unit {
 
     pub const fn mod_attack_speed_pct(&self) -> [f32; MAX_ATTACK] {
         self.mod_attack_speed_pct
+    }
+
+    pub const fn attack_timer(&self, attack: WeaponAttackType) -> u32 {
+        self.attack_timer[attack as usize]
+    }
+
+    pub fn set_attack_timer(&mut self, attack: WeaponAttackType, time_ms: u32) {
+        let slot = attack as usize;
+        if slot < MAX_ATTACK {
+            self.attack_timer[slot] = time_ms;
+        }
+    }
+
+    pub fn reset_attack_timer_like_cpp(&mut self, attack: WeaponAttackType) {
+        let slot = attack as usize;
+        if slot < MAX_ATTACK {
+            self.attack_timer[slot] =
+                (self.base_attack_speed[slot] as f32 * self.mod_attack_speed_pct[slot]) as u32;
+        }
+    }
+
+    pub fn set_base_attack_time_like_cpp(&mut self, attack: WeaponAttackType, time_ms: u32) {
+        let slot = attack as usize;
+        if slot < MAX_ATTACK {
+            self.base_attack_speed[slot] = time_ms;
+        }
+    }
+
+    pub const fn can_dual_wield_like_cpp(&self) -> bool {
+        self.can_dual_wield
+    }
+
+    pub fn set_can_dual_wield_like_cpp(&mut self, can_dual_wield: bool) {
+        self.can_dual_wield = can_dual_wield;
+    }
+
+    pub const fn emote_state_like_cpp(&self) -> u32 {
+        self.emote_state
+    }
+
+    pub fn set_emote_state_like_cpp(&mut self, emote_state: u32) {
+        self.emote_state = emote_state;
+    }
+
+    fn apply_creature_attack_ai_side_effects_like_cpp(&mut self, victim_guid: ObjectGuid) {
+        if self.world().object().type_id() != TypeId::Unit
+            || self.subsystems.control.controlled_by_player
+        {
+            return;
+        }
+
+        self.subsystems.combat.add_threat(victim_guid, 0.0);
+        self.subsystems.ai.send_hostile_reaction_like_cpp();
+        self.subsystems.ai.call_assistance_like_cpp();
+        self.set_emote_state_like_cpp(0);
+        self.set_stand_state_like_cpp(UnitStandStateType::Stand);
+    }
+
+    fn has_offhand_weapon_for_attack_like_cpp(&self) -> bool {
+        self.world().object().type_id() != TypeId::Player && self.can_dual_wield
+    }
+
+    fn delay_offhand_attack_like_cpp(&mut self) {
+        if !self.has_offhand_weapon_for_attack_like_cpp() {
+            return;
+        }
+
+        let base = WeaponAttackType::BaseAttack as usize;
+        let off = WeaponAttackType::OffAttack as usize;
+        let delay = self.attack_timer[base].saturating_add(self.base_attack_speed[base] / 2);
+        self.attack_timer[off] = self.attack_timer[off].max(delay);
     }
 
     pub const fn weapon_damage(&self, attack: WeaponAttackType) -> [f32; 2] {
@@ -747,6 +972,10 @@ mod tests {
         assert_eq!(unit.attacking(), None);
         assert_eq!(unit.base_attack_speed(), [0; MAX_ATTACK]);
         assert_eq!(unit.mod_attack_speed_pct(), [1.0; MAX_ATTACK]);
+        assert_eq!(unit.attack_timer(WeaponAttackType::BaseAttack), 0);
+        assert_eq!(unit.attack_timer(WeaponAttackType::OffAttack), 0);
+        assert!(!unit.can_dual_wield_like_cpp());
+        assert_eq!(unit.emote_state_like_cpp(), 0);
         assert_eq!(unit.weapon_damage(WeaponAttackType::BaseAttack), [1.0, 2.0]);
         assert_eq!(unit.speed_rate(), [1.0; MAX_MOVE_TYPE]);
         assert!(unit.subsystems().auras.owned_auras.is_empty());
@@ -811,6 +1040,295 @@ mod tests {
         unit.set_attacking(Some(victim));
         unit.subsystems_mut().clear_runtime_state();
         assert_eq!(unit.attacking(), None);
+    }
+
+    #[test]
+    fn attack_like_cpp_records_target_and_melee_state() {
+        let mut unit = Unit::new(true);
+        let attacker = ObjectGuid::new(1, 9);
+        let victim = ObjectGuid::new(1, 10);
+        unit.world_mut().object_mut().create(attacker);
+
+        assert_eq!(
+            unit.attack_like_cpp(victim, true, true, true),
+            UnitAttackStartOutcome::NewTarget { previous: None }
+        );
+        assert_eq!(unit.attacking(), Some(victim));
+        assert_eq!(unit.data().target, victim);
+        assert!(unit.has_unit_state(UnitState::MELEE_ATTACKING.bits()));
+
+        assert_eq!(
+            unit.attack_like_cpp(victim, true, true, true),
+            UnitAttackStartOutcome::NoChangeSameTarget
+        );
+        assert_eq!(
+            unit.attack_like_cpp(victim, true, true, false),
+            UnitAttackStartOutcome::MeleeStoppedSameTarget
+        );
+        assert!(!unit.has_unit_state(UnitState::MELEE_ATTACKING.bits()));
+        assert_eq!(
+            unit.attack_like_cpp(victim, true, true, true),
+            UnitAttackStartOutcome::MeleeStartedSameTarget
+        );
+        assert!(unit.has_unit_state(UnitState::MELEE_ATTACKING.bits()));
+    }
+
+    #[test]
+    fn attack_like_cpp_switches_target_and_interrupts_melee_spell() {
+        let mut unit = Unit::new(true);
+        let attacker = ObjectGuid::new(1, 9);
+        let first = ObjectGuid::new(1, 10);
+        let second = ObjectGuid::new(1, 11);
+        let melee = CurrentSpellRef::new(700, Some(attacker), None).with_cast_time_ms(1_000);
+        unit.world_mut().object_mut().create(attacker);
+
+        assert_eq!(
+            unit.attack_like_cpp(first, true, true, true),
+            UnitAttackStartOutcome::NewTarget { previous: None }
+        );
+        unit.subsystems_mut()
+            .spells
+            .set_current_spell(CurrentSpellSlot::Melee, melee);
+        assert_eq!(
+            unit.attack_like_cpp(second, true, true, false),
+            UnitAttackStartOutcome::NewTarget {
+                previous: Some(first)
+            }
+        );
+
+        assert_eq!(unit.attacking(), Some(second));
+        assert_eq!(unit.data().target, second);
+        assert_eq!(unit.current_spell(CurrentSpellSlot::Melee), None);
+        assert!(!unit.has_unit_state(UnitState::MELEE_ATTACKING.bits()));
+    }
+
+    #[test]
+    fn attack_stop_like_cpp_clears_target_melee_state_and_spell() {
+        let mut unit = Unit::new(true);
+        let attacker = ObjectGuid::new(1, 9);
+        let victim = ObjectGuid::new(1, 10);
+        let melee = CurrentSpellRef::new(701, Some(attacker), None).with_cast_time_ms(1_000);
+        unit.world_mut().object_mut().create(attacker);
+        unit.attack_like_cpp(victim, true, true, true);
+        unit.subsystems_mut()
+            .spells
+            .set_current_spell(CurrentSpellSlot::Melee, melee);
+
+        assert_eq!(
+            unit.attack_stop_like_cpp(),
+            UnitAttackStopOutcome::Stopped { victim }
+        );
+        assert_eq!(unit.attacking(), None);
+        assert_eq!(unit.data().target, ObjectGuid::EMPTY);
+        assert_eq!(unit.current_spell(CurrentSpellSlot::Melee), None);
+        assert!(!unit.has_unit_state(UnitState::MELEE_ATTACKING.bits()));
+        assert_eq!(unit.attack_stop_like_cpp(), UnitAttackStopOutcome::NoVictim);
+    }
+
+    #[test]
+    fn attacker_set_helpers_match_cpp_insert_erase_shape() {
+        let mut victim = Unit::new(true);
+        let attacker = ObjectGuid::new(1, 9);
+
+        assert!(victim.add_attacker_like_cpp(attacker));
+        assert!(!victim.add_attacker_like_cpp(attacker));
+        assert!(victim.has_attacker_like_cpp(attacker));
+        assert!(victim.remove_attacker_like_cpp(attacker));
+        assert!(!victim.remove_attacker_like_cpp(attacker));
+        assert!(!victim.has_attacker_like_cpp(attacker));
+    }
+
+    #[test]
+    fn attack_with_context_like_cpp_rejects_mounted_evading_and_gm_targets() {
+        let mut unit = Unit::new(true);
+        let attacker = ObjectGuid::new(1, 9);
+        let victim = ObjectGuid::new(1, 10);
+        unit.world_mut().object_mut().create(attacker);
+
+        assert_eq!(
+            unit.attack_with_context_like_cpp(
+                victim,
+                true,
+                true,
+                true,
+                UnitAttackContextLikeCpp {
+                    attacker_is_mounted_player: true,
+                    ..Default::default()
+                },
+            ),
+            UnitAttackStartOutcome::InvalidMountedAttacker
+        );
+        assert_eq!(unit.attacking(), None);
+
+        assert_eq!(
+            unit.attack_with_context_like_cpp(
+                victim,
+                true,
+                true,
+                true,
+                UnitAttackContextLikeCpp {
+                    attacker_is_evading_creature: true,
+                    ..Default::default()
+                },
+            ),
+            UnitAttackStartOutcome::InvalidAttackerEvading
+        );
+        assert_eq!(
+            unit.attack_with_context_like_cpp(
+                victim,
+                true,
+                true,
+                true,
+                UnitAttackContextLikeCpp {
+                    victim_is_game_master_player: true,
+                    ..Default::default()
+                },
+            ),
+            UnitAttackStartOutcome::InvalidVictimGameMaster
+        );
+        assert_eq!(
+            unit.attack_with_context_like_cpp(
+                victim,
+                true,
+                true,
+                true,
+                UnitAttackContextLikeCpp {
+                    victim_is_evading_creature: true,
+                    ..Default::default()
+                },
+            ),
+            UnitAttackStartOutcome::InvalidVictimEvading
+        );
+    }
+
+    #[test]
+    fn attack_like_cpp_removes_unattackable_aura_type_before_melee_state() {
+        let mut unit = Unit::new(true);
+        let attacker = ObjectGuid::new(1, 9);
+        let victim = ObjectGuid::new(1, 10);
+        let aura = AppliedAuraRef::new(400, attacker, 0, 0x1);
+        unit.world_mut().object_mut().create(attacker);
+        unit.subsystems_mut()
+            .auras
+            .register_applied_aura_type_like_cpp(aura, SPELL_AURA_MOD_UNATTACKABLE_LIKE_CPP);
+
+        assert!(
+            unit.subsystems()
+                .auras
+                .has_aura_type_like_cpp(SPELL_AURA_MOD_UNATTACKABLE_LIKE_CPP)
+        );
+
+        assert_eq!(
+            unit.attack_like_cpp(victim, true, true, true),
+            UnitAttackStartOutcome::NewTarget { previous: None }
+        );
+
+        assert!(!unit.subsystems().auras.has_applied(aura));
+        assert!(
+            !unit
+                .subsystems()
+                .auras
+                .has_aura_type_like_cpp(SPELL_AURA_MOD_UNATTACKABLE_LIKE_CPP)
+        );
+        assert_eq!(unit.subsystems().auras.removed_count(), 1);
+        assert_eq!(unit.attacking(), Some(victim));
+    }
+
+    #[test]
+    fn attack_like_cpp_delays_non_player_offhand_timer_like_cpp() {
+        let mut unit = Unit::new(true);
+        let attacker = ObjectGuid::new(1, 9);
+        let victim = ObjectGuid::new(1, 10);
+        unit.world_mut().object_mut().create(attacker);
+        unit.set_can_dual_wield_like_cpp(true);
+        unit.set_base_attack_time_like_cpp(WeaponAttackType::BaseAttack, 2_000);
+        unit.set_attack_timer(WeaponAttackType::BaseAttack, 600);
+        unit.set_attack_timer(WeaponAttackType::OffAttack, 100);
+
+        assert_eq!(
+            unit.attack_like_cpp(victim, true, true, true),
+            UnitAttackStartOutcome::NewTarget { previous: None }
+        );
+        assert_eq!(unit.attack_timer(WeaponAttackType::OffAttack), 1_600);
+
+        let next_victim = ObjectGuid::new(1, 11);
+        unit.set_attack_timer(WeaponAttackType::BaseAttack, 500);
+        unit.set_attack_timer(WeaponAttackType::OffAttack, 2_200);
+        assert_eq!(
+            unit.attack_like_cpp(next_victim, true, true, true),
+            UnitAttackStartOutcome::NewTarget {
+                previous: Some(victim)
+            }
+        );
+        assert_eq!(unit.attack_timer(WeaponAttackType::OffAttack), 2_200);
+    }
+
+    #[test]
+    fn attack_like_cpp_does_not_delay_player_offhand_timer() {
+        let mut player_unit = Unit::new(true);
+        let attacker = ObjectGuid::new(1, 12);
+        let victim = ObjectGuid::new(1, 13);
+        player_unit.set_type(
+            TypeId::Player,
+            TypeMask::OBJECT | TypeMask::UNIT | TypeMask::PLAYER,
+        );
+        player_unit.world_mut().object_mut().create(attacker);
+        player_unit.set_can_dual_wield_like_cpp(true);
+        player_unit.set_base_attack_time_like_cpp(WeaponAttackType::BaseAttack, 2_000);
+        player_unit.set_attack_timer(WeaponAttackType::BaseAttack, 600);
+        player_unit.set_attack_timer(WeaponAttackType::OffAttack, 100);
+
+        assert_eq!(
+            player_unit.attack_like_cpp(victim, true, true, true),
+            UnitAttackStartOutcome::NewTarget { previous: None }
+        );
+        assert_eq!(player_unit.attack_timer(WeaponAttackType::OffAttack), 100);
+    }
+
+    #[test]
+    fn attack_like_cpp_applies_creature_ai_side_effects_for_uncontrolled_unit() {
+        let mut unit = Unit::new(true);
+        let attacker = ObjectGuid::new(1, 14);
+        let victim = ObjectGuid::new(1, 15);
+        unit.world_mut().object_mut().create(attacker);
+        unit.set_emote_state_like_cpp(88);
+        unit.set_stand_state_like_cpp(UnitStandStateType::Sit);
+
+        assert_eq!(
+            unit.attack_like_cpp(victim, true, true, true),
+            UnitAttackStartOutcome::NewTarget { previous: None }
+        );
+
+        assert!(unit.subsystems().combat.is_threatened_by(victim));
+        assert_eq!(unit.subsystems().ai.hostile_reaction_count, 1);
+        assert_eq!(unit.subsystems().ai.call_assistance_count, 1);
+        assert_eq!(unit.emote_state_like_cpp(), 0);
+        assert_eq!(unit.stand_state_like_cpp(), UnitStandStateType::Stand);
+    }
+
+    #[test]
+    fn attack_like_cpp_skips_creature_ai_side_effects_when_controlled_by_player() {
+        let mut unit = Unit::new(true);
+        let attacker = ObjectGuid::new(1, 16);
+        let victim = ObjectGuid::new(1, 17);
+        let charmer = ObjectGuid::create_player(1, 18);
+        unit.world_mut().object_mut().create(attacker);
+        unit.subsystems_mut().control.apply_charmed_by(
+            charmer,
+            crate::CharmType::Charm,
+            true,
+            None,
+            false,
+        );
+
+        assert_eq!(
+            unit.attack_like_cpp(victim, true, true, true),
+            UnitAttackStartOutcome::NewTarget { previous: None }
+        );
+
+        assert!(!unit.subsystems().combat.is_threatened_by(victim));
+        assert_eq!(unit.subsystems().ai.hostile_reaction_count, 0);
+        assert_eq!(unit.subsystems().ai.call_assistance_count, 0);
     }
 
     #[test]

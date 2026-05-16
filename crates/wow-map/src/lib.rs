@@ -10,7 +10,7 @@ pub mod spawn;
 
 use std::fmt;
 
-pub use cell::{Cell, CellArea, GridObjectGuids, WorldObjectGuids};
+pub use cell::{Cell, CellArea, GridObjectGuids, WorldObjectGuids, calculate_cell_area_like_cpp};
 pub use coords::{
     CellCoord, GridCoord, MAX_NUMBER_OF_CELLS, MAX_NUMBER_OF_GRIDS, SIZE_OF_GRID_CELL,
     SIZE_OF_GRIDS, TOTAL_NUMBER_OF_CELLS_PER_MAP, cell_to_grid_local, compute_cell_coord,
@@ -27,13 +27,24 @@ pub use grid_unload::{
     object_grid_cleaner, object_grid_evacuator, object_grid_stoper, object_grid_unloader,
 };
 pub use manager::{
-    InstanceIdAllocator, MIN_GRID_DELAY_MS, MIN_MAP_UPDATE_DELAY_MS, ManagedMap, ManagedMapKind,
-    MapManager, MapUpdater,
+    CreateMapDecision, CreateMapDifficultyContext, CreateMapEntryContext, CreateMapEntryKind,
+    CreateMapGroupContext, CreateMapInstanceLockContext, CreateMapPlayerContext,
+    CreateMapSideEffect, ExistingInstanceMapContext, InstanceIdAllocator, MIN_GRID_DELAY_MS,
+    MIN_MAP_UPDATE_DELAY_MS, ManagedMap, ManagedMapKind, MapManager, MapUpdater,
 };
 pub use map::{
-    ActiveObjectKind, GridLifecycle, Map, MapObjectStoreError, NoopGridLifecycle,
-    NoopTerrainGridLoader, TerrainGridLoader, cell_from_grid_center, cell_from_world,
-    is_grid_id_loaded,
+    AIRelocationPlan, ActiveObjectKind, AddToMapError, AddToMapOutcome,
+    CreatureDelayedRelocationVisibilityPlan, CreatureRelocationVisibilityPlan,
+    DelayedCreatureRelocationContext, DelayedPlayerRelocationContext,
+    DelayedUnitRelocationCellPlan, DelayedUnitRelocationForCellsPlan, DelayedUnitRelocationPlan,
+    DelayedUnitRelocationVisibilityPlans, GridLifecycle, Map, MapObjectCellMoveState,
+    MapObjectMoveListEntry, MapObjectMoveListPlan, MapObjectRelocationError,
+    MapObjectRelocationOutcome, MapObjectStoreError, MapUpdatePlayerSources, MapUpdateVisitPlan,
+    NearbyCellGuids, NearbyCellVisitCenter, NearbyCellVisitPlan, NoopGridLifecycle,
+    NoopTerrainGridLoader, ObjectUpdatePlan, PlayerDelayedRelocationVisibilityPlan,
+    PlayerRelocationVisibilityPlan, ProcessRelocationNotifiesOutcome, RelocationNotifyProcessPlan,
+    RemoveFromMapError, RemoveFromMapOutcome, ResetNotifyFlagsOutcome, TerrainGridLoader,
+    cell_from_grid_center, cell_from_world, is_grid_id_loaded,
 };
 pub use object_grid_loader::{
     CorpseCellStore, CorpseGridObject, GridSpawnLoadFilter, LoadAllGridSpawns,

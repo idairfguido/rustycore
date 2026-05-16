@@ -36,7 +36,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::QuestGiverStatusQuery,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::Inplace,
         handler_name: "handle_quest_giver_status_query",
     }
 }
@@ -45,7 +45,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::QuestGiverHello,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::Inplace,
         handler_name: "handle_quest_giver_hello",
     }
 }
@@ -54,7 +54,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::QuestGiverQueryQuest,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::Inplace,
         handler_name: "handle_quest_giver_query_quest",
     }
 }
@@ -63,7 +63,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::QuestGiverAcceptQuest,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::Inplace,
         handler_name: "handle_quest_giver_accept_quest",
     }
 }
@@ -72,7 +72,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::QuestLogRemoveQuest,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::Inplace,
         handler_name: "handle_quest_log_remove_quest",
     }
 }
@@ -81,7 +81,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::QueryQuestInfo,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::Inplace,
         handler_name: "handle_query_quest_info",
     }
 }
@@ -90,7 +90,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::QuestGiverRequestReward,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::Inplace,
         handler_name: "handle_quest_giver_request_reward",
     }
 }
@@ -99,7 +99,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::QuestGiverCompleteQuest,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::Inplace,
         handler_name: "handle_quest_giver_complete_quest",
     }
 }
@@ -108,7 +108,7 @@ inventory::submit! {
     PacketHandlerEntry {
         opcode: ClientOpcodes::QuestGiverChooseReward,
         status: SessionStatus::LoggedIn,
-        processing: PacketProcessing::ThreadUnsafe,
+        processing: PacketProcessing::Inplace,
         handler_name: "handle_quest_giver_choose_reward",
     }
 }

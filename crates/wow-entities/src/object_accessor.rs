@@ -4,7 +4,7 @@ use wow_constants::{TypeId, TypeMask};
 use wow_core::ObjectGuid;
 use wow_core::guid::HighGuid;
 
-use crate::{Item, PlayerInventoryStorage, WorldObject};
+use crate::{Creature, GameObject, Item, Player, PlayerInventoryStorage, WorldObject};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AccessorObjectKind {
@@ -174,7 +174,15 @@ pub trait ObjectAccessorMapSource {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapObjectRecord {
     kind: AccessorObjectKind,
-    object: WorldObject,
+    body: MapObjectBody,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum MapObjectBody {
+    WorldObject(WorldObject),
+    Creature(Box<Creature>),
+    GameObject(GameObject),
+    Player(Box<Player>),
 }
 
 impl MapObjectRecord {
@@ -197,15 +205,122 @@ impl MapObjectRecord {
             });
         }
 
-        Ok(Self { kind, object })
+        Ok(Self {
+            kind,
+            body: MapObjectBody::WorldObject(object),
+        })
+    }
+
+    pub fn new_game_object(game_object: GameObject) -> Result<Self, ObjectAccessorError> {
+        let record = Self::new(AccessorObjectKind::GameObject, game_object.world().clone())?;
+        Ok(Self {
+            kind: record.kind,
+            body: MapObjectBody::GameObject(game_object),
+        })
+    }
+
+    pub fn new_creature(creature: Creature) -> Result<Self, ObjectAccessorError> {
+        let record = Self::new(
+            AccessorObjectKind::Creature,
+            creature.unit().world().clone(),
+        )?;
+        Ok(Self {
+            kind: record.kind,
+            body: MapObjectBody::Creature(Box::new(creature)),
+        })
+    }
+
+    pub fn new_player(player: Player) -> Result<Self, ObjectAccessorError> {
+        let record = Self::new(AccessorObjectKind::Player, player.unit().world().clone())?;
+        Ok(Self {
+            kind: record.kind,
+            body: MapObjectBody::Player(Box::new(player)),
+        })
     }
 
     pub const fn kind(&self) -> AccessorObjectKind {
         self.kind
     }
 
-    pub const fn object(&self) -> &WorldObject {
-        &self.object
+    pub fn object(&self) -> &WorldObject {
+        match &self.body {
+            MapObjectBody::WorldObject(object) => object,
+            MapObjectBody::Creature(creature) => creature.unit().world(),
+            MapObjectBody::GameObject(game_object) => game_object.world(),
+            MapObjectBody::Player(player) => player.unit().world(),
+        }
+    }
+
+    pub fn object_mut(&mut self) -> &mut WorldObject {
+        match &mut self.body {
+            MapObjectBody::WorldObject(object) => object,
+            MapObjectBody::Creature(creature) => creature.unit_mut().world_mut(),
+            MapObjectBody::GameObject(game_object) => game_object.world_mut(),
+            MapObjectBody::Player(player) => player.unit_mut().world_mut(),
+        }
+    }
+
+    pub fn creature(&self) -> Option<&Creature> {
+        match &self.body {
+            MapObjectBody::Creature(creature) => Some(creature.as_ref()),
+            MapObjectBody::WorldObject(_)
+            | MapObjectBody::GameObject(_)
+            | MapObjectBody::Player(_) => None,
+        }
+    }
+
+    pub fn creature_mut(&mut self) -> Option<&mut Creature> {
+        match &mut self.body {
+            MapObjectBody::Creature(creature) => Some(creature.as_mut()),
+            MapObjectBody::WorldObject(_)
+            | MapObjectBody::GameObject(_)
+            | MapObjectBody::Player(_) => None,
+        }
+    }
+
+    pub fn game_object(&self) -> Option<&GameObject> {
+        match &self.body {
+            MapObjectBody::GameObject(game_object) => Some(game_object),
+            MapObjectBody::WorldObject(_)
+            | MapObjectBody::Creature(_)
+            | MapObjectBody::Player(_) => None,
+        }
+    }
+
+    pub fn game_object_mut(&mut self) -> Option<&mut GameObject> {
+        match &mut self.body {
+            MapObjectBody::GameObject(game_object) => Some(game_object),
+            MapObjectBody::WorldObject(_)
+            | MapObjectBody::Creature(_)
+            | MapObjectBody::Player(_) => None,
+        }
+    }
+
+    pub fn player(&self) -> Option<&Player> {
+        match &self.body {
+            MapObjectBody::Player(player) => Some(player.as_ref()),
+            MapObjectBody::WorldObject(_)
+            | MapObjectBody::Creature(_)
+            | MapObjectBody::GameObject(_) => None,
+        }
+    }
+
+    pub fn player_mut(&mut self) -> Option<&mut Player> {
+        match &mut self.body {
+            MapObjectBody::Player(player) => Some(player.as_mut()),
+            MapObjectBody::WorldObject(_)
+            | MapObjectBody::Creature(_)
+            | MapObjectBody::GameObject(_) => None,
+        }
+    }
+
+    pub fn into_object(self) -> WorldObject {
+        match self.body {
+            MapObjectBody::WorldObject(object) => object,
+            MapObjectBody::Creature(creature) => creature.unit().world().clone(),
+            MapObjectBody::GameObject(game_object) => game_object.world().clone(),
+            MapObjectBody::Player(player) => player.unit().world().clone(),
+        }
     }
 }
 
@@ -914,6 +1029,86 @@ mod tests {
         accessor.add_player("jaina", in_world).unwrap();
         assert!(accessor.find_player(player_guid).is_some());
         assert_eq!(accessor.save_all_players_count(), 1);
+    }
+
+    #[test]
+    fn map_object_record_can_store_typed_gameobject_like_cpp() {
+        let mut game_object = GameObject::new();
+        let guid = guid(HighGuid::GameObject, 77);
+        game_object.world_mut().object_mut().create(guid);
+        game_object.world_mut().object_mut().set_entry(123);
+        game_object.world_mut().set_map(571, 0).unwrap();
+        game_object
+            .world_mut()
+            .relocate(Position::xyz(1.0, 2.0, 3.0));
+        game_object.set_created_by(ObjectGuid::create_player(1, 42));
+
+        let mut record = MapObjectRecord::new_game_object(game_object).unwrap();
+
+        assert_eq!(record.kind(), AccessorObjectKind::GameObject);
+        assert_eq!(record.object().guid(), guid);
+        assert_eq!(
+            record.game_object().unwrap().owner_guid(),
+            ObjectGuid::create_player(1, 42)
+        );
+        record.object_mut().relocate(Position::xyz(4.0, 5.0, 6.0));
+        assert_eq!(record.game_object().unwrap().world().position().x, 4.0);
+    }
+
+    #[test]
+    fn map_object_record_can_store_typed_creature_like_cpp() {
+        let mut creature = Creature::new(false);
+        let guid = guid(HighGuid::Creature, 78);
+        creature.unit_mut().world_mut().object_mut().create(guid);
+        creature.unit_mut().world_mut().object_mut().set_entry(321);
+        creature.unit_mut().world_mut().set_map(571, 0).unwrap();
+        creature
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::xyz(1.0, 2.0, 3.0));
+        creature.unit_mut().set_level(42);
+
+        let mut record = MapObjectRecord::new_creature(creature).unwrap();
+
+        assert_eq!(record.kind(), AccessorObjectKind::Creature);
+        assert_eq!(record.object().guid(), guid);
+        assert_eq!(record.creature().unwrap().unit().data().level, 42);
+        record
+            .creature_mut()
+            .unwrap()
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::xyz(4.0, 5.0, 6.0));
+        assert_eq!(record.object().position().x, 4.0);
+    }
+
+    #[test]
+    fn map_object_record_can_store_typed_player_like_cpp() {
+        let mut player = Player::new(Some(7), false);
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let victim_guid = guid(HighGuid::Creature, 77);
+        player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(player_guid);
+        player.unit_mut().world_mut().set_map(571, 7).unwrap();
+        player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::xyz(1.0, 2.0, 3.0));
+        player.unit_mut().set_attacking(Some(victim_guid));
+
+        let mut record = MapObjectRecord::new_player(player).unwrap();
+
+        assert_eq!(record.kind(), AccessorObjectKind::Player);
+        assert_eq!(record.object().guid(), player_guid);
+        assert_eq!(
+            record.player().unwrap().unit().attacking(),
+            Some(victim_guid)
+        );
+        record.player_mut().unwrap().unit_mut().set_attacking(None);
+        assert_eq!(record.player().unwrap().unit().attacking(), None);
     }
 
     #[test]

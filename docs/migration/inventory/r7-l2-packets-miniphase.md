@@ -10,7 +10,42 @@
   Rust targets: `crates/wow-handler/src/lib.rs`, `crates/wow-world/src/handlers/{character,misc,trainer}.rs`, `crates/wow-world/src/session.rs`.
   Acceptance: Rust represents `PROCESS_THREADSAFE`; duplicate `TrainerList` registration is removed; `TimeSyncResponseDropped` and `TimeSyncResponseFailed` dispatch to the same handler as C++; focused tests assert C++ status/processing for the touched opcodes and reject duplicate handler registrations.
 
+- [x] **#NEXT.L2.DISPATCH.002** Audit complete Rust runtime handler metadata against the C++ client opcode table.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Protocol/Opcodes.cpp`; `/home/server/woltk-trinity-legacy/src/server/game/Server/Protocol/Opcodes.h`; generated inventory `docs/migration/inventory/cpp-client-handlers.tsv`.
+  Rust targets: `crates/wow-world/src/handlers/{character,misc,movement,quest,spell}.rs`, `crates/wow-world/src/session.rs`.
+  Acceptance: every registered Rust runtime opcode with active C++ status has tested `SessionStatus` and `PacketProcessing`; movement macro registrations are included; `STATUS_NEVER`/`STATUS_UNHANDLED` compatibility shims are explicit test exceptions.
+
 ## Follow-Up Work Items
 
-- [ ] **#NEXT.L2.DISPATCH.002** Generate or audit a complete client opcode metadata table from C++ `Opcodes.cpp` so every Rust handler registration has tested `SessionStatus` and `PacketProcessing`.
-- [ ] **#NEXT.L2.PACKET.WIRE.001** Audit parsers/serializers for the login-to-world packet path against `Server/Packets/*.h`, starting with movement, object update, gossip, trainer, vendor and query packets.
+- [x] **#NEXT.L2.PACKET.WIRE.001** Audit parsers/serializers for the login-to-world packet path against `Server/Packets/*.h`.
+
+### Packet Wire Subtasks
+
+- [x] **#NEXT.L2.PACKET.WIRE.001.a** Movement critical path: `MovementInfo`, movement ACKs, movement-force packets, active mover, teleport ack, spline done, skip time.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/MovementPackets.h`; `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/MovementPackets.cpp`.
+  Rust targets: `crates/wow-packet/src/packets/movement.rs`.
+  Acceptance: C++ field order is represented for current Rust movement packets; zero-valued transport `PrevMoveTime`/`VehicleRecID` are not emitted on write, matching C++ optional-bit semantics.
+
+- [x] **#NEXT.L2.PACKET.WIRE.001.b** Character/login packets.
+  C++ refs: `AuthenticationPackets.*`, `CharacterPackets.*`, `AccountPackets.*`, `BattlePayPackets.*`, `HotfixPackets.*`.
+  Rust targets: `crates/wow-packet/src/packets/{auth,character,character_packets,battlenet,misc}.rs`.
+  Acceptance: login/select/create/delete/query packets used by `WorldSession::dispatch_packet` match C++ read/write field order or have an explicit compatibility exception.
+  Closed notes: `CMSG_CONNECT_TO_FAILED` now consumes C++ `Con`; `CMSG_CREATE_CHARACTER` sorts customization choices by option id before runtime use, matching Trinity `SortCustomizations`.
+
+- [x] **#NEXT.L2.PACKET.WIRE.001.c** Object update and query packets.
+  C++ refs: `QueryPackets.*`, update-object write paths in C++ entity/update code.
+  Rust targets: `crates/wow-packet/src/packets/{query,update}.rs`.
+  Acceptance: `SMSG_UPDATE_OBJECT` create/update values and query request/response packets used on login-to-world have golden or focused layout tests.
+  Closed notes: `QueryCreatureResponse` string length bitfields now use C++ `length()+1` semantics; `QueryGameObjectResponse` always writes `statsData.size()`; update destroy/out-of-range GUIDs are serialized through C++-like sorted/deduped sets.
+
+- [x] **#NEXT.L2.PACKET.WIRE.001.d** Gossip/trainer/vendor packets.
+  C++ refs: `NPCPackets.*`, `GossipPackets.*`, `TrainerPackets` equivalents in handlers, `ItemPackets.*`.
+  Rust targets: `crates/wow-packet/src/packets/{gossip,trainer,item,misc}.rs`.
+  Acceptance: packet layouts for gossip hello/select, trainer list/buy, vendor list/buy/sell match C++ field order.
+  Closed notes: gossip/trainer layouts checked against `NPCPackets.cpp`; `BuyItem` now resets bit reader state between `hasItemBonus` and `ItemModList`, matching `ItemInstance::operator>>`.
+
+- [x] **#NEXT.L2.PACKET.WIRE.001.e** Combat/loot/chat/social/group packets used by current runtime.
+  C++ refs: `CombatPackets.*`, `LootPackets.*`, `ChatPackets.*`, `SocialPackets.*`, `PartyPackets.*`.
+  Rust targets: `crates/wow-packet/src/packets/{combat,loot,chat,social,party}.rs`.
+  Acceptance: every currently registered runtime handler in these domains has parser/serializer coverage against C++ or a recorded n/a reason.
+  Closed notes: loot/party packet tests cover current C++ field order; chat parser now leaves `is_secure=false` for message opcodes without a C++ secure bit instead of inventing `true`.

@@ -36,6 +36,20 @@ impl CellArea {
     }
 }
 
+pub fn calculate_cell_area_like_cpp(x: f32, y: f32, radius: f32) -> CellArea {
+    if radius <= 0.0 {
+        let mut center = compute_cell_coord(x, y);
+        center.normalize();
+        return CellArea::new(center, center);
+    }
+
+    let mut low = compute_cell_coord(x - radius, y - radius);
+    let mut high = compute_cell_coord(x + radius, y + radius);
+    low.normalize();
+    high.normalize();
+    CellArea::new(low, high)
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct WorldObjectGuids {
     pub players: HashSet<ObjectGuid>,
@@ -215,6 +229,22 @@ mod tests {
         cell.set_no_create();
         assert!(cell.no_create());
         assert_eq!(cell.cell_coord(), CellCoord::new(256, 256));
+    }
+
+    #[test]
+    fn calculate_cell_area_matches_cpp_bounds_and_normalization() {
+        assert_eq!(
+            calculate_cell_area_like_cpp(0.0, 0.0, 0.0),
+            CellArea::new(CellCoord::new(256, 256), CellCoord::new(256, 256))
+        );
+
+        let area = calculate_cell_area_like_cpp(0.0, 0.0, 70.0);
+        assert_eq!(area.low_bound, CellCoord::new(254, 254));
+        assert_eq!(area.high_bound, CellCoord::new(257, 257));
+
+        let edge = calculate_cell_area_like_cpp(-50_000.0, -50_000.0, 100.0);
+        assert_eq!(edge.low_bound, CellCoord::new(511, 511));
+        assert_eq!(edge.high_bound, CellCoord::new(511, 511));
     }
 
     #[test]
