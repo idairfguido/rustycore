@@ -81,6 +81,12 @@ use wow_recastdetour::PathQueryFilterContext;
 const PLAYER_FLAGS_UBER_LIKE_CPP: u32 = 0x0008_0000;
 const ATTACK_DISPLAY_DELAY_LIKE_CPP_MS: u32 = 200;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlayerAttackStartLikeCppResult {
+    Rejected,
+    Accepted { send_attack_start: bool },
+}
+
 fn rounded_median_u32(sorted_values: &[u32]) -> u32 {
     debug_assert!(!sorted_values.is_empty());
     let mid = sorted_values.len() / 2;
@@ -1817,6 +1823,7 @@ impl WorldSession {
         if let Some(existing) = map.get_typed_player_mut(guid) {
             let attacking = existing.unit().attacking();
             let target = existing.unit().data().target;
+            let unit_state = existing.unit().unit_state();
             let player_flags = existing.data().player_flags;
             let player_flags_ex = existing.data().player_flags_ex;
             player.replace_all_player_flags(player_flags);
@@ -1824,6 +1831,7 @@ impl WorldSession {
             *existing = player;
             existing.unit_mut().set_attacking(attacking);
             existing.unit_mut().set_target(target);
+            existing.unit_mut().add_unit_state(unit_state);
             return;
         }
 
@@ -2122,7 +2130,10 @@ impl WorldSession {
         });
     }
 
-    pub(crate) fn start_player_attack_like_cpp(&mut self, victim: ObjectGuid) -> bool {
+    pub(crate) fn start_player_attack_like_cpp(
+        &mut self,
+        victim: ObjectGuid,
+    ) -> PlayerAttackStartLikeCppResult {
         let _ = self.ensure_canonical_world_map_for_current_player_like_cpp();
         let player_guid = self.player_guid();
         let attacker_is_mounted_player = self.player_mounted_like_cpp;
@@ -2134,7 +2145,7 @@ impl WorldSession {
             if self.selection_guid_like_cpp() == Some(victim) {
                 self.set_selection_guid_like_cpp(None);
             }
-            return false;
+            return PlayerAttackStartLikeCppResult::Rejected;
         }
         attack_context.attacker_is_mounted_player = attacker_is_mounted_player;
         attack_context.attacker_unit_flags = self.player_unit_flags_like_cpp.bits();
@@ -2180,7 +2191,7 @@ impl WorldSession {
                 if self.selection_guid_like_cpp() == Some(victim) {
                     self.set_selection_guid_like_cpp(None);
                 }
-                return false;
+                return PlayerAttackStartLikeCppResult::Rejected;
             }
         };
         if let Some(player_guid) = player_guid {
@@ -2195,11 +2206,14 @@ impl WorldSession {
                     .add_attacker_like_cpp(player_guid);
             });
         }
-        !matches!(
+        let send_attack_start = matches!(
             outcome,
-            Some(wow_entities::UnitAttackStartOutcome::NoChangeSameTarget)
-                | Some(wow_entities::UnitAttackStartOutcome::MeleeStoppedSameTarget)
-        )
+            Some(
+                wow_entities::UnitAttackStartOutcome::NewTarget { .. }
+                    | wow_entities::UnitAttackStartOutcome::MeleeStartedSameTarget
+            )
+        );
+        PlayerAttackStartLikeCppResult::Accepted { send_attack_start }
     }
 
     pub(crate) fn stop_player_attack_like_cpp(&mut self) -> Option<ObjectGuid> {
@@ -14210,6 +14224,55 @@ mod tests {
                 .ai_state(),
             wow_entities::CreatureAiState::InCombat
         );
+    }
+
+    #[tokio::test]
+    async fn handle_attack_swing_same_target_no_change_sends_no_stop_or_duplicate_start_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let player = ObjectGuid::create_player(1, 81);
+        let victim = test_creature_guid(18_032);
+
+        canonical.lock().unwrap().create_world_map(0, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Attacker".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            0,
+            1,
+            1,
+            80,
+            0,
+        ));
+        register_test_creature(&mut session, manager.clone(), victim, 40);
+
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_packed_guid(&victim);
+        session.handle_attack_swing(pkt).await;
+
+        let sent = send_rx.try_recv().unwrap();
+        let opcode = u16::from_le_bytes([sent[0], sent[1]]);
+        assert_eq!(opcode, ServerOpcodes::AttackStart as u16);
+        let _ = drain_server_opcodes(&send_rx);
+
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_packed_guid(&victim);
+        session.handle_attack_swing(pkt).await;
+
+        assert_eq!(drain_server_opcodes(&send_rx), Vec::<u16>::new());
+        assert_eq!(session.combat_target, Some(victim));
+        assert!(session.in_combat);
     }
 
     #[test]

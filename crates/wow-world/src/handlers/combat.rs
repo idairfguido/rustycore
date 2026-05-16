@@ -16,7 +16,7 @@ use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::ClientPacket;
 use wow_packet::packets::combat::{AttackStart, AttackSwing, SAttackStop, SetSheathed};
 
-use crate::session::WorldSession;
+use crate::session::{PlayerAttackStartLikeCppResult, WorldSession};
 
 // ── Handler registrations ─────────────────────────────────────────
 
@@ -90,15 +90,18 @@ impl WorldSession {
             return;
         }
 
-        if !self.start_player_attack_like_cpp(swing.victim) {
-            let stop = SAttackStop {
-                attacker: player_guid,
-                victim: swing.victim,
-                now_dead: false,
-            };
-            self.send_packet(&stop);
-            return;
-        }
+        let attack_start = match self.start_player_attack_like_cpp(swing.victim) {
+            PlayerAttackStartLikeCppResult::Rejected => {
+                let stop = SAttackStop {
+                    attacker: player_guid,
+                    victim: swing.victim,
+                    now_dead: false,
+                };
+                self.send_packet(&stop);
+                return;
+            }
+            PlayerAttackStartLikeCppResult::Accepted { send_attack_start } => send_attack_start,
+        };
 
         // Start combat with the canonical map-owned creature after C++-style
         // attack validation succeeds.
@@ -106,12 +109,15 @@ impl WorldSession {
             creature.enter_combat(player_guid);
         });
 
-        // Notify client that combat started.
-        let start = AttackStart {
-            attacker: player_guid,
-            victim: swing.victim,
-        };
-        self.send_packet(&start);
+        // Unit::Attack only emits a melee start packet for new targets or a
+        // same-target ranged-to-melee switch; same-target no-op is accepted.
+        if attack_start {
+            let start = AttackStart {
+                attacker: player_guid,
+                victim: swing.victim,
+            };
+            self.send_packet(&start);
+        }
     }
 
     /// CMSG_ATTACK_STOP — client stops attacking.
