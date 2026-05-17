@@ -309,6 +309,14 @@ pub(crate) enum RepresentedGameObjectUseEffect {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
     },
+    SpellcasterPartyOnlyRejected {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    },
+    GameObjectUseCountIncremented {
+        gameobject_guid: ObjectGuid,
+        use_count: u32,
+    },
     CastSpell {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
@@ -334,6 +342,7 @@ pub(crate) struct RepresentedGameObjectUseState {
     pub per_player_despawn_secs: Option<u32>,
     pub per_player_despawn_until: Option<Instant>,
     pub personal_loot_uses: u32,
+    pub use_count: u32,
     pub unique_users: Vec<wow_core::ObjectGuid>,
     pub chair_slots: Vec<Option<wow_core::ObjectGuid>>,
     pub chest_restock_time_secs: Option<u32>,
@@ -502,6 +511,7 @@ impl Default for RepresentedGameObjectUseState {
             per_player_despawn_secs: None,
             per_player_despawn_until: None,
             personal_loot_uses: 0,
+            use_count: 0,
             unique_users: Vec::new(),
             chair_slots: Vec::new(),
             chest_restock_time_secs: None,
@@ -10138,6 +10148,58 @@ impl WorldSession {
                 player_guid,
                 gossip_id: source.gossip_id,
             });
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_spellcaster_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        source: wow_entities::SpellcasterUseSource,
+        party_context_allows_use: Option<bool>,
+    ) -> bool {
+        if source.party_only && party_context_allows_use != Some(true) {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::SpellcasterPartyOnlyRejected {
+                    gameobject_guid,
+                    player_guid,
+                },
+            );
+            return false;
+        }
+
+        self.remove_represented_mounted_auras_by_type_like_cpp();
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::RemoveMountedAuras {
+                gameobject_guid,
+                player_guid,
+            },
+        );
+        if source.spell_id != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::CastSpell {
+                    gameobject_guid,
+                    player_guid,
+                    spell_id: source.spell_id,
+                },
+            );
+        }
+
+        let use_count = {
+            let state = self
+                .represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default();
+            state.use_count = state.use_count.saturating_add(1);
+            state.use_count
+        };
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::GameObjectUseCountIncremented {
+                gameobject_guid,
+                use_count,
+            },
+        );
 
         true
     }
@@ -22542,6 +22604,79 @@ mod tests {
                 player_guid,
                 gossip_id: 123,
             }]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_spellcaster_casts_and_adds_use_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 20);
+
+        assert!(session.use_represented_gameobject_spellcaster_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::SpellcasterUseSource {
+                spell_id: 3456,
+                charges: 1,
+                party_only: false,
+            },
+            None,
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::RemoveMountedAuras {
+                    gameobject_guid,
+                    player_guid,
+                },
+                RepresentedGameObjectUseEffect::CastSpell {
+                    gameobject_guid,
+                    player_guid,
+                    spell_id: 3456,
+                },
+                RepresentedGameObjectUseEffect::GameObjectUseCountIncremented {
+                    gameobject_guid,
+                    use_count: 1,
+                },
+            ]
+        );
+        assert_eq!(
+            session
+                .represented_gameobject_use_states
+                .get(&gameobject_guid)
+                .unwrap()
+                .use_count,
+            1
+        );
+    }
+
+    #[test]
+    fn gameobject_use_spellcaster_party_only_fails_without_owner_context_like_cpp_guard() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 21);
+
+        assert!(!session.use_represented_gameobject_spellcaster_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::SpellcasterUseSource {
+                spell_id: 3456,
+                charges: 1,
+                party_only: true,
+            },
+            None,
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::SpellcasterPartyOnlyRejected {
+                    gameobject_guid,
+                    player_guid,
+                }
+            ]
         );
     }
 

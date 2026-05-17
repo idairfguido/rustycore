@@ -167,6 +167,13 @@ pub struct QuestgiverUseSource {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SpellcasterUseSource {
+    pub spell_id: u32,
+    pub charges: u32,
+    pub party_only: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CameraUseSource {
     pub cinematic_id: u32,
     pub event_id: u32,
@@ -361,6 +368,18 @@ impl GameObjectTemplateData {
 
         Some(QuestgiverUseSource {
             gossip_id: self.data[3],
+        })
+    }
+
+    pub const fn spellcaster_use_source_like_cpp(&self) -> Option<SpellcasterUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_SPELLCASTER {
+            return None;
+        }
+
+        Some(SpellcasterUseSource {
+            spell_id: self.data[0],
+            charges: self.data[1],
+            party_only: self.data[2] != 0,
         })
     }
 
@@ -1305,6 +1324,29 @@ mod tests {
         assert_eq!(
             GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data)
                 .questgiver_use_source_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn spellcaster_use_source_uses_cpp_data_indices() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[0] = 1234;
+        data[1] = 7;
+        data[2] = 1;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_SPELLCASTER, data)
+                .spellcaster_use_source_like_cpp(),
+            Some(SpellcasterUseSource {
+                spell_id: 1234,
+                charges: 7,
+                party_only: true,
+            })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data)
+                .spellcaster_use_source_like_cpp(),
             None
         );
     }
