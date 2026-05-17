@@ -499,6 +499,8 @@ pub(crate) struct RepresentedGameObjectUseState {
     pub loot_state: Option<wow_entities::LootState>,
     pub loot_state_unit_guid: wow_core::ObjectGuid,
     pub owner_guid: Option<wow_core::ObjectGuid>,
+    pub ritual_owner_guid: Option<wow_core::ObjectGuid>,
+    pub owner_current_channeled_spell_active: Option<bool>,
     pub go_state: Option<wow_entities::GoState>,
     pub gameobject_flags: u32,
     pub dynamic_flags: u32,
@@ -668,6 +670,8 @@ impl Default for RepresentedGameObjectUseState {
             loot_state: None,
             loot_state_unit_guid: wow_core::ObjectGuid::EMPTY,
             owner_guid: None,
+            ritual_owner_guid: None,
+            owner_current_channeled_spell_active: None,
             go_state: None,
             gameobject_flags: 0,
             dynamic_flags: 0,
@@ -2739,6 +2743,21 @@ impl WorldSession {
             self.group_registry.as_ref(),
             self.player_guid(),
         ) else {
+            return false;
+        };
+        group_registry.get(&group_guid).is_some_and(|group| {
+            group.members.contains(&player_guid) && group.members.contains(&owner_guid)
+        })
+    }
+
+    fn represented_player_is_same_raid_with_like_cpp(
+        &self,
+        player_guid: ObjectGuid,
+        owner_guid: ObjectGuid,
+    ) -> bool {
+        let (Some(group_guid), Some(group_registry)) =
+            (self.group_guid, self.group_registry.as_ref())
+        else {
             return false;
         };
         group_registry.get(&group_guid).is_some_and(|group| {
@@ -10523,6 +10542,61 @@ impl WorldSession {
         player_guid: ObjectGuid,
         source: wow_entities::RitualUseSource,
     ) -> bool {
+        let (owner_guid, ritual_owner_guid, owner_current_channeled_spell_active) = {
+            let state = self.represented_gameobject_use_states.get(&gameobject_guid);
+            (
+                state.and_then(|state| state.owner_guid),
+                state.and_then(|state| state.ritual_owner_guid),
+                state.and_then(|state| state.owner_current_channeled_spell_active),
+            )
+        };
+
+        let ritual_spell_caster_guid = if let Some(owner_guid) = owner_guid {
+            if owner_guid == player_guid {
+                return false;
+            }
+            if source.casters_grouped
+                && !self.represented_player_is_same_raid_with_like_cpp(player_guid, owner_guid)
+            {
+                return false;
+            }
+            if owner_current_channeled_spell_active == Some(false) {
+                return false;
+            }
+            owner_guid
+        } else {
+            let ritual_owner_guid = ritual_owner_guid.unwrap_or_else(|| {
+                self.represented_gameobject_use_states
+                    .get(&gameobject_guid)
+                    .and_then(|state| state.unique_users.first().copied())
+                    .unwrap_or(player_guid)
+            });
+            if player_guid != ritual_owner_guid
+                && source.casters_grouped
+                && !self
+                    .represented_player_is_same_raid_with_like_cpp(player_guid, ritual_owner_guid)
+            {
+                return false;
+            }
+            self.represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default()
+                .ritual_owner_guid
+                .get_or_insert(ritual_owner_guid);
+            ritual_owner_guid
+        };
+
+        let unique_user_count = {
+            let state = self
+                .represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default();
+            if !state.unique_users.contains(&player_guid) {
+                state.unique_users.push(player_guid);
+            }
+            state.unique_users.len() as u32
+        };
+
         if source.anim_spell_id != 0 {
             self.represented_gameobject_use_effects.push(
                 RepresentedGameObjectUseEffect::CastSpell {
@@ -10532,23 +10606,6 @@ impl WorldSession {
                 },
             );
         }
-
-        let (unique_user_count, ritual_spell_caster_guid) = {
-            let state = self
-                .represented_gameobject_use_states
-                .entry(gameobject_guid)
-                .or_default();
-            if state.owner_guid.is_none() {
-                state.owner_guid = Some(state.unique_users.first().copied().unwrap_or(player_guid));
-            }
-            if !state.unique_users.contains(&player_guid) {
-                state.unique_users.push(player_guid);
-            }
-            (
-                state.unique_users.len() as u32,
-                state.owner_guid.unwrap_or(player_guid),
-            )
-        };
 
         if unique_user_count != source.casters_required {
             self.represented_gameobject_use_effects.push(
@@ -10585,7 +10642,7 @@ impl WorldSession {
                 .represented_gameobject_use_states
                 .entry(gameobject_guid)
                 .or_default();
-            state.owner_guid = None;
+            state.ritual_owner_guid = None;
             state.unique_users.clear();
             state.use_count = 0;
         } else {
@@ -23678,6 +23735,101 @@ mod tests {
     }
 
     #[test]
+    fn gameobject_use_ritual_validates_summoned_owner_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let owner_guid = ObjectGuid::create_player(1, 98);
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 18);
+        let source = wow_entities::RitualUseSource {
+            casters_required: 2,
+            spell_id: 100,
+            anim_spell_id: 200,
+            persistent: false,
+            caster_target_spell_id: 0,
+            caster_target_spell_targets: 0,
+            casters_grouped: true,
+            no_target_check: true,
+            allow_unfriendly_cross_faction_party: false,
+        };
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .owner_guid = Some(owner_guid);
+
+        assert!(!session.use_represented_gameobject_ritual_like_cpp(
+            gameobject_guid,
+            owner_guid,
+            source,
+        ));
+        assert!(session.represented_gameobject_use_effects.is_empty());
+        assert!(
+            session
+                .represented_gameobject_use_states
+                .get(&gameobject_guid)
+                .unwrap()
+                .unique_users
+                .is_empty()
+        );
+
+        assert!(!session.use_represented_gameobject_ritual_like_cpp(
+            gameobject_guid,
+            player_guid,
+            source,
+        ));
+        assert!(session.represented_gameobject_use_effects.is_empty());
+
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(owner_guid);
+        group.add_member(player_guid);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .owner_current_channeled_spell_active = Some(false);
+
+        assert!(!session.use_represented_gameobject_ritual_like_cpp(
+            gameobject_guid,
+            player_guid,
+            source,
+        ));
+        assert!(session.represented_gameobject_use_effects.is_empty());
+
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .owner_current_channeled_spell_active = Some(true);
+
+        assert!(!session.use_represented_gameobject_ritual_like_cpp(
+            gameobject_guid,
+            player_guid,
+            source,
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::CastSpell {
+                    gameobject_guid,
+                    player_guid,
+                    spell_id: 200,
+                },
+                RepresentedGameObjectUseEffect::RitualWaitingForParticipants {
+                    gameobject_guid,
+                    player_guid,
+                    unique_user_count: 1,
+                    casters_required: 2,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn gameobject_use_ritual_completes_and_deactivates_like_cpp() {
         let (mut session, _pkt_tx, _send_rx) = make_session();
         let player_guid = ObjectGuid::create_player(1, 99);
@@ -23689,6 +23841,13 @@ mod tests {
             .entry(gameobject_guid)
             .or_default()
             .unique_users = vec![other_player_guid];
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(other_player_guid);
+        group.add_member(player_guid);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
 
         assert!(session.use_represented_gameobject_ritual_like_cpp(
             gameobject_guid,
@@ -23749,6 +23908,52 @@ mod tests {
                 .and_then(|state| state.loot_state),
             Some(wow_entities::LootState::JustDeactivated)
         );
+    }
+
+    #[test]
+    fn gameobject_use_persistent_summoned_ritual_keeps_gameobject_owner_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let owner_guid = ObjectGuid::create_player(1, 98);
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 18);
+        let state = session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        state.owner_guid = Some(owner_guid);
+        state.owner_current_channeled_spell_active = Some(true);
+        state.unique_users = vec![owner_guid];
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(owner_guid);
+        group.add_member(player_guid);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+
+        assert!(session.use_represented_gameobject_ritual_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::RitualUseSource {
+                casters_required: 2,
+                spell_id: 100,
+                anim_spell_id: 0,
+                persistent: true,
+                caster_target_spell_id: 0,
+                caster_target_spell_targets: 0,
+                casters_grouped: true,
+                no_target_check: true,
+                allow_unfriendly_cross_faction_party: false,
+            },
+        ));
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.owner_guid, Some(owner_guid));
+        assert_eq!(state.ritual_owner_guid, None);
+        assert!(state.unique_users.is_empty());
     }
 
     #[test]
