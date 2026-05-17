@@ -11118,6 +11118,10 @@ impl WorldSession {
         source: wow_entities::CameraUseSource,
     ) -> bool {
         if source.cinematic_id != 0 {
+            self.send_packet(&wow_packet::packets::misc::TriggerCinematic {
+                cinematic_id: source.cinematic_id,
+                conversation_guid: ObjectGuid::EMPTY,
+            });
             self.represented_gameobject_use_effects.push(
                 RepresentedGameObjectUseEffect::TriggerCinematic {
                     gameobject_guid,
@@ -24805,7 +24809,7 @@ mod tests {
 
     #[test]
     fn gameobject_use_camera_records_cinematic_and_event_like_cpp() {
-        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let (mut session, _pkt_tx, send_rx) = make_session();
         let player_guid = ObjectGuid::create_player(1, 99);
         let gameobject_guid =
             ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 8);
@@ -24833,6 +24837,12 @@ mod tests {
                 },
             ]
         );
+        let mut expected = (ServerOpcodes::TriggerCinematic as u16)
+            .to_le_bytes()
+            .to_vec();
+        expected.extend_from_slice(&444_u32.to_le_bytes());
+        expected.extend_from_slice(&ObjectGuid::EMPTY.to_raw_bytes());
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
 
         session.represented_gameobject_use_effects.clear();
         assert!(session.use_represented_gameobject_camera_like_cpp(

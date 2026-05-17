@@ -129,6 +129,25 @@ impl ServerPacket for GameObjectInteraction {
     }
 }
 
+// ── TriggerCinematic (SMSG 0x27ca) ──────────────────────────────────
+
+/// Starts a cinematic sequence for the player.
+pub struct TriggerCinematic {
+    pub cinematic_id: u32,
+    pub conversation_guid: ObjectGuid,
+}
+
+impl ServerPacket for TriggerCinematic {
+    const OPCODE: ServerOpcodes = ServerOpcodes::TriggerCinematic;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_uint32(self.cinematic_id);
+        for byte in self.conversation_guid.to_raw_bytes() {
+            pkt.write_uint8(byte);
+        }
+    }
+}
+
 // ── FeatureSystemStatus (SMSG 0x25bf) — IN-GAME version ─────────────
 
 /// Feature system status sent AFTER entering the world.
@@ -3493,6 +3512,22 @@ mod tests {
         );
         assert_eq!(&bytes[2..18], &guid.to_raw_bytes());
         assert_eq!(&bytes[18..22], &40_i32.to_le_bytes());
+        assert_eq!(bytes.len(), 22);
+    }
+
+    #[test]
+    fn trigger_cinematic_writes_id_and_conversation_guid_like_cpp() {
+        let bytes = TriggerCinematic {
+            cinematic_id: 444,
+            conversation_guid: ObjectGuid::EMPTY,
+        }
+        .to_bytes();
+        assert_eq!(
+            bytes[0..2],
+            (ServerOpcodes::TriggerCinematic as u16).to_le_bytes()
+        );
+        assert_eq!(&bytes[2..6], &444_u32.to_le_bytes());
+        assert_eq!(&bytes[6..22], &ObjectGuid::EMPTY.to_raw_bytes());
         assert_eq!(bytes.len(), 22);
     }
 }
