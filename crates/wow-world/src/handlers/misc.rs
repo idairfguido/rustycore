@@ -1202,6 +1202,12 @@ impl crate::session::WorldSession {
         ) {
             return;
         }
+        if !self.apply_represented_gameobject_cooldown_like_cpp(
+            gameobject_guid,
+            template.get_cooldown_like_cpp(),
+        ) {
+            return;
+        }
 
         if let Some(source) = template.chest_loot_source_like_cpp() {
             if source.is_empty() {

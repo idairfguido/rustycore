@@ -8,7 +8,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
 use rand::seq::SliceRandom;
@@ -202,6 +202,13 @@ pub(crate) enum RepresentedGameObjectUseEffect {
         player_guid: ObjectGuid,
         handled: bool,
     },
+    CooldownStarted {
+        gameobject_guid: ObjectGuid,
+        cooldown_secs: u32,
+    },
+    CooldownRejected {
+        gameobject_guid: ObjectGuid,
+    },
     ReportUseAi {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
@@ -255,6 +262,7 @@ pub(crate) struct RepresentedGameObjectUseState {
     pub fishing_hole_max_opens: Option<u32>,
     pub report_use_ai_returns_true: bool,
     pub gossip_hello_ai_returns_true: bool,
+    pub cooldown_until: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -419,6 +427,7 @@ impl Default for RepresentedGameObjectUseState {
             fishing_hole_max_opens: None,
             report_use_ai_returns_true: false,
             gossip_hello_ai_returns_true: false,
+            cooldown_until: None,
         }
     }
 }
@@ -9820,6 +9829,40 @@ impl WorldSession {
             self.player_mount_vehicle_usable_seat_count_like_cpp = 0;
             self.player_unit_flags_like_cpp.remove(UnitFlags::MOUNT);
         }
+    }
+
+    pub(crate) fn apply_represented_gameobject_cooldown_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        cooldown_secs: u32,
+    ) -> bool {
+        if cooldown_secs == 0 {
+            return true;
+        }
+
+        let now = Instant::now();
+        let state = self
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        if state
+            .cooldown_until
+            .is_some_and(|cooldown_until| cooldown_until > now)
+        {
+            self.represented_gameobject_use_effects
+                .push(RepresentedGameObjectUseEffect::CooldownRejected { gameobject_guid });
+            return false;
+        }
+
+        state.cooldown_until =
+            Some(now + Duration::from_millis(u64::from(cooldown_secs).saturating_mul(1000)));
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::CooldownStarted {
+                gameobject_guid,
+                cooldown_secs,
+            },
+        );
+        true
     }
 
     fn send_active_player_transport_server_time_update_like_cpp(&self) {
@@ -21656,6 +21699,36 @@ mod tests {
                 player_guid,
             },]
         );
+    }
+
+    #[test]
+    fn gameobject_use_cooldown_matches_cpp_template_gate() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 6);
+
+        assert!(session.apply_represented_gameobject_cooldown_like_cpp(gameobject_guid, 0));
+        assert!(session.represented_gameobject_use_effects.is_empty());
+
+        assert!(session.apply_represented_gameobject_cooldown_like_cpp(gameobject_guid, 5));
+        assert!(!session.apply_represented_gameobject_cooldown_like_cpp(gameobject_guid, 5));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::CooldownStarted {
+                    gameobject_guid,
+                    cooldown_secs: 5,
+                },
+                RepresentedGameObjectUseEffect::CooldownRejected { gameobject_guid },
+            ]
+        );
+
+        session
+            .represented_gameobject_use_states
+            .get_mut(&gameobject_guid)
+            .unwrap()
+            .cooldown_until = Some(Instant::now() - Duration::from_secs(1));
+        assert!(session.apply_represented_gameobject_cooldown_like_cpp(gameobject_guid, 5));
     }
 
     #[test]

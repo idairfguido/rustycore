@@ -271,6 +271,14 @@ impl GameObjectTemplateData {
         self.data[index]
     }
 
+    pub const fn get_cooldown_like_cpp(&self) -> u32 {
+        match self.go_type {
+            GAMEOBJECT_TYPE_TRAP => self.data[5],
+            GAMEOBJECT_TYPE_GOOBER => self.data[6],
+            _ => 0,
+        }
+    }
+
     pub const fn chest_loot_source_like_cpp(&self) -> Option<GameObjectLootSource> {
         if self.go_type != GAMEOBJECT_TYPE_CHEST {
             return None;
@@ -1065,6 +1073,29 @@ mod tests {
         assert_eq!(
             GameObjectTemplateData::new(GAMEOBJECT_TYPE_TEXT, [1; MAX_GAMEOBJECT_DATA])
                 .get_no_damage_immune_like_cpp(),
+            0
+        );
+    }
+
+    #[test]
+    fn gameobject_template_cooldown_matches_cpp_switch() {
+        let mut trap = [0; MAX_GAMEOBJECT_DATA];
+        trap[5] = 12;
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_TRAP, trap).get_cooldown_like_cpp(),
+            12
+        );
+
+        let mut goober = [0; MAX_GAMEOBJECT_DATA];
+        goober[6] = 34;
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_GOOBER, goober).get_cooldown_like_cpp(),
+            34
+        );
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, [99; MAX_GAMEOBJECT_DATA])
+                .get_cooldown_like_cpp(),
             0
         );
     }
