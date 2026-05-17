@@ -10587,6 +10587,15 @@ impl WorldSession {
                 unique_user_count,
             },
         );
+        self.apply_represented_gameobject_post_use_spell_like_cpp(
+            gameobject_guid,
+            player_guid,
+            gameobject_guid.entry(),
+            wow_entities::GAMEOBJECT_TYPE_RITUAL,
+            final_spell_id,
+            triggered,
+            RepresentedGameObjectSpellCaster::User,
+        );
 
         true
     }
@@ -23619,6 +23628,13 @@ mod tests {
                     triggered: true,
                     persistent: false,
                     unique_user_count: 2,
+                },
+                RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
+                    gameobject_guid,
+                    target_guid: player_guid,
+                    spell_id: 61993,
+                    triggered: true,
+                    caster: RepresentedGameObjectSpellCaster::User,
                 },
             ]
         );
