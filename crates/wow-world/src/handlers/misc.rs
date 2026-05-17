@@ -1262,12 +1262,7 @@ impl crate::session::WorldSession {
             }
             GAMEOBJECT_TYPE_CHAIR => {
                 if let Some(source) = template.chair_use_source_like_cpp() {
-                    let gameobject_size = self
-                        .represented_gameobject_use_states
-                        .get(&gameobject_guid)
-                        .map(|state| state.scale)
-                        .filter(|scale| *scale > 0.0)
-                        .unwrap_or(1.0);
+                    let gameobject_size = result.try_read::<f32>(7).unwrap_or(1.0).max(0.0);
                     self.use_represented_gameobject_chair_like_cpp(
                         gameobject_guid,
                         player_guid,
