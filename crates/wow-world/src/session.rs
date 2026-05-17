@@ -328,6 +328,14 @@ pub(crate) enum RepresentedGameObjectUseEffect {
         condition_id: u32,
         forge_type: u32,
     },
+    CapturePointAssaultRequested {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        capture_time_ms: u32,
+        world_state_id: u32,
+        contested_event_horde: u32,
+        contested_event_alliance: u32,
+    },
     SpellcasterPartyOnlyRejected {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
@@ -10205,6 +10213,26 @@ impl WorldSession {
                 player_guid,
                 condition_id: source.condition_id,
                 forge_type: source.forge_type,
+            },
+        );
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_capture_point_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        source: wow_entities::CapturePointUseSource,
+    ) -> bool {
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::CapturePointAssaultRequested {
+                gameobject_guid,
+                player_guid,
+                capture_time_ms: source.capture_time_ms,
+                world_state_id: source.world_state_id,
+                contested_event_horde: source.contested_event_horde,
+                contested_event_alliance: source.contested_event_alliance,
             },
         );
 
@@ -22736,6 +22764,38 @@ mod tests {
                 condition_id: 77,
                 forge_type: 4,
             }]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_capture_point_records_assault_hook_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 25);
+
+        assert!(session.use_represented_gameobject_capture_point_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::CapturePointUseSource {
+                capture_time_ms: 60_000,
+                world_state_id: 123,
+                contested_event_horde: 456,
+                contested_event_alliance: 789,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::CapturePointAssaultRequested {
+                    gameobject_guid,
+                    player_guid,
+                    capture_time_ms: 60_000,
+                    world_state_id: 123,
+                    contested_event_horde: 456,
+                    contested_event_alliance: 789,
+                }
+            ]
         );
     }
 

@@ -36,6 +36,7 @@ pub const GAMEOBJECT_TYPE_BARBER_CHAIR: u32 = 32;
 pub const GAMEOBJECT_TYPE_DESTRUCTIBLE_BUILDING: u32 = 33;
 pub const GAMEOBJECT_TYPE_GUILD_BANK: u32 = 34;
 pub const GAMEOBJECT_TYPE_NEW_FLAG: u32 = 36;
+pub const GAMEOBJECT_TYPE_CAPTURE_POINT: u32 = 42;
 pub const GAMEOBJECT_TYPE_ITEM_FORGE: u32 = 47;
 pub const GAMEOBJECT_TYPE_UI_LINK: u32 = 48;
 pub const GAMEOBJECT_TYPE_GATHERING_NODE: u32 = 50;
@@ -177,6 +178,14 @@ pub struct UiLinkUseSource {
 pub struct ItemForgeUseSource {
     pub condition_id: u32,
     pub forge_type: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CapturePointUseSource {
+    pub capture_time_ms: u32,
+    pub world_state_id: u32,
+    pub contested_event_horde: u32,
+    pub contested_event_alliance: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -409,6 +418,19 @@ impl GameObjectTemplateData {
         Some(ItemForgeUseSource {
             condition_id: self.data[0],
             forge_type: self.data[5],
+        })
+    }
+
+    pub const fn capture_point_use_source_like_cpp(&self) -> Option<CapturePointUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_CAPTURE_POINT {
+            return None;
+        }
+
+        Some(CapturePointUseSource {
+            capture_time_ms: self.data[0],
+            world_state_id: self.data[10],
+            contested_event_horde: self.data[11],
+            contested_event_alliance: self.data[14],
         })
     }
 
@@ -1419,6 +1441,31 @@ mod tests {
         assert_eq!(
             GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data)
                 .item_forge_use_source_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn capture_point_use_source_uses_cpp_data_indices() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[0] = 60_000;
+        data[10] = 123;
+        data[11] = 456;
+        data[14] = 789;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CAPTURE_POINT, data)
+                .capture_point_use_source_like_cpp(),
+            Some(CapturePointUseSource {
+                capture_time_ms: 60_000,
+                world_state_id: 123,
+                contested_event_horde: 456,
+                contested_event_alliance: 789,
+            })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data)
+                .capture_point_use_source_like_cpp(),
             None
         );
     }
