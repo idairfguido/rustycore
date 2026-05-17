@@ -309,6 +309,14 @@ pub(crate) enum RepresentedGameObjectUseEffect {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
     },
+    BarberChairUsed {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        customization_scope: u32,
+        teleport_position: Position,
+        stand_state: u32,
+        sit_anim_kit: u32,
+    },
     SpellcasterPartyOnlyRejected {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
@@ -10132,6 +10140,27 @@ impl WorldSession {
                 },
             );
         }
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_barber_chair_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gameobject_position: Position,
+        source: wow_entities::BarberChairUseSource,
+    ) -> bool {
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::BarberChairUsed {
+                gameobject_guid,
+                player_guid,
+                customization_scope: source.customization_scope,
+                teleport_position: gameobject_position,
+                stand_state: 4_u32.saturating_add(source.chair_height),
+                sit_anim_kit: source.sit_anim_kit,
+            },
+        );
 
         true
     }
@@ -22581,6 +22610,37 @@ mod tests {
             vec![RepresentedGameObjectUseEffect::ChairNoFreeSlot {
                 gameobject_guid,
                 player_guid,
+            }]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_barber_chair_records_ui_teleport_and_stand_state_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 22);
+        let gameobject_position = Position::new(1.0, 2.0, 3.0, 4.0);
+
+        assert!(session.use_represented_gameobject_barber_chair_like_cpp(
+            gameobject_guid,
+            player_guid,
+            gameobject_position,
+            wow_entities::BarberChairUseSource {
+                chair_height: 2,
+                sit_anim_kit: 55,
+                customization_scope: 7,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::BarberChairUsed {
+                gameobject_guid,
+                player_guid,
+                customization_scope: 7,
+                teleport_position: gameobject_position,
+                stand_state: 6,
+                sit_anim_kit: 55,
             }]
         );
     }

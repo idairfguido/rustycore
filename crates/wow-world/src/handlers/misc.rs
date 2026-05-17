@@ -11,10 +11,11 @@ use tracing::{debug, info, warn};
 use wow_constants::{ClientOpcodes, ItemExtendedCostFlags};
 use wow_database::{SqlTransaction, WorldStatements};
 use wow_entities::{
-    GAMEOBJECT_TYPE_BUTTON, GAMEOBJECT_TYPE_CAMERA, GAMEOBJECT_TYPE_CHAIR, GAMEOBJECT_TYPE_DOOR,
-    GAMEOBJECT_TYPE_FISHING_HOLE, GAMEOBJECT_TYPE_GATHERING_NODE, GAMEOBJECT_TYPE_GOOBER,
-    GAMEOBJECT_TYPE_QUESTGIVER, GAMEOBJECT_TYPE_SPELL_FOCUS, GAMEOBJECT_TYPE_SPELLCASTER,
-    GAMEOBJECT_TYPE_TRAP, GameObjectTemplateData, MAX_GAMEOBJECT_DATA,
+    GAMEOBJECT_TYPE_BARBER_CHAIR, GAMEOBJECT_TYPE_BUTTON, GAMEOBJECT_TYPE_CAMERA,
+    GAMEOBJECT_TYPE_CHAIR, GAMEOBJECT_TYPE_DOOR, GAMEOBJECT_TYPE_FISHING_HOLE,
+    GAMEOBJECT_TYPE_GATHERING_NODE, GAMEOBJECT_TYPE_GOOBER, GAMEOBJECT_TYPE_QUESTGIVER,
+    GAMEOBJECT_TYPE_SPELL_FOCUS, GAMEOBJECT_TYPE_SPELLCASTER, GAMEOBJECT_TYPE_TRAP,
+    GameObjectTemplateData, MAX_GAMEOBJECT_DATA,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::ClientPacket;
@@ -1256,6 +1257,17 @@ impl crate::session::WorldSession {
                         player_position,
                         gameobject_access.position,
                         gameobject_size,
+                        source,
+                    );
+                }
+                return;
+            }
+            GAMEOBJECT_TYPE_BARBER_CHAIR => {
+                if let Some(source) = template.barber_chair_use_source_like_cpp() {
+                    self.use_represented_gameobject_barber_chair_like_cpp(
+                        gameobject_guid,
+                        player_guid,
+                        gameobject_access.position,
                         source,
                     );
                 }
