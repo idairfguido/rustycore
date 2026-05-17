@@ -189,6 +189,11 @@ pub(crate) enum RepresentedGameObjectUseEffect {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
     },
+    BattlegroundObjectUseRejected {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        reason: RepresentedBattlegroundObjectUseRejection,
+    },
     RemoveMountedAuras {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
@@ -499,6 +504,14 @@ pub(crate) enum BattlegroundFlagDropClickTarget {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepresentedBattlegroundObjectUseRejection {
+    UnfriendlyFaction,
+    RecentlyDroppedFlag,
+    DamageImmune,
+    Dead,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
 pub(crate) enum RepresentedNewFlagStateRequest {
     InBase,
@@ -546,6 +559,7 @@ pub(crate) struct RepresentedGameObjectUseState {
     pub scale: f32,
     pub rotation: [f32; 4],
     pub go_type: Option<u8>,
+    pub faction_template: Option<u32>,
     pub interact_radius_override: Option<u32>,
     pub lock_id: Option<u32>,
     pub fishing_hole_max_opens: Option<u32>,
@@ -722,6 +736,7 @@ impl Default for RepresentedGameObjectUseState {
             scale: 1.0,
             rotation: [0.0, 0.0, 0.0, 1.0],
             go_type: None,
+            faction_template: None,
             interact_radius_override: None,
             lock_id: None,
             fishing_hole_max_opens: None,
@@ -1481,6 +1496,7 @@ pub struct WorldSession {
     player_scale_duration_like_cpp: i32,
     /// Represented `UnitData::Flags` for player deltas not yet backed by canonical Unit.
     player_unit_flags_like_cpp: UnitFlags,
+    player_faction_template_like_cpp: Option<u32>,
     /// Represented `UNIT_FLAG_MOUNT` state until UnitData owns live player flags.
     player_mounted_like_cpp: bool,
     /// Represented `pvpInfo.IsHostile` branch for Honorless Target after taxi landing.
@@ -2172,6 +2188,7 @@ impl WorldSession {
             player_object_scale_like_cpp: 1.0,
             player_scale_duration_like_cpp: 0,
             player_unit_flags_like_cpp: UnitFlags::PLAYER_CONTROLLED,
+            player_faction_template_like_cpp: None,
             player_mounted_like_cpp: false,
             player_pvp_hostile_like_cpp: false,
             player_pvp_enabled_like_cpp: false,
@@ -3735,6 +3752,18 @@ impl WorldSession {
             .entry(guid)
             .or_default()
             .lock_id = (lock_id != 0).then_some(lock_id);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_represented_gameobject_faction_template_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        faction_template: u32,
+    ) {
+        self.represented_gameobject_use_states
+            .entry(guid)
+            .or_default()
+            .faction_template = (faction_template != 0).then_some(faction_template);
     }
 
     pub(crate) fn record_represented_gameobject_display_model_like_cpp(
@@ -9582,6 +9611,11 @@ impl WorldSession {
     }
 
     #[cfg(test)]
+    pub(crate) fn set_player_faction_template_like_cpp(&mut self, faction_template: u32) {
+        self.player_faction_template_like_cpp = (faction_template != 0).then_some(faction_template);
+    }
+
+    #[cfg(test)]
     pub(crate) fn set_player_game_master_like_cpp(&mut self, is_game_master: bool) {
         self.player_game_master_like_cpp = is_game_master;
     }
@@ -10082,6 +10116,103 @@ impl WorldSession {
             || gameobject_usable_mounted
     }
 
+    fn faction_template_is_friendly_to_like_cpp(
+        faction: &wow_data::progression_rewards::FactionTemplateEntry,
+        other: &wow_data::progression_rewards::FactionTemplateEntry,
+    ) -> bool {
+        if faction.id == other.id {
+            return true;
+        }
+        if other.faction != 0 {
+            if faction.enemies.contains(&other.faction) {
+                return false;
+            }
+            if faction.friend.contains(&other.faction) {
+                return true;
+            }
+        }
+        (faction.friend_group & other.faction_group) != 0
+            || (faction.faction_group & other.friend_group) != 0
+    }
+
+    fn has_recently_dropped_flag_debuff_like_cpp(&self) -> bool {
+        const SPELL_RECENTLY_DROPPED_ALLIANCE_FLAG: i32 = 42_792;
+        const SPELL_RECENTLY_DROPPED_HORDE_FLAG: i32 = 50_326;
+        const SPELL_RECENTLY_DROPPED_NEUTRAL_FLAG: i32 = 50_327;
+
+        self.visible_auras.values().any(|aura| {
+            matches!(
+                aura.spell_id,
+                SPELL_RECENTLY_DROPPED_ALLIANCE_FLAG
+                    | SPELL_RECENTLY_DROPPED_HORDE_FLAG
+                    | SPELL_RECENTLY_DROPPED_NEUTRAL_FLAG
+            )
+        })
+    }
+
+    pub(crate) fn represented_player_can_use_battleground_object_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    ) -> bool {
+        let gameobject_faction = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .and_then(|state| state.faction_template);
+        if let (Some(player_faction), Some(gameobject_faction), Some(store)) = (
+            self.player_faction_template_like_cpp,
+            gameobject_faction,
+            self.faction_template_store.as_ref(),
+        ) && let (Some(player_entry), Some(gameobject_entry)) =
+            (store.get(player_faction), store.get(gameobject_faction))
+            && !Self::faction_template_is_friendly_to_like_cpp(player_entry, gameobject_entry)
+        {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::UnfriendlyFaction,
+                },
+            );
+            return false;
+        }
+
+        if self.player_unit_flags_like_cpp.contains(UnitFlags::IMMUNE) {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::DamageImmune,
+                },
+            );
+            return false;
+        }
+
+        if self.has_recently_dropped_flag_debuff_like_cpp() {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::RecentlyDroppedFlag,
+                },
+            );
+            return false;
+        }
+
+        if !self.player_alive_like_cpp {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::Dead,
+                },
+            );
+            return false;
+        }
+
+        true
+    }
+
     pub(crate) fn record_represented_gameobject_report_use_ai_like_cpp(
         &mut self,
         gameobject_guid: ObjectGuid,
@@ -10480,6 +10611,12 @@ impl WorldSession {
         player_guid: ObjectGuid,
         source: wow_entities::FlagStandUseSource,
     ) -> bool {
+        if !self
+            .represented_player_can_use_battleground_object_like_cpp(gameobject_guid, player_guid)
+        {
+            return false;
+        }
+
         self.represented_gameobject_use_effects.push(
             RepresentedGameObjectUseEffect::RemoveStealthOrInvisibilityAuras {
                 gameobject_guid,
@@ -10506,6 +10643,12 @@ impl WorldSession {
         gameobject_entry: u32,
         source: wow_entities::FlagDropUseSource,
     ) -> bool {
+        if !self
+            .represented_player_can_use_battleground_object_like_cpp(gameobject_guid, player_guid)
+        {
+            return false;
+        }
+
         let click_target = match gameobject_entry {
             179785 | 179786 => BattlegroundFlagDropClickTarget::WarsongGulch,
             184142 => BattlegroundFlagDropClickTarget::EyeOfTheStorm,
@@ -10603,6 +10746,12 @@ impl WorldSession {
         gameobject_entry: u32,
         source: wow_entities::NewFlagUseSource,
     ) -> bool {
+        if !self
+            .represented_player_can_use_battleground_object_like_cpp(gameobject_guid, player_guid)
+        {
+            return false;
+        }
+
         self.represented_gameobject_use_effects.push(
             RepresentedGameObjectUseEffect::NewFlagPickupRequested {
                 gameobject_guid,
@@ -10638,6 +10787,12 @@ impl WorldSession {
         source: wow_entities::NewFlagDropUseSource,
         owner_return_on_defender_interact: Option<bool>,
     ) -> bool {
+        if !self
+            .represented_player_can_use_battleground_object_like_cpp(gameobject_guid, player_guid)
+        {
+            return false;
+        }
+
         self.represented_gameobject_use_effects.push(
             RepresentedGameObjectUseEffect::NewFlagDropInteracted {
                 gameobject_guid,
@@ -23274,6 +23429,120 @@ mod tests {
         session.set_player_mounted_like_cpp(false);
         session.player_vehicle_seat_flags_like_cpp = Some(0);
         assert!(session.represented_gameobject_use_allowed_by_mover_like_cpp(false));
+    }
+
+    fn faction_template_entry(
+        id: u32,
+        faction: u16,
+        faction_group: u8,
+        friend_group: u8,
+        enemy: u16,
+    ) -> wow_data::progression_rewards::FactionTemplateEntry {
+        let mut enemies = [0; 8];
+        enemies[0] = enemy;
+        wow_data::progression_rewards::FactionTemplateEntry {
+            id,
+            faction,
+            flags: 0,
+            faction_group,
+            friend_group,
+            enemy_group: 0,
+            enemies,
+            friend: [0; 8],
+        }
+    }
+
+    #[test]
+    fn battleground_object_use_guard_matches_cpp_faction_and_player_state() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 39);
+
+        session.set_player_faction_template_like_cpp(1);
+        session.record_represented_gameobject_faction_template_like_cpp(gameobject_guid, 2);
+        session.set_faction_template_store(Arc::new(
+            wow_data::progression_rewards::FactionTemplateStore::from_entries([
+                faction_template_entry(1, 10, 1, 0, 20),
+                faction_template_entry(2, 20, 2, 0, 0),
+            ]),
+        ));
+        assert!(
+            !session.represented_player_can_use_battleground_object_like_cpp(
+                gameobject_guid,
+                player_guid,
+            )
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::UnfriendlyFaction,
+                }
+            ]
+        );
+
+        session.represented_gameobject_use_effects.clear();
+        session.record_represented_gameobject_faction_template_like_cpp(gameobject_guid, 0);
+        session.player_unit_flags_like_cpp.insert(UnitFlags::IMMUNE);
+        assert!(
+            !session.represented_player_can_use_battleground_object_like_cpp(
+                gameobject_guid,
+                player_guid,
+            )
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::DamageImmune,
+                }
+            ]
+        );
+
+        session.represented_gameobject_use_effects.clear();
+        session.player_unit_flags_like_cpp.remove(UnitFlags::IMMUNE);
+        session.apply_aura(50_327, player_guid, 30_000, 0).unwrap();
+        assert!(
+            !session.represented_player_can_use_battleground_object_like_cpp(
+                gameobject_guid,
+                player_guid,
+            )
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects.last(),
+            Some(
+                &RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::RecentlyDroppedFlag,
+                }
+            )
+        );
+
+        session.visible_auras.clear();
+        session.represented_gameobject_use_effects.clear();
+        session.set_player_alive_like_cpp(false);
+        assert!(
+            !session.represented_player_can_use_battleground_object_like_cpp(
+                gameobject_guid,
+                player_guid,
+            )
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::Dead,
+                }
+            ]
+        );
     }
 
     #[test]
