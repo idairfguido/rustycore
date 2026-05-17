@@ -99,9 +99,9 @@ pub use game_object::{
     GAMEOBJECT_TYPE_FLAGDROP, GAMEOBJECT_TYPE_FLAGSTAND, GAMEOBJECT_TYPE_GATHERING_NODE,
     GAMEOBJECT_TYPE_GUILD_BANK, GAMEOBJECT_TYPE_MAILBOX, GAMEOBJECT_TYPE_MAP_OBJECT,
     GAMEOBJECT_TYPE_MINI_GAME, GAMEOBJECT_TYPE_QUESTGIVER, GAMEOBJECT_TYPE_TEXT,
-    GO_DYNFLAG_LO_NO_INTERACT, GameObject, GameObjectDataUpdate, GameObjectDataValues,
-    GameObjectLootSource, GameObjectTemplateData, GameObjectValuesUpdate, GatheringNodeUseSource,
-    GoState, LootState, MAX_GAMEOBJECT_DATA,
+    GAMEOBJECT_TYPE_UI_LINK, GO_DYNFLAG_LO_NO_INTERACT, GameObject, GameObjectDataUpdate,
+    GameObjectDataValues, GameObjectLootSource, GameObjectTemplateData, GameObjectValuesUpdate,
+    GatheringNodeUseSource, GoState, LootState, MAX_GAMEOBJECT_DATA,
 };
 pub use item::{
     APPEARANCE_MODIFIER_SLOT_BY_SPEC, ArtifactPower, BOP_TRADEABLE_DURATION_SECS,

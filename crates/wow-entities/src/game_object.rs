@@ -37,6 +37,7 @@ pub const GAMEOBJECT_TYPE_DESTRUCTIBLE_BUILDING: u32 = 33;
 pub const GAMEOBJECT_TYPE_GUILD_BANK: u32 = 34;
 pub const GAMEOBJECT_TYPE_NEW_FLAG: u32 = 36;
 pub const GAMEOBJECT_TYPE_ITEM_FORGE: u32 = 47;
+pub const GAMEOBJECT_TYPE_UI_LINK: u32 = 48;
 pub const GAMEOBJECT_TYPE_GATHERING_NODE: u32 = 50;
 
 pub const GO_DYNFLAG_LO_NO_INTERACT: u32 = 0x0080;
@@ -236,6 +237,21 @@ impl GameObjectTemplateData {
             _ => return 0,
         };
         self.data[index]
+    }
+
+    pub const fn is_usable_mounted_like_cpp(&self) -> bool {
+        let index = match self.go_type {
+            GAMEOBJECT_TYPE_MAILBOX => return true,
+            GAMEOBJECT_TYPE_BARBER_CHAIR => return false,
+            GAMEOBJECT_TYPE_QUESTGIVER => 8,
+            GAMEOBJECT_TYPE_TEXT => 3,
+            GAMEOBJECT_TYPE_GOOBER => 17,
+            GAMEOBJECT_TYPE_SPELLCASTER => 3,
+            GAMEOBJECT_TYPE_UI_LINK => 1,
+            _ => return false,
+        };
+
+        self.data[index] != 0
     }
 
     pub const fn chest_loot_source_like_cpp(&self) -> Option<GameObjectLootSource> {
@@ -951,6 +967,44 @@ mod tests {
         assert_eq!(
             GameObjectTemplateData::new(GAMEOBJECT_TYPE_MAP_OBJECT, data).get_lock_id_like_cpp(),
             0
+        );
+    }
+
+    #[test]
+    fn gameobject_template_usable_mounted_matches_cpp_switch() {
+        assert!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_MAILBOX, [0; MAX_GAMEOBJECT_DATA])
+                .is_usable_mounted_like_cpp()
+        );
+        assert!(
+            !GameObjectTemplateData::new(GAMEOBJECT_TYPE_BARBER_CHAIR, [1; MAX_GAMEOBJECT_DATA])
+                .is_usable_mounted_like_cpp()
+        );
+
+        let cases = [
+            (GAMEOBJECT_TYPE_QUESTGIVER, 8),
+            (GAMEOBJECT_TYPE_TEXT, 3),
+            (GAMEOBJECT_TYPE_GOOBER, 17),
+            (GAMEOBJECT_TYPE_SPELLCASTER, 3),
+            (GAMEOBJECT_TYPE_UI_LINK, 1),
+        ];
+
+        for (go_type, index) in cases {
+            let mut data = [0; MAX_GAMEOBJECT_DATA];
+            assert!(
+                !GameObjectTemplateData::new(go_type, data).is_usable_mounted_like_cpp(),
+                "type {go_type} should default to not usable mounted"
+            );
+            data[index] = 1;
+            assert!(
+                GameObjectTemplateData::new(go_type, data).is_usable_mounted_like_cpp(),
+                "type {go_type} should read allowMounted from data[{index}]"
+            );
+        }
+
+        assert!(
+            !GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, [1; MAX_GAMEOBJECT_DATA])
+                .is_usable_mounted_like_cpp()
         );
     }
 

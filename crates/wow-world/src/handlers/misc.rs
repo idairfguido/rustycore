@@ -1186,6 +1186,11 @@ impl crate::session::WorldSession {
             );
             return;
         }
+        if !self.represented_gameobject_use_allowed_by_mover_like_cpp(
+            template.is_usable_mounted_like_cpp(),
+        ) {
+            return;
+        }
 
         if let Some(source) = template.chest_loot_source_like_cpp() {
             if source.is_empty() {

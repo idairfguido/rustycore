@@ -9687,6 +9687,22 @@ impl WorldSession {
         self.player_moved_unit_guid_like_cpp = guid;
     }
 
+    pub(crate) fn represented_gameobject_use_allowed_by_mover_like_cpp(
+        &self,
+        gameobject_usable_mounted: bool,
+    ) -> bool {
+        let Some(player_guid) = self.player_guid() else {
+            return false;
+        };
+        if self.player_moved_unit_guid_like_cpp() == player_guid {
+            return true;
+        }
+
+        self.player_vehicle_seat_flags_like_cpp.is_some()
+            || self.player_mounted_like_cpp
+            || gameobject_usable_mounted
+    }
+
     fn send_active_player_transport_server_time_update_like_cpp(&self) {
         let Some(guid) = self.player_guid() else {
             return;
@@ -21401,6 +21417,28 @@ mod tests {
             assert_eq!(entry.status, *status, "{opcode_name} status");
             assert_eq!(entry.processing, *processing, "{opcode_name} processing");
         }
+    }
+
+    #[test]
+    fn gameobject_use_mover_guard_matches_cpp_remote_control_branch() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let controlled_guid =
+            ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 571, 0, 123, 4);
+
+        session.set_player_guid(Some(player_guid));
+        assert!(session.represented_gameobject_use_allowed_by_mover_like_cpp(false));
+
+        session.set_player_moved_unit_guid_like_cpp(controlled_guid);
+        assert!(!session.represented_gameobject_use_allowed_by_mover_like_cpp(false));
+        assert!(session.represented_gameobject_use_allowed_by_mover_like_cpp(true));
+
+        session.set_player_mounted_like_cpp(true);
+        assert!(session.represented_gameobject_use_allowed_by_mover_like_cpp(false));
+
+        session.set_player_mounted_like_cpp(false);
+        session.player_vehicle_seat_flags_like_cpp = Some(0);
+        assert!(session.represented_gameobject_use_allowed_by_mover_like_cpp(false));
     }
 
     #[test]
