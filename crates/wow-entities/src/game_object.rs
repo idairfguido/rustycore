@@ -155,6 +155,13 @@ pub struct TrapUseSource {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ChairUseSource {
+    pub chair_slots: u32,
+    pub chair_height: u32,
+    pub triggered_event_id: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CameraUseSource {
     pub cinematic_id: u32,
     pub event_id: u32,
@@ -327,6 +334,18 @@ impl GameObjectTemplateData {
             spell_id: self.data[3],
             charges: self.data[4],
             cooldown_secs: self.data[5],
+        })
+    }
+
+    pub const fn chair_use_source_like_cpp(&self) -> Option<ChairUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_CHAIR {
+            return None;
+        }
+
+        Some(ChairUseSource {
+            chair_slots: self.data[0],
+            chair_height: self.data[1],
+            triggered_event_id: self.data[3],
         })
     }
 
@@ -1233,6 +1252,27 @@ mod tests {
         );
         assert_eq!(
             GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data).trap_use_source_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn chair_use_source_uses_cpp_data_indices() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[0] = 3;
+        data[1] = 2;
+        data[3] = 77;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHAIR, data).chair_use_source_like_cpp(),
+            Some(ChairUseSource {
+                chair_slots: 3,
+                chair_height: 2,
+                triggered_event_id: 77,
+            })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data).chair_use_source_like_cpp(),
             None
         );
     }

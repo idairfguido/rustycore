@@ -11,7 +11,7 @@ use tracing::{debug, info, warn};
 use wow_constants::{ClientOpcodes, ItemExtendedCostFlags};
 use wow_database::{SqlTransaction, WorldStatements};
 use wow_entities::{
-    GAMEOBJECT_TYPE_BUTTON, GAMEOBJECT_TYPE_CAMERA, GAMEOBJECT_TYPE_DOOR,
+    GAMEOBJECT_TYPE_BUTTON, GAMEOBJECT_TYPE_CAMERA, GAMEOBJECT_TYPE_CHAIR, GAMEOBJECT_TYPE_DOOR,
     GAMEOBJECT_TYPE_FISHING_HOLE, GAMEOBJECT_TYPE_GATHERING_NODE, GAMEOBJECT_TYPE_GOOBER,
     GAMEOBJECT_TYPE_SPELL_FOCUS, GAMEOBJECT_TYPE_TRAP, GameObjectTemplateData, MAX_GAMEOBJECT_DATA,
 };
@@ -1226,6 +1226,25 @@ impl crate::session::WorldSession {
                     self.use_represented_gameobject_trap_like_cpp(
                         gameobject_guid,
                         player_guid,
+                        source,
+                    );
+                }
+                return;
+            }
+            GAMEOBJECT_TYPE_CHAIR => {
+                if let Some(source) = template.chair_use_source_like_cpp() {
+                    let gameobject_size = self
+                        .represented_gameobject_use_states
+                        .get(&gameobject_guid)
+                        .map(|state| state.scale)
+                        .filter(|scale| *scale > 0.0)
+                        .unwrap_or(1.0);
+                    self.use_represented_gameobject_chair_like_cpp(
+                        gameobject_guid,
+                        player_guid,
+                        player_position,
+                        gameobject_access.position,
+                        gameobject_size,
                         source,
                     );
                 }

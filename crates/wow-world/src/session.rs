@@ -183,7 +183,7 @@ pub(crate) struct PlayerSaveToDbSnapshotLikeCpp {
     pub money: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum RepresentedGameObjectUseEffect {
     UseRejectedNoDamageImmune {
         gameobject_guid: ObjectGuid,
@@ -298,6 +298,17 @@ pub(crate) enum RepresentedGameObjectUseEffect {
         loot_state: wow_entities::LootState,
         go_state: Option<wow_entities::GoState>,
     },
+    ChairUsed {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        slot: u32,
+        teleport_position: Position,
+        stand_state: u32,
+    },
+    ChairNoFreeSlot {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    },
     CastSpell {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
@@ -324,6 +335,7 @@ pub(crate) struct RepresentedGameObjectUseState {
     pub per_player_despawn_until: Option<Instant>,
     pub personal_loot_uses: u32,
     pub unique_users: Vec<wow_core::ObjectGuid>,
+    pub chair_slots: Vec<Option<wow_core::ObjectGuid>>,
     pub chest_restock_time_secs: Option<u32>,
     pub chest_consumable: Option<bool>,
     pub chest_personal_loot_id: Option<u32>,
@@ -491,6 +503,7 @@ impl Default for RepresentedGameObjectUseState {
             per_player_despawn_until: None,
             personal_loot_uses: 0,
             unique_users: Vec::new(),
+            chair_slots: Vec::new(),
             chest_restock_time_secs: None,
             chest_consumable: None,
             chest_personal_loot_id: None,
@@ -10032,6 +10045,82 @@ impl WorldSession {
 
         if source.charges == 1 {
             state.loot_state = Some(wow_entities::LootState::JustDeactivated);
+        }
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_chair_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        player_position: Position,
+        gameobject_position: Position,
+        gameobject_size: f32,
+        source: wow_entities::ChairUseSource,
+    ) -> bool {
+        let slot_count = source.chair_slots.max(1).min(5);
+        let state = self
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        if state.chair_slots.is_empty() {
+            state.chair_slots = vec![None; slot_count as usize];
+        }
+
+        let orthogonal_orientation = gameobject_position.orientation + std::f32::consts::PI * 0.5;
+        let mut nearest_slot = None;
+        let mut lowest_dist = f32::MAX;
+        let mut nearest_position = gameobject_position;
+        for slot in 0..state.chair_slots.len() {
+            if state.chair_slots[slot].is_some() {
+                continue;
+            }
+
+            let relative_distance =
+                (gameobject_size * slot as f32) - (gameobject_size * (slot_count - 1) as f32 / 2.0);
+            let candidate = Position::new(
+                gameobject_position.x + relative_distance * orthogonal_orientation.cos(),
+                gameobject_position.y + relative_distance * orthogonal_orientation.sin(),
+                gameobject_position.z,
+                gameobject_position.orientation,
+            );
+            let dist = player_position.distance_2d(&candidate);
+            if dist <= lowest_dist {
+                nearest_slot = Some(slot);
+                lowest_dist = dist;
+                nearest_position = candidate;
+            }
+        }
+
+        let Some(slot) = nearest_slot else {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::ChairNoFreeSlot {
+                    gameobject_guid,
+                    player_guid,
+                },
+            );
+            return false;
+        };
+
+        state.chair_slots[slot] = Some(player_guid);
+        let stand_state = 4_u32.saturating_add(source.chair_height);
+        self.represented_gameobject_use_effects
+            .push(RepresentedGameObjectUseEffect::ChairUsed {
+                gameobject_guid,
+                player_guid,
+                slot: slot as u32,
+                teleport_position: nearest_position,
+                stand_state,
+            });
+        if source.triggered_event_id != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: source.triggered_event_id,
+                },
+            );
         }
 
         true
@@ -22323,6 +22412,98 @@ mod tests {
         assert_eq!(
             session.represented_gameobject_use_effects.last(),
             Some(&RepresentedGameObjectUseEffect::CooldownRejected { gameobject_guid })
+        );
+    }
+
+    #[test]
+    fn gameobject_use_chair_picks_nearest_free_slot_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 17);
+
+        assert!(session.use_represented_gameobject_chair_like_cpp(
+            gameobject_guid,
+            player_guid,
+            Position::new(0.0, 1.8, 0.0, 0.0),
+            Position::ZERO,
+            2.0,
+            wow_entities::ChairUseSource {
+                chair_slots: 3,
+                chair_height: 2,
+                triggered_event_id: 55,
+            },
+        ));
+
+        assert_eq!(session.represented_gameobject_use_effects.len(), 2);
+        match session.represented_gameobject_use_effects[0] {
+            RepresentedGameObjectUseEffect::ChairUsed {
+                gameobject_guid: effect_gameobject_guid,
+                player_guid: effect_player_guid,
+                slot,
+                teleport_position,
+                stand_state,
+            } => {
+                assert_eq!(effect_gameobject_guid, gameobject_guid);
+                assert_eq!(effect_player_guid, player_guid);
+                assert_eq!(slot, 2);
+                assert!((teleport_position.x - 0.0).abs() < 0.001);
+                assert!((teleport_position.y - 2.0).abs() < 0.001);
+                assert!((teleport_position.z - 0.0).abs() < 0.001);
+                assert!((teleport_position.orientation - 0.0).abs() < 0.001);
+                assert_eq!(stand_state, 6);
+            }
+            other => panic!("unexpected chair effect: {other:?}"),
+        }
+        assert_eq!(
+            session.represented_gameobject_use_effects[1],
+            RepresentedGameObjectUseEffect::TriggerGameEvent {
+                gameobject_guid,
+                player_guid,
+                event_id: 55,
+            }
+        );
+        assert_eq!(
+            session
+                .represented_gameobject_use_states
+                .get(&gameobject_guid)
+                .unwrap()
+                .chair_slots[2],
+            Some(player_guid)
+        );
+    }
+
+    #[test]
+    fn gameobject_use_chair_rejects_when_all_represented_slots_are_occupied() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let other_guid = ObjectGuid::create_player(1, 100);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 18);
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .chair_slots = vec![Some(other_guid)];
+
+        assert!(!session.use_represented_gameobject_chair_like_cpp(
+            gameobject_guid,
+            player_guid,
+            Position::ZERO,
+            Position::ZERO,
+            1.0,
+            wow_entities::ChairUseSource {
+                chair_slots: 1,
+                chair_height: 0,
+                triggered_event_id: 0,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::ChairNoFreeSlot {
+                gameobject_guid,
+                player_guid,
+            }]
         );
     }
 
