@@ -408,6 +408,20 @@ pub(crate) enum RepresentedGameObjectUseEffect {
         area_id: u32,
         prevent_unfriendly_outside_instances: bool,
     },
+    GameObjectPostUseSpellMissing {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gameobject_entry: u32,
+        spell_id: u32,
+        go_type: u32,
+    },
+    GameObjectPostUseSpellCast {
+        gameobject_guid: ObjectGuid,
+        target_guid: ObjectGuid,
+        spell_id: u32,
+        triggered: bool,
+        caster: RepresentedGameObjectSpellCaster,
+    },
     FishingNodeOwnerRejected {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
@@ -455,6 +469,12 @@ pub(crate) enum BattlegroundFlagDropClickTarget {
 pub(crate) enum RepresentedNewFlagStateRequest {
     InBase,
     Taken,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepresentedGameObjectSpellCaster {
+    User,
+    GameObject,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -10584,6 +10604,70 @@ impl WorldSession {
             },
         );
 
+        self.apply_represented_gameobject_post_use_spell_like_cpp(
+            gameobject_guid,
+            player_guid,
+            gameobject_entry,
+            wow_entities::GAMEOBJECT_TYPE_MEETINGSTONE,
+            spell_id,
+            false,
+            RepresentedGameObjectSpellCaster::User,
+        );
+
+        true
+    }
+
+    pub(crate) fn apply_represented_gameobject_post_use_spell_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gameobject_entry: u32,
+        go_type: u32,
+        spell_id: u32,
+        triggered: bool,
+        caster: RepresentedGameObjectSpellCaster,
+    ) -> bool {
+        if spell_id == 0 {
+            return false;
+        }
+
+        if self
+            .spell_store()
+            .is_some_and(|store| store.get(spell_id as i32).is_none())
+        {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::GameObjectPostUseSpellMissing {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry,
+                    spell_id,
+                    go_type,
+                },
+            );
+            return false;
+        }
+
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
+                gameobject_guid,
+                target_guid: player_guid,
+                spell_id,
+                triggered,
+                caster,
+            },
+        );
+
+        if go_type == wow_entities::GAMEOBJECT_TYPE_NEW_FLAG
+            && caster == RepresentedGameObjectSpellCaster::GameObject
+        {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::NewFlagOwnerStateRequested {
+                    gameobject_guid,
+                    player_guid,
+                    state: RepresentedNewFlagStateRequest::Taken,
+                },
+            );
+        }
         true
     }
 
@@ -23547,6 +23631,46 @@ mod tests {
                     spell_id: 61994,
                     area_id: 456,
                     prevent_unfriendly_outside_instances: true,
+                },
+                RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
+                    gameobject_guid,
+                    target_guid: player_guid,
+                    spell_id: 61994,
+                    triggered: false,
+                    caster: RepresentedGameObjectSpellCaster::User,
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_post_use_spell_records_missing_spell_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 23);
+        session.set_spell_store(std::sync::Arc::new(wow_data::SpellStore::new()));
+
+        assert!(
+            !session.apply_represented_gameobject_post_use_spell_like_cpp(
+                gameobject_guid,
+                player_guid,
+                194097,
+                wow_entities::GAMEOBJECT_TYPE_MEETINGSTONE,
+                61994,
+                false,
+                RepresentedGameObjectSpellCaster::User,
+            )
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::GameObjectPostUseSpellMissing {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 194097,
+                    spell_id: 61994,
+                    go_type: wow_entities::GAMEOBJECT_TYPE_MEETINGSTONE,
                 }
             ]
         );
