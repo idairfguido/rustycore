@@ -5,6 +5,7 @@
 
 //! Character handlers: enum, create, delete, and player login.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use rand::Rng;
@@ -50,6 +51,7 @@ const GO_SPAWN_PHASE_USE_FLAGS_COLUMN: usize = GO_SPAWN_TEMPLATE_DATA_START + MA
 const GO_SPAWN_PHASE_ID_COLUMN: usize = GO_SPAWN_PHASE_USE_FLAGS_COLUMN + 1;
 const GO_SPAWN_PHASE_GROUP_COLUMN: usize = GO_SPAWN_PHASE_USE_FLAGS_COLUMN + 2;
 const GO_SPAWN_TERRAIN_SWAP_MAP_COLUMN: usize = GO_SPAWN_PHASE_USE_FLAGS_COLUMN + 3;
+const TACT_KEY_TABLE_HASH_LIKE_CPP: u32 = 0xD3F6_1A9E;
 
 inventory::submit! {
     PacketHandlerEntry {
@@ -239,6 +241,15 @@ inventory::submit! {
         status: SessionStatus::LoggedIn,
         processing: PacketProcessing::Inplace,
         handler_name: "handle_query_game_object",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::QueryPageText,
+        status: SessionStatus::LoggedIn,
+        processing: PacketProcessing::Inplace,
+        handler_name: "handle_query_page_text",
     }
 }
 
@@ -1981,10 +1992,17 @@ impl WorldSession {
             // Not found anywhere → send Invalid(3) so the client uses its local DB2 copy.
             // RecordRemoved(2) would tell the client to DELETE the record from its cache,
             // which is wrong for items that exist in the client's DB2 but not on the server.
-            info!(
-                "DbQueryBulk: NOT_FOUND table=0x{:08X} record={} → Invalid(3)",
-                query.table_hash, record_id
-            );
+            if query.table_hash == TACT_KEY_TABLE_HASH_LIKE_CPP {
+                debug!(
+                    "DbQueryBulk: NOT_FOUND TactKey.db2 record={} → Invalid(3), client may use local DB2 cache",
+                    record_id
+                );
+            } else {
+                info!(
+                    "DbQueryBulk: NOT_FOUND table=0x{:08X} record={} → Invalid(3)",
+                    query.table_hash, record_id
+                );
+            }
             self.send_packet(&DBReply::not_found(query.table_hash, *record_id));
         }
     }
@@ -2093,17 +2111,17 @@ impl WorldSession {
             self.send_packet(&LootReleaseAll);
         }
 
+        self.set_player_logout_like_cpp(true);
+
         // Always allow instant logout for now (no combat/duel checks)
         self.send_packet(&LogoutResponse::instant_ok());
 
         // Complete logout immediately
         self.logout_time = None;
 
-        // Persist played time to DB before marking offline
-        self.save_played_time().await;
-
         // Trinity clears buyback slots before SaveToDB; persisted buyback items must not survive logout.
         self.clear_buyback_on_logout().await;
+        self.save_current_player_to_db_like_cpp().await;
         self.save_account_mounts_like_cpp().await;
 
         if let Some(player_guid) = self.player_guid() {
@@ -2135,6 +2153,7 @@ impl WorldSession {
         // connection. If we don't swap back, the next PlayerLogin sends
         // ConnectTo on the dead instance socket → client stuck at 90%.
         self.restore_realm_channels();
+        self.set_player_logout_like_cpp(false);
 
         info!("Player logged out for account {}", self.account_id);
     }
@@ -2148,7 +2167,7 @@ impl WorldSession {
 
     /// Save accumulated played time (`totaltime` + `leveltime`) back to the
     /// characters database.  Called on logout so time is not lost.
-    async fn save_played_time(&self) {
+    pub(crate) async fn save_played_time(&self) {
         let guid = match self.player_guid() {
             Some(g) => g,
             None => return,
@@ -2988,6 +3007,46 @@ impl WorldSession {
     /// on the player's map, builds CreatureCreateData for each, and sends
     /// a batched UpdateObject.
     pub async fn send_nearby_creatures(&mut self, map_id: u16, position: &Position, zone_id: u32) {
+        const VISIBILITY_RANGE: f32 = 800.0;
+
+        let map_creatures = self.visible_world_creatures_from_map_like_cpp(map_id, position);
+        if self.has_world_map_manager_like_cpp() {
+            if map_creatures.is_empty() {
+                self.client_visible_guids_like_cpp
+                    .retain(|guid| !guid.is_any_type_creature());
+                self.last_visibility_pos = Some(*position);
+                return;
+            }
+
+            let mut blocks = Vec::with_capacity(map_creatures.len());
+            let mut visible = HashSet::with_capacity(map_creatures.len());
+            for creature in &map_creatures {
+                let mut create_data = creature.create_data.clone();
+                create_data.health = i64::from(creature.current_hp());
+                create_data.max_health = i64::from(creature.max_hp());
+                create_data.level = creature.level();
+                create_data.zone_id = zone_id;
+                blocks.push(UpdateObject::create_creature_block(
+                    create_data,
+                    &creature.position(),
+                ));
+                visible.insert(creature.guid());
+            }
+
+            self.client_visible_guids_like_cpp
+                .retain(|guid| !guid.is_any_type_creature());
+            self.client_visible_guids_like_cpp.extend(visible);
+            self.last_visibility_pos = Some(*position);
+            self.send_packet(&UpdateObject::create_creatures(blocks, map_id));
+            debug!(
+                "Sent {} map-owned creatures to account {} on map {}",
+                map_creatures.len(),
+                self.account_id,
+                map_id
+            );
+            return;
+        }
+
         let world_db = match self.world_db() {
             Some(db) => Arc::clone(db),
             None => {
@@ -2996,7 +3055,6 @@ impl WorldSession {
             }
         };
 
-        const VISIBILITY_RANGE: f32 = 800.0;
         let x_min = position.x - VISIBILITY_RANGE;
         let x_max = position.x + VISIBILITY_RANGE;
         let y_min = position.y - VISIBILITY_RANGE;
@@ -3030,6 +3088,7 @@ impl WorldSession {
 
         let realm_id = self.realm_id();
         let mut blocks = Vec::new();
+        let mut visible_guids = Vec::new();
         let mut result = result;
 
         loop {
@@ -3068,21 +3127,22 @@ impl WorldSession {
             let template_display_id: u32 =
                 result.try_read::<Option<u32>>(22).flatten().unwrap_or(0);
             let loot_id: u32 = result.try_read::<Option<u32>>(23).flatten().unwrap_or(0);
-            let gold_min: u32 = result.try_read::<Option<u32>>(24).flatten().unwrap_or(0);
-            let gold_max: u32 = result.try_read::<Option<u32>>(25).flatten().unwrap_or(0);
+            let skin_loot_id: u32 = result.try_read::<Option<u32>>(24).flatten().unwrap_or(0);
+            let gold_min: u32 = result.try_read::<Option<u32>>(25).flatten().unwrap_or(0);
+            let gold_max: u32 = result.try_read::<Option<u32>>(26).flatten().unwrap_or(0);
             let phase_use_flags: u8 = result
-                .try_read::<u8>(26)
-                .or_else(|| result.try_read::<i16>(26).map(|value| value.max(0) as u8))
+                .try_read::<u8>(27)
+                .or_else(|| result.try_read::<i16>(27).map(|value| value.max(0) as u8))
                 .unwrap_or(0);
             let phase_id: u16 = result
-                .try_read::<u16>(27)
-                .or_else(|| result.try_read::<i32>(27).map(|value| value.max(0) as u16))
+                .try_read::<u16>(28)
+                .or_else(|| result.try_read::<i32>(28).map(|value| value.max(0) as u16))
                 .unwrap_or(0);
             let phase_group_id: u32 = result
-                .try_read::<u32>(28)
-                .or_else(|| result.try_read::<i32>(28).map(|value| value.max(0) as u32))
+                .try_read::<u32>(29)
+                .or_else(|| result.try_read::<i32>(29).map(|value| value.max(0) as u32))
                 .unwrap_or(0);
-            let terrain_swap_map: i32 = result.try_read(29).unwrap_or(-1);
+            let terrain_swap_map: i32 = result.try_read(30).unwrap_or(-1);
 
             let display_id = if model_id > 0 {
                 model_id
@@ -3152,6 +3212,7 @@ impl WorldSession {
                 create_data.clone(),
                 &creature_pos,
             ));
+            visible_guids.push(guid);
 
             // Register through canonical map state when available; the legacy
             // per-session AI object remains a compatibility facade/cache.
@@ -3166,6 +3227,7 @@ impl WorldSession {
                 max_dmg,
                 aggro_radius,
                 loot_id,
+                skin_loot_id,
                 gold_min,
                 gold_max,
                 None,
@@ -3186,12 +3248,15 @@ impl WorldSession {
         }
 
         let count = blocks.len();
-        // Snapshot visible set from the map-owned creature store.
-        self.visible_creatures = self.world_creature_guids().into_iter().collect();
+        // Mirror C++ Player::m_clientGUIDs semantics: this is the exact set
+        // of creatures sent to this client, not every creature loaded on map.
+        self.client_visible_guids_like_cpp
+            .retain(|guid| !guid.is_any_type_creature());
+        self.client_visible_guids_like_cpp
+            .extend(visible_guids.iter().copied());
         self.last_visibility_pos = Some(*position);
         let update = UpdateObject::create_creatures(blocks, map_id);
         self.send_packet(&update);
-        let visible_guids: Vec<_> = self.visible_creatures.iter().copied().collect();
         let mob_count = visible_guids
             .iter()
             .filter(|g| {
@@ -3199,7 +3264,7 @@ impl WorldSession {
                     .unwrap_or(false)
             })
             .count();
-        let npc_count = self.visible_creatures.len().saturating_sub(mob_count);
+        let npc_count = visible_guids.len().saturating_sub(mob_count);
         debug!(
             "Sent {} creatures ({} mobs / {} npcs) to account {} on map {}",
             count, mob_count, npc_count, self.account_id, map_id
@@ -3240,12 +3305,122 @@ impl WorldSession {
         let y_min = pos.y - RANGE;
         let y_max = pos.y + RANGE;
 
+        let map_creatures = self.visible_world_creatures_from_map_like_cpp(map_id, &pos);
+        let canonical_gameobjects =
+            self.visible_gameobjects_from_canonical_map_like_cpp(map_id, &pos, RANGE);
+        let has_map_visibility_source =
+            self.has_world_map_manager_like_cpp() || canonical_gameobjects.is_some();
+
+        if has_map_visibility_source {
+            let mut new_visible_creatures: HashSet<ObjectGuid> = HashSet::new();
+            let mut new_creature_blocks: Vec<UpdateBlock> = Vec::new();
+            for creature in &map_creatures {
+                let guid = creature.guid();
+                new_visible_creatures.insert(guid);
+                if !self.client_visible_guids_like_cpp.contains(&guid) {
+                    let mut create_data = creature.create_data.clone();
+                    create_data.health = i64::from(creature.current_hp());
+                    create_data.max_health = i64::from(creature.max_hp());
+                    create_data.level = creature.level();
+                    new_creature_blocks.push(UpdateObject::create_creature_block(
+                        create_data,
+                        &creature.position(),
+                    ));
+                }
+            }
+
+            let removed_creatures: Vec<ObjectGuid> = self
+                .client_visible_guids_like_cpp
+                .iter()
+                .filter(|g| g.is_any_type_creature() && !new_visible_creatures.contains(g))
+                .copied()
+                .collect();
+
+            if !new_creature_blocks.is_empty() {
+                debug!(
+                    "Visibility update: {} map-owned creatures",
+                    new_creature_blocks.len()
+                );
+                self.send_packet(&UpdateObject::create_creatures(new_creature_blocks, map_id));
+            }
+            if !removed_creatures.is_empty() {
+                debug!(
+                    "Visibility update: {} map-owned creatures out of range",
+                    removed_creatures.len()
+                );
+                self.send_packet(&UpdateObject::out_of_range_objects(
+                    removed_creatures,
+                    map_id,
+                ));
+            }
+            self.client_visible_guids_like_cpp
+                .retain(|guid| !guid.is_any_type_creature());
+            self.client_visible_guids_like_cpp
+                .extend(new_visible_creatures.iter().copied());
+
+            if let Some(gameobjects) = canonical_gameobjects {
+                let new_visible_gos: HashSet<_> = gameobjects.iter().map(|go| go.guid).collect();
+                let new_go_blocks = gameobjects
+                    .into_iter()
+                    .filter(|go| !self.client_visible_guids_like_cpp.contains(&go.guid))
+                    .map(UpdateObject::create_gameobject_block)
+                    .collect::<Vec<_>>();
+                let removed_gos: Vec<ObjectGuid> = self
+                    .client_visible_guids_like_cpp
+                    .iter()
+                    .filter(|g| g.is_game_object() && !new_visible_gos.contains(g))
+                    .copied()
+                    .collect();
+                for guid in &removed_gos {
+                    self.represented_gameobject_phase_shifts.remove(guid);
+                }
+
+                if !new_go_blocks.is_empty() {
+                    debug!(
+                        "Visibility update: {} canonical game objects",
+                        new_go_blocks.len()
+                    );
+                    self.send_packet(&UpdateObject::create_world_objects(new_go_blocks, map_id));
+                }
+                if !removed_gos.is_empty() {
+                    debug!(
+                        "Visibility update: {} canonical game objects out of range",
+                        removed_gos.len()
+                    );
+                    self.send_packet(&UpdateObject::out_of_range_objects(
+                        removed_gos.clone(),
+                        map_id,
+                    ));
+                }
+                for guid in &removed_gos {
+                    self.client_visible_guids_like_cpp.remove(guid);
+                }
+                self.client_visible_guids_like_cpp
+                    .extend(new_visible_gos.iter().copied());
+            }
+
+            self.last_visibility_pos = Some(pos);
+            debug!(
+                "Visibility updated at ({:.1}, {:.1}): {} creatures / {} GOs in range",
+                pos.x,
+                pos.y,
+                self.client_visible_guids_like_cpp
+                    .iter()
+                    .filter(|guid| guid.is_any_type_creature())
+                    .count(),
+                self.client_visible_guids_like_cpp
+                    .iter()
+                    .filter(|guid| guid.is_game_object())
+                    .count()
+            );
+            return;
+        }
+
         // ── CREATURES ───────────────────────────────────────────────────
         let world_db = match self.world_db() {
             Some(db) => Arc::clone(db),
             None => return,
         };
-
         let mut stmt = world_db.prepare(WorldStatements::SEL_CREATURES_IN_RANGE);
         stmt.set_u16(0, map_id);
         stmt.set_f32(1, x_min);
@@ -3297,21 +3472,22 @@ impl WorldSession {
                 let template_display_id: u32 =
                     cr.try_read::<Option<u32>>(22).flatten().unwrap_or(0);
                 let loot_id: u32 = cr.try_read::<Option<u32>>(23).flatten().unwrap_or(0);
-                let gold_min: u32 = cr.try_read::<Option<u32>>(24).flatten().unwrap_or(0);
-                let gold_max: u32 = cr.try_read::<Option<u32>>(25).flatten().unwrap_or(0);
+                let skin_loot_id: u32 = cr.try_read::<Option<u32>>(24).flatten().unwrap_or(0);
+                let gold_min: u32 = cr.try_read::<Option<u32>>(25).flatten().unwrap_or(0);
+                let gold_max: u32 = cr.try_read::<Option<u32>>(26).flatten().unwrap_or(0);
                 let phase_use_flags: u8 = cr
-                    .try_read::<u8>(26)
-                    .or_else(|| cr.try_read::<i16>(26).map(|value| value.max(0) as u8))
+                    .try_read::<u8>(27)
+                    .or_else(|| cr.try_read::<i16>(27).map(|value| value.max(0) as u8))
                     .unwrap_or(0);
                 let phase_id: u16 = cr
-                    .try_read::<u16>(27)
-                    .or_else(|| cr.try_read::<i32>(27).map(|value| value.max(0) as u16))
+                    .try_read::<u16>(28)
+                    .or_else(|| cr.try_read::<i32>(28).map(|value| value.max(0) as u16))
                     .unwrap_or(0);
                 let phase_group_id: u32 = cr
-                    .try_read::<u32>(28)
-                    .or_else(|| cr.try_read::<i32>(28).map(|value| value.max(0) as u32))
+                    .try_read::<u32>(29)
+                    .or_else(|| cr.try_read::<i32>(29).map(|value| value.max(0) as u32))
                     .unwrap_or(0);
-                let terrain_swap_map: i32 = cr.try_read(29).unwrap_or(-1);
+                let terrain_swap_map: i32 = cr.try_read(30).unwrap_or(-1);
 
                 let display_id = if model_id > 0 {
                     model_id
@@ -3356,7 +3532,7 @@ impl WorldSession {
                 new_visible_creatures.insert(guid);
 
                 // Only create a new block if this creature isn't already visible.
-                if !self.visible_creatures.contains(&guid) {
+                if !self.client_visible_guids_like_cpp.contains(&guid) {
                     let creature_pos = Position::new(pos_x, pos_y, pos_z, orientation);
                     let create_data = CreatureCreateData {
                         guid,
@@ -3396,6 +3572,7 @@ impl WorldSession {
                         max_dmg,
                         aggro_radius,
                         loot_id,
+                        skin_loot_id,
                         gold_min,
                         gold_max,
                         None,
@@ -3415,9 +3592,9 @@ impl WorldSession {
 
         // Creatures that left range → out-of-range
         let removed_creatures: Vec<ObjectGuid> = self
-            .visible_creatures
+            .client_visible_guids_like_cpp
             .iter()
-            .filter(|g| !new_visible_creatures.contains(g))
+            .filter(|g| g.is_any_type_creature() && !new_visible_creatures.contains(g))
             .cloned()
             .collect();
 
@@ -3438,7 +3615,10 @@ impl WorldSession {
                 map_id,
             ));
         }
-        self.visible_creatures = new_visible_creatures;
+        self.client_visible_guids_like_cpp
+            .retain(|guid| !guid.is_any_type_creature());
+        self.client_visible_guids_like_cpp
+            .extend(new_visible_creatures.iter().copied());
 
         // ── GAME OBJECTS ────────────────────────────────────────────────
         let mut go_stmt = world_db.prepare(WorldStatements::SEL_GAMEOBJECTS_IN_RANGE);
@@ -3568,7 +3748,7 @@ impl WorldSession {
                     terrain_swap_map,
                 );
 
-                if !self.visible_gameobjects.contains(&guid) {
+                if !self.client_visible_guids_like_cpp.contains(&guid) {
                     let go_pos = Position::new(pos_x, pos_y, pos_z, orientation);
                     let create_data = GameObjectCreateData {
                         guid,
@@ -3603,6 +3783,7 @@ impl WorldSession {
                         data2
                     };
                     self.record_represented_fishing_hole_max_opens_like_cpp(guid, max_opens);
+                    self.record_represented_fishing_hole_radius_like_cpp(guid, template_data[0]);
                 }
                 self.record_represented_gameobject_interact_radius_override_like_cpp(
                     guid,
@@ -3618,6 +3799,7 @@ impl WorldSession {
                     scale,
                     [rot0, rot1, rot2, rot3],
                 );
+                self.record_represented_gameobject_anim_progress_like_cpp(guid, anim_progress);
 
                 if !go_result.next_row() {
                     break;
@@ -3626,9 +3808,9 @@ impl WorldSession {
         }
 
         let removed_gos: Vec<ObjectGuid> = self
-            .visible_gameobjects
+            .client_visible_guids_like_cpp
             .iter()
-            .filter(|g| !new_visible_gos.contains(g))
+            .filter(|g| g.is_game_object() && !new_visible_gos.contains(g))
             .cloned()
             .collect();
         for guid in &removed_gos {
@@ -3647,9 +3829,16 @@ impl WorldSession {
                 "Visibility update: {} game objects out of range",
                 removed_gos.len()
             );
-            self.send_packet(&UpdateObject::out_of_range_objects(removed_gos, map_id));
+            self.send_packet(&UpdateObject::out_of_range_objects(
+                removed_gos.clone(),
+                map_id,
+            ));
         }
-        self.visible_gameobjects = new_visible_gos;
+        for guid in &removed_gos {
+            self.client_visible_guids_like_cpp.remove(guid);
+        }
+        self.client_visible_guids_like_cpp
+            .extend(new_visible_gos.iter().copied());
 
         // ── Update position marker ──────────────────────────────────────
         self.last_visibility_pos = Some(pos);
@@ -3657,8 +3846,14 @@ impl WorldSession {
             "Visibility updated at ({:.1}, {:.1}): {} creatures / {} GOs in range",
             pos.x,
             pos.y,
-            self.visible_creatures.len(),
-            self.visible_gameobjects.len()
+            self.client_visible_guids_like_cpp
+                .iter()
+                .filter(|guid| guid.is_any_type_creature())
+                .count(),
+            self.client_visible_guids_like_cpp
+                .iter()
+                .filter(|guid| guid.is_game_object())
+                .count()
         );
     }
 
@@ -3897,10 +4092,10 @@ impl WorldSession {
 
         let go_type: i32 = result.try_read(1).unwrap_or(0);
         let display_id: i32 = result.try_read(2).unwrap_or(0);
-        let name: String = result.read_string(3);
+        let mut name: String = result.read_string(3);
         let icon_name: String = result.read_string(4);
-        let cast_bar_caption: String = result.read_string(5);
-        let unk_string: String = result.read_string(6);
+        let mut cast_bar_caption: String = result.read_string(5);
+        let mut unk_string: String = result.read_string(6);
         let size: f32 = result.try_read(7).unwrap_or(1.0);
 
         // Data0..Data34 at columns 8..42, matching C++ MAX_GAMEOBJECT_DATA.
@@ -3909,6 +4104,54 @@ impl WorldSession {
             data[i] = result.try_read(8 + i).unwrap_or(0);
         }
         let content_tuning_id = result.try_read(43).unwrap_or(0);
+
+        let locale = &self.locale;
+        if !locale.is_empty() && locale != "enUS" {
+            let mut loc_stmt = world_db.prepare(WorldStatements::SEL_GAMEOBJECT_TEMPLATE_LOCALE);
+            loc_stmt.set_u32(0, query.game_object_id);
+            loc_stmt.set_string(1, locale);
+            match world_db.query(&loc_stmt).await {
+                Ok(r) if !r.is_empty() => {
+                    let loc_name: String = r.read_string(0);
+                    let loc_cast_bar_caption: String = r.read_string(1);
+                    let loc_unk_string: String = r.read_string(2);
+                    if !loc_name.is_empty() {
+                        name = loc_name;
+                    }
+                    if !loc_cast_bar_caption.is_empty() {
+                        cast_bar_caption = loc_cast_bar_caption;
+                    }
+                    if !loc_unk_string.is_empty() {
+                        unk_string = loc_unk_string;
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => debug!(
+                    "Failed to query gameobject locale {} {}: {e}",
+                    query.game_object_id, locale
+                ),
+            }
+        }
+
+        let mut quest_items = Vec::new();
+        let mut quest_item_stmt = world_db.prepare(WorldStatements::SEL_GAMEOBJECT_QUEST_ITEMS);
+        quest_item_stmt.set_u32(0, query.game_object_id);
+        match world_db.query(&quest_item_stmt).await {
+            Ok(mut quest_item_result) if !quest_item_result.is_empty() => loop {
+                let item_id: i32 = quest_item_result.try_read::<i32>(0).unwrap_or(0);
+                if item_id > 0 {
+                    quest_items.push(item_id);
+                }
+                if !quest_item_result.next_row() {
+                    break;
+                }
+            },
+            Ok(_) => {}
+            Err(e) => debug!(
+                "Failed to query gameobject quest items {}: {e}",
+                query.game_object_id
+            ),
+        }
 
         let mut names: [String; 4] = Default::default();
         names[0] = name;
@@ -3922,7 +4165,7 @@ impl WorldSession {
             display_id,
             data,
             size,
-            quest_items: Vec::new(),
+            quest_items,
             content_tuning_id,
         };
 
@@ -3934,6 +4177,77 @@ impl WorldSession {
         });
     }
 
+    pub async fn handle_query_page_text(&mut self, query: QueryPageText) {
+        let world_db = match self.world_db() {
+            Some(db) => Arc::clone(db),
+            None => {
+                self.send_packet(&QueryPageTextResponse {
+                    page_text_id: query.page_text_id,
+                    allow: false,
+                    pages: Vec::new(),
+                });
+                return;
+            }
+        };
+
+        let mut pages = Vec::new();
+        let mut page_id = query.page_text_id;
+        let mut visited = HashSet::new();
+
+        while page_id != 0 && visited.insert(page_id) && pages.len() < 100 {
+            let mut stmt = world_db.prepare(WorldStatements::SEL_PAGE_TEXT);
+            stmt.set_u32(0, page_id);
+            let result = match world_db.query(&stmt).await {
+                Ok(result) => result,
+                Err(e) => {
+                    debug!("Failed to query page text {page_id}: {e}");
+                    break;
+                }
+            };
+            if result.is_empty() {
+                break;
+            }
+
+            let id: u32 = result.try_read(0).unwrap_or(page_id);
+            let mut text: String = result.read_string(1);
+            let next_page_id: u32 = result.try_read(2).unwrap_or(0);
+            let player_condition_id: i32 = result.try_read(3).unwrap_or(0);
+            let flags: u8 = result.try_read(4).unwrap_or(0);
+
+            let locale = &self.locale;
+            if !locale.is_empty() && locale != "enUS" {
+                let mut loc_stmt = world_db.prepare(WorldStatements::SEL_PAGE_TEXT_LOCALE);
+                loc_stmt.set_u32(0, id);
+                loc_stmt.set_string(1, locale);
+                match world_db.query(&loc_stmt).await {
+                    Ok(locale_result) if !locale_result.is_empty() => {
+                        let locale_text: String = locale_result.read_string(0);
+                        if !locale_text.is_empty() {
+                            text = locale_text;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => debug!("Failed to query page text locale {id} {locale}: {e}"),
+                }
+            }
+
+            pages.push(PageTextInfo {
+                id,
+                next_page_id,
+                player_condition_id,
+                flags,
+                text,
+            });
+            page_id = next_page_id;
+        }
+
+        self.send_packet(&QueryPageTextResponse {
+            page_text_id: query.page_text_id,
+            allow: !pages.is_empty(),
+            pages,
+        });
+    }
+
     /// Send nearby gameobjects to the client as UpdateObject packets.
     pub async fn send_nearby_gameobjects(
         &mut self,
@@ -3941,12 +4255,40 @@ impl WorldSession {
         position: &Position,
         _zone_id: u32,
     ) {
+        const VISIBILITY_RANGE: f32 = 800.0;
+
+        if let Some(gameobjects) =
+            self.visible_gameobjects_from_canonical_map_like_cpp(map_id, position, VISIBILITY_RANGE)
+        {
+            if gameobjects.is_empty() {
+                self.client_visible_guids_like_cpp
+                    .retain(|guid| !guid.is_game_object());
+                return;
+            }
+
+            let go_guids: HashSet<_> = gameobjects.iter().map(|go| go.guid).collect();
+            let blocks = gameobjects
+                .into_iter()
+                .map(UpdateObject::create_gameobject_block)
+                .collect::<Vec<_>>();
+            let count = blocks.len();
+            self.client_visible_guids_like_cpp
+                .retain(|guid| !guid.is_game_object());
+            self.client_visible_guids_like_cpp
+                .extend(go_guids.iter().copied());
+            self.send_packet(&UpdateObject::create_world_objects(blocks, map_id));
+            debug!(
+                "Sent {} canonical gameobjects to account {} on map {}",
+                count, self.account_id, map_id
+            );
+            return;
+        }
+
         let world_db = match self.world_db() {
             Some(db) => Arc::clone(db),
             None => return,
         };
 
-        const VISIBILITY_RANGE: f32 = 800.0;
         let x_min = position.x - VISIBILITY_RANGE;
         let x_max = position.x + VISIBILITY_RANGE;
         let y_min = position.y - VISIBILITY_RANGE;
@@ -4109,6 +4451,7 @@ impl WorldSession {
                     data2
                 };
                 self.record_represented_fishing_hole_max_opens_like_cpp(guid, max_opens);
+                self.record_represented_fishing_hole_radius_like_cpp(guid, template_data[0]);
             }
             self.record_represented_gameobject_interact_radius_override_like_cpp(
                 guid,
@@ -4124,6 +4467,7 @@ impl WorldSession {
                 scale,
                 [rot0, rot1, rot2, rot3],
             );
+            self.record_represented_gameobject_anim_progress_like_cpp(guid, anim_progress);
 
             if !result.next_row() {
                 break;
@@ -4134,7 +4478,10 @@ impl WorldSession {
             return;
         }
 
-        self.visible_gameobjects = go_guids.iter().cloned().collect();
+        self.client_visible_guids_like_cpp
+            .retain(|guid| !guid.is_game_object());
+        self.client_visible_guids_like_cpp
+            .extend(go_guids.iter().copied());
         let count = blocks.len();
         let update = UpdateObject::create_world_objects(blocks, map_id);
         self.send_packet(&update);
@@ -8390,7 +8737,7 @@ impl WorldSession {
         self.login_time = Some(std::time::Instant::now());
         // Clear per-session loot/visibility state for fresh login. Creatures
         // remain map-owned, matching C++ Map ownership.
-        self.visible_creatures.clear();
+        self.client_visible_guids_like_cpp.clear();
         self.loot_table.clear();
         self.set_active_loot_guid(ObjectGuid::EMPTY);
         self.combat_target = None;
@@ -8516,6 +8863,51 @@ mod tests {
                 assert!(id > 0, "Race {race} sex {sex} has zero display ID");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn tact_key_db_query_bulk_miss_returns_invalid_like_cpp_client_cache_fallback() {
+        let (mut session, send_rx) = make_session_with_send_capacity(1);
+
+        session
+            .handle_db_query_bulk(wow_packet::packets::misc::DbQueryBulk {
+                table_hash: TACT_KEY_TABLE_HASH_LIKE_CPP,
+                queries: vec![3909],
+            })
+            .await;
+
+        let bytes = send_rx.try_recv().expect("db reply");
+        assert_eq!(
+            u16::from_le_bytes([bytes[0], bytes[1]]),
+            wow_constants::ServerOpcodes::DbReply as u16
+        );
+        let mut pkt = WorldPacket::from_bytes(&bytes[2..]);
+        assert_eq!(pkt.read_uint32().unwrap(), TACT_KEY_TABLE_HASH_LIKE_CPP);
+        assert_eq!(pkt.read_int32().unwrap(), 3909);
+        let _timestamp = pkt.read_int32().unwrap();
+        assert_eq!(pkt.read_bits(3).unwrap(), 3);
+        assert_eq!(pkt.read_uint32().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn query_page_text_without_world_db_sends_cpp_deny_shape() {
+        let (mut session, send_rx) = make_session_with_send_capacity(1);
+
+        session
+            .handle_query_page_text(QueryPageText {
+                page_text_id: 123,
+                item_guid: ObjectGuid::EMPTY,
+            })
+            .await;
+
+        let bytes = send_rx.try_recv().expect("query page text response");
+        assert_eq!(
+            u16::from_le_bytes([bytes[0], bytes[1]]),
+            wow_constants::ServerOpcodes::QueryPageTextResponse as u16
+        );
+        assert_eq!(&bytes[2..6], &123_u32.to_le_bytes());
+        assert_eq!(bytes[6], 0x00);
+        assert_eq!(bytes.len(), 7);
     }
 
     #[tokio::test]

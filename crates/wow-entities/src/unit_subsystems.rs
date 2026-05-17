@@ -194,6 +194,16 @@ impl AuraSubsystem {
             .is_some_and(|auras| !auras.is_empty())
     }
 
+    pub fn has_aura_type_with_caster_like_cpp(
+        &self,
+        aura_type: i32,
+        caster_guid: ObjectGuid,
+    ) -> bool {
+        self.applied_aura_types
+            .get(&aura_type)
+            .is_some_and(|auras| auras.iter().any(|aura| aura.caster_guid == caster_guid))
+    }
+
     pub fn remove_auras_by_type_like_cpp(&mut self, aura_type: i32) -> Vec<AppliedAuraRef> {
         let removed = self
             .applied_aura_types
@@ -1080,6 +1090,26 @@ impl CombatReferenceState {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CombatBeginContextLikeCpp {
+    pub same_unit: bool,
+    pub attacker_in_world: bool,
+    pub victim_in_world: bool,
+    pub attacker_alive: bool,
+    pub victim_alive: bool,
+    pub same_map: bool,
+    pub same_phase: bool,
+    pub attacker_unit_state: u32,
+    pub victim_unit_state: u32,
+    pub attacker_combat_disallowed: bool,
+    pub victim_combat_disallowed: bool,
+    pub relation_represented: bool,
+    pub attacker_is_friendly_to_victim: bool,
+    pub victim_is_friendly_to_attacker: bool,
+    pub attacker_or_owner_player_is_game_master: bool,
+    pub victim_or_owner_player_is_game_master: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CombatSubsystem {
     pub threat: HashMap<ObjectGuid, f32>,
@@ -1120,6 +1150,48 @@ impl Default for CombatSubsystem {
 }
 
 impl CombatSubsystem {
+    pub fn can_begin_combat_like_cpp(context: CombatBeginContextLikeCpp) -> bool {
+        if context.same_unit {
+            return false;
+        }
+        if !context.attacker_in_world || !context.victim_in_world {
+            return false;
+        }
+        if !context.attacker_alive || !context.victim_alive {
+            return false;
+        }
+        if !context.same_map {
+            return false;
+        }
+        if !context.same_phase {
+            return false;
+        }
+        if context.attacker_unit_state & UnitState::EVADE.bits() != 0
+            || context.victim_unit_state & UnitState::EVADE.bits() != 0
+        {
+            return false;
+        }
+        if context.attacker_unit_state & UnitState::IN_FLIGHT.bits() != 0
+            || context.victim_unit_state & UnitState::IN_FLIGHT.bits() != 0
+        {
+            return false;
+        }
+        if context.attacker_combat_disallowed || context.victim_combat_disallowed {
+            return false;
+        }
+        if context.relation_represented
+            && (context.attacker_is_friendly_to_victim || context.victim_is_friendly_to_attacker)
+        {
+            return false;
+        }
+        if context.attacker_or_owner_player_is_game_master
+            || context.victim_or_owner_player_is_game_master
+        {
+            return false;
+        }
+        true
+    }
+
     pub fn initialize_threat_list_capability(&mut self, can_have_threat_list: bool) {
         self.owner_can_have_threat_list = can_have_threat_list;
     }
@@ -1396,6 +1468,16 @@ impl CombatSubsystem {
         self.pve_refs.contains_key(&target) || self.pvp_refs.contains_key(&target)
     }
 
+    pub fn purge_combat_ref_like_cpp(&mut self, target: ObjectGuid) -> bool {
+        let removed =
+            self.pve_refs.remove(&target).is_some() || self.pvp_refs.remove(&target).is_some();
+        if removed {
+            self.remove_threat(target);
+            self.threatened_by_me.remove(&target);
+        }
+        removed
+    }
+
     pub fn has_pve_combat(&self) -> bool {
         self.pve_refs
             .values()
@@ -1428,6 +1510,34 @@ impl CombatSubsystem {
             self.pvp_refs.remove(guid);
         }
         expired
+    }
+
+    pub fn revalidate_combat_like_cpp(
+        &mut self,
+        mut can_begin_combat: impl FnMut(ObjectGuid, CombatReferenceState) -> bool,
+    ) -> Vec<ObjectGuid> {
+        let mut removed = Vec::new();
+        self.pve_refs.retain(|guid, reference| {
+            if can_begin_combat(*guid, *reference) {
+                true
+            } else {
+                removed.push(*guid);
+                false
+            }
+        });
+        self.pvp_refs.retain(|guid, reference| {
+            if can_begin_combat(*guid, *reference) {
+                true
+            } else {
+                removed.push(*guid);
+                false
+            }
+        });
+        for guid in &removed {
+            self.remove_threat(*guid);
+            self.threatened_by_me.remove(guid);
+        }
+        removed
     }
 
     pub fn end_all_pve_combat(&mut self) {
@@ -4013,6 +4123,125 @@ mod unit_subsystems_tests {
         combat.end_all_pve_combat();
         assert!(!combat.has_pve_combat());
         assert!(!combat.has_combat());
+    }
+
+    #[test]
+    fn combat_can_begin_matches_cpp_guard_order_shape() {
+        let valid = CombatBeginContextLikeCpp {
+            attacker_in_world: true,
+            victim_in_world: true,
+            attacker_alive: true,
+            victim_alive: true,
+            same_map: true,
+            same_phase: true,
+            ..Default::default()
+        };
+
+        assert!(CombatSubsystem::can_begin_combat_like_cpp(valid));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                same_unit: true,
+                ..valid
+            }
+        ));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                attacker_in_world: false,
+                ..valid
+            }
+        ));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                victim_alive: false,
+                ..valid
+            }
+        ));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                same_map: false,
+                ..valid
+            }
+        ));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                same_phase: false,
+                ..valid
+            }
+        ));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                attacker_unit_state: UnitState::EVADE.bits(),
+                ..valid
+            }
+        ));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                victim_unit_state: UnitState::IN_FLIGHT.bits(),
+                ..valid
+            }
+        ));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                attacker_combat_disallowed: true,
+                ..valid
+            }
+        ));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                relation_represented: true,
+                victim_is_friendly_to_attacker: true,
+                ..valid
+            }
+        ));
+        assert!(!CombatSubsystem::can_begin_combat_like_cpp(
+            CombatBeginContextLikeCpp {
+                attacker_or_owner_player_is_game_master: true,
+                ..valid
+            }
+        ));
+    }
+
+    #[test]
+    fn combat_revalidate_removes_invalid_refs_and_related_threat_like_cpp() {
+        let mut combat = CombatSubsystem::default();
+        let valid_pve = guid(42);
+        let invalid_pve = guid(43);
+        let invalid_pvp = guid(44);
+
+        combat.set_in_combat_with(valid_pve, false, false);
+        combat.set_in_combat_with(invalid_pve, false, false);
+        combat.set_in_combat_with(invalid_pvp, true, false);
+        combat.add_threat(valid_pve, 10.0);
+        combat.add_threat(invalid_pve, 20.0);
+        combat.put_threatened_by_me_ref(invalid_pve, ThreatReferenceState::default());
+
+        let removed =
+            combat.revalidate_combat_like_cpp(|guid, _| guid != invalid_pve && guid != invalid_pvp);
+
+        assert_eq!(removed.len(), 2);
+        assert!(removed.contains(&invalid_pve));
+        assert!(removed.contains(&invalid_pvp));
+        assert!(combat.is_in_combat_with(valid_pve));
+        assert!(!combat.is_in_combat_with(invalid_pve));
+        assert!(!combat.is_in_combat_with(invalid_pvp));
+        assert_eq!(combat.threat_value(valid_pve), Some(10.0));
+        assert_eq!(combat.threat_value(invalid_pve), None);
+        assert!(!combat.is_threatening_to(invalid_pve, true));
+    }
+
+    #[test]
+    fn combat_purge_ref_removes_ref_and_related_threat_like_cpp_end_combat_side() {
+        let mut combat = CombatSubsystem::default();
+        let target = guid(45);
+        combat.set_in_combat_with(target, false, false);
+        combat.add_threat(target, 30.0);
+        combat.put_threatened_by_me_ref(target, ThreatReferenceState::default());
+
+        assert!(combat.purge_combat_ref_like_cpp(target));
+        assert!(!combat.is_in_combat_with(target));
+        assert_eq!(combat.threat_value(target), None);
+        assert!(!combat.is_threatening_to(target, true));
+        assert!(!combat.purge_combat_ref_like_cpp(target));
     }
 
     #[test]

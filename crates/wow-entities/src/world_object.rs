@@ -217,6 +217,105 @@ impl UiMapPhaseIdRef {
 const DEFAULT_PHASE: u32 = 169;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SmoothPhasingInfoLikeCpp {
+    pub replace_object: Option<ObjectGuid>,
+    pub replace_active: bool,
+    pub stop_anim_kits: bool,
+    pub disabled: bool,
+}
+
+impl Default for SmoothPhasingInfoLikeCpp {
+    fn default() -> Self {
+        Self {
+            replace_object: None,
+            replace_active: true,
+            stop_anim_kits: true,
+            disabled: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SmoothPhasingStorageLikeCpp {
+    Single(SmoothPhasingInfoLikeCpp),
+    ViewerDependent(BTreeMap<ObjectGuid, SmoothPhasingInfoLikeCpp>),
+}
+
+impl Default for SmoothPhasingStorageLikeCpp {
+    fn default() -> Self {
+        Self::Single(SmoothPhasingInfoLikeCpp::default())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SmoothPhasingLikeCpp {
+    storage: SmoothPhasingStorageLikeCpp,
+}
+
+impl SmoothPhasingLikeCpp {
+    pub fn set_viewer_dependent_info_like_cpp(
+        &mut self,
+        seer: ObjectGuid,
+        info: SmoothPhasingInfoLikeCpp,
+    ) {
+        if !matches!(
+            self.storage,
+            SmoothPhasingStorageLikeCpp::ViewerDependent(_)
+        ) {
+            self.storage = SmoothPhasingStorageLikeCpp::ViewerDependent(BTreeMap::new());
+        }
+
+        if let SmoothPhasingStorageLikeCpp::ViewerDependent(viewer_info) = &mut self.storage {
+            viewer_info.insert(seer, info);
+        }
+    }
+
+    pub fn clear_viewer_dependent_info_like_cpp(&mut self, seer: ObjectGuid) {
+        if let SmoothPhasingStorageLikeCpp::ViewerDependent(viewer_info) = &mut self.storage {
+            viewer_info.remove(&seer);
+        }
+    }
+
+    pub fn set_single_info_like_cpp(&mut self, info: SmoothPhasingInfoLikeCpp) {
+        self.storage = SmoothPhasingStorageLikeCpp::Single(info);
+    }
+
+    pub fn is_replacing_like_cpp(&self, guid: ObjectGuid) -> bool {
+        matches!(
+            self.storage,
+            SmoothPhasingStorageLikeCpp::Single(SmoothPhasingInfoLikeCpp {
+                replace_object: Some(replace_object),
+                ..
+            }) if replace_object == guid
+        )
+    }
+
+    pub fn is_being_replaced_for_seer_like_cpp(&self, seer: ObjectGuid) -> bool {
+        match &self.storage {
+            SmoothPhasingStorageLikeCpp::ViewerDependent(viewer_info) => viewer_info
+                .get(&seer)
+                .is_some_and(|smooth_phasing_info| !smooth_phasing_info.disabled),
+            SmoothPhasingStorageLikeCpp::Single(_) => false,
+        }
+    }
+
+    pub fn info_for_seer_like_cpp(&self, seer: ObjectGuid) -> Option<&SmoothPhasingInfoLikeCpp> {
+        match &self.storage {
+            SmoothPhasingStorageLikeCpp::ViewerDependent(viewer_info) => viewer_info.get(&seer),
+            SmoothPhasingStorageLikeCpp::Single(info) => Some(info),
+        }
+    }
+
+    pub fn disable_replacement_for_seer_like_cpp(&mut self, seer: ObjectGuid) {
+        if let SmoothPhasingStorageLikeCpp::ViewerDependent(viewer_info) = &mut self.storage {
+            if let Some(smooth_phasing_info) = viewer_info.get_mut(&seer) {
+                smooth_phasing_info.disabled = true;
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PhaseRef {
     id: u32,
     flags: PhaseFlags,
@@ -637,6 +736,7 @@ pub struct WorldObject {
     area_id: u32,
     combat_reach: f32,
     current_cell: Option<(u32, u32)>,
+    smooth_phasing: Option<SmoothPhasingLikeCpp>,
 }
 
 impl WorldObject {
@@ -658,6 +758,7 @@ impl WorldObject {
             area_id: 0,
             combat_reach: 0.0,
             current_cell: None,
+            smooth_phasing: None,
         }
     }
 
@@ -776,6 +877,19 @@ impl WorldObject {
 
     pub const fn current_cell(&self) -> Option<(u32, u32)> {
         self.current_cell
+    }
+
+    pub const fn smooth_phasing_like_cpp(&self) -> Option<&SmoothPhasingLikeCpp> {
+        self.smooth_phasing.as_ref()
+    }
+
+    pub fn smooth_phasing_mut_like_cpp(&mut self) -> Option<&mut SmoothPhasingLikeCpp> {
+        self.smooth_phasing.as_mut()
+    }
+
+    pub fn get_or_create_smooth_phasing_like_cpp(&mut self) -> &mut SmoothPhasingLikeCpp {
+        self.smooth_phasing
+            .get_or_insert_with(SmoothPhasingLikeCpp::default)
     }
 
     pub fn set_name(&mut self, name: impl Into<String>) {
@@ -1327,6 +1441,41 @@ mod tests {
         assert_eq!(object.combat_reach(), 0.0);
         assert_eq!(object.static_floor_z(), INVALID_HEIGHT);
         assert_eq!(object.current_cell(), None);
+        assert!(object.smooth_phasing_like_cpp().is_none());
+    }
+
+    #[test]
+    fn smooth_phasing_storage_matches_cpp_single_and_viewer_dependent_shape() {
+        let seer = ObjectGuid::create_player(1, 1);
+        let other_seer = ObjectGuid::create_player(1, 2);
+        let replacement = ObjectGuid::new(1, 3);
+        let mut smooth_phasing = SmoothPhasingLikeCpp::default();
+
+        assert!(smooth_phasing.info_for_seer_like_cpp(seer).is_some());
+        assert!(!smooth_phasing.is_being_replaced_for_seer_like_cpp(seer));
+
+        smooth_phasing.set_single_info_like_cpp(SmoothPhasingInfoLikeCpp {
+            replace_object: Some(replacement),
+            ..SmoothPhasingInfoLikeCpp::default()
+        });
+        assert!(smooth_phasing.is_replacing_like_cpp(replacement));
+        assert!(smooth_phasing.info_for_seer_like_cpp(other_seer).is_some());
+
+        smooth_phasing.set_viewer_dependent_info_like_cpp(
+            seer,
+            SmoothPhasingInfoLikeCpp {
+                replace_object: Some(replacement),
+                ..SmoothPhasingInfoLikeCpp::default()
+            },
+        );
+        assert!(smooth_phasing.is_being_replaced_for_seer_like_cpp(seer));
+        assert!(smooth_phasing.info_for_seer_like_cpp(other_seer).is_none());
+
+        smooth_phasing.disable_replacement_for_seer_like_cpp(seer);
+        assert!(!smooth_phasing.is_being_replaced_for_seer_like_cpp(seer));
+
+        smooth_phasing.clear_viewer_dependent_info_like_cpp(seer);
+        assert!(smooth_phasing.info_for_seer_like_cpp(seer).is_none());
     }
 
     #[test]

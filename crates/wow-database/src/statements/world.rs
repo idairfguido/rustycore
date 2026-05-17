@@ -110,6 +110,14 @@ pub enum WorldStatements {
     SEL_INSTANCE_SPAWN_GROUPS,
     /// Load gameobject template for query response.
     SEL_GAMEOBJECT_TEMPLATE_BY_ENTRY,
+    /// Localized gameobject name/castbar/unk by entry and locale.
+    SEL_GAMEOBJECT_TEMPLATE_LOCALE,
+    /// C++ ObjectMgr gameobject quest item list by entry.
+    SEL_GAMEOBJECT_QUEST_ITEMS,
+    /// Static page text by page ID.
+    SEL_PAGE_TEXT,
+    /// Localized static page text by page ID and locale.
+    SEL_PAGE_TEXT_LOCALE,
     SEL_GAMEOBJECT_TEMPLATE_IDS,
     /// SELECT InventoryType FROM item_template WHERE entry = ?
     SEL_ITEM_INVENTORY_TYPE,
@@ -165,6 +173,8 @@ pub enum WorldStatements {
     SEL_FISHING_LOOT_TEMPLATE_ROWS,
     /// All fishing_loot_template rows for startup loading.
     SEL_FISHING_LOOT_TEMPLATE_ALL_ROWS,
+    /// All C++ ObjectMgr fishing base skill levels by AreaTable ID.
+    SEL_FISHING_BASE_SKILL_LEVELS,
     /// gameobject_loot_template rows for a gameobject loot ID.
     /// Args: gameobject loot ID (u32).
     SEL_GAMEOBJECT_LOOT_TEMPLATE_ROWS,
@@ -446,7 +456,7 @@ impl StatementDef for WorldStatements {
                 "ct.speed_walk, ct.speed_run, ct.scale, ct.unit_class, ",
                 "ct.BaseAttackTime, ct.RangeAttackTime, ",
                 "ctm.CreatureDisplayID, ",
-                "ctdiff.LootID, ctdiff.GoldMin, ctdiff.GoldMax, ",
+                "ctdiff.LootID, ctdiff.SkinLootID, ctdiff.GoldMin, ctdiff.GoldMax, ",
                 "c.phaseUseFlags, c.phaseid, c.phasegroup, c.terrainSwapMap ",
                 "FROM creature c ",
                 "JOIN creature_template ct ON c.id = ct.entry ",
@@ -534,6 +544,18 @@ impl StatementDef for WorldStatements {
                 "Data32, Data33, Data34, ContentTuningId ",
                 "FROM gameobject_template WHERE entry = ?",
             ),
+            Self::SEL_GAMEOBJECT_TEMPLATE_LOCALE => {
+                "SELECT Name, CastBarCaption, Unk1 FROM gameobject_template_locale WHERE entry = ? AND locale = ?"
+            }
+            Self::SEL_GAMEOBJECT_QUEST_ITEMS => {
+                "SELECT ItemId FROM gameobject_questitem WHERE GameObjectEntry = ? ORDER BY Idx ASC"
+            }
+            Self::SEL_PAGE_TEXT => {
+                "SELECT ID, `Text`, NextPageID, PlayerConditionID, Flags FROM page_text WHERE ID = ?"
+            }
+            Self::SEL_PAGE_TEXT_LOCALE => {
+                "SELECT `Text` FROM page_text_locale WHERE ID = ? AND locale = ?"
+            }
             Self::SEL_GAMEOBJECT_TEMPLATE_IDS => "SELECT entry FROM gameobject_template",
             Self::SEL_CREATURE_GOSSIP_MENU => {
                 "SELECT MenuID FROM creature_template_gossip WHERE CreatureID = ?"
@@ -605,6 +627,9 @@ impl StatementDef for WorldStatements {
                 "SELECT Entry, Item, Reference, Chance, QuestRequired, LootMode, GroupId, MinCount, MaxCount ",
                 "FROM fishing_loot_template",
             ),
+            Self::SEL_FISHING_BASE_SKILL_LEVELS => {
+                "SELECT entry, skill FROM skill_fishing_base_level"
+            }
             Self::SEL_GAMEOBJECT_LOOT_TEMPLATE_ROWS => concat!(
                 "SELECT Item, Reference, Chance, QuestRequired, LootMode, GroupId, MinCount, MaxCount ",
                 "FROM gameobject_loot_template WHERE Entry = ?",

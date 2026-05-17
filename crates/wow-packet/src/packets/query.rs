@@ -361,6 +361,70 @@ impl ServerPacket for QueryGameObjectResponse {
     }
 }
 
+// ── CMSG_QUERY_PAGE_TEXT (0x3274) ────────────────────────────────────
+
+/// Client request for static page-text data.
+pub struct QueryPageText {
+    pub page_text_id: u32,
+    pub item_guid: ObjectGuid,
+}
+
+impl ClientPacket for QueryPageText {
+    const OPCODE: ClientOpcodes = ClientOpcodes::QueryPageText;
+
+    fn read(packet: &mut WorldPacket) -> Result<Self, PacketError> {
+        let page_text_id = packet.read_uint32()?;
+        let guid_bytes = packet.read_bytes(16)?;
+        let mut raw = [0_u8; 16];
+        raw.copy_from_slice(&guid_bytes);
+        Ok(Self {
+            page_text_id,
+            item_guid: ObjectGuid::from_raw_bytes(&raw),
+        })
+    }
+}
+
+/// One page in `SMSG_QUERY_PAGE_TEXT_RESPONSE`.
+pub struct PageTextInfo {
+    pub id: u32,
+    pub next_page_id: u32,
+    pub player_condition_id: i32,
+    pub flags: u8,
+    pub text: String,
+}
+
+/// Static page-text response, including linked pages by `NextPageID`.
+pub struct QueryPageTextResponse {
+    pub page_text_id: u32,
+    pub allow: bool,
+    pub pages: Vec<PageTextInfo>,
+}
+
+impl ServerPacket for QueryPageTextResponse {
+    const OPCODE: ServerOpcodes = ServerOpcodes::QueryPageTextResponse;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_uint32(self.page_text_id);
+        pkt.write_bit(self.allow);
+        pkt.flush_bits();
+
+        if !self.allow {
+            return;
+        }
+
+        pkt.write_uint32(self.pages.len() as u32);
+        for page in &self.pages {
+            pkt.write_uint32(page.id);
+            pkt.write_uint32(page.next_page_id);
+            pkt.write_int32(page.player_condition_id);
+            pkt.write_uint8(page.flags);
+            pkt.write_bits(page.text.len() as u32, 12);
+            pkt.flush_bits();
+            pkt.write_string(&page.text);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -450,6 +514,71 @@ mod tests {
         let bytes = resp.to_bytes();
         assert!(bytes.windows(4).any(|w| w == 0x1122_3344i32.to_le_bytes()));
         assert!(bytes.windows(4).any(|w| w == 0x5566_7788i32.to_le_bytes()));
+    }
+
+    #[test]
+    fn query_page_text_reads_cpp_page_id_then_raw_item_guid() {
+        let guid =
+            ObjectGuid::create_world_object(wow_core::guid::HighGuid::Item, 0, 1, 0, 0, 7, 9);
+        let mut data = (ClientOpcodes::QueryPageText as u16).to_le_bytes().to_vec();
+        data.extend_from_slice(&123_u32.to_le_bytes());
+        data.extend_from_slice(&guid.to_raw_bytes());
+        let mut pkt = WorldPacket::from_bytes(&data);
+        pkt.skip_opcode();
+
+        let query = QueryPageText::read(&mut pkt).unwrap();
+        assert_eq!(query.page_text_id, 123);
+        assert_eq!(query.item_guid, guid);
+    }
+
+    #[test]
+    fn query_page_text_response_writes_cpp_allow_false_shape() {
+        let bytes = QueryPageTextResponse {
+            page_text_id: 123,
+            allow: false,
+            pages: Vec::new(),
+        }
+        .to_bytes();
+
+        assert_eq!(
+            bytes[0..2],
+            (ServerOpcodes::QueryPageTextResponse as u16).to_le_bytes()
+        );
+        assert_eq!(&bytes[2..6], &123_u32.to_le_bytes());
+        assert_eq!(bytes[6], 0x00);
+        assert_eq!(bytes.len(), 7);
+    }
+
+    #[test]
+    fn query_page_text_response_writes_pages_like_cpp() {
+        let bytes = QueryPageTextResponse {
+            page_text_id: 123,
+            allow: true,
+            pages: vec![PageTextInfo {
+                id: 123,
+                next_page_id: 124,
+                player_condition_id: -5,
+                flags: 7,
+                text: "abc".to_string(),
+            }],
+        }
+        .to_bytes();
+
+        assert_eq!(
+            bytes[0..2],
+            (ServerOpcodes::QueryPageTextResponse as u16).to_le_bytes()
+        );
+        assert_eq!(&bytes[2..6], &123_u32.to_le_bytes());
+        assert_eq!(bytes[6], 0x80);
+        assert_eq!(&bytes[7..11], &1_u32.to_le_bytes());
+        assert_eq!(&bytes[11..15], &123_u32.to_le_bytes());
+        assert_eq!(&bytes[15..19], &124_u32.to_le_bytes());
+        assert_eq!(&bytes[19..23], &(-5_i32).to_le_bytes());
+        assert_eq!(bytes[23], 7);
+        assert_eq!(bytes[24], 0x00);
+        assert_eq!(bytes[25], 0x30);
+        assert_eq!(&bytes[26..29], b"abc");
+        assert_eq!(bytes.len(), 29);
     }
 
     #[test]

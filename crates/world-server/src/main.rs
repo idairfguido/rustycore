@@ -465,6 +465,11 @@ async fn main() -> Result<()> {
             .await
             .context("Failed to load AreaTable.db2 / hotfix rows")?,
     );
+    let fishing_base_skill_store = Arc::new(
+        wow_data::FishingBaseSkillStoreLikeCpp::load(world_db.as_ref(), &area_table_store)
+            .await
+            .context("Failed to load skill_fishing_base_level")?,
+    );
     let phase_store = Arc::new(
         wow_data::PhaseStore::load_with_hotfixes(&data_dir, &locale, &hotfix_db)
             .await
@@ -775,6 +780,14 @@ async fn main() -> Result<()> {
     let player_condition_store = Arc::new(
         wow_data::PlayerConditionStore::load(&data_dir, &locale)
             .context("Failed to load PlayerCondition.db2 — check DataDir and DBC.Locale config")?,
+    );
+    let content_tuning_store = Arc::new(
+        wow_data::progression_rewards::ContentTuningStore::load(&data_dir, &locale)
+            .context("Failed to load ContentTuning.db2 — check DataDir and DBC.Locale config")?,
+    );
+    info!(
+        "Loaded {} content tuning rows from ContentTuning.db2",
+        content_tuning_store.len()
     );
     let world_state_expression_store = Arc::new(
         wow_data::WorldStateExpressionStore::load(&data_dir, &locale).context(
@@ -1288,6 +1301,7 @@ async fn main() -> Result<()> {
         loot_stores: Some(Arc::clone(&loot_stores)),
         condition_store: Some(Arc::clone(&condition_store)),
         player_condition_store: Some(Arc::clone(&player_condition_store)),
+        content_tuning_store: Some(Arc::clone(&content_tuning_store)),
         disable_mgr: Some(Arc::clone(&disable_mgr)),
         lock_store: Some(Arc::clone(&lock_store)),
         spell_item_enchantment_store: Some(Arc::clone(&spell_item_enchantment_store)),
@@ -1297,6 +1311,7 @@ async fn main() -> Result<()> {
         spell_misc_store: Some(Arc::clone(&spell_misc_store)),
         spell_range_store: Some(Arc::clone(&spell_range_store)),
         area_table_store: Some(Arc::clone(&area_table_store)),
+        fishing_base_skill_store: Some(Arc::clone(&fishing_base_skill_store)),
         area_trigger_store: Some(Arc::clone(&area_trigger_store)),
         chr_specialization_store: Some(Arc::clone(&chr_specialization_store)),
         dungeon_encounter_store: Some(Arc::clone(&dungeon_encounter_store)),
@@ -2153,6 +2168,9 @@ async fn create_session(
     if let Some(ref store) = resources.player_condition_store {
         session.set_player_condition_store(Arc::clone(store));
     }
+    if let Some(ref store) = resources.content_tuning_store {
+        session.set_content_tuning_store(Arc::clone(store));
+    }
     if let Some(ref store) = resources.disable_mgr {
         session.set_disable_mgr(Arc::clone(store));
     }
@@ -2179,6 +2197,9 @@ async fn create_session(
     }
     if let Some(ref store) = resources.area_table_store {
         session.set_area_table_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.fishing_base_skill_store {
+        session.set_fishing_base_skill_store(Arc::clone(store));
     }
     if let Some(ref store) = resources.area_trigger_store {
         session.set_area_trigger_store(Arc::clone(store));

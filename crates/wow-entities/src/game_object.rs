@@ -26,6 +26,7 @@ pub const GAMEOBJECT_TYPE_FISHING_NODE: u32 = 17;
 pub const GAMEOBJECT_TYPE_RITUAL: u32 = 18;
 pub const GAMEOBJECT_TYPE_MAILBOX: u32 = 19;
 pub const GAMEOBJECT_TYPE_SPELLCASTER: u32 = 22;
+pub const GAMEOBJECT_TYPE_MEETINGSTONE: u32 = 23;
 pub const GAMEOBJECT_TYPE_FLAGSTAND: u32 = 24;
 pub const GAMEOBJECT_TYPE_FISHING_HOLE: u32 = 25;
 pub const GAMEOBJECT_TYPE_FLAGDROP: u32 = 26;
@@ -36,7 +37,10 @@ pub const GAMEOBJECT_TYPE_BARBER_CHAIR: u32 = 32;
 pub const GAMEOBJECT_TYPE_DESTRUCTIBLE_BUILDING: u32 = 33;
 pub const GAMEOBJECT_TYPE_GUILD_BANK: u32 = 34;
 pub const GAMEOBJECT_TYPE_NEW_FLAG: u32 = 36;
+pub const GAMEOBJECT_TYPE_NEW_FLAG_DROP: u32 = 37;
+pub const GAMEOBJECT_TYPE_CAPTURE_POINT: u32 = 42;
 pub const GAMEOBJECT_TYPE_ITEM_FORGE: u32 = 47;
+pub const GAMEOBJECT_TYPE_UI_LINK: u32 = 48;
 pub const GAMEOBJECT_TYPE_GATHERING_NODE: u32 = 50;
 
 pub const GO_DYNFLAG_LO_NO_INTERACT: u32 = 0x0080;
@@ -58,6 +62,8 @@ pub const GAMEOBJECT_DATA_GATHERING_NODE_SPELL: usize = 14;
 pub const GAMEOBJECT_DATA_GATHERING_NODE_MAX_LOOTS: usize = 18;
 pub const GAMEOBJECT_DATA_GATHERING_NODE_LINKED_TRAP: usize = 20;
 
+pub const GO_FLAG_IN_USE: u32 = 0x0000_0001;
+pub const GO_FLAG_IN_MULTI_USE: u32 = 0x0020_0000;
 pub const GAME_OBJECT_DATA_PARENT_BIT: usize = 0;
 pub const GAME_OBJECT_DATA_DISPLAY_ID_BIT: usize = 4;
 pub const GAME_OBJECT_DATA_CREATED_BY_BIT: usize = 9;
@@ -145,6 +151,130 @@ pub struct GatheringNodeUseSource {
     pub linked_trap_entry: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TrapUseSource {
+    pub spell_id: u32,
+    pub charges: u32,
+    pub cooldown_secs: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ChairUseSource {
+    pub chair_slots: u32,
+    pub chair_height: u32,
+    pub triggered_event_id: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BarberChairUseSource {
+    pub chair_height: u32,
+    pub sit_anim_kit: u32,
+    pub customization_scope: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct UiLinkUseSource {
+    pub ui_link_type: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ItemForgeUseSource {
+    pub condition_id: u32,
+    pub forge_type: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CapturePointUseSource {
+    pub capture_time_ms: u32,
+    pub world_state_id: u32,
+    pub contested_event_horde: u32,
+    pub contested_event_alliance: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FlagStandUseSource {
+    pub pickup_spell_id: u32,
+    pub return_aura_id: u32,
+    pub return_spell_id: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FlagDropUseSource {
+    pub event_id: u32,
+    pub pickup_spell_id: u32,
+    pub expire_duration_ms: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct NewFlagUseSource {
+    pub pickup_spell_id: u32,
+    pub expire_duration_ms: u32,
+    pub respawn_time_ms: u32,
+    pub flag_drop_entry: u32,
+    pub exclusive_category: i32,
+    pub world_state_id: u32,
+    pub return_on_defender_interact: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct NewFlagDropUseSource {
+    pub spawn_vignette_id: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RitualUseSource {
+    pub casters_required: u32,
+    pub spell_id: u32,
+    pub anim_spell_id: u32,
+    pub persistent: bool,
+    pub caster_target_spell_id: u32,
+    pub caster_target_spell_targets: u32,
+    pub casters_grouped: bool,
+    pub no_target_check: bool,
+    pub allow_unfriendly_cross_faction_party: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MeetingStoneUseSource {
+    pub area_id: u32,
+    pub prevent_unfriendly_outside_instances: bool,
+    pub content_tuning_id: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct QuestgiverUseSource {
+    pub gossip_id: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SpellcasterUseSource {
+    pub spell_id: u32,
+    pub charges: u32,
+    pub party_only: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CameraUseSource {
+    pub cinematic_id: u32,
+    pub event_id: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GooberUseSource {
+    pub lock_id: u32,
+    pub quest_id: u32,
+    pub event_id: u32,
+    pub auto_close_ms: u32,
+    pub custom_anim: u32,
+    pub consumable: bool,
+    pub page_id: u32,
+    pub spell_id: u32,
+    pub linked_trap_entry: u32,
+    pub gossip_id: u32,
+    pub allow_multi_interact: bool,
+    pub player_cast: bool,
+}
+
 impl GameObjectTemplateData {
     pub const fn new(go_type: u32, data: [u32; MAX_GAMEOBJECT_DATA]) -> Self {
         Self { go_type, data }
@@ -205,6 +335,7 @@ impl GameObjectTemplateData {
             GAMEOBJECT_TYPE_RITUAL => 9,
             GAMEOBJECT_TYPE_MAILBOX => 1,
             GAMEOBJECT_TYPE_SPELLCASTER => 8,
+            GAMEOBJECT_TYPE_MEETINGSTONE => 3,
             GAMEOBJECT_TYPE_FLAGSTAND => 13,
             GAMEOBJECT_TYPE_FISHING_HOLE => 5,
             GAMEOBJECT_TYPE_FLAGDROP => 10,
@@ -213,6 +344,8 @@ impl GameObjectTemplateData {
             GAMEOBJECT_TYPE_BARBER_CHAIR => 3,
             GAMEOBJECT_TYPE_DESTRUCTIBLE_BUILDING => 27,
             GAMEOBJECT_TYPE_GUILD_BANK => 1,
+            GAMEOBJECT_TYPE_NEW_FLAG => 14,
+            GAMEOBJECT_TYPE_NEW_FLAG_DROP => 2,
             GAMEOBJECT_TYPE_GATHERING_NODE => 24,
             _ => return 0,
         };
@@ -232,10 +365,273 @@ impl GameObjectTemplateData {
             GAMEOBJECT_TYPE_FLAGSTAND => 0,
             GAMEOBJECT_TYPE_FISHING_HOLE => 4,
             GAMEOBJECT_TYPE_FLAGDROP => 0,
+            GAMEOBJECT_TYPE_NEW_FLAG => 0,
+            GAMEOBJECT_TYPE_NEW_FLAG_DROP => 0,
             GAMEOBJECT_TYPE_GATHERING_NODE => 3,
             _ => return 0,
         };
         self.data[index]
+    }
+
+    pub const fn is_usable_mounted_like_cpp(&self) -> bool {
+        let index = match self.go_type {
+            GAMEOBJECT_TYPE_MAILBOX => return true,
+            GAMEOBJECT_TYPE_BARBER_CHAIR => return false,
+            GAMEOBJECT_TYPE_QUESTGIVER => 8,
+            GAMEOBJECT_TYPE_TEXT => 3,
+            GAMEOBJECT_TYPE_GOOBER => 17,
+            GAMEOBJECT_TYPE_SPELLCASTER => 3,
+            GAMEOBJECT_TYPE_UI_LINK => 1,
+            _ => return false,
+        };
+
+        self.data[index] != 0
+    }
+
+    pub const fn get_no_damage_immune_like_cpp(&self) -> u32 {
+        let index = match self.go_type {
+            GAMEOBJECT_TYPE_DOOR => 3,
+            GAMEOBJECT_TYPE_BUTTON => 4,
+            GAMEOBJECT_TYPE_QUESTGIVER => 5,
+            GAMEOBJECT_TYPE_CHEST => {
+                return if self.data[22] == 0 { 1 } else { 0 };
+            }
+            GAMEOBJECT_TYPE_GOOBER => 11,
+            GAMEOBJECT_TYPE_FLAGSTAND => 5,
+            GAMEOBJECT_TYPE_FLAGDROP => 3,
+            _ => return 0,
+        };
+
+        self.data[index]
+    }
+
+    pub const fn get_cooldown_like_cpp(&self) -> u32 {
+        match self.go_type {
+            GAMEOBJECT_TYPE_TRAP => self.data[5],
+            GAMEOBJECT_TYPE_GOOBER => self.data[6],
+            _ => 0,
+        }
+    }
+
+    pub const fn get_auto_close_time_like_cpp(&self) -> u32 {
+        match self.go_type {
+            GAMEOBJECT_TYPE_DOOR | GAMEOBJECT_TYPE_BUTTON => self.data[2],
+            GAMEOBJECT_TYPE_TRAP => self.data[6],
+            GAMEOBJECT_TYPE_GOOBER => self.data[3],
+            _ => 0,
+        }
+    }
+
+    pub const fn trap_use_source_like_cpp(&self) -> Option<TrapUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_TRAP {
+            return None;
+        }
+
+        Some(TrapUseSource {
+            spell_id: self.data[3],
+            charges: self.data[4],
+            cooldown_secs: self.data[5],
+        })
+    }
+
+    pub const fn chair_use_source_like_cpp(&self) -> Option<ChairUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_CHAIR {
+            return None;
+        }
+
+        Some(ChairUseSource {
+            chair_slots: self.data[0],
+            chair_height: self.data[1],
+            triggered_event_id: self.data[3],
+        })
+    }
+
+    pub const fn barber_chair_use_source_like_cpp(&self) -> Option<BarberChairUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_BARBER_CHAIR {
+            return None;
+        }
+
+        Some(BarberChairUseSource {
+            chair_height: self.data[0],
+            sit_anim_kit: self.data[2],
+            customization_scope: self.data[4],
+        })
+    }
+
+    pub const fn ui_link_use_source_like_cpp(&self) -> Option<UiLinkUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_UI_LINK {
+            return None;
+        }
+
+        Some(UiLinkUseSource {
+            ui_link_type: self.data[0],
+        })
+    }
+
+    pub const fn item_forge_use_source_like_cpp(&self) -> Option<ItemForgeUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_ITEM_FORGE {
+            return None;
+        }
+
+        Some(ItemForgeUseSource {
+            condition_id: self.data[0],
+            forge_type: self.data[5],
+        })
+    }
+
+    pub const fn capture_point_use_source_like_cpp(&self) -> Option<CapturePointUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_CAPTURE_POINT {
+            return None;
+        }
+
+        Some(CapturePointUseSource {
+            capture_time_ms: self.data[0],
+            world_state_id: self.data[10],
+            contested_event_horde: self.data[11],
+            contested_event_alliance: self.data[14],
+        })
+    }
+
+    pub const fn flag_stand_use_source_like_cpp(&self) -> Option<FlagStandUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_FLAGSTAND {
+            return None;
+        }
+
+        Some(FlagStandUseSource {
+            pickup_spell_id: self.data[1],
+            return_aura_id: self.data[3],
+            return_spell_id: self.data[4],
+        })
+    }
+
+    pub const fn flag_drop_use_source_like_cpp(&self) -> Option<FlagDropUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_FLAGDROP {
+            return None;
+        }
+
+        Some(FlagDropUseSource {
+            event_id: self.data[1],
+            pickup_spell_id: self.data[2],
+            expire_duration_ms: self.data[6],
+        })
+    }
+
+    pub const fn questgiver_use_source_like_cpp(&self) -> Option<QuestgiverUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_QUESTGIVER {
+            return None;
+        }
+
+        Some(QuestgiverUseSource {
+            gossip_id: self.data[3],
+        })
+    }
+
+    pub const fn ritual_use_source_like_cpp(&self) -> Option<RitualUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_RITUAL {
+            return None;
+        }
+
+        Some(RitualUseSource {
+            casters_required: self.data[0],
+            spell_id: self.data[1],
+            anim_spell_id: self.data[2],
+            persistent: self.data[3] != 0,
+            caster_target_spell_id: self.data[4],
+            caster_target_spell_targets: self.data[5],
+            casters_grouped: self.data[6] != 0,
+            no_target_check: self.data[7] != 0,
+            allow_unfriendly_cross_faction_party: self.data[10] != 0,
+        })
+    }
+
+    pub const fn meeting_stone_use_source_like_cpp(&self) -> Option<MeetingStoneUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_MEETINGSTONE {
+            return None;
+        }
+
+        Some(MeetingStoneUseSource {
+            area_id: self.data[2],
+            prevent_unfriendly_outside_instances: self.data[4] != 0,
+            content_tuning_id: 0,
+        })
+    }
+
+    pub const fn new_flag_use_source_like_cpp(&self) -> Option<NewFlagUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_NEW_FLAG {
+            return None;
+        }
+
+        Some(NewFlagUseSource {
+            pickup_spell_id: self.data[1],
+            expire_duration_ms: self.data[7],
+            respawn_time_ms: self.data[8],
+            flag_drop_entry: self.data[9],
+            exclusive_category: self.data[10] as i32,
+            world_state_id: self.data[11],
+            return_on_defender_interact: self.data[12] != 0,
+        })
+    }
+
+    pub const fn new_flag_drop_use_source_like_cpp(&self) -> Option<NewFlagDropUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_NEW_FLAG_DROP {
+            return None;
+        }
+
+        Some(NewFlagDropUseSource {
+            spawn_vignette_id: self.data[1],
+        })
+    }
+
+    pub const fn spellcaster_use_source_like_cpp(&self) -> Option<SpellcasterUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_SPELLCASTER {
+            return None;
+        }
+
+        Some(SpellcasterUseSource {
+            spell_id: self.data[0],
+            charges: self.data[1],
+            party_only: self.data[2] != 0,
+        })
+    }
+
+    pub const fn spell_focus_linked_trap_like_cpp(&self) -> u32 {
+        if self.go_type != GAMEOBJECT_TYPE_SPELL_FOCUS {
+            return 0;
+        }
+
+        self.data[2]
+    }
+
+    pub const fn camera_use_source_like_cpp(&self) -> Option<CameraUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_CAMERA {
+            return None;
+        }
+
+        Some(CameraUseSource {
+            cinematic_id: self.data[1],
+            event_id: self.data[2],
+        })
+    }
+
+    pub const fn goober_use_source_like_cpp(&self) -> Option<GooberUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_GOOBER {
+            return None;
+        }
+
+        Some(GooberUseSource {
+            lock_id: self.data[0],
+            quest_id: self.data[1],
+            event_id: self.data[2],
+            auto_close_ms: self.data[3],
+            custom_anim: self.data[4],
+            consumable: self.data[5] != 0,
+            page_id: self.data[7],
+            spell_id: self.data[10],
+            linked_trap_entry: self.data[12],
+            gossip_id: self.data[19],
+            allow_multi_interact: self.data[20] != 0,
+            player_cast: self.data[23] != 0,
+        })
     }
 
     pub const fn chest_loot_source_like_cpp(&self) -> Option<GameObjectLootSource> {
@@ -891,6 +1287,7 @@ mod tests {
             (GAMEOBJECT_TYPE_RITUAL, 9),
             (GAMEOBJECT_TYPE_MAILBOX, 1),
             (GAMEOBJECT_TYPE_SPELLCASTER, 8),
+            (GAMEOBJECT_TYPE_MEETINGSTONE, 3),
             (GAMEOBJECT_TYPE_FLAGSTAND, 13),
             (GAMEOBJECT_TYPE_FISHING_HOLE, 5),
             (GAMEOBJECT_TYPE_FLAGDROP, 10),
@@ -899,6 +1296,8 @@ mod tests {
             (GAMEOBJECT_TYPE_BARBER_CHAIR, 3),
             (GAMEOBJECT_TYPE_DESTRUCTIBLE_BUILDING, 27),
             (GAMEOBJECT_TYPE_GUILD_BANK, 1),
+            (GAMEOBJECT_TYPE_NEW_FLAG, 14),
+            (GAMEOBJECT_TYPE_NEW_FLAG_DROP, 2),
             (GAMEOBJECT_TYPE_GATHERING_NODE, 24),
         ];
 
@@ -934,6 +1333,8 @@ mod tests {
             (GAMEOBJECT_TYPE_FLAGSTAND, 0),
             (GAMEOBJECT_TYPE_FISHING_HOLE, 4),
             (GAMEOBJECT_TYPE_FLAGDROP, 0),
+            (GAMEOBJECT_TYPE_NEW_FLAG, 0),
+            (GAMEOBJECT_TYPE_NEW_FLAG_DROP, 0),
             (GAMEOBJECT_TYPE_GATHERING_NODE, 3),
         ];
 
@@ -951,6 +1352,500 @@ mod tests {
         assert_eq!(
             GameObjectTemplateData::new(GAMEOBJECT_TYPE_MAP_OBJECT, data).get_lock_id_like_cpp(),
             0
+        );
+    }
+
+    #[test]
+    fn gameobject_template_usable_mounted_matches_cpp_switch() {
+        assert!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_MAILBOX, [0; MAX_GAMEOBJECT_DATA])
+                .is_usable_mounted_like_cpp()
+        );
+        assert!(
+            !GameObjectTemplateData::new(GAMEOBJECT_TYPE_BARBER_CHAIR, [1; MAX_GAMEOBJECT_DATA])
+                .is_usable_mounted_like_cpp()
+        );
+
+        let cases = [
+            (GAMEOBJECT_TYPE_QUESTGIVER, 8),
+            (GAMEOBJECT_TYPE_TEXT, 3),
+            (GAMEOBJECT_TYPE_GOOBER, 17),
+            (GAMEOBJECT_TYPE_SPELLCASTER, 3),
+            (GAMEOBJECT_TYPE_UI_LINK, 1),
+        ];
+
+        for (go_type, index) in cases {
+            let mut data = [0; MAX_GAMEOBJECT_DATA];
+            assert!(
+                !GameObjectTemplateData::new(go_type, data).is_usable_mounted_like_cpp(),
+                "type {go_type} should default to not usable mounted"
+            );
+            data[index] = 1;
+            assert!(
+                GameObjectTemplateData::new(go_type, data).is_usable_mounted_like_cpp(),
+                "type {go_type} should read allowMounted from data[{index}]"
+            );
+        }
+
+        assert!(
+            !GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, [1; MAX_GAMEOBJECT_DATA])
+                .is_usable_mounted_like_cpp()
+        );
+    }
+
+    #[test]
+    fn gameobject_template_no_damage_immune_matches_cpp_switch() {
+        let cases = [
+            (GAMEOBJECT_TYPE_DOOR, 3),
+            (GAMEOBJECT_TYPE_BUTTON, 4),
+            (GAMEOBJECT_TYPE_QUESTGIVER, 5),
+            (GAMEOBJECT_TYPE_GOOBER, 11),
+            (GAMEOBJECT_TYPE_FLAGSTAND, 5),
+            (GAMEOBJECT_TYPE_FLAGDROP, 3),
+        ];
+
+        for (go_type, index) in cases {
+            let mut data = [0; MAX_GAMEOBJECT_DATA];
+            assert_eq!(
+                GameObjectTemplateData::new(go_type, data).get_no_damage_immune_like_cpp(),
+                0
+            );
+            data[index] = 7;
+            assert_eq!(
+                GameObjectTemplateData::new(go_type, data).get_no_damage_immune_like_cpp(),
+                7
+            );
+        }
+
+        let mut chest = [0; MAX_GAMEOBJECT_DATA];
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, chest)
+                .get_no_damage_immune_like_cpp(),
+            1
+        );
+        chest[22] = 1;
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, chest)
+                .get_no_damage_immune_like_cpp(),
+            0
+        );
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_TEXT, [1; MAX_GAMEOBJECT_DATA])
+                .get_no_damage_immune_like_cpp(),
+            0
+        );
+    }
+
+    #[test]
+    fn gameobject_template_cooldown_matches_cpp_switch() {
+        let mut trap = [0; MAX_GAMEOBJECT_DATA];
+        trap[5] = 12;
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_TRAP, trap).get_cooldown_like_cpp(),
+            12
+        );
+
+        let mut goober = [0; MAX_GAMEOBJECT_DATA];
+        goober[6] = 34;
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_GOOBER, goober).get_cooldown_like_cpp(),
+            34
+        );
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, [99; MAX_GAMEOBJECT_DATA])
+                .get_cooldown_like_cpp(),
+            0
+        );
+    }
+
+    #[test]
+    fn gameobject_template_auto_close_time_matches_cpp_switch() {
+        let cases = [
+            (GAMEOBJECT_TYPE_DOOR, 2, 11),
+            (GAMEOBJECT_TYPE_BUTTON, 2, 22),
+            (GAMEOBJECT_TYPE_TRAP, 6, 33),
+            (GAMEOBJECT_TYPE_GOOBER, 3, 44),
+        ];
+
+        for (go_type, index, value) in cases {
+            let mut data = [0; MAX_GAMEOBJECT_DATA];
+            data[index] = value;
+            assert_eq!(
+                GameObjectTemplateData::new(go_type, data).get_auto_close_time_like_cpp(),
+                value
+            );
+        }
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, [99; MAX_GAMEOBJECT_DATA])
+                .get_auto_close_time_like_cpp(),
+            0
+        );
+    }
+
+    #[test]
+    fn trap_use_source_uses_cpp_data_indices() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[3] = 123;
+        data[4] = 1;
+        data[5] = 9;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_TRAP, data).trap_use_source_like_cpp(),
+            Some(TrapUseSource {
+                spell_id: 123,
+                charges: 1,
+                cooldown_secs: 9,
+            })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data).trap_use_source_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn chair_use_source_uses_cpp_data_indices() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[0] = 3;
+        data[1] = 2;
+        data[3] = 77;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHAIR, data).chair_use_source_like_cpp(),
+            Some(ChairUseSource {
+                chair_slots: 3,
+                chair_height: 2,
+                triggered_event_id: 77,
+            })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data).chair_use_source_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn barber_chair_use_source_uses_cpp_data_indices() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[0] = 2;
+        data[2] = 345;
+        data[4] = 9;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_BARBER_CHAIR, data)
+                .barber_chair_use_source_like_cpp(),
+            Some(BarberChairUseSource {
+                chair_height: 2,
+                sit_anim_kit: 345,
+                customization_scope: 9,
+            })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHAIR, data)
+                .barber_chair_use_source_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn ui_link_use_source_uses_cpp_data_indices() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[0] = 3;
+        data[6] = 99;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_UI_LINK, data)
+                .ui_link_use_source_like_cpp(),
+            Some(UiLinkUseSource { ui_link_type: 3 })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data).ui_link_use_source_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn item_forge_use_source_uses_cpp_data_indices() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[0] = 77;
+        data[5] = 4;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_ITEM_FORGE, data)
+                .item_forge_use_source_like_cpp(),
+            Some(ItemForgeUseSource {
+                condition_id: 77,
+                forge_type: 4,
+            })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data)
+                .item_forge_use_source_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn capture_point_use_source_uses_cpp_data_indices() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[0] = 60_000;
+        data[10] = 123;
+        data[11] = 456;
+        data[14] = 789;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CAPTURE_POINT, data)
+                .capture_point_use_source_like_cpp(),
+            Some(CapturePointUseSource {
+                capture_time_ms: 60_000,
+                world_state_id: 123,
+                contested_event_horde: 456,
+                contested_event_alliance: 789,
+            })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data)
+                .capture_point_use_source_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn battleground_flag_use_sources_use_cpp_data_indices() {
+        let mut stand = [0; MAX_GAMEOBJECT_DATA];
+        stand[1] = 111;
+        stand[3] = 333;
+        stand[4] = 444;
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_FLAGSTAND, stand)
+                .flag_stand_use_source_like_cpp(),
+            Some(FlagStandUseSource {
+                pickup_spell_id: 111,
+                return_aura_id: 333,
+                return_spell_id: 444,
+            })
+        );
+
+        let mut drop = [0; MAX_GAMEOBJECT_DATA];
+        drop[1] = 222;
+        drop[2] = 333;
+        drop[6] = 666;
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_FLAGDROP, drop)
+                .flag_drop_use_source_like_cpp(),
+            Some(FlagDropUseSource {
+                event_id: 222,
+                pickup_spell_id: 333,
+                expire_duration_ms: 666,
+            })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, drop)
+                .flag_drop_use_source_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn questgiver_use_source_uses_cpp_data_indices() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[3] = 42;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_QUESTGIVER, data)
+                .questgiver_use_source_like_cpp(),
+            Some(QuestgiverUseSource { gossip_id: 42 })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data)
+                .questgiver_use_source_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn ritual_and_meeting_stone_use_sources_use_cpp_data_indices() {
+        let mut ritual = [0; MAX_GAMEOBJECT_DATA];
+        ritual[0] = 3;
+        ritual[1] = 62330;
+        ritual[2] = 111;
+        ritual[3] = 1;
+        ritual[4] = 222;
+        ritual[5] = 2;
+        ritual[6] = 1;
+        ritual[7] = 1;
+        ritual[10] = 1;
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_RITUAL, ritual)
+                .ritual_use_source_like_cpp(),
+            Some(RitualUseSource {
+                casters_required: 3,
+                spell_id: 62330,
+                anim_spell_id: 111,
+                persistent: true,
+                caster_target_spell_id: 222,
+                caster_target_spell_targets: 2,
+                casters_grouped: true,
+                no_target_check: true,
+                allow_unfriendly_cross_faction_party: true,
+            })
+        );
+
+        let mut meeting_stone = [0; MAX_GAMEOBJECT_DATA];
+        meeting_stone[2] = 345;
+        meeting_stone[4] = 1;
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_MEETINGSTONE, meeting_stone)
+                .meeting_stone_use_source_like_cpp(),
+            Some(MeetingStoneUseSource {
+                area_id: 345,
+                prevent_unfriendly_outside_instances: true,
+                content_tuning_id: 0,
+            })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, ritual).ritual_use_source_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn new_flag_use_sources_use_cpp_data_indices() {
+        let mut flag = [0; MAX_GAMEOBJECT_DATA];
+        flag[1] = 111;
+        flag[7] = 777;
+        flag[8] = 888;
+        flag[9] = 999;
+        flag[10] = u32::MAX;
+        flag[11] = 1111;
+        flag[12] = 1;
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_NEW_FLAG, flag)
+                .new_flag_use_source_like_cpp(),
+            Some(NewFlagUseSource {
+                pickup_spell_id: 111,
+                expire_duration_ms: 777,
+                respawn_time_ms: 888,
+                flag_drop_entry: 999,
+                exclusive_category: -1,
+                world_state_id: 1111,
+                return_on_defender_interact: true,
+            })
+        );
+
+        let mut drop = [0; MAX_GAMEOBJECT_DATA];
+        drop[1] = 222;
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_NEW_FLAG_DROP, drop)
+                .new_flag_drop_use_source_like_cpp(),
+            Some(NewFlagDropUseSource {
+                spawn_vignette_id: 222,
+            })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, drop).new_flag_use_source_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn spellcaster_use_source_uses_cpp_data_indices() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[0] = 1234;
+        data[1] = 7;
+        data[2] = 1;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_SPELLCASTER, data)
+                .spellcaster_use_source_like_cpp(),
+            Some(SpellcasterUseSource {
+                spell_id: 1234,
+                charges: 7,
+                party_only: true,
+            })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data)
+                .spellcaster_use_source_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn spell_focus_linked_trap_uses_cpp_data_index() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[2] = 987;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_SPELL_FOCUS, data)
+                .spell_focus_linked_trap_like_cpp(),
+            987
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data)
+                .spell_focus_linked_trap_like_cpp(),
+            0
+        );
+    }
+
+    #[test]
+    fn camera_use_source_uses_cpp_data_indices() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[1] = 1234;
+        data[2] = 55;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CAMERA, data).camera_use_source_like_cpp(),
+            Some(CameraUseSource {
+                cinematic_id: 1234,
+                event_id: 55,
+            })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data).camera_use_source_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn goober_use_source_uses_cpp_data_indices() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[0] = 99;
+        data[1] = 101;
+        data[2] = 202;
+        data[3] = 303;
+        data[4] = 4;
+        data[5] = 1;
+        data[7] = 707;
+        data[10] = 1010;
+        data[12] = 1212;
+        data[19] = 1919;
+        data[20] = 1;
+        data[23] = 1;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_GOOBER, data).goober_use_source_like_cpp(),
+            Some(GooberUseSource {
+                lock_id: 99,
+                quest_id: 101,
+                event_id: 202,
+                auto_close_ms: 303,
+                custom_anim: 4,
+                consumable: true,
+                page_id: 707,
+                spell_id: 1010,
+                linked_trap_entry: 1212,
+                gossip_id: 1919,
+                allow_multi_interact: true,
+                player_cast: true,
+            })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data).goober_use_source_like_cpp(),
+            None
         );
     }
 

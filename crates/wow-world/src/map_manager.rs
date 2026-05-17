@@ -831,6 +831,10 @@ impl WorldCreature {
         self.creature.ai_ownership().loot_id
     }
 
+    pub fn skin_loot_id(&self) -> u32 {
+        self.creature.ai_ownership().skin_loot_id
+    }
+
     pub fn gold_min(&self) -> u32 {
         self.creature.ai_ownership().gold_min
     }
@@ -900,6 +904,25 @@ impl WorldCreature {
 
     pub fn take_damage(&mut self, damage: u32) -> bool {
         self.creature.take_ai_damage(damage, self.now_ms())
+    }
+
+    pub fn take_damage_before_death_state_like_cpp(&mut self, damage: u32) -> bool {
+        self.creature
+            .apply_ai_damage_before_death_state_like_cpp(damage, self.now_ms())
+    }
+
+    pub fn complete_death_state_after_kill_hooks_like_cpp(&mut self) {
+        self.creature
+            .complete_ai_death_state_after_kill_hooks_like_cpp(self.now_ms());
+    }
+
+    pub fn apply_corpse_loot_flags_after_death_state_like_cpp(
+        &mut self,
+        lootable: bool,
+        can_skin: bool,
+    ) {
+        self.creature
+            .apply_corpse_loot_flags_after_death_state_like_cpp(lootable, can_skin);
     }
 
     pub fn die(&mut self) {

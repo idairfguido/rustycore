@@ -1,4 +1,6 @@
-use wow_constants::{DeathState, PowerType, TypeId, TypeMask, UnitState, WeaponAttackType};
+use wow_constants::{
+    DeathState, PowerType, TypeId, TypeMask, UnitDynFlags, UnitFlags, UnitState, WeaponAttackType,
+};
 use wow_core::{ObjectGuid, Position};
 
 use crate::{BASE_MAXDAMAGE, BASE_MINDAMAGE, Unit};
@@ -76,6 +78,7 @@ pub struct CreatureAiOwnershipState {
     pub min_damage: u32,
     pub max_damage: u32,
     pub loot_id: u32,
+    pub skin_loot_id: u32,
     pub gold_min: u32,
     pub gold_max: u32,
     pub boss_id: Option<u32>,
@@ -112,6 +115,7 @@ impl Default for CreatureAiOwnershipState {
             min_damage: BASE_MINDAMAGE as u32,
             max_damage: BASE_MAXDAMAGE as u32,
             loot_id: 0,
+            skin_loot_id: 0,
             gold_min: 0,
             gold_max: 0,
             boss_id: None,
@@ -605,6 +609,8 @@ pub struct Creature {
     runtime_state: CreatureRuntimeState,
     ai_ownership: CreatureAiOwnershipState,
     tap_list: Vec<ObjectGuid>,
+    attack_reputation_faction_id: Option<u32>,
+    is_contested_guard_faction: bool,
 }
 
 impl Creature {
@@ -664,6 +670,8 @@ impl Creature {
             runtime_state: CreatureRuntimeState::default(),
             ai_ownership: CreatureAiOwnershipState::default(),
             tap_list: Vec::new(),
+            attack_reputation_faction_id: None,
+            is_contested_guard_faction: false,
         }
     }
 
@@ -970,6 +978,19 @@ impl Creature {
 
     /// Apply damage and return `true` when this call killed the creature.
     pub fn take_ai_damage(&mut self, damage: u32, now_ms: u64) -> bool {
+        if self.apply_ai_damage_before_death_state_like_cpp(damage, now_ms) {
+            self.mark_ai_dead(now_ms);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn apply_ai_damage_before_death_state_like_cpp(
+        &mut self,
+        damage: u32,
+        now_ms: u64,
+    ) -> bool {
         if !self.ai_is_alive() {
             return false;
         }
@@ -978,7 +999,12 @@ impl Creature {
         self.unit.set_health(remaining);
         self.last_damaged_time = now_ms.min(i64::MAX as u64) as i64;
         if remaining == 0 {
-            self.mark_ai_dead(now_ms);
+            self.ai_ownership.state = CreatureAiState::Dead;
+            self.ai_ownership.combat_target = None;
+            self.ai_ownership.move_target = None;
+            self.ai_ownership.death_time_ms = Some(now_ms);
+            self.respawn_delay =
+                self.ai_ownership.respawn_time_secs.min(u64::from(u32::MAX)) as u32;
             true
         } else {
             false
@@ -990,9 +1016,40 @@ impl Creature {
         self.ai_ownership.combat_target = None;
         self.ai_ownership.move_target = None;
         self.ai_ownership.death_time_ms = Some(now_ms);
-        self.unit.set_attacking(None);
-        self.unit.set_death_state(DeathState::Corpse);
         self.unit.set_health(0);
+        self.respawn_delay = self.ai_ownership.respawn_time_secs.min(u64::from(u32::MAX)) as u32;
+        self.set_death_state_runtime(DeathState::JustDied, now_ms.min(i64::MAX as u64) as i64);
+        self.unit.set_health(0);
+    }
+
+    pub fn complete_ai_death_state_after_kill_hooks_like_cpp(&mut self, now_ms: u64) {
+        if self.ai_ownership.state != CreatureAiState::Dead || self.unit.is_dead() {
+            return;
+        }
+        self.set_death_state_runtime(DeathState::JustDied, now_ms.min(i64::MAX as u64) as i64);
+        self.unit.set_health(0);
+    }
+
+    pub fn apply_corpse_loot_flags_after_death_state_like_cpp(
+        &mut self,
+        lootable: bool,
+        can_skin: bool,
+    ) {
+        if lootable {
+            self.unit
+                .world_mut()
+                .object_mut()
+                .set_dynamic_flag(UnitDynFlags::Lootable as u32);
+        }
+        if can_skin {
+            self.unit
+                .world_mut()
+                .object_mut()
+                .set_dynamic_flag(UnitDynFlags::CanSkin as u32);
+            let mut flags = self.unit.unit_flags_like_cpp();
+            flags.insert(UnitFlags::SKINNABLE);
+            self.unit.set_unit_flags_like_cpp(flags);
+        }
     }
 
     pub fn respawn_ai(&mut self, now_ms: u64) {
@@ -1449,6 +1506,22 @@ impl Creature {
     pub fn set_faction(&mut self, faction: u32) {
         self.ai_ownership.faction = faction;
         self.unit.set_faction(faction);
+    }
+
+    pub const fn attack_reputation_faction_id_like_cpp(&self) -> Option<u32> {
+        self.attack_reputation_faction_id
+    }
+
+    pub fn set_attack_reputation_faction_id_like_cpp(&mut self, faction_id: Option<u32>) {
+        self.attack_reputation_faction_id = faction_id;
+    }
+
+    pub const fn is_contested_guard_like_cpp(&self) -> bool {
+        self.is_contested_guard_faction
+    }
+
+    pub fn set_contested_guard_like_cpp(&mut self, contested_guard: bool) {
+        self.is_contested_guard_faction = contested_guard;
     }
 
     pub const fn runtime_state(&self) -> &CreatureRuntimeState {
@@ -2072,8 +2145,71 @@ mod tests {
         assert_eq!(creature.unit().death_state(), DeathState::Corpse);
         assert_eq!(creature.ai_state(), CreatureAiState::Dead);
         assert_eq!(creature.ai_ownership().death_time_ms, Some(20));
+        assert_eq!(
+            creature.corpse_remove_time(),
+            20 + i64::from(DEFAULT_CORPSE_DELAY_SECS)
+        );
+        assert_eq!(creature.respawn_time(), 20 + 30);
+        assert!(creature.runtime_state().save_respawn_requested);
         assert!(!creature.should_ai_respawn(29_999));
         assert!(creature.should_ai_respawn(30_020));
+    }
+
+    #[test]
+    fn creature_ai_lethal_damage_can_defer_death_state_until_kill_hooks_like_cpp() {
+        let mut creature = Creature::new(false);
+        creature.unit_mut().set_max_health(40);
+        creature.unit_mut().set_health(40);
+        creature.ai_ownership_mut().respawn_time_secs = 30;
+
+        assert!(creature.apply_ai_damage_before_death_state_like_cpp(100, 20));
+        assert_eq!(creature.current_health(), 0);
+        assert_eq!(creature.ai_state(), CreatureAiState::Dead);
+        assert_eq!(creature.ai_ownership().death_time_ms, Some(20));
+        assert_eq!(creature.unit().death_state(), DeathState::Alive);
+        assert_eq!(creature.corpse_remove_time(), 0);
+        assert!(!creature.runtime_state().save_respawn_requested);
+
+        creature.complete_ai_death_state_after_kill_hooks_like_cpp(20);
+        assert_eq!(creature.unit().death_state(), DeathState::Corpse);
+        assert_eq!(
+            creature.corpse_remove_time(),
+            20 + i64::from(DEFAULT_CORPSE_DELAY_SECS)
+        );
+        assert_eq!(creature.respawn_time(), 20 + 30);
+        assert!(creature.runtime_state().save_respawn_requested);
+    }
+
+    #[test]
+    fn creature_corpse_loot_flags_apply_after_death_state_like_cpp() {
+        let mut creature = Creature::new(false);
+        creature.unit_mut().set_max_health(40);
+        creature.unit_mut().set_health(40);
+        creature.apply_ai_damage_before_death_state_like_cpp(100, 20);
+        creature.complete_ai_death_state_after_kill_hooks_like_cpp(20);
+
+        creature.apply_corpse_loot_flags_after_death_state_like_cpp(true, true);
+
+        assert!(
+            creature
+                .unit()
+                .world()
+                .object()
+                .has_dynamic_flag(UnitDynFlags::Lootable as u32)
+        );
+        assert!(
+            creature
+                .unit()
+                .world()
+                .object()
+                .has_dynamic_flag(UnitDynFlags::CanSkin as u32)
+        );
+        assert!(
+            creature
+                .unit()
+                .unit_flags_like_cpp()
+                .contains(UnitFlags::SKINNABLE)
+        );
     }
 
     #[test]

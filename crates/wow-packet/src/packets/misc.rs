@@ -84,6 +84,126 @@ impl ServerPacket for TutorialFlags {
     }
 }
 
+// ── FishNotHooked (SMSG 0x26cf) ─────────────────────────────────────
+
+/// Empty packet sent when a fishing bobber is clicked before a fish is hooked.
+pub struct FishNotHooked;
+
+impl ServerPacket for FishNotHooked {
+    const OPCODE: ServerOpcodes = ServerOpcodes::FishNotHooked;
+
+    fn write(&self, _pkt: &mut WorldPacket) {}
+}
+
+// ── EnableBarberShop (SMSG 0x26bc) ──────────────────────────────────
+
+/// Opens the barber shop/customization UI for the requested customization scope.
+pub struct EnableBarberShop {
+    pub customization_scope: u8,
+}
+
+impl ServerPacket for EnableBarberShop {
+    const OPCODE: ServerOpcodes = ServerOpcodes::EnableBarberShop;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_uint8(self.customization_scope);
+    }
+}
+
+// ── GameObjectInteraction (SMSG 0x288b) ─────────────────────────────
+
+/// Opens a gameobject-backed interaction UI.
+pub struct GameObjectInteraction {
+    pub object_guid: ObjectGuid,
+    pub interaction_type: i32,
+}
+
+impl ServerPacket for GameObjectInteraction {
+    const OPCODE: ServerOpcodes = ServerOpcodes::GameObjectInteraction;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        for byte in self.object_guid.to_raw_bytes() {
+            pkt.write_uint8(byte);
+        }
+        pkt.write_int32(self.interaction_type);
+    }
+}
+
+// ── GameObjectCustomAnim (SMSG 0x25c4) ───────────────────────────────
+
+/// Broadcasts a custom animation for a gameobject.
+pub struct GameObjectCustomAnim {
+    pub object_guid: ObjectGuid,
+    pub custom_anim: u32,
+    pub play_as_despawn: bool,
+}
+
+impl ServerPacket for GameObjectCustomAnim {
+    const OPCODE: ServerOpcodes = ServerOpcodes::GameObjectCustomAnim;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        for byte in self.object_guid.to_raw_bytes() {
+            pkt.write_uint8(byte);
+        }
+        pkt.write_uint32(self.custom_anim);
+        pkt.write_bit(self.play_as_despawn);
+        pkt.flush_bits();
+    }
+}
+
+// ── GameObjectDespawn (SMSG 0x25c5) ─────────────────────────────────
+
+/// Notifies the client that a gameobject despawned.
+pub struct GameObjectDespawn {
+    pub object_guid: ObjectGuid,
+}
+
+impl ServerPacket for GameObjectDespawn {
+    const OPCODE: ServerOpcodes = ServerOpcodes::GameObjectDespawn;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        for byte in self.object_guid.to_raw_bytes() {
+            pkt.write_uint8(byte);
+        }
+    }
+}
+
+// ── PageText (SMSG 0x2719) ───────────────────────────────────────────
+
+/// Opens a page-text object; the client queries the page contents separately.
+pub struct PageText {
+    pub gameobject_guid: ObjectGuid,
+}
+
+impl ServerPacket for PageText {
+    const OPCODE: ServerOpcodes = ServerOpcodes::PageText;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        for byte in self.gameobject_guid.to_raw_bytes() {
+            pkt.write_uint8(byte);
+        }
+    }
+}
+
+// ── TriggerCinematic (SMSG 0x27ca) ──────────────────────────────────
+
+/// Starts a cinematic sequence for the player.
+pub struct TriggerCinematic {
+    pub cinematic_id: u32,
+    pub conversation_guid: ObjectGuid,
+}
+
+impl ServerPacket for TriggerCinematic {
+    const OPCODE: ServerOpcodes = ServerOpcodes::TriggerCinematic;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_uint32(self.cinematic_id);
+        for byte in self.conversation_guid.to_raw_bytes() {
+            pkt.write_uint8(byte);
+        }
+    }
+}
+
 // ── FeatureSystemStatus (SMSG 0x25bf) — IN-GAME version ─────────────
 
 /// Feature system status sent AFTER entering the world.
@@ -2438,6 +2558,83 @@ impl ServerPacket for MailQueryNextTimeResult {
     }
 }
 
+// ── RatedPvpInfo ─────────────────────────────────────────────────────────────
+
+/// C++ `WorldPackets::Battleground::RatedPvpInfo`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RatedPvpBracketInfo {
+    pub personal_rating: i32,
+    pub ranking: i32,
+    pub season_played: i32,
+    pub season_won: i32,
+    pub unused1: i32,
+    pub unused2: i32,
+    pub weekly_played: i32,
+    pub weekly_won: i32,
+    pub rounds_season_played: i32,
+    pub rounds_season_won: i32,
+    pub rounds_weekly_played: i32,
+    pub rounds_weekly_won: i32,
+    pub best_weekly_rating: i32,
+    pub last_weeks_best_rating: i32,
+    pub best_season_rating: i32,
+    pub pvp_tier_id: i32,
+    pub unused3: i32,
+    pub unused4: i32,
+    pub rank: i32,
+    pub disqualified: bool,
+}
+
+impl RatedPvpBracketInfo {
+    fn write_like_cpp(&self, pkt: &mut WorldPacket) {
+        pkt.write_int32(self.personal_rating);
+        pkt.write_int32(self.ranking);
+        pkt.write_int32(self.season_played);
+        pkt.write_int32(self.season_won);
+        pkt.write_int32(self.unused1);
+        pkt.write_int32(self.unused2);
+        pkt.write_int32(self.weekly_played);
+        pkt.write_int32(self.weekly_won);
+        pkt.write_int32(self.rounds_season_played);
+        pkt.write_int32(self.rounds_season_won);
+        pkt.write_int32(self.rounds_weekly_played);
+        pkt.write_int32(self.rounds_weekly_won);
+        pkt.write_int32(self.best_weekly_rating);
+        pkt.write_int32(self.last_weeks_best_rating);
+        pkt.write_int32(self.best_season_rating);
+        pkt.write_int32(self.pvp_tier_id);
+        pkt.write_int32(self.unused3);
+        pkt.write_int32(self.unused4);
+        pkt.write_int32(self.rank);
+        pkt.write_bit(self.disqualified);
+        pkt.flush_bits();
+    }
+}
+
+pub const RATED_PVP_BRACKET_COUNT_LIKE_CPP: usize = 7;
+
+pub struct RatedPvpInfo {
+    pub brackets: [RatedPvpBracketInfo; RATED_PVP_BRACKET_COUNT_LIKE_CPP],
+}
+
+impl Default for RatedPvpInfo {
+    fn default() -> Self {
+        Self {
+            brackets: [RatedPvpBracketInfo::default(); RATED_PVP_BRACKET_COUNT_LIKE_CPP],
+        }
+    }
+}
+
+impl ServerPacket for RatedPvpInfo {
+    const OPCODE: ServerOpcodes = ServerOpcodes::RatedPvpInfo;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        for bracket in &self.brackets {
+            bracket.write_like_cpp(pkt);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2456,6 +2653,27 @@ mod tests {
         let pkt = AccountDataTimes::for_player(guid);
         let bytes = pkt.to_bytes();
         assert!(bytes.len() > 76); // Bigger than empty GUID version
+    }
+
+    #[test]
+    fn rated_pvp_info_empty_matches_cpp_default_shape() {
+        let bytes = RatedPvpInfo::default().to_bytes();
+        assert_eq!(
+            u16::from_le_bytes([bytes[0], bytes[1]]),
+            ServerOpcodes::RatedPvpInfo as u16
+        );
+        assert_eq!(
+            bytes.len(),
+            2 + RATED_PVP_BRACKET_COUNT_LIKE_CPP * (19 * 4 + 1)
+        );
+
+        let mut pkt = WorldPacket::from_bytes(&bytes[2..]);
+        for _ in 0..RATED_PVP_BRACKET_COUNT_LIKE_CPP {
+            for _ in 0..19 {
+                assert_eq!(pkt.read_int32().unwrap(), 0);
+            }
+            assert!(!pkt.has_bit().unwrap());
+        }
     }
 
     #[test]
@@ -3306,6 +3524,142 @@ mod tests {
         // Mask = 0x5E for warrior (Cloth+Leather+Mail+Plate+Shield)
         let mask = u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]);
         assert_eq!(mask, 0x5E);
+    }
+
+    #[test]
+    fn fish_not_hooked_is_empty_server_packet_like_cpp() {
+        let bytes = FishNotHooked.to_bytes();
+        assert_eq!(bytes, (ServerOpcodes::FishNotHooked as u16).to_le_bytes());
+    }
+
+    #[test]
+    fn enable_barber_shop_writes_customization_scope_like_cpp() {
+        let bytes = EnableBarberShop {
+            customization_scope: 7,
+        }
+        .to_bytes();
+        assert_eq!(
+            bytes[0..2],
+            (ServerOpcodes::EnableBarberShop as u16).to_le_bytes()
+        );
+        assert_eq!(bytes[2], 7);
+        assert_eq!(bytes.len(), 3);
+    }
+
+    #[test]
+    fn gameobject_interaction_writes_raw_guid_and_interaction_type_like_cpp() {
+        let guid = ObjectGuid::create_world_object(
+            wow_core::guid::HighGuid::GameObject,
+            0,
+            1,
+            571,
+            0,
+            777,
+            23,
+        );
+        let bytes = GameObjectInteraction {
+            object_guid: guid,
+            interaction_type: 40,
+        }
+        .to_bytes();
+        assert_eq!(
+            bytes[0..2],
+            (ServerOpcodes::GameObjectInteraction as u16).to_le_bytes()
+        );
+        assert_eq!(&bytes[2..18], &guid.to_raw_bytes());
+        assert_eq!(&bytes[18..22], &40_i32.to_le_bytes());
+        assert_eq!(bytes.len(), 22);
+    }
+
+    #[test]
+    fn gameobject_custom_anim_writes_guid_anim_and_despawn_bit_like_cpp() {
+        let guid = ObjectGuid::create_world_object(
+            wow_core::guid::HighGuid::GameObject,
+            0,
+            1,
+            571,
+            0,
+            777,
+            23,
+        );
+        let bytes = GameObjectCustomAnim {
+            object_guid: guid,
+            custom_anim: 255,
+            play_as_despawn: false,
+        }
+        .to_bytes();
+        assert_eq!(
+            bytes[0..2],
+            (ServerOpcodes::GameObjectCustomAnim as u16).to_le_bytes()
+        );
+        assert_eq!(&bytes[2..18], &guid.to_raw_bytes());
+        assert_eq!(&bytes[18..22], &255_u32.to_le_bytes());
+        assert_eq!(bytes[22], 0x00);
+        assert_eq!(bytes.len(), 23);
+
+        let despawn_bytes = GameObjectCustomAnim {
+            object_guid: guid,
+            custom_anim: 7,
+            play_as_despawn: true,
+        }
+        .to_bytes();
+        assert_eq!(despawn_bytes[22], 0x80);
+    }
+
+    #[test]
+    fn gameobject_despawn_writes_raw_guid_like_cpp() {
+        let guid = ObjectGuid::create_world_object(
+            wow_core::guid::HighGuid::GameObject,
+            0,
+            1,
+            571,
+            0,
+            777,
+            23,
+        );
+        let bytes = GameObjectDespawn { object_guid: guid }.to_bytes();
+        assert_eq!(
+            bytes[0..2],
+            (ServerOpcodes::GameObjectDespawn as u16).to_le_bytes()
+        );
+        assert_eq!(&bytes[2..18], &guid.to_raw_bytes());
+        assert_eq!(bytes.len(), 18);
+    }
+
+    #[test]
+    fn page_text_writes_gameobject_guid_like_cpp() {
+        let guid = ObjectGuid::create_world_object(
+            wow_core::guid::HighGuid::GameObject,
+            0,
+            1,
+            571,
+            0,
+            777,
+            23,
+        );
+        let bytes = PageText {
+            gameobject_guid: guid,
+        }
+        .to_bytes();
+        assert_eq!(bytes[0..2], (ServerOpcodes::PageText as u16).to_le_bytes());
+        assert_eq!(&bytes[2..18], &guid.to_raw_bytes());
+        assert_eq!(bytes.len(), 18);
+    }
+
+    #[test]
+    fn trigger_cinematic_writes_id_and_conversation_guid_like_cpp() {
+        let bytes = TriggerCinematic {
+            cinematic_id: 444,
+            conversation_guid: ObjectGuid::EMPTY,
+        }
+        .to_bytes();
+        assert_eq!(
+            bytes[0..2],
+            (ServerOpcodes::TriggerCinematic as u16).to_le_bytes()
+        );
+        assert_eq!(&bytes[2..6], &444_u32.to_le_bytes());
+        assert_eq!(&bytes[6..22], &ObjectGuid::EMPTY.to_raw_bytes());
+        assert_eq!(bytes.len(), 22);
     }
 }
 

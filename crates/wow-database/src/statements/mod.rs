@@ -103,6 +103,30 @@ mod tests {
                 .contains("gameobject_template_addon")
         );
         assert!(
+            WorldStatements::SEL_GAMEOBJECT_TEMPLATE_LOCALE
+                .sql()
+                .contains("gameobject_template_locale")
+        );
+        assert!(
+            WorldStatements::SEL_GAMEOBJECT_QUEST_ITEMS
+                .sql()
+                .contains("gameobject_questitem")
+        );
+        assert_eq!(
+            WorldStatements::SEL_GAMEOBJECT_TEMPLATE_LOCALE
+                .sql()
+                .matches('?')
+                .count(),
+            2
+        );
+        assert_eq!(
+            WorldStatements::SEL_GAMEOBJECT_QUEST_ITEMS
+                .sql()
+                .matches('?')
+                .count(),
+            1
+        );
+        assert!(
             WorldStatements::SEL_ITEM_TEMPLATE_ADDON_LOOT_METADATA
                 .sql()
                 .contains("QuestLogItemId")

@@ -262,7 +262,7 @@ impl WorldSession {
     /// Handle CMSG_SET_ACTIVE_MOVER — client sets which unit is currently being moved.
     ///
     /// The client sends this after login to establish the active mover GUID.
-    /// In single‑player sessions, the mover must be the player's own GUID.
+    /// The mover must match C++ `Player::GetUnitBeingMoved()`.
     pub async fn handle_set_active_mover(&mut self, pkt: SetActiveMover) {
         trace!(
             account = self.account_id,
@@ -270,18 +270,15 @@ impl WorldSession {
             "SetActiveMover"
         );
 
-        // Validate: in a single‑player session, the active mover must be
-        // the player's own GUID (or empty, meaning "no unit moving").
-        if let Some(player_guid) = self.player_guid() {
-            if !pkt.active_mover.is_empty() && pkt.active_mover != player_guid {
-                warn!(
-                    account = self.account_id,
-                    "SetActiveMover GUID mismatch: expected {:?}, got {:?}",
-                    player_guid,
-                    pkt.active_mover
-                );
-                // Not fatal; the client can be wrong, we just ignore.
-            }
+        let expected_mover = self.player_moved_unit_guid_like_cpp();
+        if !expected_mover.is_empty() && pkt.active_mover != expected_mover {
+            warn!(
+                account = self.account_id,
+                "SetActiveMover GUID mismatch: expected {:?}, got {:?}",
+                expected_mover,
+                pkt.active_mover
+            );
+            // C++ only logs this mismatch.
         }
     }
 

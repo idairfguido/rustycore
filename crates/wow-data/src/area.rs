@@ -10,7 +10,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use tracing::info;
-use wow_database::{HotfixDatabase, HotfixStatements};
+use wow_database::{HotfixDatabase, HotfixStatements, WorldDatabase, WorldStatements};
 
 use crate::wdc4::Wdc4Reader;
 
@@ -25,6 +25,11 @@ pub struct AreaTableEntry {
 #[derive(Debug, Clone, Default)]
 pub struct AreaTableStore {
     entries: HashMap<u32, AreaTableEntry>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FishingBaseSkillStoreLikeCpp {
+    levels_by_area: HashMap<u32, i32>,
 }
 
 pub const AREA_FLAG_IS_SUBZONE_LIKE_CPP: u32 = 0x4000_0000;
@@ -155,6 +160,71 @@ impl AreaTableStore {
     }
 }
 
+impl FishingBaseSkillStoreLikeCpp {
+    pub fn from_entries(entries: impl IntoIterator<Item = (u32, i32)>) -> Self {
+        Self {
+            levels_by_area: entries.into_iter().collect(),
+        }
+    }
+
+    /// C++ `ObjectMgr::LoadFishingBaseSkillLevel`.
+    pub async fn load(db: &WorldDatabase, area_store: &AreaTableStore) -> Result<Self> {
+        let stmt = db.prepare(WorldStatements::SEL_FISHING_BASE_SKILL_LEVELS);
+        let mut result = db.query(&stmt).await?;
+        if result.is_empty() {
+            info!("Loaded 0 areas for fishing base skill level");
+            return Ok(Self::default());
+        }
+
+        let mut levels_by_area = HashMap::new();
+        loop {
+            let area_id: u32 = result.read(0);
+            let skill: i16 = result.read(1);
+            if area_store.contains(area_id) {
+                levels_by_area.insert(area_id, i32::from(skill));
+            }
+
+            if !result.next_row() {
+                break;
+            }
+        }
+
+        info!(
+            "Loaded {} areas for fishing base skill level",
+            levels_by_area.len()
+        );
+        Ok(Self { levels_by_area })
+    }
+
+    pub fn get(&self, area_id: u32) -> Option<i32> {
+        self.levels_by_area.get(&area_id).copied()
+    }
+
+    /// C++ `ObjectMgr::GetFishingBaseSkillLevel`.
+    pub fn base_skill_level_like_cpp(&self, area_store: &AreaTableStore, mut area_id: u32) -> i32 {
+        while area_id != 0 {
+            if let Some(skill) = self.get(area_id) {
+                return skill;
+            }
+
+            let Some(area) = area_store.get(area_id) else {
+                return 0;
+            };
+            area_id = u32::from(area.parent_area_id);
+        }
+
+        0
+    }
+
+    pub fn len(&self) -> usize {
+        self.levels_by_area.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.levels_by_area.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,6 +255,28 @@ mod tests {
             store.get(101).map(|area| area.is_subzone_like_cpp()),
             Some(true)
         );
+    }
+
+    #[test]
+    fn fishing_base_skill_store_walks_parent_areas_like_cpp() {
+        let areas = AreaTableStore::from_entries([
+            AreaTableEntry {
+                id: 10,
+                parent_area_id: 0,
+                mount_flags: 0,
+                flags: 0,
+            },
+            AreaTableEntry {
+                id: 11,
+                parent_area_id: 10,
+                mount_flags: 0,
+                flags: AREA_FLAG_IS_SUBZONE_LIKE_CPP,
+            },
+        ]);
+        let fishing = FishingBaseSkillStoreLikeCpp::from_entries([(10, 225)]);
+
+        assert_eq!(fishing.base_skill_level_like_cpp(&areas, 11), 225);
+        assert_eq!(fishing.base_skill_level_like_cpp(&areas, 999), 0);
     }
 
     #[test]

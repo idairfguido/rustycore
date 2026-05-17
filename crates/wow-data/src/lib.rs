@@ -70,7 +70,7 @@ pub mod world_safe_locs;
 pub mod world_spawn_id_store;
 pub mod world_state_expression;
 
-pub use area::{AreaTableEntry, AreaTableStore};
+pub use area::{AreaTableEntry, AreaTableStore, FishingBaseSkillStoreLikeCpp};
 pub use area_trigger::{
     AreaTriggerData, AreaTriggerStore, AreaTriggerTeleport, TriggerShape, load_area_triggers,
 };

@@ -8,13 +8,15 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
 use rand::seq::SliceRandom;
 use tracing::{debug, info, trace, warn};
 
-use crate::entity_update_bridge::player_values_update_to_update_object;
+use crate::entity_update_bridge::{
+    player_values_update_to_update_object, unit_values_update_to_update_object,
+};
 use crate::map_manager::{WorldMMapPathRequestLikeCpp, WorldMMapPathfinderWorkerLikeCpp};
 use crate::phasing::{
     init_db_phase_shift_like_cpp, init_db_visible_map_id_like_cpp,
@@ -22,7 +24,9 @@ use crate::phasing::{
 };
 use wow_constants::item::{CurrencyTypes, CurrencyTypesFlags};
 use wow_constants::movement::MovementFlag;
-use wow_constants::unit::{Gender, Team, UnitFlags, UnitStandStateType, WeaponAttackType};
+use wow_constants::unit::{
+    Gender, Team, UnitFlags, UnitPvpFlags, UnitStandStateType, WeaponAttackType,
+};
 use wow_constants::{
     BagFamilyMask, BuyResult, ClientOpcodes, InventoryResult, InventoryType, ItemBondingType,
     ItemClass, ItemContext, ItemEnchantmentType, ItemFlags, ItemFlags2, ItemQuality, SellResult,
@@ -33,20 +37,21 @@ use wow_data::{
     AreaTableStore, AreaTriggerStore, ChrSpecializationStore, ConditionEntriesByTypeStore,
     CreatureDisplayInfoStore, CreatureModelDataStore, CreatureTemplateMountStoreLikeCpp,
     CurrencyTypesEntry, CurrencyTypesStore, DISABLE_TYPE_MAP, DisableMgrLikeCpp,
-    DisableWorldObjectRefLikeCpp, DungeonEncounterStore, GameObjectDisplayInfoStore,
-    HotfixBlobCache, ImportPriceStores, ItemAppearanceStore, ItemClassStore, ItemCurrencyCostStore,
-    ItemDisenchantLootStore, ItemExtendedCostStore, ItemModifiedAppearanceStore,
-    ItemPriceBaseStore, ItemRandomEnchantmentTemplateStore, ItemRandomPropertiesStore,
-    ItemRandomPropertyTemplateEntry, ItemRandomSuffixStore, ItemStatsStore, ItemStore, LockStore,
-    MapDifficultyStore, MapDifficultyXConditionStore, MapStore, MountCapabilityStore, MountStore,
-    MountTypeXCapabilityStore, MountXDisplayStore, PhaseGroupStore, PhaseStore,
-    PlayerConditionAuraLikeCpp, PlayerConditionContextLikeCpp, PlayerConditionCountLikeCpp,
-    PlayerConditionPartyStatusLikeCpp, PlayerConditionQuestKillLikeCpp,
-    PlayerConditionReputationLikeCpp, PlayerConditionSkillLikeCpp, PlayerConditionStore,
-    PlayerStatsStore, RandPropPointsStore, SkillStore, SpellItemEnchantmentStore, SpellMiscStore,
-    SpellRangeStore, SpellStore, VEHICLE_SEAT_FLAG_CAN_ATTACK, VehicleAccessoryStoreLikeCpp,
-    VehicleSeatStore, VehicleStore, VehicleTemplateStoreLikeCpp,
-    is_player_meeting_condition_like_cpp,
+    DisableWorldObjectRefLikeCpp, DungeonEncounterStore, FishingBaseSkillStoreLikeCpp,
+    GameObjectDisplayInfoStore, HotfixBlobCache, ImportPriceStores, ItemAppearanceStore,
+    ItemClassStore, ItemCurrencyCostStore, ItemDisenchantLootStore, ItemExtendedCostStore,
+    ItemModifiedAppearanceStore, ItemPriceBaseStore, ItemRandomEnchantmentTemplateStore,
+    ItemRandomPropertiesStore, ItemRandomPropertyTemplateEntry, ItemRandomSuffixStore,
+    ItemStatsStore, ItemStore, LockStore, MapDifficultyStore, MapDifficultyXConditionStore,
+    MapStore, MountCapabilityStore, MountStore, MountTypeXCapabilityStore, MountXDisplayStore,
+    PhaseGroupStore, PhaseStore, PlayerConditionAuraLikeCpp, PlayerConditionContextLikeCpp,
+    PlayerConditionCountLikeCpp, PlayerConditionPartyStatusLikeCpp,
+    PlayerConditionQuestKillLikeCpp, PlayerConditionReputationLikeCpp, PlayerConditionSkillLikeCpp,
+    PlayerConditionStore, PlayerStatsStore, RandPropPointsStore, SkillStore,
+    SpellItemEnchantmentStore, SpellMiscStore, SpellRangeStore, SpellStore, SummonPropertiesEntry,
+    VEHICLE_SEAT_FLAG_CAN_ATTACK, VehicleAccessoryStoreLikeCpp, VehicleSeatStore, VehicleStore,
+    VehicleTemplateStoreLikeCpp, is_player_meeting_condition_like_cpp,
+    progression_rewards::{ContentTuningStore, FactionStore, FactionTemplateStore},
 };
 use wow_database::{
     CharStatements, CharacterDatabase, LoginDatabase, PreparedStatement, SqlTransaction,
@@ -61,11 +66,12 @@ use wow_entities::{
     ItemSlotRef, ItemStorageRef, ItemStorageTemplate, MAX_ITEM_SPELLS, NULL_BAG, NULL_SLOT,
     ObjectAccessor, PLAYER_SLOT_END, PhaseShift, Player, PlayerEnchantTimeUpdate,
     PlayerInventoryStorage, PlayerItemTimeUpdate, REAGENT_BAG_SLOT_END, REAGENT_BAG_SLOT_START,
-    SendNewItemDelivery, SendNewItemDisplayText, SendNewItemPlan, Vehicle, VehicleAccessory,
-    VisibleItemValues, WorldObject, is_bag_pos, is_equipment_packed_pos, make_item_pos,
+    SendNewItemDelivery, SendNewItemDisplayText, SendNewItemPlan, UNIT_DATA_HEALTH_BIT,
+    UnitDataUpdate, UnitDataValues, UpdateMask, Vehicle, VehicleAccessory, VisibleItemValues,
+    WorldObject, is_bag_pos, is_equipment_packed_pos, make_item_pos,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus, build_dispatch_table};
-use wow_loot::LootStores;
+use wow_loot::{LootStoreKind, LootStores};
 use wow_network::session_mgr::{InstanceLink, SessionManager};
 use wow_network::{
     GroupRegistry, LootDropRatesLikeCpp, PendingInvites, PlayerBroadcastInfo, PlayerRegistry,
@@ -79,12 +85,25 @@ use wow_packet::packets::misc::{AccountMount, AccountMountUpdate, BuyFailed, Sel
 use wow_recastdetour::PathQueryFilterContext;
 
 const PLAYER_FLAGS_UBER_LIKE_CPP: u32 = 0x0008_0000;
+const PLAYER_FLAGS_CONTESTED_PVP_LIKE_CPP: u32 = 0x0000_0100;
+const FACTION_TEMPLATE_FLAG_CONTESTED_GUARD_LIKE_CPP: u16 = 0x0000_1000;
 const ATTACK_DISPLAY_DELAY_LIKE_CPP_MS: u32 = 200;
+const MIN_MELEE_REACH_LIKE_CPP: f32 = 2.0;
+const NOMINAL_MELEE_RANGE_LIKE_CPP: f32 = 5.0;
+const SUMMON_PROPERTIES_ONLY_VISIBLE_TO_SUMMONER_LIKE_CPP: u32 = 0x0000_0010;
+const SUMMON_PROPERTIES_ONLY_VISIBLE_TO_SUMMONER_GROUP_LIKE_CPP: u32 = 0x0001_0000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PlayerAttackStartLikeCppResult {
     Rejected,
     Accepted { send_attack_start: bool },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AttackReputationFactionSnapshotLikeCpp {
+    faction_id: u32,
+    contested_guard: bool,
+    can_have_reputation: Option<bool>,
 }
 
 fn rounded_median_u32(sorted_values: &[u32]) -> u32 {
@@ -107,6 +126,9 @@ const MAX_PACKETS_PER_UPDATE: usize = 100;
 const TRANSFER_ABORT_MAP_NOT_ALLOWED_LIKE_CPP: u32 = 16;
 const MAP_BATTLEGROUND_LIKE_CPP: i8 = 3;
 const MAP_ARENA_LIKE_CPP: i8 = 4;
+const GROUP_XP_DISTANCE_LIKE_CPP: f32 = 74.0;
+const BATTLEGROUND_WS_LIKE_CPP: u32 = 2;
+const BATTLEGROUND_EY_LIKE_CPP: u32 = 7;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MMapRuntimeConfigLikeCpp {
@@ -153,8 +175,85 @@ pub(crate) struct RepresentedLootRollState {
     pub voters: HashMap<ObjectGuid, RepresentedLootRollVote>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PlayerSaveToDbSnapshotLikeCpp {
+    pub guid: ObjectGuid,
+    pub map_id: u16,
+    pub position: Position,
+    pub level: u8,
+    pub xp: u32,
+    pub money: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum RepresentedGameObjectUseEffect {
+    UseRejectedNoDamageImmune {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    },
+    BattlegroundObjectUseRejected {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        reason: RepresentedBattlegroundObjectUseRejection,
+    },
+    RemoveMountedAuras {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    },
+    RemoveStealthOrInvisibilityAuras {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    },
+    ClearPlayerTalkMenus {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    },
+    GossipHelloAi {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        handled: bool,
+    },
+    CooldownStarted {
+        gameobject_guid: ObjectGuid,
+        cooldown_secs: u32,
+    },
+    CooldownRejected {
+        gameobject_guid: ObjectGuid,
+    },
+    DoorOrButtonUsed {
+        gameobject_guid: ObjectGuid,
+        user_guid: ObjectGuid,
+        restore_time_ms: u32,
+        go_state: wow_entities::GoState,
+    },
+    DoorOrButtonRejectedNotReady {
+        gameobject_guid: ObjectGuid,
+    },
+    #[allow(dead_code)]
+    DoorOrButtonReset {
+        gameobject_guid: ObjectGuid,
+        go_state: wow_entities::GoState,
+    },
+    TriggerCinematic {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        cinematic_id: u32,
+    },
+    ShowPageText {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        page_id: u32,
+    },
+    SendGossip {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gossip_id: u32,
+    },
+    ReportUseAi {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        handled: bool,
+    },
     TriggerGameEvent {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
@@ -165,6 +264,265 @@ pub(crate) enum RepresentedGameObjectUseEffect {
         player_guid: ObjectGuid,
         trap_entry: u32,
     },
+    KillCreditGo {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        entry: u32,
+    },
+    GooberQuestGateRejected {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        quest_id: u32,
+    },
+    GooberSetGoStateForPlayer {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        go_state: wow_entities::GoState,
+    },
+    GooberDespawnForPlayer {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        despawn_secs: u32,
+    },
+    GooberUsed {
+        gameobject_guid: ObjectGuid,
+        user_guid: ObjectGuid,
+        custom_anim: u32,
+        auto_close_ms: u32,
+        go_state: Option<wow_entities::GoState>,
+    },
+    #[allow(dead_code)]
+    GooberLinkedTrapDespawn {
+        gameobject_guid: ObjectGuid,
+        trap_entry: u32,
+    },
+    #[allow(dead_code)]
+    GooberUniqueUserSpell {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        spell_id: u32,
+    },
+    #[allow(dead_code)]
+    GooberCleared {
+        gameobject_guid: ObjectGuid,
+        loot_state: wow_entities::LootState,
+        go_state: Option<wow_entities::GoState>,
+    },
+    ChairUsed {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        slot: u32,
+        teleport_position: Position,
+        stand_state: u32,
+    },
+    ChairNoFreeSlot {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    },
+    BarberChairUsed {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        customization_scope: u32,
+        teleport_position: Position,
+        stand_state: u32,
+        sit_anim_kit: u32,
+    },
+    UiLinkOpened {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        ui_link_type: u32,
+        interaction_type: i32,
+    },
+    ItemForgeUsed {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        condition_id: u32,
+        forge_type: u32,
+    },
+    CapturePointAssaultRequested {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        capture_time_ms: u32,
+        world_state_id: u32,
+        contested_event_horde: u32,
+        contested_event_alliance: u32,
+    },
+    CapturePointAssaultAi {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        handled: bool,
+    },
+    BattlegroundFlagStandClicked {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        pickup_spell_id: u32,
+        return_aura_id: u32,
+        return_spell_id: u32,
+    },
+    BattlegroundFlagDropClicked {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gameobject_entry: u32,
+        click_target: BattlegroundFlagDropClickTarget,
+        event_id: u32,
+        pickup_spell_id: u32,
+        expire_duration_ms: u32,
+    },
+    GameObjectDeleted {
+        gameobject_guid: ObjectGuid,
+    },
+    NewFlagPickupRequested {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        pickup_spell_id: u32,
+        expire_duration_ms: u32,
+        respawn_time_ms: u32,
+        flag_drop_entry: u32,
+        exclusive_category: i32,
+        world_state_id: u32,
+        return_on_defender_interact: bool,
+    },
+    NewFlagDropInteracted {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        spawn_vignette_id: u32,
+    },
+    NewFlagOwnerStateRequested {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        state: RepresentedNewFlagStateRequest,
+    },
+    RitualWaitingForParticipants {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        unique_user_count: u32,
+        casters_required: u32,
+    },
+    RitualCasterTargetSpellRequested {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        spell_id: u32,
+        target_count: u32,
+    },
+    RitualCasterTargetSpellCast {
+        gameobject_guid: ObjectGuid,
+        caster_guid: ObjectGuid,
+        target_guid: ObjectGuid,
+        spell_id: u32,
+        triggered: bool,
+    },
+    RitualCompleted {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        final_spell_id: u32,
+        triggered: bool,
+        persistent: bool,
+        unique_user_count: u32,
+    },
+    MeetingStoneSummonRequested {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        target_guid: ObjectGuid,
+        gameobject_entry: u32,
+        spell_id: u32,
+        area_id: u32,
+        prevent_unfriendly_outside_instances: bool,
+    },
+    MeetingStoneTargetRejected {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        target_guid: Option<ObjectGuid>,
+    },
+    MeetingStoneLevelRejected {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        target_guid: ObjectGuid,
+        player_level: u8,
+        target_level: u8,
+        required_level: i32,
+    },
+    GameObjectPostUseSpellMissing {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gameobject_entry: u32,
+        spell_id: u32,
+        go_type: u32,
+        spell_lookup_difficulty_id: u8,
+    },
+    OutdoorPvpCustomSpellRequested {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gameobject_entry: u32,
+        spell_id: u32,
+        go_type: u32,
+        spell_lookup_difficulty_id: u8,
+        spell_info_missing: bool,
+    },
+    GameObjectPostUseSpellCast {
+        gameobject_guid: ObjectGuid,
+        target_guid: ObjectGuid,
+        caster_guid: ObjectGuid,
+        spell_id: u32,
+        triggered: bool,
+        caster: RepresentedGameObjectSpellCaster,
+        spell_lookup_difficulty_id: u8,
+    },
+    FishingNodeOwnerRejected {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        owner_guid: ObjectGuid,
+    },
+    FishingNodeActivated {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    },
+    FishingSkillUpdated {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    },
+    FishingLootRoll {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        player_fishing_level: i32,
+        area_fishing_level: i32,
+        chance: i32,
+        roll: i32,
+    },
+    FishingHoleDelegated {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        fishing_hole_guid: ObjectGuid,
+    },
+    FishingLootRequested {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        loot_type: u8,
+    },
+    FishNotHooked {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    },
+    FishingHoleCatchCriteriaUpdated {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gameobject_entry: u32,
+    },
+    FinishChanneledSpell {
+        player_guid: ObjectGuid,
+    },
+    SpellcasterPartyOnlyRejected {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    },
+    GameObjectUseCountIncremented {
+        gameobject_guid: ObjectGuid,
+        use_count: u32,
+    },
+    GameObjectChargesDepleted {
+        gameobject_guid: ObjectGuid,
+        max_charges: u32,
+        loot_state: wow_entities::LootState,
+    },
     CastSpell {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
@@ -173,34 +531,117 @@ pub(crate) enum RepresentedGameObjectUseEffect {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BattlegroundFlagDropClickTarget {
+    None,
+    WarsongGulch,
+    EyeOfTheStorm,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepresentedBattlegroundObjectUseRejection {
+    UnfriendlyFaction,
+    RecentlyDroppedFlag,
+    DamageImmune,
+    Dead,
+    NotInBattleground,
+    Vehicle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) enum RepresentedNewFlagStateRequest {
+    InBase,
+    Taken,
+    Dropped,
+    Respawning,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) enum RepresentedCapturePointStateLikeCpp {
+    Neutral,
+    ContestedHorde,
+    ContestedAlliance,
+    HordeCaptured,
+    AllianceCaptured,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepresentedGameObjectSpellCaster {
+    User,
+    GameObject,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RepresentedPendingBind {
     pub instance_id: u32,
     pub time_until_lock_ms: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RepresentedGameObjectUseState {
     pub loot_state: Option<wow_entities::LootState>,
     pub loot_state_unit_guid: wow_core::ObjectGuid,
     pub owner_guid: Option<wow_core::ObjectGuid>,
+    pub ritual_owner_guid: Option<wow_core::ObjectGuid>,
+    pub owner_current_channeled_spell_active: Option<bool>,
     pub go_state: Option<wow_entities::GoState>,
+    pub prev_go_state: Option<wow_entities::GoState>,
+    pub gameobject_flags: u32,
     pub dynamic_flags: u32,
     pub despawn_delay_secs: Option<u32>,
     pub per_player_despawn_secs: Option<u32>,
     pub per_player_despawn_until: Option<Instant>,
     pub personal_loot_uses: u32,
+    pub use_count: u32,
+    pub unique_users: Vec<wow_core::ObjectGuid>,
+    pub chair_slots: Vec<Option<wow_core::ObjectGuid>>,
     pub chest_restock_time_secs: Option<u32>,
     pub chest_consumable: Option<bool>,
     pub chest_personal_loot_id: Option<u32>,
     pub map_id: Option<u16>,
+    pub zone_id: Option<u32>,
+    pub area_id: Option<u32>,
     pub position: Option<wow_core::Position>,
+    pub go_anim_progress: u8,
     pub display_id: Option<u32>,
     pub scale: f32,
     pub rotation: [f32; 4],
     pub go_type: Option<u8>,
+    pub faction_template: Option<u32>,
     pub interact_radius_override: Option<u32>,
     pub lock_id: Option<u32>,
     pub fishing_hole_max_opens: Option<u32>,
+    pub fishing_hole_radius: Option<f32>,
+    pub fishing_area_level: Option<i32>,
+    pub player_fishing_level: Option<i32>,
+    pub fishing_roll: Option<i32>,
+    pub nearby_fishing_hole_guid: Option<wow_core::ObjectGuid>,
+    pub capture_point_state: Option<RepresentedCapturePointStateLikeCpp>,
+    pub new_flag_state: Option<RepresentedNewFlagStateRequest>,
+    pub new_flag_carrier_guid: Option<wow_core::ObjectGuid>,
+    pub new_flag_taken_from_base_game_time_ms: Option<u32>,
+    pub new_flag_respawn_until: Option<Instant>,
+    pub new_flag_return_on_defender_interact: Option<bool>,
+    pub new_flag_pickup_spell_id: Option<u32>,
+    pub new_flag_entry: Option<u32>,
+    pub report_use_ai_returns_true: bool,
+    pub gossip_hello_ai_returns_true: bool,
+    pub capture_point_assault_ai_returns_true: bool,
+    pub cooldown_until: Option<Instant>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RepresentedGameObjectAccessLikeCpp {
+    pub entry: u32,
+    pub position: wow_core::Position,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RepresentedCreatureAccessLikeCpp {
+    pub entry: u32,
+    pub position: wow_core::Position,
+    pub npc_flags: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -332,24 +773,52 @@ impl Default for RepresentedGameObjectUseState {
             loot_state: None,
             loot_state_unit_guid: wow_core::ObjectGuid::EMPTY,
             owner_guid: None,
+            ritual_owner_guid: None,
+            owner_current_channeled_spell_active: None,
             go_state: None,
+            prev_go_state: None,
+            gameobject_flags: 0,
             dynamic_flags: 0,
             despawn_delay_secs: None,
             per_player_despawn_secs: None,
             per_player_despawn_until: None,
             personal_loot_uses: 0,
+            use_count: 0,
+            unique_users: Vec::new(),
+            chair_slots: Vec::new(),
             chest_restock_time_secs: None,
             chest_consumable: None,
             chest_personal_loot_id: None,
             map_id: None,
+            zone_id: None,
+            area_id: None,
             position: None,
+            go_anim_progress: 255,
             display_id: None,
             scale: 1.0,
             rotation: [0.0, 0.0, 0.0, 1.0],
             go_type: None,
+            faction_template: None,
             interact_radius_override: None,
             lock_id: None,
             fishing_hole_max_opens: None,
+            fishing_hole_radius: None,
+            fishing_area_level: None,
+            player_fishing_level: None,
+            fishing_roll: None,
+            nearby_fishing_hole_guid: None,
+            capture_point_state: None,
+            new_flag_state: None,
+            new_flag_carrier_guid: None,
+            new_flag_taken_from_base_game_time_ms: None,
+            new_flag_respawn_until: None,
+            new_flag_return_on_defender_interact: None,
+            new_flag_pickup_spell_id: None,
+            new_flag_entry: None,
+            report_use_ai_returns_true: false,
+            gossip_hello_ai_returns_true: false,
+            capture_point_assault_ai_returns_true: false,
+            cooldown_until: None,
         }
     }
 }
@@ -381,7 +850,17 @@ pub(crate) enum RepresentedLootRollCriteriaEvent {
     },
 }
 
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepresentedGameObjectCriteriaEvent {
+    UseGameobject {
+        player_guid: ObjectGuid,
+        gameobject_entry: u32,
+    },
+}
+
 pub type SharedObjectAccessor = Arc<RwLock<ObjectAccessor>>;
+pub(crate) const SKILL_FISHING_LIKE_CPP: u16 = 356;
 pub(crate) const SKILL_RIDING_LIKE_CPP: u16 = 762;
 pub(crate) const LIQUID_MAP_IN_WATER_LIKE_CPP: u32 = 0x0000_0004;
 pub(crate) const LIQUID_MAP_UNDER_WATER_LIKE_CPP: u32 = 0x0000_0008;
@@ -749,6 +1228,9 @@ pub struct WorldSession {
     // C++ PlayerCondition.db2 store used by ConditionMgr player-condition checks.
     player_condition_store: Option<Arc<PlayerConditionStore>>,
 
+    // C++ ContentTuning.db2 store used by level gates such as Meeting Stone.
+    content_tuning_store: Option<Arc<ContentTuningStore>>,
+
     // C++ DisableMgr store loaded from world.disables.
     disable_mgr: Option<Arc<DisableMgrLikeCpp>>,
 
@@ -767,6 +1249,9 @@ pub struct WorldSession {
     // Area table store (area hierarchy + mount flags)
     area_table_store: Option<Arc<AreaTableStore>>,
 
+    // C++ ObjectMgr fishing base skill levels loaded from skill_fishing_base_level.
+    fishing_base_skill_store: Option<Arc<FishingBaseSkillStoreLikeCpp>>,
+
     // Area trigger store (collision detection + teleportation)
     area_trigger_store: Option<Arc<AreaTriggerStore>>,
 
@@ -780,6 +1265,8 @@ pub struct WorldSession {
     map_store: Option<Arc<MapStore>>,
     map_difficulty_store: Option<Arc<MapDifficultyStore>>,
     map_difficulty_x_condition_store: Option<Arc<MapDifficultyXConditionStore>>,
+    faction_store: Option<Arc<FactionStore>>,
+    faction_template_store: Option<Arc<FactionTemplateStore>>,
     creature_template_mount_store: Option<Arc<CreatureTemplateMountStoreLikeCpp>>,
     creature_display_info_store: Option<Arc<CreatureDisplayInfoStore>>,
     gameobject_display_info_store: Option<Arc<GameObjectDisplayInfoStore>>,
@@ -829,6 +1316,8 @@ pub struct WorldSession {
     // ── ConnectTo flow ──────────────────────────────────────────
     /// GUID of the character being logged in (set during PlayerLogin).
     player_loading: Option<ObjectGuid>,
+    /// C++ `WorldSession::m_playerLogout`: true only while the logout routine is executing.
+    player_logout_like_cpp: bool,
 
     /// The ConnectToKey.Raw value for the pending instance connection.
     connect_to_key: Option<i64>,
@@ -887,6 +1376,10 @@ pub struct WorldSession {
 
     /// Pending creature spawn request (set during login, processed async).
     pub(crate) pending_creature_spawn: Option<PendingCreatureSpawn>,
+    /// Creature kills observed from synchronous melee ticks and completed in `process_pending`.
+    pending_creature_kill_loot_like_cpp: Vec<ObjectGuid>,
+    pending_creature_kill_rewards_like_cpp: Vec<PendingCreatureKillRewardLikeCpp>,
+    represented_creature_kill_events_like_cpp: Vec<RepresentedCreatureKillEventLikeCpp>,
     /// Creatures waiting to respawn after corpse despawn.
     pub(crate) respawn_queue: Vec<PendingRespawn>,
 
@@ -952,8 +1445,6 @@ pub struct WorldSession {
     // ── Creature AI tracking ──────────────────────────────────────
     /// Tick counter for creature movement (throttle to every N ticks).
     pub(crate) creature_tick: u32,
-    #[cfg(test)]
-    pub(crate) creatures: std::collections::HashMap<wow_core::ObjectGuid, wow_ai::CreatureAI>,
     /// Per-session finite vendor stock state, mirroring Creature::m_vendorItemCounts
     /// until vendor ownership moves into the shared creature model.
     pub(crate) vendor_item_counts: HashMap<(wow_core::ObjectGuid, u32), VendorItemCount>,
@@ -1019,6 +1510,8 @@ pub struct WorldSession {
     active_player_local_flags_like_cpp: u32,
     /// Represented `ActivePlayerData::TransportServerTime`.
     active_player_transport_server_time_like_cpp: i32,
+    /// C++ `Player::GetUnitBeingMoved()` represented GUID.
+    player_moved_unit_guid_like_cpp: ObjectGuid,
     /// Count of visibility refreshes requested by movement initialization.
     movement_visibility_refresh_requests_like_cpp: u32,
     /// ACKs accepted by represented movement handling until full Unit movement runtime/broadcasts exist.
@@ -1047,6 +1540,8 @@ pub struct WorldSession {
     player_mount_vehicle_usable_seat_count_like_cpp: u8,
     /// Represented current `VehicleSeatEntry::Flags` for C++ `HandleAttackSwingOpcode`.
     player_vehicle_seat_flags_like_cpp: Option<i32>,
+    /// Represented `Player::GetBattleground()->GetTypeID()` for C++ battleground object use.
+    player_battleground_type_id_like_cpp: Option<u32>,
     /// Represented current pet GUID until player-owned pet runtime is canonical.
     represented_pet_guid_like_cpp: Option<ObjectGuid>,
     /// Represented current pet react state for C++ mount/dismount PetMode side effects.
@@ -1079,6 +1574,7 @@ pub struct WorldSession {
     player_scale_duration_like_cpp: i32,
     /// Represented `UnitData::Flags` for player deltas not yet backed by canonical Unit.
     player_unit_flags_like_cpp: UnitFlags,
+    player_faction_template_like_cpp: Option<u32>,
     /// Represented `UNIT_FLAG_MOUNT` state until UnitData owns live player flags.
     player_mounted_like_cpp: bool,
     /// Represented `pvpInfo.IsHostile` branch for Honorless Target after taxi landing.
@@ -1158,6 +1654,8 @@ pub struct WorldSession {
         std::collections::HashMap<(wow_core::ObjectGuid, u8), RepresentedLootRollState>,
     #[cfg(test)]
     pub(crate) represented_loot_roll_criteria_events: Vec<RepresentedLootRollCriteriaEvent>,
+    #[cfg(test)]
+    pub(crate) represented_gameobject_criteria_events: Vec<RepresentedGameObjectCriteriaEvent>,
     /// C++ `sWorld->getRate(...)` subset used by represented loot generation.
     loot_drop_rates: LootDropRatesLikeCpp,
     /// C++ `CONFIG_ENABLE_AE_LOOT` represented switch.
@@ -1190,11 +1688,9 @@ pub struct WorldSession {
     pub(crate) represented_personal_loot_owners: std::collections::HashSet<wow_core::ObjectGuid>,
 
     // ── Dynamic visibility tracking ───────────────────────────────
-    /// GUIDs of all creatures currently visible to this client.
+    /// C++ `Player::m_clientGUIDs`: exact objects currently known by this client.
     /// Updated on login and each visibility refresh (player movement).
-    pub(crate) visible_creatures: std::collections::HashSet<wow_core::ObjectGuid>,
-    /// GUIDs of all game objects currently visible to this client.
-    pub(crate) visible_gameobjects: std::collections::HashSet<wow_core::ObjectGuid>,
+    pub(crate) client_visible_guids_like_cpp: std::collections::HashSet<wow_core::ObjectGuid>,
     /// Represented C++ `GameObject::GetPhaseShift()` for visible DB-spawned
     /// gameobjects until canonical gameobject map ownership lands.
     pub(crate) represented_gameobject_phase_shifts:
@@ -1437,9 +1933,11 @@ pub enum RepresentedAuraEffectLikeCpp {
     SafeFall,
     Fly,
     Ghost,
+    Invisibility,
     Mounted,
     MountedFlightSpeed,
     ModifyFallDamagePct,
+    Stealth,
     WaterWalk,
 }
 
@@ -1464,6 +1962,64 @@ pub struct PendingCreatureSpawn {
     pub zone_id: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PendingCreatureKillRewardLikeCpp {
+    killer_guid: ObjectGuid,
+    creature_guid: ObjectGuid,
+    creature_entry: u32,
+    creature_level: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepresentedCreatureKillEventLikeCpp {
+    KillerProc {
+        attacker_guid: ObjectGuid,
+        victim_guid: ObjectGuid,
+    },
+    TapperTargetDiesProc {
+        tapper_guid: ObjectGuid,
+        victim_guid: ObjectGuid,
+    },
+    VictimDeathProc {
+        victim_guid: ObjectGuid,
+    },
+    DeliveredKillingBlowCriteria {
+        player_guid: ObjectGuid,
+        victim_guid: ObjectGuid,
+        quantity: u32,
+    },
+    DeathStateJustDied {
+        victim_guid: ObjectGuid,
+    },
+    ZoneScriptUnitDeath {
+        unit_guid: ObjectGuid,
+    },
+    TapperPetKilledUnitAi {
+        tapper_guid: ObjectGuid,
+        pet_guid: ObjectGuid,
+        victim_guid: ObjectGuid,
+    },
+    LootFlagsApplied {
+        creature_guid: ObjectGuid,
+        lootable: bool,
+        can_skin: bool,
+        skinnable: bool,
+    },
+    CreatureOnHealthDepletedAi {
+        creature_guid: ObjectGuid,
+        attacker_guid: ObjectGuid,
+        is_kill: bool,
+    },
+    CreatureJustDiedAi {
+        creature_guid: ObjectGuid,
+        killer_guid: ObjectGuid,
+    },
+    ScriptMgrOnCreatureKill {
+        killer_guid: ObjectGuid,
+        creature_guid: ObjectGuid,
+    },
+}
+
 /// A creature waiting to respawn after its corpse despawned.
 ///
 /// Stored in `WorldSession::respawn_queue`; processed by `tick_creatures_sync`.
@@ -1475,7 +2031,7 @@ pub struct PendingRespawn {
     pub home_pos: wow_core::Position,
     /// Full create data — reused verbatim for the respawn CREATE packet.
     pub create_data: wow_packet::packets::update::CreatureCreateData,
-    /// AI fields needed to rebuild `CreatureAI`.
+    /// AI fields needed to rebuild the canonical creature runtime.
     pub max_hp: u32,
     pub level: u8,
     pub min_dmg: u32,
@@ -1485,6 +2041,7 @@ pub struct PendingRespawn {
     pub unit_flags: u32,
     pub map_id: u16,
     pub loot_id: u32,
+    pub skin_loot_id: u32,
     pub gold_min: u32,
     pub gold_max: u32,
     pub boss_id: Option<u32>,
@@ -1556,18 +2113,22 @@ impl WorldSession {
             loot_stores: None,
             condition_store: None,
             player_condition_store: None,
+            content_tuning_store: None,
             disable_mgr: None,
             lock_store: None,
             spell_item_enchantment_store: None,
             hotfix_blob_cache: None,
             skill_store: None,
             area_table_store: None,
+            fishing_base_skill_store: None,
             area_trigger_store: None,
             chr_specialization_store: None,
             dungeon_encounter_store: None,
             map_store: None,
             map_difficulty_store: None,
             map_difficulty_x_condition_store: None,
+            faction_store: None,
+            faction_template_store: None,
             creature_template_mount_store: None,
             creature_display_info_store: None,
             gameobject_display_info_store: None,
@@ -1596,6 +2157,7 @@ impl WorldSession {
             legit_characters: Vec::new(),
             pending_packets: Vec::new(),
             player_loading: None,
+            player_logout_like_cpp: false,
             connect_to_key: None,
             connect_to_serial: None,
             session_mgr: None,
@@ -1619,6 +2181,9 @@ impl WorldSession {
             player_guid: None,
             player_controller: None,
             pending_creature_spawn: None,
+            pending_creature_kill_loot_like_cpp: Vec::new(),
+            pending_creature_kill_rewards_like_cpp: Vec::new(),
+            represented_creature_kill_events_like_cpp: Vec::new(),
             respawn_queue: Vec::new(),
             inventory_items: HashMap::new(),
             buyback_items: HashMap::new(),
@@ -1644,8 +2209,6 @@ impl WorldSession {
             registered_addon_prefixes: Vec::new(),
             filter_addon_messages: false,
             creature_tick: 0,
-            #[cfg(test)]
-            creatures: std::collections::HashMap::new(),
             vendor_item_counts: HashMap::new(),
             map_manager: None,
             canonical_map_manager: None,
@@ -1673,6 +2236,7 @@ impl WorldSession {
             movement_jump_proc_requests_like_cpp: 0,
             active_player_local_flags_like_cpp: 0,
             active_player_transport_server_time_like_cpp: 0,
+            player_moved_unit_guid_like_cpp: ObjectGuid::EMPTY,
             movement_visibility_refresh_requests_like_cpp: 0,
             movement_ack_events_like_cpp: Vec::new(),
             taxi_destinations_like_cpp: Vec::new(),
@@ -1687,6 +2251,7 @@ impl WorldSession {
             player_mount_vehicle_seat_count_like_cpp: 0,
             player_mount_vehicle_usable_seat_count_like_cpp: 0,
             player_vehicle_seat_flags_like_cpp: None,
+            player_battleground_type_id_like_cpp: None,
             represented_pet_guid_like_cpp: None,
             represented_pet_react_state_like_cpp:
                 wow_packet::packets::pet::REACT_DEFENSIVE_LIKE_CPP,
@@ -1705,6 +2270,7 @@ impl WorldSession {
             player_object_scale_like_cpp: 1.0,
             player_scale_duration_like_cpp: 0,
             player_unit_flags_like_cpp: UnitFlags::PLAYER_CONTROLLED,
+            player_faction_template_like_cpp: None,
             player_mounted_like_cpp: false,
             player_pvp_hostile_like_cpp: false,
             player_pvp_enabled_like_cpp: false,
@@ -1741,6 +2307,8 @@ impl WorldSession {
             represented_loot_rolls: std::collections::HashMap::new(),
             #[cfg(test)]
             represented_loot_roll_criteria_events: Vec::new(),
+            #[cfg(test)]
+            represented_gameobject_criteria_events: Vec::new(),
             loot_drop_rates: LootDropRatesLikeCpp::default(),
             enable_ae_loot_like_cpp: false,
             mmap_runtime_config_like_cpp: MMapRuntimeConfigLikeCpp::default(),
@@ -1754,8 +2322,7 @@ impl WorldSession {
             represented_locked_dungeon_encounters: std::collections::HashSet::new(),
             represented_personal_loot_money: std::collections::HashMap::new(),
             represented_personal_loot_owners: std::collections::HashSet::new(),
-            visible_creatures: std::collections::HashSet::new(),
-            visible_gameobjects: std::collections::HashSet::new(),
+            client_visible_guids_like_cpp: std::collections::HashSet::new(),
             represented_gameobject_phase_shifts: std::collections::HashMap::new(),
             represented_player_phase_shift: PhaseShift::default(),
             last_visibility_pos: None,
@@ -1795,6 +2362,8 @@ impl WorldSession {
             .set_map(u32::from(self.player_map_id_like_cpp()), 0)
             .ok()?;
         player.unit_mut().world_mut().relocate(position);
+        *player.unit_mut().world_mut().phase_shift_mut() =
+            self.represented_player_phase_shift.clone();
         player.unit_mut().world_mut().object_mut().add_to_world();
         player.set_race_class_gender(
             self.player_race_like_cpp(),
@@ -1802,6 +2371,9 @@ impl WorldSession {
             gender_from_u8(self.player_gender_like_cpp()),
         );
         player.unit_mut().set_level(self.player_level_like_cpp());
+        player.set_xp(self.player_xp_like_cpp() as i32);
+        player.set_next_level_xp(self.player_next_level_xp_like_cpp() as i32);
+        player.set_money(self.player_gold_like_cpp());
         player
             .unit_mut()
             .set_base_attack_time_like_cpp(WeaponAttackType::BaseAttack, 2_000);
@@ -1814,24 +2386,132 @@ impl WorldSession {
         Some(player)
     }
 
+    fn player_session_never_visible_for_seer_like_cpp(&self, guid: ObjectGuid) -> bool {
+        self.player_logout_like_cpp || self.player_loading == Some(guid)
+    }
+
+    fn player_can_never_see_target_like_cpp(&self) -> bool {
+        self.active_player_local_flags_like_cpp
+            & PLAYER_LOCAL_FLAG_OVERRIDE_TRANSPORT_SERVER_TIME_LIKE_CPP
+            == 0
+    }
+
+    fn apply_player_session_visibility_detection_like_cpp(
+        player: &mut Player,
+        never_visible_for_seer: bool,
+        seer_can_never_see_target: bool,
+    ) {
+        player
+            .unit_mut()
+            .set_never_visible_for_seer_like_cpp(never_visible_for_seer);
+        player
+            .unit_mut()
+            .set_seer_can_never_see_target_like_cpp(seer_can_never_see_target);
+    }
+
+    fn sync_current_player_session_visibility_detection_like_cpp(&mut self) {
+        let Some(guid) = self.player_guid() else {
+            return;
+        };
+        let never_visible_for_seer = self.player_session_never_visible_for_seer_like_cpp(guid);
+        let seer_can_never_see_target = self.player_can_never_see_target_like_cpp();
+        let _ = self.mutate_canonical_player_by_guid_like_cpp(guid, |player| {
+            Self::apply_player_session_visibility_detection_like_cpp(
+                player,
+                never_visible_for_seer,
+                seer_can_never_see_target,
+            );
+        });
+    }
+
+    pub(crate) fn current_player_save_to_db_snapshot_like_cpp(
+        &self,
+    ) -> Option<PlayerSaveToDbSnapshotLikeCpp> {
+        let guid = self.player_guid()?;
+        if let Some(manager) = self.canonical_map_manager.as_ref()
+            && let Ok(manager) = manager.lock()
+            && let Some(map) = manager.find_map(u32::from(self.player_map_id_like_cpp()), 0)
+            && let Some(player) = map.map().get_typed_player(guid)
+        {
+            return Some(PlayerSaveToDbSnapshotLikeCpp {
+                guid,
+                map_id: player.unit().world().map_id() as u16,
+                position: player.unit().world().position(),
+                level: player.unit().data().level.clamp(0, i32::from(u8::MAX)) as u8,
+                xp: player.active_data().xp.max(0) as u32,
+                money: player.active_data().coinage,
+            });
+        }
+
+        Some(PlayerSaveToDbSnapshotLikeCpp {
+            guid,
+            map_id: self.player_map_id_like_cpp(),
+            position: self.player_position_like_cpp()?,
+            level: self.player_level_like_cpp(),
+            xp: self.player_xp_like_cpp(),
+            money: self.player_gold_like_cpp(),
+        })
+    }
+
+    pub(crate) fn sync_session_from_save_to_db_snapshot_like_cpp(
+        &mut self,
+    ) -> Option<PlayerSaveToDbSnapshotLikeCpp> {
+        let snapshot = self.current_player_save_to_db_snapshot_like_cpp()?;
+        self.set_player_map_position_like_cpp(snapshot.map_id, snapshot.position);
+        self.set_player_level_like_cpp(snapshot.level);
+        self.set_player_xp_like_cpp(snapshot.xp);
+        self.set_player_gold_like_cpp(snapshot.money);
+        Some(snapshot)
+    }
+
     fn sync_canonical_player_entity_like_cpp(
+        &self,
         managed: &mut wow_map::ManagedMap,
         mut player: Player,
     ) {
         let guid = player.guid();
+        let never_visible_for_seer = self.player_session_never_visible_for_seer_like_cpp(guid);
+        let seer_can_never_see_target = self.player_can_never_see_target_like_cpp();
+        Self::apply_player_session_visibility_detection_like_cpp(
+            &mut player,
+            never_visible_for_seer,
+            seer_can_never_see_target,
+        );
         let map = managed.map_mut();
         if let Some(existing) = map.get_typed_player_mut(guid) {
             let attacking = existing.unit().attacking();
             let target = existing.unit().data().target;
             let unit_state = existing.unit().unit_state();
+            let pvp_flags = existing.unit().pvp_flags_like_cpp();
             let player_flags = existing.data().player_flags;
             let player_flags_ex = existing.data().player_flags_ex;
+            let farsight_object = existing.active_data().farsight_object;
+            let duel = existing.duel_info_like_cpp();
+            let gameplay_state = existing.gameplay_state().clone();
+            let visibility_detection = existing.unit().visibility_detection_like_cpp().clone();
+            let forced_reaction_faction_ids =
+                existing.forced_reputation_faction_ids_like_cpp().clone();
             player.replace_all_player_flags(player_flags);
             player.replace_all_player_flags_ex(player_flags_ex);
+            player.set_duel_info_like_cpp(duel);
+            *player.gameplay_state_mut() = gameplay_state;
+            player.replace_forced_reputation_faction_ids_like_cpp(forced_reaction_faction_ids);
             *existing = player;
             existing.unit_mut().set_attacking(attacking);
             existing.unit_mut().set_target(target);
             existing.unit_mut().add_unit_state(unit_state);
+            existing
+                .unit_mut()
+                .replace_all_pvp_flags_like_cpp(pvp_flags);
+            existing
+                .unit_mut()
+                .replace_visibility_detection_like_cpp(visibility_detection);
+            existing.set_farsight_object_like_cpp(farsight_object);
+            Self::apply_player_session_visibility_detection_like_cpp(
+                existing,
+                never_visible_for_seer,
+                seer_can_never_see_target,
+            );
             return;
         }
 
@@ -1888,6 +2568,42 @@ impl WorldSession {
         result
     }
 
+    fn canonical_player_pvp_flags_like_cpp(&self, guid: ObjectGuid) -> Option<UnitPvpFlags> {
+        let map_id = u32::from(self.player_map_id_like_cpp());
+        let manager = Arc::clone(self.canonical_map_manager.as_ref()?);
+        let manager = manager.lock().ok()?;
+        let mut result = None;
+        manager.do_for_all_maps_with_map_id(map_id, |managed| {
+            if result.is_none() {
+                result = managed
+                    .map()
+                    .get_typed_player(guid)
+                    .map(|player| player.unit().pvp_flags_like_cpp());
+            }
+        });
+        result
+    }
+
+    fn canonical_player_duel_in_progress_like_cpp(
+        &self,
+        guid: ObjectGuid,
+        opponent: ObjectGuid,
+    ) -> Option<bool> {
+        let map_id = u32::from(self.player_map_id_like_cpp());
+        let manager = Arc::clone(self.canonical_map_manager.as_ref()?);
+        let manager = manager.lock().ok()?;
+        let mut result = None;
+        manager.do_for_all_maps_with_map_id(map_id, |managed| {
+            if result.is_none() {
+                result = managed
+                    .map()
+                    .get_typed_player(guid)
+                    .map(|player| player.is_dueling_opponent_in_progress_like_cpp(opponent));
+            }
+        });
+        result
+    }
+
     fn canonical_player_attack_state_like_cpp(&self) -> Option<Option<ObjectGuid>> {
         let guid = self.player_guid?;
         let map_id = u32::from(self.player_map_id_like_cpp());
@@ -1902,6 +2618,59 @@ impl WorldSession {
             }
         });
         result
+    }
+
+    fn attack_reputation_faction_snapshot_like_cpp(
+        &self,
+        creature: &wow_entities::Creature,
+    ) -> Option<AttackReputationFactionSnapshotLikeCpp> {
+        let faction_template_id = u32::try_from(creature.unit().data().faction_template).ok()?;
+        self.faction_template_store
+            .as_ref()
+            .and_then(|store| store.get(faction_template_id))
+            .map(|entry| {
+                let faction_id = u32::from(entry.faction);
+                AttackReputationFactionSnapshotLikeCpp {
+                    faction_id,
+                    contested_guard: entry.flags & FACTION_TEMPLATE_FLAG_CONTESTED_GUARD_LIKE_CPP
+                        != 0,
+                    can_have_reputation: self.faction_store.as_ref().and_then(|store| {
+                        store
+                            .get(faction_id)
+                            .map(|faction| faction.can_have_reputation_like_cpp())
+                    }),
+                }
+            })
+            .or_else(|| {
+                creature
+                    .attack_reputation_faction_id_like_cpp()
+                    .map(|faction_id| AttackReputationFactionSnapshotLikeCpp {
+                        faction_id,
+                        contested_guard: creature.is_contested_guard_like_cpp(),
+                        can_have_reputation: None,
+                    })
+            })
+    }
+
+    fn is_within_melee_range_like_cpp(
+        attacker_position: Position,
+        attacker_combat_reach: f32,
+        target_position: Position,
+        target_combat_reach: f32,
+    ) -> bool {
+        let melee_range =
+            (attacker_combat_reach.max(0.0) + target_combat_reach.max(0.0) + 4.0 / 3.0)
+                .max(NOMINAL_MELEE_RANGE_LIKE_CPP);
+        attacker_position.distance(&target_position) <= melee_range
+    }
+
+    fn is_within_target_boundary_radius_like_cpp(
+        attacker_position: Position,
+        target_position: Position,
+        target_bounding_radius: f32,
+    ) -> bool {
+        let boundary_radius = target_bounding_radius.max(MIN_MELEE_REACH_LIKE_CPP);
+        attacker_position.distance(&target_position) < boundary_radius
     }
 
     fn is_player_facing_target_for_melee_like_cpp(
@@ -2057,6 +2826,197 @@ impl WorldSession {
         Some(f(creature))
     }
 
+    fn object_id_visibility_conditions_met_like_cpp(
+        &self,
+        target: &WorldObject,
+        seer: &WorldObject,
+    ) -> bool {
+        let Some(condition_store) = self.condition_store.as_ref() else {
+            return true;
+        };
+
+        let area_table_store = self.area_table_store.as_ref().map(Arc::clone);
+        crate::conditions::is_object_meeting_visibility_by_object_id_conditions_like_cpp(
+            condition_store,
+            target.object().type_id() as u32,
+            target.object().entry(),
+            Some(seer),
+            |condition, source_info| {
+                crate::conditions::condition_meets_basic_like_cpp(
+                    condition,
+                    source_info,
+                    |area_id, required_area_id| {
+                        area_table_store.as_ref().is_some_and(|store| {
+                            store.is_in_area_like_cpp(area_id, required_area_id)
+                        })
+                    },
+                )
+                .value()
+                .unwrap_or(false)
+            },
+        )
+    }
+
+    fn current_player_is_in_group_guid_like_cpp(&self, group_owner: ObjectGuid) -> bool {
+        let Some(group_guid) = self.group_guid else {
+            return false;
+        };
+        if ObjectGuid::create_group(group_guid) != group_owner {
+            return false;
+        }
+        let Some(group_registry) = self.group_registry.as_ref() else {
+            return false;
+        };
+        let Some(player_guid) = self.player_guid() else {
+            return false;
+        };
+        group_registry
+            .get(&group_guid)
+            .is_some_and(|group| group.members.contains(&player_guid))
+    }
+
+    fn current_player_is_group_visible_for_owner_like_cpp(&self, owner_guid: ObjectGuid) -> bool {
+        let (Some(group_guid), Some(group_registry), Some(player_guid)) = (
+            self.group_guid,
+            self.group_registry.as_ref(),
+            self.player_guid(),
+        ) else {
+            return false;
+        };
+        group_registry.get(&group_guid).is_some_and(|group| {
+            group.members.contains(&player_guid) && group.members.contains(&owner_guid)
+        })
+    }
+
+    fn represented_player_is_same_raid_with_like_cpp(
+        &self,
+        player_guid: ObjectGuid,
+        owner_guid: ObjectGuid,
+    ) -> bool {
+        let (Some(group_guid), Some(group_registry)) =
+            (self.group_guid, self.group_registry.as_ref())
+        else {
+            return false;
+        };
+        group_registry.get(&group_guid).is_some_and(|group| {
+            group.members.contains(&player_guid) && group.members.contains(&owner_guid)
+        })
+    }
+
+    fn current_group_member_guids_for_tap_like_cpp(
+        &self,
+        player_guid: ObjectGuid,
+    ) -> Vec<ObjectGuid> {
+        let (Some(group_guid), Some(group_registry)) =
+            (self.group_guid, self.group_registry.as_ref())
+        else {
+            return Vec::new();
+        };
+        group_registry
+            .get(&group_guid)
+            .map(|group| {
+                group
+                    .members
+                    .iter()
+                    .copied()
+                    .filter(|member| *member != player_guid)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn summon_private_object_owner_like_cpp(
+        &self,
+        caster_guid: ObjectGuid,
+        caster_private_object_owner: ObjectGuid,
+        properties: &SummonPropertiesEntry,
+    ) -> ObjectGuid {
+        let flags = u32::try_from(properties.flags[0]).unwrap_or(0);
+        let only_visible_to_summoner =
+            flags & SUMMON_PROPERTIES_ONLY_VISIBLE_TO_SUMMONER_LIKE_CPP != 0;
+        let only_visible_to_summoner_group =
+            flags & SUMMON_PROPERTIES_ONLY_VISIBLE_TO_SUMMONER_GROUP_LIKE_CPP != 0;
+        if !only_visible_to_summoner && !only_visible_to_summoner_group {
+            return ObjectGuid::EMPTY;
+        }
+
+        if !caster_private_object_owner.is_empty() {
+            return caster_private_object_owner;
+        }
+
+        if only_visible_to_summoner_group && caster_guid.is_player() {
+            if let Some(group_guid) = self.group_guid {
+                return ObjectGuid::create_group(group_guid);
+            }
+        }
+
+        caster_guid
+    }
+
+    pub fn set_canonical_creature_private_object_owner_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        owner: ObjectGuid,
+    ) -> bool {
+        let mut updated = self
+            .mutate_canonical_creature_by_guid_like_cpp(guid, |creature| {
+                creature.unit_mut().set_private_object_owner_like_cpp(owner);
+            })
+            .is_some();
+
+        if let Some(manager) = self.map_manager.as_ref() {
+            let mut manager = manager
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(creature) =
+                manager.find_creature_mut(self.player_map_id_like_cpp(), 0, guid)
+            {
+                creature
+                    .creature
+                    .unit_mut()
+                    .set_private_object_owner_like_cpp(owner);
+                updated = true;
+            }
+        }
+
+        updated
+    }
+
+    fn apply_target_visibility_context_for_current_player_like_cpp(
+        &self,
+        target_unit: &mut wow_entities::Unit,
+        seer_unit: &mut wow_entities::Unit,
+    ) {
+        target_unit.set_object_id_visibility_conditions_met_like_cpp(
+            self.object_id_visibility_conditions_met_like_cpp(
+                target_unit.world(),
+                seer_unit.world(),
+            ),
+        );
+
+        let target_guid = target_unit.world().object().guid();
+        let moved_unit_guid = self.player_moved_unit_guid_like_cpp();
+        if !moved_unit_guid.is_empty() && moved_unit_guid == target_guid {
+            seer_unit.set_seer_can_always_see_target_like_cpp(true);
+        }
+
+        let private_owner = target_unit.private_object_owner_like_cpp();
+        if !private_owner.is_empty() {
+            seer_unit.set_seer_group_visible_for_private_owner_like_cpp(
+                self.current_player_is_in_group_guid_like_cpp(private_owner),
+            );
+        }
+
+        let owner_group_visible = target_unit
+            .subsystems()
+            .control
+            .charmer_or_owner_guid()
+            .is_some_and(|owner_guid| {
+                self.current_player_is_group_visible_for_owner_like_cpp(owner_guid)
+            });
+        target_unit.set_target_owner_group_visible_for_seer_like_cpp(owner_group_visible);
+    }
+
     fn canonical_unit_attack_target_state_like_cpp(
         &self,
         guid: ObjectGuid,
@@ -2083,6 +3043,22 @@ impl WorldSession {
             );
         };
         if let Some(player) = map.map().get_typed_player(guid) {
+            let pvp_flags = player.unit().pvp_flags_like_cpp();
+            let attacker_can_see_or_detect_target = self
+                .can_see_phase_shift_like_cpp(player.unit().world().phase_shift())
+                && self
+                    .player_guid()
+                    .and_then(|attacker_guid| map.map().get_typed_player(attacker_guid))
+                    .map(|attacker| {
+                        let mut target_unit = player.unit().clone();
+                        let mut seer_unit = attacker.unit().clone();
+                        self.apply_target_visibility_context_for_current_player_like_cpp(
+                            &mut target_unit,
+                            &mut seer_unit,
+                        );
+                        seer_unit.can_see_or_detect_unit_like_cpp(&target_unit, false, true, false)
+                    })
+                    .unwrap_or(true);
             return (
                 player.unit().is_alive(),
                 player.unit().world().object().is_in_world(),
@@ -2091,20 +3067,73 @@ impl WorldSession {
                     victim_unit_state: player.unit().unit_state(),
                     victim_unit_flags: player.unit().unit_flags_like_cpp().bits(),
                     victim_has_affecting_player: true,
+                    visibility_represented: true,
+                    attacker_can_see_or_detect_target,
+                    victim_in_sanctuary: pvp_flags.contains(UnitPvpFlags::SANCTUARY),
+                    victim_is_pvp: pvp_flags.contains(UnitPvpFlags::PVP),
+                    victim_is_ffa_pvp: pvp_flags.contains(UnitPvpFlags::FFA_PVP),
+                    victim_has_pvp_unk1_flag: pvp_flags.contains(UnitPvpFlags::UNK1),
                     ..Default::default()
                 },
             );
         }
         if let Some(creature) = map.map().get_typed_creature(guid) {
+            let attacker_can_see_or_detect_target = self
+                .can_see_phase_shift_like_cpp(creature.unit().world().phase_shift())
+                && self
+                    .player_guid()
+                    .and_then(|attacker_guid| map.map().get_typed_player(attacker_guid))
+                    .map(|attacker| {
+                        let mut target_unit = creature.unit().clone();
+                        let mut seer_unit = attacker.unit().clone();
+                        self.apply_target_visibility_context_for_current_player_like_cpp(
+                            &mut target_unit,
+                            &mut seer_unit,
+                        );
+                        seer_unit.can_see_or_detect_unit_like_cpp(&target_unit, false, true, false)
+                    })
+                    .unwrap_or(true);
+            let mut context = wow_entities::UnitAttackContextLikeCpp {
+                victim_is_evading_creature: creature.is_evading_attacks_like_cpp(),
+                victim_unit_state: creature.unit().unit_state(),
+                victim_unit_flags: creature.unit().unit_flags_like_cpp().bits(),
+                visibility_represented: true,
+                attacker_can_see_or_detect_target,
+                ..Default::default()
+            };
+            if let Some(reputation_snapshot) =
+                self.attack_reputation_faction_snapshot_like_cpp(creature)
+                && let Some(attacker_guid) = self.player_guid()
+                && let Some(attacker) = map.map().get_typed_player(attacker_guid)
+            {
+                let player_has_contested_pvp_flag =
+                    attacker.has_player_flag(PLAYER_FLAGS_CONTESTED_PVP_LIKE_CPP);
+                let creature_has_forced_reputation_rank =
+                    attacker.has_forced_reputation_rank_like_cpp(reputation_snapshot.faction_id);
+                let player_has_reputation_state = match reputation_snapshot.can_have_reputation {
+                    Some(false) => false,
+                    Some(true) => {
+                        attacker.has_reputation_state_like_cpp(reputation_snapshot.faction_id)
+                    }
+                    None => true,
+                };
+                if (reputation_snapshot.contested_guard && player_has_contested_pvp_flag)
+                    || creature_has_forced_reputation_rank
+                    || player_has_reputation_state
+                {
+                    context.player_creature_reputation_represented = true;
+                    context.creature_is_contested_guard = reputation_snapshot.contested_guard;
+                    context.player_has_contested_pvp_flag = player_has_contested_pvp_flag;
+                    context.creature_has_forced_reputation_rank =
+                        creature_has_forced_reputation_rank;
+                    context.player_at_war_with_creature_faction = player_has_reputation_state
+                        && attacker.is_at_war_with_faction_like_cpp(reputation_snapshot.faction_id);
+                }
+            }
             return (
                 creature.is_alive(),
                 creature.unit().world().object().is_in_world(),
-                wow_entities::UnitAttackContextLikeCpp {
-                    victim_is_evading_creature: creature.is_evading_attacks_like_cpp(),
-                    victim_unit_state: creature.unit().unit_state(),
-                    victim_unit_flags: creature.unit().unit_flags_like_cpp().bits(),
-                    ..Default::default()
-                },
+                context,
             );
         }
         (
@@ -2149,6 +3178,213 @@ impl WorldSession {
         });
     }
 
+    fn begin_canonical_player_combat_ref_like_cpp(
+        &mut self,
+        attacker_guid: ObjectGuid,
+        victim_guid: ObjectGuid,
+        relation_represented: bool,
+        attacker_is_friendly_to_victim: bool,
+        victim_is_friendly_to_attacker: bool,
+    ) -> bool {
+        let Some(manager) = self.canonical_map_manager.as_ref().cloned() else {
+            return false;
+        };
+        let Ok(mut manager) = manager.lock() else {
+            return false;
+        };
+        let Some(managed) = manager.find_map_mut(u32::from(self.player_map_id_like_cpp()), 0)
+        else {
+            return false;
+        };
+        let map = managed.map_mut();
+        let Some(attacker) = map.get_typed_player(attacker_guid) else {
+            return false;
+        };
+        let attacker_unit = attacker.unit();
+        let attacker_world = attacker_unit.world();
+        let attacker_combat = &attacker_unit.subsystems().combat;
+
+        let (context, both_player_controlled) =
+            if let Some(victim) = map.get_typed_player(victim_guid) {
+                let victim_unit = victim.unit();
+                let victim_world = victim_unit.world();
+                let victim_combat = &victim_unit.subsystems().combat;
+                (
+                    wow_entities::CombatBeginContextLikeCpp {
+                        same_unit: attacker_guid == victim_guid,
+                        attacker_in_world: attacker_world.object().is_in_world(),
+                        victim_in_world: victim_world.object().is_in_world(),
+                        attacker_alive: attacker_unit.is_alive(),
+                        victim_alive: victim_unit.is_alive(),
+                        same_map: attacker_world.is_in_map(victim_world),
+                        same_phase: attacker_world.in_same_phase(victim_world),
+                        attacker_unit_state: attacker_unit.unit_state(),
+                        victim_unit_state: victim_unit.unit_state(),
+                        attacker_combat_disallowed: attacker_combat.combat_disallowed,
+                        victim_combat_disallowed: victim_combat.combat_disallowed,
+                        relation_represented,
+                        attacker_is_friendly_to_victim,
+                        victim_is_friendly_to_attacker,
+                        attacker_or_owner_player_is_game_master: attacker.is_game_master_like_cpp(),
+                        victim_or_owner_player_is_game_master: victim.is_game_master_like_cpp(),
+                    },
+                    true,
+                )
+            } else if let Some(victim) = map.get_typed_creature(victim_guid) {
+                let victim_unit = victim.unit();
+                let victim_world = victim_unit.world();
+                let victim_combat = &victim_unit.subsystems().combat;
+                (
+                    wow_entities::CombatBeginContextLikeCpp {
+                        same_unit: false,
+                        attacker_in_world: attacker_world.object().is_in_world(),
+                        victim_in_world: victim_world.object().is_in_world(),
+                        attacker_alive: attacker_unit.is_alive(),
+                        victim_alive: victim_unit.is_alive(),
+                        same_map: attacker_world.is_in_map(victim_world),
+                        same_phase: attacker_world.in_same_phase(victim_world),
+                        attacker_unit_state: attacker_unit.unit_state(),
+                        victim_unit_state: victim_unit.unit_state(),
+                        attacker_combat_disallowed: attacker_combat.combat_disallowed,
+                        victim_combat_disallowed: victim_combat.combat_disallowed,
+                        relation_represented,
+                        attacker_is_friendly_to_victim,
+                        victim_is_friendly_to_attacker,
+                        attacker_or_owner_player_is_game_master: attacker.is_game_master_like_cpp(),
+                        victim_or_owner_player_is_game_master: false,
+                    },
+                    false,
+                )
+            } else {
+                return false;
+            };
+
+        if !wow_entities::CombatSubsystem::can_begin_combat_like_cpp(context) {
+            return false;
+        }
+
+        let Some(attacker) = map.get_typed_player_mut(attacker_guid) else {
+            return false;
+        };
+        let attacker_started = attacker
+            .unit_mut()
+            .subsystems_mut()
+            .combat
+            .set_in_combat_with(victim_guid, both_player_controlled, false);
+
+        let victim_started = if let Some(victim) = map.get_typed_player_mut(victim_guid) {
+            victim
+                .unit_mut()
+                .subsystems_mut()
+                .combat
+                .set_in_combat_with(attacker_guid, both_player_controlled, false)
+        } else if let Some(victim) = map.get_typed_creature_mut(victim_guid) {
+            victim
+                .unit_mut()
+                .subsystems_mut()
+                .combat
+                .set_in_combat_with(attacker_guid, both_player_controlled, false)
+        } else {
+            false
+        };
+
+        attacker_started && victim_started
+    }
+
+    fn canonical_creature_threat_value_like_cpp(
+        &self,
+        creature_guid: ObjectGuid,
+        attacker_guid: ObjectGuid,
+    ) -> Option<f32> {
+        let manager = self.canonical_map_manager.as_ref()?.clone();
+        let manager = manager.lock().ok()?;
+        let managed = manager.find_map(u32::from(self.player_map_id_like_cpp()), 0)?;
+        let creature = managed.map().get_typed_creature(creature_guid)?;
+        creature
+            .unit()
+            .subsystems()
+            .combat
+            .threat_value(attacker_guid)
+    }
+
+    fn mirror_canonical_creature_threat_from_attacker_like_cpp(
+        &mut self,
+        creature_guid: ObjectGuid,
+        attacker_guid: ObjectGuid,
+        threat_value: f32,
+    ) -> bool {
+        if threat_value <= 0.0 {
+            return false;
+        }
+        if !self.begin_canonical_player_combat_ref_like_cpp(
+            attacker_guid,
+            creature_guid,
+            false,
+            false,
+            false,
+        ) {
+            return false;
+        }
+
+        let Some(manager) = self.canonical_map_manager.as_ref().cloned() else {
+            return false;
+        };
+        let Ok(mut manager) = manager.lock() else {
+            return false;
+        };
+        let Some(managed) = manager.find_map_mut(u32::from(self.player_map_id_like_cpp()), 0)
+        else {
+            return false;
+        };
+        let map = managed.map_mut();
+
+        let threat_ref = {
+            let Some(creature) = map.get_typed_creature_mut(creature_guid) else {
+                return false;
+            };
+            creature
+                .unit_mut()
+                .subsystems_mut()
+                .combat
+                .set_threat(attacker_guid, threat_value);
+            creature
+                .unit()
+                .subsystems()
+                .combat
+                .threat_ref(attacker_guid)
+                .copied()
+        };
+
+        let Some(threat_ref) = threat_ref else {
+            return false;
+        };
+        let Some(attacker) = map.get_typed_player_mut(attacker_guid) else {
+            return false;
+        };
+        attacker
+            .unit_mut()
+            .subsystems_mut()
+            .combat
+            .put_threatened_by_me_ref(creature_guid, threat_ref);
+        true
+    }
+
+    fn revalidate_canonical_player_combat_refs_like_cpp(&mut self, player_guid: ObjectGuid) {
+        let Some(manager) = self.canonical_map_manager.as_ref().cloned() else {
+            return;
+        };
+        let Ok(mut manager) = manager.lock() else {
+            return;
+        };
+        let Some(managed) = manager.find_map_mut(u32::from(self.player_map_id_like_cpp()), 0)
+        else {
+            return;
+        };
+        if managed.map().get_typed_player(player_guid).is_some() {
+            managed.map_mut().revalidate_all_combat_refs_like_cpp();
+        }
+    }
+
     pub(crate) fn start_player_attack_like_cpp(
         &mut self,
         victim: ObjectGuid,
@@ -2169,11 +3405,27 @@ impl WorldSession {
         attack_context.attacker_is_mounted_player = attacker_is_mounted_player;
         attack_context.attacker_unit_flags = self.player_unit_flags_like_cpp.bits();
         attack_context.attacker_has_affecting_player = true;
+        let attacker_pvp_flags = player_guid
+            .and_then(|guid| self.canonical_player_pvp_flags_like_cpp(guid))
+            .unwrap_or_default();
+        attack_context.attacker_in_sanctuary = attacker_pvp_flags.contains(UnitPvpFlags::SANCTUARY);
+        attack_context.attacker_is_ffa_pvp = attacker_pvp_flags.contains(UnitPvpFlags::FFA_PVP);
+        attack_context.attacker_has_pvp_unk1_flag = attacker_pvp_flags.contains(UnitPvpFlags::UNK1);
+        if attack_context.victim_has_affecting_player {
+            attack_context.sanctuary_represented = true;
+            attack_context.pvp_represented = true;
+            attack_context.player_player_duel_in_progress = player_guid
+                .and_then(|guid| self.canonical_player_duel_in_progress_like_cpp(guid, victim))
+                .unwrap_or(false);
+        }
         attack_context.attacker_is_player_uber = player_guid
             .and_then(|guid| {
                 self.canonical_player_has_player_flag_like_cpp(guid, PLAYER_FLAGS_UBER_LIKE_CPP)
             })
             .unwrap_or(false);
+        let combat_relation_represented = attack_context.relation_represented;
+        let combat_attacker_is_friendly_to_victim = attack_context.attacker_is_friendly_to_victim;
+        let combat_victim_is_friendly_to_attacker = attack_context.victim_is_friendly_to_attacker;
         self.combat_target = Some(victim);
         self.in_combat = true;
         self.set_selection_guid_like_cpp(Some(victim));
@@ -2224,6 +3476,13 @@ impl WorldSession {
                     .unit_mut()
                     .add_attacker_like_cpp(player_guid);
             });
+            let _ = self.begin_canonical_player_combat_ref_like_cpp(
+                player_guid,
+                victim,
+                combat_relation_represented,
+                combat_attacker_is_friendly_to_victim,
+                combat_victim_is_friendly_to_attacker,
+            );
         }
         let send_attack_start = matches!(
             outcome,
@@ -2325,7 +3584,7 @@ impl WorldSession {
             };
             if let Some(key) = key {
                 if let Some(managed) = manager.find_map_mut(key.map_id, key.instance_id) {
-                    Self::sync_canonical_player_entity_like_cpp(managed, player);
+                    self.sync_canonical_player_entity_like_cpp(managed, player);
                 }
             }
         }
@@ -2362,6 +3621,7 @@ impl WorldSession {
         max_dmg: u32,
         aggro_radius: f32,
         loot_id: u32,
+        skin_loot_id: u32,
         gold_min: u32,
         gold_max: u32,
         boss_id: Option<u32>,
@@ -2386,7 +3646,7 @@ impl WorldSession {
             phase_group_id,
             terrain_swap_map,
         );
-        let canonical_creature = {
+        let mut canonical_creature = {
             let mut creature = wow_entities::Creature::new(false);
             creature.unit_mut().world_mut().object_mut().create(guid);
             creature
@@ -2408,6 +3668,7 @@ impl WorldSession {
             creature.ai_ownership_mut().min_damage = min_dmg;
             creature.ai_ownership_mut().max_damage = max_dmg;
             creature.ai_ownership_mut().loot_id = loot_id;
+            creature.ai_ownership_mut().skin_loot_id = skin_loot_id;
             creature.ai_ownership_mut().gold_min = gold_min;
             creature.ai_ownership_mut().gold_max = gold_max;
             creature.ai_ownership_mut().boss_id = boss_id;
@@ -2418,6 +3679,7 @@ impl WorldSession {
             creature.ai_ownership_mut().terrain_swap_map = validated_terrain_swap_map;
             creature
         };
+        canonical_creature.clear_data_changes();
         self.insert_canonical_creature_map_object_like_cpp(map_id, canonical_creature.clone());
 
         if let Some(manager) = &self.map_manager {
@@ -2551,6 +3813,21 @@ impl WorldSession {
         self.upsert_canonical_gameobject_map_object_like_cpp(map_id, guid, entry, position);
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn record_represented_gameobject_zone_area_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        zone_id: u32,
+        area_id: u32,
+    ) {
+        let state = self
+            .represented_gameobject_use_states
+            .entry(guid)
+            .or_default();
+        state.zone_id = Some(zone_id);
+        state.area_id = Some(area_id);
+    }
+
     pub(crate) fn record_represented_gameobject_interact_radius_override_like_cpp(
         &mut self,
         guid: ObjectGuid,
@@ -2574,6 +3851,18 @@ impl WorldSession {
             .lock_id = (lock_id != 0).then_some(lock_id);
     }
 
+    #[cfg(test)]
+    pub(crate) fn record_represented_gameobject_faction_template_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        faction_template: u32,
+    ) {
+        self.represented_gameobject_use_states
+            .entry(guid)
+            .or_default()
+            .faction_template = (faction_template != 0).then_some(faction_template);
+    }
+
     pub(crate) fn record_represented_gameobject_display_model_like_cpp(
         &mut self,
         guid: ObjectGuid,
@@ -2588,6 +3877,128 @@ impl WorldSession {
         state.display_id = (display_id != 0).then_some(display_id);
         state.scale = scale;
         state.rotation = rotation;
+    }
+
+    pub(crate) fn record_represented_gameobject_anim_progress_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        anim_progress: u8,
+    ) {
+        self.represented_gameobject_use_states
+            .entry(guid)
+            .or_default()
+            .go_anim_progress = anim_progress;
+    }
+
+    pub(crate) fn canonical_gameobject_access_like_cpp(
+        &self,
+        guid: ObjectGuid,
+    ) -> Option<RepresentedGameObjectAccessLikeCpp> {
+        if guid.is_empty() || !guid.is_game_object() {
+            return None;
+        }
+        let manager = self.canonical_map_manager.as_ref()?;
+        let Ok(manager) = manager.lock() else {
+            return None;
+        };
+        let map = manager.find_map(u32::from(self.player_map_id_like_cpp()), 0)?;
+        let game_object = map.map().get_typed_game_object(guid)?;
+        Some(RepresentedGameObjectAccessLikeCpp {
+            entry: game_object.world().object().entry(),
+            position: game_object.world().position(),
+        })
+    }
+
+    pub(crate) fn represented_gameobject_can_interact_with_like_cpp(
+        &self,
+        guid: ObjectGuid,
+        interaction_distance: f32,
+    ) -> Option<RepresentedGameObjectAccessLikeCpp> {
+        let access = self.canonical_gameobject_access_like_cpp(guid)?;
+        let player_position = self.player_position_like_cpp()?;
+        if access
+            .position
+            .is_within_dist(&player_position, interaction_distance)
+        {
+            Some(access)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn has_canonical_map_manager_like_cpp(&self) -> bool {
+        self.canonical_map_manager.is_some()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn canonical_creature_access_like_cpp(
+        &self,
+        guid: ObjectGuid,
+    ) -> Option<RepresentedCreatureAccessLikeCpp> {
+        if guid.is_empty() || !guid.is_any_type_creature() {
+            return None;
+        }
+        let manager = self.canonical_map_manager.as_ref()?;
+        let Ok(manager) = manager.lock() else {
+            return None;
+        };
+        let map = manager.find_map(u32::from(self.player_map_id_like_cpp()), 0)?;
+        let creature = map.map().get_typed_creature(guid)?;
+        Some(RepresentedCreatureAccessLikeCpp {
+            entry: creature.entry(),
+            position: creature.unit().world().position(),
+            npc_flags: creature.ai_ownership().npc_flags,
+        })
+    }
+
+    pub(crate) fn represented_npc_can_interact_with_like_cpp(
+        &self,
+        guid: ObjectGuid,
+        npc_flags: u32,
+    ) -> Option<RepresentedCreatureAccessLikeCpp> {
+        if guid.is_empty() || !guid.is_any_type_creature() {
+            return None;
+        }
+        let player_guid = self.player_guid()?;
+        let player_position = self.player_position_like_cpp()?;
+        let manager = self.canonical_map_manager.as_ref()?;
+        let Ok(manager) = manager.lock() else {
+            return None;
+        };
+        let map = manager.find_map(u32::from(self.player_map_id_like_cpp()), 0)?;
+        let creature = map.map().get_typed_creature(guid)?;
+
+        if !creature.is_alive() {
+            return None;
+        }
+        if npc_flags != 0 && (creature.ai_ownership().npc_flags & npc_flags) == 0 {
+            return None;
+        }
+
+        let interaction_distance = creature.unit().world().combat_reach() + 4.0;
+        let in_range = if let Some(player) = map.map().get_typed_player(player_guid) {
+            creature.unit().world().is_within_dist_in_map(
+                player.unit().world(),
+                interaction_distance,
+                true,
+            )
+        } else {
+            let fallback_distance = interaction_distance + creature.unit().world().combat_reach();
+            creature
+                .unit()
+                .world()
+                .position()
+                .is_within_dist(&player_position, fallback_distance)
+        };
+        if !in_range {
+            return None;
+        }
+
+        Some(RepresentedCreatureAccessLikeCpp {
+            entry: creature.entry(),
+            position: creature.unit().world().position(),
+            npc_flags: creature.ai_ownership().npc_flags,
+        })
     }
 
     pub(crate) fn represented_gameobject_is_per_player_despawned_like_cpp(
@@ -2608,7 +4019,7 @@ impl WorldSession {
         }
     }
 
-    #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn record_represented_gameobject_owner_guid_like_cpp(
         &mut self,
         guid: ObjectGuid,
@@ -2629,6 +4040,17 @@ impl WorldSession {
             .entry(guid)
             .or_default()
             .fishing_hole_max_opens = Some(max_opens);
+    }
+
+    pub(crate) fn record_represented_fishing_hole_radius_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        radius: u32,
+    ) {
+        self.represented_gameobject_use_states
+            .entry(guid)
+            .or_default()
+            .fishing_hole_radius = Some(radius as f32);
     }
 
     fn upsert_canonical_gameobject_map_object_like_cpp(
@@ -2699,25 +4121,7 @@ impl WorldSession {
             }
         }
 
-        #[cfg(test)]
-        {
-            let mut legacy = self.creatures.remove(&guid)?;
-            let mut creature =
-                Self::test_world_creature_from_legacy(self.player_map_id_like_cpp(), &legacy);
-            let result = f.take().expect("creature mutator is called once")(&mut creature);
-            Self::sync_test_world_creature_to_legacy(&creature, &mut legacy);
-            let position = creature.position();
-            let canonical_creature = creature.creature.clone();
-            self.creatures.insert(guid, legacy);
-            self.relocate_canonical_creature_map_object_like_cpp(guid, position);
-            self.sync_canonical_creature_entity_like_cpp(canonical_creature);
-            return Some(result);
-        }
-
-        #[cfg(not(test))]
-        {
-            None
-        }
+        None
     }
 
     pub(crate) fn world_creature_guids(&self) -> Vec<ObjectGuid> {
@@ -2728,150 +4132,105 @@ impl WorldSession {
                 .creature_guids(self.player_map_id_like_cpp(), 0);
         }
 
-        #[cfg(test)]
-        {
-            return self.creatures.keys().copied().collect();
-        }
-
-        #[cfg(not(test))]
-        {
-            Vec::new()
-        }
+        Vec::new()
     }
 
-    #[cfg(test)]
-    fn test_world_creature_from_legacy(
+    pub(crate) fn has_world_map_manager_like_cpp(&self) -> bool {
+        self.map_manager.is_some()
+    }
+
+    pub(crate) fn visible_world_creatures_from_map_like_cpp(
+        &self,
         map_id: u16,
-        legacy: &wow_ai::CreatureAI,
-    ) -> crate::map_manager::WorldCreature {
-        let mut creature = wow_entities::Creature::new(false);
-        creature
-            .unit_mut()
-            .world_mut()
-            .object_mut()
-            .create(legacy.guid);
-        creature
-            .unit_mut()
-            .world_mut()
-            .object_mut()
-            .set_entry(legacy.entry);
-        let _ = creature.unit_mut().world_mut().set_map(map_id as u32, 0);
-        creature.unit_mut().world_mut().relocate(legacy.current_pos);
-        creature.set_ai_home_position(legacy.home_pos);
-        creature.unit_mut().set_level(legacy.level);
-        creature.unit_mut().set_max_health(u64::from(legacy.max_hp));
-        creature.unit_mut().set_health(u64::from(legacy.hp));
-        creature.set_ai_identity_runtime(
-            legacy.display_id,
-            legacy.faction,
-            legacy.npc_flags,
-            legacy.unit_flags,
-        );
-        creature.configure_ai_runtime(
-            legacy.home_pos,
-            legacy.aggro_radius,
-            legacy.wander_radius,
-            legacy.respawn_time_secs,
-        );
-        {
-            let ai = creature.ai_ownership_mut();
-            ai.state = match legacy.state {
-                wow_ai::CreatureState::Idle => wow_entities::CreatureAiState::Idle,
-                wow_ai::CreatureState::WalkingRandom => {
-                    wow_entities::CreatureAiState::WalkingRandom
-                }
-                wow_ai::CreatureState::WalkingWaypoint => {
-                    wow_entities::CreatureAiState::WalkingWaypoint
-                }
-                wow_ai::CreatureState::InCombat => wow_entities::CreatureAiState::InCombat,
-                wow_ai::CreatureState::Dead => wow_entities::CreatureAiState::Dead,
-                wow_ai::CreatureState::Returning => wow_entities::CreatureAiState::Returning,
-            };
-            ai.move_target = legacy.move_target;
-            ai.move_duration_ms = legacy.move_duration_ms;
-            ai.combat_target = legacy.combat_target;
-            ai.min_damage = legacy.min_dmg;
-            ai.max_damage = legacy.max_dmg;
-            ai.swing_timer_ms = legacy.swing_timer_ms;
-            ai.spline_id = legacy.spline_id;
-            ai.loot_id = legacy.loot_id;
-            ai.gold_min = legacy.gold_min;
-            ai.gold_max = legacy.gold_max;
-            ai.boss_id = legacy.boss_id;
-            ai.dungeon_encounter_id = legacy.dungeon_encounter_id;
-        }
-        if !legacy.is_alive {
-            creature.mark_ai_dead(0);
-        }
-
-        crate::map_manager::WorldCreature::from_canonical(
-            creature,
-            wow_packet::packets::update::CreatureCreateData {
-                guid: legacy.guid,
-                entry: legacy.entry,
-                display_id: legacy.display_id,
-                native_display_id: legacy.display_id,
-                health: legacy.max_hp as i64,
-                max_health: legacy.max_hp as i64,
-                level: legacy.level,
-                faction_template: legacy.faction as i32,
-                npc_flags: legacy.npc_flags as u64,
-                unit_flags: legacy.unit_flags,
-                unit_flags2: 0,
-                unit_flags3: 0,
-                scale: 1.0,
-                unit_class: 1,
-                base_attack_time: 2000,
-                ranged_attack_time: 0,
-                zone_id: 0,
-                speed_walk_rate: 1.0,
-                speed_run_rate: 1.14286,
-            },
-        )
+        position: &wow_core::Position,
+    ) -> Vec<crate::map_manager::WorldCreature> {
+        let Some(manager) = &self.map_manager else {
+            return Vec::new();
+        };
+        manager
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get_visible_creatures_in_phase(
+                map_id,
+                0,
+                position.x,
+                position.y,
+                position.z,
+                Some(&self.represented_player_phase_shift),
+            )
     }
 
-    #[cfg(test)]
-    fn sync_test_world_creature_to_legacy(
-        creature: &crate::map_manager::WorldCreature,
-        legacy: &mut wow_ai::CreatureAI,
-    ) {
-        legacy.current_pos = creature.position();
-        legacy.home_pos = creature.home_position();
-        legacy.hp = creature.current_hp();
-        legacy.max_hp = creature.max_hp();
-        legacy.level = creature.level();
-        legacy.state = match creature.state() {
-            wow_entities::CreatureAiState::Idle => wow_ai::CreatureState::Idle,
-            wow_entities::CreatureAiState::WalkingRandom => wow_ai::CreatureState::WalkingRandom,
-            wow_entities::CreatureAiState::WalkingWaypoint => {
-                wow_ai::CreatureState::WalkingWaypoint
-            }
-            wow_entities::CreatureAiState::InCombat => wow_ai::CreatureState::InCombat,
-            wow_entities::CreatureAiState::Dead => wow_ai::CreatureState::Dead,
-            wow_entities::CreatureAiState::Returning => wow_ai::CreatureState::Returning,
+    pub(crate) fn visible_gameobjects_from_canonical_map_like_cpp(
+        &self,
+        map_id: u16,
+        position: &wow_core::Position,
+        visibility_radius: f32,
+    ) -> Option<Vec<wow_packet::packets::update::GameObjectCreateData>> {
+        let manager = self.canonical_map_manager.as_ref()?;
+        let Ok(manager) = manager.lock() else {
+            return None;
         };
-        let ai = creature.creature.ai_ownership();
-        legacy.move_target = ai.move_target;
-        legacy.move_duration_ms = ai.move_duration_ms;
-        legacy.combat_target = ai.combat_target;
-        legacy.min_dmg = ai.min_damage;
-        legacy.max_dmg = ai.max_damage;
-        legacy.aggro_radius = ai.aggro_radius;
-        legacy.wander_radius = ai.wander_radius;
-        legacy.respawn_time_secs = ai.respawn_time_secs;
-        legacy.npc_flags = ai.npc_flags;
-        legacy.unit_flags = ai.unit_flags;
-        legacy.display_id = ai.display_id;
-        legacy.faction = ai.faction;
-        legacy.spline_id = ai.spline_id;
-        legacy.swing_timer_ms = ai.swing_timer_ms;
-        legacy.loot_id = ai.loot_id;
-        legacy.gold_min = ai.gold_min;
-        legacy.gold_max = ai.gold_max;
-        legacy.boss_id = ai.boss_id;
-        legacy.dungeon_encounter_id = ai.dungeon_encounter_id;
-        legacy.is_alive = creature.is_alive();
-        legacy.corpse_despawn_at = creature.corpse_despawn_at();
+        let map = manager.find_map(u32::from(map_id), 0)?;
+        let nearby =
+            map.map()
+                .nearby_cell_guids_like_cpp(position.x, position.y, visibility_radius);
+        let now = Instant::now();
+        let mut gameobjects = Vec::new();
+
+        for guid in nearby.grid.gameobjects {
+            let Some(gameobject) = map.map().get_typed_game_object(guid) else {
+                continue;
+            };
+            let object = gameobject.world();
+            if object.map_id() != u32::from(map_id)
+                || !object
+                    .position()
+                    .is_within_dist(position, visibility_radius)
+            {
+                continue;
+            }
+            if let Some(phase_shift) = self.represented_gameobject_phase_shifts.get(&guid)
+                && !self.can_see_phase_shift_like_cpp(phase_shift)
+            {
+                continue;
+            }
+            let state = self.represented_gameobject_use_states.get(&guid);
+            if state.is_some_and(|state| {
+                state
+                    .per_player_despawn_until
+                    .is_some_and(|until| until > now)
+            }) {
+                continue;
+            }
+            let Some(state) = state else {
+                continue;
+            };
+            let Some(display_id) = state.display_id else {
+                continue;
+            };
+            let Some(go_type) = state.go_type else {
+                continue;
+            };
+
+            gameobjects.push(wow_packet::packets::update::GameObjectCreateData {
+                guid,
+                entry: object.object().entry(),
+                display_id,
+                go_type,
+                position: object.position(),
+                rotation: state.rotation,
+                anim_progress: 255,
+                state: state
+                    .go_state
+                    .map(|go_state| go_state as i8)
+                    .unwrap_or(wow_entities::GoState::Ready as i8),
+                created_by: state.owner_guid.unwrap_or(ObjectGuid::EMPTY),
+                faction_template: 0,
+                scale: state.scale,
+            });
+        }
+
+        Some(gameobjects)
     }
 
     pub fn set_realm_id(&mut self, realm_id: u16) {
@@ -4079,6 +5438,30 @@ impl WorldSession {
         }
     }
 
+    fn send_player_health_values_update_like_cpp(&self, guid: ObjectGuid, health: u64) {
+        let mut mask = UpdateMask::new(UNIT_DATA_HEALTH_BIT + 1);
+        mask.set(UNIT_DATA_HEALTH_BIT);
+        let update = wow_entities::PlayerValuesUpdate {
+            changed_object_type_mask: 0,
+            object_data: None,
+            unit_data: Some(UnitDataUpdate {
+                mask,
+                values: UnitDataValues {
+                    health,
+                    ..Default::default()
+                },
+            }),
+            player_data: None,
+            active_player_data: None,
+        };
+
+        if let Some(packet) =
+            player_values_update_to_update_object(guid, self.player_map_id_like_cpp(), &update)
+        {
+            self.send_packet(&packet);
+        }
+    }
+
     pub(crate) fn can_destroy_direct_item_like_cpp(
         &self,
         slot: u8,
@@ -4307,6 +5690,10 @@ impl WorldSession {
         self.player_condition_store = Some(store);
     }
 
+    pub fn set_content_tuning_store(&mut self, store: Arc<ContentTuningStore>) {
+        self.content_tuning_store = Some(store);
+    }
+
     /// Get the loaded PlayerCondition.db2 store reference.
     pub fn player_condition_store(&self) -> Option<&Arc<PlayerConditionStore>> {
         self.player_condition_store.as_ref()
@@ -4485,6 +5872,14 @@ impl WorldSession {
         store: Arc<MapDifficultyXConditionStore>,
     ) {
         self.map_difficulty_x_condition_store = Some(store);
+    }
+
+    pub fn set_faction_store(&mut self, store: Arc<FactionStore>) {
+        self.faction_store = Some(store);
+    }
+
+    pub fn set_faction_template_store(&mut self, store: Arc<FactionTemplateStore>) {
+        self.faction_template_store = Some(store);
     }
 
     pub fn set_creature_template_mount_store(
@@ -4701,6 +6096,18 @@ impl WorldSession {
         self.area_table_store = Some(store);
     }
 
+    pub(crate) fn area_table_store(&self) -> Option<&Arc<AreaTableStore>> {
+        self.area_table_store.as_ref()
+    }
+
+    pub fn set_fishing_base_skill_store(&mut self, store: Arc<FishingBaseSkillStoreLikeCpp>) {
+        self.fishing_base_skill_store = Some(store);
+    }
+
+    pub(crate) fn fishing_base_skill_store(&self) -> Option<&Arc<FishingBaseSkillStoreLikeCpp>> {
+        self.fishing_base_skill_store.as_ref()
+    }
+
     /// Set the quest store shared reference.
     pub fn set_quest_store(&mut self, store: Arc<wow_data::quest::QuestStore>) {
         self.quest_store = Some(store);
@@ -4721,6 +6128,32 @@ impl WorldSession {
         stmt.set_u64(0, self.player_gold_like_cpp());
         stmt.set_u32(1, guid);
         let _ = char_db.execute(&stmt).await;
+    }
+
+    async fn save_player_level_xp_like_cpp(&self) {
+        let (Some(guid), Some(char_db)) = (self.player_guid(), self.char_db().map(Arc::clone))
+        else {
+            return;
+        };
+        let mut stmt = char_db.prepare(CharStatements::UPD_CHAR_LEVEL);
+        stmt.set_u8(0, self.player_level_like_cpp());
+        stmt.set_u32(1, self.player_xp_like_cpp());
+        stmt.set_u32(2, guid.counter() as u32);
+        if let Err(err) = char_db.execute(&stmt).await {
+            warn!("Failed to save level/xp for guid {}: {err}", guid.counter());
+        }
+    }
+
+    pub(crate) async fn save_current_player_to_db_like_cpp(&mut self) {
+        if self
+            .sync_session_from_save_to_db_snapshot_like_cpp()
+            .is_none()
+        {
+            return;
+        }
+        self.save_player_level_xp_like_cpp().await;
+        self.save_player_gold().await;
+        self.save_played_time().await;
     }
 
     /// Give XP to the player, leveling up if threshold reached.
@@ -5315,11 +6748,17 @@ impl WorldSession {
     /// Set the player loading GUID (ConnectTo flow).
     pub fn set_player_loading(&mut self, guid: Option<ObjectGuid>) {
         self.player_loading = guid;
+        self.sync_current_player_session_visibility_detection_like_cpp();
     }
 
     /// Get the player loading GUID.
     pub fn player_loading(&self) -> Option<ObjectGuid> {
         self.player_loading
+    }
+
+    pub(crate) fn set_player_logout_like_cpp(&mut self, player_logout: bool) {
+        self.player_logout_like_cpp = player_logout;
+        self.sync_current_player_session_visibility_detection_like_cpp();
     }
 
     /// Set the ConnectTo key.
@@ -6096,6 +7535,7 @@ impl WorldSession {
     /// Process pending packets asynchronously. Call after `update()`.
     pub async fn process_pending(&mut self) {
         self.process_represented_session_commands_like_cpp().await;
+        self.process_pending_creature_kills_like_cpp().await;
 
         // ── Spell casting tick ─────────────────────────────────────────
         // Check if an active spell cast has completed and execute it.
@@ -6118,6 +7558,53 @@ impl WorldSession {
         let packets: Vec<WorldPacket> = self.pending_packets.drain(..).collect();
         for pkt in packets {
             self.dispatch_packet(pkt).await;
+        }
+    }
+
+    async fn process_pending_creature_kills_like_cpp(&mut self) {
+        let mut pending = std::mem::take(&mut self.pending_creature_kill_loot_like_cpp);
+        pending.sort_by_key(|guid| (guid.high_value(), guid.low_value()));
+        pending.dedup();
+        for creature_guid in pending {
+            self.ensure_represented_creature_kill_loot_like_cpp(creature_guid)
+                .await;
+        }
+
+        let mut rewards = std::mem::take(&mut self.pending_creature_kill_rewards_like_cpp);
+        rewards.sort_by_key(|reward| {
+            (
+                reward.creature_guid.high_value(),
+                reward.creature_guid.low_value(),
+            )
+        });
+        rewards.dedup_by_key(|reward| reward.creature_guid);
+        for reward in rewards {
+            let xp = self.creature_kill_xp(reward.creature_level);
+            if xp > 0 {
+                self.give_xp(xp, reward.creature_guid, true).await;
+            }
+            self.on_creature_killed(reward.creature_entry, reward.creature_guid)
+                .await;
+            self.record_represented_creature_kill_hooks_like_cpp(
+                reward.killer_guid,
+                reward.creature_guid,
+            );
+            if let Some(values_update) = self
+                .complete_represented_creature_death_state_after_kill_hooks_like_cpp(
+                    reward.killer_guid,
+                    reward.creature_guid,
+                )
+                && self
+                    .client_visible_guids_like_cpp
+                    .contains(&reward.creature_guid)
+                && let Some(update) = unit_values_update_to_update_object(
+                    reward.creature_guid,
+                    self.player_map_id_like_cpp(),
+                    &values_update,
+                )
+            {
+                self.send_packet(&update);
+            }
         }
     }
 
@@ -6313,6 +7800,12 @@ impl WorldSession {
                 match wow_packet::packets::query::QueryGameObject::read(&mut pkt) {
                     Ok(query) => self.handle_query_game_object(query).await,
                     Err(e) => warn!("Failed to read QueryGameObject: {e}"),
+                }
+            }
+            ClientOpcodes::QueryPageText => {
+                match wow_packet::packets::query::QueryPageText::read(&mut pkt) {
+                    Ok(query) => self.handle_query_page_text(query).await,
+                    Err(e) => warn!("Failed to read QueryPageText: {e}"),
                 }
             }
             ClientOpcodes::QueryPlayerNames => {
@@ -7480,6 +8973,7 @@ impl WorldSession {
         self.player_class = controller.class();
         self.player_level = controller.level();
         self.player_gender = controller.gender();
+        self.player_moved_unit_guid_like_cpp = controller.guid();
         self.player_controller = Some(controller);
     }
 
@@ -8237,6 +9731,16 @@ impl WorldSession {
     }
 
     #[cfg(test)]
+    pub(crate) fn set_player_faction_template_like_cpp(&mut self, faction_template: u32) {
+        self.player_faction_template_like_cpp = (faction_template != 0).then_some(faction_template);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_player_battleground_type_id_like_cpp(&mut self, bg_type_id: u32) {
+        self.player_battleground_type_id_like_cpp = (bg_type_id != 0).then_some(bg_type_id);
+    }
+
+    #[cfg(test)]
     pub(crate) fn set_player_game_master_like_cpp(&mut self, is_game_master: bool) {
         self.player_game_master_like_cpp = is_game_master;
     }
@@ -8451,6 +9955,12 @@ impl WorldSession {
         self.player_stand_state_like_cpp = state;
     }
 
+    fn chair_stand_state_like_cpp(chair_height: u32) -> UnitStandStateType {
+        let stand_state = 4_u32.saturating_add(chair_height);
+        <UnitStandStateType as num_traits::FromPrimitive>::from_u32(stand_state)
+            .unwrap_or(UnitStandStateType::Stand)
+    }
+
     #[cfg(test)]
     pub(crate) fn player_stand_state_like_cpp(&self) -> UnitStandStateType {
         self.player_stand_state_like_cpp
@@ -8488,15 +9998,2247 @@ impl WorldSession {
         self.movement_jump_proc_requests_like_cpp
     }
 
+    fn record_represented_creature_kill_hooks_like_cpp(
+        &mut self,
+        attacker_guid: ObjectGuid,
+        creature_guid: ObjectGuid,
+    ) {
+        let reward_source = self
+            .mutate_world_creature(creature_guid, |creature| {
+                (creature.map_id() as u16, creature.position())
+            })
+            .unwrap_or_else(|| {
+                (
+                    self.player_map_id_like_cpp(),
+                    self.player_position_like_cpp().unwrap_or(Position::ZERO),
+                )
+            });
+        let mut tappers = self
+            .mutate_world_creature(creature_guid, |creature| {
+                creature.creature.tap_list().to_vec()
+            })
+            .unwrap_or_default();
+        if tappers.is_empty() {
+            tappers.push(attacker_guid);
+        }
+        let mut unique_tappers = Vec::with_capacity(tappers.len());
+        for tapper in tappers {
+            if !unique_tappers.contains(&tapper) {
+                unique_tappers.push(tapper);
+            }
+        }
+
+        self.represented_creature_kill_events_like_cpp.push(
+            RepresentedCreatureKillEventLikeCpp::KillerProc {
+                attacker_guid,
+                victim_guid: creature_guid,
+            },
+        );
+
+        for tapper_guid in unique_tappers {
+            if !self.represented_player_at_group_reward_distance_like_cpp(
+                tapper_guid,
+                reward_source.0,
+                reward_source.1,
+            ) {
+                continue;
+            }
+            self.represented_creature_kill_events_like_cpp.push(
+                RepresentedCreatureKillEventLikeCpp::TapperTargetDiesProc {
+                    tapper_guid,
+                    victim_guid: creature_guid,
+                },
+            );
+        }
+
+        self.represented_creature_kill_events_like_cpp.push(
+            RepresentedCreatureKillEventLikeCpp::VictimDeathProc {
+                victim_guid: creature_guid,
+            },
+        );
+        self.represented_creature_kill_events_like_cpp.push(
+            RepresentedCreatureKillEventLikeCpp::DeliveredKillingBlowCriteria {
+                player_guid: attacker_guid,
+                victim_guid: creature_guid,
+                quantity: 1,
+            },
+        );
+    }
+
+    fn represented_player_at_group_reward_distance_like_cpp(
+        &self,
+        player_guid: ObjectGuid,
+        reward_map_id: u16,
+        reward_position: Position,
+    ) -> bool {
+        let player_state = if self.player_guid() == Some(player_guid) {
+            self.player_position_like_cpp()
+                .map(|position| (self.player_map_id_like_cpp(), position))
+        } else {
+            self.player_registry.as_ref().and_then(|registry| {
+                registry
+                    .get(&player_guid)
+                    .map(|entry| (entry.map_id, entry.position))
+            })
+        };
+        let Some((player_map_id, player_position)) = player_state else {
+            return self.player_guid() == Some(player_guid);
+        };
+        if player_map_id != reward_map_id {
+            return false;
+        }
+        if self
+            .map_store
+            .as_ref()
+            .and_then(|store| store.get(u32::from(player_map_id)))
+            .is_some_and(|entry| entry.is_dungeon())
+        {
+            return true;
+        }
+        player_position.distance(&reward_position) <= GROUP_XP_DISTANCE_LIKE_CPP
+    }
+
+    fn represented_creature_can_skin_after_death_state_like_cpp(
+        &mut self,
+        creature_guid: ObjectGuid,
+    ) -> bool {
+        let skin_loot_id = self
+            .mutate_world_creature(creature_guid, |creature| {
+                creature.creature.ai_ownership().skin_loot_id
+            })
+            .unwrap_or(0);
+        if skin_loot_id == 0 {
+            return false;
+        }
+        self.loot_stores
+            .as_ref()
+            .and_then(|stores| stores.get(&LootStoreKind::Skinning))
+            .is_some_and(|store| store.collect_loot_ids_like_cpp().contains(&skin_loot_id))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn represented_creature_kill_events_like_cpp(
+        &self,
+    ) -> &[RepresentedCreatureKillEventLikeCpp] {
+        &self.represented_creature_kill_events_like_cpp
+    }
+
+    fn complete_represented_creature_death_state_after_kill_hooks_like_cpp(
+        &mut self,
+        attacker_guid: ObjectGuid,
+        creature_guid: ObjectGuid,
+    ) -> Option<wow_entities::UnitValuesUpdate> {
+        let lootable = self
+            .loot_table
+            .get(&creature_guid)
+            .is_some_and(|loot| loot.coins > 0 || loot.unlooted_count > 0);
+        let can_skin = self.represented_creature_can_skin_after_death_state_like_cpp(creature_guid);
+        let values_update = self.mutate_world_creature(creature_guid, |creature| {
+            creature.complete_death_state_after_kill_hooks_like_cpp();
+            creature.apply_corpse_loot_flags_after_death_state_like_cpp(lootable, can_skin);
+            creature.creature.unit().values_update()
+        })?;
+        self.represented_creature_kill_events_like_cpp.push(
+            RepresentedCreatureKillEventLikeCpp::DeathStateJustDied {
+                victim_guid: creature_guid,
+            },
+        );
+        self.represented_creature_kill_events_like_cpp.push(
+            RepresentedCreatureKillEventLikeCpp::ZoneScriptUnitDeath {
+                unit_guid: creature_guid,
+            },
+        );
+        self.record_represented_tapper_pet_killed_unit_hooks_like_cpp(creature_guid);
+        self.represented_creature_kill_events_like_cpp.push(
+            RepresentedCreatureKillEventLikeCpp::LootFlagsApplied {
+                creature_guid,
+                lootable,
+                can_skin,
+                skinnable: can_skin,
+            },
+        );
+        self.represented_creature_kill_events_like_cpp.push(
+            RepresentedCreatureKillEventLikeCpp::CreatureOnHealthDepletedAi {
+                creature_guid,
+                attacker_guid,
+                is_kill: true,
+            },
+        );
+        self.represented_creature_kill_events_like_cpp.push(
+            RepresentedCreatureKillEventLikeCpp::CreatureJustDiedAi {
+                creature_guid,
+                killer_guid: attacker_guid,
+            },
+        );
+        if attacker_guid.is_player() {
+            self.represented_creature_kill_events_like_cpp.push(
+                RepresentedCreatureKillEventLikeCpp::ScriptMgrOnCreatureKill {
+                    killer_guid: attacker_guid,
+                    creature_guid,
+                },
+            );
+        }
+        Some(values_update)
+    }
+
+    fn record_represented_tapper_pet_killed_unit_hooks_like_cpp(
+        &mut self,
+        creature_guid: ObjectGuid,
+    ) {
+        let (Some(player_guid), Some(pet_guid)) =
+            (self.player_guid(), self.represented_pet_guid_like_cpp)
+        else {
+            return;
+        };
+        let tapper_has_current_player = self
+            .mutate_world_creature(creature_guid, |creature| {
+                creature.creature.tap_list().contains(&player_guid)
+            })
+            .unwrap_or(true);
+        if !tapper_has_current_player {
+            return;
+        }
+        self.represented_creature_kill_events_like_cpp.push(
+            RepresentedCreatureKillEventLikeCpp::TapperPetKilledUnitAi {
+                tapper_guid: player_guid,
+                pet_guid,
+                victim_guid: creature_guid,
+            },
+        );
+    }
+
     pub(crate) fn apply_move_init_active_mover_complete_like_cpp(&mut self, ticks: u32) {
         self.active_player_local_flags_like_cpp |=
             PLAYER_LOCAL_FLAG_OVERRIDE_TRANSPORT_SERVER_TIME_LIKE_CPP;
         self.active_player_transport_server_time_like_cpp =
             Self::game_time_ms_like_cpp().saturating_sub(ticks) as i32;
+        self.sync_current_player_session_visibility_detection_like_cpp();
         self.movement_visibility_refresh_requests_like_cpp = self
             .movement_visibility_refresh_requests_like_cpp
             .saturating_add(1);
         self.send_active_player_transport_server_time_update_like_cpp();
+    }
+
+    pub(crate) fn player_moved_unit_guid_like_cpp(&self) -> ObjectGuid {
+        if !self.player_moved_unit_guid_like_cpp.is_empty() {
+            self.player_moved_unit_guid_like_cpp
+        } else {
+            self.player_guid().unwrap_or(ObjectGuid::EMPTY)
+        }
+    }
+
+    pub fn set_player_moved_unit_guid_like_cpp(&mut self, guid: ObjectGuid) {
+        self.player_moved_unit_guid_like_cpp = guid;
+    }
+
+    pub(crate) fn represented_gameobject_use_allowed_by_mover_like_cpp(
+        &self,
+        gameobject_usable_mounted: bool,
+    ) -> bool {
+        let Some(player_guid) = self.player_guid() else {
+            return false;
+        };
+        if self.player_moved_unit_guid_like_cpp() == player_guid {
+            return true;
+        }
+
+        self.player_vehicle_seat_flags_like_cpp.is_some()
+            || self.player_mounted_like_cpp
+            || gameobject_usable_mounted
+    }
+
+    fn faction_template_is_friendly_to_like_cpp(
+        faction: &wow_data::progression_rewards::FactionTemplateEntry,
+        other: &wow_data::progression_rewards::FactionTemplateEntry,
+    ) -> bool {
+        if faction.id == other.id {
+            return true;
+        }
+        if other.faction != 0 {
+            if faction.enemies.contains(&other.faction) {
+                return false;
+            }
+            if faction.friend.contains(&other.faction) {
+                return true;
+            }
+        }
+        (faction.friend_group & other.faction_group) != 0
+            || (faction.faction_group & other.friend_group) != 0
+    }
+
+    fn has_recently_dropped_flag_debuff_like_cpp(&self) -> bool {
+        const SPELL_RECENTLY_DROPPED_ALLIANCE_FLAG: i32 = 42_792;
+        const SPELL_RECENTLY_DROPPED_HORDE_FLAG: i32 = 50_326;
+        const SPELL_RECENTLY_DROPPED_NEUTRAL_FLAG: i32 = 50_327;
+
+        self.visible_auras.values().any(|aura| {
+            matches!(
+                aura.spell_id,
+                SPELL_RECENTLY_DROPPED_ALLIANCE_FLAG
+                    | SPELL_RECENTLY_DROPPED_HORDE_FLAG
+                    | SPELL_RECENTLY_DROPPED_NEUTRAL_FLAG
+            )
+        })
+    }
+
+    pub(crate) fn represented_player_can_use_battleground_object_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    ) -> bool {
+        let gameobject_faction = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .and_then(|state| state.faction_template);
+        if let (Some(player_faction), Some(gameobject_faction), Some(store)) = (
+            self.player_faction_template_like_cpp,
+            gameobject_faction,
+            self.faction_template_store.as_ref(),
+        ) && let (Some(player_entry), Some(gameobject_entry)) =
+            (store.get(player_faction), store.get(gameobject_faction))
+            && !Self::faction_template_is_friendly_to_like_cpp(player_entry, gameobject_entry)
+        {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::UnfriendlyFaction,
+                },
+            );
+            return false;
+        }
+
+        if self.player_unit_flags_like_cpp.contains(UnitFlags::IMMUNE) {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::DamageImmune,
+                },
+            );
+            return false;
+        }
+
+        if self.has_recently_dropped_flag_debuff_like_cpp() {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::RecentlyDroppedFlag,
+                },
+            );
+            return false;
+        }
+
+        if !self.player_alive_like_cpp {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::Dead,
+                },
+            );
+            return false;
+        }
+
+        true
+    }
+
+    pub(crate) fn represented_player_reject_battleground_object_vehicle_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    ) -> bool {
+        if self.player_vehicle_seat_flags_like_cpp.is_none() {
+            return false;
+        }
+
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                gameobject_guid,
+                player_guid,
+                reason: RepresentedBattlegroundObjectUseRejection::Vehicle,
+            },
+        );
+        true
+    }
+
+    fn represented_player_battleground_type_id_or_reject_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    ) -> Option<u32> {
+        if let Some(bg_type_id) = self.player_battleground_type_id_like_cpp {
+            return Some(bg_type_id);
+        }
+
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                gameobject_guid,
+                player_guid,
+                reason: RepresentedBattlegroundObjectUseRejection::NotInBattleground,
+            },
+        );
+        None
+    }
+
+    fn represented_gameobject_is_friendly_to_player_like_cpp(
+        &self,
+        gameobject_guid: ObjectGuid,
+    ) -> Option<bool> {
+        let gameobject_faction = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .and_then(|state| state.faction_template)?;
+        let player_faction = self.player_faction_template_like_cpp?;
+        let store = self.faction_template_store.as_ref()?;
+        let gameobject_entry = store.get(gameobject_faction)?;
+        let player_entry = store.get(player_faction)?;
+        Some(Self::faction_template_is_friendly_to_like_cpp(
+            gameobject_entry,
+            player_entry,
+        ))
+    }
+
+    pub(crate) fn record_represented_gameobject_report_use_ai_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    ) -> bool {
+        let handled = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .map(|state| state.report_use_ai_returns_true)
+            .unwrap_or(false);
+        self.represented_gameobject_use_effects
+            .push(RepresentedGameObjectUseEffect::ReportUseAi {
+                gameobject_guid,
+                player_guid,
+                handled,
+            });
+        handled
+    }
+
+    pub(crate) fn apply_represented_gameobject_player_use_preamble_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gameobject_usable_mounted: bool,
+        no_damage_immune: bool,
+    ) -> bool {
+        if no_damage_immune && self.player_unit_flags_like_cpp.contains(UnitFlags::IMMUNE) {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::UseRejectedNoDamageImmune {
+                    gameobject_guid,
+                    player_guid,
+                },
+            );
+            return false;
+        }
+
+        if !gameobject_usable_mounted {
+            self.remove_represented_mounted_auras_by_type_like_cpp();
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::RemoveMountedAuras {
+                    gameobject_guid,
+                    player_guid,
+                },
+            );
+        }
+
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::ClearPlayerTalkMenus {
+                gameobject_guid,
+                player_guid,
+            },
+        );
+
+        let handled = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .map(|state| state.gossip_hello_ai_returns_true)
+            .unwrap_or(false);
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::GossipHelloAi {
+                gameobject_guid,
+                player_guid,
+                handled,
+            },
+        );
+        !handled
+    }
+
+    fn remove_represented_mounted_auras_by_type_like_cpp(&mut self) {
+        let mounted_slots: Vec<u8> = self
+            .visible_auras
+            .iter()
+            .filter_map(|(slot, aura)| {
+                (aura.represented_effect == Some(RepresentedAuraEffectLikeCpp::Mounted))
+                    .then_some(*slot)
+            })
+            .collect();
+        for slot in mounted_slots {
+            let _ = self.remove_aura(slot);
+        }
+
+        if self.player_mounted_like_cpp {
+            self.player_mounted_like_cpp = false;
+            self.player_mount_display_id_like_cpp = 0;
+            self.player_mount_vehicle_id_like_cpp = 0;
+            self.player_mount_vehicle_kit_like_cpp = None;
+            self.player_mount_vehicle_accessories_like_cpp.clear();
+            self.player_mount_vehicle_seat_count_like_cpp = 0;
+            self.player_mount_vehicle_usable_seat_count_like_cpp = 0;
+            self.player_unit_flags_like_cpp.remove(UnitFlags::MOUNT);
+        }
+    }
+
+    fn remove_represented_stealth_or_invisibility_auras_by_type_like_cpp(&mut self) -> usize {
+        let slots: Vec<u8> = self
+            .visible_auras
+            .iter()
+            .filter_map(|(slot, aura)| {
+                matches!(
+                    aura.represented_effect,
+                    Some(RepresentedAuraEffectLikeCpp::Stealth)
+                        | Some(RepresentedAuraEffectLikeCpp::Invisibility)
+                )
+                .then_some(*slot)
+            })
+            .collect();
+        let removed = slots.len();
+        for slot in slots {
+            let _ = self.remove_aura(slot);
+        }
+        removed
+    }
+
+    pub(crate) fn apply_represented_gameobject_cooldown_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        cooldown_secs: u32,
+    ) -> bool {
+        if cooldown_secs == 0 {
+            return true;
+        }
+
+        let now = Instant::now();
+        let state = self
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        if state
+            .cooldown_until
+            .is_some_and(|cooldown_until| cooldown_until > now)
+        {
+            self.represented_gameobject_use_effects
+                .push(RepresentedGameObjectUseEffect::CooldownRejected { gameobject_guid });
+            return false;
+        }
+
+        state.cooldown_until =
+            Some(now + Duration::from_millis(u64::from(cooldown_secs).saturating_mul(1000)));
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::CooldownStarted {
+                gameobject_guid,
+                cooldown_secs,
+            },
+        );
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_door_or_button_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        user_guid: ObjectGuid,
+        restore_time_ms: u32,
+    ) -> bool {
+        let now = Instant::now();
+        let state = self
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        if state
+            .loot_state
+            .is_some_and(|loot_state| loot_state != wow_entities::LootState::Ready)
+        {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::DoorOrButtonRejectedNotReady { gameobject_guid },
+            );
+            return false;
+        }
+
+        let current_go_state = state.go_state.unwrap_or(wow_entities::GoState::Ready);
+        let next_go_state = if current_go_state == wow_entities::GoState::Ready {
+            wow_entities::GoState::Active
+        } else {
+            wow_entities::GoState::Ready
+        };
+        state.prev_go_state = Some(current_go_state);
+        state.go_state = Some(next_go_state);
+        state.loot_state = Some(wow_entities::LootState::Activated);
+        state.loot_state_unit_guid = user_guid;
+        state.gameobject_flags |= wow_entities::GO_FLAG_IN_USE;
+        state.cooldown_until = (restore_time_ms != 0)
+            .then_some(now + Duration::from_millis(u64::from(restore_time_ms)));
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::DoorOrButtonUsed {
+                gameobject_guid,
+                user_guid,
+                restore_time_ms,
+                go_state: next_go_state,
+            },
+        );
+        true
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn reset_represented_gameobject_door_or_button_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+    ) -> bool {
+        let Some(state) = self
+            .represented_gameobject_use_states
+            .get_mut(&gameobject_guid)
+        else {
+            return false;
+        };
+        if matches!(
+            state.loot_state,
+            Some(wow_entities::LootState::Ready | wow_entities::LootState::JustDeactivated)
+        ) {
+            return false;
+        }
+
+        state.gameobject_flags &= !wow_entities::GO_FLAG_IN_USE;
+        let restored_go_state = state.prev_go_state.unwrap_or(wow_entities::GoState::Ready);
+        state.go_state = Some(restored_go_state);
+        state.loot_state = Some(wow_entities::LootState::JustDeactivated);
+        state.cooldown_until = None;
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::DoorOrButtonReset {
+                gameobject_guid,
+                go_state: restored_go_state,
+            },
+        );
+        true
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn tick_represented_gameobject_door_or_button_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+    ) -> bool {
+        let now = Instant::now();
+        let expired = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .and_then(|state| state.cooldown_until)
+            .is_some_and(|cooldown_until| cooldown_until <= now);
+        if !expired {
+            return false;
+        }
+        self.reset_represented_gameobject_door_or_button_like_cpp(gameobject_guid)
+    }
+
+    pub(crate) fn use_represented_gameobject_trap_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        user_guid: ObjectGuid,
+        source: wow_entities::TrapUseSource,
+    ) -> bool {
+        let now = Instant::now();
+        let state = self
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        if state
+            .cooldown_until
+            .is_some_and(|cooldown_until| cooldown_until > now)
+        {
+            self.represented_gameobject_use_effects
+                .push(RepresentedGameObjectUseEffect::CooldownRejected { gameobject_guid });
+            return false;
+        }
+
+        if source.spell_id != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::CastSpell {
+                    gameobject_guid,
+                    player_guid: user_guid,
+                    spell_id: source.spell_id,
+                },
+            );
+        }
+
+        let cooldown_secs = if source.cooldown_secs != 0 {
+            source.cooldown_secs
+        } else {
+            4
+        };
+        state.cooldown_until =
+            Some(now + Duration::from_millis(u64::from(cooldown_secs).saturating_mul(1000)));
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::CooldownStarted {
+                gameobject_guid,
+                cooldown_secs,
+            },
+        );
+
+        if source.charges == 1 {
+            state.loot_state = Some(wow_entities::LootState::JustDeactivated);
+        }
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_chair_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        player_position: Position,
+        gameobject_position: Position,
+        gameobject_size: f32,
+        source: wow_entities::ChairUseSource,
+    ) -> bool {
+        let slot_count = source.chair_slots.max(1).min(5);
+        let state = self
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        if state.chair_slots.is_empty() {
+            state.chair_slots = vec![None; slot_count as usize];
+        }
+
+        let orthogonal_orientation = gameobject_position.orientation + std::f32::consts::PI * 0.5;
+        let mut nearest_slot = None;
+        let mut lowest_dist = f32::MAX;
+        let mut nearest_position = gameobject_position;
+        for slot in 0..state.chair_slots.len() {
+            if state.chair_slots[slot].is_some() {
+                continue;
+            }
+
+            let relative_distance =
+                (gameobject_size * slot as f32) - (gameobject_size * (slot_count - 1) as f32 / 2.0);
+            let candidate = Position::new(
+                gameobject_position.x + relative_distance * orthogonal_orientation.cos(),
+                gameobject_position.y + relative_distance * orthogonal_orientation.sin(),
+                gameobject_position.z,
+                gameobject_position.orientation,
+            );
+            let dist = player_position.distance_2d(&candidate);
+            if dist <= lowest_dist {
+                nearest_slot = Some(slot);
+                lowest_dist = dist;
+                nearest_position = candidate;
+            }
+        }
+
+        let Some(slot) = nearest_slot else {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::ChairNoFreeSlot {
+                    gameobject_guid,
+                    player_guid,
+                },
+            );
+            return false;
+        };
+
+        state.chair_slots[slot] = Some(player_guid);
+        let stand_state = 4_u32.saturating_add(source.chair_height);
+        self.set_player_position_like_cpp(nearest_position);
+        self.set_player_stand_state_like_cpp(Self::chair_stand_state_like_cpp(source.chair_height));
+        self.represented_gameobject_use_effects
+            .push(RepresentedGameObjectUseEffect::ChairUsed {
+                gameobject_guid,
+                player_guid,
+                slot: slot as u32,
+                teleport_position: nearest_position,
+                stand_state,
+            });
+        if source.triggered_event_id != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: source.triggered_event_id,
+                },
+            );
+        }
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_barber_chair_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gameobject_position: Position,
+        source: wow_entities::BarberChairUseSource,
+    ) -> bool {
+        self.send_packet(&wow_packet::packets::misc::EnableBarberShop {
+            customization_scope: source.customization_scope.min(u32::from(u8::MAX)) as u8,
+        });
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::BarberChairUsed {
+                gameobject_guid,
+                player_guid,
+                customization_scope: source.customization_scope,
+                teleport_position: gameobject_position,
+                stand_state: 4_u32.saturating_add(source.chair_height),
+                sit_anim_kit: source.sit_anim_kit,
+            },
+        );
+        self.set_player_position_like_cpp(gameobject_position);
+        self.set_player_stand_state_like_cpp(Self::chair_stand_state_like_cpp(source.chair_height));
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_ui_link_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        source: wow_entities::UiLinkUseSource,
+    ) -> bool {
+        let interaction_type = Self::ui_link_player_interaction_type_like_cpp(source.ui_link_type);
+        self.send_packet(&wow_packet::packets::misc::GameObjectInteraction {
+            object_guid: gameobject_guid,
+            interaction_type,
+        });
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::UiLinkOpened {
+                gameobject_guid,
+                player_guid,
+                ui_link_type: source.ui_link_type,
+                interaction_type,
+            },
+        );
+
+        true
+    }
+
+    const fn ui_link_player_interaction_type_like_cpp(ui_link_type: u32) -> i32 {
+        match ui_link_type {
+            0 => 54, // PlayerInteractionType::AdventureJournal
+            1 => 39, // PlayerInteractionType::ObliterumForge
+            2 => 40, // PlayerInteractionType::ScrappingMachine
+            3 => 44, // PlayerInteractionType::ItemInteraction
+            _ => 0,  // PlayerInteractionType::None
+        }
+    }
+
+    pub(crate) fn use_represented_gameobject_item_forge_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        source: wow_entities::ItemForgeUseSource,
+    ) -> bool {
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::ItemForgeUsed {
+                gameobject_guid,
+                player_guid,
+                condition_id: source.condition_id,
+                forge_type: source.forge_type,
+            },
+        );
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_capture_point_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        source: wow_entities::CapturePointUseSource,
+    ) -> bool {
+        let state = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .and_then(|state| state.capture_point_state)
+            .unwrap_or(RepresentedCapturePointStateLikeCpp::Neutral);
+        let can_interact = match player_team_for_race_cpp(self.player_race_like_cpp()) {
+            Team::Horde => matches!(
+                state,
+                RepresentedCapturePointStateLikeCpp::Neutral
+                    | RepresentedCapturePointStateLikeCpp::ContestedAlliance
+                    | RepresentedCapturePointStateLikeCpp::AllianceCaptured
+            ),
+            Team::Alliance => matches!(
+                state,
+                RepresentedCapturePointStateLikeCpp::Neutral
+                    | RepresentedCapturePointStateLikeCpp::ContestedHorde
+                    | RepresentedCapturePointStateLikeCpp::HordeCaptured
+            ),
+            Team::Other => false,
+        };
+        if !can_interact {
+            return false;
+        }
+
+        let ai_handled = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .map(|state| state.capture_point_assault_ai_returns_true)
+            .unwrap_or(false);
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::CapturePointAssaultAi {
+                gameobject_guid,
+                player_guid,
+                handled: ai_handled,
+            },
+        );
+        if ai_handled {
+            return true;
+        }
+
+        if self.player_battleground_type_id_like_cpp.is_none() {
+            return false;
+        }
+
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::CapturePointAssaultRequested {
+                gameobject_guid,
+                player_guid,
+                capture_time_ms: source.capture_time_ms,
+                world_state_id: source.world_state_id,
+                contested_event_horde: source.contested_event_horde,
+                contested_event_alliance: source.contested_event_alliance,
+            },
+        );
+
+        true
+    }
+
+    fn send_represented_gameobject_delete_packets_like_cpp(&mut self, gameobject_guid: ObjectGuid) {
+        self.send_packet(&wow_packet::packets::misc::GameObjectDespawn {
+            object_guid: gameobject_guid,
+        });
+        let map_id = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .and_then(|state| state.map_id)
+            .unwrap_or_else(|| self.player_map_id_like_cpp());
+        self.send_packet(&wow_packet::packets::update::UpdateObject::destroy_objects(
+            vec![gameobject_guid],
+            map_id,
+        ));
+    }
+
+    pub(crate) fn use_represented_gameobject_flagstand_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        source: wow_entities::FlagStandUseSource,
+    ) -> bool {
+        if !self
+            .represented_player_can_use_battleground_object_like_cpp(gameobject_guid, player_guid)
+        {
+            return false;
+        }
+        if self
+            .represented_player_battleground_type_id_or_reject_like_cpp(
+                gameobject_guid,
+                player_guid,
+            )
+            .is_none()
+        {
+            return false;
+        }
+        if self.represented_player_reject_battleground_object_vehicle_like_cpp(
+            gameobject_guid,
+            player_guid,
+        ) {
+            return false;
+        }
+
+        self.remove_represented_stealth_or_invisibility_auras_by_type_like_cpp();
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::RemoveStealthOrInvisibilityAuras {
+                gameobject_guid,
+                player_guid,
+            },
+        );
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::BattlegroundFlagStandClicked {
+                gameobject_guid,
+                player_guid,
+                pickup_spell_id: source.pickup_spell_id,
+                return_aura_id: source.return_aura_id,
+                return_spell_id: source.return_spell_id,
+            },
+        );
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_flagdrop_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gameobject_entry: u32,
+        source: wow_entities::FlagDropUseSource,
+    ) -> bool {
+        if !self
+            .represented_player_can_use_battleground_object_like_cpp(gameobject_guid, player_guid)
+        {
+            return false;
+        }
+        let Some(bg_type_id) = self.represented_player_battleground_type_id_or_reject_like_cpp(
+            gameobject_guid,
+            player_guid,
+        ) else {
+            return false;
+        };
+        if self.represented_player_reject_battleground_object_vehicle_like_cpp(
+            gameobject_guid,
+            player_guid,
+        ) {
+            return false;
+        }
+
+        let click_target = match gameobject_entry {
+            179785 | 179786 if bg_type_id == BATTLEGROUND_WS_LIKE_CPP => {
+                BattlegroundFlagDropClickTarget::WarsongGulch
+            }
+            184142 if bg_type_id == BATTLEGROUND_EY_LIKE_CPP => {
+                BattlegroundFlagDropClickTarget::EyeOfTheStorm
+            }
+            _ => BattlegroundFlagDropClickTarget::None,
+        };
+
+        self.remove_represented_stealth_or_invisibility_auras_by_type_like_cpp();
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::RemoveStealthOrInvisibilityAuras {
+                gameobject_guid,
+                player_guid,
+            },
+        );
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::BattlegroundFlagDropClicked {
+                gameobject_guid,
+                player_guid,
+                gameobject_entry,
+                click_target,
+                event_id: source.event_id,
+                pickup_spell_id: source.pickup_spell_id,
+                expire_duration_ms: source.expire_duration_ms,
+            },
+        );
+        if source.event_id != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: source.event_id,
+                },
+            );
+        }
+        self.send_represented_gameobject_delete_packets_like_cpp(gameobject_guid);
+        self.represented_gameobject_use_effects
+            .push(RepresentedGameObjectUseEffect::GameObjectDeleted { gameobject_guid });
+
+        true
+    }
+
+    pub(crate) fn apply_represented_new_flag_state_command_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: Option<ObjectGuid>,
+        new_state: RepresentedNewFlagStateRequest,
+        respawn_time_ms: u32,
+    ) -> bool {
+        let state = self
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        let old_state = state
+            .new_flag_state
+            .unwrap_or(RepresentedNewFlagStateRequest::InBase);
+        if old_state == new_state {
+            return false;
+        }
+
+        state.new_flag_state = Some(new_state);
+        state.new_flag_carrier_guid = if new_state == RepresentedNewFlagStateRequest::Taken {
+            player_guid
+        } else {
+            None
+        };
+
+        if new_state == RepresentedNewFlagStateRequest::Taken
+            && old_state == RepresentedNewFlagStateRequest::InBase
+        {
+            state.new_flag_taken_from_base_game_time_ms = Some(Self::game_time_ms_like_cpp());
+        } else if matches!(
+            new_state,
+            RepresentedNewFlagStateRequest::InBase | RepresentedNewFlagStateRequest::Respawning
+        ) {
+            state.new_flag_taken_from_base_game_time_ms = None;
+        }
+
+        state.new_flag_respawn_until = (new_state == RepresentedNewFlagStateRequest::Respawning)
+            .then(|| Instant::now() + Duration::from_millis(u64::from(respawn_time_ms)));
+
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::NewFlagOwnerStateRequested {
+                gameobject_guid,
+                player_guid: player_guid.unwrap_or(ObjectGuid::EMPTY),
+                state: new_state,
+            },
+        );
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_new_flag_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gameobject_entry: u32,
+        source: wow_entities::NewFlagUseSource,
+    ) -> bool {
+        if !self
+            .represented_player_can_use_battleground_object_like_cpp(gameobject_guid, player_guid)
+        {
+            return false;
+        }
+        let current_state = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .and_then(|state| state.new_flag_state)
+            .unwrap_or(RepresentedNewFlagStateRequest::InBase);
+        if current_state != RepresentedNewFlagStateRequest::InBase {
+            return false;
+        }
+        {
+            let state = self
+                .represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default();
+            state.new_flag_return_on_defender_interact = Some(source.return_on_defender_interact);
+            state.new_flag_pickup_spell_id = Some(source.pickup_spell_id);
+            state.new_flag_entry = Some(gameobject_entry);
+        }
+
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::NewFlagPickupRequested {
+                gameobject_guid,
+                player_guid,
+                pickup_spell_id: source.pickup_spell_id,
+                expire_duration_ms: source.expire_duration_ms,
+                respawn_time_ms: source.respawn_time_ms,
+                flag_drop_entry: source.flag_drop_entry,
+                exclusive_category: source.exclusive_category,
+                world_state_id: source.world_state_id,
+                return_on_defender_interact: source.return_on_defender_interact,
+            },
+        );
+
+        self.apply_represented_gameobject_post_use_spell_like_cpp(
+            gameobject_guid,
+            player_guid,
+            gameobject_entry,
+            wow_entities::GAMEOBJECT_TYPE_NEW_FLAG,
+            source.pickup_spell_id,
+            false,
+            RepresentedGameObjectSpellCaster::GameObject,
+            gameobject_guid,
+        );
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_new_flag_drop_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        source: wow_entities::NewFlagDropUseSource,
+    ) -> bool {
+        if !self
+            .represented_player_can_use_battleground_object_like_cpp(gameobject_guid, player_guid)
+        {
+            return false;
+        }
+
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::NewFlagDropInteracted {
+                gameobject_guid,
+                player_guid,
+                spawn_vignette_id: source.spawn_vignette_id,
+            },
+        );
+
+        let owner_guid = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .and_then(|state| state.owner_guid);
+        if let Some(owner_guid) = owner_guid {
+            let Some(owner_state) = self.represented_gameobject_use_states.get(&owner_guid) else {
+                self.send_represented_gameobject_delete_packets_like_cpp(gameobject_guid);
+                self.represented_gameobject_use_effects
+                    .push(RepresentedGameObjectUseEffect::GameObjectDeleted { gameobject_guid });
+                return true;
+            };
+            if owner_state.go_type != Some(wow_entities::GAMEOBJECT_TYPE_NEW_FLAG as u8) {
+                return false;
+            }
+            if owner_state.new_flag_state != Some(RepresentedNewFlagStateRequest::Dropped) {
+                return false;
+            }
+            let return_on_defender_interact = owner_state
+                .new_flag_return_on_defender_interact
+                .unwrap_or(false);
+            let owner_pickup_spell_id = owner_state.new_flag_pickup_spell_id.unwrap_or(0);
+            let owner_entry = owner_state.new_flag_entry.unwrap_or(0);
+            let defender_interact = self
+                .represented_gameobject_is_friendly_to_player_like_cpp(owner_guid)
+                .map(|friendly| !friendly)
+                .unwrap_or(false);
+            if defender_interact && return_on_defender_interact {
+                self.send_represented_gameobject_delete_packets_like_cpp(gameobject_guid);
+                self.represented_gameobject_use_effects
+                    .push(RepresentedGameObjectUseEffect::GameObjectDeleted { gameobject_guid });
+                self.apply_represented_new_flag_state_command_like_cpp(
+                    owner_guid,
+                    Some(player_guid),
+                    RepresentedNewFlagStateRequest::InBase,
+                    0,
+                );
+                return true;
+            }
+
+            if self.apply_represented_gameobject_post_use_spell_like_cpp_internal(
+                owner_guid,
+                player_guid,
+                owner_entry,
+                wow_entities::GAMEOBJECT_TYPE_NEW_FLAG,
+                owner_pickup_spell_id,
+                true,
+                RepresentedGameObjectSpellCaster::GameObject,
+                owner_guid,
+                false,
+            ) {
+                self.send_represented_gameobject_delete_packets_like_cpp(gameobject_guid);
+                self.represented_gameobject_use_effects
+                    .push(RepresentedGameObjectUseEffect::GameObjectDeleted { gameobject_guid });
+                self.apply_represented_new_flag_state_command_like_cpp(
+                    owner_guid,
+                    Some(player_guid),
+                    RepresentedNewFlagStateRequest::Taken,
+                    0,
+                );
+                return true;
+            }
+        }
+
+        self.send_represented_gameobject_delete_packets_like_cpp(gameobject_guid);
+        self.represented_gameobject_use_effects
+            .push(RepresentedGameObjectUseEffect::GameObjectDeleted { gameobject_guid });
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_ritual_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        source: wow_entities::RitualUseSource,
+    ) -> bool {
+        let (owner_guid, ritual_owner_guid, owner_current_channeled_spell_active) = {
+            let state = self.represented_gameobject_use_states.get(&gameobject_guid);
+            (
+                state.and_then(|state| state.owner_guid),
+                state.and_then(|state| state.ritual_owner_guid),
+                state.and_then(|state| state.owner_current_channeled_spell_active),
+            )
+        };
+
+        let ritual_spell_caster_guid = if let Some(owner_guid) = owner_guid {
+            if owner_guid == player_guid {
+                return false;
+            }
+            if source.casters_grouped
+                && !self.represented_player_is_same_raid_with_like_cpp(player_guid, owner_guid)
+            {
+                return false;
+            }
+            if owner_current_channeled_spell_active == Some(false) {
+                return false;
+            }
+            owner_guid
+        } else {
+            let ritual_owner_guid = ritual_owner_guid.unwrap_or_else(|| {
+                self.represented_gameobject_use_states
+                    .get(&gameobject_guid)
+                    .and_then(|state| state.unique_users.first().copied())
+                    .unwrap_or(player_guid)
+            });
+            if player_guid != ritual_owner_guid
+                && source.casters_grouped
+                && !self
+                    .represented_player_is_same_raid_with_like_cpp(player_guid, ritual_owner_guid)
+            {
+                return false;
+            }
+            self.represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default()
+                .ritual_owner_guid
+                .get_or_insert(ritual_owner_guid);
+            ritual_owner_guid
+        };
+
+        let unique_user_count = {
+            let state = self
+                .represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default();
+            if !state.unique_users.contains(&player_guid) {
+                state.unique_users.push(player_guid);
+            }
+            state.unique_users.len() as u32
+        };
+
+        if source.anim_spell_id != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::CastSpell {
+                    gameobject_guid,
+                    player_guid,
+                    spell_id: source.anim_spell_id,
+                },
+            );
+        }
+
+        if unique_user_count != source.casters_required {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::RitualWaitingForParticipants {
+                    gameobject_guid,
+                    player_guid,
+                    unique_user_count,
+                    casters_required: source.casters_required,
+                },
+            );
+            return false;
+        }
+
+        let mut final_spell_id = source.spell_id;
+        let mut triggered = source.anim_spell_id != 0;
+        if final_spell_id == 62330 {
+            final_spell_id = 61993;
+            triggered = true;
+        }
+
+        if source.caster_target_spell_id != 0 && source.caster_target_spell_id != 1 {
+            let unique_users = self
+                .represented_gameobject_use_states
+                .get(&gameobject_guid)
+                .map(|state| state.unique_users.clone())
+                .unwrap_or_default();
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::RitualCasterTargetSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    spell_id: source.caster_target_spell_id,
+                    target_count: source.caster_target_spell_targets,
+                },
+            );
+            let mut rng = rand::thread_rng();
+            for _ in 0..source.caster_target_spell_targets {
+                let Some(target_guid) = unique_users.choose(&mut rng).copied() else {
+                    continue;
+                };
+                if !self
+                    .player_registry
+                    .as_ref()
+                    .is_some_and(|registry| registry.contains_key(&target_guid))
+                {
+                    continue;
+                }
+                self.represented_gameobject_use_effects.push(
+                    RepresentedGameObjectUseEffect::RitualCasterTargetSpellCast {
+                        gameobject_guid,
+                        caster_guid: ritual_spell_caster_guid,
+                        target_guid,
+                        spell_id: source.caster_target_spell_id,
+                        triggered: true,
+                    },
+                );
+            }
+        }
+
+        if let Some(owner_guid) = owner_guid {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::FinishChanneledSpell {
+                    player_guid: owner_guid,
+                },
+            );
+        }
+
+        if source.persistent {
+            let state = self
+                .represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default();
+            state.ritual_owner_guid = None;
+            state.unique_users.clear();
+            state.use_count = 0;
+        } else {
+            self.represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default()
+                .loot_state = Some(wow_entities::LootState::JustDeactivated);
+        }
+
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::RitualCompleted {
+                gameobject_guid,
+                player_guid,
+                final_spell_id,
+                triggered,
+                persistent: source.persistent,
+                unique_user_count,
+            },
+        );
+        self.apply_represented_gameobject_post_use_spell_like_cpp(
+            gameobject_guid,
+            player_guid,
+            gameobject_guid.entry(),
+            wow_entities::GAMEOBJECT_TYPE_RITUAL,
+            final_spell_id,
+            triggered,
+            RepresentedGameObjectSpellCaster::User,
+            ritual_spell_caster_guid,
+        );
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_meeting_stone_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gameobject_entry: u32,
+        source: wow_entities::MeetingStoneUseSource,
+    ) -> bool {
+        let target_guid = self.selection_guid_like_cpp();
+        if !target_guid.is_some_and(|target_guid| {
+            target_guid != player_guid
+                && self.represented_player_is_same_raid_with_like_cpp(player_guid, target_guid)
+                && self
+                    .player_registry
+                    .as_ref()
+                    .is_some_and(|registry| registry.contains_key(&target_guid))
+        }) {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::MeetingStoneTargetRejected {
+                    gameobject_guid,
+                    player_guid,
+                    target_guid,
+                },
+            );
+            return false;
+        }
+        let target_guid = target_guid.expect("checked above");
+        if let Some(content_tuning) = self
+            .content_tuning_store
+            .as_ref()
+            .and_then(|store| store.get(source.content_tuning_id))
+        {
+            let player_level = self.player_level_like_cpp();
+            let target_level = self
+                .player_registry
+                .as_ref()
+                .and_then(|registry| registry.get(&target_guid).map(|target| target.level))
+                .unwrap_or(0);
+            if i32::from(player_level) < content_tuning.max_level
+                || i32::from(target_level) < content_tuning.max_level
+            {
+                self.represented_gameobject_use_effects.push(
+                    RepresentedGameObjectUseEffect::MeetingStoneLevelRejected {
+                        gameobject_guid,
+                        player_guid,
+                        target_guid,
+                        player_level,
+                        target_level,
+                        required_level: content_tuning.max_level,
+                    },
+                );
+                return false;
+            }
+        }
+        let spell_id = if gameobject_entry == 194097 {
+            61994
+        } else {
+            59782
+        };
+
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::MeetingStoneSummonRequested {
+                gameobject_guid,
+                player_guid,
+                target_guid,
+                gameobject_entry,
+                spell_id,
+                area_id: source.area_id,
+                prevent_unfriendly_outside_instances: source.prevent_unfriendly_outside_instances,
+            },
+        );
+
+        self.apply_represented_gameobject_post_use_spell_like_cpp(
+            gameobject_guid,
+            player_guid,
+            gameobject_entry,
+            wow_entities::GAMEOBJECT_TYPE_MEETINGSTONE,
+            spell_id,
+            false,
+            RepresentedGameObjectSpellCaster::User,
+            player_guid,
+        );
+
+        true
+    }
+
+    pub(crate) fn apply_represented_gameobject_post_use_spell_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gameobject_entry: u32,
+        go_type: u32,
+        spell_id: u32,
+        triggered: bool,
+        caster: RepresentedGameObjectSpellCaster,
+        caster_guid: ObjectGuid,
+    ) -> bool {
+        self.apply_represented_gameobject_post_use_spell_like_cpp_internal(
+            gameobject_guid,
+            player_guid,
+            gameobject_entry,
+            go_type,
+            spell_id,
+            triggered,
+            caster,
+            caster_guid,
+            true,
+        )
+    }
+
+    fn apply_represented_gameobject_post_use_spell_like_cpp_internal(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gameobject_entry: u32,
+        go_type: u32,
+        spell_id: u32,
+        triggered: bool,
+        caster: RepresentedGameObjectSpellCaster,
+        caster_guid: ObjectGuid,
+        apply_new_flag_taken_state: bool,
+    ) -> bool {
+        if spell_id == 0 {
+            return false;
+        }
+
+        let spell_lookup_difficulty_id =
+            self.represented_gameobject_spell_lookup_difficulty_id_like_cpp();
+        let spell_info_missing = self
+            .spell_store()
+            .is_some_and(|store| store.get(spell_id as i32).is_none());
+
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::OutdoorPvpCustomSpellRequested {
+                gameobject_guid,
+                player_guid,
+                gameobject_entry,
+                spell_id,
+                go_type,
+                spell_lookup_difficulty_id,
+                spell_info_missing,
+            },
+        );
+
+        if spell_info_missing {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::GameObjectPostUseSpellMissing {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry,
+                    spell_id,
+                    go_type,
+                    spell_lookup_difficulty_id,
+                },
+            );
+            return false;
+        }
+
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
+                gameobject_guid,
+                target_guid: player_guid,
+                caster_guid,
+                spell_id,
+                triggered,
+                caster,
+                spell_lookup_difficulty_id,
+            },
+        );
+
+        if apply_new_flag_taken_state
+            && go_type == wow_entities::GAMEOBJECT_TYPE_NEW_FLAG
+            && caster == RepresentedGameObjectSpellCaster::GameObject
+        {
+            self.apply_represented_new_flag_state_command_like_cpp(
+                gameobject_guid,
+                Some(player_guid),
+                RepresentedNewFlagStateRequest::Taken,
+                0,
+            );
+        }
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_fishing_node_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    ) -> bool {
+        let known_owner = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .and_then(|state| state.owner_guid);
+        if let Some(owner_guid) = known_owner {
+            if owner_guid != player_guid {
+                self.represented_gameobject_use_effects.push(
+                    RepresentedGameObjectUseEffect::FishingNodeOwnerRejected {
+                        gameobject_guid,
+                        player_guid,
+                        owner_guid,
+                    },
+                );
+                return false;
+            }
+        }
+
+        let current_loot_state = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .and_then(|state| state.loot_state)
+            .unwrap_or(wow_entities::LootState::Ready);
+
+        match current_loot_state {
+            wow_entities::LootState::Ready => {
+                let (
+                    area_fishing_level,
+                    player_fishing_level,
+                    fishing_roll,
+                    explicit_fishing_hole_guid,
+                ) = {
+                    let represented_area_fishing_level =
+                        self.represented_fishing_base_skill_level_like_cpp(gameobject_guid);
+                    let represented_player_fishing_level =
+                        i32::from(self.player_skill_value_like_cpp(SKILL_FISHING_LIKE_CPP));
+                    let state = self
+                        .represented_gameobject_use_states
+                        .entry(gameobject_guid)
+                        .or_default();
+                    state.loot_state = Some(wow_entities::LootState::Activated);
+                    state.loot_state_unit_guid = player_guid;
+                    state.go_state = Some(wow_entities::GoState::Active);
+                    state.gameobject_flags = wow_entities::GO_FLAG_IN_MULTI_USE;
+                    (
+                        state.fishing_area_level.or(represented_area_fishing_level),
+                        state
+                            .player_fishing_level
+                            .or(Some(represented_player_fishing_level)),
+                        state.fishing_roll,
+                        state.nearby_fishing_hole_guid,
+                    )
+                };
+                let fishing_hole_guid = explicit_fishing_hole_guid.or_else(|| {
+                    self.lookup_represented_fishing_hole_around_like_cpp(gameobject_guid)
+                });
+                self.represented_gameobject_use_effects.push(
+                    RepresentedGameObjectUseEffect::FishingNodeActivated {
+                        gameobject_guid,
+                        player_guid,
+                    },
+                );
+                if let Some(area_fishing_level) = area_fishing_level {
+                    self.represented_gameobject_use_effects.push(
+                        RepresentedGameObjectUseEffect::FishingSkillUpdated {
+                            gameobject_guid,
+                            player_guid,
+                        },
+                    );
+                    let player_fishing_level = player_fishing_level.unwrap_or(0);
+                    let roll = fishing_roll.unwrap_or(100).clamp(1, 100);
+                    let chance =
+                        if area_fishing_level > 0 && player_fishing_level < area_fishing_level {
+                            (((player_fishing_level as f64 / area_fishing_level as f64).powi(2)
+                                * 100.0) as i32)
+                                .max(1)
+                        } else {
+                            100
+                        };
+                    self.represented_gameobject_use_effects.push(
+                        RepresentedGameObjectUseEffect::FishingLootRoll {
+                            gameobject_guid,
+                            player_guid,
+                            player_fishing_level,
+                            area_fishing_level,
+                            chance,
+                            roll,
+                        },
+                    );
+
+                    if let Some(fishing_hole_guid) = fishing_hole_guid {
+                        self.represented_gameobject_use_states
+                            .entry(gameobject_guid)
+                            .or_default()
+                            .loot_state = Some(wow_entities::LootState::JustDeactivated);
+                        self.represented_gameobject_use_effects.push(
+                            RepresentedGameObjectUseEffect::FishingHoleDelegated {
+                                gameobject_guid,
+                                player_guid,
+                                fishing_hole_guid,
+                            },
+                        );
+                    } else {
+                        let loot_type = if chance >= roll {
+                            wow_packet::packets::loot::LOOT_TYPE_FISHING_LIKE_CPP
+                        } else {
+                            wow_packet::packets::loot::LOOT_TYPE_FISHING_JUNK_LIKE_CPP
+                        };
+                        self.represented_gameobject_use_effects.push(
+                            RepresentedGameObjectUseEffect::FishingLootRequested {
+                                gameobject_guid,
+                                player_guid,
+                                loot_type,
+                            },
+                        );
+                    }
+                }
+            }
+            wow_entities::LootState::JustDeactivated => {}
+            _ => {
+                self.represented_gameobject_use_states
+                    .entry(gameobject_guid)
+                    .or_default()
+                    .loot_state = Some(wow_entities::LootState::JustDeactivated);
+                self.represented_gameobject_use_effects.push(
+                    RepresentedGameObjectUseEffect::FishNotHooked {
+                        gameobject_guid,
+                        player_guid,
+                    },
+                );
+                self.send_packet(&wow_packet::packets::misc::FishNotHooked);
+            }
+        }
+
+        self.represented_gameobject_use_effects
+            .push(RepresentedGameObjectUseEffect::FinishChanneledSpell { player_guid });
+
+        true
+    }
+
+    fn lookup_represented_fishing_hole_around_like_cpp(
+        &self,
+        gameobject_guid: ObjectGuid,
+    ) -> Option<ObjectGuid> {
+        const FISHING_HOLE_SEARCH_RANGE_LIKE_CPP: f32 =
+            20.0 + wow_movement::CONTACT_DISTANCE_LIKE_CPP;
+
+        let source = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)?;
+        let source_position = source.position?;
+        let source_map_id = source.map_id;
+        let now = Instant::now();
+        let mut nearest: Option<(ObjectGuid, f32)> = None;
+
+        for (candidate_guid, candidate) in &self.represented_gameobject_use_states {
+            if *candidate_guid == gameobject_guid {
+                continue;
+            }
+            if candidate.go_type != Some(wow_entities::GAMEOBJECT_TYPE_FISHING_HOLE as u8) {
+                continue;
+            }
+            if source_map_id.is_some() && candidate.map_id != source_map_id {
+                continue;
+            }
+            if candidate
+                .per_player_despawn_until
+                .is_some_and(|until| until > now)
+            {
+                continue;
+            }
+            let Some(candidate_position) = candidate.position else {
+                continue;
+            };
+            let Some(fishing_hole_radius) = candidate.fishing_hole_radius else {
+                continue;
+            };
+            if !source_position
+                .is_within_dist(&candidate_position, FISHING_HOLE_SEARCH_RANGE_LIKE_CPP)
+                || !source_position.is_within_dist(&candidate_position, fishing_hole_radius)
+            {
+                continue;
+            }
+            let distance = source_position.distance(&candidate_position);
+            if nearest.is_none_or(|(_, nearest_distance)| distance < nearest_distance) {
+                nearest = Some((*candidate_guid, distance));
+            }
+        }
+
+        nearest.map(|(guid, _)| guid)
+    }
+
+    pub(crate) fn represented_gameobject_area_id_like_cpp(
+        &self,
+        gameobject_guid: ObjectGuid,
+    ) -> u32 {
+        self.represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .and_then(|state| state.area_id)
+            .unwrap_or_else(|| self.player_zone_area_like_cpp().1)
+    }
+
+    fn represented_fishing_base_skill_level_like_cpp(
+        &self,
+        gameobject_guid: ObjectGuid,
+    ) -> Option<i32> {
+        let area_id = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .and_then(|state| state.area_id)?;
+        let area_store = self.area_table_store()?;
+        let fishing_store = self.fishing_base_skill_store()?;
+        Some(fishing_store.base_skill_level_like_cpp(area_store, area_id))
+    }
+
+    fn represented_gameobject_spell_lookup_difficulty_id_like_cpp(&self) -> u8 {
+        let map_id = u32::from(self.player_map_id_like_cpp());
+        self.canonical_map_manager
+            .as_ref()
+            .and_then(|manager| manager.lock().ok())
+            .and_then(|manager| {
+                manager
+                    .find_map(map_id, 0)
+                    .map(|managed| managed.map().spawn_mode())
+            })
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn use_represented_gameobject_questgiver_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        source: wow_entities::QuestgiverUseSource,
+    ) -> bool {
+        self.represented_gameobject_use_effects
+            .push(RepresentedGameObjectUseEffect::SendGossip {
+                gameobject_guid,
+                player_guid,
+                gossip_id: source.gossip_id,
+            });
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_spellcaster_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gameobject_entry: u32,
+        source: wow_entities::SpellcasterUseSource,
+    ) -> bool {
+        if source.party_only {
+            let owner_guid = self
+                .represented_gameobject_use_states
+                .get(&gameobject_guid)
+                .and_then(|state| state.owner_guid);
+            if !owner_guid.is_some_and(|owner_guid| {
+                self.represented_player_is_same_raid_with_like_cpp(player_guid, owner_guid)
+            }) {
+                self.represented_gameobject_use_effects.push(
+                    RepresentedGameObjectUseEffect::SpellcasterPartyOnlyRejected {
+                        gameobject_guid,
+                        player_guid,
+                    },
+                );
+                return false;
+            }
+        }
+
+        self.remove_represented_mounted_auras_by_type_like_cpp();
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::RemoveMountedAuras {
+                gameobject_guid,
+                player_guid,
+            },
+        );
+
+        let use_count = {
+            let state = self
+                .represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default();
+            state.use_count = state.use_count.saturating_add(1);
+            state.use_count
+        };
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::GameObjectUseCountIncremented {
+                gameobject_guid,
+                use_count,
+            },
+        );
+
+        self.apply_represented_gameobject_post_use_spell_like_cpp(
+            gameobject_guid,
+            player_guid,
+            gameobject_entry,
+            wow_entities::GAMEOBJECT_TYPE_SPELLCASTER,
+            source.spell_id,
+            false,
+            RepresentedGameObjectSpellCaster::User,
+            player_guid,
+        );
+
+        if source.charges != 0 && use_count >= source.charges {
+            let state = self
+                .represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default();
+            state.use_count = 0;
+            state.loot_state = Some(wow_entities::LootState::JustDeactivated);
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::GameObjectChargesDepleted {
+                    gameobject_guid,
+                    max_charges: source.charges,
+                    loot_state: wow_entities::LootState::JustDeactivated,
+                },
+            );
+        }
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_spell_focus_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        linked_trap_entry: u32,
+    ) -> bool {
+        if linked_trap_entry != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::TriggerLinkedTrap {
+                    gameobject_guid,
+                    player_guid,
+                    trap_entry: linked_trap_entry,
+                },
+            );
+        }
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_camera_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        source: wow_entities::CameraUseSource,
+    ) -> bool {
+        if source.cinematic_id != 0 {
+            self.send_packet(&wow_packet::packets::misc::TriggerCinematic {
+                cinematic_id: source.cinematic_id,
+                conversation_guid: ObjectGuid::EMPTY,
+            });
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::TriggerCinematic {
+                    gameobject_guid,
+                    player_guid,
+                    cinematic_id: source.cinematic_id,
+                },
+            );
+        }
+
+        if source.event_id != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: source.event_id,
+                },
+            );
+        }
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_goober_preamble_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        gameobject_entry: u32,
+        gameobject_position: Position,
+        player_guid: ObjectGuid,
+        source: wow_entities::GooberUseSource,
+    ) -> bool {
+        if source.page_id != 0 {
+            self.send_packet(&wow_packet::packets::misc::PageText { gameobject_guid });
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::ShowPageText {
+                    gameobject_guid,
+                    player_guid,
+                    page_id: source.page_id,
+                },
+            );
+        } else if source.gossip_id != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::SendGossip {
+                    gameobject_guid,
+                    player_guid,
+                    gossip_id: source.gossip_id,
+                },
+            );
+        }
+
+        if source.event_id != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: source.event_id,
+                },
+            );
+        }
+
+        if source.quest_id != 0
+            && self
+                .quest_store
+                .as_ref()
+                .is_some_and(|store| store.get(source.quest_id).is_some())
+            && self
+                .player_quests
+                .get(&source.quest_id)
+                .map_or(true, |status| status.status != 1)
+        {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::GooberQuestGateRejected {
+                    gameobject_guid,
+                    player_guid,
+                    quest_id: source.quest_id,
+                },
+            );
+            return false;
+        }
+
+        let mut credit_guids = Vec::new();
+        if let (Some(group_guid), Some(group_registry)) = (self.group_guid, &self.group_registry) {
+            if let Some(group) = group_registry.get(&group_guid) {
+                if group.members.contains(&player_guid) {
+                    credit_guids.extend(group.members.iter().copied());
+                }
+            }
+        }
+        if credit_guids.is_empty() {
+            credit_guids.push(player_guid);
+        }
+
+        for credit_guid in credit_guids {
+            if self.represented_player_at_group_reward_distance_like_cpp(
+                credit_guid,
+                self.player_map_id_like_cpp(),
+                gameobject_position,
+            ) {
+                self.represented_gameobject_use_effects.push(
+                    RepresentedGameObjectUseEffect::KillCreditGo {
+                        gameobject_guid,
+                        player_guid: credit_guid,
+                        entry: gameobject_entry,
+                    },
+                );
+            }
+        }
+
+        if source.linked_trap_entry != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::TriggerLinkedTrap {
+                    gameobject_guid,
+                    player_guid,
+                    trap_entry: source.linked_trap_entry,
+                },
+            );
+        }
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_goober_state_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gameobject_entry: u32,
+        source: wow_entities::GooberUseSource,
+    ) -> bool {
+        if source.allow_multi_interact {
+            if source.consumable {
+                let state = self
+                    .represented_gameobject_use_states
+                    .entry(gameobject_guid)
+                    .or_default();
+                let despawn_secs = state
+                    .despawn_delay_secs
+                    .unwrap_or(wow_entities::DEFAULT_GAMEOBJECT_RESPAWN_DELAY_SECS);
+                state.per_player_despawn_secs = Some(despawn_secs);
+                state.per_player_despawn_until =
+                    Some(Instant::now() + Duration::from_secs(u64::from(despawn_secs)));
+                self.represented_gameobject_use_effects.push(
+                    RepresentedGameObjectUseEffect::GooberDespawnForPlayer {
+                        gameobject_guid,
+                        player_guid,
+                        despawn_secs,
+                    },
+                );
+            } else {
+                self.represented_gameobject_use_effects.push(
+                    RepresentedGameObjectUseEffect::GooberSetGoStateForPlayer {
+                        gameobject_guid,
+                        player_guid,
+                        go_state: wow_entities::GoState::Active,
+                    },
+                );
+            }
+        } else {
+            let (go_state, custom_anim_progress) = {
+                let state = self
+                    .represented_gameobject_use_states
+                    .entry(gameobject_guid)
+                    .or_default();
+                state.gameobject_flags |= wow_entities::GO_FLAG_IN_USE;
+                state.loot_state = Some(wow_entities::LootState::Activated);
+                state.loot_state_unit_guid = player_guid;
+                let custom_anim_progress = if source.custom_anim != 0 {
+                    Some(u32::from(state.go_anim_progress))
+                } else {
+                    state.go_state = Some(wow_entities::GoState::Active);
+                    None
+                };
+                state.cooldown_until =
+                    Some(Instant::now() + Duration::from_millis(u64::from(source.auto_close_ms)));
+                (
+                    custom_anim_progress
+                        .is_none()
+                        .then_some(wow_entities::GoState::Active),
+                    custom_anim_progress,
+                )
+            };
+            if let Some(custom_anim) = custom_anim_progress {
+                self.send_packet(&wow_packet::packets::misc::GameObjectCustomAnim {
+                    object_guid: gameobject_guid,
+                    custom_anim,
+                    play_as_despawn: false,
+                });
+            }
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::GooberUsed {
+                    gameobject_guid,
+                    user_guid: player_guid,
+                    custom_anim: source.custom_anim,
+                    auto_close_ms: source.auto_close_ms,
+                    go_state,
+                },
+            );
+        }
+
+        if source.spell_id != 0 {
+            self.apply_represented_gameobject_post_use_spell_like_cpp(
+                gameobject_guid,
+                player_guid,
+                gameobject_entry,
+                wow_entities::GAMEOBJECT_TYPE_GOOBER,
+                source.spell_id,
+                false,
+                if source.player_cast {
+                    RepresentedGameObjectSpellCaster::User
+                } else {
+                    RepresentedGameObjectSpellCaster::GameObject
+                },
+                if source.player_cast {
+                    player_guid
+                } else {
+                    gameobject_guid
+                },
+            );
+        }
+
+        true
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn apply_represented_gameobject_goober_just_deactivated_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        source: wow_entities::GooberUseSource,
+    ) -> bool {
+        if source.linked_trap_entry != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::GooberLinkedTrapDespawn {
+                    gameobject_guid,
+                    trap_entry: source.linked_trap_entry,
+                },
+            );
+        }
+
+        let mut unique_users = Vec::new();
+        {
+            let state = self
+                .represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default();
+            if source.spell_id != 0 {
+                unique_users = std::mem::take(&mut state.unique_users);
+            } else {
+                state.unique_users.clear();
+            }
+
+            state.loot_state_unit_guid = wow_core::ObjectGuid::EMPTY;
+            state.gameobject_flags &= !wow_entities::GO_FLAG_IN_USE;
+            state.cooldown_until = None;
+            if source.lock_id != 0 || source.auto_close_ms != 0 {
+                state.go_state = Some(wow_entities::GoState::Ready);
+            }
+            state.loot_state = if source.consumable {
+                Some(wow_entities::LootState::NotReady)
+            } else {
+                Some(wow_entities::LootState::Ready)
+            };
+        }
+
+        if source.spell_id != 0 {
+            for player_guid in unique_users {
+                self.represented_gameobject_use_effects.push(
+                    RepresentedGameObjectUseEffect::GooberUniqueUserSpell {
+                        gameobject_guid,
+                        player_guid,
+                        spell_id: source.spell_id,
+                    },
+                );
+            }
+        }
+
+        if let Some(state) = self.represented_gameobject_use_states.get(&gameobject_guid) {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::GooberCleared {
+                    gameobject_guid,
+                    loot_state: state
+                        .loot_state
+                        .unwrap_or(wow_entities::LootState::NotReady),
+                    go_state: state.go_state,
+                },
+            );
+        }
+
+        true
     }
 
     fn send_active_player_transport_server_time_update_like_cpp(&self) {
@@ -8523,6 +12265,12 @@ impl WorldSession {
     #[cfg(test)]
     pub(crate) fn active_player_local_flags_like_cpp(&self) -> u32 {
         self.active_player_local_flags_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_active_player_local_flags_like_cpp(&mut self, flags: u32) {
+        self.active_player_local_flags_like_cpp = flags;
+        self.sync_current_player_session_visibility_detection_like_cpp();
     }
 
     #[cfg(test)]
@@ -9643,6 +13391,7 @@ impl WorldSession {
                         unit_flags: c.unit_flags(),
                         map_id,
                         loot_id: c.loot_id(),
+                        skin_loot_id: c.skin_loot_id(),
                         gold_min: c.gold_min(),
                         gold_max: c.gold_max(),
                         boss_id: c.boss_id(),
@@ -9659,7 +13408,7 @@ impl WorldSession {
                         c.creature.ai_ownership().respawn_time_secs
                     );
                 }
-                self.visible_creatures.remove(g);
+                self.client_visible_guids_like_cpp.remove(g);
             }
             let pkt = UpdateObject::destroy_objects(despawn_guids, map_id);
             if let Err(e) = self.send_tx.send(pkt.to_bytes()) {
@@ -9711,6 +13460,7 @@ impl WorldSession {
                 r.max_dmg,
                 r.aggro_radius,
                 r.loot_id,
+                r.skin_loot_id,
                 r.gold_min,
                 r.gold_max,
                 r.boss_id,
@@ -9720,7 +13470,7 @@ impl WorldSession {
                 r.phase_group_id,
                 r.terrain_swap_map,
             );
-            self.visible_creatures.insert(guid);
+            self.client_visible_guids_like_cpp.insert(guid);
         }
         // ──────────────────────────────────────────────────────────────────
 
@@ -9890,6 +13640,7 @@ impl WorldSession {
         let Some(player_guid) = self.player_guid() else {
             return;
         };
+        self.revalidate_canonical_player_combat_refs_like_cpp(player_guid);
         let canonical_attack_state = self.canonical_player_attack_state_like_cpp();
         let Some(combat_target) = (match canonical_attack_state {
             Some(Some(target)) => Some(target),
@@ -9903,6 +13654,9 @@ impl WorldSession {
             return;
         };
         self.combat_target = Some(combat_target);
+        let canonical_threat_before = self
+            .canonical_creature_threat_value_like_cpp(combat_target, player_guid)
+            .unwrap_or(0.0);
         let now = Instant::now();
         let diff_ms = now
             .saturating_duration_since(self.combat_tick_last_at_like_cpp)
@@ -9914,42 +13668,82 @@ impl WorldSession {
         // clear the canonical player's attack state as well as session mirrors.
         #[derive(Clone, Copy)]
         enum CombatTargetRuntimeLikeCpp {
-            WorldCreature { position: Position },
-            CanonicalPlayer { position: Position },
+            WorldCreature {
+                position: Position,
+                combat_reach: f32,
+                bounding_radius: f32,
+            },
+            CanonicalPlayer {
+                position: Position,
+                combat_reach: f32,
+                bounding_radius: f32,
+            },
         }
 
         let target_runtime = self
             .mutate_world_creature(combat_target, |creature| {
+                let unit_data = creature.creature.unit().data();
                 CombatTargetRuntimeLikeCpp::WorldCreature {
                     position: creature.position(),
+                    combat_reach: unit_data.combat_reach,
+                    bounding_radius: unit_data.bounding_radius,
                 }
             })
             .or_else(|| {
                 self.mutate_canonical_player_by_guid_like_cpp(combat_target, |player| {
+                    let unit_data = player.unit().data();
                     CombatTargetRuntimeLikeCpp::CanonicalPlayer {
                         position: player.unit().world().position(),
+                        combat_reach: unit_data.combat_reach,
+                        bounding_radius: unit_data.bounding_radius,
                     }
                 })
             });
         let Some(target_runtime) = target_runtime else {
             let _ = self.mutate_canonical_player_like_cpp(|player| {
-                player.unit_mut().attack_stop_like_cpp()
+                let unit = player.unit_mut();
+                unit.attack_stop_like_cpp();
+                unit.subsystems_mut()
+                    .combat
+                    .purge_combat_ref_like_cpp(combat_target);
             });
             self.combat_target = None;
             self.in_combat = false;
             return;
         };
-        let target_position = match target_runtime {
-            CombatTargetRuntimeLikeCpp::WorldCreature { position }
-            | CombatTargetRuntimeLikeCpp::CanonicalPlayer { position } => position,
+        let (target_position, target_combat_reach, target_bounding_radius) = match target_runtime {
+            CombatTargetRuntimeLikeCpp::WorldCreature {
+                position,
+                combat_reach,
+                bounding_radius,
+            }
+            | CombatTargetRuntimeLikeCpp::CanonicalPlayer {
+                position,
+                combat_reach,
+                bounding_radius,
+            } => (position, combat_reach, bounding_radius),
         };
         let player_position = self.player_position_like_cpp();
+        let player_combat_reach = self
+            .mutate_canonical_player_like_cpp(|player| player.unit().data().combat_reach)
+            .unwrap_or(0.0);
         let in_melee_range = player_position
-            .map(|position| position.distance(&target_position) <= 5.0)
+            .map(|position| {
+                Self::is_within_melee_range_like_cpp(
+                    position,
+                    player_combat_reach,
+                    target_position,
+                    target_combat_reach,
+                )
+            })
             .unwrap_or(true);
         let facing_target = player_position
             .map(|position| {
-                Self::is_player_facing_target_for_melee_like_cpp(position, target_position)
+                Self::is_within_target_boundary_radius_like_cpp(
+                    position,
+                    target_position,
+                    target_bounding_radius,
+                ) || Self::is_player_facing_target_for_melee_like_cpp(position, target_position)
             })
             .unwrap_or(true);
         let within_los = self.player_melee_los_to_target_like_cpp.unwrap_or(true);
@@ -10025,9 +13819,11 @@ impl WorldSession {
             return;
         }
 
+        let tap_group_guids = self.current_group_member_guids_for_tap_like_cpp(player_guid);
+
         // Gather combat data from the canonical map-owned creature before
         // emitting combat packets.
-        let Some((swings, target_level, now_dead, move_stop)) = self
+        let Some((swings, target_entry, target_level, now_dead, move_stop, values_update)) = self
             .mutate_world_creature(combat_target, |creature| {
                 if !creature.is_alive() {
                     return None;
@@ -10044,6 +13840,7 @@ impl WorldSession {
                         vec![creature.roll_damage().max(1)]
                     }
                 };
+                let entry = creature.entry();
                 let level = creature.level();
                 let mut sent_swings = Vec::new();
                 let mut died = false;
@@ -10054,7 +13851,10 @@ impl WorldSession {
                     }
                     let damage = dmg.max(1);
                     let health_before = creature.current_hp();
-                    died = creature.take_damage(damage);
+                    creature
+                        .creature
+                        .set_tapped_by_player(player_guid, &tap_group_guids);
+                    died = creature.take_damage_before_death_state_like_cpp(damage);
                     let over_damage = if died {
                         damage.saturating_sub(health_before) as i32
                     } else {
@@ -10085,7 +13885,8 @@ impl WorldSession {
                 if canonical_swing_damages.is_none() {
                     creature.record_swing();
                 }
-                Some((sent_swings, level, died, move_stop))
+                let values_update = creature.creature.unit().values_update();
+                Some((sent_swings, entry, level, died, move_stop, values_update))
             })
             .flatten()
         else {
@@ -10098,6 +13899,14 @@ impl WorldSession {
                     .unit_mut()
                     .set_last_damaged_target_like_cpp(Some(combat_target));
             });
+            if !now_dead {
+                let total_damage: u32 = swings.iter().map(|(damage, _, _)| *damage).sum();
+                let _ = self.mirror_canonical_creature_threat_from_attacker_like_cpp(
+                    combat_target,
+                    player_guid,
+                    canonical_threat_before + total_damage as f32,
+                );
+            }
         }
 
         for (dmg, _swing_killed, over_damage) in &swings {
@@ -10114,10 +13923,37 @@ impl WorldSession {
             let _ = self.send_tx.send(state_update.to_bytes());
         }
 
-        // TODO: creature health VALUES update — format needs verification vs client
-        // (temporarily disabled to prevent client crash from malformed packet)
+        if self.client_visible_guids_like_cpp.contains(&combat_target)
+            && let Some(update) = unit_values_update_to_update_object(
+                combat_target,
+                self.player_map_id_like_cpp(),
+                &values_update,
+            )
+        {
+            self.send_packet(&update);
+        }
 
         if now_dead {
+            if !self
+                .pending_creature_kill_loot_like_cpp
+                .contains(&combat_target)
+            {
+                self.pending_creature_kill_loot_like_cpp.push(combat_target);
+            }
+            if !self
+                .pending_creature_kill_rewards_like_cpp
+                .iter()
+                .any(|reward| reward.creature_guid == combat_target)
+            {
+                self.pending_creature_kill_rewards_like_cpp.push(
+                    PendingCreatureKillRewardLikeCpp {
+                        killer_guid: player_guid,
+                        creature_guid: combat_target,
+                        creature_entry: target_entry,
+                        creature_level: target_level,
+                    },
+                );
+            }
             if let Some(bytes) = move_stop {
                 let _ = self.send_tx.send(bytes);
             }
@@ -10128,8 +13964,13 @@ impl WorldSession {
             };
             let _ = self.send_tx.send(stop.to_bytes());
             let _ = self.mutate_canonical_player_like_cpp(|player| {
-                player.unit_mut().attack_stop_like_cpp()
+                let unit = player.unit_mut();
+                unit.attack_stop_like_cpp();
+                unit.subsystems_mut()
+                    .combat
+                    .purge_combat_ref_like_cpp(combat_target);
             });
+            self.revalidate_canonical_player_combat_refs_like_cpp(player_guid);
             self.combat_target = None;
             self.in_combat = false;
         }
@@ -10508,25 +14349,56 @@ impl WorldSession {
         // Si target es el mismo jugador
         if target_guid == player_guid {
             info!(account = self.account_id, heal = heal_amount, "Healed self");
-            // TODO: Actualizar HP del jugador en la DB
-            // self.player_health = min(self.player_health + heal_amount, self.player_max_health);
-            // Enviar UpdateObject con VALUES update
+            let current = self.player_health_like_cpp;
+            let healed = current
+                .saturating_add(heal_amount)
+                .min(self.player_max_health_like_cpp);
+            if healed != current {
+                self.player_health_like_cpp = healed;
+                self.player_alive_like_cpp = healed > 0;
+                let max_health = self.player_max_health_like_cpp;
+                let _ = self.mutate_canonical_player_like_cpp(|player| {
+                    player.unit_mut().set_max_health(u64::from(max_health));
+                    player.unit_mut().set_health(u64::from(healed));
+                });
+                self.send_player_health_values_update_like_cpp(player_guid, u64::from(healed));
+            }
             return Ok(());
         }
 
-        // Si target es otra criatura/jugador
-        if self.mutate_world_creature(target_guid, |_| ()).is_some() {
-            info!(
-                account = self.account_id,
-                creature = ?target_guid,
-                heal = heal_amount,
-                "Healed creature"
-            );
-            // TODO: Actualizar HP de la criatura
-            return Ok(());
+        let account_id = self.account_id;
+        let values_update = self
+            .mutate_world_creature(target_guid, |creature| {
+                info!(
+                    account = account_id,
+                    creature = ?target_guid,
+                    heal = heal_amount,
+                    "Healed creature"
+                );
+
+                {
+                    let unit = creature.creature.unit_mut();
+                    let current = unit.data().health;
+                    let max = unit.data().max_health;
+                    let healed = current.saturating_add(u64::from(heal_amount)).min(max);
+                    unit.set_health(healed);
+                }
+
+                creature.creature.unit().values_update()
+            })
+            .ok_or("Target not found")?;
+
+        if self.client_visible_guids_like_cpp.contains(&target_guid)
+            && let Some(update) = unit_values_update_to_update_object(
+                target_guid,
+                self.player_map_id_like_cpp(),
+                &values_update,
+            )
+        {
+            self.send_packet(&update);
         }
 
-        Err("Target not found")
+        Ok(())
     }
 
     /// Helper: apply damage to target creature.
@@ -10538,11 +14410,12 @@ impl WorldSession {
         use wow_packet::ServerPacket;
         use wow_packet::packets::movement::MonsterMoveStop;
 
-        let _player_guid = self.player_guid().ok_or("No player GUID")?;
+        let player_guid = self.player_guid().ok_or("No player GUID")?;
         let account_id = self.account_id;
+        let tap_group_guids = self.current_group_member_guids_for_tap_like_cpp(player_guid);
 
         // Si target es otra criatura — mutate canonical shared map state.
-        let kill_info = self
+        let (kill_info, mut values_update) = self
             .mutate_world_creature(target_guid, |creature| {
                 info!(
                     account = account_id,
@@ -10551,8 +14424,11 @@ impl WorldSession {
                     "Dealt damage to creature"
                 );
 
-                let died = creature.take_damage(damage_amount);
-                if died {
+                creature
+                    .creature
+                    .set_tapped_by_player(player_guid, &tap_group_guids);
+                let died = creature.take_damage_before_death_state_like_cpp(damage_amount);
+                let kill_info = if died {
                     info!(
                         "Creature {} (entry={}) killed",
                         target_guid,
@@ -10569,7 +14445,8 @@ impl WorldSession {
                     Some((creature.entry(), target_guid, move_stop))
                 } else {
                     None
-                }
+                };
+                (kill_info, creature.creature.unit().values_update())
             })
             .ok_or("Target creature not found")?;
 
@@ -10578,6 +14455,8 @@ impl WorldSession {
             if let Some(bytes) = move_stop {
                 let _ = self.send_tx.send(bytes);
             }
+            self.ensure_represented_creature_kill_loot_like_cpp(guid)
+                .await;
             // Give XP for the kill
             let mob_level = self
                 .mutate_world_creature(guid, |creature| creature.level())
@@ -10587,6 +14466,25 @@ impl WorldSession {
                 self.give_xp(xp, guid, true).await;
             }
             self.on_creature_killed(entry, guid).await;
+            self.record_represented_creature_kill_hooks_like_cpp(player_guid, guid);
+            if let Some(death_values_update) = self
+                .complete_represented_creature_death_state_after_kill_hooks_like_cpp(
+                    player_guid,
+                    guid,
+                )
+            {
+                values_update = death_values_update;
+            }
+        }
+
+        if self.client_visible_guids_like_cpp.contains(&target_guid)
+            && let Some(update) = unit_values_update_to_update_object(
+                target_guid,
+                self.player_map_id_like_cpp(),
+                &values_update,
+            )
+        {
+            self.send_packet(&update);
         }
 
         Ok(())
@@ -10764,13 +14662,14 @@ fn default_available_classes() -> Vec<wow_packet::packets::auth::RaceClassAvaila
 mod tests {
     use super::*;
     use wow_constants::{
-        BagFamilyMask, EnchantmentSlot, InventoryResult, InventoryType, ItemBondingType, ItemClass,
-        ItemContext, ItemFieldFlags, ItemFlags, ItemFlags2, ItemUpdateState, PhaseShiftFlags,
-        ServerOpcodes, SpellItemEnchantmentFlags,
+        BagFamilyMask, ConditionSourceType, ConditionType, EnchantmentSlot, InventoryResult,
+        InventoryType, ItemBondingType, ItemClass, ItemContext, ItemFieldFlags, ItemFlags,
+        ItemFlags2, ItemUpdateState, PhaseShiftFlags, ServerOpcodes, SpellItemEnchantmentFlags,
+        UnitDynFlags, UnitFlags,
     };
     use wow_core::{Position, guid::HighGuid};
     use wow_data::{
-        ImportPriceArmorEntry, ImportPriceArmorStore, ImportPriceQualityEntry,
+        Condition, ImportPriceArmorEntry, ImportPriceArmorStore, ImportPriceQualityEntry,
         ImportPriceQualityStore, ImportPriceShieldEntry, ImportPriceShieldStore, ImportPriceStores,
         ImportPriceWeaponEntry, ImportPriceWeaponStore, ItemAppearanceEntry, ItemAppearanceStore,
         ItemClassEntry, ItemClassStore, ItemCurrencyCostEntry, ItemCurrencyCostStore,
@@ -10790,6 +14689,8 @@ mod tests {
         CreatureLoot, LOOT_TYPE_CORPSE_LIKE_CPP, LOOT_TYPE_ITEM_LIKE_CPP, LootEntry, LootEntryFlags,
     };
 
+    const BATTLEGROUND_AB_LIKE_CPP: u32 = 3;
+
     fn make_session() -> (
         WorldSession,
         flume::Sender<WorldPacket>,
@@ -10798,7 +14699,7 @@ mod tests {
         let (pkt_tx, pkt_rx) = flume::bounded(100);
         let (send_tx, send_rx) = flume::bounded(100);
 
-        let session = WorldSession::new(
+        let mut session = WorldSession::new(
             1,
             "TestAccount".into(),
             0,
@@ -10810,8 +14711,51 @@ mod tests {
             pkt_rx,
             send_tx,
         );
+        session.set_active_player_local_flags_like_cpp(
+            PLAYER_LOCAL_FLAG_OVERRIDE_TRANSPORT_SERVER_TIME_LIKE_CPP,
+        );
 
         (session, pkt_tx, send_rx)
+    }
+
+    fn test_quest_template(id: u32) -> wow_data::quest::QuestTemplate {
+        wow_data::quest::QuestTemplate {
+            id,
+            quest_type: 0,
+            quest_level: 1,
+            quest_max_scaling_level: 0,
+            min_level: 1,
+            quest_sort_id: 0,
+            quest_info_id: 0,
+            suggested_group_num: 0,
+            reward_next_quest: 0,
+            reward_xp_difficulty: 0,
+            reward_xp_multiplier: 1.0,
+            reward_money_difficulty: 0,
+            reward_money_multiplier: 1.0,
+            reward_bonus_money: 0,
+            reward_display_spell: [0; wow_data::quest::QUEST_REWARD_DISPLAY_SPELL_COUNT],
+            reward_spell: 0,
+            reward_honor: 0,
+            flags: 0,
+            flags_ex: 0,
+            flags_ex2: 0,
+            reward_items: [0; wow_data::quest::QUEST_REWARD_ITEM_COUNT],
+            reward_amounts: [0; wow_data::quest::QUEST_REWARD_ITEM_COUNT],
+            item_drop: [0; wow_data::quest::QUEST_ITEM_DROP_COUNT],
+            item_drop_quantity: [0; wow_data::quest::QUEST_ITEM_DROP_COUNT],
+            log_title: String::new(),
+            log_description: String::new(),
+            quest_description: String::new(),
+            area_description: String::new(),
+            quest_completion_log: String::new(),
+            objectives: Vec::new(),
+            allowable_races: 0,
+            allowable_classes: 0,
+            max_level: 0,
+            prev_quest_id: 0,
+            reward_choice_items: [(0, 0); wow_data::quest::QUEST_REWARD_CHOICES_COUNT],
+        }
     }
 
     fn drain_server_opcodes(rx: &flume::Receiver<Vec<u8>>) -> Vec<u16> {
@@ -11684,15 +15628,17 @@ mod tests {
     #[test]
     fn time_sync_response_sets_initial_clock_delta_like_cpp() {
         let (mut session, _pkt_tx, _send_rx) = make_session();
-        let sent_time = WorldSession::game_time_ms_like_cpp().wrapping_sub(20);
+        let _ = WorldSession::game_time_ms_like_cpp();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let sent_time = WorldSession::game_time_ms_like_cpp();
         session.time_sync_pending_requests.insert(7, sent_time);
 
-        session.record_time_sync_response_like_cpp(7, sent_time.wrapping_sub(1_000));
+        session.record_time_sync_response_like_cpp(7, sent_time.saturating_sub(1));
 
         assert!(session.time_sync_pending_requests.is_empty());
         assert_eq!(session.time_sync_clock_delta_queue.len(), 1);
         assert!(
-            session.time_sync_clock_delta >= 1_000,
+            session.time_sync_clock_delta >= 1,
             "expected initial fallback delta from first sample"
         );
     }
@@ -11733,6 +15679,403 @@ mod tests {
 
     fn test_creature_guid(counter: i64) -> ObjectGuid {
         ObjectGuid::create_world_object(wow_core::guid::HighGuid::Creature, 0, 1, 0, 0, 1, counter)
+    }
+
+    fn test_gameobject_guid(entry: u32, counter: i64) -> ObjectGuid {
+        ObjectGuid::create_world_object(
+            wow_core::guid::HighGuid::GameObject,
+            0,
+            1,
+            571,
+            0,
+            entry,
+            counter,
+        )
+    }
+
+    fn add_canonical_test_creature(
+        canonical: &SharedCanonicalMapManager,
+        guid: ObjectGuid,
+        entry: u32,
+        position: Position,
+        npc_flags: u32,
+    ) {
+        let mut creature = wow_entities::Creature::new(false);
+        creature.unit_mut().world_mut().object_mut().create(guid);
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .set_entry(entry);
+        creature.unit_mut().world_mut().set_map(571, 0).unwrap();
+        creature.unit_mut().world_mut().relocate(position);
+        creature.unit_mut().world_mut().set_combat_reach(1.0);
+        creature.unit_mut().set_level(80);
+        creature.unit_mut().set_max_health(100);
+        creature.unit_mut().set_health(100);
+        creature.set_ai_identity_runtime(1, 35, npc_flags, 0);
+        creature.unit_mut().world_mut().object_mut().add_to_world();
+
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(571, 0)
+            .unwrap()
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_creature(creature).unwrap(),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn gameobject_interaction_resolves_canonical_map_object_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let gameobject_guid = test_gameobject_guid(777, 9);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Tester".to_string(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            571,
+            2,
+            1,
+            10,
+            0,
+        ));
+
+        let mut gameobject = GameObject::new();
+        gameobject.world_mut().object_mut().create(gameobject_guid);
+        gameobject.world_mut().object_mut().set_entry(777);
+        gameobject.world_mut().set_map(571, 0).unwrap();
+        gameobject
+            .world_mut()
+            .relocate(Position::new(14.9, 0.0, 0.0, 0.0));
+        gameobject.world_mut().object_mut().add_to_world();
+
+        canonical
+            .lock()
+            .unwrap()
+            .create_world_map(571, 0)
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_game_object(gameobject).unwrap(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            session.represented_gameobject_can_interact_with_like_cpp(gameobject_guid, 5.0),
+            Some(RepresentedGameObjectAccessLikeCpp {
+                entry: 777,
+                position: Position::new(14.9, 0.0, 0.0, 0.0),
+            })
+        );
+
+        session.set_player_position_like_cpp(Position::new(20.1, 0.0, 0.0, 0.0));
+        assert_eq!(
+            session.represented_gameobject_can_interact_with_like_cpp(gameobject_guid, 5.0),
+            None
+        );
+    }
+
+    #[test]
+    fn visible_world_creatures_use_map_grid_and_phase_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let manager = shared_map_manager();
+        let player_position = Position::new(10.0, 10.0, 0.0, 0.0);
+        let visible_guid = test_creature_guid(20);
+        let far_guid = test_creature_guid(21);
+        let visible_pos = Position::new(20.0, 20.0, 0.0, 0.0);
+        let far_pos = Position::new(5000.0, 5000.0, 0.0, 0.0);
+
+        session.set_map_manager(Arc::clone(&manager));
+        for (guid, position) in [(visible_guid, visible_pos), (far_guid, far_pos)] {
+            let (grid_x, grid_y) = crate::map_manager::world_to_grid_coords(position.x, position.y);
+            manager.write().unwrap().add_creature(
+                571,
+                0,
+                grid_x,
+                grid_y,
+                crate::map_manager::WorldCreature::new(
+                    guid, 900, position, 100, 80, 1, 2, 0.0, 1, 35, 0, 0,
+                ),
+            );
+        }
+
+        let visible = session.visible_world_creatures_from_map_like_cpp(571, &player_position);
+
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].guid(), visible_guid);
+    }
+
+    #[test]
+    fn visible_gameobjects_use_canonical_map_cells_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_position = Position::new(10.0, 10.0, 0.0, 0.0);
+        let visible_guid = test_gameobject_guid(910, 30);
+        let far_guid = test_gameobject_guid(911, 31);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        canonical.lock().unwrap().create_world_map(571, 0);
+
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            571,
+            visible_guid,
+            910,
+            Position::new(20.0, 20.0, 0.0, 0.0),
+            3,
+        );
+        session.record_represented_gameobject_display_model_like_cpp(
+            visible_guid,
+            7000,
+            1.5,
+            [0.0, 0.0, 0.0, 1.0],
+        );
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            571,
+            far_guid,
+            911,
+            Position::new(5000.0, 5000.0, 0.0, 0.0),
+            3,
+        );
+        session.record_represented_gameobject_display_model_like_cpp(
+            far_guid,
+            7001,
+            1.0,
+            [0.0, 0.0, 0.0, 1.0],
+        );
+
+        let visible = session
+            .visible_gameobjects_from_canonical_map_like_cpp(571, &player_position, 800.0)
+            .expect("canonical map");
+
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].guid, visible_guid);
+        assert_eq!(visible[0].entry, 910);
+        assert_eq!(visible[0].display_id, 7000);
+        assert_eq!(visible[0].go_type, 3);
+        assert_eq!(visible[0].scale, 1.5);
+    }
+
+    #[tokio::test]
+    async fn update_visibility_uses_map_sources_without_world_db_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let player_position = Position::new(10.0, 10.0, 0.0, 0.0);
+        let creature_guid = test_creature_guid(40);
+        let gameobject_guid = test_gameobject_guid(912, 41);
+
+        session.set_map_manager(Arc::clone(&manager));
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_player_map_position_like_cpp(571, player_position);
+
+        let creature_position = Position::new(20.0, 20.0, 0.0, 0.0);
+        let (grid_x, grid_y) =
+            crate::map_manager::world_to_grid_coords(creature_position.x, creature_position.y);
+        manager.write().unwrap().add_creature(
+            571,
+            0,
+            grid_x,
+            grid_y,
+            crate::map_manager::WorldCreature::new(
+                creature_guid,
+                901,
+                creature_position,
+                100,
+                80,
+                1,
+                2,
+                0.0,
+                1,
+                35,
+                0,
+                0,
+            ),
+        );
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            571,
+            gameobject_guid,
+            912,
+            Position::new(30.0, 30.0, 0.0, 0.0),
+            3,
+        );
+        session.record_represented_gameobject_display_model_like_cpp(
+            gameobject_guid,
+            7002,
+            1.0,
+            [0.0, 0.0, 0.0, 1.0],
+        );
+
+        session.update_visibility().await;
+
+        assert!(
+            session
+                .client_visible_guids_like_cpp
+                .contains(&creature_guid)
+        );
+        assert!(
+            session
+                .client_visible_guids_like_cpp
+                .contains(&gameobject_guid)
+        );
+        assert_eq!(session.last_visibility_pos, Some(player_position));
+        assert!(
+            send_rx.try_recv().is_ok(),
+            "map-driven visibility should send create data without DB"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_nearby_creatures_empty_map_source_is_authoritative_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let manager = shared_map_manager();
+        let player_position = Position::new(10.0, 10.0, 0.0, 0.0);
+        let stale_creature = test_creature_guid(44);
+
+        session.set_map_manager(Arc::clone(&manager));
+        session.client_visible_guids_like_cpp.insert(stale_creature);
+
+        session
+            .send_nearby_creatures(571, &player_position, 0)
+            .await;
+
+        assert!(
+            !session
+                .client_visible_guids_like_cpp
+                .contains(&stale_creature)
+        );
+        assert_eq!(session.last_visibility_pos, Some(player_position));
+        assert!(
+            send_rx.try_recv().is_err(),
+            "empty map-owned creature source should not fall back to SQL or send creates"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_nearby_gameobjects_empty_canonical_source_is_authoritative_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_position = Position::new(10.0, 10.0, 0.0, 0.0);
+        let stale_gameobject = test_gameobject_guid(913, 45);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session
+            .client_visible_guids_like_cpp
+            .insert(stale_gameobject);
+
+        session
+            .send_nearby_gameobjects(571, &player_position, 0)
+            .await;
+
+        assert!(
+            !session
+                .client_visible_guids_like_cpp
+                .contains(&stale_gameobject)
+        );
+        assert!(
+            send_rx.try_recv().is_err(),
+            "empty canonical gameobject source should not fall back to SQL or send creates"
+        );
+    }
+
+    #[test]
+    fn npc_interaction_resolves_canonical_trainer_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let trainer_guid = test_creature_guid(10);
+        let vendor_guid = test_creature_guid(11);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Tester".to_string(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session
+            .ensure_canonical_world_map_for_current_player_like_cpp()
+            .expect("canonical map");
+
+        add_canonical_test_creature(
+            &canonical,
+            trainer_guid,
+            500,
+            Position::new(14.0, 0.0, 0.0, 0.0),
+            wow_constants::unit::NPCFlags1::TRAINER.bits(),
+        );
+        add_canonical_test_creature(
+            &canonical,
+            vendor_guid,
+            501,
+            Position::new(14.0, 0.0, 0.0, 0.0),
+            wow_constants::unit::NPCFlags1::VENDOR.bits(),
+        );
+
+        assert_eq!(
+            session.canonical_creature_access_like_cpp(trainer_guid),
+            Some(RepresentedCreatureAccessLikeCpp {
+                entry: 500,
+                position: Position::new(14.0, 0.0, 0.0, 0.0),
+                npc_flags: wow_constants::unit::NPCFlags1::TRAINER.bits(),
+            })
+        );
+        assert_eq!(
+            session.represented_npc_can_interact_with_like_cpp(
+                trainer_guid,
+                wow_constants::unit::NPCFlags1::TRAINER.bits(),
+            ),
+            Some(RepresentedCreatureAccessLikeCpp {
+                entry: 500,
+                position: Position::new(14.0, 0.0, 0.0, 0.0),
+                npc_flags: wow_constants::unit::NPCFlags1::TRAINER.bits(),
+            })
+        );
+        assert_eq!(
+            session.represented_npc_can_interact_with_like_cpp(
+                vendor_guid,
+                wow_constants::unit::NPCFlags1::TRAINER.bits(),
+            ),
+            None
+        );
+
+        session.set_player_position_like_cpp(Position::new(40.0, 0.0, 0.0, 0.0));
+        session
+            .mutate_canonical_player_like_cpp(|player| {
+                player
+                    .unit_mut()
+                    .world_mut()
+                    .relocate(Position::new(40.0, 0.0, 0.0, 0.0));
+            })
+            .unwrap();
+        assert_eq!(
+            session.represented_npc_can_interact_with_like_cpp(
+                trainer_guid,
+                wow_constants::unit::NPCFlags1::TRAINER.bits(),
+            ),
+            None
+        );
     }
 
     #[test]
@@ -11961,6 +16304,7 @@ mod tests {
             0,
             0,
             0,
+            0,
             None,
             0,
             0,
@@ -11988,6 +16332,7 @@ mod tests {
             3,
             5,
             20.0,
+            0,
             0,
             0,
             0,
@@ -12038,6 +16383,7 @@ mod tests {
             3,
             5,
             20.0,
+            0,
             0,
             0,
             0,
@@ -12121,6 +16467,7 @@ mod tests {
             0,
             0,
             0,
+            0,
             None,
             0,
             0,
@@ -12182,6 +16529,7 @@ mod tests {
             0,
             0,
             0,
+            0,
             None,
             0,
             0,
@@ -12226,6 +16574,7 @@ mod tests {
             3,
             5,
             20.0,
+            0,
             0,
             0,
             0,
@@ -12689,10 +17038,12 @@ mod tests {
 
     #[tokio::test]
     async fn spell_damage_syncs_canonical_creature_health() {
-        let (mut session, _, _) = make_session();
+        let (mut session, _, send_rx) = make_session();
         let manager = shared_map_manager();
         let guid = test_creature_guid(18_002);
-        session.player_guid = Some(ObjectGuid::create_player(1, 42));
+        let player = ObjectGuid::create_player(1, 42);
+        session.player_guid = Some(player);
+        session.client_visible_guids_like_cpp.insert(guid);
         register_test_creature(&mut session, manager.clone(), guid, 40);
 
         session.apply_damage(guid, 7).await.unwrap();
@@ -12700,6 +17051,365 @@ mod tests {
         let manager = manager.read().unwrap();
         let world_creature = manager.find_creature(0, 0, guid).unwrap();
         assert_eq!(world_creature.current_hp(), 33);
+        assert!(world_creature.creature.is_tapped_by(player));
+        assert!(world_creature.creature.has_loot_recipient());
+        let sent = send_rx.try_recv().unwrap();
+        let opcode = u16::from_le_bytes([sent[0], sent[1]]);
+        assert_eq!(opcode, ServerOpcodes::UpdateObject as u16);
+    }
+
+    #[tokio::test]
+    async fn spell_damage_kill_generates_creature_loot_for_tappers_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let guid = test_creature_guid(18_006);
+        let player = ObjectGuid::create_player(1, 47);
+        session.player_guid = Some(player);
+        register_test_creature(&mut session, manager.clone(), guid, 40);
+
+        session.apply_damage(guid, 100).await.unwrap();
+
+        let loot = session
+            .loot_table
+            .get(&guid)
+            .expect("creature corpse loot is generated during kill");
+        assert!(loot.allowed_looters.contains(&player));
+        assert_eq!(loot.loot_type, LOOT_TYPE_CORPSE_LIKE_CPP);
+        let manager = manager.read().unwrap();
+        let world_creature = manager.find_creature(0, 0, guid).unwrap();
+        assert!(world_creature.creature.is_tapped_by(player));
+        assert!(
+            world_creature
+                .creature
+                .unit()
+                .world()
+                .object()
+                .has_dynamic_flag(UnitDynFlags::Lootable as u32)
+        );
+        assert!(
+            !world_creature
+                .creature
+                .unit()
+                .unit_flags_like_cpp()
+                .contains(UnitFlags::SKINNABLE)
+        );
+        assert_eq!(
+            session.represented_creature_kill_events_like_cpp(),
+            &[
+                RepresentedCreatureKillEventLikeCpp::KillerProc {
+                    attacker_guid: player,
+                    victim_guid: guid,
+                },
+                RepresentedCreatureKillEventLikeCpp::TapperTargetDiesProc {
+                    tapper_guid: player,
+                    victim_guid: guid,
+                },
+                RepresentedCreatureKillEventLikeCpp::VictimDeathProc { victim_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::DeliveredKillingBlowCriteria {
+                    player_guid: player,
+                    victim_guid: guid,
+                    quantity: 1,
+                },
+                RepresentedCreatureKillEventLikeCpp::DeathStateJustDied { victim_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::ZoneScriptUnitDeath { unit_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::LootFlagsApplied {
+                    creature_guid: guid,
+                    lootable: true,
+                    can_skin: false,
+                    skinnable: false,
+                },
+                RepresentedCreatureKillEventLikeCpp::CreatureOnHealthDepletedAi {
+                    creature_guid: guid,
+                    attacker_guid: player,
+                    is_kill: true,
+                },
+                RepresentedCreatureKillEventLikeCpp::CreatureJustDiedAi {
+                    creature_guid: guid,
+                    killer_guid: player,
+                },
+                RepresentedCreatureKillEventLikeCpp::ScriptMgrOnCreatureKill {
+                    killer_guid: player,
+                    creature_guid: guid,
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn creature_kill_target_dies_proc_filters_group_reward_distance_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let guid = test_creature_guid(18_007);
+        let player = ObjectGuid::create_player(1, 48);
+        let near_member = ObjectGuid::create_player(1, 49);
+        let far_member = ObjectGuid::create_player(1, 50);
+        let (near_tx, _near_rx) = flume::bounded(10);
+        let (far_tx, _far_rx) = flume::bounded(10);
+        let player_registry = Arc::new(PlayerRegistry::default());
+        let mut near_info = broadcast_info(near_member, near_tx);
+        near_info.position = Position::new(20.0, 10.0, 0.0, 0.0);
+        let mut far_info = broadcast_info(far_member, far_tx);
+        far_info.position = Position::new(200.0, 10.0, 0.0, 0.0);
+        player_registry.insert(near_member, near_info);
+        player_registry.insert(far_member, far_info);
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(player);
+        group.add_member(near_member);
+        group.add_member(far_member);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.player_guid = Some(player);
+        session.player_position = Some(Position::new(10.0, 10.0, 0.0, 0.0));
+        session.group_guid = Some(group_guid);
+        session.set_player_registry(player_registry);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        register_test_creature(&mut session, manager.clone(), guid, 40);
+
+        session.apply_damage(guid, 100).await.unwrap();
+
+        let target_dies_tappers: Vec<_> = session
+            .represented_creature_kill_events_like_cpp()
+            .iter()
+            .filter_map(|event| match event {
+                RepresentedCreatureKillEventLikeCpp::TapperTargetDiesProc {
+                    tapper_guid,
+                    victim_guid,
+                } if *victim_guid == guid => Some(*tapper_guid),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(target_dies_tappers, vec![player, near_member]);
+        assert!(
+            !target_dies_tappers.contains(&far_member),
+            "C++ Player::IsAtGroupRewardDistance suppresses TARGET_DIES proc for far tappers"
+        );
+        let loot = session
+            .loot_table
+            .get(&guid)
+            .expect("loot still uses the original tap list");
+        assert!(loot.allowed_looters.contains(&far_member));
+    }
+
+    #[tokio::test]
+    async fn creature_kill_notifies_current_tapper_pet_after_death_state_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let guid = test_creature_guid(18_008);
+        let player = ObjectGuid::create_player(1, 51);
+        let pet_guid =
+            ObjectGuid::create_world_object(wow_core::guid::HighGuid::Pet, 0, 1, 0, 0, 500, 52);
+        session.player_guid = Some(player);
+        session.set_represented_pet_mode_state_like_cpp(
+            Some(pet_guid),
+            wow_packet::packets::pet::REACT_DEFENSIVE_LIKE_CPP,
+            wow_packet::packets::pet::COMMAND_FOLLOW_LIKE_CPP,
+        );
+        register_test_creature(&mut session, manager.clone(), guid, 40);
+
+        session.apply_damage(guid, 100).await.unwrap();
+
+        assert_eq!(
+            session.represented_creature_kill_events_like_cpp(),
+            &[
+                RepresentedCreatureKillEventLikeCpp::KillerProc {
+                    attacker_guid: player,
+                    victim_guid: guid,
+                },
+                RepresentedCreatureKillEventLikeCpp::TapperTargetDiesProc {
+                    tapper_guid: player,
+                    victim_guid: guid,
+                },
+                RepresentedCreatureKillEventLikeCpp::VictimDeathProc { victim_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::DeliveredKillingBlowCriteria {
+                    player_guid: player,
+                    victim_guid: guid,
+                    quantity: 1,
+                },
+                RepresentedCreatureKillEventLikeCpp::DeathStateJustDied { victim_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::ZoneScriptUnitDeath { unit_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::TapperPetKilledUnitAi {
+                    tapper_guid: player,
+                    pet_guid,
+                    victim_guid: guid,
+                },
+                RepresentedCreatureKillEventLikeCpp::LootFlagsApplied {
+                    creature_guid: guid,
+                    lootable: true,
+                    can_skin: false,
+                    skinnable: false,
+                },
+                RepresentedCreatureKillEventLikeCpp::CreatureOnHealthDepletedAi {
+                    creature_guid: guid,
+                    attacker_guid: player,
+                    is_kill: true,
+                },
+                RepresentedCreatureKillEventLikeCpp::CreatureJustDiedAi {
+                    creature_guid: guid,
+                    killer_guid: player,
+                },
+                RepresentedCreatureKillEventLikeCpp::ScriptMgrOnCreatureKill {
+                    killer_guid: player,
+                    creature_guid: guid,
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn creature_kill_sets_skinning_flags_when_skin_loot_template_exists_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let guid = test_creature_guid(18_009);
+        let player = ObjectGuid::create_player(1, 52);
+        let skin_loot_id = 777;
+        let mut skinning_store = wow_loot::LootStore::for_kind_like_cpp(LootStoreKind::Skinning);
+        skinning_store
+            .load_rows_like_cpp(
+                [wow_loot::LootTemplateRow {
+                    entry: skin_loot_id,
+                    item: wow_loot::LootStoreItem {
+                        item_id: 9_002,
+                        reference: 0,
+                        chance: 100.0,
+                        needs_quest: false,
+                        loot_mode: 1,
+                        group_id: 0,
+                        min_count: 1,
+                        max_count: 1,
+                    },
+                }],
+                |_| true,
+            )
+            .unwrap();
+        let mut stores = LootStores::new();
+        stores.insert(LootStoreKind::Skinning, skinning_store);
+        session.set_loot_stores(Arc::new(stores));
+        session.player_guid = Some(player);
+        session.set_map_manager(manager);
+        session.current_map_id = 0;
+        session.register_world_creature(
+            0,
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            test_creature_create_data(guid, 9001, 40),
+            3,
+            5,
+            20.0,
+            0,
+            skin_loot_id,
+            0,
+            0,
+            None,
+            0,
+            0,
+            0,
+            0,
+            -1,
+        );
+
+        session.apply_damage(guid, 100).await.unwrap();
+
+        let manager = session.map_manager.as_ref().unwrap().read().unwrap();
+        let world_creature = manager.find_creature(0, 0, guid).unwrap();
+        assert!(
+            world_creature
+                .creature
+                .unit()
+                .world()
+                .object()
+                .has_dynamic_flag(UnitDynFlags::CanSkin as u32)
+        );
+        assert!(
+            world_creature
+                .creature
+                .unit()
+                .unit_flags_like_cpp()
+                .contains(UnitFlags::SKINNABLE)
+        );
+        assert!(
+            session
+                .represented_creature_kill_events_like_cpp()
+                .contains(&RepresentedCreatureKillEventLikeCpp::LootFlagsApplied {
+                    creature_guid: guid,
+                    lootable: true,
+                    can_skin: true,
+                    skinnable: true,
+                })
+        );
+    }
+
+    #[tokio::test]
+    async fn spell_heal_syncs_canonical_creature_health_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let manager = shared_map_manager();
+        let guid = test_creature_guid(18_003);
+        session.player_guid = Some(ObjectGuid::create_player(1, 43));
+        session.client_visible_guids_like_cpp.insert(guid);
+        register_test_creature(&mut session, manager.clone(), guid, 40);
+        session
+            .mutate_world_creature(guid, |creature| {
+                creature.take_damage(20);
+                creature.creature.clear_data_changes();
+            })
+            .unwrap();
+
+        session.apply_heal(guid, 7).await.unwrap();
+
+        let manager = manager.read().unwrap();
+        let world_creature = manager.find_creature(0, 0, guid).unwrap();
+        assert_eq!(world_creature.current_hp(), 27);
+        let sent = send_rx.try_recv().unwrap();
+        let opcode = u16::from_le_bytes([sent[0], sent[1]]);
+        assert_eq!(opcode, ServerOpcodes::UpdateObject as u16);
+    }
+
+    #[tokio::test]
+    async fn spell_self_heal_syncs_player_health_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let guid = ObjectGuid::create_player(1, 44);
+        let canonical = shared_canonical_map_manager();
+        canonical.lock().unwrap().create_world_map(0, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            guid,
+            "Healer".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            0,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.set_player_health_like_cpp(50, 100);
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+
+        session.apply_heal(guid, 20).await.unwrap();
+
+        assert_eq!(session.player_health_like_cpp(), 70);
+        let canonical_health = session
+            .mutate_canonical_player_like_cpp(|player| player.unit().data().health)
+            .unwrap();
+        assert_eq!(canonical_health, 70);
+        let sent = send_rx.try_recv().unwrap();
+        let opcode = u16::from_le_bytes([sent[0], sent[1]]);
+        assert_eq!(opcode, ServerOpcodes::UpdateObject as u16);
     }
 
     #[tokio::test]
@@ -12744,13 +17454,14 @@ mod tests {
 
     #[test]
     fn combat_tick_damage_syncs_canonical_creature_health() {
-        let (mut session, _, _) = make_session();
+        let (mut session, _, send_rx) = make_session();
         let manager = shared_map_manager();
         let guid = test_creature_guid(18_003);
         let player = ObjectGuid::create_player(1, 43);
         session.player_guid = Some(player);
         session.combat_target = Some(guid);
         session.in_combat = true;
+        session.client_visible_guids_like_cpp.insert(guid);
         register_test_creature(&mut session, manager.clone(), guid, 40);
         session
             .mutate_world_creature(guid, |creature| {
@@ -12765,6 +17476,174 @@ mod tests {
         let manager = manager.read().unwrap();
         let world_creature = manager.find_creature(0, 0, guid).unwrap();
         assert!(world_creature.current_hp() < 40);
+
+        let attacker_state = send_rx.try_recv().unwrap();
+        let opcode = u16::from_le_bytes([attacker_state[0], attacker_state[1]]);
+        assert_eq!(opcode, ServerOpcodes::AttackerStateUpdate as u16);
+        let values_update = send_rx.try_recv().unwrap();
+        let opcode = u16::from_le_bytes([values_update[0], values_update[1]]);
+        assert_eq!(opcode, ServerOpcodes::UpdateObject as u16);
+    }
+
+    #[tokio::test]
+    async fn combat_tick_kill_generates_creature_loot_after_pending_drain_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let guid = test_creature_guid(18_015);
+        let player = ObjectGuid::create_player(1, 63);
+        session.player_guid = Some(player);
+        session.set_player_level_like_cpp(1);
+        session.set_player_xp_like_cpp(0);
+        session.set_player_next_level_xp_like_cpp(400);
+        session.combat_target = Some(guid);
+        session.in_combat = true;
+        let mut quest_store = wow_data::quest::QuestStore::new();
+        quest_store.quests.insert(
+            9_001,
+            wow_data::quest::QuestTemplate {
+                id: 9_001,
+                quest_type: 0,
+                quest_level: 1,
+                quest_max_scaling_level: 0,
+                min_level: 1,
+                quest_sort_id: 0,
+                quest_info_id: 0,
+                suggested_group_num: 0,
+                reward_next_quest: 0,
+                reward_xp_difficulty: 0,
+                reward_xp_multiplier: 1.0,
+                reward_money_difficulty: 0,
+                reward_money_multiplier: 1.0,
+                reward_bonus_money: 0,
+                reward_display_spell: [0; wow_data::quest::QUEST_REWARD_DISPLAY_SPELL_COUNT],
+                reward_spell: 0,
+                reward_honor: 0,
+                flags: 0,
+                flags_ex: 0,
+                flags_ex2: 0,
+                reward_items: [0; wow_data::quest::QUEST_REWARD_ITEM_COUNT],
+                reward_amounts: [0; wow_data::quest::QUEST_REWARD_ITEM_COUNT],
+                item_drop: [0; wow_data::quest::QUEST_ITEM_DROP_COUNT],
+                item_drop_quantity: [0; wow_data::quest::QUEST_ITEM_DROP_COUNT],
+                log_title: String::new(),
+                log_description: String::new(),
+                quest_description: String::new(),
+                area_description: String::new(),
+                quest_completion_log: String::new(),
+                objectives: vec![wow_data::quest::QuestObjective {
+                    id: 1,
+                    quest_id: 9_001,
+                    obj_type: 0,
+                    order: 0,
+                    storage_index: 0,
+                    object_id: 9001,
+                    amount: 1,
+                    flags: 0,
+                    flags2: 0,
+                    progress_bar_weight: 0.0,
+                    description: String::new(),
+                }],
+                allowable_races: 0,
+                allowable_classes: 0,
+                max_level: 0,
+                prev_quest_id: 0,
+                reward_choice_items: [(0, 0); wow_data::quest::QUEST_REWARD_CHOICES_COUNT],
+            },
+        );
+        session.set_quest_store(Arc::new(quest_store));
+        session.player_quests.insert(
+            9_001,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id: 9_001,
+                status: 1,
+                explored: false,
+                objective_counts: vec![0],
+            },
+        );
+        register_test_creature(&mut session, manager.clone(), guid, 3);
+        session
+            .mutate_world_creature(guid, |creature| {
+                creature.enter_combat(player);
+                creature.creature.ai_ownership_mut().last_swing_ms = 0;
+                creature.creature.ai_ownership_mut().swing_timer_ms = 0;
+            })
+            .unwrap();
+
+        session.tick_combat_sync();
+
+        assert!(session.loot_table.get(&guid).is_none());
+        assert_eq!(session.pending_creature_kill_loot_like_cpp, vec![guid]);
+
+        session.process_pending().await;
+
+        let loot = session
+            .loot_table
+            .get(&guid)
+            .expect("melee kill loot is generated from pending bridge");
+        assert!(loot.allowed_looters.contains(&player));
+        assert_eq!(loot.loot_type, LOOT_TYPE_CORPSE_LIKE_CPP);
+        assert!(session.player_xp_like_cpp() > 0);
+        let quest = session.player_quests.get(&9_001).unwrap();
+        assert_eq!(quest.status, 2);
+        assert_eq!(quest.objective_counts, vec![1]);
+        let manager = manager.read().unwrap();
+        let world_creature = manager.find_creature(0, 0, guid).unwrap();
+        assert!(world_creature.creature.is_tapped_by(player));
+        assert!(
+            world_creature
+                .creature
+                .unit()
+                .world()
+                .object()
+                .has_dynamic_flag(UnitDynFlags::Lootable as u32)
+        );
+        assert!(
+            !world_creature
+                .creature
+                .unit()
+                .unit_flags_like_cpp()
+                .contains(UnitFlags::SKINNABLE)
+        );
+        assert_eq!(
+            session.represented_creature_kill_events_like_cpp(),
+            &[
+                RepresentedCreatureKillEventLikeCpp::KillerProc {
+                    attacker_guid: player,
+                    victim_guid: guid,
+                },
+                RepresentedCreatureKillEventLikeCpp::TapperTargetDiesProc {
+                    tapper_guid: player,
+                    victim_guid: guid,
+                },
+                RepresentedCreatureKillEventLikeCpp::VictimDeathProc { victim_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::DeliveredKillingBlowCriteria {
+                    player_guid: player,
+                    victim_guid: guid,
+                    quantity: 1,
+                },
+                RepresentedCreatureKillEventLikeCpp::DeathStateJustDied { victim_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::ZoneScriptUnitDeath { unit_guid: guid },
+                RepresentedCreatureKillEventLikeCpp::LootFlagsApplied {
+                    creature_guid: guid,
+                    lootable: true,
+                    can_skin: false,
+                    skinnable: false,
+                },
+                RepresentedCreatureKillEventLikeCpp::CreatureOnHealthDepletedAi {
+                    creature_guid: guid,
+                    attacker_guid: player,
+                    is_kill: true,
+                },
+                RepresentedCreatureKillEventLikeCpp::CreatureJustDiedAi {
+                    creature_guid: guid,
+                    killer_guid: player,
+                },
+                RepresentedCreatureKillEventLikeCpp::ScriptMgrOnCreatureKill {
+                    killer_guid: player,
+                    creature_guid: guid,
+                },
+            ]
+        );
     }
 
     #[test]
@@ -12950,11 +17829,14 @@ mod tests {
                 creature.creature.ai_ownership_mut().swing_timer_ms = 0;
             })
             .unwrap();
+        assert!(session.mirror_canonical_creature_threat_from_attacker_like_cpp(guid, player, 3.0));
 
         session.tick_combat_sync();
 
         let guard = manager.read().unwrap();
         let world_creature = guard.find_creature(0, 0, guid).unwrap();
+        assert!(world_creature.creature.is_tapped_by(player));
+        assert!(world_creature.creature.has_loot_recipient());
         assert_eq!(
             world_creature
                 .creature
@@ -12976,6 +17858,41 @@ mod tests {
         assert_eq!(
             player_entity.unit().last_damaged_target_like_cpp(),
             Some(guid)
+        );
+        assert!(
+            player_entity
+                .unit()
+                .subsystems()
+                .combat
+                .is_threatening_to(guid, true)
+        );
+        assert!(
+            player_entity
+                .unit()
+                .subsystems()
+                .combat
+                .is_in_combat_with(guid)
+        );
+        let creature_entity = canonical
+            .find_map(0, 0)
+            .unwrap()
+            .map()
+            .get_typed_creature(guid)
+            .unwrap();
+        assert_eq!(
+            creature_entity
+                .unit()
+                .subsystems()
+                .combat
+                .threat_value(player),
+            Some(10.0)
+        );
+        assert!(
+            creature_entity
+                .unit()
+                .subsystems()
+                .combat
+                .is_in_combat_with(player)
         );
     }
 
@@ -13873,6 +18790,142 @@ mod tests {
     }
 
     #[test]
+    fn combat_tick_melee_range_uses_combat_reach_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let guid = test_creature_guid(18_019);
+        let player = ObjectGuid::create_player(1, 68);
+
+        canonical.lock().unwrap().create_world_map(0, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Reach".to_string(),
+            Position::new(10.0, 10.0, 0.0, 0.0),
+            0,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        session
+            .mutate_canonical_player_like_cpp(|player| {
+                player.unit_mut().set_attacking(Some(guid));
+                player.unit_mut().set_target(guid);
+                player
+                    .unit_mut()
+                    .add_unit_state(UnitState::MELEE_ATTACKING.bits());
+            })
+            .unwrap();
+        session.combat_target = Some(guid);
+        session.in_combat = true;
+        register_test_creature(&mut session, manager.clone(), guid, 40);
+        session
+            .mutate_world_creature(guid, |creature| {
+                creature
+                    .creature
+                    .set_ai_position(Position::new(17.0, 10.0, 0.0, 0.0));
+                creature.creature.unit_mut().set_combat_reach(6.0);
+                creature.enter_combat(player);
+                creature.creature.ai_ownership_mut().last_swing_ms = 0;
+                creature.creature.ai_ownership_mut().swing_timer_ms = 0;
+            })
+            .unwrap();
+
+        session.tick_combat_sync();
+
+        let hp = manager
+            .read()
+            .unwrap()
+            .find_creature(0, 0, guid)
+            .unwrap()
+            .current_hp();
+        assert!(hp < 40);
+        let sent = send_rx.try_recv().unwrap();
+        let opcode = u16::from_le_bytes([sent[0], sent[1]]);
+        assert_eq!(opcode, ServerOpcodes::AttackerStateUpdate as u16);
+    }
+
+    #[test]
+    fn combat_tick_boundary_radius_suppresses_bad_facing_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let guid = test_creature_guid(18_020);
+        let player = ObjectGuid::create_player(1, 69);
+
+        canonical.lock().unwrap().create_world_map(0, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Boundary".to_string(),
+            Position::new(10.0, 10.0, 0.0, std::f32::consts::PI),
+            0,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        session
+            .mutate_canonical_player_like_cpp(|player| {
+                player.unit_mut().set_attacking(Some(guid));
+                player.unit_mut().set_target(guid);
+                player
+                    .unit_mut()
+                    .add_unit_state(UnitState::MELEE_ATTACKING.bits());
+            })
+            .unwrap();
+        session.combat_target = Some(guid);
+        session.in_combat = true;
+        register_test_creature(&mut session, manager.clone(), guid, 40);
+        session
+            .mutate_world_creature(guid, |creature| {
+                creature
+                    .creature
+                    .set_ai_position(Position::new(12.0, 10.0, 0.0, 0.0));
+                creature.creature.unit_mut().set_bounding_radius(3.0);
+                creature.enter_combat(player);
+                creature.creature.ai_ownership_mut().last_swing_ms = 0;
+                creature.creature.ai_ownership_mut().swing_timer_ms = 0;
+            })
+            .unwrap();
+
+        session.tick_combat_sync();
+
+        let hp = manager
+            .read()
+            .unwrap()
+            .find_creature(0, 0, guid)
+            .unwrap()
+            .current_hp();
+        assert!(hp < 40);
+        let sent = send_rx.try_recv().unwrap();
+        let opcode = u16::from_le_bytes([sent[0], sent[1]]);
+        assert_eq!(opcode, ServerOpcodes::AttackerStateUpdate as u16);
+    }
+
+    #[test]
     fn combat_tick_clears_canonical_player_attack_when_target_dies_like_cpp() {
         let (mut session, _, _) = make_session();
         let manager = shared_map_manager();
@@ -13922,6 +18975,7 @@ mod tests {
                 creature.creature.ai_ownership_mut().swing_timer_ms = 0;
             })
             .unwrap();
+        assert!(session.mirror_canonical_creature_threat_from_attacker_like_cpp(guid, player, 1.0));
 
         session.tick_combat_sync();
 
@@ -13958,6 +19012,41 @@ mod tests {
             .unwrap();
         assert_eq!(player_entity.unit().attacking(), None);
         assert_eq!(player_entity.unit().data().target, ObjectGuid::EMPTY);
+        assert!(
+            !player_entity
+                .unit()
+                .subsystems()
+                .combat
+                .is_in_combat_with(guid)
+        );
+        assert!(
+            !player_entity
+                .unit()
+                .subsystems()
+                .combat
+                .is_threatening_to(guid, true)
+        );
+        let creature_entity = guard
+            .find_map(0, 0)
+            .unwrap()
+            .map()
+            .get_typed_creature(guid)
+            .unwrap();
+        assert!(
+            !creature_entity
+                .unit()
+                .subsystems()
+                .combat
+                .is_in_combat_with(player)
+        );
+        assert_eq!(
+            creature_entity
+                .unit()
+                .subsystems()
+                .combat
+                .threat_value(player),
+            None
+        );
         assert_eq!(session.combat_target, None);
         assert!(!session.in_combat);
     }
@@ -14156,6 +19245,69 @@ mod tests {
     }
 
     #[test]
+    fn player_attack_uses_canonical_invisibility_detection_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 95);
+        let victim = test_creature_guid(18_095);
+
+        canonical.lock().unwrap().create_world_map(0, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Rogue".to_string(),
+            Position::new(9.0, 10.0, 0.0, 0.0),
+            0,
+            1,
+            4,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        register_test_creature(&mut session, manager, victim, 40);
+        session
+            .mutate_canonical_creature_by_guid_like_cpp(victim, |creature| {
+                creature.unit_mut().set_invisibility_like_cpp(1, 50);
+            })
+            .unwrap();
+
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Rejected
+        );
+        assert_eq!(session.combat_target, None);
+
+        session
+            .mutate_canonical_player_by_guid_like_cpp(attacker, |player| {
+                player.unit_mut().set_invisibility_detect_like_cpp(1, 50);
+            })
+            .unwrap();
+
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Accepted {
+                send_attack_start: true
+            }
+        );
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(0, 0).unwrap().map();
+        assert_eq!(
+            map.get_typed_player(attacker).unwrap().unit().attacking(),
+            Some(victim)
+        );
+    }
+
+    #[test]
     fn player_attack_rejects_typed_player_victim_without_pvp_snapshot_like_cpp() {
         let (mut session, _, _) = make_session();
         let canonical = shared_canonical_map_manager();
@@ -14228,6 +19380,1023 @@ mod tests {
         }
         assert_eq!(session.combat_target, None);
         assert!(!session.in_combat);
+    }
+
+    #[test]
+    fn player_attack_accepts_typed_player_victim_with_pvp_flag_snapshot_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 49);
+        let victim = ObjectGuid::create_player(1, 50);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+
+        let mut victim_player = Player::new(Some(8), false);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(victim);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .set_map(571, 0)
+            .unwrap();
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::new(11.0, 20.0, 30.0, 0.0));
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .add_to_world();
+        victim_player
+            .unit_mut()
+            .set_pvp_flag_like_cpp(UnitPvpFlags::PVP);
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(571, 0)
+            .unwrap()
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_player(victim_player).unwrap(),
+            )
+            .unwrap();
+
+        session.start_player_attack_like_cpp(victim);
+        {
+            let guard = canonical.lock().unwrap();
+            let map = guard.find_map(571, 0).unwrap().map();
+            let attacker_entity = map.get_typed_player(attacker).unwrap();
+            let victim_entity = map.get_typed_player(victim).unwrap();
+            assert_eq!(attacker_entity.unit().attacking(), Some(victim));
+            assert_eq!(attacker_entity.unit().data().target, victim);
+            assert!(victim_entity.unit().has_attacker_like_cpp(attacker));
+        }
+        assert_eq!(session.combat_target, Some(victim));
+        assert!(session.in_combat);
+    }
+
+    #[test]
+    fn player_attack_rejects_player_loading_visibility_like_cpp() {
+        let (mut attacker_session, _, _) = make_session();
+        let (mut victim_session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 51);
+        let victim = ObjectGuid::create_player(1, 52);
+        let map_store = Arc::new(wow_data::MapStore::from_entries([wow_data::MapEntry {
+            id: 571,
+            instance_type: wow_data::map::MAP_COMMON,
+            parent_map_id: -1,
+            cosmetic_parent_map_id: -1,
+            flags1: 0,
+        }]));
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        attacker_session.set_canonical_map_manager(Arc::clone(&canonical));
+        victim_session.set_canonical_map_manager(Arc::clone(&canonical));
+        attacker_session.set_map_store(Arc::clone(&map_store));
+        victim_session.set_map_store(map_store);
+
+        attacker_session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        victim_session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            victim,
+            "Rogue".to_string(),
+            Position::new(11.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            4,
+            80,
+            0,
+        ));
+        let _ = attacker_session.ensure_canonical_world_map_for_current_player_like_cpp();
+        let _ = victim_session.ensure_canonical_world_map_for_current_player_like_cpp();
+        victim_session
+            .mutate_canonical_player_by_guid_like_cpp(victim, |player| {
+                player.unit_mut().set_pvp_flag_like_cpp(UnitPvpFlags::PVP);
+            })
+            .unwrap();
+
+        victim_session.set_player_loading(Some(victim));
+        assert_eq!(
+            attacker_session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Rejected
+        );
+        assert_eq!(attacker_session.combat_target, None);
+
+        victim_session.set_player_loading(None);
+        assert_eq!(
+            attacker_session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Accepted {
+                send_attack_start: true
+            }
+        );
+
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(571, 0).unwrap().map();
+        assert_eq!(
+            map.get_typed_player(attacker).unwrap().unit().attacking(),
+            Some(victim)
+        );
+        assert!(
+            map.get_typed_player(victim)
+                .unwrap()
+                .unit()
+                .has_attacker_like_cpp(attacker)
+        );
+    }
+
+    #[test]
+    fn player_attack_uses_canonical_farsight_can_always_see_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 53);
+        let victim = ObjectGuid::create_player(1, 54);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Hunter".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            3,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+
+        let mut victim_player = Player::new(Some(8), false);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(victim);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .set_map(571, 0)
+            .unwrap();
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::new(11.0, 20.0, 30.0, 0.0));
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .add_to_world();
+        victim_player
+            .unit_mut()
+            .set_pvp_flag_like_cpp(UnitPvpFlags::PVP);
+        victim_player.unit_mut().set_invisibility_like_cpp(0, 100);
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(571, 0)
+            .unwrap()
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_player(victim_player).unwrap(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Rejected
+        );
+
+        session
+            .mutate_canonical_player_by_guid_like_cpp(attacker, |player| {
+                player.set_farsight_object_like_cpp(victim);
+            })
+            .unwrap();
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Accepted {
+                send_attack_start: true
+            }
+        );
+    }
+
+    #[test]
+    fn player_attack_uses_stalked_aura_as_always_detectable_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 59);
+        let victim = ObjectGuid::create_player(1, 60);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Hunter".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            3,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+
+        let mut victim_player = Player::new(Some(8), false);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(victim);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .set_map(571, 0)
+            .unwrap();
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::new(11.0, 20.0, 30.0, 0.0));
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .add_to_world();
+        victim_player
+            .unit_mut()
+            .set_pvp_flag_like_cpp(UnitPvpFlags::PVP);
+        victim_player.unit_mut().set_invisibility_like_cpp(0, 100);
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(571, 0)
+            .unwrap()
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_player(victim_player).unwrap(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Rejected
+        );
+
+        session
+            .mutate_canonical_player_by_guid_like_cpp(victim, |player| {
+                player
+                    .unit_mut()
+                    .subsystems_mut()
+                    .auras
+                    .register_applied_aura_type_like_cpp(
+                        wow_entities::AppliedAuraRef::new(53338, attacker, 0, 0x1),
+                        wow_entities::SPELL_AURA_MOD_STALKED_LIKE_CPP,
+                    );
+            })
+            .unwrap();
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Accepted {
+                send_attack_start: true
+            }
+        );
+    }
+
+    #[test]
+    fn player_attack_uses_owner_group_visibility_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 61);
+        let owner = ObjectGuid::create_player(1, 62);
+        let victim = ObjectGuid::create_player(1, 63);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Hunter".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            3,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+
+        let mut victim_player = Player::new(Some(8), false);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(victim);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .set_map(571, 0)
+            .unwrap();
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::new(11.0, 20.0, 30.0, 0.0));
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .add_to_world();
+        victim_player
+            .unit_mut()
+            .set_pvp_flag_like_cpp(UnitPvpFlags::PVP);
+        victim_player.unit_mut().set_invisibility_like_cpp(0, 100);
+        victim_player
+            .unit_mut()
+            .subsystems_mut()
+            .control
+            .set_owner_guid(Some(owner));
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(571, 0)
+            .unwrap()
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_player(victim_player).unwrap(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Rejected
+        );
+
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(attacker);
+        group.add_member(owner);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Accepted {
+                send_attack_start: true
+            }
+        );
+    }
+
+    #[test]
+    fn player_attack_uses_private_object_group_visibility_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 64);
+        let victim = ObjectGuid::create_player(1, 65);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Hunter".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            3,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+
+        let mut victim_player = Player::new(Some(8), false);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(victim);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .set_map(571, 0)
+            .unwrap();
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::new(11.0, 20.0, 30.0, 0.0));
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .add_to_world();
+        victim_player
+            .unit_mut()
+            .set_pvp_flag_like_cpp(UnitPvpFlags::PVP);
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(571, 0)
+            .unwrap()
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_player(victim_player).unwrap(),
+            )
+            .unwrap();
+
+        let group_registry = Arc::new(GroupRegistry::default());
+        let group = GroupInfo::new(attacker);
+        let group_guid = group.group_guid;
+        session
+            .mutate_canonical_player_by_guid_like_cpp(victim, |player| {
+                player
+                    .unit_mut()
+                    .set_private_object_owner_like_cpp(ObjectGuid::create_group(group_guid));
+            })
+            .unwrap();
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Rejected
+        );
+
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Accepted {
+                send_attack_start: true
+            }
+        );
+    }
+
+    #[test]
+    fn summon_private_object_owner_derives_from_properties_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let caster = ObjectGuid::create_player(1, 66);
+        let inherited_private_owner = ObjectGuid::create_player(1, 67);
+
+        let mut properties = SummonPropertiesEntry {
+            id: 1,
+            control: 0,
+            faction: 0,
+            title: 0,
+            slot: 0,
+            flags: [0, 0],
+        };
+        assert_eq!(
+            session.summon_private_object_owner_like_cpp(caster, ObjectGuid::EMPTY, &properties),
+            ObjectGuid::EMPTY
+        );
+
+        properties.flags[0] = SUMMON_PROPERTIES_ONLY_VISIBLE_TO_SUMMONER_LIKE_CPP as i32;
+        assert_eq!(
+            session.summon_private_object_owner_like_cpp(caster, ObjectGuid::EMPTY, &properties),
+            caster
+        );
+        assert_eq!(
+            session.summon_private_object_owner_like_cpp(
+                caster,
+                inherited_private_owner,
+                &properties
+            ),
+            inherited_private_owner
+        );
+
+        properties.flags[0] = SUMMON_PROPERTIES_ONLY_VISIBLE_TO_SUMMONER_GROUP_LIKE_CPP as i32;
+        assert_eq!(
+            session.summon_private_object_owner_like_cpp(caster, ObjectGuid::EMPTY, &properties),
+            caster
+        );
+        session.group_guid = Some(77);
+        assert_eq!(
+            session.summon_private_object_owner_like_cpp(caster, ObjectGuid::EMPTY, &properties),
+            ObjectGuid::create_group(77)
+        );
+    }
+
+    #[test]
+    fn player_attack_uses_private_summon_group_owner_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 68);
+        let summon = test_creature_guid(669);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Hunter".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            3,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        session.register_world_creature(
+            571,
+            Position::new(11.0, 20.0, 30.0, 0.0),
+            test_creature_create_data(summon, 9001, 25),
+            3,
+            5,
+            20.0,
+            0,
+            0,
+            0,
+            0,
+            None,
+            0,
+            0,
+            0,
+            0,
+            -1,
+        );
+
+        let group_registry = Arc::new(GroupRegistry::default());
+        let group = GroupInfo::new(attacker);
+        let group_guid = group.group_guid;
+        session.group_guid = Some(group_guid);
+        let properties = SummonPropertiesEntry {
+            id: 2,
+            control: 0,
+            faction: 0,
+            title: 0,
+            slot: 0,
+            flags: [
+                SUMMON_PROPERTIES_ONLY_VISIBLE_TO_SUMMONER_GROUP_LIKE_CPP as i32,
+                0,
+            ],
+        };
+        let private_owner =
+            session.summon_private_object_owner_like_cpp(attacker, ObjectGuid::EMPTY, &properties);
+        assert_eq!(private_owner, ObjectGuid::create_group(group_guid));
+        assert!(
+            session.set_canonical_creature_private_object_owner_like_cpp(summon, private_owner)
+        );
+
+        assert_eq!(
+            session.start_player_attack_like_cpp(summon),
+            PlayerAttackStartLikeCppResult::Rejected
+        );
+
+        group_registry.insert(group_guid, group);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+        assert_eq!(
+            session.start_player_attack_like_cpp(summon),
+            PlayerAttackStartLikeCppResult::Accepted {
+                send_attack_start: true
+            }
+        );
+    }
+
+    #[test]
+    fn player_attack_can_always_see_unit_being_moved_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 69);
+        let controlled = test_creature_guid(670);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Hunter".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            3,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        session.apply_move_init_active_mover_complete_like_cpp(0);
+        session.register_world_creature(
+            571,
+            Position::new(11.0, 20.0, 30.0, 0.0),
+            test_creature_create_data(controlled, 9001, 25),
+            3,
+            5,
+            20.0,
+            0,
+            0,
+            0,
+            0,
+            None,
+            0,
+            0,
+            0,
+            0,
+            -1,
+        );
+        session
+            .mutate_canonical_creature_by_guid_like_cpp(controlled, |creature| {
+                creature.unit_mut().set_invisibility_like_cpp(0, 100);
+            })
+            .unwrap();
+
+        assert_eq!(
+            session.start_player_attack_like_cpp(controlled),
+            PlayerAttackStartLikeCppResult::Rejected
+        );
+
+        session.set_player_moved_unit_guid_like_cpp(controlled);
+        assert_eq!(
+            session.start_player_attack_like_cpp(controlled),
+            PlayerAttackStartLikeCppResult::Accepted {
+                send_attack_start: true
+            }
+        );
+    }
+
+    #[test]
+    fn logout_save_snapshot_uses_canonical_player_state_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 70);
+        let saved_position = Position::new(44.0, 55.0, 66.0, 1.25);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Saver".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            3,
+            10,
+            0,
+        ));
+        session.set_player_xp_like_cpp(1);
+        session.set_player_gold_like_cpp(2);
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        session
+            .mutate_canonical_player_like_cpp(|player| {
+                player.unit_mut().world_mut().relocate(saved_position);
+                player.unit_mut().set_level(42);
+                player.set_xp(1234);
+                player.set_money(5678);
+            })
+            .unwrap();
+
+        let snapshot = session
+            .sync_session_from_save_to_db_snapshot_like_cpp()
+            .unwrap();
+        assert_eq!(
+            snapshot,
+            PlayerSaveToDbSnapshotLikeCpp {
+                guid: player_guid,
+                map_id: 571,
+                position: saved_position,
+                level: 42,
+                xp: 1234,
+                money: 5678,
+            }
+        );
+        assert_eq!(session.player_position_like_cpp(), Some(saved_position));
+        assert_eq!(session.player_level_like_cpp(), 42);
+        assert_eq!(session.player_xp_like_cpp(), 1234);
+        assert_eq!(session.player_gold_like_cpp(), 5678);
+    }
+
+    #[test]
+    fn player_attack_waits_for_active_mover_visibility_flag_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 55);
+        let victim = ObjectGuid::create_player(1, 56);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+
+        let mut victim_player = Player::new(Some(8), false);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(victim);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .set_map(571, 0)
+            .unwrap();
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::new(11.0, 20.0, 30.0, 0.0));
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .add_to_world();
+        victim_player
+            .unit_mut()
+            .set_pvp_flag_like_cpp(UnitPvpFlags::PVP);
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(571, 0)
+            .unwrap()
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_player(victim_player).unwrap(),
+            )
+            .unwrap();
+
+        session.set_active_player_local_flags_like_cpp(0);
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Rejected
+        );
+        assert_eq!(session.combat_target, None);
+
+        session.apply_move_init_active_mover_complete_like_cpp(0);
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Accepted {
+                send_attack_start: true
+            }
+        );
+    }
+
+    #[test]
+    fn player_attack_rejects_object_id_visibility_conditions_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 57);
+        let victim = ObjectGuid::create_player(1, 58);
+
+        session.set_condition_store(Arc::new(
+            ConditionEntriesByTypeStore::from_conditions_like_cpp([Condition {
+                source_type: ConditionSourceType::ObjectIdVisibility,
+                source_group: TypeId::Player as u32,
+                source_entry: 0,
+                source_id: 0,
+                condition_type: ConditionType::Aura,
+                condition_value1: 999_999,
+                condition_value2: 0,
+                ..Condition::default()
+            }]),
+        ));
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+
+        let mut victim_player = Player::new(Some(8), false);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(victim);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .set_map(571, 0)
+            .unwrap();
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::new(11.0, 20.0, 30.0, 0.0));
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .add_to_world();
+        victim_player
+            .unit_mut()
+            .set_pvp_flag_like_cpp(UnitPvpFlags::PVP);
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(571, 0)
+            .unwrap()
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_player(victim_player).unwrap(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            session.start_player_attack_like_cpp(victim),
+            PlayerAttackStartLikeCppResult::Rejected
+        );
+        assert_eq!(session.combat_target, None);
+    }
+
+    #[test]
+    fn player_attack_accepts_in_progress_duel_before_sanctuary_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let attacker = ObjectGuid::create_player(1, 87);
+        let victim = ObjectGuid::create_player(1, 88);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            attacker,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        session
+            .mutate_canonical_player_by_guid_like_cpp(attacker, |player| {
+                player.set_duel_opponent_in_progress_like_cpp(victim);
+                player
+                    .unit_mut()
+                    .set_pvp_flag_like_cpp(UnitPvpFlags::SANCTUARY);
+            })
+            .unwrap();
+
+        let mut victim_player = Player::new(Some(8), false);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(victim);
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .set_map(571, 0)
+            .unwrap();
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::new(11.0, 20.0, 30.0, 0.0));
+        victim_player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .add_to_world();
+        victim_player
+            .unit_mut()
+            .set_pvp_flag_like_cpp(UnitPvpFlags::SANCTUARY);
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(571, 0)
+            .unwrap()
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_player(victim_player).unwrap(),
+            )
+            .unwrap();
+
+        session.start_player_attack_like_cpp(victim);
+        {
+            let guard = canonical.lock().unwrap();
+            let map = guard.find_map(571, 0).unwrap().map();
+            let attacker_entity = map.get_typed_player(attacker).unwrap();
+            let victim_entity = map.get_typed_player(victim).unwrap();
+            assert_eq!(attacker_entity.unit().attacking(), Some(victim));
+            assert_eq!(attacker_entity.unit().data().target, victim);
+            assert!(victim_entity.unit().has_attacker_like_cpp(attacker));
+        }
+        assert_eq!(session.combat_target, Some(victim));
+        assert!(session.in_combat);
     }
 
     #[test]
@@ -14807,6 +20976,7 @@ mod tests {
             0,
             0,
             0,
+            0,
             None,
             0,
             0,
@@ -14825,6 +20995,26 @@ mod tests {
                 .get_typed_creature(victim)
                 .unwrap();
             assert!(creature.unit().has_attacker_like_cpp(player));
+            assert!(
+                creature
+                    .unit()
+                    .subsystems()
+                    .combat
+                    .is_in_combat_with(player)
+            );
+            let player_entity = guard
+                .find_map(571, 0)
+                .unwrap()
+                .map()
+                .get_typed_player(player)
+                .unwrap();
+            assert!(
+                player_entity
+                    .unit()
+                    .subsystems()
+                    .combat
+                    .is_in_combat_with(victim)
+            );
         }
 
         assert_eq!(session.stop_player_attack_like_cpp(), Some(victim));
@@ -14836,6 +21026,192 @@ mod tests {
             .get_typed_creature(victim)
             .unwrap();
         assert!(!creature.unit().has_attacker_like_cpp(player));
+    }
+
+    #[test]
+    fn player_attack_does_not_create_combat_ref_when_can_begin_combat_fails_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let player = ObjectGuid::create_player(1, 157);
+        let victim = test_creature_guid(18_114);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_map_manager(manager);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.register_world_creature(
+            571,
+            Position::new(11.0, 20.0, 30.0, 0.0),
+            test_creature_create_data(victim, 9001, 25),
+            3,
+            5,
+            20.0,
+            0,
+            0,
+            0,
+            0,
+            None,
+            0,
+            0,
+            0,
+            0,
+            -1,
+        );
+        session
+            .mutate_world_creature(victim, |creature| {
+                creature
+                    .creature
+                    .unit_mut()
+                    .subsystems_mut()
+                    .combat
+                    .combat_disallowed = true;
+            })
+            .unwrap();
+
+        session.start_player_attack_like_cpp(victim);
+
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(571, 0).unwrap().map();
+        let player_entity = map.get_typed_player(player).unwrap();
+        let creature = map.get_typed_creature(victim).unwrap();
+        assert_eq!(player_entity.unit().attacking(), Some(victim));
+        assert!(creature.unit().has_attacker_like_cpp(player));
+        assert!(
+            !player_entity
+                .unit()
+                .subsystems()
+                .combat
+                .is_in_combat_with(victim)
+        );
+        assert!(
+            !creature
+                .unit()
+                .subsystems()
+                .combat
+                .is_in_combat_with(player)
+        );
+    }
+
+    #[test]
+    fn combat_tick_revalidates_and_purges_invalid_combat_refs_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let player = ObjectGuid::create_player(1, 158);
+        let victim = test_creature_guid(18_115);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_map_manager(manager);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.register_world_creature(
+            571,
+            Position::new(11.0, 20.0, 30.0, 0.0),
+            test_creature_create_data(victim, 9001, 25),
+            3,
+            5,
+            20.0,
+            0,
+            0,
+            0,
+            0,
+            None,
+            0,
+            0,
+            0,
+            0,
+            -1,
+        );
+        session.start_player_attack_like_cpp(victim);
+        {
+            let guard = canonical.lock().unwrap();
+            let map = guard.find_map(571, 0).unwrap().map();
+            assert!(
+                map.get_typed_player(player)
+                    .unwrap()
+                    .unit()
+                    .subsystems()
+                    .combat
+                    .is_in_combat_with(victim)
+            );
+            assert!(
+                map.get_typed_creature(victim)
+                    .unwrap()
+                    .unit()
+                    .subsystems()
+                    .combat
+                    .is_in_combat_with(player)
+            );
+        }
+        session
+            .mutate_world_creature(victim, |creature| {
+                let mut victim_phase = PhaseShift::default();
+                victim_phase.add_phase_like_cpp(20, wow_constants::PhaseFlags::empty(), 1);
+                *creature.creature.unit_mut().world_mut().phase_shift_mut() = victim_phase;
+            })
+            .unwrap();
+
+        session.tick_combat_sync();
+
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(571, 0).unwrap().map();
+        assert!(
+            !map.get_typed_player(player)
+                .unwrap()
+                .unit()
+                .subsystems()
+                .combat
+                .is_in_combat_with(victim)
+        );
+        assert!(
+            !map.get_typed_creature(victim)
+                .unwrap()
+                .unit()
+                .subsystems()
+                .combat
+                .is_in_combat_with(player)
+        );
+        assert_eq!(
+            map.get_typed_player(player).unwrap().unit().attacking(),
+            Some(victim)
+        );
     }
 
     #[test]
@@ -14878,6 +21254,7 @@ mod tests {
             0,
             0,
             0,
+            0,
             None,
             0,
             0,
@@ -14907,6 +21284,385 @@ mod tests {
         );
         assert_eq!(session.combat_target, None);
         assert!(!session.in_combat);
+    }
+
+    #[test]
+    fn player_attack_unseen_phase_creature_is_rejected_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let player = ObjectGuid::create_player(1, 151);
+        let victim = test_creature_guid(18_109);
+
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.set_map_manager(manager);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        let mut player_phase = PhaseShift::default();
+        player_phase.add_phase_like_cpp(10, wow_constants::PhaseFlags::empty(), 1);
+        session.set_represented_player_phase_shift_like_cpp(player_phase);
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.register_world_creature(
+            571,
+            Position::new(11.0, 20.0, 30.0, 0.0),
+            test_creature_create_data(victim, 9001, 25),
+            3,
+            5,
+            20.0,
+            0,
+            0,
+            0,
+            0,
+            None,
+            0,
+            0,
+            0,
+            0,
+            -1,
+        );
+        session
+            .mutate_canonical_creature_by_guid_like_cpp(victim, |creature| {
+                let mut victim_phase = PhaseShift::default();
+                victim_phase.add_phase_like_cpp(20, wow_constants::PhaseFlags::empty(), 1);
+                *creature.unit_mut().world_mut().phase_shift_mut() = victim_phase;
+            })
+            .unwrap();
+
+        session.start_player_attack_like_cpp(victim);
+
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(571, 0).unwrap().map();
+        let player_entity = map.get_typed_player(player).unwrap();
+        let victim_entity = map.get_typed_creature(victim).unwrap();
+        assert_eq!(player_entity.unit().attacking(), None);
+        assert_eq!(player_entity.unit().data().target, ObjectGuid::EMPTY);
+        assert!(!victim_entity.unit().has_attacker_like_cpp(player));
+        assert_eq!(session.combat_target, None);
+        assert!(!session.in_combat);
+    }
+
+    #[test]
+    fn player_attack_creature_reputation_without_at_war_is_rejected_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let player = ObjectGuid::create_player(1, 153);
+        let victim = test_creature_guid(18_110);
+
+        canonical.lock().unwrap().create_world_map(0, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_faction_store(Arc::new(
+            wow_data::progression_rewards::FactionStore::from_entries([
+                wow_data::progression_rewards::FactionEntry {
+                    id: 72,
+                    reputation_index: 1,
+                },
+            ]),
+        ));
+        session.set_faction_template_store(Arc::new(
+            wow_data::progression_rewards::FactionTemplateStore::from_entries([
+                wow_data::progression_rewards::FactionTemplateEntry {
+                    id: 14,
+                    faction: 72,
+                    flags: 0,
+                    faction_group: 0,
+                    friend_group: 0,
+                    enemy_group: 0,
+                    enemies: [0; 8],
+                    friend: [0; 8],
+                },
+            ]),
+        ));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            0,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        session
+            .mutate_canonical_player_by_guid_like_cpp(player, |player| {
+                player.gameplay_state_mut().reputations.push(
+                    wow_entities::PlayerReputationRecord {
+                        faction_id: 72,
+                        standing: 0,
+                        flags: 0,
+                    },
+                );
+            })
+            .unwrap();
+        register_test_creature(&mut session, manager, victim, 40);
+
+        session.start_player_attack_like_cpp(victim);
+
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(0, 0).unwrap().map();
+        assert_eq!(
+            map.get_typed_player(player).unwrap().unit().attacking(),
+            None
+        );
+        assert!(
+            !map.get_typed_creature(victim)
+                .unwrap()
+                .unit()
+                .has_attacker_like_cpp(player)
+        );
+        assert_eq!(session.combat_target, None);
+        assert!(!session.in_combat);
+    }
+
+    #[test]
+    fn player_attack_creature_reputation_at_war_is_accepted_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let player = ObjectGuid::create_player(1, 154);
+        let victim = test_creature_guid(18_111);
+
+        canonical.lock().unwrap().create_world_map(0, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_faction_store(Arc::new(
+            wow_data::progression_rewards::FactionStore::from_entries([
+                wow_data::progression_rewards::FactionEntry {
+                    id: 72,
+                    reputation_index: 1,
+                },
+            ]),
+        ));
+        session.set_faction_template_store(Arc::new(
+            wow_data::progression_rewards::FactionTemplateStore::from_entries([
+                wow_data::progression_rewards::FactionTemplateEntry {
+                    id: 14,
+                    faction: 72,
+                    flags: 0,
+                    faction_group: 0,
+                    friend_group: 0,
+                    enemy_group: 0,
+                    enemies: [0; 8],
+                    friend: [0; 8],
+                },
+            ]),
+        ));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            0,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        session
+            .mutate_canonical_player_by_guid_like_cpp(player, |player| {
+                player.gameplay_state_mut().reputations.push(
+                    wow_entities::PlayerReputationRecord {
+                        faction_id: 72,
+                        standing: 0,
+                        flags: wow_entities::REPUTATION_FLAG_AT_WAR_LIKE_CPP,
+                    },
+                );
+            })
+            .unwrap();
+        register_test_creature(&mut session, manager, victim, 40);
+
+        session.start_player_attack_like_cpp(victim);
+
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(0, 0).unwrap().map();
+        assert_eq!(
+            map.get_typed_player(player).unwrap().unit().attacking(),
+            Some(victim)
+        );
+        assert!(
+            map.get_typed_creature(victim)
+                .unwrap()
+                .unit()
+                .has_attacker_like_cpp(player)
+        );
+        assert_eq!(session.combat_target, Some(victim));
+        assert!(session.in_combat);
+    }
+
+    #[test]
+    fn player_attack_creature_reputation_uses_faction_template_store_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let player = ObjectGuid::create_player(1, 155);
+        let victim = test_creature_guid(18_112);
+
+        canonical.lock().unwrap().create_world_map(0, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_faction_template_store(Arc::new(
+            wow_data::progression_rewards::FactionTemplateStore::from_entries([
+                wow_data::progression_rewards::FactionTemplateEntry {
+                    id: 14,
+                    faction: 72,
+                    flags: FACTION_TEMPLATE_FLAG_CONTESTED_GUARD_LIKE_CPP,
+                    faction_group: 0,
+                    friend_group: 0,
+                    enemy_group: 0,
+                    enemies: [0; 8],
+                    friend: [0; 8],
+                },
+            ]),
+        ));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            0,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        session
+            .mutate_canonical_player_by_guid_like_cpp(player, |player| {
+                player.set_player_flag(PLAYER_FLAGS_CONTESTED_PVP_LIKE_CPP);
+            })
+            .unwrap();
+        register_test_creature(&mut session, manager, victim, 40);
+
+        session.start_player_attack_like_cpp(victim);
+
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(0, 0).unwrap().map();
+        assert_eq!(
+            map.get_typed_player(player).unwrap().unit().attacking(),
+            Some(victim)
+        );
+        assert!(
+            map.get_typed_creature(victim)
+                .unwrap()
+                .unit()
+                .has_attacker_like_cpp(player)
+        );
+        assert_eq!(session.combat_target, Some(victim));
+        assert!(session.in_combat);
+    }
+
+    #[test]
+    fn player_attack_creature_non_reputation_faction_does_not_require_at_war_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let manager = shared_map_manager();
+        let canonical = shared_canonical_map_manager();
+        let player = ObjectGuid::create_player(1, 156);
+        let victim = test_creature_guid(18_113);
+
+        canonical.lock().unwrap().create_world_map(0, 0);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_faction_store(Arc::new(
+            wow_data::progression_rewards::FactionStore::from_entries([
+                wow_data::progression_rewards::FactionEntry {
+                    id: 72,
+                    reputation_index: -1,
+                },
+            ]),
+        ));
+        session.set_faction_template_store(Arc::new(
+            wow_data::progression_rewards::FactionTemplateStore::from_entries([
+                wow_data::progression_rewards::FactionTemplateEntry {
+                    id: 14,
+                    faction: 72,
+                    flags: 0,
+                    faction_group: 0,
+                    friend_group: 0,
+                    enemy_group: 0,
+                    enemies: [0; 8],
+                    friend: [0; 8],
+                },
+            ]),
+        ));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player,
+            "Warrior".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            0,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        register_test_creature(&mut session, manager, victim, 40);
+
+        session.start_player_attack_like_cpp(victim);
+
+        let guard = canonical.lock().unwrap();
+        let map = guard.find_map(0, 0).unwrap().map();
+        assert_eq!(
+            map.get_typed_player(player).unwrap().unit().attacking(),
+            Some(victim)
+        );
+        assert!(
+            map.get_typed_creature(victim)
+                .unwrap()
+                .unit()
+                .has_attacker_like_cpp(player)
+        );
+        assert_eq!(session.combat_target, Some(victim));
+        assert!(session.in_combat);
     }
 
     #[test]
@@ -14946,6 +21702,7 @@ mod tests {
             3,
             5,
             20.0,
+            0,
             0,
             0,
             0,
@@ -16486,7 +23243,7 @@ mod tests {
                 round_robin_player: ObjectGuid::EMPTY,
                 player_ffa_items: Vec::new(),
                 players_looting: Vec::new(),
-                allowed_looters: Vec::new(),
+                allowed_looters: vec![player_guid],
                 items: vec![LootEntry {
                     loot_list_id: 1,
                     item_id: 700,
@@ -16528,7 +23285,7 @@ mod tests {
                 round_robin_player: ObjectGuid::EMPTY,
                 player_ffa_items: Vec::new(),
                 players_looting: Vec::new(),
-                allowed_looters: Vec::new(),
+                allowed_looters: vec![player_guid],
                 items: Vec::new(),
                 looted_by_player: false,
             },
@@ -17240,6 +23997,3241 @@ mod tests {
             assert_eq!(entry.status, *status, "{opcode_name} status");
             assert_eq!(entry.processing, *processing, "{opcode_name} processing");
         }
+    }
+
+    #[test]
+    fn gameobject_use_mover_guard_matches_cpp_remote_control_branch() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let controlled_guid =
+            ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 571, 0, 123, 4);
+
+        session.set_player_guid(Some(player_guid));
+        assert!(session.represented_gameobject_use_allowed_by_mover_like_cpp(false));
+
+        session.set_player_moved_unit_guid_like_cpp(controlled_guid);
+        assert!(!session.represented_gameobject_use_allowed_by_mover_like_cpp(false));
+        assert!(session.represented_gameobject_use_allowed_by_mover_like_cpp(true));
+
+        session.set_player_mounted_like_cpp(true);
+        assert!(session.represented_gameobject_use_allowed_by_mover_like_cpp(false));
+
+        session.set_player_mounted_like_cpp(false);
+        session.player_vehicle_seat_flags_like_cpp = Some(0);
+        assert!(session.represented_gameobject_use_allowed_by_mover_like_cpp(false));
+    }
+
+    fn faction_template_entry(
+        id: u32,
+        faction: u16,
+        faction_group: u8,
+        friend_group: u8,
+        enemy: u16,
+    ) -> wow_data::progression_rewards::FactionTemplateEntry {
+        let mut enemies = [0; 8];
+        enemies[0] = enemy;
+        wow_data::progression_rewards::FactionTemplateEntry {
+            id,
+            faction,
+            flags: 0,
+            faction_group,
+            friend_group,
+            enemy_group: 0,
+            enemies,
+            friend: [0; 8],
+        }
+    }
+
+    #[test]
+    fn battleground_object_use_guard_matches_cpp_faction_and_player_state() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 39);
+
+        session.set_player_faction_template_like_cpp(1);
+        session.record_represented_gameobject_faction_template_like_cpp(gameobject_guid, 2);
+        session.set_faction_template_store(Arc::new(
+            wow_data::progression_rewards::FactionTemplateStore::from_entries([
+                faction_template_entry(1, 10, 1, 0, 20),
+                faction_template_entry(2, 20, 2, 0, 0),
+            ]),
+        ));
+        assert!(
+            !session.represented_player_can_use_battleground_object_like_cpp(
+                gameobject_guid,
+                player_guid,
+            )
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::UnfriendlyFaction,
+                }
+            ]
+        );
+
+        session.represented_gameobject_use_effects.clear();
+        session.record_represented_gameobject_faction_template_like_cpp(gameobject_guid, 0);
+        session.player_unit_flags_like_cpp.insert(UnitFlags::IMMUNE);
+        assert!(
+            !session.represented_player_can_use_battleground_object_like_cpp(
+                gameobject_guid,
+                player_guid,
+            )
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::DamageImmune,
+                }
+            ]
+        );
+
+        session.represented_gameobject_use_effects.clear();
+        session.player_unit_flags_like_cpp.remove(UnitFlags::IMMUNE);
+        session.apply_aura(50_327, player_guid, 30_000, 0).unwrap();
+        assert!(
+            !session.represented_player_can_use_battleground_object_like_cpp(
+                gameobject_guid,
+                player_guid,
+            )
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects.last(),
+            Some(
+                &RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::RecentlyDroppedFlag,
+                }
+            )
+        );
+
+        session.visible_auras.clear();
+        session.represented_gameobject_use_effects.clear();
+        session.set_player_alive_like_cpp(false);
+        assert!(
+            !session.represented_player_can_use_battleground_object_like_cpp(
+                gameobject_guid,
+                player_guid,
+            )
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::Dead,
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_preamble_matches_cpp_player_branch() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 4);
+
+        session.set_player_guid(Some(player_guid));
+        session.set_player_mounted_like_cpp(true);
+        assert!(
+            session.apply_represented_gameobject_player_use_preamble_like_cpp(
+                gameobject_guid,
+                player_guid,
+                false,
+                false,
+            )
+        );
+        assert!(!session.player_mounted_like_cpp);
+        assert!(
+            !session
+                .player_unit_flags_like_cpp
+                .contains(UnitFlags::MOUNT)
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::RemoveMountedAuras {
+                    gameobject_guid,
+                    player_guid,
+                },
+                RepresentedGameObjectUseEffect::ClearPlayerTalkMenus {
+                    gameobject_guid,
+                    player_guid,
+                },
+                RepresentedGameObjectUseEffect::GossipHelloAi {
+                    gameobject_guid,
+                    player_guid,
+                    handled: false,
+                },
+            ]
+        );
+
+        session.represented_gameobject_use_effects.clear();
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .gossip_hello_ai_returns_true = true;
+        assert!(
+            !session.apply_represented_gameobject_player_use_preamble_like_cpp(
+                gameobject_guid,
+                player_guid,
+                true,
+                false,
+            )
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::ClearPlayerTalkMenus {
+                    gameobject_guid,
+                    player_guid,
+                },
+                RepresentedGameObjectUseEffect::GossipHelloAi {
+                    gameobject_guid,
+                    player_guid,
+                    handled: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_preamble_rejects_damage_immune_player_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 5);
+
+        session.set_player_guid(Some(player_guid));
+        session.player_unit_flags_like_cpp.insert(UnitFlags::IMMUNE);
+        assert!(
+            !session.apply_represented_gameobject_player_use_preamble_like_cpp(
+                gameobject_guid,
+                player_guid,
+                false,
+                true,
+            )
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::UseRejectedNoDamageImmune {
+                gameobject_guid,
+                player_guid,
+            },]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_cooldown_matches_cpp_template_gate() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 6);
+
+        assert!(session.apply_represented_gameobject_cooldown_like_cpp(gameobject_guid, 0));
+        assert!(session.represented_gameobject_use_effects.is_empty());
+
+        assert!(session.apply_represented_gameobject_cooldown_like_cpp(gameobject_guid, 5));
+        assert!(!session.apply_represented_gameobject_cooldown_like_cpp(gameobject_guid, 5));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::CooldownStarted {
+                    gameobject_guid,
+                    cooldown_secs: 5,
+                },
+                RepresentedGameObjectUseEffect::CooldownRejected { gameobject_guid },
+            ]
+        );
+
+        session
+            .represented_gameobject_use_states
+            .get_mut(&gameobject_guid)
+            .unwrap()
+            .cooldown_until = Some(Instant::now() - Duration::from_secs(1));
+        assert!(session.apply_represented_gameobject_cooldown_like_cpp(gameobject_guid, 5));
+    }
+
+    #[test]
+    fn gameobject_use_door_or_button_matches_cpp_ready_gate_and_state_switch() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 7);
+
+        assert!(session.use_represented_gameobject_door_or_button_like_cpp(
+            gameobject_guid,
+            player_guid,
+            3000,
+        ));
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.go_state, Some(wow_entities::GoState::Active));
+        assert_eq!(state.prev_go_state, Some(wow_entities::GoState::Ready));
+        assert_eq!(state.loot_state, Some(wow_entities::LootState::Activated));
+        assert_eq!(state.loot_state_unit_guid, player_guid);
+        assert_eq!(
+            state.gameobject_flags & wow_entities::GO_FLAG_IN_USE,
+            wow_entities::GO_FLAG_IN_USE
+        );
+        assert!(state.cooldown_until.is_some());
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::DoorOrButtonUsed {
+                gameobject_guid,
+                user_guid: player_guid,
+                restore_time_ms: 3000,
+                go_state: wow_entities::GoState::Active,
+            }]
+        );
+
+        assert!(!session.use_represented_gameobject_door_or_button_like_cpp(
+            gameobject_guid,
+            player_guid,
+            3000,
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects.last(),
+            Some(&RepresentedGameObjectUseEffect::DoorOrButtonRejectedNotReady { gameobject_guid })
+        );
+    }
+
+    #[test]
+    fn gameobject_door_or_button_tick_resets_after_cooldown_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 72);
+
+        assert!(session.use_represented_gameobject_door_or_button_like_cpp(
+            gameobject_guid,
+            player_guid,
+            3000,
+        ));
+        assert!(!session.tick_represented_gameobject_door_or_button_like_cpp(gameobject_guid));
+        session
+            .represented_gameobject_use_states
+            .get_mut(&gameobject_guid)
+            .unwrap()
+            .cooldown_until = Some(Instant::now() - Duration::from_millis(1));
+
+        assert!(session.tick_represented_gameobject_door_or_button_like_cpp(gameobject_guid));
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.go_state, Some(wow_entities::GoState::Ready));
+        assert_eq!(
+            state.loot_state,
+            Some(wow_entities::LootState::JustDeactivated)
+        );
+        assert_eq!(state.gameobject_flags & wow_entities::GO_FLAG_IN_USE, 0);
+        assert!(state.cooldown_until.is_none());
+        assert_eq!(
+            session.represented_gameobject_use_effects.last(),
+            Some(&RepresentedGameObjectUseEffect::DoorOrButtonReset {
+                gameobject_guid,
+                go_state: wow_entities::GoState::Ready,
+            })
+        );
+    }
+
+    #[test]
+    fn gameobject_use_trap_matches_cpp_spell_cooldown_and_charges() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 8);
+
+        assert!(session.use_represented_gameobject_trap_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::TrapUseSource {
+                spell_id: 1234,
+                charges: 1,
+                cooldown_secs: 0,
+            },
+        ));
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(
+            state.loot_state,
+            Some(wow_entities::LootState::JustDeactivated)
+        );
+        assert!(state.cooldown_until.is_some());
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::CastSpell {
+                    gameobject_guid,
+                    player_guid,
+                    spell_id: 1234,
+                },
+                RepresentedGameObjectUseEffect::CooldownStarted {
+                    gameobject_guid,
+                    cooldown_secs: 4,
+                },
+            ]
+        );
+
+        assert!(!session.use_represented_gameobject_trap_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::TrapUseSource {
+                spell_id: 1234,
+                charges: 1,
+                cooldown_secs: 9,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects.last(),
+            Some(&RepresentedGameObjectUseEffect::CooldownRejected { gameobject_guid })
+        );
+    }
+
+    #[test]
+    fn gameobject_use_chair_picks_nearest_free_slot_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 17);
+
+        assert!(session.use_represented_gameobject_chair_like_cpp(
+            gameobject_guid,
+            player_guid,
+            Position::new(0.0, 1.8, 0.0, 0.0),
+            Position::ZERO,
+            2.0,
+            wow_entities::ChairUseSource {
+                chair_slots: 3,
+                chair_height: 2,
+                triggered_event_id: 55,
+            },
+        ));
+
+        assert_eq!(session.represented_gameobject_use_effects.len(), 2);
+        match session.represented_gameobject_use_effects[0] {
+            RepresentedGameObjectUseEffect::ChairUsed {
+                gameobject_guid: effect_gameobject_guid,
+                player_guid: effect_player_guid,
+                slot,
+                teleport_position,
+                stand_state,
+            } => {
+                assert_eq!(effect_gameobject_guid, gameobject_guid);
+                assert_eq!(effect_player_guid, player_guid);
+                assert_eq!(slot, 2);
+                assert!((teleport_position.x - 0.0).abs() < 0.001);
+                assert!((teleport_position.y - 2.0).abs() < 0.001);
+                assert!((teleport_position.z - 0.0).abs() < 0.001);
+                assert!((teleport_position.orientation - 0.0).abs() < 0.001);
+                assert_eq!(stand_state, 6);
+            }
+            other => panic!("unexpected chair effect: {other:?}"),
+        }
+        assert_eq!(
+            session.represented_gameobject_use_effects[1],
+            RepresentedGameObjectUseEffect::TriggerGameEvent {
+                gameobject_guid,
+                player_guid,
+                event_id: 55,
+            }
+        );
+        assert_eq!(
+            session
+                .represented_gameobject_use_states
+                .get(&gameobject_guid)
+                .unwrap()
+                .chair_slots[2],
+            Some(player_guid)
+        );
+        let session_position = session.player_position_like_cpp().unwrap();
+        assert!((session_position.x - 0.0).abs() < 0.001);
+        assert!((session_position.y - 2.0).abs() < 0.001);
+        assert!((session_position.z - 0.0).abs() < 0.001);
+        assert!((session_position.orientation - 0.0).abs() < 0.001);
+        assert_eq!(
+            session.player_stand_state_like_cpp(),
+            UnitStandStateType::SitHighChair
+        );
+    }
+
+    #[test]
+    fn gameobject_use_chair_rejects_when_all_represented_slots_are_occupied() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let other_guid = ObjectGuid::create_player(1, 100);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 18);
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .chair_slots = vec![Some(other_guid)];
+
+        assert!(!session.use_represented_gameobject_chair_like_cpp(
+            gameobject_guid,
+            player_guid,
+            Position::ZERO,
+            Position::ZERO,
+            1.0,
+            wow_entities::ChairUseSource {
+                chair_slots: 1,
+                chair_height: 0,
+                triggered_event_id: 0,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::ChairNoFreeSlot {
+                gameobject_guid,
+                player_guid,
+            }]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_barber_chair_records_ui_teleport_and_stand_state_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 22);
+        let gameobject_position = Position::new(1.0, 2.0, 3.0, 4.0);
+
+        assert!(session.use_represented_gameobject_barber_chair_like_cpp(
+            gameobject_guid,
+            player_guid,
+            gameobject_position,
+            wow_entities::BarberChairUseSource {
+                chair_height: 2,
+                sit_anim_kit: 55,
+                customization_scope: 7,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::BarberChairUsed {
+                gameobject_guid,
+                player_guid,
+                customization_scope: 7,
+                teleport_position: gameobject_position,
+                stand_state: 6,
+                sit_anim_kit: 55,
+            }]
+        );
+        let mut expected = (ServerOpcodes::EnableBarberShop as u16)
+            .to_le_bytes()
+            .to_vec();
+        expected.push(7);
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
+        assert_eq!(
+            session.player_position_like_cpp(),
+            Some(gameobject_position)
+        );
+        assert_eq!(
+            session.player_stand_state_like_cpp(),
+            UnitStandStateType::SitHighChair
+        );
+    }
+
+    #[test]
+    fn gameobject_use_ui_link_records_interaction_type_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 23);
+
+        assert!(session.use_represented_gameobject_ui_link_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::UiLinkUseSource { ui_link_type: 2 },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::UiLinkOpened {
+                gameobject_guid,
+                player_guid,
+                ui_link_type: 2,
+                interaction_type: 40,
+            }]
+        );
+        let mut expected = (ServerOpcodes::GameObjectInteraction as u16)
+            .to_le_bytes()
+            .to_vec();
+        expected.extend_from_slice(&gameobject_guid.to_raw_bytes());
+        expected.extend_from_slice(&40_i32.to_le_bytes());
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
+
+        session.represented_gameobject_use_effects.clear();
+        assert!(session.use_represented_gameobject_ui_link_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::UiLinkUseSource { ui_link_type: 99 },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::UiLinkOpened {
+                gameobject_guid,
+                player_guid,
+                ui_link_type: 99,
+                interaction_type: 0,
+            }]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_item_forge_records_condition_checked_noop_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 24);
+
+        assert!(session.use_represented_gameobject_item_forge_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::ItemForgeUseSource {
+                condition_id: 77,
+                forge_type: 4,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::ItemForgeUsed {
+                gameobject_guid,
+                player_guid,
+                condition_id: 77,
+                forge_type: 4,
+            }]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_capture_point_records_assault_hook_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 25);
+        session.set_player_battleground_type_id_like_cpp(BATTLEGROUND_AB_LIKE_CPP);
+
+        assert!(session.use_represented_gameobject_capture_point_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::CapturePointUseSource {
+                capture_time_ms: 60_000,
+                world_state_id: 123,
+                contested_event_horde: 456,
+                contested_event_alliance: 789,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::CapturePointAssaultAi {
+                    gameobject_guid,
+                    player_guid,
+                    handled: false,
+                },
+                RepresentedGameObjectUseEffect::CapturePointAssaultRequested {
+                    gameobject_guid,
+                    player_guid,
+                    capture_time_ms: 60_000,
+                    world_state_id: 123,
+                    contested_event_horde: 456,
+                    contested_event_alliance: 789,
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_capture_point_requires_battleground_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 42);
+
+        assert!(!session.use_represented_gameobject_capture_point_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::CapturePointUseSource {
+                capture_time_ms: 60_000,
+                world_state_id: 123,
+                contested_event_horde: 456,
+                contested_event_alliance: 789,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::CapturePointAssaultAi {
+                gameobject_guid,
+                player_guid,
+                handled: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_capture_point_ai_can_handle_before_battleground_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 44);
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .capture_point_assault_ai_returns_true = true;
+
+        assert!(session.use_represented_gameobject_capture_point_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::CapturePointUseSource {
+                capture_time_ms: 60_000,
+                world_state_id: 123,
+                contested_event_horde: 456,
+                contested_event_alliance: 789,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::CapturePointAssaultAi {
+                gameobject_guid,
+                player_guid,
+                handled: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_capture_point_respects_team_state_gate_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 43);
+        session.set_player_battleground_type_id_like_cpp(BATTLEGROUND_AB_LIKE_CPP);
+        session.player_race = 1;
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .capture_point_state = Some(RepresentedCapturePointStateLikeCpp::AllianceCaptured);
+
+        assert!(!session.use_represented_gameobject_capture_point_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::CapturePointUseSource {
+                capture_time_ms: 60_000,
+                world_state_id: 123,
+                contested_event_horde: 456,
+                contested_event_alliance: 789,
+            },
+        ));
+        assert!(session.represented_gameobject_use_effects.is_empty());
+
+        session.player_race = 2;
+        assert!(session.use_represented_gameobject_capture_point_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::CapturePointUseSource {
+                capture_time_ms: 60_000,
+                world_state_id: 123,
+                contested_event_horde: 456,
+                contested_event_alliance: 789,
+            },
+        ));
+    }
+
+    #[test]
+    fn gameobject_use_flagstand_records_battleground_click_hook_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 26);
+        session.set_player_battleground_type_id_like_cpp(BATTLEGROUND_WS_LIKE_CPP);
+
+        assert!(session.use_represented_gameobject_flagstand_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::FlagStandUseSource {
+                pickup_spell_id: 11,
+                return_aura_id: 33,
+                return_spell_id: 44,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::RemoveStealthOrInvisibilityAuras {
+                    gameobject_guid,
+                    player_guid,
+                },
+                RepresentedGameObjectUseEffect::BattlegroundFlagStandClicked {
+                    gameobject_guid,
+                    player_guid,
+                    pickup_spell_id: 11,
+                    return_aura_id: 33,
+                    return_spell_id: 44,
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_flagstand_rejects_vehicle_before_bg_click_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 40);
+        session.set_player_battleground_type_id_like_cpp(BATTLEGROUND_WS_LIKE_CPP);
+        session.player_vehicle_seat_flags_like_cpp = Some(0);
+
+        assert!(!session.use_represented_gameobject_flagstand_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::FlagStandUseSource {
+                pickup_spell_id: 11,
+                return_aura_id: 33,
+                return_spell_id: 44,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::Vehicle,
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_flagstand_rejects_missing_battleground_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 42);
+
+        assert!(!session.use_represented_gameobject_flagstand_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::FlagStandUseSource {
+                pickup_spell_id: 11,
+                return_aura_id: 33,
+                return_spell_id: 44,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::NotInBattleground,
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_flagstand_removes_stealth_and_invisibility_auras_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 41);
+        session.set_player_battleground_type_id_like_cpp(BATTLEGROUND_WS_LIKE_CPP);
+
+        session.apply_aura(1001, player_guid, 30_000, 0).unwrap();
+        session.apply_aura(1002, player_guid, 30_000, 0).unwrap();
+        session
+            .visible_auras
+            .get_mut(&0)
+            .unwrap()
+            .represented_effect = Some(RepresentedAuraEffectLikeCpp::Stealth);
+        session
+            .visible_auras
+            .get_mut(&1)
+            .unwrap()
+            .represented_effect = Some(RepresentedAuraEffectLikeCpp::Invisibility);
+        while send_rx.try_recv().is_ok() {}
+
+        assert!(session.use_represented_gameobject_flagstand_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::FlagStandUseSource {
+                pickup_spell_id: 11,
+                return_aura_id: 33,
+                return_spell_id: 44,
+            },
+        ));
+
+        assert!(session.visible_auras.values().all(|aura| !matches!(
+            aura.represented_effect,
+            Some(RepresentedAuraEffectLikeCpp::Stealth)
+                | Some(RepresentedAuraEffectLikeCpp::Invisibility)
+        )));
+        assert!(send_rx.try_recv().is_ok());
+        assert!(send_rx.try_recv().is_ok());
+    }
+
+    #[test]
+    fn gameobject_use_flagdrop_triggers_event_and_delete_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 27);
+        session.set_player_battleground_type_id_like_cpp(BATTLEGROUND_WS_LIKE_CPP);
+        let map_id = session.player_map_id_like_cpp();
+
+        assert!(session.use_represented_gameobject_flagdrop_like_cpp(
+            gameobject_guid,
+            player_guid,
+            179785,
+            wow_entities::FlagDropUseSource {
+                event_id: 22,
+                pickup_spell_id: 33,
+                expire_duration_ms: 44,
+            },
+        ));
+        let mut expected = (ServerOpcodes::GameObjectDespawn as u16)
+            .to_le_bytes()
+            .to_vec();
+        expected.extend_from_slice(&gameobject_guid.to_raw_bytes());
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
+        assert_eq!(
+            send_rx.try_recv().unwrap(),
+            wow_packet::packets::update::UpdateObject::destroy_objects(
+                vec![gameobject_guid],
+                map_id
+            )
+            .to_bytes()
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::RemoveStealthOrInvisibilityAuras {
+                    gameobject_guid,
+                    player_guid,
+                },
+                RepresentedGameObjectUseEffect::BattlegroundFlagDropClicked {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 179785,
+                    click_target: BattlegroundFlagDropClickTarget::WarsongGulch,
+                    event_id: 22,
+                    pickup_spell_id: 33,
+                    expire_duration_ms: 44,
+                },
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: 22,
+                },
+                RepresentedGameObjectUseEffect::GameObjectDeleted { gameobject_guid },
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_flagdrop_requires_matching_battleground_type_for_click_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 43);
+        session.set_player_battleground_type_id_like_cpp(BATTLEGROUND_EY_LIKE_CPP);
+
+        assert!(session.use_represented_gameobject_flagdrop_like_cpp(
+            gameobject_guid,
+            player_guid,
+            179785,
+            wow_entities::FlagDropUseSource {
+                event_id: 22,
+                pickup_spell_id: 33,
+                expire_duration_ms: 44,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::RemoveStealthOrInvisibilityAuras {
+                    gameobject_guid,
+                    player_guid,
+                },
+                RepresentedGameObjectUseEffect::BattlegroundFlagDropClicked {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 179785,
+                    click_target: BattlegroundFlagDropClickTarget::None,
+                    event_id: 22,
+                    pickup_spell_id: 33,
+                    expire_duration_ms: 44,
+                },
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: 22,
+                },
+                RepresentedGameObjectUseEffect::GameObjectDeleted { gameobject_guid },
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_flagdrop_rejects_missing_battleground_before_delete_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 44);
+
+        assert!(!session.use_represented_gameobject_flagdrop_like_cpp(
+            gameobject_guid,
+            player_guid,
+            179785,
+            wow_entities::FlagDropUseSource {
+                event_id: 22,
+                pickup_spell_id: 33,
+                expire_duration_ms: 44,
+            },
+        ));
+        assert!(send_rx.try_recv().is_err());
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::NotInBattleground,
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_flagdrop_rejects_vehicle_before_delete_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 41);
+        session.set_player_battleground_type_id_like_cpp(BATTLEGROUND_WS_LIKE_CPP);
+        session.player_vehicle_seat_flags_like_cpp = Some(0);
+
+        assert!(!session.use_represented_gameobject_flagdrop_like_cpp(
+            gameobject_guid,
+            player_guid,
+            179785,
+            wow_entities::FlagDropUseSource {
+                event_id: 22,
+                pickup_spell_id: 33,
+                expire_duration_ms: 44,
+            },
+        ));
+        assert!(send_rx.try_recv().is_err());
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::BattlegroundObjectUseRejected {
+                    gameobject_guid,
+                    player_guid,
+                    reason: RepresentedBattlegroundObjectUseRejection::Vehicle,
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_flagdrop_unknown_entry_keeps_delete_without_bg_click_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 27);
+        session.set_player_battleground_type_id_like_cpp(BATTLEGROUND_WS_LIKE_CPP);
+
+        assert!(session.use_represented_gameobject_flagdrop_like_cpp(
+            gameobject_guid,
+            player_guid,
+            1,
+            wow_entities::FlagDropUseSource {
+                event_id: 0,
+                pickup_spell_id: 33,
+                expire_duration_ms: 44,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::RemoveStealthOrInvisibilityAuras {
+                    gameobject_guid,
+                    player_guid,
+                },
+                RepresentedGameObjectUseEffect::BattlegroundFlagDropClicked {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 1,
+                    click_target: BattlegroundFlagDropClickTarget::None,
+                    event_id: 0,
+                    pickup_spell_id: 33,
+                    expire_duration_ms: 44,
+                },
+                RepresentedGameObjectUseEffect::GameObjectDeleted { gameobject_guid },
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_new_flag_records_pickup_request_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 36);
+
+        assert!(session.use_represented_gameobject_new_flag_like_cpp(
+            gameobject_guid,
+            player_guid,
+            179_830,
+            wow_entities::NewFlagUseSource {
+                pickup_spell_id: 11,
+                expire_duration_ms: 22,
+                respawn_time_ms: 33,
+                flag_drop_entry: 44,
+                exclusive_category: -55,
+                world_state_id: 66,
+                return_on_defender_interact: true,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::NewFlagPickupRequested {
+                    gameobject_guid,
+                    player_guid,
+                    pickup_spell_id: 11,
+                    expire_duration_ms: 22,
+                    respawn_time_ms: 33,
+                    flag_drop_entry: 44,
+                    exclusive_category: -55,
+                    world_state_id: 66,
+                    return_on_defender_interact: true,
+                },
+                RepresentedGameObjectUseEffect::OutdoorPvpCustomSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 179_830,
+                    spell_id: 11,
+                    go_type: wow_entities::GAMEOBJECT_TYPE_NEW_FLAG,
+                    spell_lookup_difficulty_id: 0,
+                    spell_info_missing: false,
+                },
+                RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
+                    gameobject_guid,
+                    target_guid: player_guid,
+                    caster_guid: gameobject_guid,
+                    spell_id: 11,
+                    triggered: false,
+                    caster: RepresentedGameObjectSpellCaster::GameObject,
+                    spell_lookup_difficulty_id: 0,
+                },
+                RepresentedGameObjectUseEffect::NewFlagOwnerStateRequested {
+                    gameobject_guid,
+                    player_guid,
+                    state: RepresentedNewFlagStateRequest::Taken,
+                },
+            ]
+        );
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(
+            state.new_flag_state,
+            Some(RepresentedNewFlagStateRequest::Taken)
+        );
+        assert_eq!(state.new_flag_carrier_guid, Some(player_guid));
+        assert!(state.new_flag_taken_from_base_game_time_ms.is_some());
+        assert!(state.new_flag_respawn_until.is_none());
+    }
+
+    #[test]
+    fn gameobject_use_new_flag_rejects_non_in_base_state_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 36);
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .new_flag_state = Some(RepresentedNewFlagStateRequest::Taken);
+
+        assert!(!session.use_represented_gameobject_new_flag_like_cpp(
+            gameobject_guid,
+            player_guid,
+            179_830,
+            wow_entities::NewFlagUseSource {
+                pickup_spell_id: 11,
+                expire_duration_ms: 22,
+                respawn_time_ms: 33,
+                flag_drop_entry: 44,
+                exclusive_category: -55,
+                world_state_id: 66,
+                return_on_defender_interact: true,
+            },
+        ));
+        assert!(session.represented_gameobject_use_effects.is_empty());
+    }
+
+    #[test]
+    fn gameobject_use_new_flag_drop_records_owner_state_and_delete_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 37);
+        let owner_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 36);
+        let map_id = session.player_map_id_like_cpp();
+        session.record_represented_gameobject_owner_guid_like_cpp(gameobject_guid, owner_guid);
+        {
+            let owner_state = session
+                .represented_gameobject_use_states
+                .entry(owner_guid)
+                .or_default();
+            owner_state.go_type = Some(wow_entities::GAMEOBJECT_TYPE_NEW_FLAG as u8);
+            owner_state.new_flag_state = Some(RepresentedNewFlagStateRequest::Dropped);
+            owner_state.new_flag_return_on_defender_interact = Some(false);
+            owner_state.new_flag_pickup_spell_id = Some(33);
+            owner_state.new_flag_entry = Some(179_830);
+        }
+
+        assert!(session.use_represented_gameobject_new_flag_drop_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::NewFlagDropUseSource {
+                spawn_vignette_id: 222,
+            }
+        ));
+        let mut expected = (ServerOpcodes::GameObjectDespawn as u16)
+            .to_le_bytes()
+            .to_vec();
+        expected.extend_from_slice(&gameobject_guid.to_raw_bytes());
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
+        assert_eq!(
+            send_rx.try_recv().unwrap(),
+            wow_packet::packets::update::UpdateObject::destroy_objects(
+                vec![gameobject_guid],
+                map_id
+            )
+            .to_bytes()
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::NewFlagDropInteracted {
+                    gameobject_guid,
+                    player_guid,
+                    spawn_vignette_id: 222,
+                },
+                RepresentedGameObjectUseEffect::OutdoorPvpCustomSpellRequested {
+                    gameobject_guid: owner_guid,
+                    player_guid,
+                    gameobject_entry: 179_830,
+                    spell_id: 33,
+                    go_type: wow_entities::GAMEOBJECT_TYPE_NEW_FLAG,
+                    spell_lookup_difficulty_id: 0,
+                    spell_info_missing: false,
+                },
+                RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
+                    gameobject_guid: owner_guid,
+                    target_guid: player_guid,
+                    caster_guid: owner_guid,
+                    spell_id: 33,
+                    triggered: true,
+                    caster: RepresentedGameObjectSpellCaster::GameObject,
+                    spell_lookup_difficulty_id: 0,
+                },
+                RepresentedGameObjectUseEffect::GameObjectDeleted { gameobject_guid },
+                RepresentedGameObjectUseEffect::NewFlagOwnerStateRequested {
+                    gameobject_guid: owner_guid,
+                    player_guid,
+                    state: RepresentedNewFlagStateRequest::Taken,
+                },
+            ]
+        );
+        let state = session
+            .represented_gameobject_use_states
+            .get(&owner_guid)
+            .unwrap();
+        assert_eq!(
+            state.new_flag_state,
+            Some(RepresentedNewFlagStateRequest::Taken)
+        );
+        assert_eq!(state.new_flag_carrier_guid, Some(player_guid));
+        assert_eq!(state.new_flag_taken_from_base_game_time_ms, None);
+    }
+
+    #[test]
+    fn gameobject_use_new_flag_drop_returns_owner_flag_on_defender_interact_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 37);
+        let owner_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 36);
+        session.record_represented_gameobject_owner_guid_like_cpp(gameobject_guid, owner_guid);
+        session.set_player_faction_template_like_cpp(1);
+        session.record_represented_gameobject_faction_template_like_cpp(owner_guid, 2);
+        session.set_faction_template_store(Arc::new(
+            wow_data::progression_rewards::FactionTemplateStore::from_entries([
+                faction_template_entry(1, 10, 1, 0, 20),
+                faction_template_entry(2, 20, 2, 0, 0),
+            ]),
+        ));
+        {
+            let owner_state = session
+                .represented_gameobject_use_states
+                .entry(owner_guid)
+                .or_default();
+            owner_state.go_type = Some(wow_entities::GAMEOBJECT_TYPE_NEW_FLAG as u8);
+            owner_state.new_flag_state = Some(RepresentedNewFlagStateRequest::Dropped);
+            owner_state.new_flag_return_on_defender_interact = Some(true);
+            owner_state.new_flag_pickup_spell_id = Some(33);
+            owner_state.new_flag_entry = Some(179_830);
+        }
+
+        assert!(session.use_represented_gameobject_new_flag_drop_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::NewFlagDropUseSource {
+                spawn_vignette_id: 222,
+            }
+        ));
+        assert!(session.represented_gameobject_use_effects.contains(
+            &RepresentedGameObjectUseEffect::NewFlagOwnerStateRequested {
+                gameobject_guid: owner_guid,
+                player_guid,
+                state: RepresentedNewFlagStateRequest::InBase,
+            }
+        ));
+        let state = session
+            .represented_gameobject_use_states
+            .get(&owner_guid)
+            .unwrap();
+        assert_eq!(
+            state.new_flag_state,
+            Some(RepresentedNewFlagStateRequest::InBase)
+        );
+        assert_eq!(state.new_flag_carrier_guid, None);
+    }
+
+    #[test]
+    fn gameobject_use_new_flag_drop_deletes_without_taken_when_owner_cast_fails_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 37);
+        let owner_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 36);
+        session.record_represented_gameobject_owner_guid_like_cpp(gameobject_guid, owner_guid);
+        session.set_spell_store(std::sync::Arc::new(wow_data::SpellStore::new()));
+        {
+            let owner_state = session
+                .represented_gameobject_use_states
+                .entry(owner_guid)
+                .or_default();
+            owner_state.go_type = Some(wow_entities::GAMEOBJECT_TYPE_NEW_FLAG as u8);
+            owner_state.new_flag_state = Some(RepresentedNewFlagStateRequest::Dropped);
+            owner_state.new_flag_return_on_defender_interact = Some(false);
+            owner_state.new_flag_pickup_spell_id = Some(33);
+            owner_state.new_flag_entry = Some(179_830);
+        }
+
+        assert!(session.use_represented_gameobject_new_flag_drop_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::NewFlagDropUseSource {
+                spawn_vignette_id: 222,
+            }
+        ));
+        assert!(session.represented_gameobject_use_effects.contains(
+            &RepresentedGameObjectUseEffect::GameObjectPostUseSpellMissing {
+                gameobject_guid: owner_guid,
+                player_guid,
+                gameobject_entry: 179_830,
+                spell_id: 33,
+                go_type: wow_entities::GAMEOBJECT_TYPE_NEW_FLAG,
+                spell_lookup_difficulty_id: 0,
+            }
+        ));
+        assert!(
+            !session
+                .represented_gameobject_use_effects
+                .iter()
+                .any(|effect| {
+                    matches!(
+                        effect,
+                        RepresentedGameObjectUseEffect::NewFlagOwnerStateRequested {
+                            gameobject_guid,
+                            state: RepresentedNewFlagStateRequest::Taken,
+                            ..
+                        } if *gameobject_guid == owner_guid
+                    )
+                })
+        );
+        let state = session
+            .represented_gameobject_use_states
+            .get(&owner_guid)
+            .unwrap();
+        assert_eq!(
+            state.new_flag_state,
+            Some(RepresentedNewFlagStateRequest::Dropped)
+        );
+    }
+
+    #[test]
+    fn gameobject_use_new_flag_drop_without_owner_still_deletes_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 37);
+
+        assert!(session.use_represented_gameobject_new_flag_drop_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::NewFlagDropUseSource {
+                spawn_vignette_id: 222,
+            }
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::NewFlagDropInteracted {
+                    gameobject_guid,
+                    player_guid,
+                    spawn_vignette_id: 222,
+                },
+                RepresentedGameObjectUseEffect::GameObjectDeleted { gameobject_guid },
+            ]
+        );
+    }
+
+    #[test]
+    fn new_flag_state_command_tracks_cpp_state_carrier_and_respawn_timer() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 38);
+
+        assert!(session.apply_represented_new_flag_state_command_like_cpp(
+            gameobject_guid,
+            Some(player_guid),
+            RepresentedNewFlagStateRequest::Taken,
+            0,
+        ));
+        assert!(!session.apply_represented_new_flag_state_command_like_cpp(
+            gameobject_guid,
+            Some(player_guid),
+            RepresentedNewFlagStateRequest::Taken,
+            0,
+        ));
+        {
+            let state = session
+                .represented_gameobject_use_states
+                .get(&gameobject_guid)
+                .unwrap();
+            assert_eq!(
+                state.new_flag_state,
+                Some(RepresentedNewFlagStateRequest::Taken)
+            );
+            assert_eq!(state.new_flag_carrier_guid, Some(player_guid));
+            assert!(state.new_flag_taken_from_base_game_time_ms.is_some());
+            assert!(state.new_flag_respawn_until.is_none());
+        }
+
+        assert!(session.apply_represented_new_flag_state_command_like_cpp(
+            gameobject_guid,
+            Some(player_guid),
+            RepresentedNewFlagStateRequest::Respawning,
+            5000,
+        ));
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(
+            state.new_flag_state,
+            Some(RepresentedNewFlagStateRequest::Respawning)
+        );
+        assert_eq!(state.new_flag_carrier_guid, None);
+        assert_eq!(state.new_flag_taken_from_base_game_time_ms, None);
+        assert!(state.new_flag_respawn_until.is_some());
+    }
+
+    #[test]
+    fn gameobject_use_ritual_waits_until_required_unique_casters_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 18);
+
+        assert!(!session.use_represented_gameobject_ritual_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::RitualUseSource {
+                casters_required: 2,
+                spell_id: 100,
+                anim_spell_id: 200,
+                persistent: false,
+                caster_target_spell_id: 0,
+                caster_target_spell_targets: 0,
+                casters_grouped: true,
+                no_target_check: true,
+                allow_unfriendly_cross_faction_party: false,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::CastSpell {
+                    gameobject_guid,
+                    player_guid,
+                    spell_id: 200,
+                },
+                RepresentedGameObjectUseEffect::RitualWaitingForParticipants {
+                    gameobject_guid,
+                    player_guid,
+                    unique_user_count: 1,
+                    casters_required: 2,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_ritual_validates_summoned_owner_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let owner_guid = ObjectGuid::create_player(1, 98);
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 18);
+        let source = wow_entities::RitualUseSource {
+            casters_required: 2,
+            spell_id: 100,
+            anim_spell_id: 200,
+            persistent: false,
+            caster_target_spell_id: 0,
+            caster_target_spell_targets: 0,
+            casters_grouped: true,
+            no_target_check: true,
+            allow_unfriendly_cross_faction_party: false,
+        };
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .owner_guid = Some(owner_guid);
+
+        assert!(!session.use_represented_gameobject_ritual_like_cpp(
+            gameobject_guid,
+            owner_guid,
+            source,
+        ));
+        assert!(session.represented_gameobject_use_effects.is_empty());
+        assert!(
+            session
+                .represented_gameobject_use_states
+                .get(&gameobject_guid)
+                .unwrap()
+                .unique_users
+                .is_empty()
+        );
+
+        assert!(!session.use_represented_gameobject_ritual_like_cpp(
+            gameobject_guid,
+            player_guid,
+            source,
+        ));
+        assert!(session.represented_gameobject_use_effects.is_empty());
+
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(owner_guid);
+        group.add_member(player_guid);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .owner_current_channeled_spell_active = Some(false);
+
+        assert!(!session.use_represented_gameobject_ritual_like_cpp(
+            gameobject_guid,
+            player_guid,
+            source,
+        ));
+        assert!(session.represented_gameobject_use_effects.is_empty());
+
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .owner_current_channeled_spell_active = Some(true);
+
+        assert!(!session.use_represented_gameobject_ritual_like_cpp(
+            gameobject_guid,
+            player_guid,
+            source,
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::CastSpell {
+                    gameobject_guid,
+                    player_guid,
+                    spell_id: 200,
+                },
+                RepresentedGameObjectUseEffect::RitualWaitingForParticipants {
+                    gameobject_guid,
+                    player_guid,
+                    unique_user_count: 1,
+                    casters_required: 2,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_ritual_completes_and_deactivates_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let other_player_guid = ObjectGuid::create_player(1, 100);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 18);
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .unique_users = vec![other_player_guid];
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(other_player_guid);
+        group.add_member(player_guid);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+
+        assert!(session.use_represented_gameobject_ritual_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::RitualUseSource {
+                casters_required: 2,
+                spell_id: 62330,
+                anim_spell_id: 0,
+                persistent: false,
+                caster_target_spell_id: 333,
+                caster_target_spell_targets: 1,
+                casters_grouped: true,
+                no_target_check: true,
+                allow_unfriendly_cross_faction_party: false,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::RitualCasterTargetSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    spell_id: 333,
+                    target_count: 1,
+                },
+                RepresentedGameObjectUseEffect::RitualCompleted {
+                    gameobject_guid,
+                    player_guid,
+                    final_spell_id: 61993,
+                    triggered: true,
+                    persistent: false,
+                    unique_user_count: 2,
+                },
+                RepresentedGameObjectUseEffect::OutdoorPvpCustomSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 777,
+                    spell_id: 61993,
+                    go_type: wow_entities::GAMEOBJECT_TYPE_RITUAL,
+                    spell_lookup_difficulty_id: 0,
+                    spell_info_missing: false,
+                },
+                RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
+                    gameobject_guid,
+                    target_guid: player_guid,
+                    caster_guid: other_player_guid,
+                    spell_id: 61993,
+                    triggered: true,
+                    caster: RepresentedGameObjectSpellCaster::User,
+                    spell_lookup_difficulty_id: 0,
+                },
+            ]
+        );
+        assert_eq!(
+            session
+                .represented_gameobject_use_states
+                .get(&gameobject_guid)
+                .and_then(|state| state.loot_state),
+            Some(wow_entities::LootState::JustDeactivated)
+        );
+    }
+
+    #[test]
+    fn gameobject_use_ritual_casts_caster_target_spell_at_random_unique_users_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let other_player_guid = ObjectGuid::create_player(1, 100);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 18);
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .unique_users = vec![other_player_guid];
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(other_player_guid);
+        group.add_member(player_guid);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+
+        let player_registry = Arc::new(PlayerRegistry::default());
+        let (player_tx, _player_rx) = flume::bounded(1);
+        player_registry.insert(player_guid, broadcast_info(player_guid, player_tx));
+        let (other_tx, _other_rx) = flume::bounded(1);
+        player_registry.insert(
+            other_player_guid,
+            broadcast_info(other_player_guid, other_tx),
+        );
+        session.set_player_registry(player_registry);
+
+        assert!(session.use_represented_gameobject_ritual_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::RitualUseSource {
+                casters_required: 2,
+                spell_id: 100,
+                anim_spell_id: 0,
+                persistent: false,
+                caster_target_spell_id: 333,
+                caster_target_spell_targets: 4,
+                casters_grouped: true,
+                no_target_check: true,
+                allow_unfriendly_cross_faction_party: false,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects.first(),
+            Some(
+                &RepresentedGameObjectUseEffect::RitualCasterTargetSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    spell_id: 333,
+                    target_count: 4,
+                }
+            )
+        );
+        let target_casts: Vec<_> = session
+            .represented_gameobject_use_effects
+            .iter()
+            .filter_map(|effect| {
+                if let RepresentedGameObjectUseEffect::RitualCasterTargetSpellCast {
+                    gameobject_guid: cast_gameobject_guid,
+                    caster_guid,
+                    target_guid,
+                    spell_id,
+                    triggered,
+                } = effect
+                {
+                    Some((
+                        *cast_gameobject_guid,
+                        *caster_guid,
+                        *target_guid,
+                        *spell_id,
+                        *triggered,
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(target_casts.len(), 4);
+        for (cast_gameobject_guid, caster_guid, target_guid, spell_id, triggered) in target_casts {
+            assert_eq!(cast_gameobject_guid, gameobject_guid);
+            assert_eq!(caster_guid, other_player_guid);
+            assert!(target_guid == player_guid || target_guid == other_player_guid);
+            assert_eq!(spell_id, 333);
+            assert!(triggered);
+        }
+    }
+
+    #[test]
+    fn gameobject_use_persistent_summoned_ritual_keeps_gameobject_owner_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let owner_guid = ObjectGuid::create_player(1, 98);
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 18);
+        let state = session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        state.owner_guid = Some(owner_guid);
+        state.owner_current_channeled_spell_active = Some(true);
+        state.unique_users = vec![owner_guid];
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(owner_guid);
+        group.add_member(player_guid);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+
+        assert!(session.use_represented_gameobject_ritual_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::RitualUseSource {
+                casters_required: 2,
+                spell_id: 100,
+                anim_spell_id: 0,
+                persistent: true,
+                caster_target_spell_id: 0,
+                caster_target_spell_targets: 0,
+                casters_grouped: true,
+                no_target_check: true,
+                allow_unfriendly_cross_faction_party: false,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::FinishChanneledSpell {
+                    player_guid: owner_guid,
+                },
+                RepresentedGameObjectUseEffect::RitualCompleted {
+                    gameobject_guid,
+                    player_guid,
+                    final_spell_id: 100,
+                    triggered: false,
+                    persistent: true,
+                    unique_user_count: 2,
+                },
+                RepresentedGameObjectUseEffect::OutdoorPvpCustomSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 777,
+                    spell_id: 100,
+                    go_type: wow_entities::GAMEOBJECT_TYPE_RITUAL,
+                    spell_lookup_difficulty_id: 0,
+                    spell_info_missing: false,
+                },
+                RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
+                    gameobject_guid,
+                    target_guid: player_guid,
+                    caster_guid: owner_guid,
+                    spell_id: 100,
+                    triggered: false,
+                    caster: RepresentedGameObjectSpellCaster::User,
+                    spell_lookup_difficulty_id: 0,
+                },
+            ]
+        );
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.owner_guid, Some(owner_guid));
+        assert_eq!(state.ritual_owner_guid, None);
+        assert!(state.unique_users.is_empty());
+    }
+
+    #[test]
+    fn gameobject_use_meeting_stone_maps_spell_by_entry_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let target_guid = ObjectGuid::create_player(1, 100);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 23);
+        session.set_selection_guid_like_cpp(Some(target_guid));
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(player_guid);
+        group.add_member(target_guid);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+        let player_registry = Arc::new(PlayerRegistry::default());
+        let (target_tx, _target_rx) = flume::bounded(1);
+        let mut target_info = broadcast_info(target_guid, target_tx);
+        target_info.level = 80;
+        player_registry.insert(target_guid, target_info);
+        session.set_player_registry(player_registry);
+
+        assert!(session.use_represented_gameobject_meeting_stone_like_cpp(
+            gameobject_guid,
+            player_guid,
+            194097,
+            wow_entities::MeetingStoneUseSource {
+                area_id: 456,
+                prevent_unfriendly_outside_instances: true,
+                content_tuning_id: 0,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::MeetingStoneSummonRequested {
+                    gameobject_guid,
+                    player_guid,
+                    target_guid,
+                    gameobject_entry: 194097,
+                    spell_id: 61994,
+                    area_id: 456,
+                    prevent_unfriendly_outside_instances: true,
+                },
+                RepresentedGameObjectUseEffect::OutdoorPvpCustomSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 194097,
+                    spell_id: 61994,
+                    go_type: wow_entities::GAMEOBJECT_TYPE_MEETINGSTONE,
+                    spell_lookup_difficulty_id: 0,
+                    spell_info_missing: false,
+                },
+                RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
+                    gameobject_guid,
+                    target_guid: player_guid,
+                    caster_guid: player_guid,
+                    spell_id: 61994,
+                    triggered: false,
+                    caster: RepresentedGameObjectSpellCaster::User,
+                    spell_lookup_difficulty_id: 0,
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_meeting_stone_requires_selected_raid_target_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let target_guid = ObjectGuid::create_player(1, 100);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 23);
+        let source = wow_entities::MeetingStoneUseSource {
+            area_id: 456,
+            prevent_unfriendly_outside_instances: true,
+            content_tuning_id: 0,
+        };
+
+        assert!(!session.use_represented_gameobject_meeting_stone_like_cpp(
+            gameobject_guid,
+            player_guid,
+            194097,
+            source,
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::MeetingStoneTargetRejected {
+                gameobject_guid,
+                player_guid,
+                target_guid: None,
+            }]
+        );
+        session.represented_gameobject_use_effects.clear();
+        session.set_selection_guid_like_cpp(Some(player_guid));
+
+        assert!(!session.use_represented_gameobject_meeting_stone_like_cpp(
+            gameobject_guid,
+            player_guid,
+            194097,
+            source,
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::MeetingStoneTargetRejected {
+                gameobject_guid,
+                player_guid,
+                target_guid: Some(player_guid),
+            }]
+        );
+        session.represented_gameobject_use_effects.clear();
+        session.set_selection_guid_like_cpp(Some(target_guid));
+
+        assert!(!session.use_represented_gameobject_meeting_stone_like_cpp(
+            gameobject_guid,
+            player_guid,
+            194097,
+            source,
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::MeetingStoneTargetRejected {
+                gameobject_guid,
+                player_guid,
+                target_guid: Some(target_guid),
+            }]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_meeting_stone_checks_content_tuning_levels_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let target_guid = ObjectGuid::create_player(1, 100);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 23);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_level_like_cpp(19);
+        session.set_selection_guid_like_cpp(Some(target_guid));
+        session.set_content_tuning_store(Arc::new(ContentTuningStore::from_entries([
+            wow_data::progression_rewards::ContentTuningEntry {
+                id: 55,
+                min_level: 1,
+                max_level: 20,
+                flags: 0,
+                expected_stat_mod_id: 0,
+                difficulty_esm_id: 0,
+            },
+        ])));
+
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(player_guid);
+        group.add_member(target_guid);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+
+        let player_registry = Arc::new(PlayerRegistry::default());
+        let (target_tx, _target_rx) = flume::bounded(1);
+        let mut target_info = broadcast_info(target_guid, target_tx);
+        target_info.level = 20;
+        player_registry.insert(target_guid, target_info);
+        session.set_player_registry(player_registry);
+        let source = wow_entities::MeetingStoneUseSource {
+            area_id: 456,
+            prevent_unfriendly_outside_instances: true,
+            content_tuning_id: 55,
+        };
+
+        assert!(!session.use_represented_gameobject_meeting_stone_like_cpp(
+            gameobject_guid,
+            player_guid,
+            194097,
+            source,
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::MeetingStoneLevelRejected {
+                gameobject_guid,
+                player_guid,
+                target_guid,
+                player_level: 19,
+                target_level: 20,
+                required_level: 20,
+            }]
+        );
+
+        session.represented_gameobject_use_effects.clear();
+        session.set_player_level_like_cpp(20);
+        assert!(session.use_represented_gameobject_meeting_stone_like_cpp(
+            gameobject_guid,
+            player_guid,
+            194097,
+            source,
+        ));
+    }
+
+    #[test]
+    fn gameobject_post_use_spell_records_missing_spell_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 23);
+        session.set_spell_store(std::sync::Arc::new(wow_data::SpellStore::new()));
+
+        assert!(
+            !session.apply_represented_gameobject_post_use_spell_like_cpp(
+                gameobject_guid,
+                player_guid,
+                194097,
+                wow_entities::GAMEOBJECT_TYPE_MEETINGSTONE,
+                61994,
+                false,
+                RepresentedGameObjectSpellCaster::User,
+                player_guid,
+            )
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::OutdoorPvpCustomSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 194097,
+                    spell_id: 61994,
+                    go_type: wow_entities::GAMEOBJECT_TYPE_MEETINGSTONE,
+                    spell_lookup_difficulty_id: 0,
+                    spell_info_missing: true,
+                },
+                RepresentedGameObjectUseEffect::GameObjectPostUseSpellMissing {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 194097,
+                    spell_id: 61994,
+                    go_type: wow_entities::GAMEOBJECT_TYPE_MEETINGSTONE,
+                    spell_lookup_difficulty_id: 0,
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_fishing_node_activates_ready_bobber_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 17);
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .owner_guid = Some(player_guid);
+
+        assert!(
+            session.use_represented_gameobject_fishing_node_like_cpp(gameobject_guid, player_guid,)
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::FishingNodeActivated {
+                    gameobject_guid,
+                    player_guid,
+                },
+                RepresentedGameObjectUseEffect::FinishChanneledSpell { player_guid },
+            ]
+        );
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.loot_state, Some(wow_entities::LootState::Activated));
+        assert_eq!(state.go_state, Some(wow_entities::GoState::Active));
+        assert_eq!(state.gameobject_flags, wow_entities::GO_FLAG_IN_MULTI_USE);
+    }
+
+    #[test]
+    fn gameobject_use_fishing_node_records_skill_roll_and_loot_type_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 47);
+        {
+            let state = session
+                .represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default();
+            state.owner_guid = Some(player_guid);
+            state.fishing_area_level = Some(200);
+            state.player_fishing_level = Some(100);
+            state.fishing_roll = Some(30);
+        }
+
+        assert!(
+            session.use_represented_gameobject_fishing_node_like_cpp(gameobject_guid, player_guid,)
+        );
+        assert!(session.represented_gameobject_use_effects.contains(
+            &RepresentedGameObjectUseEffect::FishingSkillUpdated {
+                gameobject_guid,
+                player_guid,
+            },
+        ));
+        assert!(session.represented_gameobject_use_effects.contains(
+            &RepresentedGameObjectUseEffect::FishingLootRoll {
+                gameobject_guid,
+                player_guid,
+                player_fishing_level: 100,
+                area_fishing_level: 200,
+                chance: 25,
+                roll: 30,
+            },
+        ));
+        assert!(session.represented_gameobject_use_effects.contains(
+            &RepresentedGameObjectUseEffect::FishingLootRequested {
+                gameobject_guid,
+                player_guid,
+                loot_type: wow_packet::packets::loot::LOOT_TYPE_FISHING_JUNK_LIKE_CPP,
+            },
+        ));
+    }
+
+    #[test]
+    fn gameobject_use_fishing_node_resolves_area_and_skill_from_session_state_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 57);
+        session.set_area_table_store(Arc::new(wow_data::AreaTableStore::from_entries([
+            wow_data::AreaTableEntry {
+                id: 900,
+                parent_area_id: 0,
+                mount_flags: 0,
+                flags: 0,
+            },
+            wow_data::AreaTableEntry {
+                id: 901,
+                parent_area_id: 900,
+                mount_flags: 0,
+                flags: 0,
+            },
+        ])));
+        session.set_fishing_base_skill_store(Arc::new(
+            wow_data::FishingBaseSkillStoreLikeCpp::from_entries([(900, 200)]),
+        ));
+        session.set_player_skill_values_like_cpp(HashMap::from([(SKILL_FISHING_LIKE_CPP, 100)]));
+        session.record_represented_gameobject_zone_area_like_cpp(gameobject_guid, 1, 901);
+        {
+            let state = session
+                .represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default();
+            state.owner_guid = Some(player_guid);
+            state.fishing_roll = Some(30);
+        }
+
+        assert!(
+            session.use_represented_gameobject_fishing_node_like_cpp(gameobject_guid, player_guid)
+        );
+
+        assert!(session.represented_gameobject_use_effects.contains(
+            &RepresentedGameObjectUseEffect::FishingLootRoll {
+                gameobject_guid,
+                player_guid,
+                player_fishing_level: 100,
+                area_fishing_level: 200,
+                chance: 25,
+                roll: 30,
+            },
+        ));
+        assert!(session.represented_gameobject_use_effects.contains(
+            &RepresentedGameObjectUseEffect::FishingLootRequested {
+                gameobject_guid,
+                player_guid,
+                loot_type: wow_packet::packets::loot::LOOT_TYPE_FISHING_JUNK_LIKE_CPP,
+            },
+        ));
+    }
+
+    #[test]
+    fn gameobject_use_fishing_node_delegates_to_known_fishing_hole_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 48);
+        let fishing_hole_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 49);
+        {
+            let state = session
+                .represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default();
+            state.owner_guid = Some(player_guid);
+            state.fishing_area_level = Some(500);
+            state.player_fishing_level = Some(1);
+            state.fishing_roll = Some(100);
+            state.nearby_fishing_hole_guid = Some(fishing_hole_guid);
+        }
+
+        assert!(
+            session.use_represented_gameobject_fishing_node_like_cpp(gameobject_guid, player_guid,)
+        );
+        assert!(session.represented_gameobject_use_effects.contains(
+            &RepresentedGameObjectUseEffect::FishingHoleDelegated {
+                gameobject_guid,
+                player_guid,
+                fishing_hole_guid,
+            },
+        ));
+        assert_eq!(
+            session
+                .represented_gameobject_use_states
+                .get(&gameobject_guid)
+                .and_then(|state| state.loot_state),
+            Some(wow_entities::LootState::JustDeactivated)
+        );
+    }
+
+    #[test]
+    fn gameobject_use_fishing_node_finds_nearest_represented_fishing_hole_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 58);
+        let farther_hole_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 778, 59);
+        let nearest_hole_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 779, 60);
+
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            571,
+            gameobject_guid,
+            gameobject_guid.entry(),
+            Position::ZERO,
+            wow_entities::GAMEOBJECT_TYPE_FISHING_NODE as u8,
+        );
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            571,
+            farther_hole_guid,
+            farther_hole_guid.entry(),
+            Position::new(12.0, 0.0, 0.0, 0.0),
+            wow_entities::GAMEOBJECT_TYPE_FISHING_HOLE as u8,
+        );
+        session.record_represented_fishing_hole_radius_like_cpp(farther_hole_guid, 20);
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            571,
+            nearest_hole_guid,
+            nearest_hole_guid.entry(),
+            Position::new(8.0, 0.0, 0.0, 0.0),
+            wow_entities::GAMEOBJECT_TYPE_FISHING_HOLE as u8,
+        );
+        session.record_represented_fishing_hole_radius_like_cpp(nearest_hole_guid, 20);
+        {
+            let state = session
+                .represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default();
+            state.owner_guid = Some(player_guid);
+            state.fishing_area_level = Some(500);
+            state.player_fishing_level = Some(1);
+            state.fishing_roll = Some(100);
+        }
+
+        assert!(
+            session.use_represented_gameobject_fishing_node_like_cpp(gameobject_guid, player_guid,)
+        );
+        assert!(session.represented_gameobject_use_effects.contains(
+            &RepresentedGameObjectUseEffect::FishingHoleDelegated {
+                gameobject_guid,
+                player_guid,
+                fishing_hole_guid: nearest_hole_guid,
+            },
+        ));
+        assert!(!session.represented_gameobject_use_effects.contains(
+            &RepresentedGameObjectUseEffect::FishingLootRequested {
+                gameobject_guid,
+                player_guid,
+                loot_type: wow_packet::packets::loot::LOOT_TYPE_FISHING_JUNK_LIKE_CPP,
+            },
+        ));
+    }
+
+    #[test]
+    fn gameobject_use_fishing_node_requires_fishing_hole_radius_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 61);
+        let fishing_hole_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 778, 62);
+
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            571,
+            gameobject_guid,
+            gameobject_guid.entry(),
+            Position::ZERO,
+            wow_entities::GAMEOBJECT_TYPE_FISHING_NODE as u8,
+        );
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            571,
+            fishing_hole_guid,
+            fishing_hole_guid.entry(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            wow_entities::GAMEOBJECT_TYPE_FISHING_HOLE as u8,
+        );
+        session.record_represented_fishing_hole_radius_like_cpp(fishing_hole_guid, 5);
+        {
+            let state = session
+                .represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default();
+            state.owner_guid = Some(player_guid);
+            state.fishing_area_level = Some(500);
+            state.player_fishing_level = Some(1);
+            state.fishing_roll = Some(100);
+        }
+
+        assert!(
+            session.use_represented_gameobject_fishing_node_like_cpp(gameobject_guid, player_guid,)
+        );
+        assert!(
+            !session
+                .represented_gameobject_use_effects
+                .iter()
+                .any(|effect| matches!(
+                    effect,
+                    RepresentedGameObjectUseEffect::FishingHoleDelegated { .. }
+                ))
+        );
+        assert!(session.represented_gameobject_use_effects.contains(
+            &RepresentedGameObjectUseEffect::FishingLootRequested {
+                gameobject_guid,
+                player_guid,
+                loot_type: wow_packet::packets::loot::LOOT_TYPE_FISHING_JUNK_LIKE_CPP,
+            },
+        ));
+    }
+
+    #[test]
+    fn gameobject_use_fishing_node_rejects_known_wrong_owner_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let owner_guid = ObjectGuid::create_player(1, 100);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 17);
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .owner_guid = Some(owner_guid);
+
+        assert!(
+            !session
+                .use_represented_gameobject_fishing_node_like_cpp(gameobject_guid, player_guid,)
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::FishingNodeOwnerRejected {
+                gameobject_guid,
+                player_guid,
+                owner_guid,
+            }]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_fishing_node_not_ready_sends_not_hooked_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 17);
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .loot_state = Some(wow_entities::LootState::Activated);
+
+        assert!(
+            session.use_represented_gameobject_fishing_node_like_cpp(gameobject_guid, player_guid,)
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::FishNotHooked {
+                    gameobject_guid,
+                    player_guid,
+                },
+                RepresentedGameObjectUseEffect::FinishChanneledSpell { player_guid },
+            ]
+        );
+        assert_eq!(
+            session
+                .represented_gameobject_use_states
+                .get(&gameobject_guid)
+                .and_then(|state| state.loot_state),
+            Some(wow_entities::LootState::JustDeactivated)
+        );
+        assert_eq!(
+            send_rx.try_recv().unwrap(),
+            (ServerOpcodes::FishNotHooked as u16).to_le_bytes()
+        );
+    }
+
+    #[test]
+    fn gameobject_use_questgiver_sends_gossip_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 19);
+
+        assert!(session.use_represented_gameobject_questgiver_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::QuestgiverUseSource { gossip_id: 123 },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::SendGossip {
+                gameobject_guid,
+                player_guid,
+                gossip_id: 123,
+            }]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_spellcaster_casts_and_adds_use_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 20);
+
+        assert!(session.use_represented_gameobject_spellcaster_like_cpp(
+            gameobject_guid,
+            player_guid,
+            777,
+            wow_entities::SpellcasterUseSource {
+                spell_id: 3456,
+                charges: 1,
+                party_only: false,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::RemoveMountedAuras {
+                    gameobject_guid,
+                    player_guid,
+                },
+                RepresentedGameObjectUseEffect::GameObjectUseCountIncremented {
+                    gameobject_guid,
+                    use_count: 1,
+                },
+                RepresentedGameObjectUseEffect::OutdoorPvpCustomSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 777,
+                    spell_id: 3456,
+                    go_type: wow_entities::GAMEOBJECT_TYPE_SPELLCASTER,
+                    spell_lookup_difficulty_id: 0,
+                    spell_info_missing: false,
+                },
+                RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
+                    gameobject_guid,
+                    target_guid: player_guid,
+                    caster_guid: player_guid,
+                    spell_id: 3456,
+                    triggered: false,
+                    caster: RepresentedGameObjectSpellCaster::User,
+                    spell_lookup_difficulty_id: 0,
+                },
+                RepresentedGameObjectUseEffect::GameObjectChargesDepleted {
+                    gameobject_guid,
+                    max_charges: 1,
+                    loot_state: wow_entities::LootState::JustDeactivated,
+                },
+            ]
+        );
+        assert_eq!(
+            session
+                .represented_gameobject_use_states
+                .get(&gameobject_guid)
+                .unwrap()
+                .use_count,
+            0
+        );
+        assert_eq!(
+            session
+                .represented_gameobject_use_states
+                .get(&gameobject_guid)
+                .unwrap()
+                .loot_state,
+            Some(wow_entities::LootState::JustDeactivated)
+        );
+    }
+
+    #[test]
+    fn gameobject_use_spellcaster_party_only_fails_without_owner_context_like_cpp_guard() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 21);
+
+        assert!(!session.use_represented_gameobject_spellcaster_like_cpp(
+            gameobject_guid,
+            player_guid,
+            777,
+            wow_entities::SpellcasterUseSource {
+                spell_id: 3456,
+                charges: 1,
+                party_only: true,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::SpellcasterPartyOnlyRejected {
+                    gameobject_guid,
+                    player_guid,
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_spellcaster_party_only_requires_owner_raid_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let owner_guid = ObjectGuid::create_player(1, 98);
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 22);
+        let source = wow_entities::SpellcasterUseSource {
+            spell_id: 3456,
+            charges: 0,
+            party_only: true,
+        };
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .owner_guid = Some(owner_guid);
+
+        assert!(!session.use_represented_gameobject_spellcaster_like_cpp(
+            gameobject_guid,
+            player_guid,
+            777,
+            source,
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::SpellcasterPartyOnlyRejected {
+                    gameobject_guid,
+                    player_guid,
+                }
+            ]
+        );
+        session.represented_gameobject_use_effects.clear();
+
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(owner_guid);
+        group.add_member(player_guid);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+
+        assert!(session.use_represented_gameobject_spellcaster_like_cpp(
+            gameobject_guid,
+            player_guid,
+            777,
+            source,
+        ));
+        assert!(
+            session
+                .represented_gameobject_use_effects
+                .iter()
+                .any(|effect| matches!(
+                    effect,
+                    RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
+                        caster_guid,
+                        spell_id: 3456,
+                        ..
+                    } if *caster_guid == player_guid
+                ))
+        );
+    }
+
+    #[test]
+    fn gameobject_use_spell_focus_triggers_linked_trap_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 8);
+
+        assert!(session.use_represented_gameobject_spell_focus_like_cpp(
+            gameobject_guid,
+            player_guid,
+            555,
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::TriggerLinkedTrap {
+                gameobject_guid,
+                player_guid,
+                trap_entry: 555,
+            }]
+        );
+
+        session.represented_gameobject_use_effects.clear();
+        assert!(session.use_represented_gameobject_spell_focus_like_cpp(
+            gameobject_guid,
+            player_guid,
+            0,
+        ));
+        assert!(session.represented_gameobject_use_effects.is_empty());
+    }
+
+    #[test]
+    fn gameobject_use_camera_records_cinematic_and_event_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 8);
+
+        assert!(session.use_represented_gameobject_camera_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::CameraUseSource {
+                cinematic_id: 444,
+                event_id: 55,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::TriggerCinematic {
+                    gameobject_guid,
+                    player_guid,
+                    cinematic_id: 444,
+                },
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: 55,
+                },
+            ]
+        );
+        let mut expected = (ServerOpcodes::TriggerCinematic as u16)
+            .to_le_bytes()
+            .to_vec();
+        expected.extend_from_slice(&444_u32.to_le_bytes());
+        expected.extend_from_slice(&ObjectGuid::EMPTY.to_raw_bytes());
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
+
+        session.represented_gameobject_use_effects.clear();
+        assert!(session.use_represented_gameobject_camera_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::CameraUseSource {
+                cinematic_id: 0,
+                event_id: 0,
+            },
+        ));
+        assert!(session.represented_gameobject_use_effects.is_empty());
+    }
+
+    #[test]
+    fn gameobject_use_goober_records_player_preamble_hooks_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 9);
+        let position = Position::new(10.0, 0.0, 0.0, 0.0);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_position_like_cpp(position);
+
+        assert!(session.use_represented_gameobject_goober_preamble_like_cpp(
+            gameobject_guid,
+            777,
+            position,
+            player_guid,
+            wow_entities::GooberUseSource {
+                page_id: 123,
+                gossip_id: 456,
+                event_id: 55,
+                linked_trap_entry: 999,
+                ..Default::default()
+            },
+        ));
+
+        let mut expected = (ServerOpcodes::PageText as u16).to_le_bytes().to_vec();
+        expected.extend_from_slice(&gameobject_guid.to_raw_bytes());
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::ShowPageText {
+                    gameobject_guid,
+                    player_guid,
+                    page_id: 123,
+                },
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: 55,
+                },
+                RepresentedGameObjectUseEffect::KillCreditGo {
+                    gameobject_guid,
+                    player_guid,
+                    entry: 777,
+                },
+                RepresentedGameObjectUseEffect::TriggerLinkedTrap {
+                    gameobject_guid,
+                    player_guid,
+                    trap_entry: 999,
+                },
+            ]
+        );
+
+        session.represented_gameobject_use_effects.clear();
+        assert!(session.use_represented_gameobject_goober_preamble_like_cpp(
+            gameobject_guid,
+            777,
+            position,
+            player_guid,
+            wow_entities::GooberUseSource {
+                gossip_id: 456,
+                ..Default::default()
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects.first(),
+            Some(&RepresentedGameObjectUseEffect::SendGossip {
+                gameobject_guid,
+                player_guid,
+                gossip_id: 456,
+            })
+        );
+    }
+
+    #[test]
+    fn gameobject_use_goober_quest_gate_matches_cpp_incomplete_requirement() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 10);
+        let mut quest_store = wow_data::quest::QuestStore::new();
+        quest_store.quests.insert(200, test_quest_template(200));
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_player_guid(Some(player_guid));
+
+        assert!(
+            !session.use_represented_gameobject_goober_preamble_like_cpp(
+                gameobject_guid,
+                777,
+                Position::ZERO,
+                player_guid,
+                wow_entities::GooberUseSource {
+                    quest_id: 200,
+                    event_id: 55,
+                    linked_trap_entry: 999,
+                    ..Default::default()
+                },
+            )
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: 55,
+                },
+                RepresentedGameObjectUseEffect::GooberQuestGateRejected {
+                    gameobject_guid,
+                    player_guid,
+                    quest_id: 200,
+                },
+            ]
+        );
+
+        session.represented_gameobject_use_effects.clear();
+        session.player_quests.insert(
+            200,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id: 200,
+                status: 1,
+                explored: false,
+                objective_counts: vec![],
+            },
+        );
+        assert!(session.use_represented_gameobject_goober_preamble_like_cpp(
+            gameobject_guid,
+            777,
+            Position::ZERO,
+            player_guid,
+            wow_entities::GooberUseSource {
+                quest_id: 200,
+                linked_trap_entry: 999,
+                ..Default::default()
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::KillCreditGo {
+                    gameobject_guid,
+                    player_guid,
+                    entry: 777,
+                },
+                RepresentedGameObjectUseEffect::TriggerLinkedTrap {
+                    gameobject_guid,
+                    player_guid,
+                    trap_entry: 999,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_goober_kill_credit_filters_group_reward_distance_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let near_member = ObjectGuid::create_player(1, 100);
+        let far_member = ObjectGuid::create_player(1, 101);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 11);
+        let gameobject_position = Position::new(10.0, 0.0, 0.0, 0.0);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_position_like_cpp(gameobject_position);
+
+        let player_registry = Arc::new(PlayerRegistry::default());
+        let (near_tx, _near_rx) = flume::bounded(1);
+        let (far_tx, _far_rx) = flume::bounded(1);
+        let mut near_info = broadcast_info(near_member, near_tx);
+        near_info.position = Position::new(20.0, 0.0, 0.0, 0.0);
+        let mut far_info = broadcast_info(far_member, far_tx);
+        far_info.position = Position::new(10_000.0, 0.0, 0.0, 0.0);
+        player_registry.insert(near_member, near_info);
+        player_registry.insert(far_member, far_info);
+
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(player_guid);
+        group.add_member(near_member);
+        group.add_member(far_member);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_player_registry(player_registry);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+
+        assert!(session.use_represented_gameobject_goober_preamble_like_cpp(
+            gameobject_guid,
+            777,
+            gameobject_position,
+            player_guid,
+            wow_entities::GooberUseSource::default(),
+        ));
+
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::KillCreditGo {
+                    gameobject_guid,
+                    player_guid,
+                    entry: 777,
+                },
+                RepresentedGameObjectUseEffect::KillCreditGo {
+                    gameobject_guid,
+                    player_guid: near_member,
+                    entry: 777,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_goober_state_branch_matches_cpp_global_use() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 12);
+
+        assert!(session.use_represented_gameobject_goober_state_like_cpp(
+            gameobject_guid,
+            player_guid,
+            777,
+            wow_entities::GooberUseSource {
+                auto_close_ms: 3_000,
+                spell_id: 7777,
+                player_cast: true,
+                ..Default::default()
+            },
+        ));
+
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.gameobject_flags & wow_entities::GO_FLAG_IN_USE, 1);
+        assert_eq!(state.loot_state, Some(wow_entities::LootState::Activated));
+        assert_eq!(state.loot_state_unit_guid, player_guid);
+        assert_eq!(state.go_state, Some(wow_entities::GoState::Active));
+        assert!(state.cooldown_until.is_some());
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::GooberUsed {
+                    gameobject_guid,
+                    user_guid: player_guid,
+                    custom_anim: 0,
+                    auto_close_ms: 3_000,
+                    go_state: Some(wow_entities::GoState::Active),
+                },
+                RepresentedGameObjectUseEffect::OutdoorPvpCustomSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 777,
+                    spell_id: 7777,
+                    go_type: wow_entities::GAMEOBJECT_TYPE_GOOBER,
+                    spell_lookup_difficulty_id: 0,
+                    spell_info_missing: false,
+                },
+                RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
+                    gameobject_guid,
+                    target_guid: player_guid,
+                    caster_guid: player_guid,
+                    spell_id: 7777,
+                    triggered: false,
+                    caster: RepresentedGameObjectSpellCaster::User,
+                    spell_lookup_difficulty_id: 0,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_goober_state_branch_matches_cpp_custom_anim_and_go_cast() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 13);
+        session.record_represented_gameobject_anim_progress_like_cpp(gameobject_guid, 123);
+
+        assert!(session.use_represented_gameobject_goober_state_like_cpp(
+            gameobject_guid,
+            player_guid,
+            777,
+            wow_entities::GooberUseSource {
+                custom_anim: 2,
+                spell_id: 8888,
+                player_cast: false,
+                ..Default::default()
+            },
+        ));
+
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.go_state, None);
+        let mut expected = (ServerOpcodes::GameObjectCustomAnim as u16)
+            .to_le_bytes()
+            .to_vec();
+        expected.extend_from_slice(&gameobject_guid.to_raw_bytes());
+        expected.extend_from_slice(&123_u32.to_le_bytes());
+        expected.push(0x00);
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::GooberUsed {
+                    gameobject_guid,
+                    user_guid: player_guid,
+                    custom_anim: 2,
+                    auto_close_ms: 0,
+                    go_state: None,
+                },
+                RepresentedGameObjectUseEffect::OutdoorPvpCustomSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 777,
+                    spell_id: 8888,
+                    go_type: wow_entities::GAMEOBJECT_TYPE_GOOBER,
+                    spell_lookup_difficulty_id: 0,
+                    spell_info_missing: false,
+                },
+                RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
+                    gameobject_guid,
+                    target_guid: player_guid,
+                    caster_guid: gameobject_guid,
+                    spell_id: 8888,
+                    triggered: false,
+                    caster: RepresentedGameObjectSpellCaster::GameObject,
+                    spell_lookup_difficulty_id: 0,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_goober_multi_interact_matches_cpp_per_player_branch() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 14);
+
+        assert!(session.use_represented_gameobject_goober_state_like_cpp(
+            gameobject_guid,
+            player_guid,
+            777,
+            wow_entities::GooberUseSource {
+                allow_multi_interact: true,
+                ..Default::default()
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::GooberSetGoStateForPlayer {
+                gameobject_guid,
+                player_guid,
+                go_state: wow_entities::GoState::Active,
+            }]
+        );
+        assert!(
+            !session
+                .represented_gameobject_use_states
+                .contains_key(&gameobject_guid)
+        );
+
+        session.represented_gameobject_use_effects.clear();
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .despawn_delay_secs = Some(45);
+        assert!(session.use_represented_gameobject_goober_state_like_cpp(
+            gameobject_guid,
+            player_guid,
+            777,
+            wow_entities::GooberUseSource {
+                allow_multi_interact: true,
+                consumable: true,
+                ..Default::default()
+            },
+        ));
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.per_player_despawn_secs, Some(45));
+        assert!(state.per_player_despawn_until.is_some());
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::GooberDespawnForPlayer {
+                gameobject_guid,
+                player_guid,
+                despawn_secs: 45,
+            }]
+        );
+    }
+
+    #[test]
+    fn gameobject_goober_just_deactivated_resets_and_clears_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let other_player_guid = ObjectGuid::create_player(1, 100);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 15);
+        {
+            let state = session
+                .represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default();
+            state.loot_state = Some(wow_entities::LootState::JustDeactivated);
+            state.loot_state_unit_guid = player_guid;
+            state.gameobject_flags = wow_entities::GO_FLAG_IN_USE;
+            state.go_state = Some(wow_entities::GoState::Active);
+            state.unique_users = vec![player_guid, other_player_guid];
+            state.cooldown_until = Some(Instant::now() + Duration::from_secs(30));
+        }
+
+        assert!(
+            session.apply_represented_gameobject_goober_just_deactivated_like_cpp(
+                gameobject_guid,
+                wow_entities::GooberUseSource {
+                    lock_id: 12,
+                    auto_close_ms: 3_000,
+                    spell_id: 7777,
+                    linked_trap_entry: 999,
+                    ..Default::default()
+                },
+            )
+        );
+
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.loot_state, Some(wow_entities::LootState::Ready));
+        assert_eq!(state.loot_state_unit_guid, ObjectGuid::EMPTY);
+        assert_eq!(state.gameobject_flags & wow_entities::GO_FLAG_IN_USE, 0);
+        assert_eq!(state.go_state, Some(wow_entities::GoState::Ready));
+        assert!(state.unique_users.is_empty());
+        assert!(state.cooldown_until.is_none());
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::GooberLinkedTrapDespawn {
+                    gameobject_guid,
+                    trap_entry: 999,
+                },
+                RepresentedGameObjectUseEffect::GooberUniqueUserSpell {
+                    gameobject_guid,
+                    player_guid,
+                    spell_id: 7777,
+                },
+                RepresentedGameObjectUseEffect::GooberUniqueUserSpell {
+                    gameobject_guid,
+                    player_guid: other_player_guid,
+                    spell_id: 7777,
+                },
+                RepresentedGameObjectUseEffect::GooberCleared {
+                    gameobject_guid,
+                    loot_state: wow_entities::LootState::Ready,
+                    go_state: Some(wow_entities::GoState::Ready),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_goober_just_deactivated_consumable_stays_not_ready_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 16);
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .loot_state = Some(wow_entities::LootState::JustDeactivated);
+
+        assert!(
+            session.apply_represented_gameobject_goober_just_deactivated_like_cpp(
+                gameobject_guid,
+                wow_entities::GooberUseSource {
+                    consumable: true,
+                    ..Default::default()
+                },
+            )
+        );
+
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.loot_state, Some(wow_entities::LootState::NotReady));
+        assert_eq!(state.go_state, None);
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::GooberCleared {
+                gameobject_guid,
+                loot_state: wow_entities::LootState::NotReady,
+                go_state: None,
+            }]
+        );
     }
 
     #[test]

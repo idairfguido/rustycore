@@ -55,6 +55,18 @@ pub struct CurvePointEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FactionEntry {
+    pub id: u32,
+    pub reputation_index: i16,
+}
+
+impl FactionEntry {
+    pub const fn can_have_reputation_like_cpp(&self) -> bool {
+        self.reputation_index >= 0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FactionTemplateEntry {
     pub id: u32,
     pub faction: u16,
@@ -259,6 +271,7 @@ db2_store!(ContentTuningStore, ContentTuningEntry);
 db2_store!(CriteriaTreeStore, CriteriaTreeEntry);
 db2_store!(CurveStore, CurveEntry);
 db2_store!(CurvePointStore, CurvePointEntry);
+db2_store!(FactionStore, FactionEntry);
 db2_store!(FactionTemplateStore, FactionTemplateEntry);
 db2_store!(FriendshipRepReactionStore, FriendshipRepReactionEntry);
 db2_store!(FriendshipReputationStore, FriendshipReputationEntry);
@@ -346,6 +359,15 @@ impl CurvePointStore {
                 curve_id: r.get_relationship_id(idx).unwrap_or(0),
                 order_index: r.get_field_u8(idx, 4),
             }
+        })
+    }
+}
+
+impl FactionStore {
+    pub fn load(data_dir: &str, locale: &str) -> Result<Self> {
+        load_store(data_dir, locale, "Faction.db2", |id, idx, r| FactionEntry {
+            id,
+            reputation_index: r.get_field_i16(idx, 4),
         })
     }
 }
@@ -677,6 +699,7 @@ impl_from_entries!(ContentTuningStore, ContentTuningEntry);
 impl_from_entries!(CriteriaTreeStore, CriteriaTreeEntry);
 impl_from_entries!(CurveStore, CurveEntry);
 impl_from_entries!(CurvePointStore, CurvePointEntry);
+impl_from_entries!(FactionStore, FactionEntry);
 impl_from_entries!(FactionTemplateStore, FactionTemplateEntry);
 impl_from_entries!(FriendshipRepReactionStore, FriendshipRepReactionEntry);
 impl_from_entries!(FriendshipReputationStore, FriendshipReputationEntry);
@@ -739,6 +762,7 @@ mod tests {
         load_if_exists!("CriteriaTree.db2", CriteriaTreeStore);
         load_if_exists!("Curve.db2", CurveStore);
         load_if_exists!("CurvePoint.db2", CurvePointStore);
+        load_if_exists!("Faction.db2", FactionStore);
         load_if_exists!("FactionTemplate.db2", FactionTemplateStore);
         load_if_exists!("FriendshipRepReaction.db2", FriendshipRepReactionStore);
         load_if_exists!("FriendshipReputation.db2", FriendshipReputationStore);

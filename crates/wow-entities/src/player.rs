@@ -28,6 +28,7 @@ use crate::{
 };
 
 pub const PLAYER_EXTRA_GM_ON: u32 = 0x0001;
+pub const REPUTATION_FLAG_AT_WAR_LIKE_CPP: u32 = 0x0002;
 
 pub const MAX_MONEY_AMOUNT: u64 = 99_999_999_999;
 pub const TEAM_OTHER: u8 = 0;
@@ -576,6 +577,20 @@ pub struct PlayerRestState {
     pub is_resting_now: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayerDuelStateLikeCpp {
+    Challenged,
+    Countdown,
+    InProgress,
+    Completed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlayerDuelInfoLikeCpp {
+    pub opponent: ObjectGuid,
+    pub state: PlayerDuelStateLikeCpp,
+}
+
 /// Canonical `wow-entities` bridge snapshot for gameplay data loaded by TrinityCore
 /// `Player::LoadFromDB` after the base `characters` row.
 ///
@@ -657,6 +672,7 @@ pub const PLAYER_DATA_VISIBLE_ITEMS_PARENT_BIT: usize = 61;
 pub const PLAYER_DATA_VISIBLE_ITEMS_FIRST_BIT: usize = 62;
 
 pub const ACTIVE_PLAYER_DATA_PARENT_BIT: usize = 0;
+pub const ACTIVE_PLAYER_DATA_FARSIGHT_OBJECT_BIT: usize = 26;
 pub const ACTIVE_PLAYER_DATA_COINAGE_BIT: usize = 28;
 pub const ACTIVE_PLAYER_DATA_XP_BIT: usize = 29;
 pub const ACTIVE_PLAYER_DATA_NEXT_LEVEL_XP_BIT: usize = 30;
@@ -2702,6 +2718,7 @@ impl Default for PlayerDataValues {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ActivePlayerDataValues {
+    pub farsight_object: ObjectGuid,
     pub coinage: u64,
     pub xp: i32,
     pub next_level_xp: i32,
@@ -2715,6 +2732,7 @@ pub struct ActivePlayerDataValues {
 impl Default for ActivePlayerDataValues {
     fn default() -> Self {
         Self {
+            farsight_object: ObjectGuid::EMPTY,
             coinage: 0,
             xp: 0,
             next_level_xp: 0,
@@ -2780,6 +2798,8 @@ pub struct Player {
     item_durations: Vec<ObjectGuid>,
     enchant_durations: Vec<PlayerEnchantDuration>,
     lifecycle_metadata: PlayerLifecycleMetadata,
+    duel: Option<PlayerDuelInfoLikeCpp>,
+    forced_reaction_faction_ids: HashSet<u32>,
 }
 
 impl Player {
@@ -2815,6 +2835,8 @@ impl Player {
             item_durations: Vec::new(),
             enchant_durations: Vec::new(),
             lifecycle_metadata: PlayerLifecycleMetadata::default(),
+            duel: None,
+            forced_reaction_faction_ids: HashSet::new(),
         }
     }
 
@@ -3018,6 +3040,66 @@ impl Player {
     /// hook for future DB/session integration.
     pub fn clear_gameplay_changes(&mut self) {}
 
+    pub const fn duel_info_like_cpp(&self) -> Option<PlayerDuelInfoLikeCpp> {
+        self.duel
+    }
+
+    pub fn set_duel_info_like_cpp(&mut self, duel: Option<PlayerDuelInfoLikeCpp>) {
+        self.duel = duel;
+    }
+
+    pub fn set_duel_opponent_in_progress_like_cpp(&mut self, opponent: ObjectGuid) {
+        self.duel = Some(PlayerDuelInfoLikeCpp {
+            opponent,
+            state: PlayerDuelStateLikeCpp::InProgress,
+        });
+    }
+
+    pub fn clear_duel_like_cpp(&mut self) {
+        self.duel = None;
+    }
+
+    pub fn is_dueling_opponent_in_progress_like_cpp(&self, opponent: ObjectGuid) -> bool {
+        self.duel.is_some_and(|duel| {
+            duel.opponent == opponent && duel.state == PlayerDuelStateLikeCpp::InProgress
+        })
+    }
+
+    pub fn set_forced_reputation_rank_like_cpp(&mut self, faction_id: u32, forced: bool) {
+        if forced {
+            self.forced_reaction_faction_ids.insert(faction_id);
+        } else {
+            self.forced_reaction_faction_ids.remove(&faction_id);
+        }
+    }
+
+    pub fn has_forced_reputation_rank_like_cpp(&self, faction_id: u32) -> bool {
+        self.forced_reaction_faction_ids.contains(&faction_id)
+    }
+
+    pub fn forced_reputation_faction_ids_like_cpp(&self) -> &HashSet<u32> {
+        &self.forced_reaction_faction_ids
+    }
+
+    pub fn replace_forced_reputation_faction_ids_like_cpp(&mut self, faction_ids: HashSet<u32>) {
+        self.forced_reaction_faction_ids = faction_ids;
+    }
+
+    pub fn is_at_war_with_faction_like_cpp(&self, faction_id: u32) -> bool {
+        self.gameplay_state
+            .reputations
+            .iter()
+            .find(|rep| rep.faction_id == faction_id)
+            .is_some_and(|rep| rep.flags & REPUTATION_FLAG_AT_WAR_LIKE_CPP != 0)
+    }
+
+    pub fn has_reputation_state_like_cpp(&self, faction_id: u32) -> bool {
+        self.gameplay_state
+            .reputations
+            .iter()
+            .any(|rep| rep.faction_id == faction_id)
+    }
+
     pub fn soulbound_tradeable_items(&self) -> &HashSet<ObjectGuid> {
         &self.soulbound_tradeable_items
     }
@@ -3212,6 +3294,20 @@ impl Player {
 
     pub fn mark_money_changed(&mut self) {
         self.mark_active_player_data(ACTIVE_PLAYER_DATA_COINAGE_BIT);
+    }
+
+    pub fn set_farsight_object_like_cpp(&mut self, guid: ObjectGuid) {
+        self.set_active_guid(ACTIVE_PLAYER_DATA_FARSIGHT_OBJECT_BIT, guid, |data| {
+            &mut data.farsight_object
+        });
+        self.unit_mut()
+            .set_seer_can_always_see_target_guid_like_cpp(guid);
+    }
+
+    pub fn sync_farsight_visibility_detection_like_cpp(&mut self) {
+        let farsight_object = self.active_data.farsight_object;
+        self.unit_mut()
+            .set_seer_can_always_see_target_guid_like_cpp(farsight_object);
     }
 
     pub fn modify_money(&mut self, amount: i64) -> bool {
@@ -7624,6 +7720,19 @@ impl Player {
         bit: usize,
         value: u64,
         field: impl FnOnce(&mut ActivePlayerDataValues) -> &mut u64,
+    ) {
+        let target = field(&mut self.active_data);
+        if *target != value {
+            *target = value;
+            self.mark_active_player_data(bit);
+        }
+    }
+
+    fn set_active_guid(
+        &mut self,
+        bit: usize,
+        value: ObjectGuid,
+        field: impl FnOnce(&mut ActivePlayerDataValues) -> &mut ObjectGuid,
     ) {
         let target = field(&mut self.active_data);
         if *target != value {
