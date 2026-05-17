@@ -422,6 +422,7 @@ pub(crate) enum RepresentedGameObjectUseEffect {
     GameObjectPostUseSpellCast {
         gameobject_guid: ObjectGuid,
         target_guid: ObjectGuid,
+        caster_guid: ObjectGuid,
         spell_id: u32,
         triggered: bool,
         caster: RepresentedGameObjectSpellCaster,
@@ -10474,6 +10475,7 @@ impl WorldSession {
             source.pickup_spell_id,
             false,
             RepresentedGameObjectSpellCaster::GameObject,
+            gameobject_guid,
         );
 
         true
@@ -10531,15 +10533,21 @@ impl WorldSession {
             );
         }
 
-        let unique_user_count = {
+        let (unique_user_count, ritual_spell_caster_guid) = {
             let state = self
                 .represented_gameobject_use_states
                 .entry(gameobject_guid)
                 .or_default();
+            if state.owner_guid.is_none() {
+                state.owner_guid = Some(state.unique_users.first().copied().unwrap_or(player_guid));
+            }
             if !state.unique_users.contains(&player_guid) {
                 state.unique_users.push(player_guid);
             }
-            state.unique_users.len() as u32
+            (
+                state.unique_users.len() as u32,
+                state.owner_guid.unwrap_or(player_guid),
+            )
         };
 
         if unique_user_count != source.casters_required {
@@ -10605,6 +10613,7 @@ impl WorldSession {
             final_spell_id,
             triggered,
             RepresentedGameObjectSpellCaster::User,
+            ritual_spell_caster_guid,
         );
 
         true
@@ -10642,6 +10651,7 @@ impl WorldSession {
             spell_id,
             false,
             RepresentedGameObjectSpellCaster::User,
+            player_guid,
         );
 
         true
@@ -10656,6 +10666,7 @@ impl WorldSession {
         spell_id: u32,
         triggered: bool,
         caster: RepresentedGameObjectSpellCaster,
+        caster_guid: ObjectGuid,
     ) -> bool {
         if spell_id == 0 {
             return false;
@@ -10697,6 +10708,7 @@ impl WorldSession {
             RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
                 gameobject_guid,
                 target_guid: player_guid,
+                caster_guid,
                 spell_id,
                 triggered,
                 caster,
@@ -10862,6 +10874,7 @@ impl WorldSession {
             source.spell_id,
             false,
             RepresentedGameObjectSpellCaster::User,
+            player_guid,
         );
 
         if source.charges != 0 && use_count >= source.charges {
@@ -11102,6 +11115,11 @@ impl WorldSession {
                     RepresentedGameObjectSpellCaster::User
                 } else {
                     RepresentedGameObjectSpellCaster::GameObject
+                },
+                if source.player_cast {
+                    player_guid
+                } else {
+                    gameobject_guid
                 },
             );
         }
@@ -23543,6 +23561,7 @@ mod tests {
                 RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
                     gameobject_guid,
                     target_guid: player_guid,
+                    caster_guid: gameobject_guid,
                     spell_id: 11,
                     triggered: false,
                     caster: RepresentedGameObjectSpellCaster::GameObject,
@@ -23715,6 +23734,7 @@ mod tests {
                 RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
                     gameobject_guid,
                     target_guid: player_guid,
+                    caster_guid: other_player_guid,
                     spell_id: 61993,
                     triggered: true,
                     caster: RepresentedGameObjectSpellCaster::User,
@@ -23770,6 +23790,7 @@ mod tests {
                 RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
                     gameobject_guid,
                     target_guid: player_guid,
+                    caster_guid: player_guid,
                     spell_id: 61994,
                     triggered: false,
                     caster: RepresentedGameObjectSpellCaster::User,
@@ -23796,6 +23817,7 @@ mod tests {
                 61994,
                 false,
                 RepresentedGameObjectSpellCaster::User,
+                player_guid,
             )
         );
         assert_eq!(
@@ -23980,6 +24002,7 @@ mod tests {
                 RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
                     gameobject_guid,
                     target_guid: player_guid,
+                    caster_guid: player_guid,
                     spell_id: 3456,
                     triggered: false,
                     caster: RepresentedGameObjectSpellCaster::User,
@@ -24369,6 +24392,7 @@ mod tests {
                 RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
                     gameobject_guid,
                     target_guid: player_guid,
+                    caster_guid: player_guid,
                     spell_id: 7777,
                     triggered: false,
                     caster: RepresentedGameObjectSpellCaster::User,
@@ -24424,6 +24448,7 @@ mod tests {
                 RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
                     gameobject_guid,
                     target_guid: player_guid,
+                    caster_guid: gameobject_guid,
                     spell_id: 8888,
                     triggered: false,
                     caster: RepresentedGameObjectSpellCaster::GameObject,

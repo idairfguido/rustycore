@@ -526,6 +526,7 @@ impl WorldSession {
                 source.spell_id,
                 false,
                 RepresentedGameObjectSpellCaster::User,
+                player_guid,
             );
         }
     }
@@ -8429,6 +8430,7 @@ mod tests {
                 RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
                     gameobject_guid,
                     target_guid: player_guid,
+                    caster_guid: player_guid,
                     spell_id: 777,
                     triggered: false,
                     caster: RepresentedGameObjectSpellCaster::User,
