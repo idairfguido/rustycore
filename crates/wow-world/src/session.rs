@@ -342,6 +342,11 @@ pub(crate) enum RepresentedGameObjectUseEffect {
         contested_event_horde: u32,
         contested_event_alliance: u32,
     },
+    CapturePointAssaultAi {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        handled: bool,
+    },
     BattlegroundFlagStandClicked {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
@@ -587,6 +592,7 @@ pub(crate) struct RepresentedGameObjectUseState {
     pub new_flag_entry: Option<u32>,
     pub report_use_ai_returns_true: bool,
     pub gossip_hello_ai_returns_true: bool,
+    pub capture_point_assault_ai_returns_true: bool,
     pub cooldown_until: Option<Instant>,
 }
 
@@ -768,6 +774,7 @@ impl Default for RepresentedGameObjectUseState {
             new_flag_entry: None,
             report_use_ai_returns_true: false,
             gossip_hello_ai_returns_true: false,
+            capture_point_assault_ai_returns_true: false,
             cooldown_until: None,
         }
     }
@@ -10699,10 +10706,6 @@ impl WorldSession {
         player_guid: ObjectGuid,
         source: wow_entities::CapturePointUseSource,
     ) -> bool {
-        if self.player_battleground_type_id_like_cpp.is_none() {
-            return false;
-        }
-
         let state = self
             .represented_gameobject_use_states
             .get(&gameobject_guid)
@@ -10724,6 +10727,26 @@ impl WorldSession {
             Team::Other => false,
         };
         if !can_interact {
+            return false;
+        }
+
+        let ai_handled = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .map(|state| state.capture_point_assault_ai_returns_true)
+            .unwrap_or(false);
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::CapturePointAssaultAi {
+                gameobject_guid,
+                player_guid,
+                handled: ai_handled,
+            },
+        );
+        if ai_handled {
+            return true;
+        }
+
+        if self.player_battleground_type_id_like_cpp.is_none() {
             return false;
         }
 
@@ -24257,6 +24280,11 @@ mod tests {
         assert_eq!(
             session.represented_gameobject_use_effects,
             vec![
+                RepresentedGameObjectUseEffect::CapturePointAssaultAi {
+                    gameobject_guid,
+                    player_guid,
+                    handled: false,
+                },
                 RepresentedGameObjectUseEffect::CapturePointAssaultRequested {
                     gameobject_guid,
                     player_guid,
@@ -24286,7 +24314,46 @@ mod tests {
                 contested_event_alliance: 789,
             },
         ));
-        assert!(session.represented_gameobject_use_effects.is_empty());
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::CapturePointAssaultAi {
+                gameobject_guid,
+                player_guid,
+                handled: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_capture_point_ai_can_handle_before_battleground_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 44);
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .capture_point_assault_ai_returns_true = true;
+
+        assert!(session.use_represented_gameobject_capture_point_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::CapturePointUseSource {
+                capture_time_ms: 60_000,
+                world_state_id: 123,
+                contested_event_horde: 456,
+                contested_event_alliance: 789,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::CapturePointAssaultAi {
+                gameobject_guid,
+                player_guid,
+                handled: true,
+            }]
+        );
     }
 
     #[test]
