@@ -386,6 +386,13 @@ pub(crate) enum RepresentedGameObjectUseEffect {
         spell_id: u32,
         target_count: u32,
     },
+    RitualCasterTargetSpellCast {
+        gameobject_guid: ObjectGuid,
+        caster_guid: ObjectGuid,
+        target_guid: ObjectGuid,
+        spell_id: u32,
+        triggered: bool,
+    },
     RitualCompleted {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
@@ -10649,6 +10656,11 @@ impl WorldSession {
         }
 
         if source.caster_target_spell_id != 0 && source.caster_target_spell_id != 1 {
+            let unique_users = self
+                .represented_gameobject_use_states
+                .get(&gameobject_guid)
+                .map(|state| state.unique_users.clone())
+                .unwrap_or_default();
             self.represented_gameobject_use_effects.push(
                 RepresentedGameObjectUseEffect::RitualCasterTargetSpellRequested {
                     gameobject_guid,
@@ -10657,6 +10669,28 @@ impl WorldSession {
                     target_count: source.caster_target_spell_targets,
                 },
             );
+            let mut rng = rand::thread_rng();
+            for _ in 0..source.caster_target_spell_targets {
+                let Some(target_guid) = unique_users.choose(&mut rng).copied() else {
+                    continue;
+                };
+                if !self
+                    .player_registry
+                    .as_ref()
+                    .is_some_and(|registry| registry.contains_key(&target_guid))
+                {
+                    continue;
+                }
+                self.represented_gameobject_use_effects.push(
+                    RepresentedGameObjectUseEffect::RitualCasterTargetSpellCast {
+                        gameobject_guid,
+                        caster_guid: ritual_spell_caster_guid,
+                        target_guid,
+                        spell_id: source.caster_target_spell_id,
+                        triggered: true,
+                    },
+                );
+            }
         }
 
         if let Some(owner_guid) = owner_guid {
@@ -23992,6 +24026,96 @@ mod tests {
                 .and_then(|state| state.loot_state),
             Some(wow_entities::LootState::JustDeactivated)
         );
+    }
+
+    #[test]
+    fn gameobject_use_ritual_casts_caster_target_spell_at_random_unique_users_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let other_player_guid = ObjectGuid::create_player(1, 100);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 18);
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .unique_users = vec![other_player_guid];
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(other_player_guid);
+        group.add_member(player_guid);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+
+        let player_registry = Arc::new(PlayerRegistry::default());
+        let (player_tx, _player_rx) = flume::bounded(1);
+        player_registry.insert(player_guid, broadcast_info(player_guid, player_tx));
+        let (other_tx, _other_rx) = flume::bounded(1);
+        player_registry.insert(
+            other_player_guid,
+            broadcast_info(other_player_guid, other_tx),
+        );
+        session.set_player_registry(player_registry);
+
+        assert!(session.use_represented_gameobject_ritual_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::RitualUseSource {
+                casters_required: 2,
+                spell_id: 100,
+                anim_spell_id: 0,
+                persistent: false,
+                caster_target_spell_id: 333,
+                caster_target_spell_targets: 4,
+                casters_grouped: true,
+                no_target_check: true,
+                allow_unfriendly_cross_faction_party: false,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects.first(),
+            Some(
+                &RepresentedGameObjectUseEffect::RitualCasterTargetSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    spell_id: 333,
+                    target_count: 4,
+                }
+            )
+        );
+        let target_casts: Vec<_> = session
+            .represented_gameobject_use_effects
+            .iter()
+            .filter_map(|effect| {
+                if let RepresentedGameObjectUseEffect::RitualCasterTargetSpellCast {
+                    gameobject_guid: cast_gameobject_guid,
+                    caster_guid,
+                    target_guid,
+                    spell_id,
+                    triggered,
+                } = effect
+                {
+                    Some((
+                        *cast_gameobject_guid,
+                        *caster_guid,
+                        *target_guid,
+                        *spell_id,
+                        *triggered,
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(target_casts.len(), 4);
+        for (cast_gameobject_guid, caster_guid, target_guid, spell_id, triggered) in target_casts {
+            assert_eq!(cast_gameobject_guid, gameobject_guid);
+            assert_eq!(caster_guid, other_player_guid);
+            assert!(target_guid == player_guid || target_guid == other_player_guid);
+            assert_eq!(spell_id, 333);
+            assert!(triggered);
+        }
     }
 
     #[test]
