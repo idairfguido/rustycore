@@ -319,6 +319,7 @@ pub(crate) enum RepresentedGameObjectUseEffect {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
         ui_link_type: u32,
+        interaction_type: i32,
     },
     ItemForgeUsed {
         gameobject_guid: ObjectGuid,
@@ -10378,15 +10379,31 @@ impl WorldSession {
         player_guid: ObjectGuid,
         source: wow_entities::UiLinkUseSource,
     ) -> bool {
+        let interaction_type = Self::ui_link_player_interaction_type_like_cpp(source.ui_link_type);
+        self.send_packet(&wow_packet::packets::misc::GameObjectInteraction {
+            object_guid: gameobject_guid,
+            interaction_type,
+        });
         self.represented_gameobject_use_effects.push(
             RepresentedGameObjectUseEffect::UiLinkOpened {
                 gameobject_guid,
                 player_guid,
                 ui_link_type: source.ui_link_type,
+                interaction_type,
             },
         );
 
         true
+    }
+
+    const fn ui_link_player_interaction_type_like_cpp(ui_link_type: u32) -> i32 {
+        match ui_link_type {
+            0 => 54, // PlayerInteractionType::AdventureJournal
+            1 => 39, // PlayerInteractionType::ObliterumForge
+            2 => 40, // PlayerInteractionType::ScrappingMachine
+            3 => 44, // PlayerInteractionType::ItemInteraction
+            _ => 0,  // PlayerInteractionType::None
+        }
     }
 
     pub(crate) fn use_represented_gameobject_item_forge_like_cpp(
@@ -23505,7 +23522,7 @@ mod tests {
 
     #[test]
     fn gameobject_use_ui_link_records_interaction_type_like_cpp() {
-        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let (mut session, _pkt_tx, send_rx) = make_session();
         let player_guid = ObjectGuid::create_player(1, 99);
         let gameobject_guid =
             ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 23);
@@ -23521,6 +23538,29 @@ mod tests {
                 gameobject_guid,
                 player_guid,
                 ui_link_type: 2,
+                interaction_type: 40,
+            }]
+        );
+        let mut expected = (ServerOpcodes::GameObjectInteraction as u16)
+            .to_le_bytes()
+            .to_vec();
+        expected.extend_from_slice(&gameobject_guid.to_raw_bytes());
+        expected.extend_from_slice(&40_i32.to_le_bytes());
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
+
+        session.represented_gameobject_use_effects.clear();
+        assert!(session.use_represented_gameobject_ui_link_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::UiLinkUseSource { ui_link_type: 99 },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::UiLinkOpened {
+                gameobject_guid,
+                player_guid,
+                ui_link_type: 99,
+                interaction_type: 0,
             }]
         );
     }

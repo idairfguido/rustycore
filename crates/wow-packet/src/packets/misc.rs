@@ -110,6 +110,25 @@ impl ServerPacket for EnableBarberShop {
     }
 }
 
+// ── GameObjectInteraction (SMSG 0x288b) ─────────────────────────────
+
+/// Opens a gameobject-backed interaction UI.
+pub struct GameObjectInteraction {
+    pub object_guid: ObjectGuid,
+    pub interaction_type: i32,
+}
+
+impl ServerPacket for GameObjectInteraction {
+    const OPCODE: ServerOpcodes = ServerOpcodes::GameObjectInteraction;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        for byte in self.object_guid.to_raw_bytes() {
+            pkt.write_uint8(byte);
+        }
+        pkt.write_int32(self.interaction_type);
+    }
+}
+
 // ── FeatureSystemStatus (SMSG 0x25bf) — IN-GAME version ─────────────
 
 /// Feature system status sent AFTER entering the world.
@@ -3450,6 +3469,31 @@ mod tests {
         );
         assert_eq!(bytes[2], 7);
         assert_eq!(bytes.len(), 3);
+    }
+
+    #[test]
+    fn gameobject_interaction_writes_raw_guid_and_interaction_type_like_cpp() {
+        let guid = ObjectGuid::create_world_object(
+            wow_core::guid::HighGuid::GameObject,
+            0,
+            1,
+            571,
+            0,
+            777,
+            23,
+        );
+        let bytes = GameObjectInteraction {
+            object_guid: guid,
+            interaction_type: 40,
+        }
+        .to_bytes();
+        assert_eq!(
+            bytes[0..2],
+            (ServerOpcodes::GameObjectInteraction as u16).to_le_bytes()
+        );
+        assert_eq!(&bytes[2..18], &guid.to_raw_bytes());
+        assert_eq!(&bytes[18..22], &40_i32.to_le_bytes());
+        assert_eq!(bytes.len(), 22);
     }
 }
 
