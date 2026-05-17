@@ -1436,8 +1436,12 @@ impl crate::session::WorldSession {
         let loot_id = template.get_loot_id_like_cpp();
         match go_type {
             GAMEOBJECT_TYPE_FISHING_HOLE if loot_id != 0 => {
-                self.open_represented_fishing_hole_like_cpp(gameobject_guid, loot_id)
-                    .await;
+                self.open_represented_fishing_hole_like_cpp(
+                    gameobject_guid,
+                    gameobject_access.entry,
+                    loot_id,
+                )
+                .await;
             }
             GAMEOBJECT_TYPE_GATHERING_NODE => {
                 if let Some(source) = template.gathering_node_use_source_like_cpp() {

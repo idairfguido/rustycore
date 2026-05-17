@@ -372,8 +372,14 @@ impl WorldSession {
     pub(crate) async fn open_represented_fishing_hole_like_cpp(
         &mut self,
         gameobject_guid: ObjectGuid,
+        gameobject_entry: u32,
         loot_id: u32,
     ) {
+        let player_guid = self.player_guid();
+        let should_update_criteria = player_guid.is_some()
+            && loot_id != 0
+            && self.player_is_alive_like_cpp()
+            && self.represented_gameobject_exists_for_loot_like_cpp(gameobject_guid);
         self.open_represented_gameobject_personal_loot_like_cpp(
             gameobject_guid,
             loot_id,
@@ -381,6 +387,16 @@ impl WorldSession {
             true,
         )
         .await;
+        if should_update_criteria {
+            let player_guid = player_guid.expect("checked above");
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::FishingHoleCatchCriteriaUpdated {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry,
+                },
+            );
+        }
     }
 
     pub(crate) async fn open_represented_gathering_node_like_cpp(
@@ -8320,6 +8336,32 @@ mod tests {
                     player_guid,
                     trap_entry: 456,
                 },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn represented_fishing_hole_updates_catch_criteria_like_cpp() {
+        let mut session = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let gameobject_guid = test_gameobject_guid(91_005);
+        session.set_player_guid(Some(player_guid));
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+
+        session
+            .open_represented_fishing_hole_like_cpp(gameobject_guid, 190_000, 123)
+            .await;
+
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::FishingHoleCatchCriteriaUpdated {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 190_000,
+                }
             ]
         );
     }

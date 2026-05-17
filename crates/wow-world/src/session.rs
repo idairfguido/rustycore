@@ -421,6 +421,11 @@ pub(crate) enum RepresentedGameObjectUseEffect {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
     },
+    FishingHoleCatchCriteriaUpdated {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gameobject_entry: u32,
+    },
     FinishChanneledSpell {
         player_guid: ObjectGuid,
     },
