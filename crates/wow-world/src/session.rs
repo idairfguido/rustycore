@@ -10527,6 +10527,9 @@ impl WorldSession {
                 },
             );
         }
+        self.send_packet(&wow_packet::packets::misc::GameObjectDespawn {
+            object_guid: gameobject_guid,
+        });
         self.represented_gameobject_use_effects
             .push(RepresentedGameObjectUseEffect::GameObjectDeleted { gameobject_guid });
 
@@ -10598,6 +10601,9 @@ impl WorldSession {
             );
         }
 
+        self.send_packet(&wow_packet::packets::misc::GameObjectDespawn {
+            object_guid: gameobject_guid,
+        });
         self.represented_gameobject_use_effects
             .push(RepresentedGameObjectUseEffect::GameObjectDeleted { gameobject_guid });
 
@@ -23698,7 +23704,7 @@ mod tests {
 
     #[test]
     fn gameobject_use_flagdrop_triggers_event_and_delete_like_cpp() {
-        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let (mut session, _pkt_tx, send_rx) = make_session();
         let player_guid = ObjectGuid::create_player(1, 99);
         let gameobject_guid =
             ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 27);
@@ -23713,6 +23719,11 @@ mod tests {
                 expire_duration_ms: 44,
             },
         ));
+        let mut expected = (ServerOpcodes::GameObjectDespawn as u16)
+            .to_le_bytes()
+            .to_vec();
+        expected.extend_from_slice(&gameobject_guid.to_raw_bytes());
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
         assert_eq!(
             session.represented_gameobject_use_effects,
             vec![
@@ -23841,7 +23852,7 @@ mod tests {
 
     #[test]
     fn gameobject_use_new_flag_drop_records_owner_state_and_delete_like_cpp() {
-        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let (mut session, _pkt_tx, send_rx) = make_session();
         let player_guid = ObjectGuid::create_player(1, 99);
         let gameobject_guid =
             ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 37);
@@ -23854,6 +23865,11 @@ mod tests {
             },
             Some(false),
         ));
+        let mut expected = (ServerOpcodes::GameObjectDespawn as u16)
+            .to_le_bytes()
+            .to_vec();
+        expected.extend_from_slice(&gameobject_guid.to_raw_bytes());
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
         assert_eq!(
             session.represented_gameobject_use_effects,
             vec![

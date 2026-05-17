@@ -151,6 +151,23 @@ impl ServerPacket for GameObjectCustomAnim {
     }
 }
 
+// ── GameObjectDespawn (SMSG 0x25c5) ─────────────────────────────────
+
+/// Notifies the client that a gameobject despawned.
+pub struct GameObjectDespawn {
+    pub object_guid: ObjectGuid,
+}
+
+impl ServerPacket for GameObjectDespawn {
+    const OPCODE: ServerOpcodes = ServerOpcodes::GameObjectDespawn;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        for byte in self.object_guid.to_raw_bytes() {
+            pkt.write_uint8(byte);
+        }
+    }
+}
+
 // ── PageText (SMSG 0x2719) ───────────────────────────────────────────
 
 /// Opens a page-text object; the client queries the page contents separately.
@@ -3587,6 +3604,26 @@ mod tests {
         }
         .to_bytes();
         assert_eq!(despawn_bytes[22], 0x80);
+    }
+
+    #[test]
+    fn gameobject_despawn_writes_raw_guid_like_cpp() {
+        let guid = ObjectGuid::create_world_object(
+            wow_core::guid::HighGuid::GameObject,
+            0,
+            1,
+            571,
+            0,
+            777,
+            23,
+        );
+        let bytes = GameObjectDespawn { object_guid: guid }.to_bytes();
+        assert_eq!(
+            bytes[0..2],
+            (ServerOpcodes::GameObjectDespawn as u16).to_le_bytes()
+        );
+        assert_eq!(&bytes[2..18], &guid.to_raw_bytes());
+        assert_eq!(bytes.len(), 18);
     }
 
     #[test]
