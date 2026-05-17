@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use wow_constants::{TypeId, TypeMask};
 use wow_core::{ObjectGuid, Position};
 
@@ -108,6 +110,33 @@ pub struct GameObjectLootSource {
     pub linked_trap_entry: u32,
     pub chest_restock_time_secs: u32,
     pub chest_consumable: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameObjectOwnedLoot {
+    gold: u32,
+    unlooted_count: u32,
+}
+
+impl GameObjectOwnedLoot {
+    pub const fn new(gold: u32, unlooted_count: u32) -> Self {
+        Self {
+            gold,
+            unlooted_count,
+        }
+    }
+
+    pub const fn gold(&self) -> u32 {
+        self.gold
+    }
+
+    pub const fn unlooted_count(&self) -> u32 {
+        self.unlooted_count
+    }
+
+    pub const fn is_looted_like_cpp(&self) -> bool {
+        self.gold == 0 && self.unlooted_count == 0
+    }
 }
 
 impl GameObjectLootSource {
@@ -789,6 +818,9 @@ pub struct GameObject {
     restock_time: i64,
     loot_state: LootState,
     loot_state_unit_guid: ObjectGuid,
+    shared_loot: Option<GameObjectOwnedLoot>,
+    personal_loot: HashMap<ObjectGuid, GameObjectOwnedLoot>,
+    unique_users: HashSet<ObjectGuid>,
     spawned_by_default: bool,
     use_times: u32,
     cooldown_time: i64,
@@ -829,6 +861,9 @@ impl GameObject {
             restock_time: 0,
             loot_state: LootState::NotReady,
             loot_state_unit_guid: ObjectGuid::EMPTY,
+            shared_loot: None,
+            personal_loot: HashMap::new(),
+            unique_users: HashSet::new(),
             spawned_by_default: true,
             use_times: 0,
             cooldown_time: 0,
@@ -930,6 +965,71 @@ impl GameObject {
 
     pub const fn use_times(&self) -> u32 {
         self.use_times
+    }
+
+    pub const fn shared_loot_like_cpp(&self) -> Option<&GameObjectOwnedLoot> {
+        self.shared_loot.as_ref()
+    }
+
+    pub fn set_shared_loot_like_cpp(&mut self, loot: GameObjectOwnedLoot) {
+        self.shared_loot = Some(loot);
+    }
+
+    pub fn clear_shared_loot_like_cpp(&mut self) {
+        self.shared_loot = None;
+    }
+
+    pub fn personal_loot_like_cpp(&self, guid: ObjectGuid) -> Option<&GameObjectOwnedLoot> {
+        self.personal_loot.get(&guid)
+    }
+
+    pub fn set_personal_loot_like_cpp(&mut self, guid: ObjectGuid, loot: GameObjectOwnedLoot) {
+        self.personal_loot.insert(guid, loot);
+    }
+
+    pub fn personal_loot_count_like_cpp(&self) -> usize {
+        self.personal_loot.len()
+    }
+
+    pub fn add_unique_use_like_cpp(&mut self, guid: ObjectGuid) -> bool {
+        self.unique_users.insert(guid)
+    }
+
+    pub fn unique_user_count_like_cpp(&self) -> usize {
+        self.unique_users.len()
+    }
+
+    pub fn add_use_like_cpp(&mut self) {
+        self.use_times = self.use_times.saturating_add(1);
+    }
+
+    pub fn reset_use_times_like_cpp(&mut self) {
+        self.use_times = 0;
+    }
+
+    pub fn clear_loot_like_cpp(&mut self) {
+        self.shared_loot = None;
+        self.personal_loot.clear();
+        self.unique_users.clear();
+        self.use_times = 0;
+    }
+
+    pub fn is_fully_looted_like_cpp(&self) -> bool {
+        if self
+            .shared_loot
+            .as_ref()
+            .is_some_and(|loot| !loot.is_looted_like_cpp())
+        {
+            return false;
+        }
+
+        for loot in self.personal_loot.values() {
+            if !loot.is_looted_like_cpp() {
+                return false;
+            }
+        }
+
+        true
     }
 
     pub const fn cooldown_time(&self) -> i64 {
@@ -2051,6 +2151,88 @@ mod tests {
                 .gathering_node_use_source_like_cpp(),
             None
         );
+    }
+
+    #[test]
+    fn gameobject_owned_loot_is_looted_matches_cpp_gold_and_unlooted_count() {
+        let empty = GameObjectOwnedLoot::default();
+        assert_eq!(empty.gold(), 0);
+        assert_eq!(empty.unlooted_count(), 0);
+        assert!(empty.is_looted_like_cpp());
+
+        let gold_only = GameObjectOwnedLoot::new(1, 0);
+        assert_eq!(gold_only.gold(), 1);
+        assert_eq!(gold_only.unlooted_count(), 0);
+        assert!(!gold_only.is_looted_like_cpp());
+
+        let items_only = GameObjectOwnedLoot::new(0, 1);
+        assert_eq!(items_only.gold(), 0);
+        assert_eq!(items_only.unlooted_count(), 1);
+        assert!(!items_only.is_looted_like_cpp());
+
+        assert!(!GameObjectOwnedLoot::new(1, 1).is_looted_like_cpp());
+    }
+
+    #[test]
+    fn gameobject_is_fully_looted_checks_shared_and_personal_loot_like_cpp() {
+        let mut go = GameObject::new();
+        assert!(go.is_fully_looted_like_cpp());
+        assert_eq!(go.shared_loot_like_cpp(), None);
+        assert_eq!(go.personal_loot_count_like_cpp(), 0);
+
+        go.set_shared_loot_like_cpp(GameObjectOwnedLoot::new(10, 0));
+        assert!(!go.is_fully_looted_like_cpp());
+
+        go.set_shared_loot_like_cpp(GameObjectOwnedLoot::default());
+        assert!(go.is_fully_looted_like_cpp());
+
+        let looted_player = ObjectGuid::new(1, 100);
+        let unlooted_player = ObjectGuid::new(1, 200);
+        go.set_personal_loot_like_cpp(looted_player, GameObjectOwnedLoot::default());
+        assert!(go.is_fully_looted_like_cpp());
+        assert_eq!(
+            go.personal_loot_like_cpp(looted_player),
+            Some(&GameObjectOwnedLoot::default())
+        );
+
+        go.set_personal_loot_like_cpp(unlooted_player, GameObjectOwnedLoot::new(0, 1));
+        assert_eq!(go.personal_loot_count_like_cpp(), 2);
+        assert!(!go.is_fully_looted_like_cpp());
+
+        go.set_personal_loot_like_cpp(unlooted_player, GameObjectOwnedLoot::default());
+        assert!(go.is_fully_looted_like_cpp());
+    }
+
+    #[test]
+    fn gameobject_clear_loot_clears_owned_loot_unique_users_and_use_count_like_cpp() {
+        let mut go = GameObject::new();
+        let first = ObjectGuid::new(1, 100);
+        let second = ObjectGuid::new(1, 200);
+
+        go.set_shared_loot_like_cpp(GameObjectOwnedLoot::new(1, 1));
+        go.set_personal_loot_like_cpp(first, GameObjectOwnedLoot::new(0, 1));
+        assert!(go.add_unique_use_like_cpp(first));
+        assert!(!go.add_unique_use_like_cpp(first));
+        assert!(go.add_unique_use_like_cpp(second));
+        go.add_use_like_cpp();
+        go.add_use_like_cpp();
+
+        assert_eq!(
+            go.shared_loot_like_cpp(),
+            Some(&GameObjectOwnedLoot::new(1, 1))
+        );
+        assert_eq!(go.personal_loot_count_like_cpp(), 1);
+        assert_eq!(go.unique_user_count_like_cpp(), 2);
+        assert_eq!(go.use_times(), 2);
+        assert!(!go.is_fully_looted_like_cpp());
+
+        go.clear_loot_like_cpp();
+
+        assert_eq!(go.shared_loot_like_cpp(), None);
+        assert_eq!(go.personal_loot_count_like_cpp(), 0);
+        assert_eq!(go.unique_user_count_like_cpp(), 0);
+        assert_eq!(go.use_times(), 0);
+        assert!(go.is_fully_looted_like_cpp());
     }
 
     #[test]
