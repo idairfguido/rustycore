@@ -10955,6 +10955,7 @@ impl WorldSession {
                         player_guid,
                     },
                 );
+                self.send_packet(&wow_packet::packets::misc::FishNotHooked);
             }
         }
 
@@ -24503,7 +24504,7 @@ mod tests {
 
     #[test]
     fn gameobject_use_fishing_node_not_ready_sends_not_hooked_like_cpp() {
-        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let (mut session, _pkt_tx, send_rx) = make_session();
         let player_guid = ObjectGuid::create_player(1, 99);
         let gameobject_guid =
             ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 17);
@@ -24532,6 +24533,10 @@ mod tests {
                 .get(&gameobject_guid)
                 .and_then(|state| state.loot_state),
             Some(wow_entities::LootState::JustDeactivated)
+        );
+        assert_eq!(
+            send_rx.try_recv().unwrap(),
+            (ServerOpcodes::FishNotHooked as u16).to_le_bytes()
         );
     }
 

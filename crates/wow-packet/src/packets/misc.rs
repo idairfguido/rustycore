@@ -84,6 +84,17 @@ impl ServerPacket for TutorialFlags {
     }
 }
 
+// ── FishNotHooked (SMSG 0x26cf) ─────────────────────────────────────
+
+/// Empty packet sent when a fishing bobber is clicked before a fish is hooked.
+pub struct FishNotHooked;
+
+impl ServerPacket for FishNotHooked {
+    const OPCODE: ServerOpcodes = ServerOpcodes::FishNotHooked;
+
+    fn write(&self, _pkt: &mut WorldPacket) {}
+}
+
 // ── FeatureSystemStatus (SMSG 0x25bf) — IN-GAME version ─────────────
 
 /// Feature system status sent AFTER entering the world.
@@ -3404,6 +3415,12 @@ mod tests {
         // Mask = 0x5E for warrior (Cloth+Leather+Mail+Plate+Shield)
         let mask = u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]);
         assert_eq!(mask, 0x5E);
+    }
+
+    #[test]
+    fn fish_not_hooked_is_empty_server_packet_like_cpp() {
+        let bytes = FishNotHooked.to_bytes();
+        assert_eq!(bytes, (ServerOpcodes::FishNotHooked as u16).to_le_bytes());
     }
 }
 
