@@ -10896,16 +10896,23 @@ impl WorldSession {
         player_guid: ObjectGuid,
         gameobject_entry: u32,
         source: wow_entities::SpellcasterUseSource,
-        party_context_allows_use: Option<bool>,
     ) -> bool {
-        if source.party_only && party_context_allows_use != Some(true) {
-            self.represented_gameobject_use_effects.push(
-                RepresentedGameObjectUseEffect::SpellcasterPartyOnlyRejected {
-                    gameobject_guid,
-                    player_guid,
-                },
-            );
-            return false;
+        if source.party_only {
+            let owner_guid = self
+                .represented_gameobject_use_states
+                .get(&gameobject_guid)
+                .and_then(|state| state.owner_guid);
+            if !owner_guid.is_some_and(|owner_guid| {
+                self.represented_player_is_same_raid_with_like_cpp(player_guid, owner_guid)
+            }) {
+                self.represented_gameobject_use_effects.push(
+                    RepresentedGameObjectUseEffect::SpellcasterPartyOnlyRejected {
+                        gameobject_guid,
+                        player_guid,
+                    },
+                );
+                return false;
+            }
         }
 
         self.remove_represented_mounted_auras_by_type_like_cpp();
@@ -24224,7 +24231,6 @@ mod tests {
                 charges: 1,
                 party_only: false,
             },
-            None,
         ));
         assert_eq!(
             session.represented_gameobject_use_effects,
@@ -24296,7 +24302,6 @@ mod tests {
                 charges: 1,
                 party_only: true,
             },
-            None,
         ));
         assert_eq!(
             session.represented_gameobject_use_effects,
@@ -24306,6 +24311,70 @@ mod tests {
                     player_guid,
                 }
             ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_spellcaster_party_only_requires_owner_raid_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let owner_guid = ObjectGuid::create_player(1, 98);
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 22);
+        let source = wow_entities::SpellcasterUseSource {
+            spell_id: 3456,
+            charges: 0,
+            party_only: true,
+        };
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .owner_guid = Some(owner_guid);
+
+        assert!(!session.use_represented_gameobject_spellcaster_like_cpp(
+            gameobject_guid,
+            player_guid,
+            777,
+            source,
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::SpellcasterPartyOnlyRejected {
+                    gameobject_guid,
+                    player_guid,
+                }
+            ]
+        );
+        session.represented_gameobject_use_effects.clear();
+
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(owner_guid);
+        group.add_member(player_guid);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+
+        assert!(session.use_represented_gameobject_spellcaster_like_cpp(
+            gameobject_guid,
+            player_guid,
+            777,
+            source,
+        ));
+        assert!(
+            session
+                .represented_gameobject_use_effects
+                .iter()
+                .any(|effect| matches!(
+                    effect,
+                    RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
+                        caster_guid,
+                        spell_id: 3456,
+                        ..
+                    } if *caster_guid == player_guid
+                ))
         );
     }
 

@@ -1389,7 +1389,6 @@ impl crate::session::WorldSession {
                         player_guid,
                         gameobject_access.entry,
                         source,
-                        None,
                     );
                 }
                 return;
