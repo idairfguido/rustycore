@@ -10355,6 +10355,9 @@ impl WorldSession {
         gameobject_position: Position,
         source: wow_entities::BarberChairUseSource,
     ) -> bool {
+        self.send_packet(&wow_packet::packets::misc::EnableBarberShop {
+            customization_scope: source.customization_scope.min(u32::from(u8::MAX)) as u8,
+        });
         self.represented_gameobject_use_effects.push(
             RepresentedGameObjectUseEffect::BarberChairUsed {
                 gameobject_guid,
@@ -23466,7 +23469,7 @@ mod tests {
 
     #[test]
     fn gameobject_use_barber_chair_records_ui_teleport_and_stand_state_like_cpp() {
-        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let (mut session, _pkt_tx, send_rx) = make_session();
         let player_guid = ObjectGuid::create_player(1, 99);
         let gameobject_guid =
             ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 22);
@@ -23493,6 +23496,11 @@ mod tests {
                 sit_anim_kit: 55,
             }]
         );
+        let mut expected = (ServerOpcodes::EnableBarberShop as u16)
+            .to_le_bytes()
+            .to_vec();
+        expected.push(7);
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
     }
 
     #[test]

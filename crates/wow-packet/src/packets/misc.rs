@@ -95,6 +95,21 @@ impl ServerPacket for FishNotHooked {
     fn write(&self, _pkt: &mut WorldPacket) {}
 }
 
+// ── EnableBarberShop (SMSG 0x26bc) ──────────────────────────────────
+
+/// Opens the barber shop/customization UI for the requested customization scope.
+pub struct EnableBarberShop {
+    pub customization_scope: u8,
+}
+
+impl ServerPacket for EnableBarberShop {
+    const OPCODE: ServerOpcodes = ServerOpcodes::EnableBarberShop;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_uint8(self.customization_scope);
+    }
+}
+
 // ── FeatureSystemStatus (SMSG 0x25bf) — IN-GAME version ─────────────
 
 /// Feature system status sent AFTER entering the world.
@@ -3421,6 +3436,20 @@ mod tests {
     fn fish_not_hooked_is_empty_server_packet_like_cpp() {
         let bytes = FishNotHooked.to_bytes();
         assert_eq!(bytes, (ServerOpcodes::FishNotHooked as u16).to_le_bytes());
+    }
+
+    #[test]
+    fn enable_barber_shop_writes_customization_scope_like_cpp() {
+        let bytes = EnableBarberShop {
+            customization_scope: 7,
+        }
+        .to_bytes();
+        assert_eq!(
+            bytes[0..2],
+            (ServerOpcodes::EnableBarberShop as u16).to_le_bytes()
+        );
+        assert_eq!(bytes[2], 7);
+        assert_eq!(bytes.len(), 3);
     }
 }
 
