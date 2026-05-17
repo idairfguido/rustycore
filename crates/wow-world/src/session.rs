@@ -525,6 +525,16 @@ pub(crate) enum RepresentedNewFlagStateRequest {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) enum RepresentedCapturePointStateLikeCpp {
+    Neutral,
+    ContestedHorde,
+    ContestedAlliance,
+    HordeCaptured,
+    AllianceCaptured,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RepresentedGameObjectSpellCaster {
     User,
     GameObject,
@@ -567,6 +577,7 @@ pub(crate) struct RepresentedGameObjectUseState {
     pub interact_radius_override: Option<u32>,
     pub lock_id: Option<u32>,
     pub fishing_hole_max_opens: Option<u32>,
+    pub capture_point_state: Option<RepresentedCapturePointStateLikeCpp>,
     pub new_flag_state: Option<RepresentedNewFlagStateRequest>,
     pub new_flag_carrier_guid: Option<wow_core::ObjectGuid>,
     pub new_flag_taken_from_base_game_time_ms: Option<u32>,
@@ -747,6 +758,7 @@ impl Default for RepresentedGameObjectUseState {
             interact_radius_override: None,
             lock_id: None,
             fishing_hole_max_opens: None,
+            capture_point_state: None,
             new_flag_state: None,
             new_flag_carrier_guid: None,
             new_flag_taken_from_base_game_time_ms: None,
@@ -10687,6 +10699,34 @@ impl WorldSession {
         player_guid: ObjectGuid,
         source: wow_entities::CapturePointUseSource,
     ) -> bool {
+        if self.player_battleground_type_id_like_cpp.is_none() {
+            return false;
+        }
+
+        let state = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .and_then(|state| state.capture_point_state)
+            .unwrap_or(RepresentedCapturePointStateLikeCpp::Neutral);
+        let can_interact = match player_team_for_race_cpp(self.player_race_like_cpp()) {
+            Team::Horde => matches!(
+                state,
+                RepresentedCapturePointStateLikeCpp::Neutral
+                    | RepresentedCapturePointStateLikeCpp::ContestedAlliance
+                    | RepresentedCapturePointStateLikeCpp::AllianceCaptured
+            ),
+            Team::Alliance => matches!(
+                state,
+                RepresentedCapturePointStateLikeCpp::Neutral
+                    | RepresentedCapturePointStateLikeCpp::ContestedHorde
+                    | RepresentedCapturePointStateLikeCpp::HordeCaptured
+            ),
+            Team::Other => false,
+        };
+        if !can_interact {
+            return false;
+        }
+
         self.represented_gameobject_use_effects.push(
             RepresentedGameObjectUseEffect::CapturePointAssaultRequested {
                 gameobject_guid,
@@ -14326,6 +14366,8 @@ mod tests {
     use wow_packet::packets::loot::{
         CreatureLoot, LOOT_TYPE_CORPSE_LIKE_CPP, LOOT_TYPE_ITEM_LIKE_CPP, LootEntry, LootEntryFlags,
     };
+
+    const BATTLEGROUND_AB_LIKE_CPP: u32 = 3;
 
     fn make_session() -> (
         WorldSession,
@@ -24200,6 +24242,7 @@ mod tests {
         let player_guid = ObjectGuid::create_player(1, 99);
         let gameobject_guid =
             ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 25);
+        session.set_player_battleground_type_id_like_cpp(BATTLEGROUND_AB_LIKE_CPP);
 
         assert!(session.use_represented_gameobject_capture_point_like_cpp(
             gameobject_guid,
@@ -24224,6 +24267,65 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn gameobject_use_capture_point_requires_battleground_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 42);
+
+        assert!(!session.use_represented_gameobject_capture_point_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::CapturePointUseSource {
+                capture_time_ms: 60_000,
+                world_state_id: 123,
+                contested_event_horde: 456,
+                contested_event_alliance: 789,
+            },
+        ));
+        assert!(session.represented_gameobject_use_effects.is_empty());
+    }
+
+    #[test]
+    fn gameobject_use_capture_point_respects_team_state_gate_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 43);
+        session.set_player_battleground_type_id_like_cpp(BATTLEGROUND_AB_LIKE_CPP);
+        session.player_race = 1;
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .capture_point_state = Some(RepresentedCapturePointStateLikeCpp::AllianceCaptured);
+
+        assert!(!session.use_represented_gameobject_capture_point_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::CapturePointUseSource {
+                capture_time_ms: 60_000,
+                world_state_id: 123,
+                contested_event_horde: 456,
+                contested_event_alliance: 789,
+            },
+        ));
+        assert!(session.represented_gameobject_use_effects.is_empty());
+
+        session.player_race = 2;
+        assert!(session.use_represented_gameobject_capture_point_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::CapturePointUseSource {
+                capture_time_ms: 60_000,
+                world_state_id: 123,
+                contested_event_horde: 456,
+                contested_event_alliance: 789,
+            },
+        ));
     }
 
     #[test]
