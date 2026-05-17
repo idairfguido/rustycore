@@ -37,20 +37,20 @@ use wow_data::{
     AreaTableStore, AreaTriggerStore, ChrSpecializationStore, ConditionEntriesByTypeStore,
     CreatureDisplayInfoStore, CreatureModelDataStore, CreatureTemplateMountStoreLikeCpp,
     CurrencyTypesEntry, CurrencyTypesStore, DISABLE_TYPE_MAP, DisableMgrLikeCpp,
-    DisableWorldObjectRefLikeCpp, DungeonEncounterStore, GameObjectDisplayInfoStore,
-    HotfixBlobCache, ImportPriceStores, ItemAppearanceStore, ItemClassStore, ItemCurrencyCostStore,
-    ItemDisenchantLootStore, ItemExtendedCostStore, ItemModifiedAppearanceStore,
-    ItemPriceBaseStore, ItemRandomEnchantmentTemplateStore, ItemRandomPropertiesStore,
-    ItemRandomPropertyTemplateEntry, ItemRandomSuffixStore, ItemStatsStore, ItemStore, LockStore,
-    MapDifficultyStore, MapDifficultyXConditionStore, MapStore, MountCapabilityStore, MountStore,
-    MountTypeXCapabilityStore, MountXDisplayStore, PhaseGroupStore, PhaseStore,
-    PlayerConditionAuraLikeCpp, PlayerConditionContextLikeCpp, PlayerConditionCountLikeCpp,
-    PlayerConditionPartyStatusLikeCpp, PlayerConditionQuestKillLikeCpp,
-    PlayerConditionReputationLikeCpp, PlayerConditionSkillLikeCpp, PlayerConditionStore,
-    PlayerStatsStore, RandPropPointsStore, SkillStore, SpellItemEnchantmentStore, SpellMiscStore,
-    SpellRangeStore, SpellStore, SummonPropertiesEntry, VEHICLE_SEAT_FLAG_CAN_ATTACK,
-    VehicleAccessoryStoreLikeCpp, VehicleSeatStore, VehicleStore, VehicleTemplateStoreLikeCpp,
-    is_player_meeting_condition_like_cpp,
+    DisableWorldObjectRefLikeCpp, DungeonEncounterStore, FishingBaseSkillStoreLikeCpp,
+    GameObjectDisplayInfoStore, HotfixBlobCache, ImportPriceStores, ItemAppearanceStore,
+    ItemClassStore, ItemCurrencyCostStore, ItemDisenchantLootStore, ItemExtendedCostStore,
+    ItemModifiedAppearanceStore, ItemPriceBaseStore, ItemRandomEnchantmentTemplateStore,
+    ItemRandomPropertiesStore, ItemRandomPropertyTemplateEntry, ItemRandomSuffixStore,
+    ItemStatsStore, ItemStore, LockStore, MapDifficultyStore, MapDifficultyXConditionStore,
+    MapStore, MountCapabilityStore, MountStore, MountTypeXCapabilityStore, MountXDisplayStore,
+    PhaseGroupStore, PhaseStore, PlayerConditionAuraLikeCpp, PlayerConditionContextLikeCpp,
+    PlayerConditionCountLikeCpp, PlayerConditionPartyStatusLikeCpp,
+    PlayerConditionQuestKillLikeCpp, PlayerConditionReputationLikeCpp, PlayerConditionSkillLikeCpp,
+    PlayerConditionStore, PlayerStatsStore, RandPropPointsStore, SkillStore,
+    SpellItemEnchantmentStore, SpellMiscStore, SpellRangeStore, SpellStore, SummonPropertiesEntry,
+    VEHICLE_SEAT_FLAG_CAN_ATTACK, VehicleAccessoryStoreLikeCpp, VehicleSeatStore, VehicleStore,
+    VehicleTemplateStoreLikeCpp, is_player_meeting_condition_like_cpp,
     progression_rewards::{ContentTuningStore, FactionStore, FactionTemplateStore},
 };
 use wow_database::{
@@ -600,6 +600,8 @@ pub(crate) struct RepresentedGameObjectUseState {
     pub chest_consumable: Option<bool>,
     pub chest_personal_loot_id: Option<u32>,
     pub map_id: Option<u16>,
+    pub zone_id: Option<u32>,
+    pub area_id: Option<u32>,
     pub position: Option<wow_core::Position>,
     pub go_anim_progress: u8,
     pub display_id: Option<u32>,
@@ -788,6 +790,8 @@ impl Default for RepresentedGameObjectUseState {
             chest_consumable: None,
             chest_personal_loot_id: None,
             map_id: None,
+            zone_id: None,
+            area_id: None,
             position: None,
             go_anim_progress: 255,
             display_id: None,
@@ -856,6 +860,7 @@ pub(crate) enum RepresentedGameObjectCriteriaEvent {
 }
 
 pub type SharedObjectAccessor = Arc<RwLock<ObjectAccessor>>;
+pub(crate) const SKILL_FISHING_LIKE_CPP: u16 = 356;
 pub(crate) const SKILL_RIDING_LIKE_CPP: u16 = 762;
 pub(crate) const LIQUID_MAP_IN_WATER_LIKE_CPP: u32 = 0x0000_0004;
 pub(crate) const LIQUID_MAP_UNDER_WATER_LIKE_CPP: u32 = 0x0000_0008;
@@ -1243,6 +1248,9 @@ pub struct WorldSession {
 
     // Area table store (area hierarchy + mount flags)
     area_table_store: Option<Arc<AreaTableStore>>,
+
+    // C++ ObjectMgr fishing base skill levels loaded from skill_fishing_base_level.
+    fishing_base_skill_store: Option<Arc<FishingBaseSkillStoreLikeCpp>>,
 
     // Area trigger store (collision detection + teleportation)
     area_trigger_store: Option<Arc<AreaTriggerStore>>,
@@ -2112,6 +2120,7 @@ impl WorldSession {
             hotfix_blob_cache: None,
             skill_store: None,
             area_table_store: None,
+            fishing_base_skill_store: None,
             area_trigger_store: None,
             chr_specialization_store: None,
             dungeon_encounter_store: None,
@@ -3804,6 +3813,21 @@ impl WorldSession {
         self.upsert_canonical_gameobject_map_object_like_cpp(map_id, guid, entry, position);
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn record_represented_gameobject_zone_area_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        zone_id: u32,
+        area_id: u32,
+    ) {
+        let state = self
+            .represented_gameobject_use_states
+            .entry(guid)
+            .or_default();
+        state.zone_id = Some(zone_id);
+        state.area_id = Some(area_id);
+    }
+
     pub(crate) fn record_represented_gameobject_interact_radius_override_like_cpp(
         &mut self,
         guid: ObjectGuid,
@@ -3995,7 +4019,7 @@ impl WorldSession {
         }
     }
 
-    #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn record_represented_gameobject_owner_guid_like_cpp(
         &mut self,
         guid: ObjectGuid,
@@ -6074,6 +6098,14 @@ impl WorldSession {
 
     pub(crate) fn area_table_store(&self) -> Option<&Arc<AreaTableStore>> {
         self.area_table_store.as_ref()
+    }
+
+    pub fn set_fishing_base_skill_store(&mut self, store: Arc<FishingBaseSkillStoreLikeCpp>) {
+        self.fishing_base_skill_store = Some(store);
+    }
+
+    pub(crate) fn fishing_base_skill_store(&self) -> Option<&Arc<FishingBaseSkillStoreLikeCpp>> {
+        self.fishing_base_skill_store.as_ref()
     }
 
     /// Set the quest store shared reference.
@@ -11601,6 +11633,10 @@ impl WorldSession {
                     fishing_roll,
                     explicit_fishing_hole_guid,
                 ) = {
+                    let represented_area_fishing_level =
+                        self.represented_fishing_base_skill_level_like_cpp(gameobject_guid);
+                    let represented_player_fishing_level =
+                        i32::from(self.player_skill_value_like_cpp(SKILL_FISHING_LIKE_CPP));
                     let state = self
                         .represented_gameobject_use_states
                         .entry(gameobject_guid)
@@ -11610,8 +11646,10 @@ impl WorldSession {
                     state.go_state = Some(wow_entities::GoState::Active);
                     state.gameobject_flags = wow_entities::GO_FLAG_IN_MULTI_USE;
                     (
-                        state.fishing_area_level,
-                        state.player_fishing_level,
+                        state.fishing_area_level.or(represented_area_fishing_level),
+                        state
+                            .player_fishing_level
+                            .or(Some(represented_player_fishing_level)),
                         state.fishing_roll,
                         state.nearby_fishing_hole_guid,
                     )
@@ -11753,6 +11791,29 @@ impl WorldSession {
         }
 
         nearest.map(|(guid, _)| guid)
+    }
+
+    pub(crate) fn represented_gameobject_area_id_like_cpp(
+        &self,
+        gameobject_guid: ObjectGuid,
+    ) -> u32 {
+        self.represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .and_then(|state| state.area_id)
+            .unwrap_or_else(|| self.player_zone_area_like_cpp().1)
+    }
+
+    fn represented_fishing_base_skill_level_like_cpp(
+        &self,
+        gameobject_guid: ObjectGuid,
+    ) -> Option<i32> {
+        let area_id = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .and_then(|state| state.area_id)?;
+        let area_store = self.area_table_store()?;
+        let fishing_store = self.fishing_base_skill_store()?;
+        Some(fishing_store.base_skill_level_like_cpp(area_store, area_id))
     }
 
     fn represented_gameobject_spell_lookup_difficulty_id_like_cpp(&self) -> u8 {
@@ -26107,6 +26168,63 @@ mod tests {
                 player_guid,
             },
         ));
+        assert!(session.represented_gameobject_use_effects.contains(
+            &RepresentedGameObjectUseEffect::FishingLootRoll {
+                gameobject_guid,
+                player_guid,
+                player_fishing_level: 100,
+                area_fishing_level: 200,
+                chance: 25,
+                roll: 30,
+            },
+        ));
+        assert!(session.represented_gameobject_use_effects.contains(
+            &RepresentedGameObjectUseEffect::FishingLootRequested {
+                gameobject_guid,
+                player_guid,
+                loot_type: wow_packet::packets::loot::LOOT_TYPE_FISHING_JUNK_LIKE_CPP,
+            },
+        ));
+    }
+
+    #[test]
+    fn gameobject_use_fishing_node_resolves_area_and_skill_from_session_state_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 57);
+        session.set_area_table_store(Arc::new(wow_data::AreaTableStore::from_entries([
+            wow_data::AreaTableEntry {
+                id: 900,
+                parent_area_id: 0,
+                mount_flags: 0,
+                flags: 0,
+            },
+            wow_data::AreaTableEntry {
+                id: 901,
+                parent_area_id: 900,
+                mount_flags: 0,
+                flags: 0,
+            },
+        ])));
+        session.set_fishing_base_skill_store(Arc::new(
+            wow_data::FishingBaseSkillStoreLikeCpp::from_entries([(900, 200)]),
+        ));
+        session.set_player_skill_values_like_cpp(HashMap::from([(SKILL_FISHING_LIKE_CPP, 100)]));
+        session.record_represented_gameobject_zone_area_like_cpp(gameobject_guid, 1, 901);
+        {
+            let state = session
+                .represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default();
+            state.owner_guid = Some(player_guid);
+            state.fishing_roll = Some(30);
+        }
+
+        assert!(
+            session.use_represented_gameobject_fishing_node_like_cpp(gameobject_guid, player_guid)
+        );
+
         assert!(session.represented_gameobject_use_effects.contains(
             &RepresentedGameObjectUseEffect::FishingLootRoll {
                 gameobject_guid,

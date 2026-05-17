@@ -173,6 +173,8 @@ pub enum WorldStatements {
     SEL_FISHING_LOOT_TEMPLATE_ROWS,
     /// All fishing_loot_template rows for startup loading.
     SEL_FISHING_LOOT_TEMPLATE_ALL_ROWS,
+    /// All C++ ObjectMgr fishing base skill levels by AreaTable ID.
+    SEL_FISHING_BASE_SKILL_LEVELS,
     /// gameobject_loot_template rows for a gameobject loot ID.
     /// Args: gameobject loot ID (u32).
     SEL_GAMEOBJECT_LOOT_TEMPLATE_ROWS,
@@ -625,6 +627,9 @@ impl StatementDef for WorldStatements {
                 "SELECT Entry, Item, Reference, Chance, QuestRequired, LootMode, GroupId, MinCount, MaxCount ",
                 "FROM fishing_loot_template",
             ),
+            Self::SEL_FISHING_BASE_SKILL_LEVELS => {
+                "SELECT entry, skill FROM skill_fishing_base_level"
+            }
             Self::SEL_GAMEOBJECT_LOOT_TEMPLATE_ROWS => concat!(
                 "SELECT Item, Reference, Chance, QuestRequired, LootMode, GroupId, MinCount, MaxCount ",
                 "FROM gameobject_loot_template WHERE Entry = ?",
