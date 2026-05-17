@@ -169,6 +169,11 @@ pub struct BarberChairUseSource {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct UiLinkUseSource {
+    pub ui_link_type: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct QuestgiverUseSource {
     pub gossip_id: u32,
 }
@@ -377,6 +382,16 @@ impl GameObjectTemplateData {
             chair_height: self.data[0],
             sit_anim_kit: self.data[2],
             customization_scope: self.data[4],
+        })
+    }
+
+    pub const fn ui_link_use_source_like_cpp(&self) -> Option<UiLinkUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_UI_LINK {
+            return None;
+        }
+
+        Some(UiLinkUseSource {
+            ui_link_type: self.data[0],
         })
     }
 
@@ -1349,6 +1364,23 @@ mod tests {
         assert_eq!(
             GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHAIR, data)
                 .barber_chair_use_source_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn ui_link_use_source_uses_cpp_data_indices() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[0] = 3;
+        data[6] = 99;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_UI_LINK, data)
+                .ui_link_use_source_like_cpp(),
+            Some(UiLinkUseSource { ui_link_type: 3 })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data).ui_link_use_source_like_cpp(),
             None
         );
     }

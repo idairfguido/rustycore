@@ -15,7 +15,7 @@ use wow_entities::{
     GAMEOBJECT_TYPE_CHAIR, GAMEOBJECT_TYPE_DOOR, GAMEOBJECT_TYPE_FISHING_HOLE,
     GAMEOBJECT_TYPE_GATHERING_NODE, GAMEOBJECT_TYPE_GOOBER, GAMEOBJECT_TYPE_QUESTGIVER,
     GAMEOBJECT_TYPE_SPELL_FOCUS, GAMEOBJECT_TYPE_SPELLCASTER, GAMEOBJECT_TYPE_TRAP,
-    GameObjectTemplateData, MAX_GAMEOBJECT_DATA,
+    GAMEOBJECT_TYPE_UI_LINK, GameObjectTemplateData, MAX_GAMEOBJECT_DATA,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::ClientPacket;
@@ -1268,6 +1268,16 @@ impl crate::session::WorldSession {
                         gameobject_guid,
                         player_guid,
                         gameobject_access.position,
+                        source,
+                    );
+                }
+                return;
+            }
+            GAMEOBJECT_TYPE_UI_LINK => {
+                if let Some(source) = template.ui_link_use_source_like_cpp() {
+                    self.use_represented_gameobject_ui_link_like_cpp(
+                        gameobject_guid,
+                        player_guid,
                         source,
                     );
                 }

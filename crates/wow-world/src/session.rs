@@ -317,6 +317,11 @@ pub(crate) enum RepresentedGameObjectUseEffect {
         stand_state: u32,
         sit_anim_kit: u32,
     },
+    UiLinkOpened {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        ui_link_type: u32,
+    },
     SpellcasterPartyOnlyRejected {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
@@ -10159,6 +10164,23 @@ impl WorldSession {
                 teleport_position: gameobject_position,
                 stand_state: 4_u32.saturating_add(source.chair_height),
                 sit_anim_kit: source.sit_anim_kit,
+            },
+        );
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_ui_link_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        source: wow_entities::UiLinkUseSource,
+    ) -> bool {
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::UiLinkOpened {
+                gameobject_guid,
+                player_guid,
+                ui_link_type: source.ui_link_type,
             },
         );
 
@@ -22641,6 +22663,28 @@ mod tests {
                 teleport_position: gameobject_position,
                 stand_state: 6,
                 sit_anim_kit: 55,
+            }]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_ui_link_records_interaction_type_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 23);
+
+        assert!(session.use_represented_gameobject_ui_link_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::UiLinkUseSource { ui_link_type: 2 },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::UiLinkOpened {
+                gameobject_guid,
+                player_guid,
+                ui_link_type: 2,
             }]
         );
     }
