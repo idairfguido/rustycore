@@ -11,8 +11,8 @@ use tracing::{debug, info, warn};
 use wow_constants::{ClientOpcodes, ItemExtendedCostFlags};
 use wow_database::{SqlTransaction, WorldStatements};
 use wow_entities::{
-    GAMEOBJECT_TYPE_FISHING_HOLE, GAMEOBJECT_TYPE_GATHERING_NODE, GameObjectTemplateData,
-    MAX_GAMEOBJECT_DATA,
+    GAMEOBJECT_TYPE_BUTTON, GAMEOBJECT_TYPE_DOOR, GAMEOBJECT_TYPE_FISHING_HOLE,
+    GAMEOBJECT_TYPE_GATHERING_NODE, GameObjectTemplateData, MAX_GAMEOBJECT_DATA,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::ClientPacket;
@@ -1207,6 +1207,18 @@ impl crate::session::WorldSession {
             template.get_cooldown_like_cpp(),
         ) {
             return;
+        }
+
+        match go_type {
+            GAMEOBJECT_TYPE_DOOR | GAMEOBJECT_TYPE_BUTTON => {
+                self.use_represented_gameobject_door_or_button_like_cpp(
+                    gameobject_guid,
+                    player_guid,
+                    template.get_auto_close_time_like_cpp(),
+                );
+                return;
+            }
+            _ => {}
         }
 
         if let Some(source) = template.chest_loot_source_like_cpp() {

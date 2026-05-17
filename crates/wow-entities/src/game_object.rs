@@ -279,6 +279,15 @@ impl GameObjectTemplateData {
         }
     }
 
+    pub const fn get_auto_close_time_like_cpp(&self) -> u32 {
+        match self.go_type {
+            GAMEOBJECT_TYPE_DOOR | GAMEOBJECT_TYPE_BUTTON => self.data[2],
+            GAMEOBJECT_TYPE_TRAP => self.data[6],
+            GAMEOBJECT_TYPE_GOOBER => self.data[3],
+            _ => 0,
+        }
+    }
+
     pub const fn chest_loot_source_like_cpp(&self) -> Option<GameObjectLootSource> {
         if self.go_type != GAMEOBJECT_TYPE_CHEST {
             return None;
@@ -1096,6 +1105,31 @@ mod tests {
         assert_eq!(
             GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, [99; MAX_GAMEOBJECT_DATA])
                 .get_cooldown_like_cpp(),
+            0
+        );
+    }
+
+    #[test]
+    fn gameobject_template_auto_close_time_matches_cpp_switch() {
+        let cases = [
+            (GAMEOBJECT_TYPE_DOOR, 2, 11),
+            (GAMEOBJECT_TYPE_BUTTON, 2, 22),
+            (GAMEOBJECT_TYPE_TRAP, 6, 33),
+            (GAMEOBJECT_TYPE_GOOBER, 3, 44),
+        ];
+
+        for (go_type, index, value) in cases {
+            let mut data = [0; MAX_GAMEOBJECT_DATA];
+            data[index] = value;
+            assert_eq!(
+                GameObjectTemplateData::new(go_type, data).get_auto_close_time_like_cpp(),
+                value
+            );
+        }
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, [99; MAX_GAMEOBJECT_DATA])
+                .get_auto_close_time_like_cpp(),
             0
         );
     }

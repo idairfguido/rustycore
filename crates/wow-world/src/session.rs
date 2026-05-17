@@ -209,6 +209,15 @@ pub(crate) enum RepresentedGameObjectUseEffect {
     CooldownRejected {
         gameobject_guid: ObjectGuid,
     },
+    DoorOrButtonUsed {
+        gameobject_guid: ObjectGuid,
+        user_guid: ObjectGuid,
+        restore_time_ms: u32,
+        go_state: wow_entities::GoState,
+    },
+    DoorOrButtonRejectedNotReady {
+        gameobject_guid: ObjectGuid,
+    },
     ReportUseAi {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
@@ -9860,6 +9869,49 @@ impl WorldSession {
             RepresentedGameObjectUseEffect::CooldownStarted {
                 gameobject_guid,
                 cooldown_secs,
+            },
+        );
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_door_or_button_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        user_guid: ObjectGuid,
+        restore_time_ms: u32,
+    ) -> bool {
+        let now = Instant::now();
+        let state = self
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        if state
+            .loot_state
+            .is_some_and(|loot_state| loot_state != wow_entities::LootState::Ready)
+        {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::DoorOrButtonRejectedNotReady { gameobject_guid },
+            );
+            return false;
+        }
+
+        let current_go_state = state.go_state.unwrap_or(wow_entities::GoState::Ready);
+        let next_go_state = if current_go_state == wow_entities::GoState::Ready {
+            wow_entities::GoState::Active
+        } else {
+            wow_entities::GoState::Ready
+        };
+        state.go_state = Some(next_go_state);
+        state.loot_state = Some(wow_entities::LootState::Activated);
+        state.loot_state_unit_guid = user_guid;
+        state.cooldown_until = (restore_time_ms != 0)
+            .then_some(now + Duration::from_millis(u64::from(restore_time_ms)));
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::DoorOrButtonUsed {
+                gameobject_guid,
+                user_guid,
+                restore_time_ms,
+                go_state: next_go_state,
             },
         );
         true
@@ -21729,6 +21781,47 @@ mod tests {
             .unwrap()
             .cooldown_until = Some(Instant::now() - Duration::from_secs(1));
         assert!(session.apply_represented_gameobject_cooldown_like_cpp(gameobject_guid, 5));
+    }
+
+    #[test]
+    fn gameobject_use_door_or_button_matches_cpp_ready_gate_and_state_switch() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 7);
+
+        assert!(session.use_represented_gameobject_door_or_button_like_cpp(
+            gameobject_guid,
+            player_guid,
+            3000,
+        ));
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.go_state, Some(wow_entities::GoState::Active));
+        assert_eq!(state.loot_state, Some(wow_entities::LootState::Activated));
+        assert_eq!(state.loot_state_unit_guid, player_guid);
+        assert!(state.cooldown_until.is_some());
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::DoorOrButtonUsed {
+                gameobject_guid,
+                user_guid: player_guid,
+                restore_time_ms: 3000,
+                go_state: wow_entities::GoState::Active,
+            }]
+        );
+
+        assert!(!session.use_represented_gameobject_door_or_button_like_cpp(
+            gameobject_guid,
+            player_guid,
+            3000,
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects.last(),
+            Some(&RepresentedGameObjectUseEffect::DoorOrButtonRejectedNotReady { gameobject_guid })
+        );
     }
 
     #[test]
