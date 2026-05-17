@@ -71,8 +71,8 @@ use wow_packet::packets::update::{ItemCreateData, UpdateObject};
 use wow_packet::{ClientPacket, ServerPacket};
 
 use crate::session::{
-    InventoryItem, RepresentedGameObjectUseEffect, RepresentedLootRollState,
-    RepresentedLootRollVote, WorldSession,
+    InventoryItem, RepresentedGameObjectSpellCaster, RepresentedGameObjectUseEffect,
+    RepresentedLootRollState, RepresentedLootRollVote, WorldSession,
 };
 
 const LOOT_METHOD_MASTER_LIKE_CPP: u8 = 2;
@@ -402,6 +402,7 @@ impl WorldSession {
     pub(crate) async fn open_represented_gathering_node_like_cpp(
         &mut self,
         gameobject_guid: ObjectGuid,
+        gameobject_entry: u32,
         source: GatheringNodeUseSource,
     ) {
         let Some(player_guid) = self.player_guid() else {
@@ -444,6 +445,7 @@ impl WorldSession {
         }
         self.record_represented_gathering_node_runtime_state_like_cpp(
             gameobject_guid,
+            gameobject_entry,
             player_guid,
             source,
             is_first_represented_use,
@@ -485,6 +487,7 @@ impl WorldSession {
     fn record_represented_gathering_node_runtime_state_like_cpp(
         &mut self,
         gameobject_guid: ObjectGuid,
+        gameobject_entry: u32,
         player_guid: ObjectGuid,
         source: GatheringNodeUseSource,
         is_first_represented_use: bool,
@@ -515,12 +518,14 @@ impl WorldSession {
         }
 
         if is_first_represented_use && source.spell_id != 0 {
-            self.represented_gameobject_use_effects.push(
-                RepresentedGameObjectUseEffect::CastSpell {
-                    gameobject_guid,
-                    player_guid,
-                    spell_id: source.spell_id,
-                },
+            self.apply_represented_gameobject_post_use_spell_like_cpp(
+                gameobject_guid,
+                player_guid,
+                gameobject_entry,
+                GAMEOBJECT_TYPE_GATHERING_NODE,
+                source.spell_id,
+                false,
+                RepresentedGameObjectSpellCaster::User,
             );
         }
     }
@@ -6411,7 +6416,10 @@ mod tests {
         represented_loot_object_guid_like_cpp, represented_loot_response_items_like_cpp,
         select_weighted_random_enchantment_like_cpp, start_loot_roll_packet_like_cpp,
     };
-    use crate::session::{RepresentedGameObjectUseEffect, RepresentedLootRollCriteriaEvent};
+    use crate::session::{
+        RepresentedGameObjectSpellCaster, RepresentedGameObjectUseEffect,
+        RepresentedLootRollCriteriaEvent,
+    };
     use rand::{SeedableRng, rngs::StdRng};
     use std::time::{Duration, Instant};
     use std::{
@@ -8317,10 +8325,10 @@ mod tests {
         };
 
         session
-            .open_represented_gathering_node_like_cpp(gameobject_guid, source)
+            .open_represented_gathering_node_like_cpp(gameobject_guid, 190_003, source)
             .await;
         session
-            .open_represented_gathering_node_like_cpp(gameobject_guid, source)
+            .open_represented_gathering_node_like_cpp(gameobject_guid, 190_003, source)
             .await;
 
         assert_eq!(
@@ -8387,10 +8395,10 @@ mod tests {
         };
 
         session
-            .open_represented_gathering_node_like_cpp(gameobject_guid, source)
+            .open_represented_gathering_node_like_cpp(gameobject_guid, 190_007, source)
             .await;
         session
-            .open_represented_gathering_node_like_cpp(gameobject_guid, source)
+            .open_represented_gathering_node_like_cpp(gameobject_guid, 190_007, source)
             .await;
 
         let state = session
@@ -8408,10 +8416,12 @@ mod tests {
         assert_eq!(state.despawn_delay_secs, Some(15));
         assert_eq!(
             session.represented_gameobject_use_effects,
-            vec![RepresentedGameObjectUseEffect::CastSpell {
+            vec![RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
                 gameobject_guid,
-                player_guid,
+                target_guid: player_guid,
                 spell_id: 777,
+                triggered: false,
+                caster: RepresentedGameObjectSpellCaster::User,
             }]
         );
     }

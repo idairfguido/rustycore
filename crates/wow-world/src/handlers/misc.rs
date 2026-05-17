@@ -1387,6 +1387,7 @@ impl crate::session::WorldSession {
                     self.use_represented_gameobject_spellcaster_like_cpp(
                         gameobject_guid,
                         player_guid,
+                        gameobject_access.entry,
                         source,
                         None,
                     );
@@ -1415,6 +1416,7 @@ impl crate::session::WorldSession {
                         self.use_represented_gameobject_goober_state_like_cpp(
                             gameobject_guid,
                             player_guid,
+                            gameobject_access.entry,
                             source,
                         );
                     }
@@ -1446,8 +1448,12 @@ impl crate::session::WorldSession {
             }
             GAMEOBJECT_TYPE_GATHERING_NODE => {
                 if let Some(source) = template.gathering_node_use_source_like_cpp() {
-                    self.open_represented_gathering_node_like_cpp(gameobject_guid, source)
-                        .await;
+                    self.open_represented_gathering_node_like_cpp(
+                        gameobject_guid,
+                        gameobject_access.entry,
+                        source,
+                    )
+                    .await;
                 }
             }
             _ => {

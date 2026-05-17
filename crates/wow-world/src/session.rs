@@ -279,12 +279,6 @@ pub(crate) enum RepresentedGameObjectUseEffect {
         auto_close_ms: u32,
         go_state: Option<wow_entities::GoState>,
     },
-    GooberPostUseSpell {
-        gameobject_guid: ObjectGuid,
-        target_guid: ObjectGuid,
-        spell_id: u32,
-        caster_is_player: bool,
-    },
     #[allow(dead_code)]
     GooberLinkedTrapDespawn {
         gameobject_guid: ObjectGuid,
@@ -10777,6 +10771,7 @@ impl WorldSession {
         &mut self,
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
+        gameobject_entry: u32,
         source: wow_entities::SpellcasterUseSource,
         party_context_allows_use: Option<bool>,
     ) -> bool {
@@ -10797,15 +10792,6 @@ impl WorldSession {
                 player_guid,
             },
         );
-        if source.spell_id != 0 {
-            self.represented_gameobject_use_effects.push(
-                RepresentedGameObjectUseEffect::CastSpell {
-                    gameobject_guid,
-                    player_guid,
-                    spell_id: source.spell_id,
-                },
-            );
-        }
 
         let use_count = {
             let state = self
@@ -10820,6 +10806,16 @@ impl WorldSession {
                 gameobject_guid,
                 use_count,
             },
+        );
+
+        self.apply_represented_gameobject_post_use_spell_like_cpp(
+            gameobject_guid,
+            player_guid,
+            gameobject_entry,
+            wow_entities::GAMEOBJECT_TYPE_SPELLCASTER,
+            source.spell_id,
+            false,
+            RepresentedGameObjectSpellCaster::User,
         );
 
         true
@@ -10974,6 +10970,7 @@ impl WorldSession {
         &mut self,
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
+        gameobject_entry: u32,
         source: wow_entities::GooberUseSource,
     ) -> bool {
         if source.allow_multi_interact {
@@ -11032,12 +11029,17 @@ impl WorldSession {
         }
 
         if source.spell_id != 0 {
-            self.represented_gameobject_use_effects.push(
-                RepresentedGameObjectUseEffect::GooberPostUseSpell {
-                    gameobject_guid,
-                    target_guid: player_guid,
-                    spell_id: source.spell_id,
-                    caster_is_player: source.player_cast,
+            self.apply_represented_gameobject_post_use_spell_like_cpp(
+                gameobject_guid,
+                player_guid,
+                gameobject_entry,
+                wow_entities::GAMEOBJECT_TYPE_GOOBER,
+                source.spell_id,
+                false,
+                if source.player_cast {
+                    RepresentedGameObjectSpellCaster::User
+                } else {
+                    RepresentedGameObjectSpellCaster::GameObject
                 },
             );
         }
@@ -23845,6 +23847,7 @@ mod tests {
         assert!(session.use_represented_gameobject_spellcaster_like_cpp(
             gameobject_guid,
             player_guid,
+            777,
             wow_entities::SpellcasterUseSource {
                 spell_id: 3456,
                 charges: 1,
@@ -23859,14 +23862,16 @@ mod tests {
                     gameobject_guid,
                     player_guid,
                 },
-                RepresentedGameObjectUseEffect::CastSpell {
-                    gameobject_guid,
-                    player_guid,
-                    spell_id: 3456,
-                },
                 RepresentedGameObjectUseEffect::GameObjectUseCountIncremented {
                     gameobject_guid,
                     use_count: 1,
+                },
+                RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
+                    gameobject_guid,
+                    target_guid: player_guid,
+                    spell_id: 3456,
+                    triggered: false,
+                    caster: RepresentedGameObjectSpellCaster::User,
                 },
             ]
         );
@@ -23890,6 +23895,7 @@ mod tests {
         assert!(!session.use_represented_gameobject_spellcaster_like_cpp(
             gameobject_guid,
             player_guid,
+            777,
             wow_entities::SpellcasterUseSource {
                 spell_id: 3456,
                 charges: 1,
@@ -24198,6 +24204,7 @@ mod tests {
         assert!(session.use_represented_gameobject_goober_state_like_cpp(
             gameobject_guid,
             player_guid,
+            777,
             wow_entities::GooberUseSource {
                 auto_close_ms: 3_000,
                 spell_id: 7777,
@@ -24225,11 +24232,12 @@ mod tests {
                     auto_close_ms: 3_000,
                     go_state: Some(wow_entities::GoState::Active),
                 },
-                RepresentedGameObjectUseEffect::GooberPostUseSpell {
+                RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
                     gameobject_guid,
                     target_guid: player_guid,
                     spell_id: 7777,
-                    caster_is_player: true,
+                    triggered: false,
+                    caster: RepresentedGameObjectSpellCaster::User,
                 },
             ]
         );
@@ -24245,6 +24253,7 @@ mod tests {
         assert!(session.use_represented_gameobject_goober_state_like_cpp(
             gameobject_guid,
             player_guid,
+            777,
             wow_entities::GooberUseSource {
                 custom_anim: 2,
                 spell_id: 8888,
@@ -24268,11 +24277,12 @@ mod tests {
                     auto_close_ms: 0,
                     go_state: None,
                 },
-                RepresentedGameObjectUseEffect::GooberPostUseSpell {
+                RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
                     gameobject_guid,
                     target_guid: player_guid,
                     spell_id: 8888,
-                    caster_is_player: false,
+                    triggered: false,
+                    caster: RepresentedGameObjectSpellCaster::GameObject,
                 },
             ]
         );
@@ -24288,6 +24298,7 @@ mod tests {
         assert!(session.use_represented_gameobject_goober_state_like_cpp(
             gameobject_guid,
             player_guid,
+            777,
             wow_entities::GooberUseSource {
                 allow_multi_interact: true,
                 ..Default::default()
@@ -24316,6 +24327,7 @@ mod tests {
         assert!(session.use_represented_gameobject_goober_state_like_cpp(
             gameobject_guid,
             player_guid,
+            777,
             wow_entities::GooberUseSource {
                 allow_multi_interact: true,
                 consumable: true,
