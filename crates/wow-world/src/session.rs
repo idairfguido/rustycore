@@ -1856,9 +1856,11 @@ pub enum RepresentedAuraEffectLikeCpp {
     SafeFall,
     Fly,
     Ghost,
+    Invisibility,
     Mounted,
     MountedFlightSpeed,
     ModifyFallDamagePct,
+    Stealth,
     WaterWalk,
 }
 
@@ -10326,6 +10328,26 @@ impl WorldSession {
         }
     }
 
+    fn remove_represented_stealth_or_invisibility_auras_by_type_like_cpp(&mut self) -> usize {
+        let slots: Vec<u8> = self
+            .visible_auras
+            .iter()
+            .filter_map(|(slot, aura)| {
+                matches!(
+                    aura.represented_effect,
+                    Some(RepresentedAuraEffectLikeCpp::Stealth)
+                        | Some(RepresentedAuraEffectLikeCpp::Invisibility)
+                )
+                .then_some(*slot)
+            })
+            .collect();
+        let removed = slots.len();
+        for slot in slots {
+            let _ = self.remove_aura(slot);
+        }
+        removed
+    }
+
     pub(crate) fn apply_represented_gameobject_cooldown_like_cpp(
         &mut self,
         gameobject_guid: ObjectGuid,
@@ -10643,6 +10665,7 @@ impl WorldSession {
             return false;
         }
 
+        self.remove_represented_stealth_or_invisibility_auras_by_type_like_cpp();
         self.represented_gameobject_use_effects.push(
             RepresentedGameObjectUseEffect::RemoveStealthOrInvisibilityAuras {
                 gameobject_guid,
@@ -10687,6 +10710,7 @@ impl WorldSession {
             _ => BattlegroundFlagDropClickTarget::None,
         };
 
+        self.remove_represented_stealth_or_invisibility_auras_by_type_like_cpp();
         self.represented_gameobject_use_effects.push(
             RepresentedGameObjectUseEffect::RemoveStealthOrInvisibilityAuras {
                 gameobject_guid,
@@ -24093,6 +24117,46 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn gameobject_use_flagstand_removes_stealth_and_invisibility_auras_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 41);
+
+        session.apply_aura(1001, player_guid, 30_000, 0).unwrap();
+        session.apply_aura(1002, player_guid, 30_000, 0).unwrap();
+        session
+            .visible_auras
+            .get_mut(&0)
+            .unwrap()
+            .represented_effect = Some(RepresentedAuraEffectLikeCpp::Stealth);
+        session
+            .visible_auras
+            .get_mut(&1)
+            .unwrap()
+            .represented_effect = Some(RepresentedAuraEffectLikeCpp::Invisibility);
+        while send_rx.try_recv().is_ok() {}
+
+        assert!(session.use_represented_gameobject_flagstand_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::FlagStandUseSource {
+                pickup_spell_id: 11,
+                return_aura_id: 33,
+                return_spell_id: 44,
+            },
+        ));
+
+        assert!(session.visible_auras.values().all(|aura| !matches!(
+            aura.represented_effect,
+            Some(RepresentedAuraEffectLikeCpp::Stealth)
+                | Some(RepresentedAuraEffectLikeCpp::Invisibility)
+        )));
+        assert!(send_rx.try_recv().is_ok());
+        assert!(send_rx.try_recv().is_ok());
     }
 
     #[test]
