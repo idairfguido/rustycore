@@ -185,6 +185,11 @@ pub(crate) struct PlayerSaveToDbSnapshotLikeCpp {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RepresentedGameObjectUseEffect {
+    ReportUseAi {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        handled: bool,
+    },
     TriggerGameEvent {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
@@ -231,6 +236,7 @@ pub(crate) struct RepresentedGameObjectUseState {
     pub interact_radius_override: Option<u32>,
     pub lock_id: Option<u32>,
     pub fishing_hole_max_opens: Option<u32>,
+    pub report_use_ai_returns_true: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -393,6 +399,7 @@ impl Default for RepresentedGameObjectUseState {
             interact_radius_override: None,
             lock_id: None,
             fishing_hole_max_opens: None,
+            report_use_ai_returns_true: false,
         }
     }
 }
@@ -9701,6 +9708,25 @@ impl WorldSession {
         self.player_vehicle_seat_flags_like_cpp.is_some()
             || self.player_mounted_like_cpp
             || gameobject_usable_mounted
+    }
+
+    pub(crate) fn record_represented_gameobject_report_use_ai_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    ) -> bool {
+        let handled = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .map(|state| state.report_use_ai_returns_true)
+            .unwrap_or(false);
+        self.represented_gameobject_use_effects
+            .push(RepresentedGameObjectUseEffect::ReportUseAi {
+                gameobject_guid,
+                player_guid,
+                handled,
+            });
+        handled
     }
 
     fn send_active_player_transport_server_time_update_like_cpp(&self) {
