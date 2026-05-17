@@ -185,6 +185,23 @@ pub(crate) struct PlayerSaveToDbSnapshotLikeCpp {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RepresentedGameObjectUseEffect {
+    UseRejectedNoDamageImmune {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    },
+    RemoveMountedAuras {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    },
+    ClearPlayerTalkMenus {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+    },
+    GossipHelloAi {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        handled: bool,
+    },
     ReportUseAi {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
@@ -237,6 +254,7 @@ pub(crate) struct RepresentedGameObjectUseState {
     pub lock_id: Option<u32>,
     pub fishing_hole_max_opens: Option<u32>,
     pub report_use_ai_returns_true: bool,
+    pub gossip_hello_ai_returns_true: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -400,6 +418,7 @@ impl Default for RepresentedGameObjectUseState {
             lock_id: None,
             fishing_hole_max_opens: None,
             report_use_ai_returns_true: false,
+            gossip_hello_ai_returns_true: false,
         }
     }
 }
@@ -9727,6 +9746,80 @@ impl WorldSession {
                 handled,
             });
         handled
+    }
+
+    pub(crate) fn apply_represented_gameobject_player_use_preamble_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gameobject_usable_mounted: bool,
+        no_damage_immune: bool,
+    ) -> bool {
+        if no_damage_immune && self.player_unit_flags_like_cpp.contains(UnitFlags::IMMUNE) {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::UseRejectedNoDamageImmune {
+                    gameobject_guid,
+                    player_guid,
+                },
+            );
+            return false;
+        }
+
+        if !gameobject_usable_mounted {
+            self.remove_represented_mounted_auras_by_type_like_cpp();
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::RemoveMountedAuras {
+                    gameobject_guid,
+                    player_guid,
+                },
+            );
+        }
+
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::ClearPlayerTalkMenus {
+                gameobject_guid,
+                player_guid,
+            },
+        );
+
+        let handled = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .map(|state| state.gossip_hello_ai_returns_true)
+            .unwrap_or(false);
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::GossipHelloAi {
+                gameobject_guid,
+                player_guid,
+                handled,
+            },
+        );
+        !handled
+    }
+
+    fn remove_represented_mounted_auras_by_type_like_cpp(&mut self) {
+        let mounted_slots: Vec<u8> = self
+            .visible_auras
+            .iter()
+            .filter_map(|(slot, aura)| {
+                (aura.represented_effect == Some(RepresentedAuraEffectLikeCpp::Mounted))
+                    .then_some(*slot)
+            })
+            .collect();
+        for slot in mounted_slots {
+            let _ = self.remove_aura(slot);
+        }
+
+        if self.player_mounted_like_cpp {
+            self.player_mounted_like_cpp = false;
+            self.player_mount_display_id_like_cpp = 0;
+            self.player_mount_vehicle_id_like_cpp = 0;
+            self.player_mount_vehicle_kit_like_cpp = None;
+            self.player_mount_vehicle_accessories_like_cpp.clear();
+            self.player_mount_vehicle_seat_count_like_cpp = 0;
+            self.player_mount_vehicle_usable_seat_count_like_cpp = 0;
+            self.player_unit_flags_like_cpp.remove(UnitFlags::MOUNT);
+        }
     }
 
     fn send_active_player_transport_server_time_update_like_cpp(&self) {
@@ -21465,6 +21558,104 @@ mod tests {
         session.set_player_mounted_like_cpp(false);
         session.player_vehicle_seat_flags_like_cpp = Some(0);
         assert!(session.represented_gameobject_use_allowed_by_mover_like_cpp(false));
+    }
+
+    #[test]
+    fn gameobject_use_preamble_matches_cpp_player_branch() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 4);
+
+        session.set_player_guid(Some(player_guid));
+        session.set_player_mounted_like_cpp(true);
+        assert!(
+            session.apply_represented_gameobject_player_use_preamble_like_cpp(
+                gameobject_guid,
+                player_guid,
+                false,
+                false,
+            )
+        );
+        assert!(!session.player_mounted_like_cpp);
+        assert!(
+            !session
+                .player_unit_flags_like_cpp
+                .contains(UnitFlags::MOUNT)
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::RemoveMountedAuras {
+                    gameobject_guid,
+                    player_guid,
+                },
+                RepresentedGameObjectUseEffect::ClearPlayerTalkMenus {
+                    gameobject_guid,
+                    player_guid,
+                },
+                RepresentedGameObjectUseEffect::GossipHelloAi {
+                    gameobject_guid,
+                    player_guid,
+                    handled: false,
+                },
+            ]
+        );
+
+        session.represented_gameobject_use_effects.clear();
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .gossip_hello_ai_returns_true = true;
+        assert!(
+            !session.apply_represented_gameobject_player_use_preamble_like_cpp(
+                gameobject_guid,
+                player_guid,
+                true,
+                false,
+            )
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::ClearPlayerTalkMenus {
+                    gameobject_guid,
+                    player_guid,
+                },
+                RepresentedGameObjectUseEffect::GossipHelloAi {
+                    gameobject_guid,
+                    player_guid,
+                    handled: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_preamble_rejects_damage_immune_player_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 5);
+
+        session.set_player_guid(Some(player_guid));
+        session.player_unit_flags_like_cpp.insert(UnitFlags::IMMUNE);
+        assert!(
+            !session.apply_represented_gameobject_player_use_preamble_like_cpp(
+                gameobject_guid,
+                player_guid,
+                false,
+                true,
+            )
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::UseRejectedNoDamageImmune {
+                gameobject_guid,
+                player_guid,
+            },]
+        );
     }
 
     #[test]

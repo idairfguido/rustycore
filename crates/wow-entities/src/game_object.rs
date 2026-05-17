@@ -254,6 +254,23 @@ impl GameObjectTemplateData {
         self.data[index] != 0
     }
 
+    pub const fn get_no_damage_immune_like_cpp(&self) -> u32 {
+        let index = match self.go_type {
+            GAMEOBJECT_TYPE_DOOR => 3,
+            GAMEOBJECT_TYPE_BUTTON => 4,
+            GAMEOBJECT_TYPE_QUESTGIVER => 5,
+            GAMEOBJECT_TYPE_CHEST => {
+                return if self.data[22] == 0 { 1 } else { 0 };
+            }
+            GAMEOBJECT_TYPE_GOOBER => 11,
+            GAMEOBJECT_TYPE_FLAGSTAND => 5,
+            GAMEOBJECT_TYPE_FLAGDROP => 3,
+            _ => return 0,
+        };
+
+        self.data[index]
+    }
+
     pub const fn chest_loot_source_like_cpp(&self) -> Option<GameObjectLootSource> {
         if self.go_type != GAMEOBJECT_TYPE_CHEST {
             return None;
@@ -1005,6 +1022,50 @@ mod tests {
         assert!(
             !GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, [1; MAX_GAMEOBJECT_DATA])
                 .is_usable_mounted_like_cpp()
+        );
+    }
+
+    #[test]
+    fn gameobject_template_no_damage_immune_matches_cpp_switch() {
+        let cases = [
+            (GAMEOBJECT_TYPE_DOOR, 3),
+            (GAMEOBJECT_TYPE_BUTTON, 4),
+            (GAMEOBJECT_TYPE_QUESTGIVER, 5),
+            (GAMEOBJECT_TYPE_GOOBER, 11),
+            (GAMEOBJECT_TYPE_FLAGSTAND, 5),
+            (GAMEOBJECT_TYPE_FLAGDROP, 3),
+        ];
+
+        for (go_type, index) in cases {
+            let mut data = [0; MAX_GAMEOBJECT_DATA];
+            assert_eq!(
+                GameObjectTemplateData::new(go_type, data).get_no_damage_immune_like_cpp(),
+                0
+            );
+            data[index] = 7;
+            assert_eq!(
+                GameObjectTemplateData::new(go_type, data).get_no_damage_immune_like_cpp(),
+                7
+            );
+        }
+
+        let mut chest = [0; MAX_GAMEOBJECT_DATA];
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, chest)
+                .get_no_damage_immune_like_cpp(),
+            1
+        );
+        chest[22] = 1;
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, chest)
+                .get_no_damage_immune_like_cpp(),
+            0
+        );
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_TEXT, [1; MAX_GAMEOBJECT_DATA])
+                .get_no_damage_immune_like_cpp(),
+            0
         );
     }
 

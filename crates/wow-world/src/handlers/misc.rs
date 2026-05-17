@@ -1191,6 +1191,17 @@ impl crate::session::WorldSession {
         ) {
             return;
         }
+        let Some(player_guid) = self.player_guid() else {
+            return;
+        };
+        if !self.apply_represented_gameobject_player_use_preamble_like_cpp(
+            gameobject_guid,
+            player_guid,
+            template.is_usable_mounted_like_cpp(),
+            template.get_no_damage_immune_like_cpp() != 0,
+        ) {
+            return;
+        }
 
         if let Some(source) = template.chest_loot_source_like_cpp() {
             if source.is_empty() {
