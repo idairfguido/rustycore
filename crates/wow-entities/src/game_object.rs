@@ -153,6 +153,12 @@ pub struct TrapUseSource {
     pub cooldown_secs: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CameraUseSource {
+    pub cinematic_id: u32,
+    pub event_id: u32,
+}
+
 impl GameObjectTemplateData {
     pub const fn new(go_type: u32, data: [u32; MAX_GAMEOBJECT_DATA]) -> Self {
         Self { go_type, data }
@@ -313,6 +319,17 @@ impl GameObjectTemplateData {
         }
 
         self.data[2]
+    }
+
+    pub const fn camera_use_source_like_cpp(&self) -> Option<CameraUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_CAMERA {
+            return None;
+        }
+
+        Some(CameraUseSource {
+            cinematic_id: self.data[1],
+            event_id: self.data[2],
+        })
     }
 
     pub const fn chest_loot_source_like_cpp(&self) -> Option<GameObjectLootSource> {
@@ -1196,6 +1213,25 @@ mod tests {
             GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data)
                 .spell_focus_linked_trap_like_cpp(),
             0
+        );
+    }
+
+    #[test]
+    fn camera_use_source_uses_cpp_data_indices() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[1] = 1234;
+        data[2] = 55;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CAMERA, data).camera_use_source_like_cpp(),
+            Some(CameraUseSource {
+                cinematic_id: 1234,
+                event_id: 55,
+            })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data).camera_use_source_like_cpp(),
+            None
         );
     }
 

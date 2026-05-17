@@ -218,6 +218,11 @@ pub(crate) enum RepresentedGameObjectUseEffect {
     DoorOrButtonRejectedNotReady {
         gameobject_guid: ObjectGuid,
     },
+    TriggerCinematic {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        cinematic_id: u32,
+    },
     ReportUseAi {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
@@ -9980,6 +9985,35 @@ impl WorldSession {
                     gameobject_guid,
                     player_guid,
                     trap_entry: linked_trap_entry,
+                },
+            );
+        }
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_camera_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        source: wow_entities::CameraUseSource,
+    ) -> bool {
+        if source.cinematic_id != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::TriggerCinematic {
+                    gameobject_guid,
+                    player_guid,
+                    cinematic_id: source.cinematic_id,
+                },
+            );
+        }
+
+        if source.event_id != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: source.event_id,
                 },
             );
         }
@@ -21975,6 +22009,49 @@ mod tests {
             gameobject_guid,
             player_guid,
             0,
+        ));
+        assert!(session.represented_gameobject_use_effects.is_empty());
+    }
+
+    #[test]
+    fn gameobject_use_camera_records_cinematic_and_event_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 8);
+
+        assert!(session.use_represented_gameobject_camera_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::CameraUseSource {
+                cinematic_id: 444,
+                event_id: 55,
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::TriggerCinematic {
+                    gameobject_guid,
+                    player_guid,
+                    cinematic_id: 444,
+                },
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: 55,
+                },
+            ]
+        );
+
+        session.represented_gameobject_use_effects.clear();
+        assert!(session.use_represented_gameobject_camera_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::CameraUseSource {
+                cinematic_id: 0,
+                event_id: 0,
+            },
         ));
         assert!(session.represented_gameobject_use_effects.is_empty());
     }

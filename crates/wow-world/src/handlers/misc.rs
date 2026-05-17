@@ -11,9 +11,9 @@ use tracing::{debug, info, warn};
 use wow_constants::{ClientOpcodes, ItemExtendedCostFlags};
 use wow_database::{SqlTransaction, WorldStatements};
 use wow_entities::{
-    GAMEOBJECT_TYPE_BUTTON, GAMEOBJECT_TYPE_DOOR, GAMEOBJECT_TYPE_FISHING_HOLE,
-    GAMEOBJECT_TYPE_GATHERING_NODE, GAMEOBJECT_TYPE_SPELL_FOCUS, GAMEOBJECT_TYPE_TRAP,
-    GameObjectTemplateData, MAX_GAMEOBJECT_DATA,
+    GAMEOBJECT_TYPE_BUTTON, GAMEOBJECT_TYPE_CAMERA, GAMEOBJECT_TYPE_DOOR,
+    GAMEOBJECT_TYPE_FISHING_HOLE, GAMEOBJECT_TYPE_GATHERING_NODE, GAMEOBJECT_TYPE_SPELL_FOCUS,
+    GAMEOBJECT_TYPE_TRAP, GameObjectTemplateData, MAX_GAMEOBJECT_DATA,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::ClientPacket;
@@ -1237,6 +1237,16 @@ impl crate::session::WorldSession {
                     player_guid,
                     template.spell_focus_linked_trap_like_cpp(),
                 );
+                return;
+            }
+            GAMEOBJECT_TYPE_CAMERA => {
+                if let Some(source) = template.camera_use_source_like_cpp() {
+                    self.use_represented_gameobject_camera_like_cpp(
+                        gameobject_guid,
+                        player_guid,
+                        source,
+                    );
+                }
                 return;
             }
             _ => {}
