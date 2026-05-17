@@ -10677,6 +10677,21 @@ impl WorldSession {
         true
     }
 
+    fn send_represented_gameobject_delete_packets_like_cpp(&mut self, gameobject_guid: ObjectGuid) {
+        self.send_packet(&wow_packet::packets::misc::GameObjectDespawn {
+            object_guid: gameobject_guid,
+        });
+        let map_id = self
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .and_then(|state| state.map_id)
+            .unwrap_or_else(|| self.player_map_id_like_cpp());
+        self.send_packet(&wow_packet::packets::update::UpdateObject::destroy_objects(
+            vec![gameobject_guid],
+            map_id,
+        ));
+    }
+
     pub(crate) fn use_represented_gameobject_flagstand_like_cpp(
         &mut self,
         gameobject_guid: ObjectGuid,
@@ -10786,9 +10801,7 @@ impl WorldSession {
                 },
             );
         }
-        self.send_packet(&wow_packet::packets::misc::GameObjectDespawn {
-            object_guid: gameobject_guid,
-        });
+        self.send_represented_gameobject_delete_packets_like_cpp(gameobject_guid);
         self.represented_gameobject_use_effects
             .push(RepresentedGameObjectUseEffect::GameObjectDeleted { gameobject_guid });
 
@@ -10925,9 +10938,7 @@ impl WorldSession {
             );
         }
 
-        self.send_packet(&wow_packet::packets::misc::GameObjectDespawn {
-            object_guid: gameobject_guid,
-        });
+        self.send_represented_gameobject_delete_packets_like_cpp(gameobject_guid);
         self.represented_gameobject_use_effects
             .push(RepresentedGameObjectUseEffect::GameObjectDeleted { gameobject_guid });
 
@@ -24246,6 +24257,7 @@ mod tests {
         let gameobject_guid =
             ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 27);
         session.set_player_battleground_type_id_like_cpp(BATTLEGROUND_WS_LIKE_CPP);
+        let map_id = session.player_map_id_like_cpp();
 
         assert!(session.use_represented_gameobject_flagdrop_like_cpp(
             gameobject_guid,
@@ -24262,6 +24274,14 @@ mod tests {
             .to_vec();
         expected.extend_from_slice(&gameobject_guid.to_raw_bytes());
         assert_eq!(send_rx.try_recv().unwrap(), expected);
+        assert_eq!(
+            send_rx.try_recv().unwrap(),
+            wow_packet::packets::update::UpdateObject::destroy_objects(
+                vec![gameobject_guid],
+                map_id
+            )
+            .to_bytes()
+        );
         assert_eq!(
             session.represented_gameobject_use_effects,
             vec![
@@ -24512,6 +24532,7 @@ mod tests {
         let player_guid = ObjectGuid::create_player(1, 99);
         let gameobject_guid =
             ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 37);
+        let map_id = session.player_map_id_like_cpp();
 
         assert!(session.use_represented_gameobject_new_flag_drop_like_cpp(
             gameobject_guid,
@@ -24526,6 +24547,14 @@ mod tests {
             .to_vec();
         expected.extend_from_slice(&gameobject_guid.to_raw_bytes());
         assert_eq!(send_rx.try_recv().unwrap(), expected);
+        assert_eq!(
+            send_rx.try_recv().unwrap(),
+            wow_packet::packets::update::UpdateObject::destroy_objects(
+                vec![gameobject_guid],
+                map_id
+            )
+            .to_bytes()
+        );
         assert_eq!(
             session.represented_gameobject_use_effects,
             vec![
