@@ -151,6 +151,23 @@ impl ServerPacket for GameObjectCustomAnim {
     }
 }
 
+// ── PageText (SMSG 0x2719) ───────────────────────────────────────────
+
+/// Opens a page-text object; the client queries the page contents separately.
+pub struct PageText {
+    pub gameobject_guid: ObjectGuid,
+}
+
+impl ServerPacket for PageText {
+    const OPCODE: ServerOpcodes = ServerOpcodes::PageText;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        for byte in self.gameobject_guid.to_raw_bytes() {
+            pkt.write_uint8(byte);
+        }
+    }
+}
+
 // ── TriggerCinematic (SMSG 0x27ca) ──────────────────────────────────
 
 /// Starts a cinematic sequence for the player.
@@ -3570,6 +3587,26 @@ mod tests {
         }
         .to_bytes();
         assert_eq!(despawn_bytes[22], 0x80);
+    }
+
+    #[test]
+    fn page_text_writes_gameobject_guid_like_cpp() {
+        let guid = ObjectGuid::create_world_object(
+            wow_core::guid::HighGuid::GameObject,
+            0,
+            1,
+            571,
+            0,
+            777,
+            23,
+        );
+        let bytes = PageText {
+            gameobject_guid: guid,
+        }
+        .to_bytes();
+        assert_eq!(bytes[0..2], (ServerOpcodes::PageText as u16).to_le_bytes());
+        assert_eq!(&bytes[2..18], &guid.to_raw_bytes());
+        assert_eq!(bytes.len(), 18);
     }
 
     #[test]

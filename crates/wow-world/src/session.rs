@@ -11166,6 +11166,7 @@ impl WorldSession {
         source: wow_entities::GooberUseSource,
     ) -> bool {
         if source.page_id != 0 {
+            self.send_packet(&wow_packet::packets::misc::PageText { gameobject_guid });
             self.represented_gameobject_use_effects.push(
                 RepresentedGameObjectUseEffect::ShowPageText {
                     gameobject_guid,
@@ -24886,7 +24887,7 @@ mod tests {
 
     #[test]
     fn gameobject_use_goober_records_player_preamble_hooks_like_cpp() {
-        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let (mut session, _pkt_tx, send_rx) = make_session();
         let player_guid = ObjectGuid::create_player(1, 99);
         let gameobject_guid =
             ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 9);
@@ -24908,6 +24909,9 @@ mod tests {
             },
         ));
 
+        let mut expected = (ServerOpcodes::PageText as u16).to_le_bytes().to_vec();
+        expected.extend_from_slice(&gameobject_guid.to_raw_bytes());
+        assert_eq!(send_rx.try_recv().unwrap(), expected);
         assert_eq!(
             session.represented_gameobject_use_effects,
             vec![
