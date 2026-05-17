@@ -59,6 +59,7 @@ pub const GAMEOBJECT_DATA_GATHERING_NODE_SPELL: usize = 14;
 pub const GAMEOBJECT_DATA_GATHERING_NODE_MAX_LOOTS: usize = 18;
 pub const GAMEOBJECT_DATA_GATHERING_NODE_LINKED_TRAP: usize = 20;
 
+pub const GO_FLAG_IN_USE: u32 = 0x0000_0001;
 pub const GAME_OBJECT_DATA_PARENT_BIT: usize = 0;
 pub const GAME_OBJECT_DATA_DISPLAY_ID_BIT: usize = 4;
 pub const GAME_OBJECT_DATA_CREATED_BY_BIT: usize = 9;
@@ -163,6 +164,9 @@ pub struct CameraUseSource {
 pub struct GooberUseSource {
     pub quest_id: u32,
     pub event_id: u32,
+    pub auto_close_ms: u32,
+    pub custom_anim: u32,
+    pub consumable: bool,
     pub page_id: u32,
     pub spell_id: u32,
     pub linked_trap_entry: u32,
@@ -352,6 +356,9 @@ impl GameObjectTemplateData {
         Some(GooberUseSource {
             quest_id: self.data[1],
             event_id: self.data[2],
+            auto_close_ms: self.data[3],
+            custom_anim: self.data[4],
+            consumable: self.data[5] != 0,
             page_id: self.data[7],
             spell_id: self.data[10],
             linked_trap_entry: self.data[12],
@@ -1269,6 +1276,9 @@ mod tests {
         let mut data = [0; MAX_GAMEOBJECT_DATA];
         data[1] = 101;
         data[2] = 202;
+        data[3] = 303;
+        data[4] = 4;
+        data[5] = 1;
         data[7] = 707;
         data[10] = 1010;
         data[12] = 1212;
@@ -1281,6 +1291,9 @@ mod tests {
             Some(GooberUseSource {
                 quest_id: 101,
                 event_id: 202,
+                auto_close_ms: 303,
+                custom_anim: 4,
+                consumable: true,
                 page_id: 707,
                 spell_id: 1010,
                 linked_trap_entry: 1212,

@@ -100,10 +100,10 @@ pub use game_object::{
     GAMEOBJECT_TYPE_GOOBER, GAMEOBJECT_TYPE_GUILD_BANK, GAMEOBJECT_TYPE_MAILBOX,
     GAMEOBJECT_TYPE_MAP_OBJECT, GAMEOBJECT_TYPE_MINI_GAME, GAMEOBJECT_TYPE_QUESTGIVER,
     GAMEOBJECT_TYPE_SPELL_FOCUS, GAMEOBJECT_TYPE_TEXT, GAMEOBJECT_TYPE_TRAP,
-    GAMEOBJECT_TYPE_UI_LINK, GO_DYNFLAG_LO_NO_INTERACT, GameObject, GameObjectDataUpdate,
-    GameObjectDataValues, GameObjectLootSource, GameObjectTemplateData, GameObjectValuesUpdate,
-    GatheringNodeUseSource, GoState, GooberUseSource, LootState, MAX_GAMEOBJECT_DATA,
-    TrapUseSource,
+    GAMEOBJECT_TYPE_UI_LINK, GO_DYNFLAG_LO_NO_INTERACT, GO_FLAG_IN_USE, GameObject,
+    GameObjectDataUpdate, GameObjectDataValues, GameObjectLootSource, GameObjectTemplateData,
+    GameObjectValuesUpdate, GatheringNodeUseSource, GoState, GooberUseSource, LootState,
+    MAX_GAMEOBJECT_DATA, TrapUseSource,
 };
 pub use item::{
     APPEARANCE_MODIFIER_SLOT_BY_SPEC, ArtifactPower, BOP_TRADEABLE_DURATION_SECS,

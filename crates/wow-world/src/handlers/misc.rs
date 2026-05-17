@@ -1251,13 +1251,19 @@ impl crate::session::WorldSession {
             }
             GAMEOBJECT_TYPE_GOOBER => {
                 if let Some(source) = template.goober_use_source_like_cpp() {
-                    self.use_represented_gameobject_goober_preamble_like_cpp(
+                    if self.use_represented_gameobject_goober_preamble_like_cpp(
                         gameobject_guid,
                         gameobject_access.entry,
                         gameobject_access.position,
                         player_guid,
                         source,
-                    );
+                    ) {
+                        self.use_represented_gameobject_goober_state_like_cpp(
+                            gameobject_guid,
+                            player_guid,
+                            source,
+                        );
+                    }
                 }
                 return;
             }

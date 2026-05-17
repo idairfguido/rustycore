@@ -258,6 +258,29 @@ pub(crate) enum RepresentedGameObjectUseEffect {
         player_guid: ObjectGuid,
         quest_id: u32,
     },
+    GooberSetGoStateForPlayer {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        go_state: wow_entities::GoState,
+    },
+    GooberDespawnForPlayer {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        despawn_secs: u32,
+    },
+    GooberUsed {
+        gameobject_guid: ObjectGuid,
+        user_guid: ObjectGuid,
+        custom_anim: u32,
+        auto_close_ms: u32,
+        go_state: Option<wow_entities::GoState>,
+    },
+    GooberPostUseSpell {
+        gameobject_guid: ObjectGuid,
+        target_guid: ObjectGuid,
+        spell_id: u32,
+        caster_is_player: bool,
+    },
     CastSpell {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
@@ -277,6 +300,7 @@ pub(crate) struct RepresentedGameObjectUseState {
     pub loot_state_unit_guid: wow_core::ObjectGuid,
     pub owner_guid: Option<wow_core::ObjectGuid>,
     pub go_state: Option<wow_entities::GoState>,
+    pub gameobject_flags: u32,
     pub dynamic_flags: u32,
     pub despawn_delay_secs: Option<u32>,
     pub per_player_despawn_secs: Option<u32>,
@@ -442,6 +466,7 @@ impl Default for RepresentedGameObjectUseState {
             loot_state_unit_guid: wow_core::ObjectGuid::EMPTY,
             owner_guid: None,
             go_state: None,
+            gameobject_flags: 0,
             dynamic_flags: 0,
             despawn_delay_secs: None,
             per_player_despawn_secs: None,
@@ -10131,6 +10156,81 @@ impl WorldSession {
                     gameobject_guid,
                     player_guid,
                     trap_entry: source.linked_trap_entry,
+                },
+            );
+        }
+
+        true
+    }
+
+    pub(crate) fn use_represented_gameobject_goober_state_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        source: wow_entities::GooberUseSource,
+    ) -> bool {
+        if source.allow_multi_interact {
+            if source.consumable {
+                let state = self
+                    .represented_gameobject_use_states
+                    .entry(gameobject_guid)
+                    .or_default();
+                let despawn_secs = state
+                    .despawn_delay_secs
+                    .unwrap_or(wow_entities::DEFAULT_GAMEOBJECT_RESPAWN_DELAY_SECS);
+                state.per_player_despawn_secs = Some(despawn_secs);
+                state.per_player_despawn_until =
+                    Some(Instant::now() + Duration::from_secs(u64::from(despawn_secs)));
+                self.represented_gameobject_use_effects.push(
+                    RepresentedGameObjectUseEffect::GooberDespawnForPlayer {
+                        gameobject_guid,
+                        player_guid,
+                        despawn_secs,
+                    },
+                );
+            } else {
+                self.represented_gameobject_use_effects.push(
+                    RepresentedGameObjectUseEffect::GooberSetGoStateForPlayer {
+                        gameobject_guid,
+                        player_guid,
+                        go_state: wow_entities::GoState::Active,
+                    },
+                );
+            }
+        } else {
+            let state = self
+                .represented_gameobject_use_states
+                .entry(gameobject_guid)
+                .or_default();
+            state.gameobject_flags |= wow_entities::GO_FLAG_IN_USE;
+            state.loot_state = Some(wow_entities::LootState::Activated);
+            state.loot_state_unit_guid = player_guid;
+            let go_state = if source.custom_anim != 0 {
+                None
+            } else {
+                state.go_state = Some(wow_entities::GoState::Active);
+                Some(wow_entities::GoState::Active)
+            };
+            state.cooldown_until =
+                Some(Instant::now() + Duration::from_millis(u64::from(source.auto_close_ms)));
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::GooberUsed {
+                    gameobject_guid,
+                    user_guid: player_guid,
+                    custom_anim: source.custom_anim,
+                    auto_close_ms: source.auto_close_ms,
+                    go_state,
+                },
+            );
+        }
+
+        if source.spell_id != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::GooberPostUseSpell {
+                    gameobject_guid,
+                    target_guid: player_guid,
+                    spell_id: source.spell_id,
+                    caster_is_player: source.player_cast,
                 },
             );
         }
@@ -22417,6 +22517,156 @@ mod tests {
                     entry: 777,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_goober_state_branch_matches_cpp_global_use() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 12);
+
+        assert!(session.use_represented_gameobject_goober_state_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::GooberUseSource {
+                auto_close_ms: 3_000,
+                spell_id: 7777,
+                player_cast: true,
+                ..Default::default()
+            },
+        ));
+
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.gameobject_flags & wow_entities::GO_FLAG_IN_USE, 1);
+        assert_eq!(state.loot_state, Some(wow_entities::LootState::Activated));
+        assert_eq!(state.loot_state_unit_guid, player_guid);
+        assert_eq!(state.go_state, Some(wow_entities::GoState::Active));
+        assert!(state.cooldown_until.is_some());
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::GooberUsed {
+                    gameobject_guid,
+                    user_guid: player_guid,
+                    custom_anim: 0,
+                    auto_close_ms: 3_000,
+                    go_state: Some(wow_entities::GoState::Active),
+                },
+                RepresentedGameObjectUseEffect::GooberPostUseSpell {
+                    gameobject_guid,
+                    target_guid: player_guid,
+                    spell_id: 7777,
+                    caster_is_player: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_goober_state_branch_matches_cpp_custom_anim_and_go_cast() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 13);
+
+        assert!(session.use_represented_gameobject_goober_state_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::GooberUseSource {
+                custom_anim: 2,
+                spell_id: 8888,
+                player_cast: false,
+                ..Default::default()
+            },
+        ));
+
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.go_state, None);
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::GooberUsed {
+                    gameobject_guid,
+                    user_guid: player_guid,
+                    custom_anim: 2,
+                    auto_close_ms: 0,
+                    go_state: None,
+                },
+                RepresentedGameObjectUseEffect::GooberPostUseSpell {
+                    gameobject_guid,
+                    target_guid: player_guid,
+                    spell_id: 8888,
+                    caster_is_player: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_goober_multi_interact_matches_cpp_per_player_branch() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 14);
+
+        assert!(session.use_represented_gameobject_goober_state_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::GooberUseSource {
+                allow_multi_interact: true,
+                ..Default::default()
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::GooberSetGoStateForPlayer {
+                gameobject_guid,
+                player_guid,
+                go_state: wow_entities::GoState::Active,
+            }]
+        );
+        assert!(
+            !session
+                .represented_gameobject_use_states
+                .contains_key(&gameobject_guid)
+        );
+
+        session.represented_gameobject_use_effects.clear();
+        session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default()
+            .despawn_delay_secs = Some(45);
+        assert!(session.use_represented_gameobject_goober_state_like_cpp(
+            gameobject_guid,
+            player_guid,
+            wow_entities::GooberUseSource {
+                allow_multi_interact: true,
+                consumable: true,
+                ..Default::default()
+            },
+        ));
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.per_player_despawn_secs, Some(45));
+        assert!(state.per_player_despawn_until.is_some());
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::GooberDespawnForPlayer {
+                gameobject_guid,
+                player_guid,
+                despawn_secs: 45,
+            }]
         );
     }
 
