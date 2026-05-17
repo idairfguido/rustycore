@@ -9869,6 +9869,12 @@ impl WorldSession {
         self.player_stand_state_like_cpp = state;
     }
 
+    fn chair_stand_state_like_cpp(chair_height: u32) -> UnitStandStateType {
+        let stand_state = 4_u32.saturating_add(chair_height);
+        <UnitStandStateType as num_traits::FromPrimitive>::from_u32(stand_state)
+            .unwrap_or(UnitStandStateType::Stand)
+    }
+
     #[cfg(test)]
     pub(crate) fn player_stand_state_like_cpp(&self) -> UnitStandStateType {
         self.player_stand_state_like_cpp
@@ -10604,6 +10610,8 @@ impl WorldSession {
 
         state.chair_slots[slot] = Some(player_guid);
         let stand_state = 4_u32.saturating_add(source.chair_height);
+        self.set_player_position_like_cpp(nearest_position);
+        self.set_player_stand_state_like_cpp(Self::chair_stand_state_like_cpp(source.chair_height));
         self.represented_gameobject_use_effects
             .push(RepresentedGameObjectUseEffect::ChairUsed {
                 gameobject_guid,
@@ -10645,6 +10653,8 @@ impl WorldSession {
                 sit_anim_kit: source.sit_anim_kit,
             },
         );
+        self.set_player_position_like_cpp(gameobject_position);
+        self.set_player_stand_state_like_cpp(Self::chair_stand_state_like_cpp(source.chair_height));
 
         true
     }
@@ -24116,6 +24126,15 @@ mod tests {
                 .chair_slots[2],
             Some(player_guid)
         );
+        let session_position = session.player_position_like_cpp().unwrap();
+        assert!((session_position.x - 0.0).abs() < 0.001);
+        assert!((session_position.y - 2.0).abs() < 0.001);
+        assert!((session_position.z - 0.0).abs() < 0.001);
+        assert!((session_position.orientation - 0.0).abs() < 0.001);
+        assert_eq!(
+            session.player_stand_state_like_cpp(),
+            UnitStandStateType::SitHighChair
+        );
     }
 
     #[test]
@@ -24186,6 +24205,14 @@ mod tests {
             .to_vec();
         expected.push(7);
         assert_eq!(send_rx.try_recv().unwrap(), expected);
+        assert_eq!(
+            session.player_position_like_cpp(),
+            Some(gameobject_position)
+        );
+        assert_eq!(
+            session.player_stand_state_like_cpp(),
+            UnitStandStateType::SitHighChair
+        );
     }
 
     #[test]
