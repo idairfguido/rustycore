@@ -7642,6 +7642,12 @@ impl WorldSession {
                     Err(e) => warn!("Failed to read QueryGameObject: {e}"),
                 }
             }
+            ClientOpcodes::QueryPageText => {
+                match wow_packet::packets::query::QueryPageText::read(&mut pkt) {
+                    Ok(query) => self.handle_query_page_text(query).await,
+                    Err(e) => warn!("Failed to read QueryPageText: {e}"),
+                }
+            }
             ClientOpcodes::QueryPlayerNames => {
                 match wow_packet::packets::query::QueryPlayerNames::read(&mut pkt) {
                     Ok(query) => self.handle_query_player_names(query).await,

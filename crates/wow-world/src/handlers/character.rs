@@ -246,6 +246,15 @@ inventory::submit! {
 
 inventory::submit! {
     PacketHandlerEntry {
+        opcode: ClientOpcodes::QueryPageText,
+        status: SessionStatus::LoggedIn,
+        processing: PacketProcessing::Inplace,
+        handler_name: "handle_query_page_text",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
         opcode: ClientOpcodes::QueryPlayerNames,
         status: SessionStatus::LoggedIn,
         processing: PacketProcessing::Inplace,
@@ -4164,6 +4173,77 @@ impl WorldSession {
             guid: query.guid,
             allow: true,
             stats: Some(stats),
+        });
+    }
+
+    pub async fn handle_query_page_text(&mut self, query: QueryPageText) {
+        let world_db = match self.world_db() {
+            Some(db) => Arc::clone(db),
+            None => {
+                self.send_packet(&QueryPageTextResponse {
+                    page_text_id: query.page_text_id,
+                    allow: false,
+                    pages: Vec::new(),
+                });
+                return;
+            }
+        };
+
+        let mut pages = Vec::new();
+        let mut page_id = query.page_text_id;
+        let mut visited = HashSet::new();
+
+        while page_id != 0 && visited.insert(page_id) && pages.len() < 100 {
+            let mut stmt = world_db.prepare(WorldStatements::SEL_PAGE_TEXT);
+            stmt.set_u32(0, page_id);
+            let result = match world_db.query(&stmt).await {
+                Ok(result) => result,
+                Err(e) => {
+                    debug!("Failed to query page text {page_id}: {e}");
+                    break;
+                }
+            };
+            if result.is_empty() {
+                break;
+            }
+
+            let id: u32 = result.try_read(0).unwrap_or(page_id);
+            let mut text: String = result.read_string(1);
+            let next_page_id: u32 = result.try_read(2).unwrap_or(0);
+            let player_condition_id: i32 = result.try_read(3).unwrap_or(0);
+            let flags: u8 = result.try_read(4).unwrap_or(0);
+
+            let locale = &self.locale;
+            if !locale.is_empty() && locale != "enUS" {
+                let mut loc_stmt = world_db.prepare(WorldStatements::SEL_PAGE_TEXT_LOCALE);
+                loc_stmt.set_u32(0, id);
+                loc_stmt.set_string(1, locale);
+                match world_db.query(&loc_stmt).await {
+                    Ok(locale_result) if !locale_result.is_empty() => {
+                        let locale_text: String = locale_result.read_string(0);
+                        if !locale_text.is_empty() {
+                            text = locale_text;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => debug!("Failed to query page text locale {id} {locale}: {e}"),
+                }
+            }
+
+            pages.push(PageTextInfo {
+                id,
+                next_page_id,
+                player_condition_id,
+                flags,
+                text,
+            });
+            page_id = next_page_id;
+        }
+
+        self.send_packet(&QueryPageTextResponse {
+            page_text_id: query.page_text_id,
+            allow: !pages.is_empty(),
+            pages,
         });
     }
 
@@ -8805,6 +8885,27 @@ mod tests {
         let _timestamp = pkt.read_int32().unwrap();
         assert_eq!(pkt.read_bits(3).unwrap(), 3);
         assert_eq!(pkt.read_uint32().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn query_page_text_without_world_db_sends_cpp_deny_shape() {
+        let (mut session, send_rx) = make_session_with_send_capacity(1);
+
+        session
+            .handle_query_page_text(QueryPageText {
+                page_text_id: 123,
+                item_guid: ObjectGuid::EMPTY,
+            })
+            .await;
+
+        let bytes = send_rx.try_recv().expect("query page text response");
+        assert_eq!(
+            u16::from_le_bytes([bytes[0], bytes[1]]),
+            wow_constants::ServerOpcodes::QueryPageTextResponse as u16
+        );
+        assert_eq!(&bytes[2..6], &123_u32.to_le_bytes());
+        assert_eq!(bytes[6], 0x00);
+        assert_eq!(bytes.len(), 7);
     }
 
     #[tokio::test]

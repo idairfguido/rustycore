@@ -114,6 +114,10 @@ pub enum WorldStatements {
     SEL_GAMEOBJECT_TEMPLATE_LOCALE,
     /// C++ ObjectMgr gameobject quest item list by entry.
     SEL_GAMEOBJECT_QUEST_ITEMS,
+    /// Static page text by page ID.
+    SEL_PAGE_TEXT,
+    /// Localized static page text by page ID and locale.
+    SEL_PAGE_TEXT_LOCALE,
     SEL_GAMEOBJECT_TEMPLATE_IDS,
     /// SELECT InventoryType FROM item_template WHERE entry = ?
     SEL_ITEM_INVENTORY_TYPE,
@@ -543,6 +547,12 @@ impl StatementDef for WorldStatements {
             }
             Self::SEL_GAMEOBJECT_QUEST_ITEMS => {
                 "SELECT ItemId FROM gameobject_questitem WHERE GameObjectEntry = ? ORDER BY Idx ASC"
+            }
+            Self::SEL_PAGE_TEXT => {
+                "SELECT ID, `Text`, NextPageID, PlayerConditionID, Flags FROM page_text WHERE ID = ?"
+            }
+            Self::SEL_PAGE_TEXT_LOCALE => {
+                "SELECT `Text` FROM page_text_locale WHERE ID = ? AND locale = ?"
             }
             Self::SEL_GAMEOBJECT_TEMPLATE_IDS => "SELECT entry FROM gameobject_template",
             Self::SEL_CREATURE_GOSSIP_MENU => {
