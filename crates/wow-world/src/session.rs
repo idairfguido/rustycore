@@ -223,6 +223,16 @@ pub(crate) enum RepresentedGameObjectUseEffect {
         player_guid: ObjectGuid,
         cinematic_id: u32,
     },
+    ShowPageText {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        page_id: u32,
+    },
+    SendGossip {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gossip_id: u32,
+    },
     ReportUseAi {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
@@ -237,6 +247,16 @@ pub(crate) enum RepresentedGameObjectUseEffect {
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
         trap_entry: u32,
+    },
+    KillCreditGo {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        entry: u32,
+    },
+    GooberQuestGateRejected {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        quest_id: u32,
     },
     CastSpell {
         gameobject_guid: ObjectGuid,
@@ -10021,6 +10041,103 @@ impl WorldSession {
         true
     }
 
+    pub(crate) fn use_represented_gameobject_goober_preamble_like_cpp(
+        &mut self,
+        gameobject_guid: ObjectGuid,
+        gameobject_entry: u32,
+        gameobject_position: Position,
+        player_guid: ObjectGuid,
+        source: wow_entities::GooberUseSource,
+    ) -> bool {
+        if source.page_id != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::ShowPageText {
+                    gameobject_guid,
+                    player_guid,
+                    page_id: source.page_id,
+                },
+            );
+        } else if source.gossip_id != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::SendGossip {
+                    gameobject_guid,
+                    player_guid,
+                    gossip_id: source.gossip_id,
+                },
+            );
+        }
+
+        if source.event_id != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: source.event_id,
+                },
+            );
+        }
+
+        if source.quest_id != 0
+            && self
+                .quest_store
+                .as_ref()
+                .is_some_and(|store| store.get(source.quest_id).is_some())
+            && self
+                .player_quests
+                .get(&source.quest_id)
+                .map_or(true, |status| status.status != 1)
+        {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::GooberQuestGateRejected {
+                    gameobject_guid,
+                    player_guid,
+                    quest_id: source.quest_id,
+                },
+            );
+            return false;
+        }
+
+        let mut credit_guids = Vec::new();
+        if let (Some(group_guid), Some(group_registry)) = (self.group_guid, &self.group_registry) {
+            if let Some(group) = group_registry.get(&group_guid) {
+                if group.members.contains(&player_guid) {
+                    credit_guids.extend(group.members.iter().copied());
+                }
+            }
+        }
+        if credit_guids.is_empty() {
+            credit_guids.push(player_guid);
+        }
+
+        for credit_guid in credit_guids {
+            if self.represented_player_at_group_reward_distance_like_cpp(
+                credit_guid,
+                self.player_map_id_like_cpp(),
+                gameobject_position,
+            ) {
+                self.represented_gameobject_use_effects.push(
+                    RepresentedGameObjectUseEffect::KillCreditGo {
+                        gameobject_guid,
+                        player_guid: credit_guid,
+                        entry: gameobject_entry,
+                    },
+                );
+            }
+        }
+
+        if source.linked_trap_entry != 0 {
+            self.represented_gameobject_use_effects.push(
+                RepresentedGameObjectUseEffect::TriggerLinkedTrap {
+                    gameobject_guid,
+                    player_guid,
+                    trap_entry: source.linked_trap_entry,
+                },
+            );
+        }
+
+        true
+    }
+
     fn send_active_player_transport_server_time_update_like_cpp(&self) {
         let Some(guid) = self.player_guid() else {
             return;
@@ -12494,6 +12611,46 @@ mod tests {
         );
 
         (session, pkt_tx, send_rx)
+    }
+
+    fn test_quest_template(id: u32) -> wow_data::quest::QuestTemplate {
+        wow_data::quest::QuestTemplate {
+            id,
+            quest_type: 0,
+            quest_level: 1,
+            quest_max_scaling_level: 0,
+            min_level: 1,
+            quest_sort_id: 0,
+            quest_info_id: 0,
+            suggested_group_num: 0,
+            reward_next_quest: 0,
+            reward_xp_difficulty: 0,
+            reward_xp_multiplier: 1.0,
+            reward_money_difficulty: 0,
+            reward_money_multiplier: 1.0,
+            reward_bonus_money: 0,
+            reward_display_spell: [0; wow_data::quest::QUEST_REWARD_DISPLAY_SPELL_COUNT],
+            reward_spell: 0,
+            reward_honor: 0,
+            flags: 0,
+            flags_ex: 0,
+            flags_ex2: 0,
+            reward_items: [0; wow_data::quest::QUEST_REWARD_ITEM_COUNT],
+            reward_amounts: [0; wow_data::quest::QUEST_REWARD_ITEM_COUNT],
+            item_drop: [0; wow_data::quest::QUEST_ITEM_DROP_COUNT],
+            item_drop_quantity: [0; wow_data::quest::QUEST_ITEM_DROP_COUNT],
+            log_title: String::new(),
+            log_description: String::new(),
+            quest_description: String::new(),
+            area_description: String::new(),
+            quest_completion_log: String::new(),
+            objectives: Vec::new(),
+            allowable_races: 0,
+            allowable_classes: 0,
+            max_level: 0,
+            prev_quest_id: 0,
+            reward_choice_items: [(0, 0); wow_data::quest::QUEST_REWARD_CHOICES_COUNT],
+        }
     }
 
     fn drain_server_opcodes(rx: &flume::Receiver<Vec<u8>>) -> Vec<u16> {
@@ -22054,6 +22211,213 @@ mod tests {
             },
         ));
         assert!(session.represented_gameobject_use_effects.is_empty());
+    }
+
+    #[test]
+    fn gameobject_use_goober_records_player_preamble_hooks_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 9);
+        let position = Position::new(10.0, 0.0, 0.0, 0.0);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_position_like_cpp(position);
+
+        assert!(session.use_represented_gameobject_goober_preamble_like_cpp(
+            gameobject_guid,
+            777,
+            position,
+            player_guid,
+            wow_entities::GooberUseSource {
+                page_id: 123,
+                gossip_id: 456,
+                event_id: 55,
+                linked_trap_entry: 999,
+                ..Default::default()
+            },
+        ));
+
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::ShowPageText {
+                    gameobject_guid,
+                    player_guid,
+                    page_id: 123,
+                },
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: 55,
+                },
+                RepresentedGameObjectUseEffect::KillCreditGo {
+                    gameobject_guid,
+                    player_guid,
+                    entry: 777,
+                },
+                RepresentedGameObjectUseEffect::TriggerLinkedTrap {
+                    gameobject_guid,
+                    player_guid,
+                    trap_entry: 999,
+                },
+            ]
+        );
+
+        session.represented_gameobject_use_effects.clear();
+        assert!(session.use_represented_gameobject_goober_preamble_like_cpp(
+            gameobject_guid,
+            777,
+            position,
+            player_guid,
+            wow_entities::GooberUseSource {
+                gossip_id: 456,
+                ..Default::default()
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects.first(),
+            Some(&RepresentedGameObjectUseEffect::SendGossip {
+                gameobject_guid,
+                player_guid,
+                gossip_id: 456,
+            })
+        );
+    }
+
+    #[test]
+    fn gameobject_use_goober_quest_gate_matches_cpp_incomplete_requirement() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 10);
+        let mut quest_store = wow_data::quest::QuestStore::new();
+        quest_store.quests.insert(200, test_quest_template(200));
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_player_guid(Some(player_guid));
+
+        assert!(
+            !session.use_represented_gameobject_goober_preamble_like_cpp(
+                gameobject_guid,
+                777,
+                Position::ZERO,
+                player_guid,
+                wow_entities::GooberUseSource {
+                    quest_id: 200,
+                    event_id: 55,
+                    linked_trap_entry: 999,
+                    ..Default::default()
+                },
+            )
+        );
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::TriggerGameEvent {
+                    gameobject_guid,
+                    player_guid,
+                    event_id: 55,
+                },
+                RepresentedGameObjectUseEffect::GooberQuestGateRejected {
+                    gameobject_guid,
+                    player_guid,
+                    quest_id: 200,
+                },
+            ]
+        );
+
+        session.represented_gameobject_use_effects.clear();
+        session.player_quests.insert(
+            200,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id: 200,
+                status: 1,
+                explored: false,
+                objective_counts: vec![],
+            },
+        );
+        assert!(session.use_represented_gameobject_goober_preamble_like_cpp(
+            gameobject_guid,
+            777,
+            Position::ZERO,
+            player_guid,
+            wow_entities::GooberUseSource {
+                quest_id: 200,
+                linked_trap_entry: 999,
+                ..Default::default()
+            },
+        ));
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::KillCreditGo {
+                    gameobject_guid,
+                    player_guid,
+                    entry: 777,
+                },
+                RepresentedGameObjectUseEffect::TriggerLinkedTrap {
+                    gameobject_guid,
+                    player_guid,
+                    trap_entry: 999,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn gameobject_use_goober_kill_credit_filters_group_reward_distance_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let near_member = ObjectGuid::create_player(1, 100);
+        let far_member = ObjectGuid::create_player(1, 101);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 11);
+        let gameobject_position = Position::new(10.0, 0.0, 0.0, 0.0);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_position_like_cpp(gameobject_position);
+
+        let player_registry = Arc::new(PlayerRegistry::default());
+        let (near_tx, _near_rx) = flume::bounded(1);
+        let (far_tx, _far_rx) = flume::bounded(1);
+        let mut near_info = broadcast_info(near_member, near_tx);
+        near_info.position = Position::new(20.0, 0.0, 0.0, 0.0);
+        let mut far_info = broadcast_info(far_member, far_tx);
+        far_info.position = Position::new(10_000.0, 0.0, 0.0, 0.0);
+        player_registry.insert(near_member, near_info);
+        player_registry.insert(far_member, far_info);
+
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(player_guid);
+        group.add_member(near_member);
+        group.add_member(far_member);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.group_guid = Some(group_guid);
+        session.set_player_registry(player_registry);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+
+        assert!(session.use_represented_gameobject_goober_preamble_like_cpp(
+            gameobject_guid,
+            777,
+            gameobject_position,
+            player_guid,
+            wow_entities::GooberUseSource::default(),
+        ));
+
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![
+                RepresentedGameObjectUseEffect::KillCreditGo {
+                    gameobject_guid,
+                    player_guid,
+                    entry: 777,
+                },
+                RepresentedGameObjectUseEffect::KillCreditGo {
+                    gameobject_guid,
+                    player_guid: near_member,
+                    entry: 777,
+                },
+            ]
+        );
     }
 
     #[test]

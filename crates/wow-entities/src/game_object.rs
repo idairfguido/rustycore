@@ -159,6 +159,18 @@ pub struct CameraUseSource {
     pub event_id: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GooberUseSource {
+    pub quest_id: u32,
+    pub event_id: u32,
+    pub page_id: u32,
+    pub spell_id: u32,
+    pub linked_trap_entry: u32,
+    pub gossip_id: u32,
+    pub allow_multi_interact: bool,
+    pub player_cast: bool,
+}
+
 impl GameObjectTemplateData {
     pub const fn new(go_type: u32, data: [u32; MAX_GAMEOBJECT_DATA]) -> Self {
         Self { go_type, data }
@@ -329,6 +341,23 @@ impl GameObjectTemplateData {
         Some(CameraUseSource {
             cinematic_id: self.data[1],
             event_id: self.data[2],
+        })
+    }
+
+    pub const fn goober_use_source_like_cpp(&self) -> Option<GooberUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_GOOBER {
+            return None;
+        }
+
+        Some(GooberUseSource {
+            quest_id: self.data[1],
+            event_id: self.data[2],
+            page_id: self.data[7],
+            spell_id: self.data[10],
+            linked_trap_entry: self.data[12],
+            gossip_id: self.data[19],
+            allow_multi_interact: self.data[20] != 0,
+            player_cast: self.data[23] != 0,
         })
     }
 
@@ -1231,6 +1260,37 @@ mod tests {
         );
         assert_eq!(
             GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data).camera_use_source_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn goober_use_source_uses_cpp_data_indices() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[1] = 101;
+        data[2] = 202;
+        data[7] = 707;
+        data[10] = 1010;
+        data[12] = 1212;
+        data[19] = 1919;
+        data[20] = 1;
+        data[23] = 1;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_GOOBER, data).goober_use_source_like_cpp(),
+            Some(GooberUseSource {
+                quest_id: 101,
+                event_id: 202,
+                page_id: 707,
+                spell_id: 1010,
+                linked_trap_entry: 1212,
+                gossip_id: 1919,
+                allow_multi_interact: true,
+                player_cast: true,
+            })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data).goober_use_source_like_cpp(),
             None
         );
     }
