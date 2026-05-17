@@ -409,6 +409,14 @@ pub(crate) enum RepresentedGameObjectUseEffect {
         spell_id: u32,
         go_type: u32,
     },
+    OutdoorPvpCustomSpellRequested {
+        gameobject_guid: ObjectGuid,
+        player_guid: ObjectGuid,
+        gameobject_entry: u32,
+        spell_id: u32,
+        go_type: u32,
+        spell_info_missing: bool,
+    },
     GameObjectPostUseSpellCast {
         gameobject_guid: ObjectGuid,
         target_guid: ObjectGuid,
@@ -10650,10 +10658,22 @@ impl WorldSession {
             return false;
         }
 
-        if self
+        let spell_info_missing = self
             .spell_store()
-            .is_some_and(|store| store.get(spell_id as i32).is_none())
-        {
+            .is_some_and(|store| store.get(spell_id as i32).is_none());
+
+        self.represented_gameobject_use_effects.push(
+            RepresentedGameObjectUseEffect::OutdoorPvpCustomSpellRequested {
+                gameobject_guid,
+                player_guid,
+                gameobject_entry,
+                spell_id,
+                go_type,
+                spell_info_missing,
+            },
+        );
+
+        if spell_info_missing {
             self.represented_gameobject_use_effects.push(
                 RepresentedGameObjectUseEffect::GameObjectPostUseSpellMissing {
                     gameobject_guid,
@@ -23490,6 +23510,14 @@ mod tests {
                     world_state_id: 66,
                     return_on_defender_interact: true,
                 },
+                RepresentedGameObjectUseEffect::OutdoorPvpCustomSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 179_830,
+                    spell_id: 11,
+                    go_type: wow_entities::GAMEOBJECT_TYPE_NEW_FLAG,
+                    spell_info_missing: false,
+                },
                 RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
                     gameobject_guid,
                     target_guid: player_guid,
@@ -23652,6 +23680,14 @@ mod tests {
                     persistent: false,
                     unique_user_count: 2,
                 },
+                RepresentedGameObjectUseEffect::OutdoorPvpCustomSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 777,
+                    spell_id: 61993,
+                    go_type: wow_entities::GAMEOBJECT_TYPE_RITUAL,
+                    spell_info_missing: false,
+                },
                 RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
                     gameobject_guid,
                     target_guid: player_guid,
@@ -23697,6 +23733,14 @@ mod tests {
                     area_id: 456,
                     prevent_unfriendly_outside_instances: true,
                 },
+                RepresentedGameObjectUseEffect::OutdoorPvpCustomSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 194097,
+                    spell_id: 61994,
+                    go_type: wow_entities::GAMEOBJECT_TYPE_MEETINGSTONE,
+                    spell_info_missing: false,
+                },
                 RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
                     gameobject_guid,
                     target_guid: player_guid,
@@ -23730,6 +23774,14 @@ mod tests {
         assert_eq!(
             session.represented_gameobject_use_effects,
             vec![
+                RepresentedGameObjectUseEffect::OutdoorPvpCustomSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 194097,
+                    spell_id: 61994,
+                    go_type: wow_entities::GAMEOBJECT_TYPE_MEETINGSTONE,
+                    spell_info_missing: true,
+                },
                 RepresentedGameObjectUseEffect::GameObjectPostUseSpellMissing {
                     gameobject_guid,
                     player_guid,
@@ -23886,6 +23938,14 @@ mod tests {
                 RepresentedGameObjectUseEffect::GameObjectUseCountIncremented {
                     gameobject_guid,
                     use_count: 1,
+                },
+                RepresentedGameObjectUseEffect::OutdoorPvpCustomSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 777,
+                    spell_id: 3456,
+                    go_type: wow_entities::GAMEOBJECT_TYPE_SPELLCASTER,
+                    spell_info_missing: false,
                 },
                 RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
                     gameobject_guid,
@@ -24266,6 +24326,14 @@ mod tests {
                     auto_close_ms: 3_000,
                     go_state: Some(wow_entities::GoState::Active),
                 },
+                RepresentedGameObjectUseEffect::OutdoorPvpCustomSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 777,
+                    spell_id: 7777,
+                    go_type: wow_entities::GAMEOBJECT_TYPE_GOOBER,
+                    spell_info_missing: false,
+                },
                 RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
                     gameobject_guid,
                     target_guid: player_guid,
@@ -24310,6 +24378,14 @@ mod tests {
                     custom_anim: 2,
                     auto_close_ms: 0,
                     go_state: None,
+                },
+                RepresentedGameObjectUseEffect::OutdoorPvpCustomSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 777,
+                    spell_id: 8888,
+                    go_type: wow_entities::GAMEOBJECT_TYPE_GOOBER,
+                    spell_info_missing: false,
                 },
                 RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
                     gameobject_guid,

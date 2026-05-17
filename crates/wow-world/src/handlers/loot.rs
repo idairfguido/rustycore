@@ -8416,13 +8416,23 @@ mod tests {
         assert_eq!(state.despawn_delay_secs, Some(15));
         assert_eq!(
             session.represented_gameobject_use_effects,
-            vec![RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
-                gameobject_guid,
-                target_guid: player_guid,
-                spell_id: 777,
-                triggered: false,
-                caster: RepresentedGameObjectSpellCaster::User,
-            }]
+            vec![
+                RepresentedGameObjectUseEffect::OutdoorPvpCustomSpellRequested {
+                    gameobject_guid,
+                    player_guid,
+                    gameobject_entry: 190_007,
+                    spell_id: 777,
+                    go_type: GAMEOBJECT_TYPE_GATHERING_NODE,
+                    spell_info_missing: false,
+                },
+                RepresentedGameObjectUseEffect::GameObjectPostUseSpellCast {
+                    gameobject_guid,
+                    target_guid: player_guid,
+                    spell_id: 777,
+                    triggered: false,
+                    caster: RepresentedGameObjectSpellCaster::User,
+                },
+            ]
         );
     }
 
