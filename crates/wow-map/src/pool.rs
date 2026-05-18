@@ -9,6 +9,7 @@
 
 use crate::map::SpawnedPoolDataLikeCpp;
 use crate::spawn::{SpawnId, SpawnObjectType};
+use std::collections::{HashMap, HashSet};
 
 /// C++ `PoolTemplateData { uint32 MaxLimit; int32 MapId; }`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,6 +82,345 @@ pub struct PoolSpawnObjectPlanLikeCpp {
     pub selected: Vec<PoolObjectLikeCpp>,
     pub despawned_trigger: Option<u64>,
     pub respawned_trigger: bool,
+}
+
+/// Typed no-op/blocked reason recorded by represented `PoolMgr::SpawnPool` planning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PoolMgrPlanSkipReasonLikeCpp {
+    MissingGroup,
+    EmptyGroup,
+}
+
+/// Typed error for deterministic `PoolMgr` planning helpers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PoolMgrPlanErrorLikeCpp {
+    MissingTemplate {
+        pool_id: u32,
+    },
+    WrongGroupKind {
+        expected: PoolMemberKindLikeCpp,
+        actual: PoolMemberKindLikeCpp,
+    },
+    UnsupportedSpawnType {
+        spawn_type: SpawnObjectType,
+    },
+    ChildPoolIdOverflow {
+        child_pool_id: u64,
+    },
+}
+
+/// One represented specialization call of C++ `PoolMgr::SpawnPool<T>`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PoolTypedSpawnPlanLikeCpp {
+    pub kind: PoolMemberKindLikeCpp,
+    pub pool_id: u32,
+    pub trigger_from: u64,
+    pub max_limit: Option<u32>,
+    pub object_plan: Option<PoolSpawnObjectPlanLikeCpp>,
+    pub skip_reason: Option<PoolMgrPlanSkipReasonLikeCpp>,
+}
+
+/// Deterministic result of represented C++ `PoolMgr::SpawnPool(...)` orchestration.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PoolSpawnPoolPlanLikeCpp {
+    pub pool_id: u32,
+    pub subplans: Vec<PoolTypedSpawnPlanLikeCpp>,
+}
+
+/// C++-shaped pure `PoolMgr` planner.
+///
+/// This struct owns only template/group/index data needed to plan C++
+/// `PoolMgr::SpawnPool`/`UpdatePool` branch order. Runtime spawned state stays
+/// exclusively in the caller-provided map-owned `SpawnedPoolDataLikeCpp`; live
+/// entity creation, DB writes, recursive live PoolMgr execution, scripts, map
+/// fanout, and server networking are intentionally represented only as action
+/// records returned by the existing `PoolGroupLikeCpp::spawn_object_plan_like_cpp`.
+#[derive(Debug, Clone, Default)]
+pub struct PoolMgrLikeCpp {
+    pub templates: HashMap<u32, PoolTemplateDataLikeCpp>,
+    pub creature_groups: HashMap<u32, PoolGroupLikeCpp>,
+    pub gameobject_groups: HashMap<u32, PoolGroupLikeCpp>,
+    pub pool_groups: HashMap<u32, PoolGroupLikeCpp>,
+    pub creature_spawn_to_pool: HashMap<SpawnId, u32>,
+    pub gameobject_spawn_to_pool: HashMap<SpawnId, u32>,
+    pub child_pool_to_parent: HashMap<u32, u32>,
+}
+
+impl PoolMgrLikeCpp {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert_template_like_cpp(&mut self, pool_id: u32, template: PoolTemplateDataLikeCpp) {
+        self.templates.insert(pool_id, template);
+    }
+
+    pub fn insert_or_replace_group_like_cpp(
+        &mut self,
+        kind: PoolMemberKindLikeCpp,
+        pool_id: u32,
+        mut group: PoolGroupLikeCpp,
+    ) -> Result<Option<PoolGroupLikeCpp>, PoolMgrPlanErrorLikeCpp> {
+        if group.member_kind() != kind {
+            return Err(PoolMgrPlanErrorLikeCpp::WrongGroupKind {
+                expected: kind,
+                actual: group.member_kind(),
+            });
+        }
+        group.set_pool_id_like_cpp(pool_id);
+        let replaced = match kind {
+            PoolMemberKindLikeCpp::Creature => self.creature_groups.insert(pool_id, group),
+            PoolMemberKindLikeCpp::GameObject => self.gameobject_groups.insert(pool_id, group),
+            PoolMemberKindLikeCpp::Pool => self.pool_groups.insert(pool_id, group),
+        };
+        Ok(replaced)
+    }
+
+    pub fn register_spawn_pool_relation_like_cpp(
+        &mut self,
+        kind: PoolMemberKindLikeCpp,
+        spawn_id: SpawnId,
+        pool_id: u32,
+    ) -> Result<Option<u32>, PoolMgrPlanErrorLikeCpp> {
+        match kind {
+            PoolMemberKindLikeCpp::Creature => {
+                Ok(self.creature_spawn_to_pool.insert(spawn_id, pool_id))
+            }
+            PoolMemberKindLikeCpp::GameObject => {
+                Ok(self.gameobject_spawn_to_pool.insert(spawn_id, pool_id))
+            }
+            PoolMemberKindLikeCpp::Pool => {
+                self.register_child_pool_relation_like_cpp(spawn_id, pool_id)
+            }
+        }
+    }
+
+    pub fn register_child_pool_relation_like_cpp(
+        &mut self,
+        child_pool_id: u64,
+        parent_pool_id: u32,
+    ) -> Result<Option<u32>, PoolMgrPlanErrorLikeCpp> {
+        let child_pool_id = u32::try_from(child_pool_id)
+            .map_err(|_| PoolMgrPlanErrorLikeCpp::ChildPoolIdOverflow { child_pool_id })?;
+        Ok(self
+            .child_pool_to_parent
+            .insert(child_pool_id, parent_pool_id))
+    }
+
+    pub fn is_part_of_a_pool_like_cpp(
+        &self,
+        spawn_type: SpawnObjectType,
+        spawn_id: SpawnId,
+    ) -> Result<u32, PoolMgrPlanErrorLikeCpp> {
+        match spawn_type {
+            SpawnObjectType::Creature => {
+                Ok(*self.creature_spawn_to_pool.get(&spawn_id).unwrap_or(&0))
+            }
+            SpawnObjectType::GameObject => {
+                Ok(*self.gameobject_spawn_to_pool.get(&spawn_id).unwrap_or(&0))
+            }
+            SpawnObjectType::AreaTrigger => Ok(0),
+        }
+    }
+
+    pub fn spawn_pool_plan_like_cpp(
+        &self,
+        spawns: &mut SpawnedPoolDataLikeCpp,
+        pool_id: u32,
+        mut explicit_roll_for: impl FnMut(PoolMemberKindLikeCpp, u32) -> f32,
+        mut choose_equal: impl FnMut(&[PoolObjectLikeCpp], usize) -> Vec<usize>,
+    ) -> Result<PoolSpawnPoolPlanLikeCpp, PoolMgrPlanErrorLikeCpp> {
+        let mut plan = PoolSpawnPoolPlanLikeCpp {
+            pool_id,
+            subplans: Vec::new(),
+        };
+        for kind in [
+            PoolMemberKindLikeCpp::Pool,
+            PoolMemberKindLikeCpp::GameObject,
+            PoolMemberKindLikeCpp::Creature,
+        ] {
+            plan.subplans.push(self.spawn_typed_pool_plan_like_cpp(
+                kind,
+                spawns,
+                pool_id,
+                0,
+                &mut explicit_roll_for,
+                &mut choose_equal,
+            )?);
+        }
+        Ok(plan)
+    }
+
+    pub fn spawn_typed_pool_plan_like_cpp(
+        &self,
+        kind: PoolMemberKindLikeCpp,
+        spawns: &mut SpawnedPoolDataLikeCpp,
+        pool_id: u32,
+        trigger_from: u64,
+        mut explicit_roll_for: impl FnMut(PoolMemberKindLikeCpp, u32) -> f32,
+        choose_equal: impl FnMut(&[PoolObjectLikeCpp], usize) -> Vec<usize>,
+    ) -> Result<PoolTypedSpawnPlanLikeCpp, PoolMgrPlanErrorLikeCpp> {
+        let Some(group) = self.group_like_cpp(kind, pool_id) else {
+            return Ok(PoolTypedSpawnPlanLikeCpp {
+                kind,
+                pool_id,
+                trigger_from,
+                max_limit: None,
+                object_plan: None,
+                skip_reason: Some(PoolMgrPlanSkipReasonLikeCpp::MissingGroup),
+            });
+        };
+        if group.is_empty_like_cpp() {
+            return Ok(PoolTypedSpawnPlanLikeCpp {
+                kind,
+                pool_id,
+                trigger_from,
+                max_limit: None,
+                object_plan: None,
+                skip_reason: Some(PoolMgrPlanSkipReasonLikeCpp::EmptyGroup),
+            });
+        }
+        self.ensure_no_child_pool_overflow_like_cpp(group)?;
+        let template = self
+            .templates
+            .get(&pool_id)
+            .ok_or(PoolMgrPlanErrorLikeCpp::MissingTemplate { pool_id })?;
+        let object_plan = group.spawn_object_plan_like_cpp(
+            spawns,
+            template.max_limit,
+            trigger_from,
+            || explicit_roll_for(kind, pool_id),
+            choose_equal,
+        );
+        Ok(PoolTypedSpawnPlanLikeCpp {
+            kind,
+            pool_id,
+            trigger_from,
+            max_limit: Some(template.max_limit),
+            object_plan: Some(object_plan),
+            skip_reason: None,
+        })
+    }
+
+    pub fn update_pool_plan_like_cpp(
+        &self,
+        spawns: &mut SpawnedPoolDataLikeCpp,
+        pool_id: u32,
+        spawn_type: SpawnObjectType,
+        spawn_id: SpawnId,
+        mut explicit_roll_for: impl FnMut(PoolMemberKindLikeCpp, u32) -> f32,
+        choose_equal: impl FnMut(&[PoolObjectLikeCpp], usize) -> Vec<usize>,
+    ) -> Result<PoolTypedSpawnPlanLikeCpp, PoolMgrPlanErrorLikeCpp> {
+        if spawn_type == SpawnObjectType::AreaTrigger {
+            return Err(PoolMgrPlanErrorLikeCpp::UnsupportedSpawnType { spawn_type });
+        }
+        if let Some(&mother_pool_id) = self.child_pool_to_parent.get(&pool_id) {
+            return self.spawn_typed_pool_plan_like_cpp(
+                PoolMemberKindLikeCpp::Pool,
+                spawns,
+                mother_pool_id,
+                u64::from(pool_id),
+                &mut explicit_roll_for,
+                choose_equal,
+            );
+        }
+        let kind = match spawn_type {
+            SpawnObjectType::Creature => PoolMemberKindLikeCpp::Creature,
+            SpawnObjectType::GameObject => PoolMemberKindLikeCpp::GameObject,
+            SpawnObjectType::AreaTrigger => unreachable!("AreaTrigger returned above"),
+        };
+        self.spawn_typed_pool_plan_like_cpp(
+            kind,
+            spawns,
+            pool_id,
+            spawn_id,
+            explicit_roll_for,
+            choose_equal,
+        )
+    }
+
+    #[must_use]
+    pub fn is_empty_like_cpp(&self, pool_id: u32) -> bool {
+        let mut visiting = HashSet::new();
+        self.is_empty_with_visited_like_cpp(pool_id, &mut visiting)
+    }
+
+    #[must_use]
+    pub fn check_pool_like_cpp(&self, pool_id: u32) -> bool {
+        for kind in [
+            PoolMemberKindLikeCpp::GameObject,
+            PoolMemberKindLikeCpp::Creature,
+            PoolMemberKindLikeCpp::Pool,
+        ] {
+            if let Some(group) = self.group_like_cpp(kind, pool_id) {
+                if !group.check_pool_like_cpp() {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    fn group_like_cpp(
+        &self,
+        kind: PoolMemberKindLikeCpp,
+        pool_id: u32,
+    ) -> Option<&PoolGroupLikeCpp> {
+        match kind {
+            PoolMemberKindLikeCpp::Creature => self.creature_groups.get(&pool_id),
+            PoolMemberKindLikeCpp::GameObject => self.gameobject_groups.get(&pool_id),
+            PoolMemberKindLikeCpp::Pool => self.pool_groups.get(&pool_id),
+        }
+    }
+
+    fn ensure_no_child_pool_overflow_like_cpp(
+        &self,
+        group: &PoolGroupLikeCpp,
+    ) -> Result<(), PoolMgrPlanErrorLikeCpp> {
+        if group.member_kind() != PoolMemberKindLikeCpp::Pool {
+            return Ok(());
+        }
+        for child in group
+            .explicitly_chanced_like_cpp()
+            .iter()
+            .chain(group.equal_chanced_like_cpp().iter())
+        {
+            if u32::try_from(child.guid).is_err() {
+                return Err(PoolMgrPlanErrorLikeCpp::ChildPoolIdOverflow {
+                    child_pool_id: child.guid,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn is_empty_with_visited_like_cpp(&self, pool_id: u32, visiting: &mut HashSet<u32>) -> bool {
+        if !visiting.insert(pool_id) {
+            return false;
+        }
+        for kind in [
+            PoolMemberKindLikeCpp::GameObject,
+            PoolMemberKindLikeCpp::Creature,
+            PoolMemberKindLikeCpp::Pool,
+        ] {
+            if let Some(group) = self.group_like_cpp(kind, pool_id) {
+                let empty = if kind == PoolMemberKindLikeCpp::Pool {
+                    group.is_empty_deep_check_like_cpp(|child_pool_id| {
+                        self.is_empty_with_visited_like_cpp(child_pool_id, visiting)
+                    })
+                } else {
+                    group.is_empty_deep_check_like_cpp(|_| true)
+                };
+                if !empty {
+                    visiting.remove(&pool_id);
+                    return false;
+                }
+            }
+        }
+        visiting.remove(&pool_id);
+        true
+    }
 }
 
 /// C++-shaped `PoolGroup<T>` buckets and pure helpers.
@@ -209,15 +549,15 @@ impl PoolGroupLikeCpp {
     /// branches, then returns explicit action records for live side effects that
     /// still belong to future owners (`Spawn1Object`, `ReSpawn1Object`,
     /// `DespawnObject`, recursive live `PoolMgr::SpawnPool`). The deterministic
-    /// API requires an explicit roll value so callers cannot skip C++
-    /// `rand_chance()` whenever `ExplicitlyChanced` is non-empty; the value is
-    /// ignored for groups without explicit-chanced members.
+    /// API requires a lazy explicit-roll provider so callers cannot skip C++
+    /// `rand_chance()` when `ExplicitlyChanced` is non-empty, while still
+    /// avoiding RNG consumption for C++ paths that do not call it.
     pub fn spawn_object_plan_like_cpp(
         &self,
         spawns: &mut SpawnedPoolDataLikeCpp,
         limit: u32,
         trigger_from: u64,
-        explicit_roll: f32,
+        mut explicit_roll: impl FnMut() -> f32,
         mut choose_equal: impl FnMut(&[PoolObjectLikeCpp], usize) -> Vec<usize>,
     ) -> PoolSpawnObjectPlanLikeCpp {
         let mut plan = PoolSpawnObjectPlanLikeCpp::default();
@@ -232,7 +572,7 @@ impl PoolGroupLikeCpp {
             let mut rolled_objects = Vec::new();
 
             if !self.explicitly_chanced.is_empty() {
-                let mut roll = explicit_roll;
+                let mut roll = explicit_roll();
                 for obj in &self.explicitly_chanced {
                     roll -= obj.chance;
                     if roll < 0.0
@@ -420,7 +760,8 @@ mod tests {
         group.add_entry_like_cpp(PoolObjectLikeCpp::new(101, 40.0), 1);
         group.add_entry_like_cpp(PoolObjectLikeCpp::new(102, 60.0), 1);
 
-        let plan = group.spawn_object_plan_like_cpp(&mut spawns, 1, 0, 30.0, choose_first_indices);
+        let plan =
+            group.spawn_object_plan_like_cpp(&mut spawns, 1, 0, || 30.0, choose_first_indices);
 
         assert_eq!(plan.selected, vec![PoolObjectLikeCpp::new(101, 40.0)]);
         assert_eq!(
@@ -445,7 +786,8 @@ mod tests {
         group.add_entry_like_cpp(PoolObjectLikeCpp::new(201, 100.0), 1);
         group.add_entry_like_cpp(PoolObjectLikeCpp::new(202, 0.0), 1);
 
-        let plan = group.spawn_object_plan_like_cpp(&mut spawns, 2, 0, 50.0, choose_first_indices);
+        let plan =
+            group.spawn_object_plan_like_cpp(&mut spawns, 2, 0, || 50.0, choose_first_indices);
 
         assert_eq!(plan.selected, vec![PoolObjectLikeCpp::new(202, 0.0)]);
         assert_eq!(
@@ -467,12 +809,17 @@ mod tests {
         group.add_entry_like_cpp(PoolObjectLikeCpp::new(211, 40.0), 1);
         group.add_entry_like_cpp(PoolObjectLikeCpp::new(212, 0.0), 1);
 
-        let plan =
-            group.spawn_object_plan_like_cpp(&mut spawns, 1, 0, 80.0, |candidates, count| {
+        let plan = group.spawn_object_plan_like_cpp(
+            &mut spawns,
+            1,
+            0,
+            || 80.0,
+            |candidates, count| {
                 assert_eq!(candidates, &[PoolObjectLikeCpp::new(212, 0.0)]);
                 assert_eq!(count, 1);
                 vec![0]
-            });
+            },
+        );
 
         assert_eq!(plan.selected, vec![PoolObjectLikeCpp::new(212, 0.0)]);
         assert_eq!(
@@ -501,11 +848,17 @@ mod tests {
         group.add_entry_like_cpp(PoolObjectLikeCpp::new(304, 0.0), 1);
 
         let mut observed_candidates = Vec::new();
-        let plan = group.spawn_object_plan_like_cpp(&mut spawns, 3, 0, 0.0, |candidates, count| {
-            observed_candidates = candidates.to_vec();
-            assert_eq!(count, 2);
-            vec![1, 99, 1, 0]
-        });
+        let plan = group.spawn_object_plan_like_cpp(
+            &mut spawns,
+            3,
+            0,
+            || 0.0,
+            |candidates, count| {
+                observed_candidates = candidates.to_vec();
+                assert_eq!(count, 2);
+                vec![1, 99, 1, 0]
+            },
+        );
 
         assert_eq!(
             observed_candidates,
@@ -539,7 +892,7 @@ mod tests {
         group.add_entry_like_cpp(PoolObjectLikeCpp::new(401, 100.0), 1);
 
         let plan =
-            group.spawn_object_plan_like_cpp(&mut spawns, 1, 401, 50.0, choose_first_indices);
+            group.spawn_object_plan_like_cpp(&mut spawns, 1, 401, || 50.0, choose_first_indices);
 
         assert_eq!(plan.selected, vec![PoolObjectLikeCpp::new(401, 100.0)]);
         assert!(plan.respawned_trigger);
@@ -567,11 +920,16 @@ mod tests {
         group.add_entry_like_cpp(PoolObjectLikeCpp::new(501, 0.0), 1);
         group.add_entry_like_cpp(PoolObjectLikeCpp::new(502, 0.0), 1);
 
-        let plan =
-            group.spawn_object_plan_like_cpp(&mut spawns, 1, 501, 0.0, |_candidates, count| {
+        let plan = group.spawn_object_plan_like_cpp(
+            &mut spawns,
+            1,
+            501,
+            || 0.0,
+            |_candidates, count| {
                 assert_eq!(count, 1);
                 vec![1]
-            });
+            },
+        );
 
         assert_eq!(plan.selected, vec![PoolObjectLikeCpp::new(502, 0.0)]);
         assert_eq!(plan.despawned_trigger, Some(501));
@@ -611,10 +969,13 @@ mod tests {
         let mut group = PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Creature, 7);
         group.add_entry_like_cpp(PoolObjectLikeCpp::new(601, 0.0), 1);
 
-        let plan =
-            group.spawn_object_plan_like_cpp(&mut spawns, 1, 601, 0.0, |_candidates, _count| {
-                vec![0]
-            });
+        let plan = group.spawn_object_plan_like_cpp(
+            &mut spawns,
+            1,
+            601,
+            || 0.0,
+            |_candidates, _count| vec![0],
+        );
 
         assert!(plan.selected.is_empty());
         assert_eq!(plan.despawned_trigger, Some(601));
@@ -636,8 +997,13 @@ mod tests {
         group.add_entry_like_cpp(PoolObjectLikeCpp::new(701, 0.0), 1);
         group.add_entry_like_cpp(PoolObjectLikeCpp::new(702, 0.0), 1);
 
-        let spawn_plan =
-            group.spawn_object_plan_like_cpp(&mut spawns, 1, 0, 0.0, |_candidates, _count| vec![0]);
+        let spawn_plan = group.spawn_object_plan_like_cpp(
+            &mut spawns,
+            1,
+            0,
+            || 0.0,
+            |_candidates, _count| vec![0],
+        );
         assert_eq!(
             spawn_plan.actions,
             vec![PoolSpawnObjectActionLikeCpp::SpawnOne {
@@ -648,19 +1014,25 @@ mod tests {
         assert!(spawns.is_spawned_pool_like_cpp(701));
         assert_eq!(spawns.get_spawned_objects_like_cpp(7), 1);
 
-        let respawn_plan =
-            group.spawn_object_plan_like_cpp(&mut spawns, 1, 701, 0.0, |_candidates, _count| {
-                vec![0]
-            });
+        let respawn_plan = group.spawn_object_plan_like_cpp(
+            &mut spawns,
+            1,
+            701,
+            || 0.0,
+            |_candidates, _count| vec![0],
+        );
         assert!(respawn_plan.respawned_trigger);
         assert!(respawn_plan.actions.is_empty());
         assert!(spawns.is_spawned_pool_like_cpp(701));
         assert_eq!(spawns.get_spawned_objects_like_cpp(7), 1);
 
-        let despawn_plan =
-            group.spawn_object_plan_like_cpp(&mut spawns, 1, 701, 0.0, |_candidates, _count| {
-                vec![1]
-            });
+        let despawn_plan = group.spawn_object_plan_like_cpp(
+            &mut spawns,
+            1,
+            701,
+            || 0.0,
+            |_candidates, _count| vec![1],
+        );
         assert_eq!(despawn_plan.despawned_trigger, Some(701));
         assert_eq!(
             despawn_plan.actions,
@@ -795,6 +1167,561 @@ mod tests {
         assert_eq!(
             creature.explicitly_chanced_like_cpp(),
             &[PoolObjectLikeCpp::new(10, 50.0)]
+        );
+    }
+
+    fn group_with_one(kind: PoolMemberKindLikeCpp, pool_id: u32, guid: u64) -> PoolGroupLikeCpp {
+        let mut group = PoolGroupLikeCpp::with_pool_id(kind, pool_id);
+        group.add_entry_like_cpp(PoolObjectLikeCpp::new(guid, 0.0), 1);
+        group
+    }
+
+    #[test]
+    fn pool_mgr_spawn_pool_orders_pool_gameobject_creature_and_mutates_map_spawns_like_cpp() {
+        let mut mgr = PoolMgrLikeCpp::new();
+        mgr.insert_template_like_cpp(10, PoolTemplateDataLikeCpp::new(3, 571));
+        mgr.insert_or_replace_group_like_cpp(
+            PoolMemberKindLikeCpp::Creature,
+            10,
+            group_with_one(PoolMemberKindLikeCpp::Creature, 10, 101),
+        )
+        .unwrap();
+        mgr.insert_or_replace_group_like_cpp(
+            PoolMemberKindLikeCpp::GameObject,
+            10,
+            group_with_one(PoolMemberKindLikeCpp::GameObject, 10, 201),
+        )
+        .unwrap();
+        mgr.insert_or_replace_group_like_cpp(
+            PoolMemberKindLikeCpp::Pool,
+            10,
+            group_with_one(PoolMemberKindLikeCpp::Pool, 10, 301),
+        )
+        .unwrap();
+        let mut spawns = SpawnedPoolDataLikeCpp::new();
+
+        let mut roll_calls = Vec::new();
+        let plan = mgr
+            .spawn_pool_plan_like_cpp(
+                &mut spawns,
+                10,
+                |kind, pool_id| {
+                    roll_calls.push((kind, pool_id));
+                    0.0
+                },
+                choose_first_indices,
+            )
+            .unwrap();
+
+        let kinds = plan
+            .subplans
+            .iter()
+            .map(|subplan| subplan.kind)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds,
+            vec![
+                PoolMemberKindLikeCpp::Pool,
+                PoolMemberKindLikeCpp::GameObject,
+                PoolMemberKindLikeCpp::Creature,
+            ]
+        );
+        assert!(roll_calls.is_empty());
+        assert!(spawns.is_spawned_pool_like_cpp(301));
+        assert!(spawns.is_spawned_gameobject_like_cpp(201));
+        assert!(spawns.is_spawned_creature_like_cpp(101));
+        assert_eq!(spawns.get_spawned_objects_like_cpp(10), 3);
+        assert_eq!(
+            plan.subplans[0].object_plan.as_ref().unwrap().actions,
+            vec![PoolSpawnObjectActionLikeCpp::SpawnOne {
+                kind: PoolMemberKindLikeCpp::Pool,
+                guid: 301,
+            }]
+        );
+    }
+
+    #[test]
+    fn pool_mgr_spawn_pool_uses_independent_explicit_rolls_per_top_level_kind_like_cpp() {
+        let mut mgr = PoolMgrLikeCpp::new();
+        mgr.insert_template_like_cpp(10, PoolTemplateDataLikeCpp::new(2, 571));
+
+        let mut gameobject_group =
+            PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::GameObject, 10);
+        gameobject_group.add_entry_like_cpp(PoolObjectLikeCpp::new(201, 25.0), 1);
+        gameobject_group.add_entry_like_cpp(PoolObjectLikeCpp::new(202, 25.0), 1);
+        mgr.insert_or_replace_group_like_cpp(
+            PoolMemberKindLikeCpp::GameObject,
+            10,
+            gameobject_group,
+        )
+        .unwrap();
+
+        let mut creature_group =
+            PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Creature, 10);
+        creature_group.add_entry_like_cpp(PoolObjectLikeCpp::new(101, 25.0), 1);
+        creature_group.add_entry_like_cpp(PoolObjectLikeCpp::new(102, 25.0), 1);
+        mgr.insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Creature, 10, creature_group)
+            .unwrap();
+
+        let mut spawns = SpawnedPoolDataLikeCpp::new();
+        let mut roll_calls = Vec::new();
+        let plan = mgr
+            .spawn_pool_plan_like_cpp(
+                &mut spawns,
+                10,
+                |kind, pool_id| {
+                    roll_calls.push((kind, pool_id));
+                    match kind {
+                        PoolMemberKindLikeCpp::Pool => 0.0,
+                        PoolMemberKindLikeCpp::GameObject => 10.0,
+                        PoolMemberKindLikeCpp::Creature => 30.0,
+                    }
+                },
+                choose_first_indices,
+            )
+            .unwrap();
+
+        assert_eq!(
+            roll_calls,
+            vec![
+                (PoolMemberKindLikeCpp::GameObject, 10),
+                (PoolMemberKindLikeCpp::Creature, 10),
+            ]
+        );
+        assert_eq!(
+            plan.subplans[0].skip_reason,
+            Some(PoolMgrPlanSkipReasonLikeCpp::MissingGroup)
+        );
+        assert!(spawns.is_spawned_gameobject_like_cpp(201));
+        assert!(!spawns.is_spawned_gameobject_like_cpp(202));
+        assert!(!spawns.is_spawned_creature_like_cpp(101));
+        assert!(spawns.is_spawned_creature_like_cpp(102));
+
+        let gameobject_plan = plan.subplans[1].object_plan.as_ref().unwrap();
+        let creature_plan = plan.subplans[2].object_plan.as_ref().unwrap();
+        assert_eq!(
+            gameobject_plan.selected,
+            vec![PoolObjectLikeCpp::new(201, 25.0)]
+        );
+        assert_eq!(
+            creature_plan.selected,
+            vec![PoolObjectLikeCpp::new(102, 25.0)]
+        );
+    }
+
+    #[test]
+    fn pool_mgr_missing_template_errors_without_limit_zero_or_spawn_mutation_like_cpp() {
+        let mut mgr = PoolMgrLikeCpp::new();
+        mgr.insert_or_replace_group_like_cpp(
+            PoolMemberKindLikeCpp::Creature,
+            10,
+            group_with_one(PoolMemberKindLikeCpp::Creature, 10, 101),
+        )
+        .unwrap();
+        let mut spawns = SpawnedPoolDataLikeCpp::new();
+
+        let result = mgr.spawn_typed_pool_plan_like_cpp(
+            PoolMemberKindLikeCpp::Creature,
+            &mut spawns,
+            10,
+            0,
+            |_, _| 0.0,
+            choose_first_indices,
+        );
+
+        assert_eq!(
+            result,
+            Err(PoolMgrPlanErrorLikeCpp::MissingTemplate { pool_id: 10 })
+        );
+        assert!(!spawns.is_spawned_creature_like_cpp(101));
+        assert_eq!(spawns.get_spawned_objects_like_cpp(10), 0);
+    }
+
+    #[test]
+    fn pool_mgr_missing_and_empty_groups_are_noop_like_cpp() {
+        let mut mgr = PoolMgrLikeCpp::new();
+        mgr.insert_template_like_cpp(10, PoolTemplateDataLikeCpp::new(1, 571));
+        mgr.insert_or_replace_group_like_cpp(
+            PoolMemberKindLikeCpp::GameObject,
+            10,
+            PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::GameObject, 10),
+        )
+        .unwrap();
+        let mut spawns = SpawnedPoolDataLikeCpp::new();
+
+        let mut roll_calls = Vec::new();
+        let plan = mgr
+            .spawn_pool_plan_like_cpp(
+                &mut spawns,
+                10,
+                |kind, pool_id| {
+                    roll_calls.push((kind, pool_id));
+                    0.0
+                },
+                choose_first_indices,
+            )
+            .unwrap();
+
+        assert_eq!(
+            plan.subplans[0].skip_reason,
+            Some(PoolMgrPlanSkipReasonLikeCpp::MissingGroup)
+        );
+        assert_eq!(
+            plan.subplans[1].skip_reason,
+            Some(PoolMgrPlanSkipReasonLikeCpp::EmptyGroup)
+        );
+        assert_eq!(
+            plan.subplans[2].skip_reason,
+            Some(PoolMgrPlanSkipReasonLikeCpp::MissingGroup)
+        );
+        assert!(roll_calls.is_empty());
+        assert_eq!(spawns.get_spawned_objects_like_cpp(10), 0);
+    }
+
+    #[test]
+    fn pool_mgr_equal_only_group_does_not_request_explicit_roll_like_cpp() {
+        let mut mgr = PoolMgrLikeCpp::new();
+        mgr.insert_template_like_cpp(10, PoolTemplateDataLikeCpp::new(1, 571));
+        mgr.insert_or_replace_group_like_cpp(
+            PoolMemberKindLikeCpp::Creature,
+            10,
+            group_with_one(PoolMemberKindLikeCpp::Creature, 10, 101),
+        )
+        .unwrap();
+        let mut spawns = SpawnedPoolDataLikeCpp::new();
+        let mut roll_calls = Vec::new();
+
+        let plan = mgr
+            .spawn_pool_plan_like_cpp(
+                &mut spawns,
+                10,
+                |kind, pool_id| {
+                    roll_calls.push((kind, pool_id));
+                    0.0
+                },
+                choose_first_indices,
+            )
+            .unwrap();
+
+        assert!(roll_calls.is_empty());
+        assert!(plan.subplans[2].object_plan.is_some());
+        assert!(spawns.is_spawned_creature_like_cpp(101));
+    }
+
+    #[test]
+    fn pool_mgr_count_non_positive_does_not_request_explicit_roll_like_cpp() {
+        let mut mgr = PoolMgrLikeCpp::new();
+        mgr.insert_template_like_cpp(10, PoolTemplateDataLikeCpp::new(1, 571));
+        let mut group = PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Creature, 10);
+        group.add_entry_like_cpp(PoolObjectLikeCpp::new(101, 100.0), 1);
+        mgr.insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Creature, 10, group)
+            .unwrap();
+        let mut spawns = SpawnedPoolDataLikeCpp::new();
+        assert_eq!(
+            spawns.add_spawn_like_cpp(SpawnObjectType::Creature, 101, 10),
+            Ok(())
+        );
+        assert_eq!(
+            spawns.add_spawn_like_cpp(SpawnObjectType::Creature, 102, 10),
+            Ok(())
+        );
+        let mut roll_calls = Vec::new();
+
+        let plan = mgr
+            .spawn_typed_pool_plan_like_cpp(
+                PoolMemberKindLikeCpp::Creature,
+                &mut spawns,
+                10,
+                0,
+                |kind, pool_id| {
+                    roll_calls.push((kind, pool_id));
+                    0.0
+                },
+                choose_first_indices,
+            )
+            .unwrap();
+
+        assert!(roll_calls.is_empty());
+        assert!(plan.object_plan.unwrap().selected.is_empty());
+        assert_eq!(spawns.get_spawned_objects_like_cpp(10), 2);
+    }
+
+    #[test]
+    fn pool_mgr_update_pool_child_pool_uses_mother_pool_branch_like_cpp() {
+        let mut mgr = PoolMgrLikeCpp::new();
+        mgr.insert_template_like_cpp(50, PoolTemplateDataLikeCpp::new(1, 571));
+        let mut mother_group = PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Pool, 50);
+        mother_group.add_entry_like_cpp(PoolObjectLikeCpp::new(70, 0.0), 1);
+        mother_group.add_entry_like_cpp(PoolObjectLikeCpp::new(71, 0.0), 1);
+        mgr.insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Pool, 50, mother_group)
+            .unwrap();
+        mgr.register_child_pool_relation_like_cpp(70, 50).unwrap();
+        let mut spawns = SpawnedPoolDataLikeCpp::new();
+        spawns.add_pool_spawn_like_cpp(70, 50);
+
+        let plan = mgr
+            .update_pool_plan_like_cpp(
+                &mut spawns,
+                70,
+                SpawnObjectType::Creature,
+                999,
+                |_, _| 0.0,
+                |_candidates, count| {
+                    assert_eq!(count, 1);
+                    vec![1]
+                },
+            )
+            .unwrap();
+
+        assert_eq!(plan.kind, PoolMemberKindLikeCpp::Pool);
+        assert_eq!(plan.pool_id, 50);
+        assert_eq!(plan.trigger_from, 70);
+        let object_plan = plan.object_plan.unwrap();
+        assert_eq!(object_plan.selected, vec![PoolObjectLikeCpp::new(71, 0.0)]);
+        assert_eq!(object_plan.despawned_trigger, Some(70));
+        assert!(!spawns.is_spawned_pool_like_cpp(70));
+        assert!(spawns.is_spawned_pool_like_cpp(71));
+    }
+
+    #[test]
+    fn pool_mgr_update_pool_creature_and_gameobject_no_child_dispatch_typed_like_cpp() {
+        let mut mgr = PoolMgrLikeCpp::new();
+        mgr.insert_template_like_cpp(10, PoolTemplateDataLikeCpp::new(1, 571));
+        mgr.insert_template_like_cpp(20, PoolTemplateDataLikeCpp::new(1, 571));
+        mgr.insert_or_replace_group_like_cpp(
+            PoolMemberKindLikeCpp::Creature,
+            10,
+            group_with_one(PoolMemberKindLikeCpp::Creature, 10, 101),
+        )
+        .unwrap();
+        mgr.insert_or_replace_group_like_cpp(
+            PoolMemberKindLikeCpp::GameObject,
+            20,
+            group_with_one(PoolMemberKindLikeCpp::GameObject, 20, 201),
+        )
+        .unwrap();
+        let mut spawns = SpawnedPoolDataLikeCpp::new();
+        assert_eq!(
+            spawns.add_spawn_like_cpp(SpawnObjectType::Creature, 101, 10),
+            Ok(())
+        );
+        assert_eq!(
+            spawns.add_spawn_like_cpp(SpawnObjectType::GameObject, 201, 20),
+            Ok(())
+        );
+
+        let creature_plan = mgr
+            .update_pool_plan_like_cpp(
+                &mut spawns,
+                10,
+                SpawnObjectType::Creature,
+                101,
+                |_, _| 0.0,
+                choose_first_indices,
+            )
+            .unwrap();
+        let gameobject_plan = mgr
+            .update_pool_plan_like_cpp(
+                &mut spawns,
+                20,
+                SpawnObjectType::GameObject,
+                201,
+                |_, _| 0.0,
+                choose_first_indices,
+            )
+            .unwrap();
+
+        assert_eq!(creature_plan.kind, PoolMemberKindLikeCpp::Creature);
+        assert_eq!(creature_plan.trigger_from, 101);
+        assert!(creature_plan.object_plan.unwrap().respawned_trigger);
+        assert_eq!(gameobject_plan.kind, PoolMemberKindLikeCpp::GameObject);
+        assert_eq!(gameobject_plan.trigger_from, 201);
+        assert!(gameobject_plan.object_plan.unwrap().respawned_trigger);
+    }
+
+    #[test]
+    fn pool_mgr_update_pool_areatrigger_is_unsupported_and_preserves_spawns_like_cpp() {
+        let mgr = PoolMgrLikeCpp::new();
+        let mut spawns = SpawnedPoolDataLikeCpp::new();
+        assert_eq!(
+            spawns.add_spawn_like_cpp(SpawnObjectType::Creature, 101, 10),
+            Ok(())
+        );
+
+        let mut roll_calls = Vec::new();
+        let result = mgr.update_pool_plan_like_cpp(
+            &mut spawns,
+            10,
+            SpawnObjectType::AreaTrigger,
+            301,
+            |kind, pool_id| {
+                roll_calls.push((kind, pool_id));
+                0.0
+            },
+            choose_first_indices,
+        );
+
+        assert_eq!(
+            result,
+            Err(PoolMgrPlanErrorLikeCpp::UnsupportedSpawnType {
+                spawn_type: SpawnObjectType::AreaTrigger,
+            })
+        );
+        assert!(spawns.is_spawned_creature_like_cpp(101));
+        assert_eq!(spawns.get_spawned_objects_like_cpp(10), 1);
+        assert_eq!(
+            mgr.is_part_of_a_pool_like_cpp(SpawnObjectType::AreaTrigger, 301),
+            Ok(0)
+        );
+        assert!(roll_calls.is_empty());
+    }
+
+    #[test]
+    fn pool_mgr_update_pool_mother_branch_requests_lazy_pool_roll_only_when_explicit_like_cpp() {
+        let mut mgr = PoolMgrLikeCpp::new();
+        mgr.insert_template_like_cpp(50, PoolTemplateDataLikeCpp::new(1, 571));
+        let mut mother_group = PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Pool, 50);
+        mother_group.add_entry_like_cpp(PoolObjectLikeCpp::new(70, 50.0), 1);
+        mother_group.add_entry_like_cpp(PoolObjectLikeCpp::new(71, 50.0), 1);
+        mgr.insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Pool, 50, mother_group)
+            .unwrap();
+        mgr.register_child_pool_relation_like_cpp(70, 50).unwrap();
+        let mut spawns = SpawnedPoolDataLikeCpp::new();
+        spawns.add_pool_spawn_like_cpp(70, 50);
+        let mut roll_calls = Vec::new();
+
+        let plan = mgr
+            .update_pool_plan_like_cpp(
+                &mut spawns,
+                70,
+                SpawnObjectType::Creature,
+                999,
+                |kind, pool_id| {
+                    roll_calls.push((kind, pool_id));
+                    60.0
+                },
+                choose_first_indices,
+            )
+            .unwrap();
+
+        assert_eq!(roll_calls, vec![(PoolMemberKindLikeCpp::Pool, 50)]);
+        assert_eq!(plan.kind, PoolMemberKindLikeCpp::Pool);
+        assert_eq!(
+            plan.object_plan.unwrap().selected,
+            vec![PoolObjectLikeCpp::new(71, 50.0)]
+        );
+        assert!(!spawns.is_spawned_pool_like_cpp(70));
+        assert!(spawns.is_spawned_pool_like_cpp(71));
+    }
+
+    #[test]
+    fn pool_mgr_update_pool_typed_branch_requests_lazy_roll_only_when_explicit_like_cpp() {
+        let mut mgr = PoolMgrLikeCpp::new();
+        mgr.insert_template_like_cpp(10, PoolTemplateDataLikeCpp::new(1, 571));
+        let mut group = PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Creature, 10);
+        group.add_entry_like_cpp(PoolObjectLikeCpp::new(101, 50.0), 1);
+        group.add_entry_like_cpp(PoolObjectLikeCpp::new(102, 50.0), 1);
+        mgr.insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Creature, 10, group)
+            .unwrap();
+        let mut spawns = SpawnedPoolDataLikeCpp::new();
+        assert_eq!(
+            spawns.add_spawn_like_cpp(SpawnObjectType::Creature, 101, 10),
+            Ok(())
+        );
+        let mut roll_calls = Vec::new();
+
+        let plan = mgr
+            .update_pool_plan_like_cpp(
+                &mut spawns,
+                10,
+                SpawnObjectType::Creature,
+                101,
+                |kind, pool_id| {
+                    roll_calls.push((kind, pool_id));
+                    60.0
+                },
+                choose_first_indices,
+            )
+            .unwrap();
+
+        assert_eq!(roll_calls, vec![(PoolMemberKindLikeCpp::Creature, 10)]);
+        assert_eq!(plan.kind, PoolMemberKindLikeCpp::Creature);
+        assert_eq!(
+            plan.object_plan.unwrap().selected,
+            vec![PoolObjectLikeCpp::new(102, 50.0)]
+        );
+        assert!(!spawns.is_spawned_creature_like_cpp(101));
+        assert!(spawns.is_spawned_creature_like_cpp(102));
+    }
+
+    #[test]
+    fn pool_mgr_is_empty_and_check_pool_preserve_cpp_order_and_result() {
+        let mut mgr = PoolMgrLikeCpp::new();
+        let mut invalid_gameobject =
+            PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::GameObject, 10);
+        invalid_gameobject.add_entry_like_cpp(PoolObjectLikeCpp::new(201, 60.0), 1);
+        let mut invalid_creature =
+            PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Creature, 10);
+        invalid_creature.add_entry_like_cpp(PoolObjectLikeCpp::new(101, 50.0), 1);
+        invalid_creature.add_entry_like_cpp(PoolObjectLikeCpp::new(102, 50.0), 1);
+        mgr.insert_or_replace_group_like_cpp(
+            PoolMemberKindLikeCpp::GameObject,
+            10,
+            invalid_gameobject,
+        )
+        .unwrap();
+        mgr.insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Creature, 10, invalid_creature)
+            .unwrap();
+
+        assert!(!mgr.is_empty_like_cpp(10));
+        assert!(!mgr.check_pool_like_cpp(10));
+
+        let mut parent = PoolMgrLikeCpp::new();
+        let mut parent_group = PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Pool, 40);
+        parent_group.add_entry_like_cpp(PoolObjectLikeCpp::new(41, 0.0), 1);
+        parent
+            .insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Pool, 40, parent_group)
+            .unwrap();
+        assert!(parent.is_empty_like_cpp(40));
+        parent
+            .insert_or_replace_group_like_cpp(
+                PoolMemberKindLikeCpp::Creature,
+                41,
+                group_with_one(PoolMemberKindLikeCpp::Creature, 41, 411),
+            )
+            .unwrap();
+        assert!(!parent.is_empty_like_cpp(40));
+
+        let mut cyclic = PoolMgrLikeCpp::new();
+        cyclic
+            .insert_or_replace_group_like_cpp(
+                PoolMemberKindLikeCpp::Pool,
+                1,
+                group_with_one(PoolMemberKindLikeCpp::Pool, 1, 1),
+            )
+            .unwrap();
+        assert!(!cyclic.is_empty_like_cpp(1));
+    }
+
+    #[test]
+    fn pool_mgr_builders_validate_group_kind_and_child_pool_overflow_like_cpp() {
+        let mut mgr = PoolMgrLikeCpp::new();
+        assert_eq!(
+            mgr.insert_or_replace_group_like_cpp(
+                PoolMemberKindLikeCpp::Creature,
+                10,
+                PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::GameObject, 10),
+            ),
+            Err(PoolMgrPlanErrorLikeCpp::WrongGroupKind {
+                expected: PoolMemberKindLikeCpp::Creature,
+                actual: PoolMemberKindLikeCpp::GameObject,
+            })
+        );
+        assert_eq!(
+            mgr.register_child_pool_relation_like_cpp(u64::from(u32::MAX) + 1, 10),
+            Err(PoolMgrPlanErrorLikeCpp::ChildPoolIdOverflow {
+                child_pool_id: u64::from(u32::MAX) + 1,
+            })
         );
     }
 }
