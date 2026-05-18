@@ -107,6 +107,12 @@ pub enum WorldStatements {
     SEL_SPAWN_GROUP_TEMPLATES,
     /// Load C++ spawn group members.
     SEL_SPAWN_GROUP_MEMBERS,
+    /// Load C++ PoolMgr pool templates.
+    SEL_POOL_TEMPLATES,
+    /// Load C++ PoolMgr pool members filtered by type.
+    SEL_POOL_MEMBERS_BY_TYPE,
+    /// Load C++ PoolMgr default autospawn candidates.
+    SEL_POOL_AUTOSPAWN_CANDIDATES,
     /// Load C++ instance spawn groups.
     SEL_INSTANCE_SPAWN_GROUPS,
     /// Load gameobject template for query response.
@@ -531,6 +537,15 @@ impl StatementDef for WorldStatements {
                 "SELECT groupId, groupName, groupFlags FROM spawn_group_template"
             }
             Self::SEL_SPAWN_GROUP_MEMBERS => "SELECT groupId, spawnType, spawnId FROM spawn_group",
+            Self::SEL_POOL_TEMPLATES => "SELECT entry, max_limit FROM pool_template",
+            Self::SEL_POOL_MEMBERS_BY_TYPE => {
+                "SELECT spawnId, poolSpawnId, chance FROM pool_members WHERE type = ?"
+            }
+            Self::SEL_POOL_AUTOSPAWN_CANDIDATES => concat!(
+                "SELECT DISTINCT pool_template.entry, pool_members.spawnId, pool_members.poolSpawnId FROM pool_template",
+                " LEFT JOIN game_event_pool ON pool_template.entry = game_event_pool.pool_entry",
+                " LEFT JOIN pool_members ON pool_members.type = 2 AND pool_template.entry = pool_members.spawnId WHERE game_event_pool.pool_entry IS NULL",
+            ),
             Self::SEL_INSTANCE_SPAWN_GROUPS => {
                 "SELECT instanceMapId, bossStateId, bossStates, spawnGroupId, flags FROM instance_spawn_groups"
             }

@@ -721,7 +721,7 @@ async fn main() -> Result<()> {
         .context("Failed to load canonical SpawnStore metadata from world DB")?;
     let canonical_spawn_metadata = Arc::new(canonical_spawn_metadata);
     info!(
-        "Loaded canonical SpawnStore metadata: creatures rows={} indexed={} event-managed={} empty-difficulty={} missing-map={}; gameobjects rows={} indexed={} event-managed={} empty-difficulty={} missing-map={}; areatriggers rows={} indexed={} empty-difficulty={} missing-map={}; spawn-group rows={} assigned={} missing-spawn={} invalid-type={} missing-group={} map-mismatch={} duplicate={}; represented validations skipped: creature={} gameobject={} areatrigger={}",
+        "Loaded canonical SpawnStore metadata: creatures rows={} indexed={} event-managed={} empty-difficulty={} missing-map={}; gameobjects rows={} indexed={} event-managed={} empty-difficulty={} missing-map={}; areatriggers rows={} indexed={} empty-difficulty={} missing-map={}; poolmgr templates rows={} loaded={} creature-members loaded={}/{} gameobject-members loaded={}/{} pool-members loaded={}/{} relation-removals={} map-mismatches={} circular={} empty={} missing-map={} autospawn loaded={}/{} skipped-empty={} skipped-broken={} skipped-child={}; spawn-group rows={} assigned={} missing-spawn={} invalid-type={} missing-group={} map-mismatch={} duplicate={}; represented validations skipped: creature={} gameobject={} areatrigger={}",
         canonical_spawn_report.creature.rows,
         canonical_spawn_report.creature.indexed,
         canonical_spawn_report.creature.skipped_event,
@@ -738,6 +738,24 @@ async fn main() -> Result<()> {
             .area_trigger
             .skipped_empty_difficulties,
         canonical_spawn_report.area_trigger.skipped_missing_map,
+        canonical_spawn_report.pool_mgr.template_rows,
+        canonical_spawn_report.pool_mgr.templates_loaded,
+        canonical_spawn_report.pool_mgr.creature_members.loaded,
+        canonical_spawn_report.pool_mgr.creature_members.rows,
+        canonical_spawn_report.pool_mgr.gameobject_members.loaded,
+        canonical_spawn_report.pool_mgr.gameobject_members.rows,
+        canonical_spawn_report.pool_mgr.pool_members.loaded,
+        canonical_spawn_report.pool_mgr.pool_members.rows,
+        canonical_spawn_report.pool_mgr.relation_removals,
+        canonical_spawn_report.pool_mgr.map_mismatches,
+        canonical_spawn_report.pool_mgr.circular_relations,
+        canonical_spawn_report.pool_mgr.empty_pools,
+        canonical_spawn_report.pool_mgr.missing_map_after_non_empty,
+        canonical_spawn_report.pool_mgr.autospawn_loaded,
+        canonical_spawn_report.pool_mgr.autospawn_rows,
+        canonical_spawn_report.pool_mgr.autospawn_skipped_empty,
+        canonical_spawn_report.pool_mgr.autospawn_skipped_broken,
+        canonical_spawn_report.pool_mgr.autospawn_skipped_child,
         canonical_spawn_report.spawn_group_rows,
         canonical_spawn_report.spawn_group_apply.assigned,
         canonical_spawn_report.spawn_group_apply.missing_spawn,

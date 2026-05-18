@@ -184,6 +184,9 @@ pub struct PoolMgrLikeCpp {
     pub creature_spawn_to_pool: HashMap<SpawnId, u32>,
     pub gameobject_spawn_to_pool: HashMap<SpawnId, u32>,
     pub child_pool_to_parent: HashMap<u32, u32>,
+    /// C++ `mAutoSpawnPoolsPerMap`; key intentionally stays signed to preserve
+    /// `PoolTemplateData::MapId == -1` during honest load/report validation.
+    pub auto_spawn_pools_per_map: HashMap<i32, Vec<u32>>,
 }
 
 impl PoolMgrLikeCpp {
@@ -246,6 +249,51 @@ impl PoolMgrLikeCpp {
         Ok(self
             .child_pool_to_parent
             .insert(child_pool_id, parent_pool_id))
+    }
+
+    pub fn add_auto_spawn_pool_like_cpp(&mut self, map_id: i32, pool_id: u32) {
+        self.auto_spawn_pools_per_map
+            .entry(map_id)
+            .or_default()
+            .push(pool_id);
+    }
+
+    #[must_use]
+    pub fn auto_spawn_pools_for_map_like_cpp(&self, map_id: i32) -> &[u32] {
+        self.auto_spawn_pools_per_map
+            .get(&map_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    #[must_use]
+    pub fn auto_spawn_pools_per_map_like_cpp(&self) -> &HashMap<i32, Vec<u32>> {
+        &self.auto_spawn_pools_per_map
+    }
+
+    pub fn remove_child_pool_relation_like_cpp(
+        &mut self,
+        child_pool_id: u32,
+        parent_pool_id: u32,
+    ) -> PoolRelationRemovalLikeCpp {
+        let removal = self
+            .pool_groups
+            .get_mut(&parent_pool_id)
+            .map(|group| group.remove_one_relation_like_cpp(child_pool_id))
+            .unwrap_or_default();
+        self.child_pool_to_parent.remove(&child_pool_id);
+        removal
+    }
+
+    #[must_use]
+    pub fn top_level_auto_spawn_candidate_like_cpp(&self, pool_id: u32) -> Option<i32> {
+        if self.is_empty_like_cpp(pool_id) || !self.check_pool_like_cpp(pool_id) {
+            return None;
+        }
+        if self.child_pool_to_parent.contains_key(&pool_id) {
+            return None;
+        }
+        self.templates.get(&pool_id).map(|template| template.map_id)
     }
 
     pub fn is_part_of_a_pool_like_cpp(
@@ -2161,5 +2209,29 @@ mod tests {
             cyclic.despawn_pool_plan_like_cpp(&mut cyclic_spawns, 1, false),
             Err(PoolMgrPlanErrorLikeCpp::ChildPoolCycle { pool_id: 1 })
         );
+    }
+
+    #[test]
+    fn pool_mgr_autospawn_tracks_top_level_non_child_only_like_cpp() {
+        let mut mgr = PoolMgrLikeCpp::new();
+        mgr.insert_template_like_cpp(10, PoolTemplateDataLikeCpp::new(1, 530));
+        mgr.insert_template_like_cpp(20, PoolTemplateDataLikeCpp::new(1, 530));
+        mgr.insert_or_replace_group_like_cpp(
+            PoolMemberKindLikeCpp::Creature,
+            10,
+            group_with_one(PoolMemberKindLikeCpp::Creature, 10, 1001),
+        )
+        .unwrap();
+        let mut parent_group = PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Pool, 20);
+        parent_group.add_entry_like_cpp(PoolObjectLikeCpp::new(10, 0.0), 1);
+        mgr.insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Pool, 20, parent_group)
+            .unwrap();
+        mgr.register_child_pool_relation_like_cpp(10, 20).unwrap();
+
+        assert_eq!(mgr.top_level_auto_spawn_candidate_like_cpp(10), None);
+        assert_eq!(mgr.top_level_auto_spawn_candidate_like_cpp(20), Some(530));
+        mgr.add_auto_spawn_pool_like_cpp(530, 20);
+        assert_eq!(mgr.auto_spawn_pools_for_map_like_cpp(530), &[20]);
+        assert!(mgr.auto_spawn_pools_for_map_like_cpp(-1).is_empty());
     }
 }

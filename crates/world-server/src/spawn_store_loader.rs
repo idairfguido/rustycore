@@ -34,6 +34,10 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use wow_core::{ObjectGuid, Position, guid::HighGuid};
 use wow_database::{WorldDatabase, WorldStatements};
+use wow_map::pool::{
+    PoolGroupLikeCpp, PoolMemberKindLikeCpp, PoolMgrLikeCpp, PoolObjectLikeCpp,
+    PoolTemplateDataLikeCpp,
+};
 use wow_map::spawn::{
     LinkedRespawnLoadIssueKindLikeCpp, LinkedRespawnLoadIssueLikeCpp,
     LinkedRespawnLoadReportLikeCpp, LinkedRespawnRowLikeCpp, LinkedRespawnTypeLikeCpp,
@@ -68,6 +72,37 @@ pub struct CanonicalSpawnStoreLoadReport {
     pub spawn_group_rows: usize,
     pub spawn_group_apply: SpawnGroupApplyReport,
     pub linked_respawn: LinkedRespawnLoadReportLikeCpp,
+    pub pool_mgr: PoolMgrLoadReportLikeCpp,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PoolMemberLoadReportLikeCpp {
+    pub rows: usize,
+    pub loaded: usize,
+    pub skipped_missing_spawn: usize,
+    pub skipped_missing_template: usize,
+    pub skipped_invalid_chance: usize,
+    pub skipped_map_mismatch: usize,
+    pub skipped_child_id_overflow: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PoolMgrLoadReportLikeCpp {
+    pub template_rows: usize,
+    pub templates_loaded: usize,
+    pub creature_members: PoolMemberLoadReportLikeCpp,
+    pub gameobject_members: PoolMemberLoadReportLikeCpp,
+    pub pool_members: PoolMemberLoadReportLikeCpp,
+    pub relation_removals: usize,
+    pub map_mismatches: usize,
+    pub circular_relations: usize,
+    pub empty_pools: usize,
+    pub missing_map_after_non_empty: usize,
+    pub autospawn_rows: usize,
+    pub autospawn_loaded: usize,
+    pub autospawn_skipped_empty: usize,
+    pub autospawn_skipped_broken: usize,
+    pub autospawn_skipped_child: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -75,6 +110,7 @@ pub struct CanonicalSpawnMetadataLikeCpp {
     spawn_store: SpawnStore,
     spawn_group_templates: BTreeMap<u32, SpawnGroupTemplateData>,
     linked_respawns: LinkedRespawnStoreLikeCpp,
+    pool_mgr: PoolMgrLikeCpp,
 }
 
 impl CanonicalSpawnMetadataLikeCpp {
@@ -86,6 +122,7 @@ impl CanonicalSpawnMetadataLikeCpp {
             spawn_store,
             spawn_group_templates,
             linked_respawns: LinkedRespawnStoreLikeCpp::new(),
+            pool_mgr: PoolMgrLikeCpp::new(),
         }
     }
 
@@ -105,8 +142,17 @@ impl CanonicalSpawnMetadataLikeCpp {
         self
     }
 
+    pub fn with_pool_mgr_like_cpp(mut self, pool_mgr: PoolMgrLikeCpp) -> Self {
+        self.pool_mgr = pool_mgr;
+        self
+    }
+
     pub fn linked_respawns_like_cpp(&self) -> &LinkedRespawnStoreLikeCpp {
         &self.linked_respawns
+    }
+
+    pub fn pool_mgr_like_cpp(&self) -> &PoolMgrLikeCpp {
+        &self.pool_mgr
     }
 
     /// C++ shaped dependency for future `Map::InitSpawnGroupState` wiring.
@@ -213,6 +259,26 @@ struct LinkedRespawnDbRow {
     link_type: u8,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PoolTemplateRowLikeCpp {
+    entry: u32,
+    max_limit: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PoolMemberRowLikeCpp {
+    spawn_id: u64,
+    pool_spawn_id: u32,
+    chance: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PoolAutospawnCandidateRowLikeCpp {
+    pool_entry: u32,
+    child_pool_id: u64,
+    mother_pool_id: u32,
+}
+
 impl From<LinkedRespawnDbRow> for LinkedRespawnRowLikeCpp {
     fn from(row: LinkedRespawnDbRow) -> Self {
         Self {
@@ -242,6 +308,10 @@ pub async fn load_canonical_spawn_store_like_cpp(
     // C++ `ObjectMgr::LoadLinkedRespawn` runs after creature/gameobject data is canonical.
     let linked_respawns = load_linked_respawns_like_cpp(db, &store, map_store, &mut report).await?;
 
+    // C++ `PoolMgr::LoadFromDB` uses ObjectMgr creature/gameobject spawn data as
+    // existence/map truth. This builds only PoolMgr metadata/plans; no live spawn.
+    let pool_mgr = load_pool_mgr_like_cpp(db, &store, &mut report).await?;
+
     let mut templates = spawn_group_templates_for_spawn_store(spawn_group_store);
     let members = load_spawn_group_members_like_cpp(db).await?;
     report.spawn_group_rows = members.len();
@@ -249,9 +319,324 @@ pub async fn load_canonical_spawn_store_like_cpp(
 
     Ok((
         CanonicalSpawnMetadataLikeCpp::new(store, templates)
-            .with_linked_respawns_like_cpp(linked_respawns),
+            .with_linked_respawns_like_cpp(linked_respawns)
+            .with_pool_mgr_like_cpp(pool_mgr),
         report,
     ))
+}
+
+async fn load_pool_mgr_like_cpp(
+    db: &WorldDatabase,
+    store: &SpawnStore,
+    report: &mut CanonicalSpawnStoreLoadReport,
+) -> Result<PoolMgrLikeCpp> {
+    let mut mgr = PoolMgrLikeCpp::new();
+
+    let stmt = db.prepare(WorldStatements::SEL_POOL_TEMPLATES);
+    let mut result = db.query(&stmt).await?;
+    if result.is_empty() {
+        return Ok(mgr);
+    }
+    loop {
+        apply_pool_template_row_like_cpp(
+            PoolTemplateRowLikeCpp {
+                entry: result.read(0),
+                max_limit: result.read(1),
+            },
+            &mut mgr,
+            &mut report.pool_mgr,
+        );
+        if !result.next_row() {
+            break;
+        }
+    }
+
+    load_pool_member_rows_like_cpp(db, store, PoolMemberKindLikeCpp::Creature, &mut mgr, report)
+        .await?;
+    load_pool_member_rows_like_cpp(
+        db,
+        store,
+        PoolMemberKindLikeCpp::GameObject,
+        &mut mgr,
+        report,
+    )
+    .await?;
+    load_pool_member_rows_like_cpp(db, store, PoolMemberKindLikeCpp::Pool, &mut mgr, report)
+        .await?;
+
+    apply_pool_map_propagation_like_cpp(&mut mgr, &mut report.pool_mgr);
+    apply_pool_final_validation_like_cpp(&mgr, &mut report.pool_mgr);
+    load_pool_autospawn_candidates_like_cpp(db, &mut mgr, report).await?;
+
+    Ok(mgr)
+}
+
+async fn load_pool_member_rows_like_cpp(
+    db: &WorldDatabase,
+    store: &SpawnStore,
+    kind: PoolMemberKindLikeCpp,
+    mgr: &mut PoolMgrLikeCpp,
+    report: &mut CanonicalSpawnStoreLoadReport,
+) -> Result<()> {
+    let mut stmt = db.prepare(WorldStatements::SEL_POOL_MEMBERS_BY_TYPE);
+    stmt.set_u8(0, kind as u8);
+    let mut result = db.query(&stmt).await?;
+    if result.is_empty() {
+        return Ok(());
+    }
+
+    loop {
+        let row = PoolMemberRowLikeCpp {
+            spawn_id: result.read(0),
+            pool_spawn_id: result.read(1),
+            chance: result.read(2),
+        };
+        match kind {
+            PoolMemberKindLikeCpp::Creature | PoolMemberKindLikeCpp::GameObject => {
+                apply_pool_spawn_member_row_like_cpp(row, store, kind, mgr, &mut report.pool_mgr);
+            }
+            PoolMemberKindLikeCpp::Pool => {
+                apply_pool_pool_member_row_like_cpp(row, mgr, &mut report.pool_mgr);
+            }
+        }
+        if !result.next_row() {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+async fn load_pool_autospawn_candidates_like_cpp(
+    db: &WorldDatabase,
+    mgr: &mut PoolMgrLikeCpp,
+    report: &mut CanonicalSpawnStoreLoadReport,
+) -> Result<()> {
+    let stmt = db.prepare(WorldStatements::SEL_POOL_AUTOSPAWN_CANDIDATES);
+    let mut result = db.query(&stmt).await?;
+    if result.is_empty() {
+        return Ok(());
+    }
+
+    loop {
+        apply_pool_autospawn_candidate_row_like_cpp(
+            PoolAutospawnCandidateRowLikeCpp {
+                pool_entry: result.read(0),
+                child_pool_id: result.try_read(1).unwrap_or(0),
+                mother_pool_id: result.try_read(2).unwrap_or(0),
+            },
+            mgr,
+            &mut report.pool_mgr,
+        );
+        if !result.next_row() {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+fn apply_pool_template_row_like_cpp(
+    row: PoolTemplateRowLikeCpp,
+    mgr: &mut PoolMgrLikeCpp,
+    report: &mut PoolMgrLoadReportLikeCpp,
+) {
+    report.template_rows += 1;
+    mgr.insert_template_like_cpp(row.entry, PoolTemplateDataLikeCpp::new(row.max_limit, -1));
+    report.templates_loaded += 1;
+}
+
+fn apply_pool_spawn_member_row_like_cpp(
+    row: PoolMemberRowLikeCpp,
+    store: &SpawnStore,
+    kind: PoolMemberKindLikeCpp,
+    mgr: &mut PoolMgrLikeCpp,
+    report: &mut PoolMgrLoadReportLikeCpp,
+) {
+    let member_report = match kind {
+        PoolMemberKindLikeCpp::Creature => &mut report.creature_members,
+        PoolMemberKindLikeCpp::GameObject => &mut report.gameobject_members,
+        PoolMemberKindLikeCpp::Pool => {
+            unreachable!("pool rows use apply_pool_pool_member_row_like_cpp")
+        }
+    };
+    member_report.rows += 1;
+
+    let spawn_type = match kind {
+        PoolMemberKindLikeCpp::Creature => SpawnObjectType::Creature,
+        PoolMemberKindLikeCpp::GameObject => SpawnObjectType::GameObject,
+        PoolMemberKindLikeCpp::Pool => {
+            unreachable!("pool rows use apply_pool_pool_member_row_like_cpp")
+        }
+    };
+    let Some(spawn_data) = store.spawn_data(spawn_type, row.spawn_id) else {
+        member_report.skipped_missing_spawn += 1;
+        return;
+    };
+    let Some(template) = mgr.templates.get_mut(&row.pool_spawn_id) else {
+        member_report.skipped_missing_template += 1;
+        return;
+    };
+    if !(0.0..=100.0).contains(&row.chance) {
+        member_report.skipped_invalid_chance += 1;
+        return;
+    }
+
+    let map_id = match i32::try_from(spawn_data.map_id) {
+        Ok(map_id) => map_id,
+        Err(_) => {
+            member_report.skipped_map_mismatch += 1;
+            return;
+        }
+    };
+    if template.map_id == -1 {
+        template.map_id = map_id;
+    }
+    if template.map_id != map_id {
+        member_report.skipped_map_mismatch += 1;
+        return;
+    }
+
+    let max_limit = template.max_limit;
+    let group_map = match kind {
+        PoolMemberKindLikeCpp::Creature => &mut mgr.creature_groups,
+        PoolMemberKindLikeCpp::GameObject => &mut mgr.gameobject_groups,
+        PoolMemberKindLikeCpp::Pool => {
+            unreachable!("pool rows use apply_pool_pool_member_row_like_cpp")
+        }
+    };
+    let group = group_map
+        .entry(row.pool_spawn_id)
+        .or_insert_with(|| PoolGroupLikeCpp::with_pool_id(kind, row.pool_spawn_id));
+    group.set_pool_id_like_cpp(row.pool_spawn_id);
+    group.add_entry_like_cpp(PoolObjectLikeCpp::new(row.spawn_id, row.chance), max_limit);
+    let spawn_id = row.spawn_id;
+    let _ = mgr.register_spawn_pool_relation_like_cpp(kind, spawn_id, row.pool_spawn_id);
+    member_report.loaded += 1;
+}
+
+fn apply_pool_pool_member_row_like_cpp(
+    row: PoolMemberRowLikeCpp,
+    mgr: &mut PoolMgrLikeCpp,
+    report: &mut PoolMgrLoadReportLikeCpp,
+) {
+    report.pool_members.rows += 1;
+    let Ok(child_pool_id) = u32::try_from(row.spawn_id) else {
+        report.pool_members.skipped_child_id_overflow += 1;
+        return;
+    };
+    if !mgr.templates.contains_key(&row.pool_spawn_id) {
+        report.pool_members.skipped_missing_template += 1;
+        return;
+    }
+    if !mgr.templates.contains_key(&child_pool_id) {
+        report.pool_members.skipped_missing_spawn += 1;
+        return;
+    }
+    if row.pool_spawn_id == child_pool_id {
+        report.circular_relations += 1;
+        report.pool_members.skipped_missing_spawn += 1;
+        return;
+    }
+    if !(0.0..=100.0).contains(&row.chance) {
+        report.pool_members.skipped_invalid_chance += 1;
+        return;
+    }
+
+    let max_limit = mgr
+        .templates
+        .get(&row.pool_spawn_id)
+        .map(|template| template.max_limit)
+        .unwrap_or(0);
+    let group = mgr.pool_groups.entry(row.pool_spawn_id).or_insert_with(|| {
+        PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Pool, row.pool_spawn_id)
+    });
+    group.set_pool_id_like_cpp(row.pool_spawn_id);
+    group.add_entry_like_cpp(
+        PoolObjectLikeCpp::new(u64::from(child_pool_id), row.chance),
+        max_limit,
+    );
+    let _ = mgr.register_child_pool_relation_like_cpp(u64::from(child_pool_id), row.pool_spawn_id);
+    report.pool_members.loaded += 1;
+}
+
+fn apply_pool_map_propagation_like_cpp(
+    mgr: &mut PoolMgrLikeCpp,
+    report: &mut PoolMgrLoadReportLikeCpp,
+) {
+    let pool_ids = mgr.templates.keys().copied().collect::<Vec<_>>();
+    for pool_id in pool_ids {
+        let mut checked = std::collections::HashSet::new();
+        let mut current = pool_id;
+        while let Some(parent) = mgr.child_pool_to_parent.get(&current).copied() {
+            let child_map_id = mgr
+                .templates
+                .get(&current)
+                .map_or(-1, |template| template.map_id);
+            if child_map_id != -1 {
+                if let Some(parent_template) = mgr.templates.get_mut(&parent) {
+                    if parent_template.map_id == -1 {
+                        parent_template.map_id = child_map_id;
+                    }
+                    if parent_template.map_id != child_map_id {
+                        mgr.remove_child_pool_relation_like_cpp(current, parent);
+                        report.map_mismatches += 1;
+                        report.relation_removals += 1;
+                        report.pool_members.loaded = report.pool_members.loaded.saturating_sub(1);
+                        break;
+                    }
+                }
+            }
+
+            checked.insert(current);
+            if checked.contains(&parent) {
+                mgr.remove_child_pool_relation_like_cpp(current, parent);
+                report.circular_relations += 1;
+                report.relation_removals += 1;
+                report.pool_members.loaded = report.pool_members.loaded.saturating_sub(1);
+                break;
+            }
+            current = parent;
+        }
+    }
+}
+
+fn apply_pool_final_validation_like_cpp(
+    mgr: &PoolMgrLikeCpp,
+    report: &mut PoolMgrLoadReportLikeCpp,
+) {
+    for (&pool_id, template) in &mgr.templates {
+        if mgr.is_empty_like_cpp(pool_id) {
+            report.empty_pools += 1;
+        } else if template.map_id == -1 {
+            report.missing_map_after_non_empty += 1;
+        }
+    }
+}
+
+fn apply_pool_autospawn_candidate_row_like_cpp(
+    row: PoolAutospawnCandidateRowLikeCpp,
+    mgr: &mut PoolMgrLikeCpp,
+    report: &mut PoolMgrLoadReportLikeCpp,
+) {
+    report.autospawn_rows += 1;
+    if mgr.is_empty_like_cpp(row.pool_entry) {
+        report.autospawn_skipped_empty += 1;
+        return;
+    }
+    if !mgr.check_pool_like_cpp(row.pool_entry) {
+        report.autospawn_skipped_broken += 1;
+        return;
+    }
+    if row.child_pool_id != 0 {
+        let _mother_pool_id = row.mother_pool_id;
+        report.autospawn_skipped_child += 1;
+        return;
+    }
+    if let Some(template) = mgr.templates.get(&row.pool_entry) {
+        mgr.add_auto_spawn_pool_like_cpp(template.map_id, row.pool_entry);
+        report.autospawn_loaded += 1;
+    }
 }
 
 pub fn spawn_group_templates_for_spawn_store(
@@ -971,6 +1356,196 @@ mod tests {
             phase_group: 0,
             script_name: String::new(),
         }
+    }
+
+    #[test]
+    fn pool_mgr_loader_skip_order_missing_spawn_before_template_and_chance_like_cpp() {
+        let maps = map_store(&[1]);
+        let difficulties = map_difficulty_store(&[(1, 0)]);
+        let mut spawn_report = SpawnKindLoadReport::default();
+        let mut store = SpawnStore::new();
+        let spawn = creature_row_to_spawn_data_like_cpp(
+            &creature_row(100, 0, "0"),
+            &maps,
+            &difficulties,
+            &mut spawn_report,
+        )
+        .unwrap();
+        store.add_object_spawn(&spawn, is_personal_phase_like_cpp_represented);
+        let mut mgr = PoolMgrLikeCpp::new();
+        let mut report = PoolMgrLoadReportLikeCpp::default();
+
+        apply_pool_spawn_member_row_like_cpp(
+            PoolMemberRowLikeCpp {
+                spawn_id: 999,
+                pool_spawn_id: 88,
+                chance: 200.0,
+            },
+            &store,
+            PoolMemberKindLikeCpp::Creature,
+            &mut mgr,
+            &mut report,
+        );
+        apply_pool_spawn_member_row_like_cpp(
+            PoolMemberRowLikeCpp {
+                spawn_id: 100,
+                pool_spawn_id: 88,
+                chance: 200.0,
+            },
+            &store,
+            PoolMemberKindLikeCpp::Creature,
+            &mut mgr,
+            &mut report,
+        );
+        mgr.insert_template_like_cpp(88, PoolTemplateDataLikeCpp::new(1, -1));
+        apply_pool_spawn_member_row_like_cpp(
+            PoolMemberRowLikeCpp {
+                spawn_id: 100,
+                pool_spawn_id: 88,
+                chance: 200.0,
+            },
+            &store,
+            PoolMemberKindLikeCpp::Creature,
+            &mut mgr,
+            &mut report,
+        );
+
+        assert_eq!(report.creature_members.rows, 3);
+        assert_eq!(report.creature_members.skipped_missing_spawn, 1);
+        assert_eq!(report.creature_members.skipped_missing_template, 1);
+        assert_eq!(report.creature_members.skipped_invalid_chance, 1);
+        assert_eq!(report.creature_members.loaded, 0);
+    }
+
+    #[test]
+    fn pool_mgr_loader_map_propagation_mismatch_and_cycle_removal_like_cpp() {
+        let mut propagated = PoolMgrLikeCpp::new();
+        let mut report = PoolMgrLoadReportLikeCpp::default();
+        propagated.insert_template_like_cpp(1, PoolTemplateDataLikeCpp::new(1, 571));
+        propagated.insert_template_like_cpp(2, PoolTemplateDataLikeCpp::new(1, -1));
+        apply_pool_pool_member_row_like_cpp(
+            PoolMemberRowLikeCpp {
+                spawn_id: 1,
+                pool_spawn_id: 2,
+                chance: 0.0,
+            },
+            &mut propagated,
+            &mut report,
+        );
+        apply_pool_map_propagation_like_cpp(&mut propagated, &mut report);
+        assert_eq!(propagated.templates.get(&2).unwrap().map_id, 571);
+        assert_eq!(report.relation_removals, 0);
+
+        let mut mismatch = PoolMgrLikeCpp::new();
+        let mut mismatch_report = PoolMgrLoadReportLikeCpp::default();
+        mismatch.insert_template_like_cpp(10, PoolTemplateDataLikeCpp::new(1, 1));
+        mismatch.insert_template_like_cpp(20, PoolTemplateDataLikeCpp::new(1, 2));
+        apply_pool_pool_member_row_like_cpp(
+            PoolMemberRowLikeCpp {
+                spawn_id: 10,
+                pool_spawn_id: 20,
+                chance: 0.0,
+            },
+            &mut mismatch,
+            &mut mismatch_report,
+        );
+        apply_pool_map_propagation_like_cpp(&mut mismatch, &mut mismatch_report);
+        assert!(!mismatch.child_pool_to_parent.contains_key(&10));
+        assert_eq!(mismatch_report.map_mismatches, 1);
+        assert_eq!(mismatch_report.relation_removals, 1);
+
+        let mut cyclic = PoolMgrLikeCpp::new();
+        let mut cycle_report = PoolMgrLoadReportLikeCpp::default();
+        cyclic.insert_template_like_cpp(30, PoolTemplateDataLikeCpp::new(1, -1));
+        cyclic.insert_template_like_cpp(31, PoolTemplateDataLikeCpp::new(1, -1));
+        apply_pool_pool_member_row_like_cpp(
+            PoolMemberRowLikeCpp {
+                spawn_id: 31,
+                pool_spawn_id: 30,
+                chance: 0.0,
+            },
+            &mut cyclic,
+            &mut cycle_report,
+        );
+        apply_pool_pool_member_row_like_cpp(
+            PoolMemberRowLikeCpp {
+                spawn_id: 30,
+                pool_spawn_id: 31,
+                chance: 0.0,
+            },
+            &mut cyclic,
+            &mut cycle_report,
+        );
+        apply_pool_map_propagation_like_cpp(&mut cyclic, &mut cycle_report);
+        assert_eq!(cycle_report.circular_relations, 1);
+        assert_eq!(cycle_report.relation_removals, 1);
+        assert_eq!(cyclic.child_pool_to_parent.len(), 1);
+    }
+
+    #[test]
+    fn pool_mgr_loader_autospawn_skips_empty_broken_and_child_like_cpp() {
+        let mut mgr = PoolMgrLikeCpp::new();
+        let mut report = PoolMgrLoadReportLikeCpp::default();
+        mgr.insert_template_like_cpp(1, PoolTemplateDataLikeCpp::new(1, 0));
+        mgr.insert_template_like_cpp(2, PoolTemplateDataLikeCpp::new(1, 0));
+        mgr.insert_template_like_cpp(3, PoolTemplateDataLikeCpp::new(1, 0));
+        mgr.insert_template_like_cpp(4, PoolTemplateDataLikeCpp::new(1, 0));
+        let mut valid = PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Creature, 1);
+        valid.add_entry_like_cpp(PoolObjectLikeCpp::new(101, 0.0), 1);
+        mgr.insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Creature, 1, valid)
+            .unwrap();
+        let mut broken = PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Creature, 3);
+        broken.add_entry_like_cpp(PoolObjectLikeCpp::new(301, 50.0), 1);
+        mgr.insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Creature, 3, broken)
+            .unwrap();
+        let mut child = PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Creature, 4);
+        child.add_entry_like_cpp(PoolObjectLikeCpp::new(401, 0.0), 1);
+        mgr.insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Creature, 4, child)
+            .unwrap();
+
+        apply_pool_autospawn_candidate_row_like_cpp(
+            PoolAutospawnCandidateRowLikeCpp {
+                pool_entry: 1,
+                child_pool_id: 0,
+                mother_pool_id: 0,
+            },
+            &mut mgr,
+            &mut report,
+        );
+        apply_pool_autospawn_candidate_row_like_cpp(
+            PoolAutospawnCandidateRowLikeCpp {
+                pool_entry: 2,
+                child_pool_id: 0,
+                mother_pool_id: 0,
+            },
+            &mut mgr,
+            &mut report,
+        );
+        apply_pool_autospawn_candidate_row_like_cpp(
+            PoolAutospawnCandidateRowLikeCpp {
+                pool_entry: 3,
+                child_pool_id: 0,
+                mother_pool_id: 0,
+            },
+            &mut mgr,
+            &mut report,
+        );
+        apply_pool_autospawn_candidate_row_like_cpp(
+            PoolAutospawnCandidateRowLikeCpp {
+                pool_entry: 4,
+                child_pool_id: 4,
+                mother_pool_id: 99,
+            },
+            &mut mgr,
+            &mut report,
+        );
+
+        assert_eq!(report.autospawn_rows, 4);
+        assert_eq!(report.autospawn_loaded, 1);
+        assert_eq!(report.autospawn_skipped_empty, 1);
+        assert_eq!(report.autospawn_skipped_broken, 1);
+        assert_eq!(report.autospawn_skipped_child, 1);
+        assert_eq!(mgr.auto_spawn_pools_for_map_like_cpp(0), &[1]);
     }
 
     #[test]

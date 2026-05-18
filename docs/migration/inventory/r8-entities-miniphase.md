@@ -5,6 +5,11 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.388** `PoolMgr::LoadFromDB` canonical metadata/planning + autospawn candidate metadata.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:442-774`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:715-764`.
+  Rust targets: `crates/world-server/src/spawn_store_loader.rs`, `crates/world-server/src/main.rs`, `crates/wow-database/src/statements/world.rs`, `crates/wow-map/src/pool.rs`, docs/inventory.
+  Acceptance: adds prepared statements for pool templates, typed members, and default autospawn candidates; `CanonicalSpawnMetadataLikeCpp` owns `PoolMgrLikeCpp`; DB load report counts templates, member skip reasons, relation removals, empty pools, missing-map after non-empty validation, and autospawn skips; validation/order matches C++ skip order; map propagation and cycle removal are represented; final C++ `ASSERT(templateData.MapId != -1)` is represented without panic; tests cover skip order, map propagation/mismatch/cycle/autospawn. Complete only for canonical DB -> metadata/planning and autospawn candidate-list metadata; remaining gaps are real `PoolMgr` runtime execution, live `SpawnPool`/`DespawnPool` RNG/chance execution, real entity creation / `LoadFromDB`, `AddToMap`/`RemoveFromMap`, `DoRespawn`, DB save/delete for runtime branches, grid/session fanout, and wiring into `Map::ProcessRespawns` pool branch. First reviewer pass returned `CAMBIOS NECESARIOS` only because docs/inventory/handoff were missing; code architecture passed; this docs correction records the slice honestly.
+
 - [x] **#NEXT.R8.ENTITIES.387** `PoolMgr` DespawnPool/DespawnObject deterministic plan.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:183-218`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:220-264`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:409-422`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:813-830`.
   Rust targets: `crates/wow-map/src/pool.rs`, `crates/wow-map/src/lib.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
