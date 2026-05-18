@@ -5,6 +5,11 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.373** `Map::ProcessRespawns` safe composite zero-delete seam.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:666-688`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1950-2023`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1959-1964`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1966-2002`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2004-2020`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2191-2240`.
+  Rust targets: `crates/wow-map/src/map.rs`, `crates/world-server/src/main.rs`.
+  Acceptance: `Map::process_due_respawns_composite_delete_only_like_cpp` uses the composite `check_respawn_like_cpp` over map-owned respawn timers and executes only safe in-memory zero-delete effects for inactive spawn-group and live creature/gameobject blockers; linked-respawn outcomes, PoolMgr, DoRespawn, DB save/delete/persistence, unsupported types, missing metadata, entity creation and fanout remain blocked with counters and preserve the oldest due timer/order. `world-server` calls this seam before `UpdateSpawnGroupConditions` and passes `SpawnStore` plus `LinkedRespawnStoreLikeCpp`; dynamic escort config/runtime remains an explicit false/false bridge until owned.
+
 - [x] **#NEXT.R8.ENTITIES.372** `Map::CheckRespawn` composite helper over represented guards.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1950-2023`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1956-1964`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1966-2002`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2004-2020`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:3607-3620`.
   Rust targets: `crates/wow-map/src/map.rs`, `crates/wow-map/src/lib.rs`.

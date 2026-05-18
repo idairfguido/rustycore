@@ -2215,9 +2215,12 @@ struct CanonicalSpawnGroupConditionTickSummaryLikeCpp {
     planned_spawn: usize,
     planned_despawn: usize,
     respawn_deleted_inactive_spawn_group: usize,
+    respawn_deleted_live_object_blocker: usize,
     respawn_blocked_missing_spawn_data: usize,
     respawn_blocked_pool_runtime: usize,
     respawn_blocked_do_respawn_runtime: usize,
+    respawn_blocked_linked_respawn_persistence: usize,
+    respawn_blocked_unsupported_spawn_type: usize,
 }
 
 fn canonical_map_update_tick_set_inactive_like_cpp(
@@ -2236,11 +2239,14 @@ fn canonical_map_update_tick_set_inactive_like_cpp(
 
     // C++ `Map::Update` runs `ProcessRespawns()` immediately before
     // `UpdateSpawnGroupConditions()` when `_respawnCheckTimer` expires.
-    // This tick executes only the safe in-memory ProcessRespawns delete branch
-    // produced by the inactive spawn-group CheckRespawn guard, then applies the
-    // existing SetInactive-only condition update seam. PoolMgr, DoRespawn, DB
-    // persistence/delete, linked-respawn checks, entity creation and fanout remain
-    // blocked gaps, and blocked oldest due timers are left intact.
+    // This tick executes only the safe in-memory ProcessRespawns zero-delete
+    // branches produced by represented composite CheckRespawn guards (inactive
+    // spawn-group and live-object blockers), then applies the existing
+    // SetInactive-only condition update seam. PoolMgr, DoRespawn, DB
+    // persistence/delete, linked-respawn persistence/reschedule, entity creation
+    // and fanout remain blocked gaps, and blocked oldest due timers are left
+    // intact. RustyCore does not yet expose CONFIG_RESPAWN_DYNAMIC_ESCORTNPC or
+    // Creature::IsEscorted ownership here, so the bridge passes false/false.
     let now_secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| {
@@ -2251,15 +2257,24 @@ fn canonical_map_update_tick_set_inactive_like_cpp(
         summary.maps_evaluated += 1;
         let respawn_summary = managed_map
             .map_mut()
-            .process_due_respawns_spawn_group_delete_only_like_cpp(
+            .process_due_respawns_composite_delete_only_like_cpp(
                 now_secs,
                 canonical_spawn_metadata.spawn_store(),
+                canonical_spawn_metadata.linked_respawns_like_cpp(),
+                5,
+                false,
+                |_, _| false,
             );
         summary.respawn_deleted_inactive_spawn_group +=
             respawn_summary.deleted_inactive_spawn_group;
+        summary.respawn_deleted_live_object_blocker += respawn_summary.deleted_live_object_blocker;
         summary.respawn_blocked_missing_spawn_data += respawn_summary.blocked_missing_spawn_data;
         summary.respawn_blocked_pool_runtime += respawn_summary.blocked_pool_runtime;
         summary.respawn_blocked_do_respawn_runtime += respawn_summary.blocked_do_respawn_runtime;
+        summary.respawn_blocked_linked_respawn_persistence +=
+            respawn_summary.blocked_linked_respawn_persistence;
+        summary.respawn_blocked_unsupported_spawn_type +=
+            respawn_summary.blocked_unsupported_spawn_type;
 
         let outcomes = apply_canonical_spawn_group_condition_update_set_inactive_like_cpp(
             managed_map,
@@ -2342,10 +2357,16 @@ fn spawn_canonical_map_update_loop(
                     planned_despawn = summary.planned_despawn,
                     respawn_deleted_inactive_spawn_group =
                         summary.respawn_deleted_inactive_spawn_group,
+                    respawn_deleted_live_object_blocker =
+                        summary.respawn_deleted_live_object_blocker,
                     respawn_blocked_missing_spawn_data = summary.respawn_blocked_missing_spawn_data,
                     respawn_blocked_pool_runtime = summary.respawn_blocked_pool_runtime,
                     respawn_blocked_do_respawn_runtime = summary.respawn_blocked_do_respawn_runtime,
-                    "C++ respawn-check timer fired; executed safe ProcessRespawns delete-only inactive-spawn-group branch, then applied UpdateSpawnGroupConditions SetInactive seam; PoolMgr/DoRespawn/DB/linked-respawn/live stores/fanout remain pending"
+                    respawn_blocked_linked_respawn_persistence =
+                        summary.respawn_blocked_linked_respawn_persistence,
+                    respawn_blocked_unsupported_spawn_type =
+                        summary.respawn_blocked_unsupported_spawn_type,
+                    "C++ respawn-check timer fired; executed safe ProcessRespawns composite zero-delete branches, then applied UpdateSpawnGroupConditions SetInactive seam; PoolMgr/DoRespawn/DB linked persistence/entity creation/fanout remain pending"
                 );
             }
         }

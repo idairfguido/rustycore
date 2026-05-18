@@ -7,10 +7,9 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 ## Repository State
 
 - Branch: `develop`
-- Base before #372: `b4eee0b #NEXT.R8.ENTITIES.371 Linked respawn metadata/load/store`
-- Local branch relation before committing #372: `develop...origin/develop [ahead 25]`
-- Most recent completed slice after committing #372: `#NEXT.R8.ENTITIES.372 — Map::CheckRespawn composite helper over represented guards`
-- Expected tree after committing #372: clean, ahead 26. No push/install/restart performed.
+- Base before #373: clean `develop...origin/develop [ahead 26]` after `#NEXT.R8.ENTITIES.372`.
+- Most recent completed slice after committing #373: `#NEXT.R8.ENTITIES.373 — Map::ProcessRespawns safe composite zero-delete seam`.
+- Expected tree after committing #373: clean, ahead 27. No push/install/restart performed.
 
 ## Critical Rules
 
@@ -22,15 +21,24 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 
 ## Progress Estimate
 
-Overall core migration estimate after #372 `Map::CheckRespawn` composite helper over represented guards: `~85.5%`.
+Overall core migration estimate after #373 `Map::ProcessRespawns` safe composite zero-delete seam: `~86.0%`.
 
-This remains intentionally below the R8 TSV row-completion ratio because heavy runtime ownership gaps remain: full live `CheckRespawn`/`ProcessRespawns` integration beyond represented helpers, real `PoolMgr`, `DoRespawn` entity creation/`LoadFromDB`, DB respawn persistence/delete, optimized map-local by-spawn indexes, wiring linked-respawn metadata into the live map process, real escort runtime feeding the closure, grid/session fanout, ObjectAccessor ownership, and broader Unit/Player inventory/auras/threat/motion/update-field work.
+This remains intentionally below the R8 TSV row-completion ratio because heavy runtime ownership gaps remain: full live `CheckRespawn`/`ProcessRespawns` side effects beyond represented safe zero-delete branches, real `PoolMgr`, `DoRespawn` entity creation/`LoadFromDB`, DB respawn persistence/delete, optimized map-local by-spawn indexes, real dynamic escort config/runtime feeding the closure, grid/session fanout, ObjectAccessor ownership, and broader Unit/Player inventory/auras/threat/motion/update-field work.
 
-Manual test point: no new client-facing manual milestone from #372; this is a map-owned respawn/check-respawn helper dependency validated with focused unit checks.
+Manual test point: no new client-facing manual milestone from #373; this is a map-owned respawn scheduler seam dependency validated with focused unit checks.
 
 ## Most Recent Completed Slices
 
 Current completed local slice:
+
+- `#NEXT.R8.ENTITIES.373`
+  - Adds `Map::process_due_respawns_composite_delete_only_like_cpp`, which uses the composite `Map::check_respawn_like_cpp` over map-owned `RespawnStoreLikeCpp` timers and executes only fully safe in-memory zero-delete effects for inactive spawn-group and live creature/gameobject blockers.
+  - `world-server` scheduler now preserves C++ `Map.cpp:682-688` order while passing `SpawnStore`, `LinkedRespawnStoreLikeCpp`, `now`, fixed jitter bridge and explicit false/false dynamic escort bridge into `wow-map`; it does not duplicate `CheckRespawn` logic.
+  - Linked-respawn outcomes are detected but counted as blocked pending DB persistence/heap decrease ownership, preserving the original timer; PoolMgr, `DoRespawn`, DB save/delete, unsupported types, missing metadata, entity creation and fanout preserve the oldest due timer/order.
+  - Source-of-truth runtime timers remain map-owned `wow_map::Map` / `RespawnStoreLikeCpp`; spawn/linked metadata remain explicit bridges from `world-server`; live blockers read only `Map::map_objects`.
+  - Independent review returned `APROBADO`; focused checks passed; committed locally for this slice. No push/install/restart performed.
+
+Previous completed local slice:
 
 - `#NEXT.R8.ENTITIES.372`
   - Adds `Map::check_respawn_like_cpp` and `CheckRespawnCompositeOutcomeLikeCpp` to compose the already represented C++ guards in strict order: spawn-group guard, live-object blocker, linked-respawn guard, then `Allowed`.
@@ -44,6 +52,28 @@ Previous completed local slice:
   - Adds linked respawn metadata/load/store and the pure linked-time guard dependency for `Map::CheckRespawn`.
   - Source-of-truth runtime timers remain map-owned `wow_map::Map` / `RespawnStoreLikeCpp`; linked respawn metadata is loaded DB -> validated canonical metadata -> read-only linked store.
   - Does not implement full `CheckRespawn`/`ProcessRespawns`, PoolMgr, `DoRespawn`, DB save/delete, live entity creation or fanout.
+
+## C++ Anchors for #373
+
+- `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:666-688` — scheduler order: `ProcessRespawns(); UpdateSpawnGroupConditions();` when respawn timer fires.
+- `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1950-2023` — `Map::CheckRespawn` contract and guard order.
+- `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1959-1964` — inactive spawn-group clears `respawnTime=0` and returns false.
+- `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1966-2002` — live creature/gameobject blocker clears `respawnTime=0` and returns false.
+- `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2004-2020` — linked respawn mutates future/infinite time and returns false; C++ persistence happens later in `ProcessRespawns`.
+- `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2191-2240` — `ProcessRespawns` due-order loop, PoolMgr, DoRespawn, zero-delete and DB-persisting reschedule branches.
+
+## Expected Validation for #373
+
+```bash
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo fmt --check
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo test -p wow-map process_respawns
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo test -p wow-map check_respawn_like_cpp
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo test -p world-server spawn_group_condition_update
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo check -p world-server
+git diff --check
+```
+
+Expected remaining gaps: real PoolMgr, `DoRespawn`/`LoadFromDB`, DB save/delete/persistence for respawn info, linked-respawn heap decrease plus `SaveRespawnInfoDB`, real dynamic escort config/runtime, entity creation/fanout, optimized by-spawn indexes and broader canonical object ownership.
 
 ## C++ Anchors for #372
 

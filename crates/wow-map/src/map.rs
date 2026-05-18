@@ -129,9 +129,12 @@ pub struct SpawnGroupConditionUpdateOutcomeLikeCpp {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ProcessRespawnsDeleteOnlySummaryLikeCpp {
     pub deleted_inactive_spawn_group: usize,
+    pub deleted_live_object_blocker: usize,
     pub blocked_missing_spawn_data: usize,
     pub blocked_pool_runtime: usize,
     pub blocked_do_respawn_runtime: usize,
+    pub blocked_linked_respawn_persistence: usize,
+    pub blocked_unsupported_spawn_type: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -595,7 +598,7 @@ where
             .process_due_respawns_like_cpp(now, is_part_of_pool, check_respawn)
     }
 
-    /// Safe execution seam for one C++ `Map::ProcessRespawns` branch.
+    /// Safe execution seam for represented C++ `Map::ProcessRespawns` zero-delete branches.
     ///
     /// C++ anchors:
     /// - `Map.cpp:2191-2198` processes only due respawn timers in queue order.
@@ -604,17 +607,25 @@ where
     /// - `Map.cpp:2226-2231` removes a timer when `CheckRespawn` set respawnTime=0.
     /// - `Map.cpp:2233-2238` future reschedule persists to DB; blocked here.
     ///
-    /// This helper only executes the fully safe in-memory deletion produced by the
-    /// currently represented inactive-spawn-group guard. It never executes DB
-    /// delete/persistence, PoolMgr, `DoRespawn`, linked-respawn, live object-store
-    /// checks, entity creation, grid/session fanout, or any invented reschedule.
-    /// If the oldest due timer needs an unavailable branch, it is left intact and
-    /// processing stops to preserve the C++ queue order.
-    pub fn process_due_respawns_spawn_group_delete_only_like_cpp(
+    /// This helper executes only fully safe in-memory deletion when the represented
+    /// composite `CheckRespawn` guard clears `respawn_time` to zero for inactive
+    /// spawn-groups or live-object blockers. It never executes DB delete/persistence,
+    /// PoolMgr, `DoRespawn`, linked-respawn persistence/reschedule, entity creation,
+    /// grid/session fanout, or any invented reschedule. If the oldest due timer needs
+    /// an unavailable branch, it is left intact and processing stops to preserve the
+    /// C++ queue order.
+    pub fn process_due_respawns_composite_delete_only_like_cpp<F>(
         &mut self,
         now: i64,
         spawn_store: &SpawnStore,
-    ) -> ProcessRespawnsDeleteOnlySummaryLikeCpp {
+        linked_store: &LinkedRespawnStoreLikeCpp,
+        jitter_secs: u32,
+        respawn_dynamic_escortnpc: bool,
+        mut is_creature_escorted: F,
+    ) -> ProcessRespawnsDeleteOnlySummaryLikeCpp
+    where
+        F: FnMut(ObjectGuid, &Creature) -> bool,
+    {
         let mut summary = ProcessRespawnsDeleteOnlySummaryLikeCpp::default();
 
         loop {
@@ -643,30 +654,71 @@ where
                 break;
             }
 
-            let mut checked_info = info.clone();
-            match self.check_respawn_spawn_group_guard_like_cpp(&mut checked_info, spawn_store) {
-                CheckRespawnSpawnGroupGuardOutcomeLikeCpp::InactiveSpawnGroupDeletedTimer
+            let mut checked_info = info;
+            match self.check_respawn_like_cpp(
+                &mut checked_info,
+                spawn_store,
+                linked_store,
+                now,
+                jitter_secs,
+                respawn_dynamic_escortnpc,
+                &mut is_creature_escorted,
+            ) {
+                CheckRespawnCompositeOutcomeLikeCpp::InactiveSpawnGroupDeletedTimer
                     if checked_info.respawn_time == 0 =>
                 {
                     self.remove_respawn_time_like_cpp(object_type, spawn_id);
                     summary.deleted_inactive_spawn_group += 1;
                 }
-                CheckRespawnSpawnGroupGuardOutcomeLikeCpp::InactiveSpawnGroupDeletedTimer => {
+                CheckRespawnCompositeOutcomeLikeCpp::AliveCreatureBlocksRespawn
+                | CheckRespawnCompositeOutcomeLikeCpp::GameObjectBlocksRespawn
+                    if checked_info.respawn_time == 0 =>
+                {
+                    self.remove_respawn_time_like_cpp(object_type, spawn_id);
+                    summary.deleted_live_object_blocker += 1;
+                }
+                CheckRespawnCompositeOutcomeLikeCpp::InactiveSpawnGroupDeletedTimer
+                | CheckRespawnCompositeOutcomeLikeCpp::AliveCreatureBlocksRespawn
+                | CheckRespawnCompositeOutcomeLikeCpp::GameObjectBlocksRespawn
+                | CheckRespawnCompositeOutcomeLikeCpp::Allowed => {
                     summary.blocked_do_respawn_runtime += 1;
                     break;
                 }
-                CheckRespawnSpawnGroupGuardOutcomeLikeCpp::Allowed => {
-                    summary.blocked_do_respawn_runtime += 1;
+                CheckRespawnCompositeOutcomeLikeCpp::LinkedInfinite
+                | CheckRespawnCompositeOutcomeLikeCpp::LinkedSelfNeverRespawn
+                | CheckRespawnCompositeOutcomeLikeCpp::LinkedDelayed => {
+                    summary.blocked_linked_respawn_persistence += 1;
                     break;
                 }
-                CheckRespawnSpawnGroupGuardOutcomeLikeCpp::MissingSpawnData => {
+                CheckRespawnCompositeOutcomeLikeCpp::MissingSpawnData => {
                     summary.blocked_missing_spawn_data += 1;
+                    break;
+                }
+                CheckRespawnCompositeOutcomeLikeCpp::UnsupportedSpawnType => {
+                    summary.blocked_unsupported_spawn_type += 1;
                     break;
                 }
             }
         }
 
         summary
+    }
+
+    /// Compatibility wrapper for the original inactive-spawn-group delete-only seam.
+    pub fn process_due_respawns_spawn_group_delete_only_like_cpp(
+        &mut self,
+        now: i64,
+        spawn_store: &SpawnStore,
+    ) -> ProcessRespawnsDeleteOnlySummaryLikeCpp {
+        let linked_store = LinkedRespawnStoreLikeCpp::new();
+        self.process_due_respawns_composite_delete_only_like_cpp(
+            now,
+            spawn_store,
+            &linked_store,
+            5,
+            false,
+            |_, _| false,
+        )
     }
 
     /// First represented guard from C++ `Map::CheckRespawn`.
@@ -4535,6 +4587,159 @@ mod tests {
         );
         assert_eq!(info.respawn_time, 55);
         assert!(!escort_checked);
+    }
+
+    #[test]
+    fn process_respawns_composite_live_creature_blocker_deletes_due_timer_like_cpp() {
+        let mut map = test_map();
+        let mut store = SpawnStore::new();
+        let group = spawn_group(67, SpawnGroupFlags::NONE);
+        store.add_object_spawn(&spawn_data(SpawnObjectType::Creature, 100, group), |_| {
+            false
+        });
+        map.insert_map_object_record(
+            MapObjectRecord::new_creature(test_creature_for_spawn(100, 100, true)).unwrap(),
+        )
+        .unwrap();
+        map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 100, 10));
+
+        let summary = map.process_due_respawns_composite_delete_only_like_cpp(
+            10,
+            &store,
+            &LinkedRespawnStoreLikeCpp::new(),
+            5,
+            false,
+            |_, _| false,
+        );
+
+        assert_eq!(summary.deleted_live_object_blocker, 1);
+        assert_eq!(summary.blocked_do_respawn_runtime, 0);
+        assert!(
+            map.get_respawn_info_like_cpp(SpawnObjectType::Creature, 100)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn process_respawns_composite_live_gameobject_blocker_deletes_due_timer_like_cpp() {
+        let mut map = test_map();
+        let mut store = SpawnStore::new();
+        let group = spawn_group(68, SpawnGroupFlags::NONE);
+        store.add_object_spawn(&spawn_data(SpawnObjectType::GameObject, 101, group), |_| {
+            false
+        });
+        map.insert_map_object_record(
+            MapObjectRecord::new_game_object(test_gameobject_for_spawn(101, 101)).unwrap(),
+        )
+        .unwrap();
+        map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::GameObject, 101, 10));
+
+        let summary = map.process_due_respawns_composite_delete_only_like_cpp(
+            10,
+            &store,
+            &LinkedRespawnStoreLikeCpp::new(),
+            5,
+            false,
+            |_, _| false,
+        );
+
+        assert_eq!(summary.deleted_live_object_blocker, 1);
+        assert_eq!(summary.blocked_do_respawn_runtime, 0);
+        assert!(
+            map.get_respawn_info_like_cpp(SpawnObjectType::GameObject, 101)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn process_respawns_composite_linked_respawn_preserves_original_timer_like_cpp() {
+        let mut map = test_map();
+        let mut store = SpawnStore::new();
+        let group = spawn_group(69, SpawnGroupFlags::NONE);
+        store.add_object_spawn(&spawn_data(SpawnObjectType::Creature, 100, group), |_| {
+            false
+        });
+        map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 100, 10));
+        map.add_respawn_info_like_cpp(RespawnInfoLikeCpp {
+            object_type: SpawnObjectType::Creature,
+            spawn_id: 200,
+            entry: 77,
+            respawn_time: 1200,
+            grid_id: 7,
+        });
+        let mut linked = LinkedRespawnStoreLikeCpp::new();
+        linked.insert_like_cpp(
+            linked_respawn_guid(HighGuid::Creature, 42, 100),
+            linked_respawn_guid(HighGuid::Creature, 77, 200),
+        );
+
+        let summary = map.process_due_respawns_composite_delete_only_like_cpp(
+            10,
+            &store,
+            &linked,
+            5,
+            false,
+            |_, _| false,
+        );
+
+        assert_eq!(summary.blocked_linked_respawn_persistence, 1);
+        assert_eq!(summary.deleted_inactive_spawn_group, 0);
+        assert_eq!(summary.deleted_live_object_blocker, 0);
+        assert_eq!(
+            map.get_respawn_info_like_cpp(SpawnObjectType::Creature, 100)
+                .unwrap()
+                .respawn_time,
+            10
+        );
+    }
+
+    #[test]
+    fn process_respawns_composite_oldest_blocked_preserves_later_due_order_like_cpp() {
+        let mut map = test_map();
+        let mut store = SpawnStore::new();
+        let active = spawn_group(70, SpawnGroupFlags::NONE);
+        let inactive = spawn_group(71, SpawnGroupFlags::MANUAL_SPAWN);
+        store.add_object_spawn(&spawn_data(SpawnObjectType::Creature, 100, active), |_| {
+            false
+        });
+        store.add_object_spawn(
+            &spawn_data(SpawnObjectType::Creature, 101, inactive),
+            |_| false,
+        );
+        map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 100, 9));
+        map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 101, 10));
+        map.add_respawn_info_like_cpp(RespawnInfoLikeCpp {
+            object_type: SpawnObjectType::Creature,
+            spawn_id: 200,
+            entry: 77,
+            respawn_time: 1200,
+            grid_id: 7,
+        });
+        let mut linked = LinkedRespawnStoreLikeCpp::new();
+        linked.insert_like_cpp(
+            linked_respawn_guid(HighGuid::Creature, 42, 100),
+            linked_respawn_guid(HighGuid::Creature, 77, 200),
+        );
+
+        let summary = map.process_due_respawns_composite_delete_only_like_cpp(
+            10,
+            &store,
+            &linked,
+            5,
+            false,
+            |_, _| false,
+        );
+
+        assert_eq!(summary.blocked_linked_respawn_persistence, 1);
+        assert_eq!(summary.deleted_inactive_spawn_group, 0);
+        assert!(
+            map.get_respawn_info_like_cpp(SpawnObjectType::Creature, 100)
+                .is_some()
+        );
+        assert!(
+            map.get_respawn_info_like_cpp(SpawnObjectType::Creature, 101)
+                .is_some()
+        );
     }
 
     #[test]
