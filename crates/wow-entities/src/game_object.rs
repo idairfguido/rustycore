@@ -4,7 +4,8 @@ use wow_constants::{TypeId, TypeMask};
 use wow_core::{ObjectGuid, Position};
 
 use crate::{
-    CreateObjectFlags, ObjectChangedFields, ObjectDataUpdate, UpdateMask, WorldObject,
+    CreateObjectFlags, MapBindingError, ObjectChangedFields, ObjectDataUpdate, UpdateMask,
+    WorldObject,
     update_fields::{GAME_OBJECT_DATA_BITS, TYPEID_GAME_OBJECT},
 };
 
@@ -25,6 +26,8 @@ pub const GAMEOBJECT_TYPE_TRANSPORT: u32 = 11;
 pub const GAMEOBJECT_TYPE_AREADAMAGE: u32 = 12;
 pub const GAMEOBJECT_TYPE_CAMERA: u32 = 13;
 pub const GAMEOBJECT_TYPE_MAP_OBJECT: u32 = 14;
+// C++ anchor: /home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/SharedDefines.h:2842
+pub const GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT: u32 = 15;
 pub const GAMEOBJECT_TYPE_FISHING_NODE: u32 = 17;
 pub const GAMEOBJECT_TYPE_RITUAL: u32 = 18;
 pub const GAMEOBJECT_TYPE_MAILBOX: u32 = 19;
@@ -49,6 +52,8 @@ pub const GAMEOBJECT_TYPE_GATHERING_NODE: u32 = 50;
 
 pub const GO_DYNFLAG_LO_NO_INTERACT: u32 = 0x0080;
 
+// C++ anchor: /home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/SharedDefines.h:2892
+pub const MAX_GAMEOBJECT_TYPE: u32 = 63;
 pub const MAX_GAMEOBJECT_DATA: usize = 35;
 pub const GAMEOBJECT_DATA_CHEST_LOOT: usize = 1;
 pub const GAMEOBJECT_DATA_CHEST_RESTOCK_TIME: usize = 2;
@@ -68,6 +73,8 @@ pub const GAMEOBJECT_DATA_GATHERING_NODE_MAX_LOOTS: usize = 18;
 pub const GAMEOBJECT_DATA_GATHERING_NODE_LINKED_TRAP: usize = 20;
 
 pub const GO_FLAG_IN_USE: u32 = 0x0000_0001;
+// C++ anchor: /home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/SharedDefines.h:2902
+pub const GO_FLAG_NODESPAWN: u32 = 0x0000_0020;
 pub const GO_FLAG_IN_MULTI_USE: u32 = 0x0020_0000;
 pub const GAME_OBJECT_DATA_PARENT_BIT: usize = 0;
 pub const GAME_OBJECT_DATA_DISPLAY_ID_BIT: usize = 4;
@@ -170,6 +177,76 @@ impl GameObjectLootSource {
 pub struct GameObjectTemplateData {
     pub go_type: u32,
     pub data: [u32; MAX_GAMEOBJECT_DATA],
+}
+
+/// Represented subset of TrinityCore `GameObjectTemplate`, template addon and override data
+/// consumed by `GameObject::Create`.
+///
+/// ObjectMgr lookups, zone-script entry overrides, model creation, phasing, terrain visible-map
+/// setup and AddToMap are deliberately external. Callers pass values already resolved from the
+/// C++ template/addon/override sources that `wow-entities` can intrinsically own.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameObjectTemplateLifecycleRecord {
+    pub entry: u32,
+    pub name: String,
+    pub go_type: u32,
+    pub display_id: u32,
+    pub scale: f32,
+    pub faction: u32,
+    pub flags: u32,
+    pub data: [u32; MAX_GAMEOBJECT_DATA],
+    pub world_effect_id: u32,
+    pub anim_kit_id: u16,
+    pub level: u32,
+    pub percent_health: u8,
+    pub custom_param: u32,
+}
+
+/// Resolved, testable input for TrinityCore `GameObject::Create`.
+///
+/// Transport type 11 remains a resolved intrinsic shape only here: transport GUID/server-time,
+/// implementation data, `startOpen`, active state transitions, pathing and passenger runtime are
+/// owned by future transport/map wiring, not by this entity lifecycle record.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameObjectCreateLifecycleRecord {
+    pub guid: ObjectGuid,
+    pub map_id: u32,
+    pub instance_id: u32,
+    pub position: Position,
+    pub rotation: [f32; 4],
+    pub anim_progress: u8,
+    pub go_state: GoState,
+    pub art_kit: u32,
+    pub dynamic: bool,
+    pub spawn_id: u64,
+    pub template: GameObjectTemplateLifecycleRecord,
+}
+
+/// Represented subset of TrinityCore `GameObjectData` consumed by `GameObject::LoadFromDB`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameObjectLoadFromDbLifecycleRecord {
+    pub create: GameObjectCreateLifecycleRecord,
+    pub spawntimesecs: i32,
+    /// Effective map-owned respawn time after caller-owned `Map`/time processing.
+    ///
+    /// C++ `LoadFromDB` clears due timers (`respawnTime <= now`) and calls `RemoveRespawnTime`
+    /// before applying entity state. `wow-entities` does not own Map time or DB timer removal, so
+    /// callers must pre-normalize due timers to `0` before building this record.
+    pub effective_map_respawn_time: i64,
+    pub despawn_possible: bool,
+    pub despawn_at_action: bool,
+    pub respawn_compatibility_mode: bool,
+    /// C++ stores `GameObjectData::StringId` in `m_stringIds[1]`; Rust stores the represented
+    /// lifecycle handoff value as entity metadata only, with DB/phasing/AddToMap still external.
+    pub string_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GameObjectLifecycleError {
+    InvalidGameObjectType { entry: u32, go_type: u32 },
+    InvalidMapObjectTransportType { entry: u32 },
+    InvalidPosition { entry: u32, position: Position },
+    MapBinding { entry: u32, source: MapBindingError },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -840,6 +917,7 @@ pub struct GameObject {
     respawn_compatibility_mode: bool,
     anim_kit_id: u16,
     world_effect_id: u32,
+    lifecycle_string_id: String,
     stationary_position: Position,
     grid_unload_cleanup_before_delete_count: u32,
     grid_unload_delete_requested: bool,
@@ -883,11 +961,134 @@ impl GameObject {
             respawn_compatibility_mode: false,
             anim_kit_id: 0,
             world_effect_id: 0,
+            lifecycle_string_id: String::new(),
             stationary_position: Position::new(0.0, 0.0, 0.0, 0.0),
             grid_unload_cleanup_before_delete_count: 0,
             grid_unload_delete_requested: false,
             grid_unload_respawn_relocation_requested: false,
         }
+    }
+
+    pub fn try_create_from_lifecycle(
+        record: GameObjectCreateLifecycleRecord,
+    ) -> Result<Self, GameObjectLifecycleError> {
+        let mut game_object = Self::new();
+        game_object.apply_create_lifecycle(record)?;
+        Ok(game_object)
+    }
+
+    pub fn try_load_from_db_lifecycle(
+        record: GameObjectLoadFromDbLifecycleRecord,
+    ) -> Result<Self, GameObjectLifecycleError> {
+        let mut game_object = Self::try_create_from_lifecycle(record.create.clone())?;
+        game_object.apply_load_from_db_lifecycle(record);
+        Ok(game_object)
+    }
+
+    pub fn apply_create_lifecycle(
+        &mut self,
+        record: GameObjectCreateLifecycleRecord,
+    ) -> Result<(), GameObjectLifecycleError> {
+        Self::validate_create_lifecycle(&record)?;
+        let template = &record.template;
+        self.world_mut()
+            .set_map(record.map_id, record.instance_id)
+            .map_err(|source| GameObjectLifecycleError::MapBinding {
+                entry: template.entry,
+                source,
+            })?;
+        self.world_mut().relocate(record.position);
+        self.stationary_position = record.position;
+        self.world_mut().object_mut().create(record.guid);
+        self.world_mut().object_mut().set_entry(template.entry);
+        self.world_mut().object_mut().set_scale(template.scale);
+        self.world_mut().set_name(template.name.clone());
+
+        self.set_respawn_compatibility_mode(!record.dynamic);
+        self.set_spawn_id(record.spawn_id);
+        self.packed_rotation = pack_gameobject_local_rotation(record.rotation);
+        self.world_effect_id = template.world_effect_id;
+        self.anim_kit_id = template.anim_kit_id;
+
+        self.set_display_id(template.display_id);
+        self.set_faction(template.faction);
+        self.set_flags(template.flags);
+        self.set_go_type(template.go_type as u8);
+        self.prev_go_state = record.go_state;
+        self.set_go_state(record.go_state);
+        self.set_art_kit(record.art_kit);
+        self.set_level(template.level);
+        self.set_percent_health(template.percent_health);
+        self.set_custom_param(template.custom_param);
+
+        // C++ keeps template `data` through `m_goInfo`; Rust has only the resolved handoff for
+        // future type-specific users. Active GO type implementations, model creation, zone scripts,
+        // DB phasing and AddToMap remain external/unrepresented in this entity constructor.
+        let _ = template.data;
+        match template.go_type {
+            GAMEOBJECT_TYPE_FISHING_HOLE | GAMEOBJECT_TYPE_TRANSPORT => {
+                // Represented C++ branches call SetGoAnimProgress(animProgress); no Rust field yet.
+                let _ = record.anim_progress;
+            }
+            GAMEOBJECT_TYPE_FISHING_NODE => {
+                self.set_level(0);
+                let _ = record.anim_progress;
+            }
+            _ => {
+                let _ = record.anim_progress;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_create_lifecycle(
+        record: &GameObjectCreateLifecycleRecord,
+    ) -> Result<(), GameObjectLifecycleError> {
+        if record.template.go_type >= MAX_GAMEOBJECT_TYPE {
+            return Err(GameObjectLifecycleError::InvalidGameObjectType {
+                entry: record.template.entry,
+                go_type: record.template.go_type,
+            });
+        }
+        if record.template.go_type == GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT {
+            return Err(GameObjectLifecycleError::InvalidMapObjectTransportType {
+                entry: record.template.entry,
+            });
+        }
+        if !record.position.is_valid_map_coord_like_cpp() {
+            return Err(GameObjectLifecycleError::InvalidPosition {
+                entry: record.template.entry,
+                position: record.position,
+            });
+        }
+
+        Ok(())
+    }
+
+    pub fn apply_load_from_db_lifecycle(&mut self, record: GameObjectLoadFromDbLifecycleRecord) {
+        let mut respawn_compatibility_mode = record.respawn_compatibility_mode;
+        let (spawned_by_default, respawn_delay_time, respawn_time) = if record.spawntimesecs >= 0 {
+            if !record.despawn_possible && !record.despawn_at_action {
+                self.set_flags(self.data().flags | GO_FLAG_NODESPAWN);
+                (true, 0, 0)
+            } else {
+                (
+                    true,
+                    record.spawntimesecs as u32,
+                    record.effective_map_respawn_time,
+                )
+            }
+        } else {
+            respawn_compatibility_mode = true;
+            (false, record.spawntimesecs.unsigned_abs(), 0)
+        };
+
+        self.set_respawn_compatibility_mode(respawn_compatibility_mode);
+        self.set_spawned_by_default(spawned_by_default);
+        self.set_respawn_delay_time(respawn_delay_time);
+        self.set_respawn_time(respawn_time);
+        self.lifecycle_string_id = record.string_id;
     }
 
     pub const fn world(&self) -> &WorldObject {
@@ -1088,6 +1289,10 @@ impl GameObject {
 
     pub const fn world_effect_id(&self) -> u32 {
         self.world_effect_id
+    }
+
+    pub fn lifecycle_string_id(&self) -> &str {
+        &self.lifecycle_string_id
     }
 
     pub const fn stationary_position(&self) -> Position {
@@ -1306,6 +1511,34 @@ impl GameObject {
     }
 }
 
+fn pack_gameobject_local_rotation(rotation: [f32; 4]) -> i64 {
+    const PACK_YZ: i64 = 1 << 20;
+    const PACK_X: i64 = PACK_YZ << 1;
+    const PACK_YZ_MASK: i64 = (PACK_YZ << 1) - 1;
+    const PACK_X_MASK: i64 = (PACK_X << 1) - 1;
+
+    let dot = rotation[0] * rotation[0]
+        + rotation[1] * rotation[1]
+        + rotation[2] * rotation[2]
+        + rotation[3] * rotation[3];
+    if dot <= f32::EPSILON {
+        return 0;
+    }
+
+    let inv_len = 1.0 / dot.sqrt();
+    let rx = rotation[0] * inv_len;
+    let ry = rotation[1] * inv_len;
+    let rz = rotation[2] * inv_len;
+    let rw = rotation[3] * inv_len;
+    let w_sign = if rw >= 0.0 { 1 } else { -1 };
+
+    let x = ((rx * PACK_X as f32) as i32 as i64) * i64::from(w_sign) & PACK_X_MASK;
+    let y = ((ry * PACK_YZ as f32) as i32 as i64) * i64::from(w_sign) & PACK_YZ_MASK;
+    let z = ((rz * PACK_YZ as f32) as i32 as i64) * i64::from(w_sign) & PACK_YZ_MASK;
+
+    z | (y << 21) | (x << 42)
+}
+
 impl Default for GameObject {
     fn default() -> Self {
         Self::new()
@@ -1364,6 +1597,220 @@ mod tests {
         assert!(!go.grid_unload_delete_requested());
         assert!(!go.grid_unload_respawn_relocation_requested());
         assert!(!go.game_object_data_changes_mask().is_any_set());
+    }
+
+    fn lifecycle_template() -> GameObjectTemplateLifecycleRecord {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[GAMEOBJECT_DATA_CHEST_LOOT] = 9001;
+        GameObjectTemplateLifecycleRecord {
+            entry: 17_000,
+            name: "C++ anchored chest".to_string(),
+            go_type: GAMEOBJECT_TYPE_CHEST,
+            display_id: 400,
+            scale: 1.75,
+            faction: 35,
+            flags: GO_FLAG_IN_USE | GO_FLAG_IN_MULTI_USE,
+            data,
+            world_effect_id: 77,
+            anim_kit_id: 12,
+            level: 80,
+            percent_health: 100,
+            custom_param: 44,
+        }
+    }
+
+    fn lifecycle_create(dynamic: bool) -> GameObjectCreateLifecycleRecord {
+        GameObjectCreateLifecycleRecord {
+            guid: ObjectGuid::new(8, 17_000),
+            map_id: 571,
+            instance_id: 3,
+            position: Position::new(1.0, 2.0, 3.0, 4.0),
+            rotation: [0.125, 0.25, 0.375, 0.875],
+            anim_progress: 33,
+            go_state: GoState::Ready,
+            art_kit: 6,
+            dynamic,
+            spawn_id: 98_765,
+            template: lifecycle_template(),
+        }
+    }
+
+    #[test]
+    fn gameobject_create_from_lifecycle_applies_cpp_create_state() {
+        let record = lifecycle_create(false);
+        let position = record.position;
+        let guid = record.guid;
+        let go = GameObject::try_create_from_lifecycle(record).expect("valid lifecycle record");
+
+        assert_eq!(go.world().guid(), guid);
+        assert_eq!(go.world().map_id(), 571);
+        assert_eq!(go.world().instance_id(), 3);
+        assert_eq!(go.world().position(), position);
+        assert_eq!(go.stationary_position(), position);
+        assert_eq!(go.world().object().entry(), 17_000);
+        assert_eq!(go.world().object().scale(), 1.75);
+        assert_eq!(go.world().name(), "C++ anchored chest");
+        assert_eq!(go.data().display_id, 400);
+        assert_eq!(go.data().faction_template, 35);
+        assert_eq!(go.data().flags, GO_FLAG_IN_USE | GO_FLAG_IN_MULTI_USE);
+        assert_eq!(go.data().type_id, GAMEOBJECT_TYPE_CHEST as i8);
+        assert_eq!(go.data().state, GoState::Ready as i8);
+        assert_eq!(go.prev_go_state(), GoState::Ready);
+        assert_eq!(go.data().art_kit, 6);
+        assert_eq!(go.data().level, 80);
+        assert_eq!(go.data().percent_health, 100);
+        assert_eq!(go.data().custom_param, 44);
+        assert_eq!(go.anim_kit_id(), 12);
+        assert_eq!(go.world_effect_id(), 77);
+        assert_eq!(go.spawn_id(), 98_765);
+        assert_ne!(go.packed_rotation(), 0);
+        assert!(go.respawn_compatibility_mode());
+    }
+
+    #[test]
+    fn gameobject_try_create_from_lifecycle_rejects_invalid_go_type_like_cpp() {
+        let mut record = lifecycle_create(true);
+        record.template.go_type = MAX_GAMEOBJECT_TYPE;
+
+        assert_eq!(
+            GameObject::try_create_from_lifecycle(record),
+            Err(GameObjectLifecycleError::InvalidGameObjectType {
+                entry: 17_000,
+                go_type: MAX_GAMEOBJECT_TYPE,
+            })
+        );
+    }
+
+    #[test]
+    fn gameobject_try_create_from_lifecycle_rejects_map_obj_transport_like_cpp() {
+        let mut record = lifecycle_create(true);
+        record.template.go_type = GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT;
+
+        assert_eq!(
+            GameObject::try_create_from_lifecycle(record),
+            Err(GameObjectLifecycleError::InvalidMapObjectTransportType { entry: 17_000 })
+        );
+    }
+
+    #[test]
+    fn gameobject_try_create_from_lifecycle_rejects_invalid_position_without_partial_state() {
+        let mut record = lifecycle_create(true);
+        record.position = Position::new(f32::INFINITY, 2.0, 3.0, 4.0);
+        let mut go = GameObject::new();
+
+        assert_eq!(
+            go.apply_create_lifecycle(record.clone()),
+            Err(GameObjectLifecycleError::InvalidPosition {
+                entry: 17_000,
+                position: record.position,
+            })
+        );
+        assert_eq!(go.world().guid(), ObjectGuid::EMPTY);
+        assert!(!go.world().has_current_map());
+        assert_eq!(go.world().position(), Position::new(0.0, 0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn gameobject_apply_create_lifecycle_propagates_map_binding_error() {
+        let mut record = lifecycle_create(true);
+        record.map_id = 571;
+        record.instance_id = 3;
+        let mut go = GameObject::new();
+        go.world_mut().set_map(1, 2).expect("initial binding");
+
+        assert_eq!(
+            go.apply_create_lifecycle(record),
+            Err(GameObjectLifecycleError::MapBinding {
+                entry: 17_000,
+                source: MapBindingError::AlreadyBound {
+                    old_map_id: 1,
+                    old_instance_id: 2,
+                    new_map_id: 571,
+                    new_instance_id: 3,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn gameobject_load_from_db_lifecycle_applies_respawn_state_like_cpp() {
+        let go = GameObject::try_load_from_db_lifecycle(GameObjectLoadFromDbLifecycleRecord {
+            create: lifecycle_create(true),
+            spawntimesecs: 300,
+            effective_map_respawn_time: 123_456,
+            despawn_possible: true,
+            despawn_at_action: false,
+            respawn_compatibility_mode: true,
+            string_id: "db-string-id".to_string(),
+        })
+        .expect("valid lifecycle record");
+
+        assert!(go.spawned_by_default());
+        assert_eq!(go.respawn_delay_time(), 300);
+        assert_eq!(go.respawn_time(), 123_456);
+        assert!(go.respawn_compatibility_mode());
+        assert_eq!(go.lifecycle_string_id(), "db-string-id");
+    }
+
+    #[test]
+    fn gameobject_load_from_db_lifecycle_handles_negative_spawntime_state() {
+        let go = GameObject::try_load_from_db_lifecycle(GameObjectLoadFromDbLifecycleRecord {
+            create: lifecycle_create(true),
+            spawntimesecs: -45,
+            effective_map_respawn_time: 123_456,
+            despawn_possible: true,
+            despawn_at_action: false,
+            respawn_compatibility_mode: false,
+            string_id: String::new(),
+        })
+        .expect("valid lifecycle record");
+
+        assert!(!go.spawned_by_default());
+        assert_eq!(go.respawn_delay_time(), 45);
+        assert_eq!(go.respawn_time(), 0);
+        assert!(go.respawn_compatibility_mode());
+    }
+
+    #[test]
+    fn gameobject_load_from_db_lifecycle_zeroes_respawn_for_nodespawn_like_cpp() {
+        let go = GameObject::try_load_from_db_lifecycle(GameObjectLoadFromDbLifecycleRecord {
+            create: lifecycle_create(true),
+            spawntimesecs: 300,
+            effective_map_respawn_time: 123_456,
+            despawn_possible: false,
+            despawn_at_action: false,
+            respawn_compatibility_mode: false,
+            string_id: String::new(),
+        })
+        .expect("valid lifecycle record");
+
+        assert!(go.spawned_by_default());
+        assert_eq!(go.respawn_delay_time(), 0);
+        assert_eq!(go.respawn_time(), 0);
+        assert_eq!(
+            go.data().flags,
+            GO_FLAG_IN_USE | GO_FLAG_IN_MULTI_USE | GO_FLAG_NODESPAWN
+        );
+        assert!(!go.respawn_compatibility_mode());
+    }
+
+    #[test]
+    fn gameobject_load_from_db_lifecycle_preserves_prenormalized_zero_respawn_time() {
+        let go = GameObject::try_load_from_db_lifecycle(GameObjectLoadFromDbLifecycleRecord {
+            create: lifecycle_create(true),
+            spawntimesecs: 300,
+            effective_map_respawn_time: 0,
+            despawn_possible: true,
+            despawn_at_action: false,
+            respawn_compatibility_mode: false,
+            string_id: String::new(),
+        })
+        .expect("valid lifecycle record");
+
+        assert!(go.spawned_by_default());
+        assert_eq!(go.respawn_delay_time(), 300);
+        assert_eq!(go.respawn_time(), 0);
+        assert!(!go.respawn_compatibility_mode());
     }
 
     #[test]
