@@ -26,7 +26,7 @@ use crate::spawn::{
     SpawnGridLoadStateLikeCpp, SpawnGroupActiveChange, SpawnGroupFlags, SpawnGroupRuntimeState,
     SpawnGroupTemplateData, SpawnId, SpawnObjectType, SpawnStore,
 };
-use wow_core::{ObjectGuid, Position, guid::HighGuid};
+use wow_core::{ObjectGuid, ObjectGuidGenerator, Position, guid::HighGuid};
 use wow_entities::{
     AccessorObjectKind, AreaTrigger, CombatBeginContextLikeCpp, CombatSubsystem, Creature,
     GameObject, INVALID_HEIGHT, LineOfSightQuery, MAX_VISIBILITY_DISTANCE, MapBindingError,
@@ -54,6 +54,35 @@ impl From<AccessorObjectKind> for ActiveObjectKind {
         match kind {
             AccessorObjectKind::Player => Self::Player,
             _ => Self::NonPlayer,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapGuidSequenceErrorLikeCpp {
+    /// Mirrors the C++ `static_assert` in `Map::GenerateLowGuid<high>` /
+    /// `Map::GetMaxLowGuid<high>` (`Map.h:514-526`) without panicking for
+    /// runtime-selected Rust `HighGuid` values.
+    UnsupportedSequenceSource { high: HighGuid },
+}
+
+struct MapGuidSequenceGeneratorLikeCpp {
+    generator: ObjectGuidGenerator,
+}
+
+impl std::fmt::Debug for MapGuidSequenceGeneratorLikeCpp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MapGuidSequenceGeneratorLikeCpp")
+            .field("high", &self.generator.high_guid())
+            .field("next_after_max_used", &self.generator.next_after_max_used())
+            .finish()
+    }
+}
+
+impl MapGuidSequenceGeneratorLikeCpp {
+    fn new(high: HighGuid) -> Self {
+        Self {
+            generator: ObjectGuidGenerator::new(high, 1),
         }
     }
 }
@@ -739,6 +768,15 @@ pub struct Map<Terrain = NoopTerrainGridLoader, Lifecycle = NoopGridLifecycle> {
     gameobjects_by_spawn_id: HashMap<SpawnId, HashSet<ObjectGuid>>,
     area_triggers_by_spawn_id: HashMap<SpawnId, HashSet<ObjectGuid>>,
     map_objects: HashMap<ObjectGuid, MapObjectRecord>,
+    /// C++ `Map::_guidGenerators` (`Map.h:789-791`), lazy initialized by
+    /// `Map::GetGuidSequenceGenerator` (`Map.cpp:2505-2511`). This stores only
+    /// map-owned sequence counters; callers must compose full ObjectGuids with
+    /// their own entry/map/server/realm context and must not feed DB spawn ids
+    /// back into this map-local runtime identity source. Trinity's constructor
+    /// seeds Transport from global ObjectMgr (`Map.cpp:145-166`); that external
+    /// synchronization is intentionally out of scope for this seam, so all
+    /// supported HighGuid generators start lazily at 1 unless explicitly set.
+    guid_generators: HashMap<HighGuid, MapGuidSequenceGeneratorLikeCpp>,
 }
 
 impl Map<NoopTerrainGridLoader, NoopGridLifecycle> {
@@ -794,6 +832,7 @@ where
             gameobjects_by_spawn_id: HashMap::new(),
             area_triggers_by_spawn_id: HashMap::new(),
             map_objects: HashMap::new(),
+            guid_generators: HashMap::new(),
         }
     }
 
@@ -807,6 +846,79 @@ where
 
     pub const fn spawn_mode(&self) -> Difficulty {
         self.spawn_mode
+    }
+
+    pub fn generate_low_guid_like_cpp(
+        &mut self,
+        high: HighGuid,
+    ) -> Result<i64, MapGuidSequenceErrorLikeCpp> {
+        Self::ensure_map_guid_sequence_source_like_cpp(high)?;
+        Ok(self
+            .guid_sequence_generator_like_cpp(high)
+            .generator
+            .generate())
+    }
+
+    pub fn get_max_low_guid_like_cpp(
+        &mut self,
+        high: HighGuid,
+    ) -> Result<i64, MapGuidSequenceErrorLikeCpp> {
+        Self::ensure_map_guid_sequence_source_like_cpp(high)?;
+        Ok(self
+            .guid_sequence_generator_like_cpp(high)
+            .generator
+            .next_after_max_used())
+    }
+
+    pub fn set_guid_sequence_like_cpp(
+        &mut self,
+        high: HighGuid,
+        next: i64,
+    ) -> Result<(), MapGuidSequenceErrorLikeCpp> {
+        Self::ensure_map_guid_sequence_source_like_cpp(high)?;
+        self.guid_sequence_generator_like_cpp(high)
+            .generator
+            .set(next);
+        Ok(())
+    }
+
+    fn guid_sequence_generator_like_cpp(
+        &mut self,
+        high: HighGuid,
+    ) -> &mut MapGuidSequenceGeneratorLikeCpp {
+        self.guid_generators
+            .entry(high)
+            .or_insert_with(|| MapGuidSequenceGeneratorLikeCpp::new(high))
+    }
+
+    fn ensure_map_guid_sequence_source_like_cpp(
+        high: HighGuid,
+    ) -> Result<(), MapGuidSequenceErrorLikeCpp> {
+        match high {
+            HighGuid::WorldTransaction
+            | HighGuid::StaticDoor
+            | HighGuid::Transport
+            | HighGuid::Conversation
+            | HighGuid::Creature
+            | HighGuid::Vehicle
+            | HighGuid::Pet
+            | HighGuid::GameObject
+            | HighGuid::DynamicObject
+            | HighGuid::AreaTrigger
+            | HighGuid::Corpse
+            | HighGuid::LootObject
+            | HighGuid::SceneObject
+            | HighGuid::Scenario
+            | HighGuid::AIGroup
+            | HighGuid::DynamicDoor
+            | HighGuid::Vignette
+            | HighGuid::CallForHelp
+            | HighGuid::AIResource
+            | HighGuid::AILock
+            | HighGuid::AILockTicket
+            | HighGuid::Cast => Ok(()),
+            _ => Err(MapGuidSequenceErrorLikeCpp::UnsupportedSequenceSource { high }),
+        }
     }
 
     pub const fn grid_expiry_ms(&self) -> i64 {
@@ -4614,6 +4726,88 @@ mod tests {
             terrain,
             RecordingLifecycle::default(),
         )
+    }
+
+    #[test]
+    fn guid_sequence_creature_starts_at_one_like_cpp() {
+        let mut map = test_map();
+
+        assert_eq!(map.generate_low_guid_like_cpp(HighGuid::Creature), Ok(1));
+        assert_eq!(map.generate_low_guid_like_cpp(HighGuid::Creature), Ok(2));
+        assert_eq!(map.get_max_low_guid_like_cpp(HighGuid::Creature), Ok(3));
+    }
+
+    #[test]
+    fn guid_sequence_creature_and_gameobject_are_independent_like_cpp() {
+        let mut map = test_map();
+
+        assert_eq!(map.generate_low_guid_like_cpp(HighGuid::Creature), Ok(1));
+        assert_eq!(map.generate_low_guid_like_cpp(HighGuid::GameObject), Ok(1));
+        assert_eq!(map.generate_low_guid_like_cpp(HighGuid::Creature), Ok(2));
+        assert_eq!(map.get_max_low_guid_like_cpp(HighGuid::GameObject), Ok(2));
+    }
+
+    #[test]
+    fn guid_sequence_accepts_non_creature_gameobject_map_sources_like_cpp() {
+        let mut map = test_map();
+
+        assert_eq!(map.generate_low_guid_like_cpp(HighGuid::AreaTrigger), Ok(1));
+        assert_eq!(
+            map.generate_low_guid_like_cpp(HighGuid::DynamicObject),
+            Ok(1)
+        );
+        assert_eq!(map.generate_low_guid_like_cpp(HighGuid::AreaTrigger), Ok(2));
+        assert_eq!(
+            map.get_max_low_guid_like_cpp(HighGuid::DynamicObject),
+            Ok(2)
+        );
+    }
+
+    #[test]
+    fn guid_sequence_is_map_instance_local_like_cpp() {
+        let mut first_map = test_map();
+        let mut second_map = test_map();
+
+        assert_eq!(
+            first_map.generate_low_guid_like_cpp(HighGuid::Creature),
+            Ok(1)
+        );
+        assert_eq!(
+            first_map.generate_low_guid_like_cpp(HighGuid::Creature),
+            Ok(2)
+        );
+        assert_eq!(
+            second_map.generate_low_guid_like_cpp(HighGuid::Creature),
+            Ok(1)
+        );
+        assert_eq!(
+            second_map.get_max_low_guid_like_cpp(HighGuid::Creature),
+            Ok(2)
+        );
+    }
+
+    #[test]
+    fn guid_sequence_transport_can_be_set_for_future_global_sync_like_cpp() {
+        let mut map = test_map();
+
+        assert_eq!(
+            map.set_guid_sequence_like_cpp(HighGuid::Transport, 77),
+            Ok(())
+        );
+        assert_eq!(map.generate_low_guid_like_cpp(HighGuid::Transport), Ok(77));
+        assert_eq!(map.get_max_low_guid_like_cpp(HighGuid::Transport), Ok(78));
+    }
+
+    #[test]
+    fn guid_sequence_rejects_non_map_local_high_guid_like_cpp() {
+        let mut map = test_map();
+
+        assert_eq!(
+            map.generate_low_guid_like_cpp(HighGuid::Player),
+            Err(MapGuidSequenceErrorLikeCpp::UnsupportedSequenceSource {
+                high: HighGuid::Player,
+            })
+        );
     }
 
     #[test]
