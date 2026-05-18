@@ -682,6 +682,7 @@ pub(crate) struct RepresentedGameObjectUseState {
     pub area_id: Option<u32>,
     pub position: Option<wow_core::Position>,
     pub go_anim_progress: u8,
+    pub despawn_at_action: bool,
     pub display_id: Option<u32>,
     pub scale: f32,
     pub rotation: [f32; 4],
@@ -890,6 +891,7 @@ impl Default for RepresentedGameObjectUseState {
             area_id: None,
             position: None,
             go_anim_progress: 255,
+            despawn_at_action: false,
             display_id: None,
             scale: 1.0,
             rotation: [0.0, 0.0, 0.0, 1.0],
@@ -10948,7 +10950,7 @@ impl WorldSession {
                     .flatten()
             })
             .collect::<Vec<_>>();
-        let generic_just_deactivated_gameobjects = self
+        let mut generic_just_deactivated_gameobjects = self
             .represented_gameobject_use_states
             .iter()
             .filter_map(|(&guid, state)| {
@@ -10958,11 +10960,17 @@ impl WorldSession {
                     state.loot_state == Some(wow_entities::LootState::JustDeactivated);
                 (is_just_deactivated && !is_goober).then_some((
                     guid,
+                    state.go_type.map(u32::from),
                     state.owner_guid.is_some(),
                     state.linked_trap_entry,
+                    state.despawn_at_action,
+                    state.go_anim_progress,
+                    state.chest_restock_time_secs,
                 ))
             })
             .collect::<Vec<_>>();
+        generic_just_deactivated_gameobjects
+            .sort_by_key(|(_, _, delete_after_clear, _, _, _, _)| (*delete_after_clear,));
         let charge_depleted_guids = self
             .represented_gameobject_use_states
             .iter()
@@ -11345,7 +11353,16 @@ impl WorldSession {
         for (guid, source) in just_deactivated_goobers {
             self.apply_represented_gameobject_goober_just_deactivated_like_cpp(guid, source);
         }
-        for (guid, delete_after_clear, linked_trap_entry) in generic_just_deactivated_gameobjects {
+        for (
+            guid,
+            go_type,
+            delete_after_clear,
+            linked_trap_entry,
+            is_despawn_at_action,
+            go_anim_progress,
+            chest_restock_time_secs,
+        ) in generic_just_deactivated_gameobjects
+        {
             if let Some(trap_entry) = linked_trap_entry.filter(|trap_entry| *trap_entry != 0) {
                 self.represented_gameobject_use_effects.push(
                     RepresentedGameObjectUseEffect::GameObjectLinkedTrapDespawn {
@@ -11357,6 +11374,28 @@ impl WorldSession {
             self.loot_table.remove(&guid);
             let mut delete_after_clear = delete_after_clear;
             let mut schedule_respawn = false;
+            let is_chest = go_type == Some(wow_entities::GAMEOBJECT_TYPE_CHEST);
+            if is_chest && !is_despawn_at_action && !delete_after_clear {
+                if let Some(state) = self.represented_gameobject_use_states.get_mut(&guid) {
+                    state.loot_state_unit_guid = wow_core::ObjectGuid::EMPTY;
+                    state.use_count = 0;
+                    if chest_restock_time_secs.is_some_and(|restock_secs| restock_secs != 0) {
+                        let restock_secs = chest_restock_time_secs.unwrap_or_default();
+                        state.chest_restock_until =
+                            Some(now + Duration::from_secs(u64::from(restock_secs)));
+                        state.loot_state = Some(wow_entities::LootState::NotReady);
+                    } else {
+                        state.loot_state = Some(wow_entities::LootState::Ready);
+                    }
+                }
+                self.represented_gameobject_use_effects.push(
+                    RepresentedGameObjectUseEffect::GameObjectJustDeactivatedCleared {
+                        gameobject_guid: guid,
+                        deleted: false,
+                    },
+                );
+                continue;
+            }
             if let Some(state) = self.represented_gameobject_use_states.get_mut(&guid) {
                 state.loot_state = Some(wow_entities::LootState::NotReady);
                 state.loot_state_unit_guid = wow_core::ObjectGuid::EMPTY;
@@ -11375,6 +11414,10 @@ impl WorldSession {
                         schedule_respawn = true;
                     }
                 }
+            }
+            let send_despawn_at_action = is_despawn_at_action || go_anim_progress > 0;
+            if send_despawn_at_action && !delete_after_clear && !schedule_respawn {
+                self.send_represented_gameobject_despawn_like_cpp(guid);
             }
             if delete_after_clear || schedule_respawn {
                 self.client_visible_guids_like_cpp.remove(&guid);
@@ -11774,10 +11817,14 @@ impl WorldSession {
         );
     }
 
-    fn send_represented_gameobject_delete_packets_like_cpp(&mut self, gameobject_guid: ObjectGuid) {
+    fn send_represented_gameobject_despawn_like_cpp(&mut self, gameobject_guid: ObjectGuid) {
         self.send_packet(&wow_packet::packets::misc::GameObjectDespawn {
             object_guid: gameobject_guid,
         });
+    }
+
+    fn send_represented_gameobject_delete_packets_like_cpp(&mut self, gameobject_guid: ObjectGuid) {
+        self.send_represented_gameobject_despawn_like_cpp(gameobject_guid);
         let map_id = self
             .represented_gameobject_use_states
             .get(&gameobject_guid)
@@ -13007,6 +13054,7 @@ impl WorldSession {
                 state.loot_state = Some(wow_entities::LootState::Activated);
                 state.loot_state_unit_guid = player_guid;
                 state.goober_use_source = Some(source);
+                state.despawn_at_action = source.consumable;
                 let custom_anim_progress = if source.custom_anim != 0 {
                     Some(u32::from(state.go_anim_progress))
                 } else {
@@ -13080,6 +13128,7 @@ impl WorldSession {
         }
 
         let mut unique_users = Vec::new();
+        let mut send_despawn_at_action = false;
         {
             let state = self
                 .represented_gameobject_use_states
@@ -13103,6 +13152,14 @@ impl WorldSession {
             } else {
                 Some(wow_entities::LootState::Ready)
             };
+            let has_represented_owner_or_summon = state.owner_guid.is_some();
+            if source.consumable && !has_represented_owner_or_summon {
+                send_despawn_at_action = true;
+            }
+        }
+
+        if send_despawn_at_action {
+            self.send_represented_gameobject_despawn_like_cpp(gameobject_guid);
         }
 
         if source.spell_id != 0 {
@@ -15609,6 +15666,16 @@ mod tests {
         (session, pkt_tx, send_rx)
     }
 
+    fn drain_server_opcodes(send_rx: &flume::Receiver<Vec<u8>>) -> Vec<ServerOpcodes> {
+        let mut opcodes = Vec::new();
+        while let Ok(bytes) = send_rx.try_recv() {
+            if let Some(opcode) = wow_packet::WorldPacket::from_bytes(&bytes).server_opcode() {
+                opcodes.push(opcode);
+            }
+        }
+        opcodes
+    }
+
     fn test_quest_template(id: u32) -> wow_data::quest::QuestTemplate {
         wow_data::quest::QuestTemplate {
             id,
@@ -15647,14 +15714,6 @@ mod tests {
             prev_quest_id: 0,
             reward_choice_items: [(0, 0); wow_data::quest::QUEST_REWARD_CHOICES_COUNT],
         }
-    }
-
-    fn drain_server_opcodes(rx: &flume::Receiver<Vec<u8>>) -> Vec<u16> {
-        rx.try_iter()
-            .filter_map(|bytes| {
-                (bytes.len() >= 2).then(|| u16::from_le_bytes([bytes[0], bytes[1]]))
-            })
-            .collect()
     }
 
     #[test]
@@ -16154,14 +16213,11 @@ mod tests {
         );
         assert!((session.player_collision_height_like_cpp - 7.32).abs() < 0.0001);
         let opcodes = drain_server_opcodes(&send_rx);
-        assert!(opcodes.contains(&(wow_constants::ServerOpcodes::MoveSetVehicleRecId as u16)));
-        assert!(opcodes.contains(&(wow_constants::ServerOpcodes::SetVehicleRecId as u16)));
-        assert!(
-            opcodes
-                .contains(&(wow_constants::ServerOpcodes::OnCancelExpectedRideVehicleAura as u16))
-        );
-        assert!(opcodes.contains(&(wow_constants::ServerOpcodes::PetMode as u16)));
-        assert!(opcodes.contains(&(wow_constants::ServerOpcodes::MoveSetCollisionHeight as u16)));
+        assert!(opcodes.contains(&wow_constants::ServerOpcodes::MoveSetVehicleRecId));
+        assert!(opcodes.contains(&wow_constants::ServerOpcodes::SetVehicleRecId));
+        assert!(opcodes.contains(&wow_constants::ServerOpcodes::OnCancelExpectedRideVehicleAura));
+        assert!(opcodes.contains(&wow_constants::ServerOpcodes::PetMode));
+        assert!(opcodes.contains(&wow_constants::ServerOpcodes::MoveSetCollisionHeight));
         let broadcast = wow_packet::WorldPacket::from_bytes(&other_rx.try_recv().unwrap());
         assert_eq!(
             broadcast.server_opcode(),
@@ -16205,10 +16261,10 @@ mod tests {
         assert_eq!(session.temporary_mount_pet_react_state_like_cpp, None);
         assert!((session.player_collision_height_like_cpp - 2.64).abs() < 0.0001);
         let opcodes = drain_server_opcodes(&send_rx);
-        assert!(opcodes.contains(&(wow_constants::ServerOpcodes::MoveSetVehicleRecId as u16)));
-        assert!(opcodes.contains(&(wow_constants::ServerOpcodes::SetVehicleRecId as u16)));
-        assert!(opcodes.contains(&(wow_constants::ServerOpcodes::PetMode as u16)));
-        assert!(opcodes.contains(&(wow_constants::ServerOpcodes::MoveSetCollisionHeight as u16)));
+        assert!(opcodes.contains(&wow_constants::ServerOpcodes::MoveSetVehicleRecId));
+        assert!(opcodes.contains(&wow_constants::ServerOpcodes::SetVehicleRecId));
+        assert!(opcodes.contains(&wow_constants::ServerOpcodes::PetMode));
+        assert!(opcodes.contains(&wow_constants::ServerOpcodes::MoveSetCollisionHeight));
         let broadcast = wow_packet::WorldPacket::from_bytes(&other_rx.try_recv().unwrap());
         assert_eq!(
             broadcast.server_opcode(),
@@ -21714,7 +21770,7 @@ mod tests {
         pkt.write_packed_guid(&victim);
         session.handle_attack_swing(pkt).await;
 
-        assert_eq!(drain_server_opcodes(&send_rx), Vec::<u16>::new());
+        assert_eq!(drain_server_opcodes(&send_rx), Vec::<ServerOpcodes>::new());
         assert_eq!(session.combat_target, Some(victim));
         assert!(session.in_combat);
     }
@@ -29174,6 +29230,155 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn represented_gameobject_chest_just_deactivated_consumable_sends_despawn_without_destroy_like_cpp()
+     {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        session.set_state(SessionState::LoggedIn);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 245);
+        let state = session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        state.go_type = Some(wow_entities::GAMEOBJECT_TYPE_CHEST as u8);
+        state.loot_state = Some(wow_entities::LootState::JustDeactivated);
+        state.despawn_at_action = true;
+        state.go_anim_progress = 0;
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+
+        session.process_pending().await;
+
+        let opcodes = drain_server_opcodes(&send_rx);
+        assert_eq!(opcodes, vec![ServerOpcodes::GameObjectDespawn]);
+    }
+
+    #[tokio::test]
+    async fn represented_gameobject_chest_just_deactivated_anim_progress_non_consumable_returns_ready_like_cpp()
+     {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        session.set_state(SessionState::LoggedIn);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 246);
+        let state = session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        state.go_type = Some(wow_entities::GAMEOBJECT_TYPE_CHEST as u8);
+        state.loot_state = Some(wow_entities::LootState::JustDeactivated);
+        state.despawn_at_action = false;
+        state.go_anim_progress = 1;
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+
+        session.process_pending().await;
+
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.loot_state, Some(wow_entities::LootState::Ready));
+        assert!(state.chest_restock_until.is_none());
+        assert!(
+            session
+                .client_visible_guids_like_cpp
+                .contains(&gameobject_guid)
+        );
+        assert!(drain_server_opcodes(&send_rx).is_empty());
+    }
+
+    #[tokio::test]
+    async fn represented_gameobject_chest_just_deactivated_anim_progress_non_consumable_restock_not_ready_like_cpp()
+     {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        session.set_state(SessionState::LoggedIn);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 248);
+        let state = session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        state.go_type = Some(wow_entities::GAMEOBJECT_TYPE_CHEST as u8);
+        state.loot_state = Some(wow_entities::LootState::JustDeactivated);
+        state.despawn_at_action = false;
+        state.go_anim_progress = 1;
+        state.chest_restock_time_secs = Some(30);
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+
+        session.process_pending().await;
+
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.loot_state, Some(wow_entities::LootState::NotReady));
+        assert!(state.chest_restock_until.is_some());
+        assert!(
+            session
+                .client_visible_guids_like_cpp
+                .contains(&gameobject_guid)
+        );
+        assert!(drain_server_opcodes(&send_rx).is_empty());
+    }
+
+    #[tokio::test]
+    async fn generic_just_deactivated_gameobject_anim_progress_sends_despawn_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        session.set_state(SessionState::LoggedIn);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 249);
+        let state = session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        state.go_type = Some(5);
+        state.loot_state = Some(wow_entities::LootState::JustDeactivated);
+        state.despawn_at_action = false;
+        state.go_anim_progress = 1;
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+
+        session.process_pending().await;
+
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.loot_state, Some(wow_entities::LootState::NotReady));
+        let opcodes = drain_server_opcodes(&send_rx);
+        assert_eq!(opcodes, vec![ServerOpcodes::GameObjectDespawn]);
+    }
+
+    #[tokio::test]
+    async fn represented_gameobject_chest_just_deactivated_without_conditions_sends_no_extra_despawn_like_cpp()
+     {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        session.set_state(SessionState::LoggedIn);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 247);
+        let state = session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        state.go_type = Some(wow_entities::GAMEOBJECT_TYPE_CHEST as u8);
+        state.loot_state = Some(wow_entities::LootState::JustDeactivated);
+        state.despawn_at_action = false;
+        state.go_anim_progress = 0;
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+
+        session.process_pending().await;
+
+        assert!(drain_server_opcodes(&send_rx).is_empty());
+    }
+
+    #[tokio::test]
     async fn process_pending_schedules_gameobject_respawn_delay_like_cpp_update() {
         let (mut session, _pkt_tx, send_rx) = make_session();
         session.set_state(SessionState::LoggedIn);
@@ -29224,10 +29429,15 @@ mod tests {
                 .client_visible_guids_like_cpp
                 .contains(&temporary_guid)
         );
-        assert!(send_rx.try_recv().is_ok());
-        assert!(send_rx.try_recv().is_ok());
-        assert!(send_rx.try_recv().is_ok());
-        assert!(send_rx.try_recv().is_ok());
+        let opcodes = drain_server_opcodes(&send_rx);
+        assert_eq!(
+            opcodes
+                .iter()
+                .filter(|opcode| **opcode == ServerOpcodes::GameObjectDespawn)
+                .count(),
+            2
+        );
+        assert_eq!(opcodes.len(), 4);
 
         session
             .represented_gameobject_use_states
@@ -29357,6 +29567,44 @@ mod tests {
                 go_state: None,
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn gameobject_goober_just_deactivated_non_consumable_anim_progress_sends_no_despawn_like_cpp()
+     {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        session.set_state(SessionState::LoggedIn);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 18);
+        let state = session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        state.go_type = Some(wow_entities::GAMEOBJECT_TYPE_GOOBER as u8);
+        state.loot_state = Some(wow_entities::LootState::JustDeactivated);
+        state.go_anim_progress = 1;
+        state.goober_use_source = Some(wow_entities::GooberUseSource {
+            consumable: false,
+            spell_id: 7777,
+            ..Default::default()
+        });
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+
+        session.process_pending().await;
+
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.loot_state, Some(wow_entities::LootState::Ready));
+        assert!(
+            session
+                .client_visible_guids_like_cpp
+                .contains(&gameobject_guid)
+        );
+        assert!(drain_server_opcodes(&send_rx).is_empty());
     }
 
     #[tokio::test]

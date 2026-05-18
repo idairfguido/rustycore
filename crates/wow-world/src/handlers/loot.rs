@@ -585,6 +585,7 @@ impl WorldSession {
             .or_default();
         state.chest_restock_time_secs = Some(source.chest_restock_time_secs);
         state.chest_consumable = Some(source.chest_consumable);
+        state.despawn_at_action = source.chest_consumable;
         state.chest_personal_loot_id = Some(source.personal_loot_id);
         state.linked_trap_entry =
             (source.linked_trap_entry != 0).then_some(source.linked_trap_entry);

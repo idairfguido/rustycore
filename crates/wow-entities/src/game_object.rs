@@ -59,6 +59,7 @@ pub const GAMEOBJECT_DATA_CHEST_USE_GROUP_LOOT_RULES: usize = 15;
 pub const GAMEOBJECT_DATA_CHEST_DUNGEON_ENCOUNTER: usize = 25;
 pub const GAMEOBJECT_DATA_CHEST_PERSONAL_LOOT: usize = 30;
 pub const GAMEOBJECT_DATA_CHEST_PUSH_LOOT: usize = 33;
+pub const GAMEOBJECT_DATA_GOOBER_CONSUMABLE: usize = 5;
 pub const GAMEOBJECT_DATA_GATHERING_NODE_DESPAWN_DELAY: usize = 6;
 pub const GAMEOBJECT_DATA_GATHERING_NODE_TRIGGERED_EVENT: usize = 7;
 pub const GAMEOBJECT_DATA_GATHERING_NODE_XP_DIFFICULTY: usize = 13;
@@ -339,6 +340,14 @@ impl GameObjectTemplateData {
             | GAMEOBJECT_TYPE_FISHING_HOLE
             | GAMEOBJECT_TYPE_GATHERING_NODE => self.data[GAMEOBJECT_DATA_CHEST_LOOT],
             _ => 0,
+        }
+    }
+
+    pub const fn is_despawn_at_action_like_cpp(&self) -> bool {
+        match self.go_type {
+            GAMEOBJECT_TYPE_CHEST => self.data[GAMEOBJECT_DATA_CHEST_CONSUMABLE] != 0,
+            GAMEOBJECT_TYPE_GOOBER => self.data[GAMEOBJECT_DATA_GOOBER_CONSUMABLE] != 0,
+            _ => false,
         }
     }
 
@@ -710,7 +719,7 @@ impl GameObjectTemplateData {
             event_id: self.data[2],
             auto_close_ms: self.data[3],
             custom_anim: self.data[4],
-            consumable: self.data[5] != 0,
+            consumable: self.data[GAMEOBJECT_DATA_GOOBER_CONSUMABLE] != 0,
             page_id: self.data[7],
             spell_id: self.data[10],
             linked_trap_entry: self.data[12],
@@ -1378,6 +1387,39 @@ mod tests {
         assert_eq!(
             GameObjectTemplateData::new(2, data).get_loot_id_like_cpp(),
             0
+        );
+    }
+
+    #[test]
+    fn gameobject_template_is_despawn_at_action_like_cpp_matches_switch() {
+        let mut chest_data = [0; MAX_GAMEOBJECT_DATA];
+        assert!(
+            !GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, chest_data)
+                .is_despawn_at_action_like_cpp()
+        );
+        chest_data[GAMEOBJECT_DATA_CHEST_CONSUMABLE] = 1;
+        assert!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, chest_data)
+                .is_despawn_at_action_like_cpp()
+        );
+
+        let mut goober_data = [0; MAX_GAMEOBJECT_DATA];
+        assert!(
+            !GameObjectTemplateData::new(GAMEOBJECT_TYPE_GOOBER, goober_data)
+                .is_despawn_at_action_like_cpp()
+        );
+        goober_data[GAMEOBJECT_DATA_GOOBER_CONSUMABLE] = 1;
+        assert!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_GOOBER, goober_data)
+                .is_despawn_at_action_like_cpp()
+        );
+
+        let mut generic_data = [0; MAX_GAMEOBJECT_DATA];
+        generic_data[GAMEOBJECT_DATA_CHEST_CONSUMABLE] = 1;
+        generic_data[GAMEOBJECT_DATA_GOOBER_CONSUMABLE] = 1;
+        assert!(
+            !GameObjectTemplateData::new(GAMEOBJECT_TYPE_GENERIC, generic_data)
+                .is_despawn_at_action_like_cpp()
         );
     }
 
