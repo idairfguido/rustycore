@@ -5,6 +5,11 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.376** `Map::ProcessRespawns` linked future reschedule + `CHAR_REP_RESPAWN` side effect.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:682-688`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2004-2020`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2191-2240`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:3549-3560`.
+  Rust targets: `crates/wow-map/src/map.rs`, `crates/world-server/src/main.rs`.
+  Acceptance: when the composite `CheckRespawn` linked-respawn guard mutates a due timer to a future/infinite respawn time, `Map::process_due_respawns_composite_delete_only_like_cpp` now removes the original due timer, reinserts the same map-owned respawn info at the future time, reports the reschedule, and continues processing later due timers; `world-server` queues and executes exact `CharStatements::REP_RESPAWN(type, spawnId, respawnTime, mapId, instanceId)` for world maps outside the `MapManager` lock, with non-world maps skipped like C++ `Instanceable()` and invalid map ids skipped without truncation. This does not implement `PoolMgr`, `DoRespawn`/`LoadFromDB`, corpse load, entity creation/fanout, ObjectAccessor/grid ownership, optimized by-spawn indexes or real dynamic escort runtime.
+
 - [x] **#NEXT.R8.ENTITIES.375** `Map::ProcessRespawns` safe zero-delete DB delete side effect.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:682-688`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2191-2240`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2140-2146`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2152-2163`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:3549-3560`.
   Rust targets: `crates/world-server/src/main.rs`.

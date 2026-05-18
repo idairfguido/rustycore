@@ -126,16 +126,19 @@ pub struct SpawnGroupConditionUpdateOutcomeLikeCpp {
     pub applied_change: Option<SpawnGroupActiveChange>,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct ProcessRespawnsDeleteOnlySummaryLikeCpp {
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ProcessRespawnsSafeSideEffectsSummaryLikeCpp {
     pub deleted_inactive_spawn_group: usize,
     pub deleted_live_object_blocker: usize,
+    pub rescheduled_linked_respawns: Vec<RespawnInfoLikeCpp>,
     pub blocked_missing_spawn_data: usize,
     pub blocked_pool_runtime: usize,
     pub blocked_do_respawn_runtime: usize,
-    pub blocked_linked_respawn_persistence: usize,
+    pub blocked_linked_respawn_non_future: usize,
     pub blocked_unsupported_spawn_type: usize,
 }
+
+pub type ProcessRespawnsDeleteOnlySummaryLikeCpp = ProcessRespawnsSafeSideEffectsSummaryLikeCpp;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckRespawnLiveObjectGuardOutcomeLikeCpp {
@@ -598,23 +601,23 @@ where
             .process_due_respawns_like_cpp(now, is_part_of_pool, check_respawn)
     }
 
-    /// Safe execution seam for represented C++ `Map::ProcessRespawns` zero-delete branches.
+    /// Safe side-effect seam for represented C++ `Map::ProcessRespawns` branches.
     ///
     /// C++ anchors:
     /// - `Map.cpp:2191-2198` processes only due respawn timers in queue order.
     /// - `Map.cpp:2200-2211` pool runtime removes+delegates to PoolMgr; blocked here.
     /// - `Map.cpp:2213-2224` allowed respawn removes+calls `DoRespawn`; blocked here.
     /// - `Map.cpp:2226-2231` removes a timer when `CheckRespawn` set respawnTime=0.
-    /// - `Map.cpp:2233-2238` future reschedule persists to DB; blocked here.
+    /// - `Map.cpp:2233-2238` updates the heap position and persists a future
+    ///   `respawnTime` when `CheckRespawn` rescheduled the timer.
     ///
-    /// This helper executes only fully safe in-memory deletion when the represented
-    /// composite `CheckRespawn` guard clears `respawn_time` to zero for inactive
-    /// spawn-groups or live-object blockers. It never executes DB delete/persistence,
-    /// PoolMgr, `DoRespawn`, linked-respawn persistence/reschedule, entity creation,
-    /// grid/session fanout, or any invented reschedule. If the oldest due timer needs
-    /// an unavailable branch, it is left intact and processing stops to preserve the
-    /// C++ queue order.
-    pub fn process_due_respawns_composite_delete_only_like_cpp<F>(
+    /// This helper executes the safe map-owned in-memory effects represented so far:
+    /// zero-delete for inactive spawn-groups/live-object blockers and linked-respawn
+    /// future reschedule by replacing the same map-owned respawn timer. DB effects,
+    /// PoolMgr, `DoRespawn`, entity creation and grid/session fanout stay outside this
+    /// lock-owned helper. If the oldest due timer needs an unavailable branch, it is
+    /// left intact and processing stops to preserve C++ queue order.
+    pub fn process_due_respawns_composite_safe_side_effects_like_cpp<F>(
         &mut self,
         now: i64,
         spawn_store: &SpawnStore,
@@ -622,11 +625,11 @@ where
         jitter_secs: u32,
         respawn_dynamic_escortnpc: bool,
         mut is_creature_escorted: F,
-    ) -> ProcessRespawnsDeleteOnlySummaryLikeCpp
+    ) -> ProcessRespawnsSafeSideEffectsSummaryLikeCpp
     where
         F: FnMut(ObjectGuid, &Creature) -> bool,
     {
-        let mut summary = ProcessRespawnsDeleteOnlySummaryLikeCpp::default();
+        let mut summary = ProcessRespawnsSafeSideEffectsSummaryLikeCpp::default();
 
         loop {
             let next_key = { self.respawn_timer_keys_like_cpp().next() };
@@ -687,8 +690,15 @@ where
                 CheckRespawnCompositeOutcomeLikeCpp::LinkedInfinite
                 | CheckRespawnCompositeOutcomeLikeCpp::LinkedSelfNeverRespawn
                 | CheckRespawnCompositeOutcomeLikeCpp::LinkedDelayed => {
-                    summary.blocked_linked_respawn_persistence += 1;
-                    break;
+                    if checked_info.respawn_time == i64::MAX || checked_info.respawn_time > now {
+                        let rescheduled_info = checked_info.clone();
+                        self.remove_respawn_time_like_cpp(object_type, spawn_id);
+                        self.add_respawn_info_like_cpp(checked_info);
+                        summary.rescheduled_linked_respawns.push(rescheduled_info);
+                    } else {
+                        summary.blocked_linked_respawn_non_future += 1;
+                        break;
+                    }
                 }
                 CheckRespawnCompositeOutcomeLikeCpp::MissingSpawnData => {
                     summary.blocked_missing_spawn_data += 1;
@@ -704,6 +714,29 @@ where
         summary
     }
 
+    /// Compatibility wrapper for callers that still use the old delete-only name.
+    pub fn process_due_respawns_composite_delete_only_like_cpp<F>(
+        &mut self,
+        now: i64,
+        spawn_store: &SpawnStore,
+        linked_store: &LinkedRespawnStoreLikeCpp,
+        jitter_secs: u32,
+        respawn_dynamic_escortnpc: bool,
+        is_creature_escorted: F,
+    ) -> ProcessRespawnsDeleteOnlySummaryLikeCpp
+    where
+        F: FnMut(ObjectGuid, &Creature) -> bool,
+    {
+        self.process_due_respawns_composite_safe_side_effects_like_cpp(
+            now,
+            spawn_store,
+            linked_store,
+            jitter_secs,
+            respawn_dynamic_escortnpc,
+            is_creature_escorted,
+        )
+    }
+
     /// Compatibility wrapper for the original inactive-spawn-group delete-only seam.
     pub fn process_due_respawns_spawn_group_delete_only_like_cpp(
         &mut self,
@@ -711,7 +744,7 @@ where
         spawn_store: &SpawnStore,
     ) -> ProcessRespawnsDeleteOnlySummaryLikeCpp {
         let linked_store = LinkedRespawnStoreLikeCpp::new();
-        self.process_due_respawns_composite_delete_only_like_cpp(
+        self.process_due_respawns_composite_safe_side_effects_like_cpp(
             now,
             spawn_store,
             &linked_store,
@@ -4652,7 +4685,7 @@ mod tests {
     }
 
     #[test]
-    fn process_respawns_composite_linked_respawn_preserves_original_timer_like_cpp() {
+    fn process_respawns_composite_linked_respawn_reschedules_future_timer_like_cpp() {
         let mut map = test_map();
         let mut store = SpawnStore::new();
         let group = spawn_group(69, SpawnGroupFlags::NONE);
@@ -4673,7 +4706,7 @@ mod tests {
             linked_respawn_guid(HighGuid::Creature, 77, 200),
         );
 
-        let summary = map.process_due_respawns_composite_delete_only_like_cpp(
+        let summary = map.process_due_respawns_composite_safe_side_effects_like_cpp(
             10,
             &store,
             &linked,
@@ -4682,19 +4715,23 @@ mod tests {
             |_, _| false,
         );
 
-        assert_eq!(summary.blocked_linked_respawn_persistence, 1);
+        assert_eq!(summary.rescheduled_linked_respawns.len(), 1);
+        assert_eq!(summary.blocked_linked_respawn_non_future, 0);
         assert_eq!(summary.deleted_inactive_spawn_group, 0);
         assert_eq!(summary.deleted_live_object_blocker, 0);
+        let rescheduled = &summary.rescheduled_linked_respawns[0];
+        assert_eq!(rescheduled.spawn_id, 100);
+        assert_eq!(rescheduled.respawn_time, 1205);
         assert_eq!(
             map.get_respawn_info_like_cpp(SpawnObjectType::Creature, 100)
                 .unwrap()
                 .respawn_time,
-            10
+            1205
         );
     }
 
     #[test]
-    fn process_respawns_composite_oldest_blocked_preserves_later_due_order_like_cpp() {
+    fn process_respawns_composite_linked_reschedule_allows_later_due_delete_like_cpp() {
         let mut map = test_map();
         let mut store = SpawnStore::new();
         let active = spawn_group(70, SpawnGroupFlags::NONE);
@@ -4721,7 +4758,7 @@ mod tests {
             linked_respawn_guid(HighGuid::Creature, 77, 200),
         );
 
-        let summary = map.process_due_respawns_composite_delete_only_like_cpp(
+        let summary = map.process_due_respawns_composite_safe_side_effects_like_cpp(
             10,
             &store,
             &linked,
@@ -4730,15 +4767,17 @@ mod tests {
             |_, _| false,
         );
 
-        assert_eq!(summary.blocked_linked_respawn_persistence, 1);
-        assert_eq!(summary.deleted_inactive_spawn_group, 0);
-        assert!(
+        assert_eq!(summary.rescheduled_linked_respawns.len(), 1);
+        assert_eq!(summary.deleted_inactive_spawn_group, 1);
+        assert_eq!(
             map.get_respawn_info_like_cpp(SpawnObjectType::Creature, 100)
-                .is_some()
+                .unwrap()
+                .respawn_time,
+            1205
         );
         assert!(
             map.get_respawn_info_like_cpp(SpawnObjectType::Creature, 101)
-                .is_some()
+                .is_none()
         );
     }
 

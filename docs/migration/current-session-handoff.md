@@ -7,9 +7,9 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 ## Repository State
 
 - Branch: `develop`
-- Base before #375: clean `develop...origin/develop [ahead 28]` after `#NEXT.R8.ENTITIES.374`.
-- Most recent completed slice: `#NEXT.R8.ENTITIES.375 — ProcessRespawns safe zero-delete DB delete side effect`.
-- Expected tree after committing #375: clean, ahead 29. No push/install/restart performed.
+- Base before #376: clean `develop...origin/develop [ahead 29]` after `#NEXT.R8.ENTITIES.375`.
+- Current in-review slice: `#NEXT.R8.ENTITIES.376 — ProcessRespawns linked future reschedule + CHAR_REP_RESPAWN side effect`.
+- Expected tree after committing #376: clean, ahead 30. No push/install/restart performed.
 
 ## Critical Rules
 
@@ -21,15 +21,20 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 
 ## Progress Estimate
 
-Overall core migration estimate after #375 `ProcessRespawns safe zero-delete DB delete side effect`: `~86.5%`.
+Overall core migration estimate after #376 `ProcessRespawns linked future reschedule + CHAR_REP_RESPAWN side effect`: `~86.8%`.
 
-This remains intentionally below the R8 TSV row-completion ratio because heavy runtime ownership gaps remain: full live `CheckRespawn`/`ProcessRespawns` side effects beyond represented safe zero-delete branches, real `PoolMgr`, `DoRespawn` entity creation/`LoadFromDB`, future `SaveRespawnInfoDB` reschedule persistence, linked-respawn reschedule/persistence, corpse load, optimized map-local by-spawn indexes, real dynamic escort config/runtime feeding the closure, grid/session fanout, ObjectAccessor ownership, and broader Unit/Player inventory/auras/threat/motion/update-field work.
+This remains intentionally below the R8 TSV row-completion ratio because heavy runtime ownership gaps remain: full live `CheckRespawn`/`ProcessRespawns` branches beyond represented safe zero-delete and linked-reschedule branches, real `PoolMgr`, `DoRespawn` entity creation/`LoadFromDB`, corpse load, optimized map-local by-spawn indexes, real dynamic escort config/runtime feeding the closure, grid/session fanout, ObjectAccessor ownership, and broader Unit/Player inventory/auras/threat/motion/update-field work.
 
-Manual test point: no new client-facing manual milestone from #375; this is a DB side-effect completion for already-safe scheduler zero-delete branches, validated with focused unit checks.
+Manual test point: no new client-facing manual milestone from #376; this is a respawn-scheduler persistence correctness slice for already-represented linked-respawn future delays, validated with focused unit checks.
 
 ## Most Recent Completed Slices
 
-Current completed local slice:
+- `#NEXT.R8.ENTITIES.376`
+  - Executes the C++ `CheckRespawn` linked-respawn future-delay branch inside the map-owned ProcessRespawns timer loop: the original due timer is removed, the same `RespawnInfoLikeCpp` is reinserted at the future linked time, later due timers can still be processed, and world-server queues/executes `CHAR_REP_RESPAWN(type, spawnId, respawnTime, mapId, instanceId)` outside the `MapManager` lock for world maps only.
+  - Source-of-truth runtime timers remain map-owned `wow_map::Map` / `RespawnStoreLikeCpp`; `world-server` only bridges the character DB prepared statement and async execution, with non-world maps skipped like C++ `Instanceable()` and invalid map ids skipped without truncation.
+  - Does not implement `PoolMgr`, `DoRespawn`/`LoadFromDB`, corpse load, entity creation/fanout, ObjectAccessor/grid ownership, optimized by-spawn indexes, real dynamic escort runtime or broader Unit/Player systems.
+
+Previous completed local slice:
 
 - `#NEXT.R8.ENTITIES.375`
   - Adds the C++ `RemoveRespawnTime(..., true)` / `DeleteRespawnInfoFromDB` side effect for the already-executed safe `ProcessRespawns` zero-delete branches: inactive spawn-group and live object blocker.
@@ -68,6 +73,27 @@ Previous completed local slice:
   - Adds linked respawn metadata/load/store and the pure linked-time guard dependency for `Map::CheckRespawn`.
   - Source-of-truth runtime timers remain map-owned `wow_map::Map` / `RespawnStoreLikeCpp`; linked respawn metadata is loaded DB -> validated canonical metadata -> read-only linked store.
   - Does not implement full `CheckRespawn`/`ProcessRespawns`, PoolMgr, `DoRespawn`, DB save/delete, live entity creation or fanout.
+
+## C++ Anchors for #376
+
+- `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:682-688` — `Map::Update` calls `ProcessRespawns(); UpdateSpawnGroupConditions();` when `_respawnCheckTimer` fires.
+- `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2004-2020` — `Map::CheckRespawn` linked-respawn guard mutates `respawnTime` to the linked creature/gameobject respawn time plus random 5-15 seconds, or `std::numeric_limits<time_t>::max()` for infinite linked delay.
+- `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2191-2240` — `ProcessRespawns` removes due handle, calls `CheckRespawn`, decreases/reinserts the heap handle for future reschedules, calls `SaveRespawnInfoDB`, and continues so later due timers remain eligible.
+- `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:3549-3560` — `SaveRespawnInfoDB` no-ops for `Instanceable()` maps and otherwise executes `CHAR_REP_RESPAWN(type, spawnId, respawnTime, mapId, instanceId)`.
+
+## Expected Validation for #376
+
+```bash
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo fmt --check
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo test -p wow-map process_respawns
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo test -p world-server respawn_db_save
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo test -p world-server spawn_group_condition_update
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo check -p world-server
+git diff --check
+git status --short --branch
+```
+
+Expected remaining gaps: real `PoolMgr`, `DoRespawn`/`LoadFromDB`, corpse load, entity creation/fanout, ObjectAccessor/grid ownership, optimized by-spawn indexes, real dynamic escort runtime and broader canonical object ownership.
 
 ## C++ Anchors for #375
 
