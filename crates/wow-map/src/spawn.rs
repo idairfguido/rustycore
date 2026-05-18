@@ -123,6 +123,148 @@ impl SpawnGroupTemplateData {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnGroupActiveChange {
+    MissingGroup,
+    SystemGroup,
+    Toggled,
+    ClearedToggle,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SpawnGroupRuntimeState {
+    toggled_spawn_group_ids: BTreeSet<u32>,
+}
+
+impl SpawnGroupRuntimeState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn set_spawn_group_active_like_cpp(
+        &mut self,
+        group: Option<&SpawnGroupTemplateData>,
+        state: bool,
+    ) -> SpawnGroupActiveChange {
+        let Some(group) = group else {
+            return SpawnGroupActiveChange::MissingGroup;
+        };
+        if group.is_system() {
+            return SpawnGroupActiveChange::SystemGroup;
+        }
+
+        if state != spawn_group_default_active_like_cpp(group) {
+            self.toggled_spawn_group_ids.insert(group.group_id);
+            SpawnGroupActiveChange::Toggled
+        } else {
+            self.toggled_spawn_group_ids.remove(&group.group_id);
+            SpawnGroupActiveChange::ClearedToggle
+        }
+    }
+
+    pub fn is_spawn_group_active_like_cpp(&self, group: Option<&SpawnGroupTemplateData>) -> bool {
+        let Some(group) = group else {
+            return false;
+        };
+        if group.is_system() {
+            return true;
+        }
+
+        self.toggled_spawn_group_ids.contains(&group.group_id)
+            != spawn_group_default_active_like_cpp(group)
+    }
+
+    pub fn is_toggled(&self, group_id: u32) -> bool {
+        self.toggled_spawn_group_ids.contains(&group_id)
+    }
+
+    pub fn toggled_spawn_group_ids(&self) -> &BTreeSet<u32> {
+        &self.toggled_spawn_group_ids
+    }
+}
+
+fn spawn_group_default_active_like_cpp(group: &SpawnGroupTemplateData) -> bool {
+    !group.flags.contains(SpawnGroupFlags::MANUAL_SPAWN)
+}
+
+#[derive(Debug, Clone)]
+pub struct SpawnGridLoadStateLikeCpp<'a> {
+    spawn_store: &'a SpawnStore,
+    spawn_group_state: &'a SpawnGroupRuntimeState,
+    respawn_timers: BTreeSet<(SpawnObjectType, SpawnId)>,
+    pool_spawned_objects: BTreeSet<(SpawnObjectType, SpawnId)>,
+}
+
+impl<'a> SpawnGridLoadStateLikeCpp<'a> {
+    pub fn new(spawn_store: &'a SpawnStore, spawn_group_state: &'a SpawnGroupRuntimeState) -> Self {
+        Self {
+            spawn_store,
+            spawn_group_state,
+            respawn_timers: BTreeSet::new(),
+            pool_spawned_objects: BTreeSet::new(),
+        }
+    }
+
+    pub fn with_respawn_timers(
+        mut self,
+        respawn_timers: impl IntoIterator<Item = (SpawnObjectType, SpawnId)>,
+    ) -> Self {
+        self.respawn_timers.extend(respawn_timers);
+        self
+    }
+
+    pub fn with_pool_spawned_objects(
+        mut self,
+        pool_spawned_objects: impl IntoIterator<Item = (SpawnObjectType, SpawnId)>,
+    ) -> Self {
+        self.pool_spawned_objects.extend(pool_spawned_objects);
+        self
+    }
+
+    pub fn add_respawn_timer(&mut self, object_type: SpawnObjectType, spawn_id: SpawnId) {
+        self.respawn_timers.insert((object_type, spawn_id));
+    }
+
+    pub fn add_pool_spawned_object(&mut self, object_type: SpawnObjectType, spawn_id: SpawnId) {
+        self.pool_spawned_objects.insert((object_type, spawn_id));
+    }
+
+    pub fn should_be_spawned_on_grid_load(
+        &self,
+        object_type: SpawnObjectType,
+        spawn_id: SpawnId,
+    ) -> bool {
+        if !object_type.type_has_data() {
+            return false;
+        }
+
+        // C++ `Map::ShouldBeSpawnedOnGridLoad` checks respawn timers before
+        // consulting spawn metadata, spawn group state, or pool state.
+        if self.respawn_timers.contains(&(object_type, spawn_id)) {
+            return false;
+        }
+
+        let Some(spawn_data) = self.spawn_store.spawn_data(object_type, spawn_id) else {
+            return false;
+        };
+        let spawn_group = &spawn_data.spawn_group;
+        if !spawn_group.is_system()
+            && !self
+                .spawn_group_state
+                .is_spawn_group_active_like_cpp(Some(spawn_group))
+        {
+            return false;
+        }
+
+        if spawn_data.pool_id != 0 && !self.pool_spawned_objects.contains(&(object_type, spawn_id))
+        {
+            return false;
+        }
+
+        true
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpawnData {
     pub object_type: SpawnObjectType,
@@ -750,6 +892,148 @@ mod tests {
         assert_eq!(legacy.map_id, 0);
         assert!(legacy.is_system());
         assert!(legacy.flags.contains(SpawnGroupFlags::COMPATIBILITY_MODE));
+    }
+
+    #[test]
+    fn spawn_group_system_active_even_when_set_attempt_is_noop() {
+        let system = template(10, 571, SpawnGroupFlags::SYSTEM);
+        let mut state = SpawnGroupRuntimeState::new();
+
+        assert!(state.is_spawn_group_active_like_cpp(Some(&system)));
+        assert_eq!(
+            state.set_spawn_group_active_like_cpp(Some(&system), false),
+            SpawnGroupActiveChange::SystemGroup
+        );
+        assert!(!state.is_toggled(10));
+        assert!(state.is_spawn_group_active_like_cpp(Some(&system)));
+    }
+
+    #[test]
+    fn spawn_group_non_manual_defaults_active_and_toggle_matches_cpp() {
+        let group = template(10, 571, SpawnGroupFlags::NONE);
+        let mut state = SpawnGroupRuntimeState::new();
+
+        assert!(state.is_spawn_group_active_like_cpp(Some(&group)));
+        assert_eq!(
+            state.set_spawn_group_active_like_cpp(Some(&group), false),
+            SpawnGroupActiveChange::Toggled
+        );
+        assert!(state.is_toggled(10));
+        assert!(!state.is_spawn_group_active_like_cpp(Some(&group)));
+
+        assert_eq!(
+            state.set_spawn_group_active_like_cpp(Some(&group), true),
+            SpawnGroupActiveChange::ClearedToggle
+        );
+        assert!(!state.is_toggled(10));
+        assert!(state.is_spawn_group_active_like_cpp(Some(&group)));
+    }
+
+    #[test]
+    fn spawn_group_manual_defaults_inactive_and_toggle_matches_cpp() {
+        let group = template(10, 571, SpawnGroupFlags::MANUAL_SPAWN);
+        let mut state = SpawnGroupRuntimeState::new();
+
+        assert!(!state.is_spawn_group_active_like_cpp(Some(&group)));
+        assert_eq!(
+            state.set_spawn_group_active_like_cpp(Some(&group), true),
+            SpawnGroupActiveChange::Toggled
+        );
+        assert!(state.is_toggled(10));
+        assert!(state.is_spawn_group_active_like_cpp(Some(&group)));
+
+        assert_eq!(
+            state.set_spawn_group_active_like_cpp(Some(&group), false),
+            SpawnGroupActiveChange::ClearedToggle
+        );
+        assert!(!state.is_toggled(10));
+        assert!(!state.is_spawn_group_active_like_cpp(Some(&group)));
+    }
+
+    #[test]
+    fn spawn_group_missing_query_is_false_and_set_reports_missing() {
+        let mut state = SpawnGroupRuntimeState::new();
+
+        assert!(!state.is_spawn_group_active_like_cpp(None));
+        assert_eq!(
+            state.set_spawn_group_active_like_cpp(None, true),
+            SpawnGroupActiveChange::MissingGroup
+        );
+    }
+
+    #[test]
+    fn should_spawn_on_grid_load_honors_respawn_before_group_and_pool() {
+        let mut store = SpawnStore::new();
+        let mut data = spawn(SpawnObjectType::Creature, 100, 0.0, 0.0);
+        data.spawn_group = template(10, 571, SpawnGroupFlags::MANUAL_SPAWN);
+        data.pool_id = 55;
+        store.add_object_spawn(&data, |_| false);
+        let state = SpawnGroupRuntimeState::new();
+        let filter = SpawnGridLoadStateLikeCpp::new(&store, &state)
+            .with_respawn_timers([(SpawnObjectType::Creature, 100)]);
+
+        assert!(!filter.should_be_spawned_on_grid_load(SpawnObjectType::Creature, 100));
+    }
+
+    #[test]
+    fn should_spawn_on_grid_load_rejects_non_system_inactive_group() {
+        let mut store = SpawnStore::new();
+        let mut data = spawn(SpawnObjectType::Creature, 100, 0.0, 0.0);
+        data.spawn_group = template(10, 571, SpawnGroupFlags::MANUAL_SPAWN);
+        store.add_object_spawn(&data, |_| false);
+        let state = SpawnGroupRuntimeState::new();
+        let filter = SpawnGridLoadStateLikeCpp::new(&store, &state);
+
+        assert!(!filter.should_be_spawned_on_grid_load(SpawnObjectType::Creature, 100));
+    }
+
+    #[test]
+    fn should_spawn_on_grid_load_pool_zero_ignores_pool_selection() {
+        let mut store = SpawnStore::new();
+        let mut data = spawn(SpawnObjectType::Creature, 100, 0.0, 0.0);
+        data.spawn_group = template(10, 571, SpawnGroupFlags::NONE);
+        data.pool_id = 0;
+        store.add_object_spawn(&data, |_| false);
+        let state = SpawnGroupRuntimeState::new();
+        let filter = SpawnGridLoadStateLikeCpp::new(&store, &state);
+
+        assert!(filter.should_be_spawned_on_grid_load(SpawnObjectType::Creature, 100));
+    }
+
+    #[test]
+    fn should_spawn_on_grid_load_pooled_spawn_requires_selected_object() {
+        let mut store = SpawnStore::new();
+        let mut data = spawn(SpawnObjectType::Creature, 100, 0.0, 0.0);
+        data.spawn_group = template(10, 571, SpawnGroupFlags::NONE);
+        data.pool_id = 55;
+        store.add_object_spawn(&data, |_| false);
+        let state = SpawnGroupRuntimeState::new();
+        let mut filter = SpawnGridLoadStateLikeCpp::new(&store, &state);
+
+        assert!(!filter.should_be_spawned_on_grid_load(SpawnObjectType::Creature, 100));
+        filter.add_pool_spawned_object(SpawnObjectType::Creature, 100);
+        assert!(filter.should_be_spawned_on_grid_load(SpawnObjectType::Creature, 100));
+    }
+
+    #[test]
+    fn should_spawn_on_grid_load_allows_system_no_respawn_no_pool() {
+        let mut store = SpawnStore::new();
+        let mut data = spawn(SpawnObjectType::Creature, 100, 0.0, 0.0);
+        data.spawn_group = template(10, 571, SpawnGroupFlags::SYSTEM);
+        store.add_object_spawn(&data, |_| false);
+        let state = SpawnGroupRuntimeState::new();
+        let filter = SpawnGridLoadStateLikeCpp::new(&store, &state);
+
+        assert!(filter.should_be_spawned_on_grid_load(SpawnObjectType::Creature, 100));
+    }
+
+    #[test]
+    fn should_spawn_on_grid_load_missing_metadata_is_false_without_panic() {
+        let store = SpawnStore::new();
+        let state = SpawnGroupRuntimeState::new();
+        let filter = SpawnGridLoadStateLikeCpp::new(&store, &state);
+
+        assert!(!filter.should_be_spawned_on_grid_load(SpawnObjectType::Creature, 999));
     }
 
     #[test]

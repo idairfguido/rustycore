@@ -12,7 +12,9 @@ use crate::cell::Cell;
 use crate::coords::MAX_NUMBER_OF_CELLS;
 use crate::grid::NGrid;
 use crate::map::GridLifecycle;
-use crate::spawn::{Difficulty, SpawnData, SpawnId, SpawnObjectType, SpawnStore};
+use crate::spawn::{
+    Difficulty, SpawnData, SpawnGridLoadStateLikeCpp, SpawnId, SpawnObjectType, SpawnStore,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CorpseGridObject {
@@ -71,6 +73,16 @@ impl GridSpawnLoadFilter for LoadAllGridSpawns {
         _spawn_id: SpawnId,
     ) -> bool {
         true
+    }
+}
+
+impl GridSpawnLoadFilter for SpawnGridLoadStateLikeCpp<'_> {
+    fn should_spawn_on_grid_load(
+        &mut self,
+        object_type: SpawnObjectType,
+        spawn_id: SpawnId,
+    ) -> bool {
+        SpawnGridLoadStateLikeCpp::should_be_spawned_on_grid_load(self, object_type, spawn_id)
     }
 }
 
@@ -337,7 +349,9 @@ mod tests {
     use super::*;
     use crate::coords::GridCoord;
     use crate::grid::NGrid;
-    use crate::spawn::{SpawnData, SpawnGroupTemplateData, SpawnPosition};
+    use crate::spawn::{
+        SpawnData, SpawnGroupFlags, SpawnGroupRuntimeState, SpawnGroupTemplateData, SpawnPosition,
+    };
 
     fn spawn(object_type: SpawnObjectType, spawn_id: SpawnId, x: f32, y: f32) -> SpawnData {
         SpawnData {
@@ -438,6 +452,47 @@ mod tests {
         let cell = grid.get_grid_type(0, 0).unwrap();
         assert_eq!(cell.grid_objects.creatures.len(), 1);
         assert!(cell.grid_objects.gameobjects.is_empty());
+    }
+
+    #[test]
+    fn load_n_with_cpp_grid_load_state_omits_inactive_spawn_and_loads_active_spawn() {
+        let mut store = SpawnStore::new();
+        let inactive_group = SpawnGroupTemplateData {
+            group_id: 10,
+            name: "manual".to_string(),
+            map_id: 571,
+            flags: SpawnGroupFlags::MANUAL_SPAWN,
+        };
+        let active_group = SpawnGroupTemplateData {
+            group_id: 11,
+            name: "default".to_string(),
+            map_id: 571,
+            flags: SpawnGroupFlags::NONE,
+        };
+        let mut inactive = spawn(SpawnObjectType::Creature, 100, 0.0, 0.0);
+        inactive.spawn_group = inactive_group;
+        let mut active = spawn(SpawnObjectType::Creature, 101, 0.0, 0.0);
+        active.spawn_group = active_group;
+        store.add_object_spawn(&inactive, |_| false);
+        store.add_object_spawn(&active, |_| false);
+
+        let state = SpawnGroupRuntimeState::new();
+        let filter = SpawnGridLoadStateLikeCpp::new(&store, &state);
+        let corpses = CorpseCellStore::new();
+        let mut grid = NGrid::from_coords(32, 32, 1000, true);
+        let mut loader = ObjectGridLoader::with_filter(&store, &corpses, 571, 1, 1, 1, filter);
+
+        let counts = loader.load_n(&mut grid);
+
+        assert_eq!(counts.creatures, 1);
+        let cell = grid.get_grid_type(0, 0).unwrap();
+        assert_eq!(cell.grid_objects.creatures.len(), 1);
+        assert!(
+            cell.grid_objects
+                .creatures
+                .iter()
+                .any(|guid| guid.counter() == 101)
+        );
     }
 
     #[test]
