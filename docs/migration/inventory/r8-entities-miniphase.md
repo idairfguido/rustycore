@@ -1461,3 +1461,17 @@ Files touched: `crates/wow-map/src/map.rs`; `docs/migration/inventory/r8-entitie
 Checks expected: `cargo fmt --check`; `cargo test -p wow-map update_spawn_group_conditions`; `git diff --check`.
 
 Remaining gaps: this does not complete `#NEXT.R8.ENTITIES.021`. `SpawnGroupSpawn`, `SpawnGroupDespawn`, pools, respawn persistence, live entity creation, grid/session fanout, DB/runtime side effects, and scheduler/respawn timer wiring remain pending.
+
+### #NEXT.R8.ENTITIES.364 — world-server helper for SetSpawnGroupInactive-only UpdateSpawnGroupConditions composition
+
+Status: complete (world-server condition-update set-inactive composition helper only; no live scheduler/spawn/despawn runtime activation).
+
+C++ anchors: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:666-688` (`Map::Update` calls `ProcessRespawns` and `UpdateSpawnGroupConditions` when `_respawnCheckTimer` passes), `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2471-2502` (`Map::UpdateSpawnGroupConditions` resolves groups by map, reads `GetSpawnGroupData`, `IsSpawnGroupActive`, and `ConditionMgr`; manual groups only plan condition-failure despawn when already active; automatic `active == should` is a no-op; `should == true` calls `SpawnGroupSpawn`; `should == false` plus despawn flag calls `SpawnGroupDespawn`; otherwise it calls `SetSpawnGroupInactive`), `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2427-2453` (`SetSpawnGroupActive` / `IsSpawnGroupActive` map-owned `_toggledSpawnGroupIds`), and `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:772-779` plus `4256-4277` (capture point event/update paths call `GetMap()->UpdateSpawnGroupConditions`).
+
+Implemented Rust helper: `world-server` now has private `apply_canonical_spawn_group_condition_update_set_inactive_like_cpp(...)` near the existing InitSpawnGroupState hook. The helper takes `map_id`, `instance_id`, and `difficulty_id` from the existing `ManagedMap`, resolves per-map groups from read-only `CanonicalSpawnMetadataLikeCpp`, returns an empty vector/no-op when no groups exist, builds the same `ConditionMapRef` and explicit empty-runtime `ConditionMapStateSnapshot` arrays as the InitSpawnGroupState hook, evaluates `CONDITION_SOURCE_TYPE_SPAWN_GROUP` through `is_spawn_group_meeting_map_conditions_like_cpp`, and delegates the only allowed map-state mutation to `ManagedMap::map_mut().apply_update_spawn_group_conditions_set_inactive_like_cpp(...)`. It logs evaluated groups/outcomes plus applied `SetInactive`, planned spawn, and planned despawn counts; it does not execute or fake `SpawnGroupSpawn` / `SpawnGroupDespawn`, write metadata, or let ConditionMgr overwrite map-owned toggles directly.
+
+Files touched: `crates/world-server/src/main.rs`; `docs/migration/inventory/r8-entities-miniphase.md`; `docs/migration/inventory/r8-entities-miniphase.tsv`.
+
+Checks expected: `cargo fmt --check` or `cargo fmt`; `cargo test -p world-server spawn_group_condition_update_set_inactive`; `git diff --check`.
+
+Remaining gaps: this does not complete `#NEXT.R8.ENTITIES.021` and does not wire the live `_respawnCheckTimer` scheduler. `SpawnGroupSpawn`, `SpawnGroupDespawn`, pools, respawn persistence, live entity creation, grid/session fanout, DB/runtime side effects, and runtime sources for event/world-state/instance/boss arrays remain pending; those arrays are intentionally empty in this helper just like the current InitSpawnGroupState hook.

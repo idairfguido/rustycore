@@ -1998,6 +1998,88 @@ fn install_canonical_spawn_group_initializer_like_cpp(
     });
 }
 
+fn apply_canonical_spawn_group_condition_update_set_inactive_like_cpp(
+    managed_map: &mut wow_map::ManagedMap,
+    canonical_spawn_metadata: &spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
+    condition_store: &wow_data::ConditionEntriesByTypeStore,
+) -> Vec<wow_map::map::SpawnGroupConditionUpdateOutcomeLikeCpp> {
+    let map_id = managed_map.map_id();
+    let instance_id = managed_map.instance_id();
+    let difficulty_id = u32::from(managed_map.map().spawn_mode());
+    let groups = canonical_spawn_metadata.spawn_group_templates_for_map_like_cpp(map_id);
+    if groups.is_empty() {
+        debug!(
+            map_id,
+            instance_id,
+            difficulty_id,
+            "UpdateSpawnGroupConditions SetInactive helper found no spawn groups for map"
+        );
+        return Vec::new();
+    }
+
+    let group_templates = groups
+        .iter()
+        .map(|(_group_id, template)| *template)
+        .collect::<Vec<_>>();
+    let groups_evaluated = group_templates.len();
+    let map_ref = ConditionMapRef::new(map_id, instance_id);
+    let map_state = ConditionMapStateSnapshot {
+        active_event_ids: &[],
+        world_states: &[],
+        difficulty_id,
+        instance_data: &[],
+        instance_data64: &[],
+        boss_states: &[],
+        scenario_step_id: None,
+    };
+    let outcomes = managed_map
+        .map_mut()
+        .apply_update_spawn_group_conditions_set_inactive_like_cpp(group_templates, |group| {
+            is_spawn_group_meeting_map_conditions_like_cpp(
+                condition_store,
+                group.group_id,
+                map_ref,
+                Some(map_state),
+                &[],
+            )
+        });
+    let applied_set_inactive = outcomes
+        .iter()
+        .filter(|outcome| outcome.applied_change.is_some())
+        .count();
+    let planned_spawn = outcomes
+        .iter()
+        .filter(|outcome| {
+            matches!(
+                outcome.action,
+                wow_map::map::SpawnGroupConditionActionLikeCpp::Spawn { .. }
+            )
+        })
+        .count();
+    let planned_despawn = outcomes
+        .iter()
+        .filter(|outcome| {
+            matches!(
+                outcome.action,
+                wow_map::map::SpawnGroupConditionActionLikeCpp::Despawn { .. }
+            )
+        })
+        .count();
+    debug!(
+        map_id,
+        instance_id,
+        difficulty_id,
+        groups_evaluated,
+        outcomes = outcomes.len(),
+        applied_set_inactive,
+        planned_spawn,
+        planned_despawn,
+        "Applied C++ UpdateSpawnGroupConditions SetInactive-only helper to canonical map"
+    );
+
+    outcomes
+}
+
 fn create_canonical_map_manager(configs: &WorldConfigSet) -> wow_map::MapManager {
     let grid_cleanup_delay_ms =
         world_config_u32(configs, "CONFIG_INTERVAL_GRIDCLEAN", 5 * 60 * 1000)
@@ -2561,6 +2643,7 @@ fn locale_id_to_name(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
+        apply_canonical_spawn_group_condition_update_set_inactive_like_cpp,
         install_canonical_spawn_group_initializer_like_cpp, load_world_config_from,
         loot_drop_rates_like_cpp, mmap_runtime_config_like_cpp, world_config_bool, world_config_u8,
         world_config_u16,
@@ -2769,20 +2852,149 @@ mmap.enablePathFinding = 0
         );
     }
 
+    // C++ anchors for the focused condition-update helper tests:
+    // - Maps/Map.cpp:666-688 (`Map::Update` respawn timer calls `UpdateSpawnGroupConditions`).
+    // - Maps/Map.cpp:2471-2502 (`UpdateSpawnGroupConditions` branch order).
+    // - Maps/Map.cpp:2427-2453 (map-owned spawn-group toggle state).
+    // - GameObject.cpp:772-779 and 4256-4277 (capture-point paths trigger condition updates).
+    #[test]
+    fn spawn_group_condition_update_set_inactive_applies_for_failed_automatic_group() {
+        let metadata = test_spawn_metadata([(30, 571)]);
+        let condition_store =
+            ConditionEntriesByTypeStore::from_conditions_like_cpp([mapid_condition(30, 530)]);
+        let mut manager = wow_map::MapManager::new(60_000, 10);
+        let group = metadata
+            .spawn_group_templates()
+            .get(&30)
+            .expect("test group 30");
+        let map = manager.create_world_map(571, 0);
+        assert!(map.map().is_spawn_group_active_like_cpp(Some(group)));
+
+        let outcomes = apply_canonical_spawn_group_condition_update_set_inactive_like_cpp(
+            map,
+            &metadata,
+            &condition_store,
+        );
+
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].group_id, 30);
+        assert_eq!(
+            outcomes[0].action,
+            wow_map::map::SpawnGroupConditionActionLikeCpp::SetInactive
+        );
+        assert!(matches!(
+            outcomes[0].applied_change,
+            Some(
+                wow_map::SpawnGroupActiveChange::Toggled
+                    | wow_map::SpawnGroupActiveChange::ClearedToggle
+            )
+        ));
+        assert!(!map.map().is_spawn_group_active_like_cpp(Some(group)));
+    }
+
+    #[test]
+    fn spawn_group_condition_update_set_inactive_planned_spawn_despawn_do_not_mutate_toggles() {
+        let metadata = test_spawn_metadata_with_flags([
+            (40, 571, SpawnGroupFlags::NONE),
+            (41, 571, SpawnGroupFlags::DESPAWN_ON_CONDITION_FAILURE),
+        ]);
+        let condition_store = ConditionEntriesByTypeStore::from_conditions_like_cpp([
+            mapid_condition(40, 571),
+            mapid_condition(41, 530),
+        ]);
+        let mut manager = wow_map::MapManager::new(60_000, 10);
+        let spawn_group = metadata
+            .spawn_group_templates()
+            .get(&40)
+            .expect("test group 40");
+        let despawn_group = metadata
+            .spawn_group_templates()
+            .get(&41)
+            .expect("test group 41");
+        let map = manager.create_world_map(571, 0);
+        map.map_mut()
+            .set_spawn_group_inactive_like_cpp(Some(spawn_group));
+        assert!(!map.map().is_spawn_group_active_like_cpp(Some(spawn_group)));
+        assert!(
+            map.map()
+                .is_spawn_group_active_like_cpp(Some(despawn_group))
+        );
+
+        let outcomes = apply_canonical_spawn_group_condition_update_set_inactive_like_cpp(
+            map,
+            &metadata,
+            &condition_store,
+        );
+
+        let spawn_outcome = outcomes
+            .iter()
+            .find(|outcome| outcome.group_id == 40)
+            .expect("spawn outcome");
+        assert_eq!(
+            spawn_outcome.action,
+            wow_map::map::SpawnGroupConditionActionLikeCpp::spawn_group_spawn_default()
+        );
+        assert_eq!(spawn_outcome.applied_change, None);
+        let despawn_outcome = outcomes
+            .iter()
+            .find(|outcome| outcome.group_id == 41)
+            .expect("despawn outcome");
+        assert_eq!(
+            despawn_outcome.action,
+            wow_map::map::SpawnGroupConditionActionLikeCpp::condition_failure_despawn()
+        );
+        assert_eq!(despawn_outcome.applied_change, None);
+        assert!(!map.map().is_spawn_group_active_like_cpp(Some(spawn_group)));
+        assert!(
+            map.map()
+                .is_spawn_group_active_like_cpp(Some(despawn_group))
+        );
+    }
+
+    #[test]
+    fn spawn_group_condition_update_set_inactive_no_groups_is_noop() {
+        let metadata = test_spawn_metadata([]);
+        let condition_store = ConditionEntriesByTypeStore::default();
+        let mut manager = wow_map::MapManager::new(60_000, 10);
+        let map = manager.create_world_map(999, 0);
+
+        let outcomes = apply_canonical_spawn_group_condition_update_set_inactive_like_cpp(
+            map,
+            &metadata,
+            &condition_store,
+        );
+
+        assert!(outcomes.is_empty());
+        assert!(
+            map.map()
+                .spawn_group_state()
+                .toggled_spawn_group_ids()
+                .is_empty()
+        );
+    }
+
     fn test_spawn_metadata<const N: usize>(
         groups: [(u32, u32); N],
+    ) -> super::spawn_store_loader::CanonicalSpawnMetadataLikeCpp {
+        test_spawn_metadata_with_flags(
+            groups.map(|(group_id, map_id)| (group_id, map_id, SpawnGroupFlags::NONE)),
+        )
+    }
+
+    fn test_spawn_metadata_with_flags<const N: usize>(
+        groups: [(u32, u32, SpawnGroupFlags); N],
     ) -> super::spawn_store_loader::CanonicalSpawnMetadataLikeCpp {
         let mut store = SpawnStore::new();
         let mut templates = BTreeMap::new();
         let mut rows = Vec::new();
-        for (index, (group_id, map_id)) in groups.into_iter().enumerate() {
+        for (index, (group_id, map_id, flags)) in groups.into_iter().enumerate() {
             templates.insert(
                 group_id,
                 SpawnGroupTemplateData {
                     group_id,
                     name: format!("test group {group_id}"),
                     map_id: wow_map::spawn::SPAWNGROUP_MAP_UNSET,
-                    flags: SpawnGroupFlags::NONE,
+                    flags,
                 },
             );
             let spawn_id = u64::try_from(index).expect("test index fits") + 1;
