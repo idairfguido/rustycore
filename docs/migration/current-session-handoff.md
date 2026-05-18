@@ -7,9 +7,9 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 ## Repository State
 
 - Branch: `develop`
-- Base before #379: clean `develop...origin/develop [ahead 32]` after `#NEXT.R8.ENTITIES.378`.
-- Latest completed local slice: `#NEXT.R8.ENTITIES.379 — Map::GetWorldObjectBySpawnId parity over map-local spawn-id stores`.
-- Expected tree after #379 local edits: dirty with this slice only unless Foreman commits after review/validation. No push/install/restart performed.
+- Current branch state after Foreman finalization: clean `develop...origin/develop [ahead 33]`.
+- Latest completed local slice: `#NEXT.R8.ENTITIES.379 — Map::GetWorldObjectBySpawnId parity over map-local spawn-id stores`, committed locally as `6de2839 Port world object spawn-id lookup` after independent review and validation.
+- No push/install/restart performed.
 
 ## Critical Rules
 
@@ -29,7 +29,7 @@ Manual test point: no new client-facing manual milestone from #379; this is a ma
 
 ## Most Recent Completed Slices
 
-- `#NEXT.R8.ENTITIES.379` (completed locally; pending independent review/commit by Foreman)
+- `#NEXT.R8.ENTITIES.379` (completed; review `APROBADO`; focused validation passed; committed locally by Foreman as `6de2839`)
   - Adds C++-shaped `Map::get_creature_by_spawn_id_like_cpp`, `Map::get_gameobject_by_spawn_id_like_cpp`, and `Map::get_world_object_by_spawn_id_like_cpp(type, spawn_id)` over the existing map-local Creature/GameObject/AreaTrigger by-spawn GUID-set indexes.
   - Source-of-truth runtime store remains `Map::map_objects`; the by-spawn maps remain derived indexes maintained only by `insert_map_object_record`/`remove_map_object`. Getters read the index, deterministically choose an indexed GUID for Rust tests, prefer alive Creature / spawned GameObject like C++, and resolve back through `map_objects`, returning `None` for absent/stale/type-mismatched records or spawn id zero.
   - Matches the C++ switch shape for Creature, GameObject, and AreaTrigger without adding DB load, object creation, respawn timers, `AreaTrigger` respawn support, `PoolMgr`, `DoRespawn`, Create/Load/Update runtime, AddToWorld/RemoveFromWorld side effects, ObjectAccessor/grid/session fanout, or broader Unit/Player systems.
