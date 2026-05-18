@@ -1433,3 +1433,17 @@ Files touched: `crates/world-server/src/spawn_store_loader.rs`; `crates/world-se
 Checks expected: `cargo fmt --check`; `cargo test -p world-server spawn_group`; `git diff --check`.
 
 Remaining gaps: this does not complete `#NEXT.R8.ENTITIES.021`, does not execute live `InitSpawnGroupState`, and does not implement live `SpawnGroupSpawn`/`SpawnGroupDespawn`, condition evaluation, pool/runtime integration, respawn persistence, live entity creation, or grid/session fanout.
+
+### #NEXT.R8.ENTITIES.362 — Wire world-server InitSpawnGroupState hook to canonical spawn metadata and ConditionMgr
+
+Status: complete (world-server InitSpawnGroupState wiring only; no live spawn/despawn/runtime activation).
+
+C++ anchors: `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapManager.cpp:71-80` (`CreateWorldMap` calls `map->InitSpawnGroupState()` during map creation), `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapManager.cpp:84-113` (`CreateInstance` calls `map->InitSpawnGroupState()` after instance setup), `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapManager.cpp:118-129` (`CreateBattleground` calls `map->InitSpawnGroupState()`), `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2455-2468` (`Map::InitSpawnGroupState` resolves groups for map, skips system groups, checks map conditions, and calls `SetSpawnGroupActive`), `/home/server/woltk-trinity-legacy/src/server/game/Conditions/ConditionMgr.cpp:1142-1145` (`IsMapMeetingNotGroupedConditions` builds `ConditionSourceInfo(map)`), and `/home/server/woltk-trinity-legacy/src/server/game/Conditions/ConditionMgr.cpp:1095-1113` (allowed spawn-group condition types).
+
+Implemented Rust wiring: `world-server` now keeps `canonical_spawn_metadata` as a live `Arc<CanonicalSpawnMetadataLikeCpp>` and installs a `wow_map::MapManager::set_spawn_group_initializer_like_cpp` hook on the canonical map manager before `register_loaded_instance_ids`. The hook is creation-only, resolves `CanonicalSpawnMetadataLikeCpp::spawn_group_templates_for_map_like_cpp(map_id)` in wrapper/C++ order, builds `ConditionMapRef::new(map_id, instance_id)`, passes an explicit `ConditionMapStateSnapshot` using the map spawn-mode difficulty and empty runtime-owned arrays, evaluates `CONDITION_SOURCE_TYPE_SPAWN_GROUP` via `wow_world::conditions::is_spawn_group_meeting_map_conditions_like_cpp`, and feeds those bools into `managed_map.map_mut().init_spawn_group_state_like_cpp(...)`. It only mutates map-owned spawn-group toggles during new map creation; it does not mutate metadata, perform I/O, load grids, touch the legacy map manager, or run spawn/despawn.
+
+Files touched: `crates/world-server/src/main.rs`; `docs/migration/inventory/r8-entities-miniphase.md`; `docs/migration/inventory/r8-entities-miniphase.tsv`.
+
+Checks expected: `cargo fmt --check`; `cargo test -p world-server canonical_spawn_group_initializer`; `cargo check -p world-server`; `git diff --check`.
+
+Remaining gaps: this does not complete `#NEXT.R8.ENTITIES.021`. Still missing: live `SpawnGroupSpawn`/`SpawnGroupDespawn`, pools, respawn persistence, live entity creation, grid/session fanout, DB/runtime side effects, and runtime map-state sources beyond the explicitly empty arrays used by this wiring slice.

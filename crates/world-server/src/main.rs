@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use wow_config::{DatabaseInfo, LoadReport, WorldConfigSet};
 use wow_core::{ObjectGuidGenerator, guid::HighGuid};
 use wow_database::{
@@ -39,6 +39,9 @@ use wow_network::{
 use wow_world::{
     MMapRuntimeConfigLikeCpp, MapManager as LegacyMapManager, SharedCanonicalMapManager,
     SharedMapManager, WorldMMapPathfinderWorkerLikeCpp, WorldSession,
+    conditions::{
+        ConditionMapRef, ConditionMapStateSnapshot, is_spawn_group_meeting_map_conditions_like_cpp,
+    },
 };
 
 mod spawn_store_loader;
@@ -715,7 +718,7 @@ async fn main() -> Result<()> {
         )
         .await
         .context("Failed to load canonical SpawnStore metadata from world DB")?;
-    let _canonical_spawn_metadata = Arc::new(canonical_spawn_metadata);
+    let canonical_spawn_metadata = Arc::new(canonical_spawn_metadata);
     info!(
         "Loaded canonical SpawnStore metadata: creatures rows={} indexed={} event-managed={} empty-difficulty={} missing-map={}; gameobjects rows={} indexed={} event-managed={} empty-difficulty={} missing-map={}; areatriggers rows={} indexed={} empty-difficulty={} missing-map={}; spawn-group rows={} assigned={} missing-spawn={} invalid-type={} missing-group={} map-mismatch={} duplicate={}; represented validations skipped: creature={} gameobject={} areatrigger={}",
         canonical_spawn_report.creature.rows,
@@ -1315,6 +1318,16 @@ async fn main() -> Result<()> {
     let instance_lock_mgr = Arc::new(std::sync::RwLock::new(loaded_instance_lock_mgr));
 
     let canonical_map_manager = Arc::new(Mutex::new(create_canonical_map_manager(&world_configs)));
+    match canonical_map_manager.lock() {
+        Ok(mut manager) => install_canonical_spawn_group_initializer_like_cpp(
+            &mut manager,
+            Arc::clone(&canonical_spawn_metadata),
+            Arc::clone(&condition_store),
+        ),
+        Err(_) => {
+            warn!("Canonical MapManager lock poisoned; InitSpawnGroupState hook not installed")
+        }
+    }
     register_loaded_instance_ids(
         &shared_map,
         canonical_map_manager.as_ref(),
@@ -1922,6 +1935,69 @@ fn loot_store_all_rows_statement_like_cpp(kind: LootStoreKind) -> WorldStatement
     }
 }
 
+fn install_canonical_spawn_group_initializer_like_cpp(
+    manager: &mut wow_map::MapManager,
+    canonical_spawn_metadata: Arc<spawn_store_loader::CanonicalSpawnMetadataLikeCpp>,
+    condition_store: Arc<wow_data::ConditionEntriesByTypeStore>,
+) {
+    manager.set_spawn_group_initializer_like_cpp(move |managed_map| {
+        let map_id = managed_map.map_id();
+        let instance_id = managed_map.instance_id();
+        let difficulty_id = u32::from(managed_map.map().spawn_mode());
+        let groups = canonical_spawn_metadata.spawn_group_templates_for_map_like_cpp(map_id);
+        if groups.is_empty() {
+            debug!(
+                map_id,
+                instance_id,
+                difficulty_id,
+                "InitSpawnGroupState hook found no spawn groups for map"
+            );
+            return;
+        }
+
+        let group_templates = groups
+            .iter()
+            .map(|(_group_id, template)| *template)
+            .collect::<Vec<_>>();
+        let map_ref = ConditionMapRef::new(map_id, instance_id);
+        let map_state = ConditionMapStateSnapshot {
+            active_event_ids: &[],
+            world_states: &[],
+            difficulty_id,
+            instance_data: &[],
+            instance_data64: &[],
+            boss_states: &[],
+            scenario_step_id: None,
+        };
+        let changes =
+            managed_map
+                .map_mut()
+                .init_spawn_group_state_like_cpp(group_templates, |group| {
+                    is_spawn_group_meeting_map_conditions_like_cpp(
+                        condition_store.as_ref(),
+                        group.group_id,
+                        map_ref,
+                        Some(map_state),
+                        &[],
+                    )
+                });
+        let toggled = changes
+            .iter()
+            .filter(|(_group_id, change)| {
+                matches!(change, wow_map::SpawnGroupActiveChange::Toggled)
+            })
+            .count();
+        debug!(
+            map_id,
+            instance_id,
+            difficulty_id,
+            groups_evaluated = changes.len(),
+            toggled,
+            "Applied C++ InitSpawnGroupState hook to canonical map"
+        );
+    });
+}
+
 fn create_canonical_map_manager(configs: &WorldConfigSet) -> wow_map::MapManager {
     let grid_cleanup_delay_ms =
         world_config_u32(configs, "CONFIG_INTERVAL_GRIDCLEAN", 5 * 60 * 1000)
@@ -2485,14 +2561,21 @@ fn locale_id_to_name(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        load_world_config_from, loot_drop_rates_like_cpp, mmap_runtime_config_like_cpp,
-        world_config_bool, world_config_u8, world_config_u16,
+        install_canonical_spawn_group_initializer_like_cpp, load_world_config_from,
+        loot_drop_rates_like_cpp, mmap_runtime_config_like_cpp, world_config_bool, world_config_u8,
+        world_config_u16,
     };
-    use std::collections::HashSet;
+    use std::collections::{BTreeMap, HashSet};
     use std::env;
     use std::fs;
     use std::path::PathBuf;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
+    use wow_constants::{ConditionSourceType, ConditionType};
+    use wow_data::{Condition, ConditionEntriesByTypeStore};
+    use wow_map::{
+        SpawnData, SpawnGroupFlags, SpawnGroupTemplateData, SpawnObjectType, SpawnPosition,
+        SpawnStore, spawn::SpawnGroupMemberRow,
+    };
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -2604,6 +2687,148 @@ mmap.enablePathFinding = 0
         let mmap_config = mmap_runtime_config_like_cpp(&configs, HashSet::from([571]));
         assert!(mmap_config.pathfinding_enabled_for_map_like_cpp(0));
         assert!(!mmap_config.pathfinding_enabled_for_map_like_cpp(571));
+    }
+
+    #[test]
+    fn canonical_spawn_group_initializer_applies_mapid_conditions_on_new_maps() {
+        let metadata = Arc::new(test_spawn_metadata([(10, 571), (11, 530)]));
+        let condition_store = Arc::new(ConditionEntriesByTypeStore::from_conditions_like_cpp([
+            mapid_condition(10, 571),
+            mapid_condition(11, 571),
+        ]));
+        let mut manager = wow_map::MapManager::new(60_000, 10);
+        install_canonical_spawn_group_initializer_like_cpp(
+            &mut manager,
+            Arc::clone(&metadata),
+            condition_store,
+        );
+
+        let group_571 = metadata
+            .spawn_group_templates()
+            .get(&10)
+            .expect("test group 10");
+        let map_571 = manager.create_world_map(571, 0);
+        assert!(
+            map_571
+                .map()
+                .is_spawn_group_active_like_cpp(Some(group_571))
+        );
+
+        let group_530 = metadata
+            .spawn_group_templates()
+            .get(&11)
+            .expect("test group 11");
+        let map_530 = manager.create_world_map(530, 0);
+        assert!(
+            !map_530
+                .map()
+                .is_spawn_group_active_like_cpp(Some(group_530))
+        );
+    }
+
+    #[test]
+    fn canonical_spawn_group_initializer_does_not_reexecute_for_existing_map() {
+        let metadata = Arc::new(test_spawn_metadata([(20, 571)]));
+        let condition_store = Arc::new(ConditionEntriesByTypeStore::from_conditions_like_cpp([
+            mapid_condition(20, 530),
+        ]));
+        let mut manager = wow_map::MapManager::new(60_000, 10);
+        install_canonical_spawn_group_initializer_like_cpp(
+            &mut manager,
+            Arc::clone(&metadata),
+            condition_store,
+        );
+
+        let group = metadata
+            .spawn_group_templates()
+            .get(&20)
+            .expect("test group 20");
+        let map = manager.create_world_map(571, 0);
+        assert!(!map.map().is_spawn_group_active_like_cpp(Some(group)));
+        map.map_mut()
+            .set_spawn_group_active_like_cpp(Some(group), true);
+        assert!(map.map().is_spawn_group_active_like_cpp(Some(group)));
+
+        let existing = manager.create_world_map(571, 0);
+        assert!(existing.map().is_spawn_group_active_like_cpp(Some(group)));
+    }
+
+    #[test]
+    fn canonical_spawn_group_initializer_no_groups_is_noop() {
+        let metadata = Arc::new(test_spawn_metadata([]));
+        let condition_store = Arc::new(ConditionEntriesByTypeStore::default());
+        let mut manager = wow_map::MapManager::new(60_000, 10);
+        install_canonical_spawn_group_initializer_like_cpp(&mut manager, metadata, condition_store);
+
+        let map = manager.create_world_map(999, 0);
+        assert!(
+            map.map()
+                .spawn_group_state()
+                .toggled_spawn_group_ids()
+                .is_empty()
+        );
+    }
+
+    fn test_spawn_metadata<const N: usize>(
+        groups: [(u32, u32); N],
+    ) -> super::spawn_store_loader::CanonicalSpawnMetadataLikeCpp {
+        let mut store = SpawnStore::new();
+        let mut templates = BTreeMap::new();
+        let mut rows = Vec::new();
+        for (index, (group_id, map_id)) in groups.into_iter().enumerate() {
+            templates.insert(
+                group_id,
+                SpawnGroupTemplateData {
+                    group_id,
+                    name: format!("test group {group_id}"),
+                    map_id: wow_map::spawn::SPAWNGROUP_MAP_UNSET,
+                    flags: SpawnGroupFlags::NONE,
+                },
+            );
+            let spawn_id = u64::try_from(index).expect("test index fits") + 1;
+            let spawn = test_spawn(spawn_id, map_id);
+            store.add_object_spawn(&spawn, |_| false);
+            rows.push(SpawnGroupMemberRow {
+                group_id,
+                spawn_type: SpawnObjectType::Creature as u8,
+                spawn_id,
+            });
+        }
+        store.apply_spawn_groups_like_cpp(&mut templates, rows);
+        super::spawn_store_loader::CanonicalSpawnMetadataLikeCpp::new(store, templates)
+    }
+
+    fn test_spawn(spawn_id: u64, map_id: u32) -> SpawnData {
+        SpawnData {
+            object_type: SpawnObjectType::Creature,
+            spawn_id,
+            map_id,
+            db_data: true,
+            spawn_group: SpawnGroupTemplateData::default_group(),
+            id: 42,
+            spawn_point: SpawnPosition::new(0.0, 0.0, 0.0, 0.0),
+            phase_use_flags: 0,
+            phase_id: 0,
+            phase_group: 0,
+            terrain_swap_map: -1,
+            pool_id: 0,
+            spawn_time_secs: 120,
+            spawn_difficulties: vec![0],
+            script_id: 0,
+            string_id: String::new(),
+        }
+    }
+
+    fn mapid_condition(spawn_group_id: u32, expected_map_id: u32) -> Condition {
+        Condition {
+            source_type: ConditionSourceType::SpawnGroup,
+            source_group: 0,
+            source_entry: spawn_group_id as i32,
+            source_id: 0,
+            condition_type: ConditionType::MapId,
+            condition_value1: expected_map_id,
+            ..Condition::default()
+        }
     }
 
     fn unique_temp_dir(name: &str) -> PathBuf {
