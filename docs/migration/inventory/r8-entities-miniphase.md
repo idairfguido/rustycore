@@ -5,6 +5,11 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.394** `Map::SpawnGroupSpawn` safe map-local planning/execution seam.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2315-2401`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2471-2502`.
+  Rust targets: `crates/wow-map/src/map.rs`, `crates/world-server/src/main.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: `Map::spawn_group_spawn_like_cpp` now validates missing/system groups without mutation, activates valid groups before iteration, walks canonical `SpawnStore` group metadata, removes respawn timers for `ignore_respawn`/`force`, skips active timers/live objects/difficulty mismatches/unloaded grids, and returns explicit loaded-grid Creature/GameObject `LoadFromDB` plans with blocked counters. The represented `UpdateSpawnGroupConditions` Spawn branch now calls this seam, returns `spawn_outcome`, and the world-server regression test asserts the C++ active-state side effect plus the existing condition-failure despawn branch. Complete only for safe map-local planning/state/timer effects; no entity `CreateFromDB`/`LoadFromDB`/`AddToMap`, AreaTrigger creation, DB persistence, fanout, or scripts are complete.
+
 - [x] **#NEXT.R8.ENTITIES.393** `ProcessRespawns` pooled `UpdatePool` safe map-local action execution.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2191-2240`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:183-257`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:288-407`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:907-919`.
   Rust targets: `crates/wow-map/src/map.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.

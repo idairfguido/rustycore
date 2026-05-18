@@ -3929,7 +3929,7 @@ mmap.enablePathFinding = 0
     }
 
     #[test]
-    fn spawn_group_condition_update_set_inactive_planned_spawn_and_executes_despawn_toggles() {
+    fn spawn_group_condition_update_set_inactive_executes_spawn_active_seam_and_despawn_toggles() {
         let metadata = test_spawn_metadata_with_flags([
             (40, 571, SpawnGroupFlags::NONE),
             (41, 571, SpawnGroupFlags::DESPAWN_ON_CONDITION_FAILURE),
@@ -3971,6 +3971,16 @@ mmap.enablePathFinding = 0
             wow_map::map::SpawnGroupConditionActionLikeCpp::spawn_group_spawn_default()
         );
         assert_eq!(spawn_outcome.applied_change, None);
+        let spawn = spawn_outcome
+            .spawn_outcome
+            .as_ref()
+            .expect("condition-success spawn executes active-state seam");
+        assert_eq!(spawn.blocked_missing_group, 0);
+        assert_eq!(spawn.blocked_system_group, 0);
+        assert_eq!(
+            spawn.applied_active_change,
+            Some(wow_map::SpawnGroupActiveChange::ClearedToggle)
+        );
         let despawn_outcome = outcomes
             .iter()
             .find(|outcome| outcome.group_id == 41)
@@ -3989,7 +3999,7 @@ mmap.enablePathFinding = 0
             despawn.applied_inactive_change,
             Some(wow_map::SpawnGroupActiveChange::Toggled)
         );
-        assert!(!map.map().is_spawn_group_active_like_cpp(Some(spawn_group)));
+        assert!(map.map().is_spawn_group_active_like_cpp(Some(spawn_group)));
         assert!(
             !map.map()
                 .is_spawn_group_active_like_cpp(Some(despawn_group))

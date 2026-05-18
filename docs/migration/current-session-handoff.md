@@ -20,9 +20,10 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 - Current branch state after #391 review/validation/local commit: `develop...origin/develop [ahead 46]` with a clean tree; no push/install/restart.
 - Current branch state after #392 review/validation/local commit: `develop...origin/develop [ahead 47]` with a clean tree; no push/install/restart.
 - Current branch state after #393 review/validation/local commit: `develop...origin/develop [ahead 48]` with a clean tree; no push/install/restart.
-- Latest completed slice in this handoff: `#NEXT.R8.ENTITIES.393 — ProcessRespawns pooled UpdatePool safe map-local action execution` (review `APROBADO`, focused checks passed, committed locally in the current #393 HEAD).
-- Previous completed slice: `#NEXT.R8.ENTITIES.392 — Map::ProcessRespawns DoRespawn unloaded-grid early-return + DB-delete bridge` (review `APROBADO`, focused checks passed, committed locally in the previous #392 HEAD).
-- No push/install/restart performed for #383, #384, #385, #386, #387, #388, #389, #390, #391, #392, or #393.
+- Current branch state after #394 review/validation/local commit: `develop...origin/develop [ahead 49]` with a clean tree; no push/install/restart.
+- Latest completed slice in this handoff: `#NEXT.R8.ENTITIES.394 — Map::SpawnGroupSpawn safe map-local planning/execution seam` (review `APROBADO`; focused checks passed; committed locally in the current #394 HEAD).
+- Previous completed slice: `#NEXT.R8.ENTITIES.393 — ProcessRespawns pooled UpdatePool safe map-local action execution` (review `APROBADO`, focused checks passed, committed locally in the current #393 HEAD).
+- No push/install/restart performed for #383, #384, #385, #386, #387, #388, #389, #390, #391, #392, #393, or #394.
 
 ## Critical Rules
 
@@ -34,13 +35,20 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 
 ## Progress Estimate
 
-Overall core migration estimate after #393 `ProcessRespawns pooled UpdatePool safe map-local action execution`: `~86.5%` (was `~86.3%` after #392; do not claim >95%).
+Overall core migration estimate after #394 `SpawnGroupSpawn safe map-local planning/execution seam`: `~86.7%` (was `~86.5%` after #393; do not claim >95%).
 
 This remains intentionally below the R8 TSV row-completion ratio because heavy runtime ownership gaps remain: real `PoolMgr` runtime execution, live `SpawnPool`/`DespawnPool` RNG/chance execution beyond deterministic planning/report, recursive subpool live integration beyond returned action records, loaded-grid/full live `ProcessRespawns` non-pooled `DoRespawn` branch, real entity creation / `LoadFromDB`, `AddToMap`/`RemoveFromMap`, corpse load, AreaTrigger Create/Load/Update runtime, templates/spawns, AI, caster unregister, unit enter/exit, movement/visibility/transport, real terrain/vmap/dynamic-tree collision, transports, visibility overrides/cinematic/sight runtime, full entity-specific `AddToWorld`/`RemoveFromWorld` side effects beyond the object/spawn-id store, real dynamic escort config/runtime feeding the closure, grid/session fanout, ObjectAccessor ownership, DB save/delete execution for runtime branches, and broader Unit/Player inventory/auras/threat/motion/update-field work.
 
-Manual test point: no new client-facing manual milestone from #392; this closes only the safe non-spawn branch where `ProcessRespawns` removes an allowed due timer and `DoRespawn` returns because the grid is unloaded. `world-server` observes the removed timer and queues the existing `CHAR_DEL_RESPAWN` bridge by before/after diff. It still does not execute loaded-grid `DoRespawn`, `LoadFromDB`, live entity creation/add/fanout, live `SpawnGroupSpawn`, full `Spawn1Object`/`ReSpawn1Object`, full `CleanupsBeforeDelete`, dynamic tree/session fanout, `PoolMgr` live execution, or DB writes inside `wow-map`.
+Manual test point: no new client-facing manual milestone from #394; this closes only the safe map-local SpawnGroupSpawn planning seam where condition-update Spawn activates the group, removes allowed map-owned respawn timers for force/ignoreRespawn, skips live/timer/difficulty/unloaded-grid blockers, and returns explicit loaded-grid Creature/GameObject load plans. It still does not execute CreateFromDB/LoadFromDB/AddToMap, AreaTrigger creation, DB persistence/fanout/scripts, loaded-grid entity creation, real full Spawn1Object/ReSpawn1Object, CleanupsBeforeDelete, dynamic tree/session fanout, PoolMgr live execution, or server install/restart.
 
 ## Most Recent Completed Slices
+
+- `#NEXT.R8.ENTITIES.394` (review `APROBADO`; focused checks passed; committed locally in the current #394 HEAD; no push/install/restart)
+  - Adds the C++-anchored safe map-local `Map::SpawnGroupSpawn` planning seam: validates missing/system groups without mutation, activates valid groups before iteration, walks canonical `SpawnStore` group metadata, removes allowed map-owned respawn timers for `force || ignore_respawn`, skips active respawn timers/live objects/difficulty mismatches/unloaded grids, reports AreaTrigger as unsupported, and returns explicit loaded-grid Creature/GameObject `LoadFromDB` plans plus blocked counters instead of creating entities.
+  - C++ anchors: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2315-2401` and `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2471-2502`.
+  - Rust targets: `crates/wow-map/src/map.rs`, `crates/world-server/src/main.rs`, docs/inventory.
+  - Checks executed by foreman after review correction: `cargo fmt --check`, `cargo test -p wow-map spawn_group_spawn`, `cargo test -p wow-map update_spawn_group_conditions`, `cargo test -p world-server spawn_group_condition_update`, `PROTOC=/home/cdmonio/.local/protoc/bin/protoc cargo check -p world-server`, `git diff --check`, and `git status --short --branch` passed with pre-existing warnings only.
+  - Remaining gaps: no real `CreateFromDB`/`LoadFromDB`/`AddToMap`, no AreaTrigger create/load/update runtime, no DB persistence/fanout/scripts, no loaded-grid entity creation, no full Spawn1Object/ReSpawn1Object, no CleanupsBeforeDelete, no dynamic tree/session fanout, and no server install/restart.
 
 - `#NEXT.R8.ENTITIES.393` (review `APROBADO`; focused checks passed; committed locally in the current #393 HEAD; no push/install/restart)
   - Executes the safe map-local actions derived from successful pooled `PoolMgrLikeCpp::update_pool_plan_like_cpp` during `Map::process_due_respawns_composite_safe_side_effects_like_cpp`: `DespawnOne` removes current Creature/GameObject records through typed by-spawn indexes and `remove_from_map_like_cpp(guid, true)`, `RespawnOne` executes only `Despawn1Object(..., false, false)` and reports the spawn half, `RemoveRespawnTime` removes map-owned member timers, and `SpawnOne` reports missing metadata, unloaded-grid skip, or loaded-grid blocked without creating entities. The pooled trigger timer is still removed after successful plan execution, preserving C++ pooled timer precedence/order.
