@@ -20,6 +20,14 @@
 //!   `LoadAreaTriggerSpawns` query/parse/index/default legacy group.
 //! - Existing Rust DB statements:
 //!   `/home/server/rustycore/crates/wow-database/src/statements/world.rs:467-529`.
+//! - `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:2798-2862`
+//!   `ObjectMgr::LoadSpawnGroups` mutates spawn-group template map metadata and indexes
+//!   `_spawnGroupsByMap` / `_spawnGroupMapStore` for non-system groups.
+//! - `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2455-2468`
+//!   `Map::InitSpawnGroupState` reads `GetSpawnGroupsForMap(GetId())`, resolves each
+//!   `GetSpawnGroupData(groupId)`, skips system groups, checks conditions, and toggles the map.
+//! - `/home/server/woltk-trinity-legacy/src/server/game/Conditions/ConditionMgr.cpp:1142-1145`
+//!   future map-condition consumer entry point; conditions are not evaluated in this loader.
 
 use std::collections::BTreeMap;
 
@@ -55,6 +63,58 @@ pub struct CanonicalSpawnStoreLoadReport {
     pub area_trigger: SpawnKindLoadReport,
     pub spawn_group_rows: usize,
     pub spawn_group_apply: SpawnGroupApplyReport,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CanonicalSpawnMetadataLikeCpp {
+    spawn_store: SpawnStore,
+    spawn_group_templates: BTreeMap<u32, SpawnGroupTemplateData>,
+}
+
+impl CanonicalSpawnMetadataLikeCpp {
+    pub fn new(
+        spawn_store: SpawnStore,
+        spawn_group_templates: BTreeMap<u32, SpawnGroupTemplateData>,
+    ) -> Self {
+        Self {
+            spawn_store,
+            spawn_group_templates,
+        }
+    }
+
+    pub fn spawn_store(&self) -> &SpawnStore {
+        &self.spawn_store
+    }
+
+    pub fn spawn_group_templates(&self) -> &BTreeMap<u32, SpawnGroupTemplateData> {
+        &self.spawn_group_templates
+    }
+
+    /// C++ shaped dependency for future `Map::InitSpawnGroupState` wiring.
+    ///
+    /// Mirrors the read side of
+    /// `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2455-2468`:
+    /// use `GetSpawnGroupsForMap(mapId)` order, then resolve each group through the
+    /// `GetSpawnGroupData(groupId)`/map filter shape. Missing maps/templates are runtime-empty,
+    /// not panics. This does not evaluate `ConditionMgr` or mutate map-owned runtime toggles.
+    pub fn spawn_group_templates_for_map_like_cpp(
+        &self,
+        map_id: u32,
+    ) -> Vec<(u32, &SpawnGroupTemplateData)> {
+        self.spawn_store
+            .spawn_group_ids_by_map(map_id)
+            .into_iter()
+            .flat_map(|group_ids| group_ids.iter().copied())
+            .filter_map(|group_id| {
+                SpawnStore::spawn_group_template_for_map(
+                    &self.spawn_group_templates,
+                    group_id,
+                    map_id,
+                )
+                .map(|template| (group_id, template))
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,7 +192,7 @@ pub async fn load_canonical_spawn_store_like_cpp(
     map_store: &wow_data::MapStore,
     map_difficulty_store: &wow_data::MapDifficultyStore,
     spawn_group_store: &wow_data::SpawnGroupTemplateStore,
-) -> Result<(SpawnStore, CanonicalSpawnStoreLoadReport)> {
+) -> Result<(CanonicalSpawnMetadataLikeCpp, CanonicalSpawnStoreLoadReport)> {
     let mut store = SpawnStore::new();
     let mut report = CanonicalSpawnStoreLoadReport::default();
 
@@ -148,7 +208,7 @@ pub async fn load_canonical_spawn_store_like_cpp(
     report.spawn_group_rows = members.len();
     report.spawn_group_apply = store.apply_spawn_groups_like_cpp(&mut templates, members);
 
-    Ok((store, report))
+    Ok((CanonicalSpawnMetadataLikeCpp::new(store, templates), report))
 }
 
 pub fn spawn_group_templates_for_spawn_store(
@@ -885,6 +945,24 @@ mod tests {
         assert_eq!(apply.assigned, 3);
         assert_eq!(apply.missing_spawn, 1);
         assert_eq!(apply.duplicate_spawn_group, 1);
+        assert_eq!(templates.get(&0).unwrap().map_id, 0);
+        assert_eq!(templates.get(&1).unwrap().map_id, 0);
+        assert_eq!(templates.get(&10).unwrap().map_id, 1);
+        assert_eq!(templates.get(&11).unwrap().map_id, 1);
+        assert!(templates.contains_key(&0));
+        assert!(templates.contains_key(&1));
+        let metadata = CanonicalSpawnMetadataLikeCpp::new(store.clone(), templates.clone());
+        assert_eq!(metadata.spawn_group_templates().get(&10).unwrap().map_id, 1);
+        assert!(metadata.spawn_group_templates().contains_key(&0));
+        assert!(metadata.spawn_group_templates().contains_key(&1));
+        assert_eq!(
+            metadata
+                .spawn_store()
+                .spawn_group_ids_by_map(1)
+                .unwrap()
+                .len(),
+            2
+        );
         assert_eq!(
             store
                 .spawn_data(SpawnObjectType::Creature, 300)
@@ -917,6 +995,104 @@ mod tests {
             store
                 .cell_object_guids(1, 0, event_managed.cell_id())
                 .is_none_or(|cell| !cell.gameobjects.contains(&303))
+        );
+    }
+
+    #[test]
+    fn canonical_spawn_metadata_spawn_group_helper_filters_by_map_and_template_like_cpp() {
+        let (template_store, _) = wow_data::SpawnGroupTemplateStore::from_rows_like_cpp([
+            wow_data::SpawnGroupTemplateRow {
+                group_id: 20,
+                name: "map-one-a".to_string(),
+                flags: 0,
+            },
+            wow_data::SpawnGroupTemplateRow {
+                group_id: 21,
+                name: "map-one-b".to_string(),
+                flags: 0,
+            },
+            wow_data::SpawnGroupTemplateRow {
+                group_id: 22,
+                name: "map-two".to_string(),
+                flags: 0,
+            },
+        ]);
+        let mut templates = spawn_group_templates_for_spawn_store(&template_store);
+        let maps = map_store(&[1, 2]);
+        let difficulties = map_difficulty_store(&[(1, 0), (2, 0)]);
+        let mut report = SpawnKindLoadReport::default();
+        let mut store = SpawnStore::new();
+
+        let map_one_a = creature_row_to_spawn_data_like_cpp(
+            &creature_row(400, 0, "0"),
+            &maps,
+            &difficulties,
+            &mut report,
+        )
+        .unwrap();
+        let map_one_b = gameobject_row_to_spawn_data_like_cpp(
+            &gameobject_row(401, 0, "0"),
+            &maps,
+            &difficulties,
+            &mut report,
+        )
+        .unwrap();
+        let mut map_two_row = creature_row(402, 0, "0");
+        map_two_row.map_id = 2;
+        let map_two =
+            creature_row_to_spawn_data_like_cpp(&map_two_row, &maps, &difficulties, &mut report)
+                .unwrap();
+
+        store.add_object_spawn(&map_one_a, is_personal_phase_like_cpp_represented);
+        store.add_object_spawn(&map_one_b, is_personal_phase_like_cpp_represented);
+        store.add_object_spawn(&map_two, is_personal_phase_like_cpp_represented);
+        let apply = store.apply_spawn_groups_like_cpp(
+            &mut templates,
+            [
+                SpawnGroupMemberRow {
+                    group_id: 21,
+                    spawn_type: SpawnObjectType::GameObject as u8,
+                    spawn_id: 401,
+                },
+                SpawnGroupMemberRow {
+                    group_id: 20,
+                    spawn_type: SpawnObjectType::Creature as u8,
+                    spawn_id: 400,
+                },
+                SpawnGroupMemberRow {
+                    group_id: 22,
+                    spawn_type: SpawnObjectType::Creature as u8,
+                    spawn_id: 402,
+                },
+            ],
+        );
+        assert_eq!(apply.assigned, 3);
+
+        // Simulate a future C++-shaped filter miss without panicking: the group id is indexed
+        // for the map, but `GetSpawnGroupData`/map filtering no longer returns a matching template.
+        templates.get_mut(&21).unwrap().map_id = 2;
+        let metadata = CanonicalSpawnMetadataLikeCpp::new(store, templates);
+
+        let map_one_groups = metadata.spawn_group_templates_for_map_like_cpp(1);
+        assert_eq!(
+            map_one_groups
+                .iter()
+                .map(|(group_id, template)| (*group_id, template.name.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(20, "map-one-a")]
+        );
+        let map_two_groups = metadata.spawn_group_templates_for_map_like_cpp(2);
+        assert_eq!(
+            map_two_groups
+                .iter()
+                .map(|(group_id, template)| (*group_id, template.name.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(22, "map-two")]
+        );
+        assert!(
+            metadata
+                .spawn_group_templates_for_map_like_cpp(999)
+                .is_empty()
         );
     }
 }

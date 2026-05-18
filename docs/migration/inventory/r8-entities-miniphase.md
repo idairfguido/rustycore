@@ -1419,3 +1419,17 @@ Files touched: `crates/wow-map/src/manager.rs`; `docs/migration/inventory/r8-ent
 Checks expected: `cargo fmt --check`; `cargo test -p wow-map init_spawn_group_state`; `cargo test -p wow-map map_manager`; `git diff --check`.
 
 Remaining gaps: this does not complete `#NEXT.R8.ENTITIES.021`. The hook does not execute `SpawnGroupSpawn`/`SpawnGroupDespawn`, load grids, do I/O, call `ConditionMgr`, or duplicate active-state ownership. Still pending: world-server/ConditionMgr wiring that resolves conditions and calls `ManagedMap::map_mut().init_spawn_group_state_like_cpp(...)`, live `SpawnGroupSpawn`/`SpawnGroupDespawn` runtime, pool/respawn integration, live entity creation, and grid/session fanout.
+
+### #NEXT.R8.ENTITIES.361 — Preserve applied spawn-group template map data for future InitSpawnGroupState wiring
+
+Status: complete (data dependency only; no InitSpawnGroupState live hook).
+
+C++ anchors: `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:2798-2862` (`ObjectMgr::LoadSpawnGroups` validates member type/spawn/template, resolves unset template map from first spawn, rejects non-system cross-map rows, writes spawn metadata, and indexes `_spawnGroupsByMap` / `_spawnGroupMapStore` for non-system groups), `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2455-2468` (`Map::InitSpawnGroupState` reads `GetSpawnGroupsForMap(GetId())`, resolves `GetSpawnGroupData`, skips system groups, checks conditions, and toggles map-owned state), and `/home/server/woltk-trinity-legacy/src/server/game/Conditions/ConditionMgr.cpp:1142-1145` (future map-condition consumer entry point).
+
+Implemented Rust dependency: `world-server` now preserves the post-`apply_spawn_groups_like_cpp` `BTreeMap<u32, SpawnGroupTemplateData>` together with the `SpawnStore` in `CanonicalSpawnMetadataLikeCpp`. The wrapper exposes read-only accessors and a C++-shaped per-map helper that follows `SpawnStore::spawn_group_ids_by_map(map_id)` order and filters through `SpawnStore::spawn_group_template_for_map(...)`, treating missing maps/templates as empty rather than panicking. `main.rs` keeps the data alive under an honest `_canonical_spawn_metadata` `Arc` but does not wire `MapManager::set_spawn_group_initializer_like_cpp` yet.
+
+Files touched: `crates/world-server/src/spawn_store_loader.rs`; `crates/world-server/src/main.rs`; `docs/migration/inventory/r8-entities-miniphase.md`; `docs/migration/inventory/r8-entities-miniphase.tsv`.
+
+Checks expected: `cargo fmt --check`; `cargo test -p world-server spawn_group`; `git diff --check`.
+
+Remaining gaps: this does not complete `#NEXT.R8.ENTITIES.021`, does not execute live `InitSpawnGroupState`, and does not implement live `SpawnGroupSpawn`/`SpawnGroupDespawn`, condition evaluation, pool/runtime integration, respawn persistence, live entity creation, or grid/session fanout.

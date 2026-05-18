@@ -706,7 +706,7 @@ async fn main() -> Result<()> {
         map_difficulty_x_condition_store.len()
     );
 
-    let (canonical_spawn_store, canonical_spawn_report) =
+    let (canonical_spawn_metadata, canonical_spawn_report) =
         spawn_store_loader::load_canonical_spawn_store_like_cpp(
             world_db.as_ref(),
             &map_store,
@@ -715,7 +715,7 @@ async fn main() -> Result<()> {
         )
         .await
         .context("Failed to load canonical SpawnStore metadata from world DB")?;
-    let _canonical_spawn_store = Arc::new(canonical_spawn_store);
+    let _canonical_spawn_metadata = Arc::new(canonical_spawn_metadata);
     info!(
         "Loaded canonical SpawnStore metadata: creatures rows={} indexed={} event-managed={} empty-difficulty={} missing-map={}; gameobjects rows={} indexed={} event-managed={} empty-difficulty={} missing-map={}; areatriggers rows={} indexed={} empty-difficulty={} missing-map={}; spawn-group rows={} assigned={} missing-spawn={} invalid-type={} missing-group={} map-mismatch={} duplicate={}; represented validations skipped: creature={} gameobject={} areatrigger={}",
         canonical_spawn_report.creature.rows,
