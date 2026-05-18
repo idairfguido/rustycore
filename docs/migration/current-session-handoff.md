@@ -7,8 +7,9 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 ## Repository State
 
 - Branch: `develop`
-- Current branch state after Foreman finalization: clean `develop...origin/develop [ahead 33]`.
-- Latest completed local slice: `#NEXT.R8.ENTITIES.379 — Map::GetWorldObjectBySpawnId parity over map-local spawn-id stores`, committed locally as `6de2839 Port world object spawn-id lookup` after independent review and validation.
+- Current branch state before #380 finalization: `develop...origin/develop [ahead 34]` with a clean tree.
+- Current branch state after #380 local commit: `develop...origin/develop [ahead 35]`.
+- Latest completed local slice: `#NEXT.R8.ENTITIES.380 — Map como WorldObjectEnvironment con hooks explícitos de terreno/LOS`.
 - No push/install/restart performed.
 
 ## Critical Rules
@@ -21,13 +22,18 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 
 ## Progress Estimate
 
-Overall core migration estimate during #379 `Map::GetWorldObjectBySpawnId parity over map-local spawn-id stores`: `~87.2%`.
+Overall core migration estimate during #380 `Map como WorldObjectEnvironment con hooks explícitos de terreno/LOS`: `~87.4%`.
 
-This remains intentionally below the R8 TSV row-completion ratio because heavy runtime ownership gaps remain: full live `ProcessRespawns` branches beyond represented safe zero-delete/reschedule branches, real `PoolMgr`, `DoRespawn` entity creation/`LoadFromDB`, corpse load, AreaTrigger Create/Load/Update runtime, templates/spawns, AI, caster unregister, unit enter/exit, movement/visibility/transport, full entity-specific `AddToWorld`/`RemoveFromWorld` side effects beyond the object/spawn-id store, real dynamic escort config/runtime feeding the closure, grid/session fanout, ObjectAccessor ownership, DB save/delete coverage beyond current seams, and broader Unit/Player inventory/auras/threat/motion/update-field work.
+This remains intentionally below the R8 TSV row-completion ratio because heavy runtime ownership gaps remain: full live `ProcessRespawns` branches beyond represented safe zero-delete/reschedule branches, real `PoolMgr`, `DoRespawn` entity creation/`LoadFromDB`, corpse load, AreaTrigger Create/Load/Update runtime, templates/spawns, AI, caster unregister, unit enter/exit, movement/visibility/transport, real terrain/vmap/dynamic-tree collision, exact collision-height/hit-sphere endpoint adjustment, visibility overrides/cinematic/sight runtime, full entity-specific `AddToWorld`/`RemoveFromWorld` side effects beyond the object/spawn-id store, real dynamic escort config/runtime feeding the closure, grid/session fanout, ObjectAccessor ownership, DB save/delete coverage beyond current seams, and broader Unit/Player inventory/auras/threat/motion/update-field work.
 
-Manual test point: no new client-facing manual milestone from #379; this is a map-owned by-spawn lookup helper slice, validated with focused unit checks.
+Manual test point: no new client-facing manual milestone from #380; this is a map-to-world-object environment hook integration slice, validated with focused unit checks.
 
 ## Most Recent Completed Slices
+
+- `#NEXT.R8.ENTITIES.380`
+  - Adds `MapWorldObjectEnvironment` as the explicit terrain/dynamic-tree hook for `Map` when it implements `wow_entities::WorldObjectEnvironment`.
+  - `Map` is now passable to `WorldObject` helpers: `map_id`/`instance_id` come from map fields, visibility range reads `visible_distance`, and LOS/map-height/floor queries delegate to `self.terrain` rather than `WorldObject` knowing `wow-map` or scanning object/session state.
+  - `NoopTerrainGridLoader` is an explicit noop fallback returning LOS `true` and `INVALID_HEIGHT` heights. This is not real terrain and does not close #NEXT.R8.ENTITIES.005; terrain/vmap/dynamic tree, collision-height/hit-sphere exactness, transports, visibility overrides/cinematic/sight runtime remain pending.
 
 - `#NEXT.R8.ENTITIES.379` (completed; review `APROBADO`; focused validation passed; committed locally by Foreman as `6de2839`)
   - Adds C++-shaped `Map::get_creature_by_spawn_id_like_cpp`, `Map::get_gameobject_by_spawn_id_like_cpp`, and `Map::get_world_object_by_spawn_id_like_cpp(type, spawn_id)` over the existing map-local Creature/GameObject/AreaTrigger by-spawn GUID-set indexes.
@@ -92,6 +98,29 @@ Previous completed local slice:
   - Adds linked respawn metadata/load/store and the pure linked-time guard dependency for `Map::CheckRespawn`.
   - Source-of-truth runtime timers remain map-owned `wow_map::Map` / `RespawnStoreLikeCpp`; linked respawn metadata is loaded DB -> validated canonical metadata -> read-only linked store.
   - Does not implement full `CheckRespawn`/`ProcessRespawns`, PoolMgr, `DoRespawn`, DB save/delete, live entity creation or fanout.
+
+## C++ Anchors for #380
+
+- `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.cpp:1167-1185` — `WorldObject::IsWithinLOS` delegates to `GetMap()->isInLineOfSight(...)` when in world, otherwise returns true.
+- `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.cpp:1187-1210` — `WorldObject::IsWithinLOSInMap` requires `IsInMap(obj)` and delegates LOS to map.
+- `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.cpp:1366-1371` — `UpdateGroundPositionZ` uses `GetMapHeight` and applies hover only when height is valid.
+- `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.cpp:1449-1485` — visibility/sight range use `GetMap()->GetVisibilityRange()` except explicit overrides/far-visible/cinematic/creature sight branches.
+- `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.cpp:3749-3769` — `GetFloorZ` maxes static floor with `Map::GetGameObjectFloor`; `GetMapHeight` adds `Z_OFFSET_FIND_HEIGHT` unless `MAX_HEIGHT` and delegates to `Map::GetHeight`.
+- `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.h:217` — `Map::GetVisibilityRange` returns `m_VisibleDistance`.
+- `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.h:287-290` — `Map::GetHeight` maxes static terrain height with gameobject floor.
+- `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.h:456-464` — `Map::isInLineOfSight` and `GetGameObjectFloor` are map/dynamic-tree ownership.
+
+## Expected Validation for #380
+
+```bash
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo fmt --check
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo test -p wow-map world_object_
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo check -p world-server
+git diff --check
+git status --short --branch
+```
+
+Expected remaining gaps: #380 completes only the `Map`↔`WorldObjectEnvironment` hook integration. It does not close #NEXT.R8.ENTITIES.005; real terrain/vmap/dynamic-tree collision, exact collision-height/hit-sphere endpoint adjustment, transport relocation, visibility overrides/cinematic/sight runtime and broader object ownership remain pending.
 
 ## C++ Anchors for #379
 

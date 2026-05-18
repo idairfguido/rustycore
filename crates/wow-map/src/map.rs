@@ -24,8 +24,9 @@ use crate::spawn::{
 use wow_core::{ObjectGuid, Position, guid::HighGuid};
 use wow_entities::{
     AccessorObjectKind, AreaTrigger, CombatBeginContextLikeCpp, CombatSubsystem, Creature,
-    GameObject, MAX_VISIBILITY_DISTANCE, MapBindingError, MapObjectRecord, ObjectAccessorError,
-    ObjectAccessorMapSource, ObjectNotifyFlags, Player, Unit, WorldObject,
+    GameObject, INVALID_HEIGHT, LineOfSightQuery, MAX_VISIBILITY_DISTANCE, MapBindingError,
+    MapObjectRecord, ObjectAccessorError, ObjectAccessorMapSource, ObjectNotifyFlags, Player, Unit,
+    WorldObject, WorldObjectEnvironment, WorldObjectHeightQuery,
 };
 
 const GRID_SLOT_COUNT: usize = (MAX_NUMBER_OF_GRIDS * MAX_NUMBER_OF_GRIDS) as usize;
@@ -317,12 +318,55 @@ pub trait TerrainGridLoader {
     fn unload_map(&mut self, grid_x: u32, grid_y: u32);
 }
 
+/// Terrain/dynamic-tree hook used by `Map` when it acts as a
+/// `WorldObjectEnvironment` for `WorldObject` helpers.
+///
+/// This is the explicit ownership seam for C++ `Map::isInLineOfSight`,
+/// `Map::GetHeight`, and `Map::GetGameObjectFloor`. Implementations may be a
+/// noop while real terrain/vmap/dynamic-tree runtime is not ported, but callers
+/// must still flow through `WorldObject -> WorldObjectEnvironment -> Map -> terrain`.
+pub trait MapWorldObjectEnvironment {
+    fn line_of_sight(&self, query: LineOfSightQuery<'_>) -> bool;
+
+    fn map_height(
+        &self,
+        object: &WorldObject,
+        x: f32,
+        y: f32,
+        z: f32,
+        query: WorldObjectHeightQuery,
+    ) -> f32;
+
+    fn floor_z(&self, object: &WorldObject, position: Position, max_search_dist: f32) -> f32;
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoopTerrainGridLoader;
 
 impl TerrainGridLoader for NoopTerrainGridLoader {
     fn load_map_and_vmap(&mut self, _grid_x: u32, _grid_y: u32) {}
     fn unload_map(&mut self, _grid_x: u32, _grid_y: u32) {}
+}
+
+impl MapWorldObjectEnvironment for NoopTerrainGridLoader {
+    fn line_of_sight(&self, _query: LineOfSightQuery<'_>) -> bool {
+        true
+    }
+
+    fn map_height(
+        &self,
+        _object: &WorldObject,
+        _x: f32,
+        _y: f32,
+        _z: f32,
+        _query: WorldObjectHeightQuery,
+    ) -> f32 {
+        INVALID_HEIGHT
+    }
+
+    fn floor_z(&self, _object: &WorldObject, _position: Position, _max_search_dist: f32) -> f32 {
+        INVALID_HEIGHT
+    }
 }
 
 pub trait GridLifecycle {
@@ -3306,6 +3350,43 @@ where
     }
 }
 
+impl<Terrain, Lifecycle> WorldObjectEnvironment for Map<Terrain, Lifecycle>
+where
+    Terrain: TerrainGridLoader + MapWorldObjectEnvironment,
+    Lifecycle: GridLifecycle,
+{
+    fn map_id(&self) -> u32 {
+        self.map_id
+    }
+
+    fn instance_id(&self) -> u32 {
+        self.instance_id
+    }
+
+    fn visibility_range(&self) -> f32 {
+        self.visible_distance
+    }
+
+    fn line_of_sight(&self, query: LineOfSightQuery<'_>) -> bool {
+        self.terrain.line_of_sight(query)
+    }
+
+    fn map_height(
+        &self,
+        object: &WorldObject,
+        x: f32,
+        y: f32,
+        z: f32,
+        query: WorldObjectHeightQuery,
+    ) -> f32 {
+        self.terrain.map_height(object, x, y, z, query)
+    }
+
+    fn floor_z(&self, object: &WorldObject, position: Position, max_search_dist: f32) -> f32 {
+        self.terrain.floor_z(object, position, max_search_dist)
+    }
+}
+
 impl<Terrain, Lifecycle> MapGridHost for Map<Terrain, Lifecycle>
 where
     Terrain: TerrainGridLoader,
@@ -3409,6 +3490,7 @@ pub const fn total_cell_count() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
     use wow_constants::{DeathState, TypeId, TypeMask};
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
     use wow_entities::{
@@ -3428,6 +3510,125 @@ mod tests {
 
         fn unload_map(&mut self, grid_x: u32, grid_y: u32) {
             self.unloads.push((grid_x, grid_y));
+        }
+    }
+
+    impl MapWorldObjectEnvironment for RecordingTerrain {
+        fn line_of_sight(&self, _query: LineOfSightQuery<'_>) -> bool {
+            true
+        }
+
+        fn map_height(
+            &self,
+            _object: &WorldObject,
+            _x: f32,
+            _y: f32,
+            _z: f32,
+            _query: WorldObjectHeightQuery,
+        ) -> f32 {
+            INVALID_HEIGHT
+        }
+
+        fn floor_z(
+            &self,
+            _object: &WorldObject,
+            _position: Position,
+            _max_search_dist: f32,
+        ) -> f32 {
+            INVALID_HEIGHT
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    struct LosCall {
+        source_guid: ObjectGuid,
+        target_guid: Option<ObjectGuid>,
+        from: Position,
+        to: Position,
+        check_dynamic: bool,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    struct HeightCall {
+        object_guid: ObjectGuid,
+        x: f32,
+        y: f32,
+        z: f32,
+        query: WorldObjectHeightQuery,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    struct FloorCall {
+        object_guid: ObjectGuid,
+        position: Position,
+        max_search_dist: f32,
+    }
+
+    #[derive(Debug)]
+    struct RecordingWorldObjectTerrain {
+        los_result: bool,
+        height_result: f32,
+        floor_result: f32,
+        los_calls: RefCell<Vec<LosCall>>,
+        height_calls: RefCell<Vec<HeightCall>>,
+        floor_calls: RefCell<Vec<FloorCall>>,
+    }
+
+    impl RecordingWorldObjectTerrain {
+        fn new(los_result: bool, height_result: f32, floor_result: f32) -> Self {
+            Self {
+                los_result,
+                height_result,
+                floor_result,
+                los_calls: RefCell::new(Vec::new()),
+                height_calls: RefCell::new(Vec::new()),
+                floor_calls: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl TerrainGridLoader for RecordingWorldObjectTerrain {
+        fn load_map_and_vmap(&mut self, _grid_x: u32, _grid_y: u32) {}
+        fn unload_map(&mut self, _grid_x: u32, _grid_y: u32) {}
+    }
+
+    impl MapWorldObjectEnvironment for RecordingWorldObjectTerrain {
+        fn line_of_sight(&self, query: LineOfSightQuery<'_>) -> bool {
+            self.los_calls.borrow_mut().push(LosCall {
+                source_guid: query.source.guid(),
+                target_guid: query.target.map(WorldObject::guid),
+                from: query.from.position,
+                to: query.to.position,
+                check_dynamic: query.options.check_dynamic,
+            });
+            self.los_result
+        }
+
+        fn map_height(
+            &self,
+            object: &WorldObject,
+            x: f32,
+            y: f32,
+            z: f32,
+            query: WorldObjectHeightQuery,
+        ) -> f32 {
+            self.height_calls.borrow_mut().push(HeightCall {
+                object_guid: object.guid(),
+                x,
+                y,
+                z,
+                query,
+            });
+            self.height_result
+        }
+
+        fn floor_z(&self, object: &WorldObject, position: Position, max_search_dist: f32) -> f32 {
+            self.floor_calls.borrow_mut().push(FloorCall {
+                object_guid: object.guid(),
+                position,
+                max_search_dist,
+            });
+            self.floor_result
         }
     }
 
@@ -3473,6 +3674,104 @@ mod tests {
             RecordingTerrain::default(),
             RecordingLifecycle::default(),
         )
+    }
+
+    fn world_object_environment_test_map(
+        terrain: RecordingWorldObjectTerrain,
+        visible_distance: f32,
+    ) -> Map<RecordingWorldObjectTerrain, RecordingLifecycle> {
+        Map::with_hooks(
+            571,
+            7,
+            1,
+            1000,
+            true,
+            visible_distance,
+            terrain,
+            RecordingLifecycle::default(),
+        )
+    }
+
+    #[test]
+    fn world_object_visibility_range_reads_map_visible_distance_like_cpp() {
+        let map = world_object_environment_test_map(
+            RecordingWorldObjectTerrain::new(true, INVALID_HEIGHT, INVALID_HEIGHT),
+            123.5,
+        );
+        let object = world_object(HighGuid::DynamicObject, 571, 7, true);
+
+        assert_eq!(object.get_visibility_range(&map), 123.5);
+    }
+
+    #[test]
+    fn world_object_los_delegates_to_map_environment_hook_like_cpp() {
+        let map = world_object_environment_test_map(
+            RecordingWorldObjectTerrain::new(false, INVALID_HEIGHT, INVALID_HEIGHT),
+            100.0,
+        );
+        let mut source = world_object(HighGuid::DynamicObject, 571, 7, true);
+        source.relocate(Position::new(1.0, 2.0, 3.0, 0.25));
+        let mut target = world_object_with_counter(HighGuid::GameObject, 2, 571, 7, true);
+        target.relocate(Position::new(4.0, 5.0, 6.0, 0.75));
+
+        let result = source.is_within_los_in_map(
+            &target,
+            &map,
+            wow_entities::LineOfSightOptions {
+                check_dynamic: true,
+            },
+        );
+
+        assert!(!result);
+        assert_eq!(
+            map.terrain().los_calls.borrow().as_slice(),
+            &[LosCall {
+                source_guid: source.guid(),
+                target_guid: Some(target.guid()),
+                from: source.position(),
+                to: target.position(),
+                check_dynamic: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn world_object_map_height_and_floor_delegate_to_map_environment_hook_like_cpp() {
+        let map = world_object_environment_test_map(
+            RecordingWorldObjectTerrain::new(true, 88.0, 25.0),
+            100.0,
+        );
+        let mut object = world_object(HighGuid::DynamicObject, 571, 7, true);
+        object.relocate(Position::new(1.0, 2.0, 3.0, 0.25));
+        object.set_static_floor_z(20.0);
+        let height_query = WorldObjectHeightQuery {
+            vmap: false,
+            distance_to_search: 9.0,
+        };
+
+        let height = object.get_map_height(&map, 4.0, 5.0, 6.0, height_query);
+        let floor = object.get_floor_z(&map);
+
+        assert_eq!(height, 88.0);
+        assert_eq!(floor, 25.0);
+        assert_eq!(
+            map.terrain().height_calls.borrow().as_slice(),
+            &[HeightCall {
+                object_guid: object.guid(),
+                x: 4.0,
+                y: 5.0,
+                z: 6.5,
+                query: height_query,
+            }]
+        );
+        assert_eq!(
+            map.terrain().floor_calls.borrow().as_slice(),
+            &[FloorCall {
+                object_guid: object.guid(),
+                position: Position::new(1.0, 2.0, 3.5, 0.25),
+                max_search_dist: 50.0,
+            }]
+        );
     }
 
     fn spawn_group(group_id: u32, flags: SpawnGroupFlags) -> SpawnGroupTemplateData {
