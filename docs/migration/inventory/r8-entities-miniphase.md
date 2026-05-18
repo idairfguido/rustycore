@@ -1550,3 +1550,17 @@ Files touched: `crates/wow-map/src/map.rs`; `crates/world-server/src/main.rs`; `
 Checks expected: `cargo fmt --check`; `cargo test -p wow-map process_respawns`; `cargo test -p world-server spawn_group_condition_update`; `cargo check -p world-server`; `git diff --check`.
 
 Remaining gaps: full live `ProcessRespawns` remains partial. Pool timers, missing metadata, active/allowed `DoRespawn`, DB save/delete, linked-respawn reschedule, by-spawn live existence, escort exceptions, real entity creation/LoadFromDB, ObjectAccessor/map-local entity ownership, grid/session fanout and persistence are still blocked/pending and are not faked by this slice.
+
+### #NEXT.R8.ENTITIES.370 — Map::CheckRespawn live by-spawn blocker over map_objects
+
+Status: complete only for the `Map::CheckRespawn` live-object existence guard from `Map.cpp:1966-2002`. This ports the branch that clears `info->respawnTime = 0` when an already-live creature with the same spawn id, or any gameobject with the same spawn id, blocks respawn. This does not complete full `CheckRespawn` or live `ProcessRespawns` integration.
+
+C++ anchors: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1950-2023` (`CheckRespawn` contract) and `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1966-2002` (already-existing live creature/gameobject guard, dynamic escort exception, zeroing respawn time on block, default abort).
+
+Implemented Rust slice: `wow-map::Map::check_respawn_live_object_guard_like_cpp(&mut RespawnInfoLikeCpp, &SpawnStore, respawn_dynamic_escortnpc, is_creature_escorted)` resolves `SpawnData` through the explicit `SpawnStore` bridge, uses canonical map-owned `map_objects` as the local runtime source of truth, blocks only alive matching creatures unless the explicit dynamic-escort flag and caller-provided escort predicate allow the live creature, blocks gameobjects by any matching `MapObjectRecord::game_object()` spawn id, preserves `respawn_time` for missing metadata and unsupported AreaTrigger, and returns explicit outcomes instead of panicking.
+
+Files touched: `crates/wow-map/src/map.rs`; `docs/migration/current-session-handoff.md`; `docs/migration/inventory/r8-entities-miniphase.md`; `docs/migration/inventory/r8-entities-miniphase.tsv`.
+
+Checks expected: `cargo fmt --check`; `cargo test -p wow-map check_respawn_live_object_guard`; `git diff --check`; `git status --short --branch`.
+
+Remaining gaps: integrate this helper into full `CheckRespawn`/`ProcessRespawns`, linked respawn, PoolMgr, DoRespawn/LoadFromDB, DB save/delete, optimized map-local by-spawn indexes, real escort runtime feeding the closure, entity creation/ownership, grid/session fanout, and world-server scheduler wiring beyond the existing safe delete-only seam.

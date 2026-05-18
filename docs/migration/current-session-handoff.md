@@ -9,8 +9,8 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 - Branch: `develop`
 - Base before this slice: `64d42b1 #NEXT.R8.ENTITIES.367 map owned respawn store integration`
 - Local branch relation before committing #368: `develop...origin/develop [ahead 21]`
-- Most recent completed slice after this commit: `#NEXT.R8.ENTITIES.369 — ProcessRespawns delete-only safe execution seam`
-- Expected tree after committing #369: clean, ahead 23. No push/install/restart performed.
+- Most recent completed slice after committing this slice: `#NEXT.R8.ENTITIES.370 — Map::CheckRespawn live by-spawn blocker`
+- Expected tree after committing #370: clean, ahead 24. No push/install/restart performed.
 
 ## Critical Rules
 
@@ -22,11 +22,11 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 
 ## Progress Estimate
 
-Overall core migration estimate after #369 delete-only ProcessRespawns seam: `~84.8%`.
+Overall core migration estimate after #370 live-object `CheckRespawn` guard: `~85.0%`.
 
-This remains intentionally below the R8 TSV row-completion ratio because heavy runtime ownership gaps remain: full live `ProcessRespawns` execution beyond the safe inactive-spawn-group delete-only seam, real `PoolMgr`, `DoRespawn` entity creation/`LoadFromDB`, DB respawn persistence/delete, linked respawn checks, real map-local by-spawn creature/gameobject stores, grid/session fanout, ObjectAccessor ownership, and broader Unit/Player inventory/auras/threat/motion/update-field work.
+This remains intentionally below the R8 TSV row-completion ratio because heavy runtime ownership gaps remain: full live `CheckRespawn`/`ProcessRespawns` integration beyond represented helpers, linked respawn checks, real `PoolMgr`, `DoRespawn` entity creation/`LoadFromDB`, DB respawn persistence/delete, optimized map-local by-spawn indexes, real escort runtime feeding the closure, grid/session fanout, ObjectAccessor ownership, and broader Unit/Player inventory/auras/threat/motion/update-field work.
 
-Manual test point: no new client-facing manual milestone from #369; this is a map-owned respawn/check-respawn dependency validated with focused unit/integration checks.
+Manual test point: no new client-facing manual milestone from #370; this is a map-owned respawn/check-respawn dependency validated with focused unit checks.
 
 ## Most Recent Completed Slices
 
@@ -45,12 +45,27 @@ Current completed slice:
   - `Map::spawn_grid_load_state_like_cpp(&SpawnStore)` now feeds `SpawnGridLoadStateLikeCpp` from map-owned respawn timer keys plus map-owned spawn-group state while preserving caller-supplied `SpawnStore` metadata as the bridge.
   - Updated R8 inventory/roadmap honestly as complete only for the Map-owned respawn-store integration dependency.
 
-Current slice:
+Recent completed slice:
 
 - `#NEXT.R8.ENTITIES.369`
   - Executes only the safe C++ `Map::ProcessRespawns` branch from `Map.cpp:2226-2231` over map-owned timers when the already-represented `CheckRespawn` spawn-group guard from `Map.cpp:1959-1964` clears `respawn_time` to zero for inactive groups.
   - `world-server` now preserves `Map.cpp:682-688` ordering by calling the delete-only `ProcessRespawns` seam before `UpdateSpawnGroupConditions` SetInactive when the scheduler fires.
   - Missing metadata, pool runtime (`pool_id != 0`), active/Allowed `DoRespawn`, DB persistence/delete, linked respawn, by-spawn live stores, entity creation and fanout remain blocked and leave the oldest due timer intact.
+
+Current completed slice:
+
+- `#NEXT.R8.ENTITIES.370`
+  - Adds `Map::check_respawn_live_object_guard_like_cpp` for the C++ `Map::CheckRespawn` live-object blocker in `Map.cpp:1966-2002`.
+  - Uses canonical map-owned `map_objects` as the local runtime source of truth: alive same-spawn creatures block, dynamic escort groups can be allowed only through explicit config plus caller escort predicate, and any same-spawn gameobject blocks.
+  - Missing `SpawnData` and AreaTrigger return explicit outcomes without mutating `respawn_time`; unsupported/default C++ abort is represented without panic.
+  - This helper is not yet integrated into full `CheckRespawn`/`ProcessRespawns` and does not implement linked respawn, PoolMgr, DoRespawn/LoadFromDB, DB save/delete, optimized by-spawn indexes, real escort runtime feeding the closure, or fanout.
+
+## C++ Anchors for #370
+
+- `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1950-2023`
+  - `Map::CheckRespawn` contract: return true to spawn, clear `respawnTime=0` to delete, or reschedule future.
+- `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1966-2002`
+  - Live by-spawn guard: creature equal-range ignores non-alive, optionally ignores escorted dynamic escort NPCs, blocks otherwise; gameobject blocks by any same spawn id; `alreadyExists` clears `respawnTime=0` and returns false.
 
 ## C++ Anchors for #369
 
@@ -79,6 +94,32 @@ Current slice:
   - `ProcessRespawns` consumes the map-owned store; PoolMgr, DoRespawn, DB persistence/delete and real entity creation remain side effects outside this slice.
 - `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2286-2305`
   - `ShouldBeSpawnedOnGridLoad` checks `GetRespawnTime(type, spawnId) != 0` before spawn-group and pool checks.
+
+## Validation for #370
+
+Independent review:
+
+- `wow-reviewer`: `APROBADO`.
+
+Checks run with `RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo`:
+
+```bash
+cargo fmt --check
+cargo test -p wow-map check_respawn_live_object_guard
+cargo check -p world-server
+git diff --check
+git status --short --branch
+```
+
+Results:
+
+- `cargo fmt --check`: OK.
+- `cargo test -p wow-map check_respawn_live_object_guard`: 6 passed.
+- `cargo check -p world-server`: OK.
+- `git diff --check`: OK.
+- `git status --short --branch`: dirty only with the four expected #370 files before commit; expected clean/ahead 24 after commit.
+
+Warnings observed are pre-existing workspace warnings (for example `unsafe` in `wow-core/src/guid.rs`, unused imports/variables in existing crates, and existing `world-server` warnings); they are not introduced by #370.
 
 ## Validation for #369
 

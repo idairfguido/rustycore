@@ -134,6 +134,15 @@ pub struct ProcessRespawnsDeleteOnlySummaryLikeCpp {
     pub blocked_do_respawn_runtime: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckRespawnLiveObjectGuardOutcomeLikeCpp {
+    Allowed,
+    AliveCreatureBlocksRespawn,
+    GameObjectBlocksRespawn,
+    MissingSpawnData,
+    UnsupportedSpawnType,
+}
+
 impl SpawnGroupConditionActionLikeCpp {
     pub const fn spawn_group_spawn_default() -> Self {
         Self::Spawn {
@@ -591,6 +600,77 @@ where
         }
 
         CheckRespawnSpawnGroupGuardOutcomeLikeCpp::Allowed
+    }
+
+    /// Live object existence guard from C++ `Map::CheckRespawn`.
+    ///
+    /// C++ anchors:
+    /// - `Map.cpp:1966-2002` checks whether an already-live creature/gameobject
+    ///   with the same spawn id blocks respawn, clears `respawnTime`, and returns
+    ///   false when blocked.
+    /// - `Map.cpp:1972-1983` allows dynamic escort NPC respawn only when the
+    ///   matching live creature is already escorting.
+    ///
+    /// Source of truth for this slice is canonical map-owned `map_objects`.
+    /// Callers must provide the `CONFIG_RESPAWN_DYNAMIC_ESCORTNPC` value and the
+    /// real escort runtime predicate; this helper does not invent
+    /// `Creature::IsEscorted`, PoolMgr, linked respawn, `DoRespawn`, DB writes, or
+    /// fanout side effects.
+    pub fn check_respawn_live_object_guard_like_cpp<F>(
+        &self,
+        info: &mut RespawnInfoLikeCpp,
+        spawn_store: &SpawnStore,
+        respawn_dynamic_escortnpc: bool,
+        mut is_creature_escorted: F,
+    ) -> CheckRespawnLiveObjectGuardOutcomeLikeCpp
+    where
+        F: FnMut(ObjectGuid, &Creature) -> bool,
+    {
+        let Some(spawn_data) = spawn_store.spawn_data(info.object_type, info.spawn_id) else {
+            return CheckRespawnLiveObjectGuardOutcomeLikeCpp::MissingSpawnData;
+        };
+
+        match info.object_type {
+            SpawnObjectType::Creature => {
+                let is_escort = respawn_dynamic_escortnpc
+                    && spawn_data
+                        .spawn_group
+                        .flags
+                        .contains(SpawnGroupFlags::ESCORTQUESTNPC);
+
+                for record in self.map_objects.values() {
+                    let Some(creature) = record.creature() else {
+                        continue;
+                    };
+                    if creature.spawn_id() != info.spawn_id || !creature.is_alive() {
+                        continue;
+                    }
+                    if is_escort && is_creature_escorted(creature.guid(), creature) {
+                        continue;
+                    }
+
+                    info.respawn_time = 0;
+                    return CheckRespawnLiveObjectGuardOutcomeLikeCpp::AliveCreatureBlocksRespawn;
+                }
+
+                CheckRespawnLiveObjectGuardOutcomeLikeCpp::Allowed
+            }
+            SpawnObjectType::GameObject => {
+                if self.map_objects.values().any(|record| {
+                    record
+                        .game_object()
+                        .is_some_and(|gameobject| gameobject.spawn_id() == info.spawn_id)
+                }) {
+                    info.respawn_time = 0;
+                    return CheckRespawnLiveObjectGuardOutcomeLikeCpp::GameObjectBlocksRespawn;
+                }
+
+                CheckRespawnLiveObjectGuardOutcomeLikeCpp::Allowed
+            }
+            SpawnObjectType::AreaTrigger => {
+                CheckRespawnLiveObjectGuardOutcomeLikeCpp::UnsupportedSpawnType
+            }
+        }
     }
 
     /// Map-owned bridge for C++ `Map::_toggledSpawnGroupIds`.
@@ -2810,7 +2890,9 @@ mod tests {
     use super::*;
     use wow_constants::{DeathState, TypeId, TypeMask};
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
-    use wow_entities::{AccessorObjectRef, Creature, ObjectAccessor, ObjectNotifyFlags, Player};
+    use wow_entities::{
+        AccessorObjectRef, Creature, GameObject, ObjectAccessor, ObjectNotifyFlags, Player,
+    };
 
     #[derive(Debug, Default)]
     struct RecordingTerrain {
@@ -2922,6 +3004,46 @@ mod tests {
             respawn_time,
             grid_id: 7,
         }
+    }
+
+    fn test_creature_for_spawn(spawn_id: SpawnId, counter: i64, alive: bool) -> Creature {
+        let mut creature = Creature::new(false);
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(guid(HighGuid::Creature, counter));
+        creature.unit_mut().world_mut().object_mut().set_entry(42);
+        creature.unit_mut().world_mut().set_map(571, 7).unwrap();
+        creature
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::xyz(1.0, 2.0, 3.0));
+        creature.unit_mut().world_mut().object_mut().add_to_world();
+        creature.unit_mut().set_death_state(DeathState::Alive);
+        creature.unit_mut().set_max_health(100);
+        creature.unit_mut().set_health(100);
+        creature.set_spawn_id(spawn_id);
+        if !alive {
+            creature.mark_ai_dead(1);
+        }
+        creature
+    }
+
+    fn test_gameobject_for_spawn(spawn_id: SpawnId, counter: i64) -> GameObject {
+        let mut gameobject = GameObject::new();
+        gameobject
+            .world_mut()
+            .object_mut()
+            .create(guid(HighGuid::GameObject, counter));
+        gameobject.world_mut().object_mut().set_entry(42);
+        gameobject.world_mut().set_map(571, 7).unwrap();
+        gameobject
+            .world_mut()
+            .relocate(Position::xyz(1.0, 2.0, 3.0));
+        gameobject.world_mut().object_mut().add_to_world();
+        gameobject.set_spawn_id(spawn_id);
+        gameobject
     }
 
     #[test]
@@ -3265,6 +3387,149 @@ mod tests {
         assert_eq!(
             outcome,
             CheckRespawnSpawnGroupGuardOutcomeLikeCpp::MissingSpawnData
+        );
+        assert_eq!(info.respawn_time, 100);
+    }
+
+    #[test]
+    fn check_respawn_live_object_guard_alive_creature_same_spawn_clears_timer_like_cpp() {
+        let mut map = test_map();
+        let mut store = SpawnStore::new();
+        let group = spawn_group(21, SpawnGroupFlags::NONE);
+        store.add_object_spawn(&spawn_data(SpawnObjectType::Creature, 51, group), |_| false);
+        map.insert_map_object_record(
+            MapObjectRecord::new_creature(test_creature_for_spawn(51, 51, true)).unwrap(),
+        )
+        .unwrap();
+        let mut info = respawn_info(SpawnObjectType::Creature, 51, 100);
+
+        let outcome =
+            map.check_respawn_live_object_guard_like_cpp(&mut info, &store, false, |_, _| false);
+
+        assert_eq!(
+            outcome,
+            CheckRespawnLiveObjectGuardOutcomeLikeCpp::AliveCreatureBlocksRespawn
+        );
+        assert_eq!(info.respawn_time, 0);
+    }
+
+    #[test]
+    fn check_respawn_live_object_guard_dead_creature_same_spawn_allows_like_cpp() {
+        let mut map = test_map();
+        let mut store = SpawnStore::new();
+        let group = spawn_group(22, SpawnGroupFlags::NONE);
+        store.add_object_spawn(&spawn_data(SpawnObjectType::Creature, 52, group), |_| false);
+        map.insert_map_object_record(
+            MapObjectRecord::new_creature(test_creature_for_spawn(52, 52, false)).unwrap(),
+        )
+        .unwrap();
+        let mut info = respawn_info(SpawnObjectType::Creature, 52, 100);
+
+        let outcome =
+            map.check_respawn_live_object_guard_like_cpp(&mut info, &store, false, |_, _| false);
+
+        assert_eq!(outcome, CheckRespawnLiveObjectGuardOutcomeLikeCpp::Allowed);
+        assert_eq!(info.respawn_time, 100);
+    }
+
+    #[test]
+    fn check_respawn_live_object_guard_dynamic_escort_closure_allows_only_when_config_enabled_like_cpp()
+     {
+        let mut map = test_map();
+        let mut store = SpawnStore::new();
+        let group = spawn_group(23, SpawnGroupFlags::ESCORTQUESTNPC);
+        store.add_object_spawn(
+            &spawn_data(SpawnObjectType::Creature, 53, group.clone()),
+            |_| false,
+        );
+        map.insert_map_object_record(
+            MapObjectRecord::new_creature(test_creature_for_spawn(53, 53, true)).unwrap(),
+        )
+        .unwrap();
+
+        let mut info_config_enabled = respawn_info(SpawnObjectType::Creature, 53, 100);
+        let enabled_outcome = map.check_respawn_live_object_guard_like_cpp(
+            &mut info_config_enabled,
+            &store,
+            true,
+            |_, _| true,
+        );
+        assert_eq!(
+            enabled_outcome,
+            CheckRespawnLiveObjectGuardOutcomeLikeCpp::Allowed
+        );
+        assert_eq!(info_config_enabled.respawn_time, 100);
+
+        let mut info_config_disabled = respawn_info(SpawnObjectType::Creature, 53, 100);
+        let disabled_outcome = map.check_respawn_live_object_guard_like_cpp(
+            &mut info_config_disabled,
+            &store,
+            false,
+            |_, _| true,
+        );
+        assert_eq!(
+            disabled_outcome,
+            CheckRespawnLiveObjectGuardOutcomeLikeCpp::AliveCreatureBlocksRespawn
+        );
+        assert_eq!(info_config_disabled.respawn_time, 0);
+    }
+
+    #[test]
+    fn check_respawn_live_object_guard_gameobject_same_spawn_clears_timer_like_cpp() {
+        let mut map = test_map();
+        let mut store = SpawnStore::new();
+        let group = spawn_group(24, SpawnGroupFlags::NONE);
+        store.add_object_spawn(&spawn_data(SpawnObjectType::GameObject, 54, group), |_| {
+            false
+        });
+        map.insert_map_object_record(
+            MapObjectRecord::new_game_object(test_gameobject_for_spawn(54, 54)).unwrap(),
+        )
+        .unwrap();
+        let mut info = respawn_info(SpawnObjectType::GameObject, 54, 100);
+
+        let outcome =
+            map.check_respawn_live_object_guard_like_cpp(&mut info, &store, false, |_, _| false);
+
+        assert_eq!(
+            outcome,
+            CheckRespawnLiveObjectGuardOutcomeLikeCpp::GameObjectBlocksRespawn
+        );
+        assert_eq!(info.respawn_time, 0);
+    }
+
+    #[test]
+    fn check_respawn_live_object_guard_missing_spawn_data_preserves_timer_like_cpp() {
+        let map = test_map();
+        let store = SpawnStore::new();
+        let mut info = respawn_info(SpawnObjectType::Creature, 55, 100);
+
+        let outcome =
+            map.check_respawn_live_object_guard_like_cpp(&mut info, &store, false, |_, _| false);
+
+        assert_eq!(
+            outcome,
+            CheckRespawnLiveObjectGuardOutcomeLikeCpp::MissingSpawnData
+        );
+        assert_eq!(info.respawn_time, 100);
+    }
+
+    #[test]
+    fn check_respawn_live_object_guard_area_trigger_unsupported_preserves_timer_like_cpp() {
+        let map = test_map();
+        let mut store = SpawnStore::new();
+        let group = spawn_group(25, SpawnGroupFlags::NONE);
+        store.add_object_spawn(&spawn_data(SpawnObjectType::AreaTrigger, 56, group), |_| {
+            false
+        });
+        let mut info = respawn_info(SpawnObjectType::AreaTrigger, 56, 100);
+
+        let outcome =
+            map.check_respawn_live_object_guard_like_cpp(&mut info, &store, false, |_, _| false);
+
+        assert_eq!(
+            outcome,
+            CheckRespawnLiveObjectGuardOutcomeLikeCpp::UnsupportedSpawnType
         );
         assert_eq!(info.respawn_time, 100);
     }
