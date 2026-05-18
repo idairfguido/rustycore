@@ -4,6 +4,8 @@ use anyhow::Result;
 use rand::Rng;
 use wow_database::WorldDatabase;
 
+pub const MAX_CREATURE_SPELLS_LIKE_CPP: usize = 8;
+
 #[derive(Debug, Clone, Default)]
 pub struct CreatureTemplateClassificationStoreLikeCpp {
     classifications: HashMap<u32, u32>,
@@ -58,6 +60,238 @@ impl CreatureTemplateClassificationStoreLikeCpp {
 
     pub fn is_empty(&self) -> bool {
         self.classifications.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CreatureTemplateLifecycleModelLikeCpp {
+    pub creature_display_id: u32,
+    pub display_scale: f32,
+    pub probability: f32,
+}
+
+impl CreatureTemplateLifecycleModelLikeCpp {
+    /// C++ `ObjectMgr::LoadCreatureTemplateModel` normalizes non-positive display scale
+    /// before inserting the model into the template model list.
+    ///
+    /// C++ anchor: `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:661-662`.
+    pub fn normalize_like_cpp(mut self) -> Self {
+        if self.display_scale <= 0.0 {
+            self.display_scale = 1.0;
+        }
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreatureTemplateLifecycleRecordLikeCpp {
+    pub entry: u32,
+    pub name: String,
+    pub faction: u32,
+    pub speed_walk: f32,
+    pub speed_run: f32,
+    pub scale: f32,
+    pub classification: u32,
+    pub unit_class: u8,
+    pub vehicle_id: u32,
+    pub movement_type: u8,
+    pub flags_extra: u32,
+    pub string_id: String,
+    pub regen_health: bool,
+    pub spells: [u32; MAX_CREATURE_SPELLS_LIKE_CPP],
+    pub models: Vec<CreatureTemplateLifecycleModelLikeCpp>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CreatureTemplateLifecycleStoreLikeCpp {
+    templates: HashMap<u32, CreatureTemplateLifecycleRecordLikeCpp>,
+}
+
+impl CreatureTemplateLifecycleStoreLikeCpp {
+    pub fn from_templates(
+        templates: impl IntoIterator<Item = CreatureTemplateLifecycleRecordLikeCpp>,
+    ) -> Self {
+        Self {
+            templates: templates
+                .into_iter()
+                .map(CreatureTemplateLifecycleRecordLikeCpp::normalize_like_cpp)
+                .map(|template| (template.entry, template))
+                .collect(),
+        }
+    }
+
+    /// Loads C++ `ObjectMgr::LoadCreatureTemplates` input rows for future
+    /// `Creature::InitEntry`/`Creature::LoadFromDB` wiring.
+    ///
+    /// C++ anchors:
+    /// - `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:349-400`
+    /// - `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:403-482`
+    /// - `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:575-617`
+    /// - `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:620+`
+    pub async fn load_like_cpp(db: &WorldDatabase) -> Result<Self> {
+        let mut templates = HashMap::new();
+        let mut result = db
+            .direct_query(
+                "SELECT entry, name, faction, speed_walk, speed_run, scale, Classification, unit_class, VehicleId, MovementType, flags_extra, StringId, RegenHealth FROM creature_template",
+            )
+            .await?;
+        if !result.is_empty() {
+            loop {
+                let record = CreatureTemplateLifecycleRecordLikeCpp {
+                    entry: result.try_read::<u32>(0).unwrap_or(0),
+                    name: result.try_read::<String>(1).unwrap_or_default(),
+                    faction: result.try_read::<u32>(2).unwrap_or(0),
+                    speed_walk: result.try_read::<f32>(3).unwrap_or(0.0),
+                    speed_run: result.try_read::<f32>(4).unwrap_or(0.0),
+                    scale: result.try_read::<f32>(5).unwrap_or(1.0),
+                    classification: result.try_read::<u32>(6).unwrap_or(0),
+                    unit_class: result.try_read::<u8>(7).unwrap_or(0),
+                    vehicle_id: result.try_read::<u32>(8).unwrap_or(0),
+                    movement_type: result.try_read::<u8>(9).unwrap_or(0),
+                    flags_extra: result.try_read::<u32>(10).unwrap_or(0),
+                    string_id: result.try_read::<String>(11).unwrap_or_default(),
+                    regen_health: result.try_read::<u8>(12).unwrap_or(0) != 0,
+                    spells: [0; MAX_CREATURE_SPELLS_LIKE_CPP],
+                    models: Vec::new(),
+                };
+                templates.insert(record.entry, record);
+                if !result.next_row() {
+                    break;
+                }
+            }
+        }
+
+        let mut spell_result = db
+            .direct_query("SELECT CreatureID, `Index`, Spell FROM creature_template_spell")
+            .await?;
+        if !spell_result.is_empty() {
+            loop {
+                let creature_id = spell_result.try_read::<u32>(0).unwrap_or(0);
+                let index = spell_result
+                    .try_read::<u8>(1)
+                    .map(usize::from)
+                    .unwrap_or(MAX_CREATURE_SPELLS_LIKE_CPP);
+                let spell = spell_result.try_read::<u32>(2).unwrap_or(0);
+                if index < MAX_CREATURE_SPELLS_LIKE_CPP {
+                    if let Some(template) = templates.get_mut(&creature_id) {
+                        template.spells[index] = spell;
+                    }
+                }
+                if !spell_result.next_row() {
+                    break;
+                }
+            }
+        }
+
+        let mut model_result = db
+            .direct_query(
+                "SELECT CreatureID, CreatureDisplayID, DisplayScale, Probability FROM creature_template_model ORDER BY Idx ASC",
+            )
+            .await?;
+        if !model_result.is_empty() {
+            loop {
+                let creature_id = model_result.try_read::<u32>(0).unwrap_or(0);
+                let model = CreatureTemplateLifecycleModelLikeCpp {
+                    creature_display_id: model_result.try_read::<u32>(1).unwrap_or(0),
+                    display_scale: model_result.try_read::<f32>(2).unwrap_or(0.0),
+                    probability: model_result.try_read::<f32>(3).unwrap_or(0.0),
+                }
+                .normalize_like_cpp();
+                if model.creature_display_id != 0 {
+                    if let Some(template) = templates.get_mut(&creature_id) {
+                        template.models.push(model);
+                    }
+                }
+                if !model_result.next_row() {
+                    break;
+                }
+            }
+        }
+
+        Ok(Self { templates })
+    }
+
+    pub fn get(&self, entry: u32) -> Option<&CreatureTemplateLifecycleRecordLikeCpp> {
+        self.templates.get(&entry)
+    }
+
+    pub fn len(&self) -> usize {
+        self.templates.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.templates.is_empty()
+    }
+}
+
+impl CreatureTemplateLifecycleRecordLikeCpp {
+    pub fn normalize_like_cpp(mut self) -> Self {
+        self.models = self
+            .models
+            .into_iter()
+            .map(CreatureTemplateLifecycleModelLikeCpp::normalize_like_cpp)
+            .collect();
+        self
+    }
+
+    pub fn first_model_like_cpp(&self) -> Option<CreatureTemplateLifecycleModelLikeCpp> {
+        self.models.first().copied()
+    }
+
+    pub fn apply_spell_row_like_cpp(&mut self, index: usize, spell: u32) {
+        if index < MAX_CREATURE_SPELLS_LIKE_CPP {
+            self.spells[index] = spell;
+        }
+    }
+
+    pub fn push_model_like_cpp(&mut self, model: CreatureTemplateLifecycleModelLikeCpp) {
+        if model.creature_display_id != 0 {
+            self.models.push(model.normalize_like_cpp());
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CreatureClassificationHealthRatesLikeCpp {
+    pub normal: f32,
+    pub elite: f32,
+    pub rare_elite: f32,
+    pub obsolete: f32,
+    pub rare: f32,
+    pub trivial: f32,
+    pub minus_mob: f32,
+}
+
+impl Default for CreatureClassificationHealthRatesLikeCpp {
+    fn default() -> Self {
+        Self {
+            normal: 1.0,
+            elite: 1.0,
+            rare_elite: 1.0,
+            obsolete: 1.0,
+            rare: 1.0,
+            trivial: 1.0,
+            minus_mob: 1.0,
+        }
+    }
+}
+
+impl CreatureClassificationHealthRatesLikeCpp {
+    /// C++ `Creature::GetHealthMod(CreatureClassifications)` switch. Unknown
+    /// classifications fall through to the elite rate, matching the C++ default.
+    ///
+    /// C++ anchor: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Creature/Creature.cpp:1646-1666`.
+    pub fn modifier_for_classification_like_cpp(&self, classification: u32) -> f32 {
+        match classification {
+            0 => self.normal,
+            1 => self.elite,
+            2 => self.rare_elite,
+            3 => self.obsolete,
+            4 => self.rare,
+            5 => self.trivial,
+            6 => self.minus_mob,
+            _ => self.elite,
+        }
     }
 }
 
@@ -554,8 +788,183 @@ mod tests {
     }
 
     #[test]
+    fn creature_template_lifecycle_store_preserves_cpp_field_mapping_and_vehicle_id() {
+        let store = CreatureTemplateLifecycleStoreLikeCpp::from_templates([
+            CreatureTemplateLifecycleRecordLikeCpp {
+                entry: 42,
+                name: "C++ Template".to_string(),
+                faction: 35,
+                speed_walk: 1.0,
+                speed_run: 1.14286,
+                scale: 1.25,
+                classification: 4,
+                unit_class: 2,
+                vehicle_id: 900,
+                movement_type: 1,
+                flags_extra: 0x20,
+                string_id: "template_string".to_string(),
+                regen_health: true,
+                spells: [0; MAX_CREATURE_SPELLS_LIKE_CPP],
+                models: Vec::new(),
+            },
+        ]);
+
+        let template = store.get(42).expect("template row retained");
+        assert_eq!(template.name, "C++ Template");
+        assert_eq!(template.faction, 35);
+        assert_eq!(template.speed_walk, 1.0);
+        assert_eq!(template.speed_run, 1.14286);
+        assert_eq!(template.scale, 1.25);
+        assert_eq!(template.classification, 4);
+        assert_eq!(template.unit_class, 2);
+        assert_eq!(template.vehicle_id, 900);
+        assert_eq!(template.movement_type, 1);
+        assert_eq!(template.flags_extra, 0x20);
+        assert_eq!(template.string_id, "template_string");
+        assert!(template.regen_health);
+    }
+
+    #[test]
+    fn creature_template_lifecycle_spells_skip_oob_and_missing_template_like_cpp() {
+        let mut present = CreatureTemplateLifecycleRecordLikeCpp {
+            entry: 7,
+            name: String::new(),
+            faction: 0,
+            speed_walk: 0.0,
+            speed_run: 0.0,
+            scale: 1.0,
+            classification: 0,
+            unit_class: 0,
+            vehicle_id: 0,
+            movement_type: 0,
+            flags_extra: 0,
+            string_id: String::new(),
+            regen_health: false,
+            spells: [0; MAX_CREATURE_SPELLS_LIKE_CPP],
+            models: Vec::new(),
+        };
+        present.apply_spell_row_like_cpp(0, 100);
+        present.apply_spell_row_like_cpp(7, 700);
+        present.apply_spell_row_like_cpp(8, 800);
+
+        let store = CreatureTemplateLifecycleStoreLikeCpp::from_templates([present]);
+        let template = store.get(7).expect("present template");
+        assert_eq!(template.spells, [100, 0, 0, 0, 0, 0, 0, 700]);
+        assert!(store.get(999).is_none());
+    }
+
+    #[test]
+    fn creature_template_lifecycle_models_preserve_order_and_first_valid_like_cpp() {
+        let mut template = CreatureTemplateLifecycleRecordLikeCpp {
+            entry: 8,
+            name: String::new(),
+            faction: 0,
+            speed_walk: 0.0,
+            speed_run: 0.0,
+            scale: 1.0,
+            classification: 0,
+            unit_class: 0,
+            vehicle_id: 0,
+            movement_type: 0,
+            flags_extra: 0,
+            string_id: String::new(),
+            regen_health: false,
+            spells: [0; MAX_CREATURE_SPELLS_LIKE_CPP],
+            models: Vec::new(),
+        };
+        template.push_model_like_cpp(CreatureTemplateLifecycleModelLikeCpp {
+            creature_display_id: 0,
+            display_scale: 9.9,
+            probability: 100.0,
+        });
+        template.push_model_like_cpp(CreatureTemplateLifecycleModelLikeCpp {
+            creature_display_id: 111,
+            display_scale: 1.0,
+            probability: 25.0,
+        });
+        template.push_model_like_cpp(CreatureTemplateLifecycleModelLikeCpp {
+            creature_display_id: 222,
+            display_scale: 2.0,
+            probability: 75.0,
+        });
+
+        assert_eq!(template.models.len(), 2);
+        assert_eq!(template.models[0].creature_display_id, 111);
+        assert_eq!(template.models[1].creature_display_id, 222);
+        assert_eq!(
+            template.first_model_like_cpp(),
+            Some(CreatureTemplateLifecycleModelLikeCpp {
+                creature_display_id: 111,
+                display_scale: 1.0,
+                probability: 25.0,
+            })
+        );
+    }
+
+    #[test]
+    fn creature_template_lifecycle_models_normalize_non_positive_display_scale_like_cpp() {
+        let mut template = CreatureTemplateLifecycleRecordLikeCpp {
+            entry: 9,
+            name: String::new(),
+            faction: 0,
+            speed_walk: 0.0,
+            speed_run: 0.0,
+            scale: 1.0,
+            classification: 0,
+            unit_class: 0,
+            vehicle_id: 0,
+            movement_type: 0,
+            flags_extra: 0,
+            string_id: String::new(),
+            regen_health: false,
+            spells: [0; MAX_CREATURE_SPELLS_LIKE_CPP],
+            models: vec![CreatureTemplateLifecycleModelLikeCpp {
+                creature_display_id: 333,
+                display_scale: -2.0,
+                probability: 1.0,
+            }],
+        };
+        let normalized_store =
+            CreatureTemplateLifecycleStoreLikeCpp::from_templates([template.clone()]);
+        assert_eq!(
+            normalized_store.get(9).expect("template").models[0].display_scale,
+            1.0
+        );
+
+        template.models.clear();
+        template.push_model_like_cpp(CreatureTemplateLifecycleModelLikeCpp {
+            creature_display_id: 444,
+            display_scale: 0.0,
+            probability: 1.0,
+        });
+        assert_eq!(template.models[0].display_scale, 1.0);
+    }
+
+    #[test]
     fn creature_classification_damage_rates_match_cpp_switch_and_default_elite() {
         let rates = CreatureClassificationDamageRatesLikeCpp {
+            normal: 1.0,
+            elite: 2.0,
+            rare_elite: 3.0,
+            obsolete: 4.0,
+            rare: 5.0,
+            trivial: 6.0,
+            minus_mob: 7.0,
+        };
+
+        assert_eq!(rates.modifier_for_classification_like_cpp(0), 1.0);
+        assert_eq!(rates.modifier_for_classification_like_cpp(1), 2.0);
+        assert_eq!(rates.modifier_for_classification_like_cpp(2), 3.0);
+        assert_eq!(rates.modifier_for_classification_like_cpp(3), 4.0);
+        assert_eq!(rates.modifier_for_classification_like_cpp(4), 5.0);
+        assert_eq!(rates.modifier_for_classification_like_cpp(5), 6.0);
+        assert_eq!(rates.modifier_for_classification_like_cpp(6), 7.0);
+        assert_eq!(rates.modifier_for_classification_like_cpp(99), 2.0);
+    }
+
+    #[test]
+    fn creature_classification_health_rates_match_cpp_switch_and_default_elite() {
+        let rates = CreatureClassificationHealthRatesLikeCpp {
             normal: 1.0,
             elite: 2.0,
             rare_elite: 3.0,

@@ -111,6 +111,7 @@ pub struct CanonicalSpawnMetadataLikeCpp {
     spawn_group_templates: BTreeMap<u32, SpawnGroupTemplateData>,
     linked_respawns: LinkedRespawnStoreLikeCpp,
     pool_mgr: PoolMgrLikeCpp,
+    creature_runtime_rows: BTreeMap<SpawnId, CreatureSpawnRuntimeRowLikeCpp>,
 }
 
 impl CanonicalSpawnMetadataLikeCpp {
@@ -123,6 +124,7 @@ impl CanonicalSpawnMetadataLikeCpp {
             spawn_group_templates,
             linked_respawns: LinkedRespawnStoreLikeCpp::new(),
             pool_mgr: PoolMgrLikeCpp::new(),
+            creature_runtime_rows: BTreeMap::new(),
         }
     }
 
@@ -153,6 +155,21 @@ impl CanonicalSpawnMetadataLikeCpp {
 
     pub fn pool_mgr_like_cpp(&self) -> &PoolMgrLikeCpp {
         &self.pool_mgr
+    }
+
+    pub fn creature_runtime_row_like_cpp(
+        &self,
+        spawn_id: SpawnId,
+    ) -> Option<&CreatureSpawnRuntimeRowLikeCpp> {
+        self.creature_runtime_rows.get(&spawn_id)
+    }
+
+    pub fn with_creature_runtime_rows_like_cpp(
+        mut self,
+        rows: BTreeMap<SpawnId, CreatureSpawnRuntimeRowLikeCpp>,
+    ) -> Self {
+        self.creature_runtime_rows = rows;
+        self
     }
 
     /// C++ shaped dependency for future `Map::InitSpawnGroupState` wiring.
@@ -194,6 +211,19 @@ pub struct ParsedSpawnDifficulties {
     pub report: SpawnDifficultyParseReport,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreatureSpawnRuntimeRowLikeCpp {
+    pub spawn_id: SpawnId,
+    pub model_id: u32,
+    pub equipment_id: i8,
+    pub wander_distance: f32,
+    pub curhealth: u32,
+    pub curmana: u32,
+    pub movement_type: u8,
+    pub string_id: String,
+    pub spawn_time_secs: i32,
+}
+
 #[derive(Debug, Clone)]
 struct CreatureSpawnRow {
     spawn_id: SpawnId,
@@ -203,7 +233,13 @@ struct CreatureSpawnRow {
     y: f32,
     z: f32,
     orientation: f32,
+    model_id: u32,
+    equipment_id: i8,
     spawn_time_secs: i32,
+    wander_distance: f32,
+    curhealth: u32,
+    curmana: u32,
+    movement_type: u8,
     spawn_difficulties: String,
     event_entry: i16,
     pool_id: u32,
@@ -296,10 +332,18 @@ pub async fn load_canonical_spawn_store_like_cpp(
     spawn_group_store: &wow_data::SpawnGroupTemplateStore,
 ) -> Result<(CanonicalSpawnMetadataLikeCpp, CanonicalSpawnStoreLoadReport)> {
     let mut store = SpawnStore::new();
+    let mut creature_runtime_rows = BTreeMap::new();
     let mut report = CanonicalSpawnStoreLoadReport::default();
 
-    load_creature_spawns_like_cpp(db, map_store, map_difficulty_store, &mut store, &mut report)
-        .await?;
+    load_creature_spawns_like_cpp(
+        db,
+        map_store,
+        map_difficulty_store,
+        &mut store,
+        &mut creature_runtime_rows,
+        &mut report,
+    )
+    .await?;
     load_gameobject_spawns_like_cpp(db, map_store, map_difficulty_store, &mut store, &mut report)
         .await?;
     load_area_trigger_spawns_like_cpp(db, map_store, map_difficulty_store, &mut store, &mut report)
@@ -320,7 +364,8 @@ pub async fn load_canonical_spawn_store_like_cpp(
     Ok((
         CanonicalSpawnMetadataLikeCpp::new(store, templates)
             .with_linked_respawns_like_cpp(linked_respawns)
-            .with_pool_mgr_like_cpp(pool_mgr),
+            .with_pool_mgr_like_cpp(pool_mgr)
+            .with_creature_runtime_rows_like_cpp(creature_runtime_rows),
         report,
     ))
 }
@@ -673,6 +718,7 @@ async fn load_creature_spawns_like_cpp(
     map_store: &wow_data::MapStore,
     map_difficulty_store: &wow_data::MapDifficultyStore,
     store: &mut SpawnStore,
+    creature_runtime_rows: &mut BTreeMap<SpawnId, CreatureSpawnRuntimeRowLikeCpp>,
     report: &mut CanonicalSpawnStoreLoadReport,
 ) -> Result<()> {
     let stmt = db.prepare(WorldStatements::SEL_CREATURE_SPAWNS);
@@ -690,7 +736,13 @@ async fn load_creature_spawns_like_cpp(
             y: result.read(4),
             z: result.read(5),
             orientation: result.read(6),
+            model_id: result.try_read(7).unwrap_or(0),
+            equipment_id: result.try_read(8).unwrap_or(0),
             spawn_time_secs: result.read(9),
+            wander_distance: result.try_read(10).unwrap_or(0.0),
+            curhealth: result.try_read(12).unwrap_or(0),
+            curmana: result.try_read(13).unwrap_or(0),
+            movement_type: result.try_read(14).unwrap_or(0),
             spawn_difficulties: result.read(15),
             event_entry: result.try_read(16).unwrap_or(0),
             pool_id: result.try_read(17).unwrap_or(0),
@@ -701,6 +753,7 @@ async fn load_creature_spawns_like_cpp(
             script_name: result.try_read(26).unwrap_or_default(),
             string_id: result.try_read(27).unwrap_or_default(),
         };
+        let runtime_row = creature_row_to_runtime_row_like_cpp(&row);
         report.creature.rows += 1;
         if let Some(spawn) = creature_row_to_spawn_data_like_cpp(
             &row,
@@ -710,9 +763,11 @@ async fn load_creature_spawns_like_cpp(
         ) {
             if row.event_entry != 0 {
                 store.insert_spawn_metadata_like_cpp(&spawn);
+                creature_runtime_rows.insert(row.spawn_id, runtime_row.clone());
                 report.creature.skipped_event += 1;
             } else {
                 store.add_object_spawn(&spawn, is_personal_phase_like_cpp_represented);
+                creature_runtime_rows.insert(row.spawn_id, runtime_row.clone());
                 report.creature.indexed += 1;
             }
         }
@@ -1040,6 +1095,20 @@ fn creature_row_to_spawn_data_like_cpp(
     )
 }
 
+fn creature_row_to_runtime_row_like_cpp(row: &CreatureSpawnRow) -> CreatureSpawnRuntimeRowLikeCpp {
+    CreatureSpawnRuntimeRowLikeCpp {
+        spawn_id: row.spawn_id,
+        model_id: row.model_id,
+        equipment_id: row.equipment_id,
+        wander_distance: row.wander_distance,
+        curhealth: row.curhealth,
+        curmana: row.curmana,
+        movement_type: row.movement_type,
+        string_id: row.string_id.clone(),
+        spawn_time_secs: row.spawn_time_secs,
+    }
+}
+
 fn gameobject_row_to_spawn_data_like_cpp(
     row: &GameObjectSpawnRow,
     map_store: &wow_data::MapStore,
@@ -1303,6 +1372,12 @@ mod tests {
             z: 30.0,
             orientation: 1.0,
             spawn_time_secs: 300,
+            model_id: 0,
+            equipment_id: 0,
+            wander_distance: 0.0,
+            curhealth: 0,
+            curmana: 0,
+            movement_type: 0,
             spawn_difficulties: difficulties.to_string(),
             event_entry,
             pool_id: 0,

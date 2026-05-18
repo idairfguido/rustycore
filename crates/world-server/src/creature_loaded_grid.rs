@@ -27,8 +27,14 @@
 
 use std::collections::BTreeMap;
 
+use crate::spawn_store_loader::CreatureSpawnRuntimeRowLikeCpp;
 use anyhow::Result;
 use wow_core::{ObjectGuid, Position, guid::HighGuid};
+use wow_data::{
+    CreatureBaseStatsStoreLikeCpp, CreatureClassificationHealthRatesLikeCpp,
+    CreatureDifficultyStoreLikeCpp, CreatureDisplayInfoStore, CreatureModelDataStore,
+    CreatureTemplateLifecycleStoreLikeCpp,
+};
 use wow_entities::{
     Creature, CreatureCreateLifecycleRecord, CreatureLifecycleStats,
     CreatureLoadFromDbLifecycleRecord, CreatureModelDimensions, CreatureSpawnLifecycleRecord,
@@ -116,6 +122,13 @@ pub enum CreatureLoadedGridResolveErrorLikeCpp {
         spawn_id: u64,
     },
     MissingTemplate {
+        entry: u32,
+    },
+    MissingDifficulty {
+        entry: u32,
+        difficulty_id: u8,
+    },
+    MissingModel {
         entry: u32,
     },
     MissingRuntimeSelection {
@@ -226,6 +239,197 @@ impl CreatureLoadedGridLifecycleResolverLikeCpp {
             map_insertion_requested,
         })
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_loaded_grid_creature_inputs_from_db_like_cpp(
+    spawn: &wow_map::SpawnData,
+    runtime_row: &CreatureSpawnRuntimeRowLikeCpp,
+    template_store: &CreatureTemplateLifecycleStoreLikeCpp,
+    difficulty_store: &CreatureDifficultyStoreLikeCpp,
+    base_stats_store: &CreatureBaseStatsStoreLikeCpp,
+    health_rates: &CreatureClassificationHealthRatesLikeCpp,
+    display_store: &CreatureDisplayInfoStore,
+    model_store: &CreatureModelDataStore,
+    difficulty_id: u8,
+    instance_id: u32,
+    respawn_time: i64,
+    add_to_map: bool,
+    mut select_level: impl FnMut(u8, u8) -> u8,
+) -> Result<
+    (
+        ResolvedCreatureTemplateLikeCpp,
+        ResolvedCreatureSpawnLikeCpp,
+        ResolvedCreatureRuntimeSelectionLikeCpp,
+    ),
+    CreatureLoadedGridResolveErrorLikeCpp,
+> {
+    let template = template_store
+        .get(spawn.id)
+        .ok_or(CreatureLoadedGridResolveErrorLikeCpp::MissingTemplate { entry: spawn.id })?;
+    if template.vehicle_id != 0 {
+        return Err(CreatureLoadedGridResolveErrorLikeCpp::UnsupportedVehicle {
+            entry: template.entry,
+            vehicle_id: template.vehicle_id,
+        });
+    }
+    let difficulty = difficulty_store
+        .get_like_cpp(template.entry, difficulty_id)
+        .ok_or(CreatureLoadedGridResolveErrorLikeCpp::MissingDifficulty {
+            entry: template.entry,
+            difficulty_id,
+        })?;
+    let selected_level = if difficulty.min_level == difficulty.max_level {
+        difficulty.min_level
+    } else {
+        select_level(difficulty.min_level, difficulty.max_level)
+            .clamp(difficulty.min_level, difficulty.max_level)
+    };
+    let base_stats = base_stats_store.get_like_cpp(selected_level, template.unit_class);
+    // C++ `Creature::UpdateLevelDependantStats`: GenerateHealth(...) produces basehp first,
+    // then `uint32(basehp * Creature::GetHealthMod(template.Classification))` becomes
+    // create/max/current health before `SetSpawnHealth` applies spawn-row current health.
+    let health_rate = health_rates.modifier_for_classification_like_cpp(template.classification);
+    let max_health =
+        u64::from((base_stats.generate_health_like_cpp(difficulty) as f32 * health_rate) as u32);
+    let max_mana = i32::try_from(base_stats.generate_mana_like_cpp(difficulty)).unwrap_or(i32::MAX);
+    // C++ `Creature::SetSpawnHealth`: `_regenerateHealth` selects full spawned health/mana;
+    // otherwise DB curhealth/curmana are preserved, with current health scaled by
+    // `Creature::GetHealthMod(template.Classification)` and min-clamped only when non-zero.
+    let (health, mana) = if template.regen_health {
+        (max_health, max_mana)
+    } else {
+        let health = if runtime_row.curhealth == 0 {
+            0
+        } else {
+            ((runtime_row.curhealth as f32) * health_rate).max(1.0) as u64
+        };
+        (
+            health,
+            i32::try_from(runtime_row.curmana).unwrap_or(i32::MAX),
+        )
+    };
+    let min_damage =
+        base_stats.generate_base_damage_like_cpp(difficulty) * difficulty.damage_modifier;
+    let selected_display_id = if runtime_row.model_id != 0 {
+        runtime_row.model_id
+    } else {
+        template
+            .first_model_like_cpp()
+            .map(|model| model.creature_display_id)
+            .ok_or(CreatureLoadedGridResolveErrorLikeCpp::MissingModel {
+                entry: template.entry,
+            })?
+    };
+    let selected_model_dimensions = display_store
+        .get(selected_display_id)
+        .and_then(|display| model_store.get(u32::from(display.model_id)))
+        .map(|_model| {
+            // Existing Rust DB2 store does not expose C++ bounding radius/combat reach fields yet.
+            // Keep dimensions absent rather than inventing a dummy; future DB2 field expansion can
+            // replace this represented `None` seam.
+            None
+        })
+        .flatten();
+    let equipment_id = u8::try_from(runtime_row.equipment_id.max(0)).unwrap_or(0);
+    let original_equipment_id = runtime_row.equipment_id;
+    let movement_type = movement_type_like_cpp(runtime_row.movement_type, template.movement_type);
+
+    let resolved_template = ResolvedCreatureTemplateLikeCpp {
+        entry: template.entry,
+        original_entry: template.entry,
+        difficulty_id,
+        name: template.name.clone(),
+        unit_class: template.unit_class,
+        faction: template.faction,
+        display_id: selected_display_id,
+        model_dimensions: selected_model_dimensions,
+        scale: template.scale,
+        speed_walk: template.speed_walk,
+        speed_run: template.speed_run,
+        spells: template.spells,
+        classification: template.classification,
+        flags_extra: template.flags_extra,
+        type_flags: difficulty.type_flags,
+        movement_type,
+        min_level: difficulty.min_level,
+        max_level: difficulty.max_level,
+        equipment_id,
+        original_equipment_id,
+        vehicle_id: None,
+        corpse_delay: 0,
+        ignore_corpse_decay_ratio: false,
+    };
+    let position = Position {
+        x: spawn.spawn_point.x,
+        y: spawn.spawn_point.y,
+        z: spawn.spawn_point.z,
+        orientation: spawn.spawn_point.orientation,
+    };
+    let spawn_group_id = (spawn.spawn_group.group_id != 0).then_some(spawn.spawn_group.group_id);
+    let pool_id = (spawn.pool_id != 0).then_some(spawn.pool_id);
+    let string_id = if runtime_row.string_id.is_empty() {
+        (!spawn.string_id.is_empty()).then(|| spawn.string_id.clone())
+    } else {
+        Some(runtime_row.string_id.clone())
+    };
+    let resolved_spawn = ResolvedCreatureSpawnLikeCpp {
+        spawn_id: spawn.spawn_id,
+        entry: spawn.id,
+        map_id: spawn.map_id,
+        instance_id,
+        position,
+        home_position: position,
+        phase_id: (spawn.phase_id != 0).then_some(spawn.phase_id),
+        phase_group: (spawn.phase_group != 0).then_some(spawn.phase_group),
+        terrain_swap_map: u32::try_from(spawn.terrain_swap_map).ok(),
+        spawn_group_id,
+        spawn_group_name: spawn_group_id.map(|_| spawn.spawn_group.name.clone()),
+        pool_id,
+        equipment_id: Some(equipment_id),
+        original_equipment_id: Some(original_equipment_id),
+        wander_distance: runtime_row.wander_distance,
+        respawn_delay: u32::try_from(runtime_row.spawn_time_secs.max(0)).unwrap_or(0),
+        respawn_time,
+        movement_type,
+        string_id,
+        is_active: true,
+        inactive_by_spawn_group: false,
+        duplicate_spawn_found: false,
+        add_to_map,
+        respawn_compatibility_mode: spawn
+            .spawn_group
+            .flags
+            .contains(wow_map::SpawnGroupFlags::COMPATIBILITY_MODE),
+    };
+    let runtime_selection = ResolvedCreatureRuntimeSelectionLikeCpp {
+        selected_level,
+        stats: CreatureLifecycleStats {
+            max_health,
+            health,
+            power_type: wow_constants::PowerType::Mana,
+            max_mana,
+            mana,
+            min_damage,
+            max_damage: min_damage * 1.5,
+        },
+        selected_display_id,
+        selected_model_dimensions,
+        selected_equipment_id: equipment_id,
+        selected_original_equipment_id: original_equipment_id,
+    };
+
+    Ok((resolved_template, resolved_spawn, runtime_selection))
+}
+
+fn movement_type_like_cpp(
+    _db_movement_type: u8,
+    _template_movement_type: u8,
+) -> MovementGeneratorType {
+    // `wow-entities` currently represents only Idle movement. Preserve raw DB/template values in
+    // the DB-backed stores and collapse here only at the existing entity seam; no live movement
+    // runtime is claimed by this builder.
+    MovementGeneratorType::Idle
 }
 
 fn validate_map_object_guid_like_cpp(
@@ -416,6 +620,454 @@ mod tests {
                 selected_original_equipment_id: -6,
             },
         )
+    }
+
+    fn db_backed_spawn(entry: u32) -> wow_map::SpawnData {
+        wow_map::SpawnData {
+            object_type: wow_map::SpawnObjectType::Creature,
+            spawn_id: 70,
+            map_id: 571,
+            db_data: true,
+            spawn_group: wow_map::SpawnGroupTemplateData {
+                group_id: 22,
+                name: "compat-group".to_string(),
+                map_id: 571,
+                flags: wow_map::SpawnGroupFlags::COMPATIBILITY_MODE,
+            },
+            id: entry,
+            spawn_point: wow_map::SpawnPosition::new(1.0, 2.0, 3.0, 4.0),
+            phase_use_flags: 0,
+            phase_id: 0,
+            phase_group: 6,
+            terrain_swap_map: -1,
+            pool_id: 0,
+            spawn_time_secs: 90,
+            spawn_difficulties: Vec::new(),
+            script_id: 0,
+            string_id: "spawn-string".to_string(),
+        }
+    }
+
+    fn db_backed_template_store(entry: u32) -> CreatureTemplateLifecycleStoreLikeCpp {
+        db_backed_template_store_with_regen(entry, true)
+    }
+
+    fn db_backed_template_store_with_regen(
+        entry: u32,
+        regen_health: bool,
+    ) -> CreatureTemplateLifecycleStoreLikeCpp {
+        CreatureTemplateLifecycleStoreLikeCpp::from_templates([
+            wow_data::CreatureTemplateLifecycleRecordLikeCpp {
+                entry,
+                name: "DB Creature".to_string(),
+                faction: 35,
+                speed_walk: 1.0,
+                speed_run: 1.14286,
+                scale: 1.25,
+                classification: 1,
+                unit_class: 1,
+                vehicle_id: 0,
+                movement_type: 1,
+                flags_extra: 0x40,
+                string_id: "template-string".to_string(),
+                regen_health,
+                spells: [10, 20, 0, 0, 0, 0, 0, 0],
+                models: vec![
+                    wow_data::CreatureTemplateLifecycleModelLikeCpp {
+                        creature_display_id: 111,
+                        display_scale: 1.0,
+                        probability: 50.0,
+                    },
+                    wow_data::CreatureTemplateLifecycleModelLikeCpp {
+                        creature_display_id: 222,
+                        display_scale: 1.0,
+                        probability: 50.0,
+                    },
+                ],
+            },
+        ])
+    }
+
+    fn db_backed_difficulty_store(entry: u32) -> CreatureDifficultyStoreLikeCpp {
+        CreatureDifficultyStoreLikeCpp::from_records(
+            [wow_data::CreatureDifficultyRecordLikeCpp {
+                entry,
+                difficulty_id: 2,
+                min_level: 18,
+                max_level: 20,
+                health_scaling_expansion: -1,
+                health_modifier: 2.0,
+                mana_modifier: 3.0,
+                armor_modifier: 1.0,
+                damage_modifier: 4.0,
+                creature_difficulty_id: 0,
+                type_flags: 0x55,
+                type_flags2: 0,
+                loot_id: 0,
+                pickpocket_loot_id: 0,
+                skin_loot_id: 0,
+                gold_min: 0,
+                gold_max: 0,
+                static_flags: [0; 8],
+            }],
+            |_| 1.0,
+        )
+    }
+
+    fn db_backed_base_stats_store() -> CreatureBaseStatsStoreLikeCpp {
+        CreatureBaseStatsStoreLikeCpp::from_records([(
+            19,
+            1,
+            wow_data::CreatureBaseStatsRecordLikeCpp {
+                base_health: [10, 20, 100],
+                base_mana: 50,
+                base_armor: 0,
+                attack_power: 0,
+                ranged_attack_power: 0,
+                base_damage: [1.0, 2.0, 5.0],
+            },
+        )])
+    }
+
+    fn empty_display_stores() -> (CreatureDisplayInfoStore, CreatureModelDataStore) {
+        (
+            CreatureDisplayInfoStore::from_entries([]),
+            CreatureModelDataStore::from_entries([]),
+        )
+    }
+
+    #[test]
+    fn loaded_grid_db_backed_builder_maps_spawn_template_runtime_like_cpp() {
+        let entry = 12_400;
+        let spawn = db_backed_spawn(entry);
+        let runtime_row = CreatureSpawnRuntimeRowLikeCpp {
+            spawn_id: spawn.spawn_id,
+            model_id: 999,
+            equipment_id: -7,
+            wander_distance: 15.0,
+            curhealth: 77,
+            curmana: 33,
+            movement_type: 2,
+            string_id: "runtime-string".to_string(),
+            spawn_time_secs: 300,
+        };
+        let (display_store, model_store) = empty_display_stores();
+
+        let (template, resolved_spawn, runtime) =
+            build_loaded_grid_creature_inputs_from_db_like_cpp(
+                &spawn,
+                &runtime_row,
+                &db_backed_template_store(entry),
+                &db_backed_difficulty_store(entry),
+                &db_backed_base_stats_store(),
+                &CreatureClassificationHealthRatesLikeCpp::default(),
+                &display_store,
+                &model_store,
+                2,
+                9,
+                123,
+                true,
+                |min, max| {
+                    assert_eq!((min, max), (18, 20));
+                    19
+                },
+            )
+            .expect("DB-backed builder should compose resolver inputs");
+
+        assert_eq!(template.entry, entry);
+        assert_eq!(template.name, "DB Creature");
+        assert_eq!(template.faction, 35);
+        assert_eq!(template.spells[0..2], [10, 20]);
+        assert_eq!(template.display_id, 999);
+        assert_eq!(template.equipment_id, 0);
+        assert_eq!(template.original_equipment_id, -7);
+        assert_eq!(resolved_spawn.spawn_id, 70);
+        assert_eq!(resolved_spawn.map_id, 571);
+        assert_eq!(resolved_spawn.instance_id, 9);
+        assert_eq!(resolved_spawn.phase_id, None);
+        assert_eq!(resolved_spawn.phase_group, Some(6));
+        assert_eq!(resolved_spawn.terrain_swap_map, None);
+        assert_eq!(resolved_spawn.pool_id, None);
+        assert_eq!(resolved_spawn.spawn_group_id, Some(22));
+        assert!(resolved_spawn.respawn_compatibility_mode);
+        assert_eq!(resolved_spawn.equipment_id, Some(0));
+        assert_eq!(resolved_spawn.original_equipment_id, Some(-7));
+        assert_eq!(resolved_spawn.wander_distance, 15.0);
+        assert_eq!(resolved_spawn.respawn_delay, 300);
+        assert_eq!(resolved_spawn.respawn_time, 123);
+        assert_eq!(resolved_spawn.string_id.as_deref(), Some("runtime-string"));
+        assert!(resolved_spawn.add_to_map);
+        assert_eq!(runtime.selected_level, 19);
+        assert_eq!(runtime.selected_display_id, 999);
+        assert_eq!(runtime.stats.max_health, 200);
+        assert_eq!(runtime.stats.health, 200);
+        assert_eq!(runtime.stats.max_mana, 150);
+        assert_eq!(runtime.stats.mana, 150);
+        assert_eq!(runtime.stats.min_damage, 20.0);
+        assert_eq!(runtime.stats.max_damage, 30.0);
+    }
+
+    #[test]
+    fn loaded_grid_db_backed_builder_regen_true_scales_max_and_current_health_like_cpp() {
+        let entry = 12_405;
+        let spawn = db_backed_spawn(entry);
+        let runtime_row = CreatureSpawnRuntimeRowLikeCpp {
+            spawn_id: spawn.spawn_id,
+            model_id: 999,
+            equipment_id: 1,
+            wander_distance: 0.0,
+            curhealth: 77,
+            curmana: 33,
+            movement_type: 0,
+            string_id: String::new(),
+            spawn_time_secs: 20,
+        };
+        let health_rates = CreatureClassificationHealthRatesLikeCpp {
+            elite: 2.0,
+            ..CreatureClassificationHealthRatesLikeCpp::default()
+        };
+        let (display_store, model_store) = empty_display_stores();
+
+        let (_, _, runtime) = build_loaded_grid_creature_inputs_from_db_like_cpp(
+            &spawn,
+            &runtime_row,
+            &db_backed_template_store_with_regen(entry, true),
+            &db_backed_difficulty_store(entry),
+            &db_backed_base_stats_store(),
+            &health_rates,
+            &display_store,
+            &model_store,
+            2,
+            0,
+            0,
+            false,
+            |_, _| 19,
+        )
+        .expect("regen=true should use health-rate-scaled max health");
+
+        assert_eq!(runtime.stats.max_health, 400);
+        assert_eq!(runtime.stats.health, 400);
+        assert_eq!(runtime.stats.max_mana, 150);
+        assert_eq!(runtime.stats.mana, 150);
+    }
+
+    #[test]
+    fn loaded_grid_db_backed_builder_errors_without_silent_fallbacks_like_cpp() {
+        let entry = 12_401;
+        let spawn = db_backed_spawn(entry);
+        let runtime_row = CreatureSpawnRuntimeRowLikeCpp {
+            spawn_id: spawn.spawn_id,
+            model_id: 0,
+            equipment_id: 1,
+            wander_distance: 0.0,
+            curhealth: 0,
+            curmana: 0,
+            movement_type: 0,
+            string_id: String::new(),
+            spawn_time_secs: 10,
+        };
+        let (display_store, model_store) = empty_display_stores();
+
+        assert_eq!(
+            build_loaded_grid_creature_inputs_from_db_like_cpp(
+                &spawn,
+                &runtime_row,
+                &CreatureTemplateLifecycleStoreLikeCpp::default(),
+                &db_backed_difficulty_store(entry),
+                &db_backed_base_stats_store(),
+                &CreatureClassificationHealthRatesLikeCpp::default(),
+                &display_store,
+                &model_store,
+                2,
+                0,
+                0,
+                false,
+                |_, _| 19,
+            ),
+            Err(CreatureLoadedGridResolveErrorLikeCpp::MissingTemplate { entry })
+        );
+        assert_eq!(
+            build_loaded_grid_creature_inputs_from_db_like_cpp(
+                &spawn,
+                &runtime_row,
+                &db_backed_template_store(entry),
+                &CreatureDifficultyStoreLikeCpp::default(),
+                &db_backed_base_stats_store(),
+                &CreatureClassificationHealthRatesLikeCpp::default(),
+                &display_store,
+                &model_store,
+                2,
+                0,
+                0,
+                false,
+                |_, _| 19,
+            ),
+            Err(CreatureLoadedGridResolveErrorLikeCpp::MissingDifficulty {
+                entry,
+                difficulty_id: 2
+            })
+        );
+    }
+
+    #[test]
+    fn loaded_grid_db_backed_builder_uses_first_template_model_and_full_health_fallback_like_cpp() {
+        let entry = 12_402;
+        let spawn = db_backed_spawn(entry);
+        let runtime_row = CreatureSpawnRuntimeRowLikeCpp {
+            spawn_id: spawn.spawn_id,
+            model_id: 0,
+            equipment_id: 3,
+            wander_distance: 0.0,
+            curhealth: 0,
+            curmana: 0,
+            movement_type: 0,
+            string_id: String::new(),
+            spawn_time_secs: 20,
+        };
+        let (display_store, model_store) = empty_display_stores();
+        let (_, resolved_spawn, runtime) = build_loaded_grid_creature_inputs_from_db_like_cpp(
+            &spawn,
+            &runtime_row,
+            &db_backed_template_store(entry),
+            &CreatureDifficultyStoreLikeCpp::from_records(
+                [wow_data::CreatureDifficultyRecordLikeCpp {
+                    min_level: 19,
+                    max_level: 19,
+                    ..db_backed_difficulty_store(entry)
+                        .get_like_cpp(entry, 2)
+                        .unwrap()
+                        .clone()
+                }],
+                |_| 1.0,
+            ),
+            &db_backed_base_stats_store(),
+            &CreatureClassificationHealthRatesLikeCpp::default(),
+            &display_store,
+            &model_store,
+            2,
+            0,
+            0,
+            false,
+            |_, _| panic!("equal-level path must not call selector"),
+        )
+        .expect("first template model/full health fallback should resolve");
+
+        assert_eq!(runtime.selected_display_id, 111);
+        assert_eq!(runtime.stats.health, runtime.stats.max_health);
+        assert_eq!(runtime.stats.mana, runtime.stats.max_mana);
+        assert_eq!(resolved_spawn.string_id.as_deref(), Some("spawn-string"));
+        assert!(!resolved_spawn.add_to_map);
+    }
+
+    #[test]
+    fn loaded_grid_db_backed_builder_regen_false_preserves_zero_health_and_db_mana_like_cpp() {
+        let entry = 12_403;
+        let spawn = db_backed_spawn(entry);
+        let runtime_row = CreatureSpawnRuntimeRowLikeCpp {
+            spawn_id: spawn.spawn_id,
+            model_id: 0,
+            equipment_id: 3,
+            wander_distance: 0.0,
+            curhealth: 0,
+            curmana: 33,
+            movement_type: 0,
+            string_id: String::new(),
+            spawn_time_secs: 20,
+        };
+        let (display_store, model_store) = empty_display_stores();
+        let health_rates = CreatureClassificationHealthRatesLikeCpp {
+            elite: 2.0,
+            ..CreatureClassificationHealthRatesLikeCpp::default()
+        };
+
+        let (_, _, runtime) = build_loaded_grid_creature_inputs_from_db_like_cpp(
+            &spawn,
+            &runtime_row,
+            &db_backed_template_store_with_regen(entry, false),
+            &db_backed_difficulty_store(entry),
+            &db_backed_base_stats_store(),
+            &health_rates,
+            &display_store,
+            &model_store,
+            2,
+            0,
+            0,
+            false,
+            |_, _| 19,
+        )
+        .expect("regen=false zero current health should preserve dead DB health");
+
+        assert_eq!(runtime.stats.max_health, 400);
+        assert_eq!(runtime.stats.health, 0);
+        assert_eq!(runtime.stats.max_mana, 150);
+        assert_eq!(runtime.stats.mana, 33);
+    }
+
+    #[test]
+    fn loaded_grid_db_backed_builder_regen_false_scales_current_health_and_min_one_like_cpp() {
+        let entry = 12_404;
+        let spawn = db_backed_spawn(entry);
+        let (display_store, model_store) = empty_display_stores();
+        let health_rates = CreatureClassificationHealthRatesLikeCpp {
+            elite: 0.25,
+            ..CreatureClassificationHealthRatesLikeCpp::default()
+        };
+
+        let low_health_row = CreatureSpawnRuntimeRowLikeCpp {
+            spawn_id: spawn.spawn_id,
+            model_id: 0,
+            equipment_id: 3,
+            wander_distance: 0.0,
+            curhealth: 1,
+            curmana: 44,
+            movement_type: 0,
+            string_id: String::new(),
+            spawn_time_secs: 20,
+        };
+        let (_, _, low_health_runtime) = build_loaded_grid_creature_inputs_from_db_like_cpp(
+            &spawn,
+            &low_health_row,
+            &db_backed_template_store_with_regen(entry, false),
+            &db_backed_difficulty_store(entry),
+            &db_backed_base_stats_store(),
+            &health_rates,
+            &display_store,
+            &model_store,
+            2,
+            0,
+            0,
+            false,
+            |_, _| 19,
+        )
+        .expect("regen=false non-zero current health should min-clamp after scaling");
+        assert_eq!(low_health_runtime.stats.max_health, 50);
+        assert_eq!(low_health_runtime.stats.health, 1);
+        assert_eq!(low_health_runtime.stats.mana, 44);
+
+        let scaled_health_row = CreatureSpawnRuntimeRowLikeCpp {
+            curhealth: 80,
+            curmana: 55,
+            ..low_health_row
+        };
+        let (_, _, scaled_health_runtime) = build_loaded_grid_creature_inputs_from_db_like_cpp(
+            &spawn,
+            &scaled_health_row,
+            &db_backed_template_store_with_regen(entry, false),
+            &db_backed_difficulty_store(entry),
+            &db_backed_base_stats_store(),
+            &health_rates,
+            &display_store,
+            &model_store,
+            2,
+            0,
+            0,
+            false,
+            |_, _| 19,
+        )
+        .expect("regen=false current health should scale by classification health rate");
+        assert_eq!(scaled_health_runtime.stats.max_health, 50);
+        assert_eq!(scaled_health_runtime.stats.health, 20);
+        assert_eq!(scaled_health_runtime.stats.mana, 55);
     }
 
     #[test]
