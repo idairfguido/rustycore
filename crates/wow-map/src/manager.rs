@@ -5,6 +5,8 @@
 //! - `game/Maps/MapManager.cpp`
 
 use std::collections::BTreeMap;
+use std::fmt;
+use std::sync::Arc;
 
 use crate::MapKey;
 use crate::map::{Map, NoopGridLifecycle, NoopTerrainGridLoader};
@@ -237,6 +239,8 @@ impl ManagedMap {
     }
 }
 
+pub type SpawnGroupInitializerLikeCpp = Arc<dyn Fn(&mut ManagedMap) + Send + Sync>;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstanceIdAllocator {
     free_instance_ids: Vec<bool>,
@@ -354,7 +358,6 @@ impl IntervalTimer {
     }
 }
 
-#[derive(Debug)]
 pub struct MapManager {
     grid_cleanup_delay_ms: u32,
     maps: BTreeMap<MapKey, ManagedMap>,
@@ -362,6 +365,27 @@ pub struct MapManager {
     instance_ids: InstanceIdAllocator,
     updater: MapUpdater,
     scheduled_scripts: usize,
+    spawn_group_initializer_like_cpp: Option<SpawnGroupInitializerLikeCpp>,
+}
+
+impl fmt::Debug for MapManager {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MapManager")
+            .field("grid_cleanup_delay_ms", &self.grid_cleanup_delay_ms)
+            .field("maps", &self.maps)
+            .field("timer", &self.timer)
+            .field("instance_ids", &self.instance_ids)
+            .field("updater", &self.updater)
+            .field("scheduled_scripts", &self.scheduled_scripts)
+            .field(
+                "spawn_group_initializer_like_cpp",
+                &self
+                    .spawn_group_initializer_like_cpp
+                    .as_ref()
+                    .map(|_| "<hook>"),
+            )
+            .finish()
+    }
 }
 
 impl Default for MapManager {
@@ -379,6 +403,7 @@ impl MapManager {
             instance_ids: InstanceIdAllocator::new(),
             updater: MapUpdater::default(),
             scheduled_scripts: 0,
+            spawn_group_initializer_like_cpp: None,
         };
         manager.set_grid_cleanup_delay(grid_cleanup_delay_ms);
         manager.set_map_update_interval(map_update_interval_ms);
@@ -398,6 +423,17 @@ impl MapManager {
         self.timer.reset();
     }
 
+    pub fn set_spawn_group_initializer_like_cpp(
+        &mut self,
+        initializer: impl Fn(&mut ManagedMap) + Send + Sync + 'static,
+    ) {
+        self.spawn_group_initializer_like_cpp = Some(Arc::new(initializer));
+    }
+
+    pub fn clear_spawn_group_initializer_like_cpp(&mut self) {
+        self.spawn_group_initializer_like_cpp = None;
+    }
+
     pub fn create_world_map(&mut self, map_id: u32, instance_id: u32) -> &mut ManagedMap {
         self.create_map_entry(map_id, instance_id, 0, ManagedMapKind::World)
     }
@@ -410,15 +446,24 @@ impl MapManager {
         kind: ManagedMapKind,
     ) -> &mut ManagedMap {
         let key = MapKey::new(map_id, instance_id);
-        self.maps.entry(key).or_insert_with(|| {
-            ManagedMap::new(
-                map_id,
-                instance_id,
-                difficulty,
-                i64::from(self.grid_cleanup_delay_ms),
-                kind,
-            )
-        })
+        let grid_cleanup_delay_ms = self.grid_cleanup_delay_ms;
+        let spawn_group_initializer_like_cpp = self.spawn_group_initializer_like_cpp.clone();
+        match self.maps.entry(key) {
+            std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                let mut map = ManagedMap::new(
+                    map_id,
+                    instance_id,
+                    difficulty,
+                    i64::from(grid_cleanup_delay_ms),
+                    kind,
+                );
+                if let Some(initializer) = spawn_group_initializer_like_cpp {
+                    initializer(&mut map);
+                }
+                entry.insert(map)
+            }
+        }
     }
 
     pub fn create_map_decision_like_cpp(
@@ -881,6 +926,9 @@ impl MapUpdater {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use crate::spawn::{SpawnGroupFlags, SpawnGroupTemplateData};
 
     #[test]
     fn delays_are_clamped_like_map_manager_h() {
@@ -899,6 +947,80 @@ mod tests {
         assert_eq!(map.map_id(), 1);
         assert_eq!(map.instance_id(), 0);
         assert!(manager.find_map(1, 1).is_none());
+    }
+
+    #[test]
+    fn map_manager_init_spawn_group_state_hook_runs_once_for_new_maps_only() {
+        let mut manager = MapManager::default();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let hook_calls = Arc::clone(&calls);
+        manager.set_spawn_group_initializer_like_cpp(move |map| {
+            hook_calls.fetch_add(1, Ordering::SeqCst);
+            map.set_player_count(7);
+        });
+
+        manager.create_world_map(571, 0);
+        manager.create_world_map(571, 0);
+        manager.create_map_entry(571, 0, 0, ManagedMapKind::World);
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(manager.find_map(571, 0).unwrap().player_count(), 7);
+
+        manager.create_map_entry(
+            571,
+            9,
+            1,
+            ManagedMapKind::Dungeon {
+                has_reset_schedule: false,
+            },
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+        manager.clear_spawn_group_initializer_like_cpp();
+        manager.create_world_map(1, 0);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn map_manager_init_spawn_group_state_hook_can_mutate_managed_map_spawn_groups() {
+        let manual = SpawnGroupTemplateData {
+            group_id: 10,
+            name: "manual".to_string(),
+            map_id: 571,
+            flags: SpawnGroupFlags::MANUAL_SPAWN,
+        };
+        let automatic = SpawnGroupTemplateData {
+            group_id: 11,
+            name: "automatic".to_string(),
+            map_id: 571,
+            flags: SpawnGroupFlags::NONE,
+        };
+        let system = SpawnGroupTemplateData {
+            group_id: 12,
+            name: "system".to_string(),
+            map_id: 571,
+            flags: SpawnGroupFlags::SYSTEM,
+        };
+        let groups = Arc::new(vec![manual.clone(), automatic.clone(), system.clone()]);
+
+        let mut manager = MapManager::default();
+        manager.set_spawn_group_initializer_like_cpp({
+            let groups = Arc::clone(&groups);
+            move |managed_map| {
+                managed_map
+                    .map_mut()
+                    .init_spawn_group_state_like_cpp(groups.iter(), |group| {
+                        group.group_id == manual.group_id
+                    });
+            }
+        });
+
+        manager.create_world_map(571, 0);
+        let map = manager.find_map(571, 0).unwrap().map();
+
+        assert!(map.is_spawn_group_active_like_cpp(Some(&groups[0])));
+        assert!(!map.is_spawn_group_active_like_cpp(Some(&groups[1])));
+        assert!(map.is_spawn_group_active_like_cpp(Some(&groups[2])));
     }
 
     #[test]

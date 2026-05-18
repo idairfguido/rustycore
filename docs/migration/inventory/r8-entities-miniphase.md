@@ -1405,3 +1405,17 @@ Implemented Rust dependency: `wow-world::conditions::is_spawn_group_meeting_map_
 Checks expected: `cargo fmt --check`; `cargo test -p wow-world spawn_group_meeting_map_conditions`; `git diff --check`.
 
 Remaining gaps: this does NOT complete `#NEXT.R8.ENTITIES.021` or live `UpdateSpawnGroupConditions`. Missing work remains: executing `SpawnGroupSpawn`/`SpawnGroupDespawn`, pool/runtime integration, respawn persistence, live entity creation, grid/session fanout, DB/runtime side effects, and wiring a future `world-server`/`wow-world` caller that resolves these bools and passes them into the `wow-map` planner without making `wow-map` depend on `wow-world`.
+
+### #NEXT.R8.ENTITIES.360 — MapManager InitSpawnGroupState creation hook
+
+Status: complete (MapManager ownership-hook dependency only; no live condition/spawn/despawn wiring).
+
+C++ anchors: `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapManager.cpp:71-80` (`MapManager::CreateWorldMap` creates `Map`, loads respawns/corpses, calls `map->InitSpawnGroupState()`, then optional `LoadAllCells`), `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapManager.cpp:84-113` (`MapManager::CreateInstance` creates `InstanceMap`, loads respawns/corpses, instance data/scenario, calls `map->InitSpawnGroupState()`, then optional `LoadAllCells`), `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapManager.cpp:118-129` (`MapManager::CreateBattleground` creates `BattlegroundMap`, BG setup, calls `map->InitSpawnGroupState()`, then optional `LoadAllCells`), and `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2455-2468` (`Map::InitSpawnGroupState` loops map spawn groups, skips system groups, and writes active state from `ConditionMgr`).
+
+Implemented Rust dependency: `wow_map::MapManager` now owns an optional C++-shaped spawn-group initializer hook (`SpawnGroupInitializerLikeCpp`) configurable through `set_spawn_group_initializer_like_cpp` and removable through `clear_spawn_group_initializer_like_cpp`. `create_map_entry` now detects new `ManagedMap` insertions with the `BTreeMap` entry API, builds the `ManagedMap`, invokes the hook immediately on `&mut ManagedMap`, and only then inserts/returns it. Existing map lookups return the existing `ManagedMap` without invoking the hook. `create_world_map` inherits the behavior by delegating to `create_map_entry`. Default/new managers keep the previous no-hook behavior.
+
+Files touched: `crates/wow-map/src/manager.rs`; `docs/migration/inventory/r8-entities-miniphase.md`.
+
+Checks expected: `cargo fmt --check`; `cargo test -p wow-map init_spawn_group_state`; `cargo test -p wow-map map_manager`; `git diff --check`.
+
+Remaining gaps: this does not complete `#NEXT.R8.ENTITIES.021`. The hook does not execute `SpawnGroupSpawn`/`SpawnGroupDespawn`, load grids, do I/O, call `ConditionMgr`, or duplicate active-state ownership. Still pending: world-server/ConditionMgr wiring that resolves conditions and calls `ManagedMap::map_mut().init_spawn_group_state_like_cpp(...)`, live `SpawnGroupSpawn`/`SpawnGroupDespawn` runtime, pool/respawn integration, live entity creation, and grid/session fanout.
