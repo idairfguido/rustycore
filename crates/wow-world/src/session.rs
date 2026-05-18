@@ -657,6 +657,7 @@ pub(crate) struct RepresentedGameObjectUseState {
     pub go_state: Option<wow_entities::GoState>,
     pub prev_go_state: Option<wow_entities::GoState>,
     pub gameobject_flags: u32,
+    pub gameobject_override_flags: Option<u32>,
     pub dynamic_flags: u32,
     pub despawn_delay_secs: Option<u32>,
     pub despawn_delay_until: Option<Instant>,
@@ -866,6 +867,7 @@ impl Default for RepresentedGameObjectUseState {
             go_state: None,
             prev_go_state: None,
             gameobject_flags: 0,
+            gameobject_override_flags: None,
             dynamic_flags: 0,
             despawn_delay_secs: None,
             despawn_delay_until: None,
@@ -3983,6 +3985,22 @@ impl WorldSession {
             .lock_id = (lock_id != 0).then_some(lock_id);
     }
 
+    pub(crate) fn record_represented_gameobject_override_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        flags: u32,
+        faction_template: u32,
+        override_source_known: bool,
+    ) {
+        let state = self
+            .represented_gameobject_use_states
+            .entry(guid)
+            .or_default();
+        state.gameobject_flags = flags;
+        state.gameobject_override_flags = override_source_known.then_some(flags);
+        state.faction_template = Some(faction_template);
+    }
+
     #[cfg(test)]
     pub(crate) fn record_represented_gameobject_faction_template_like_cpp(
         &mut self,
@@ -3993,6 +4011,17 @@ impl WorldSession {
             .entry(guid)
             .or_default()
             .faction_template = (faction_template != 0).then_some(faction_template);
+    }
+
+    pub(crate) fn restore_represented_gameobject_override_flags_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+    ) {
+        if let Some(state) = self.represented_gameobject_use_states.get_mut(&guid) {
+            if let Some(flags) = state.gameobject_override_flags {
+                state.gameobject_flags = flags;
+            }
+        }
     }
 
     pub(crate) fn record_represented_gameobject_display_model_like_cpp(
@@ -4433,7 +4462,8 @@ impl WorldSession {
                     .map(|go_state| go_state as i8)
                     .unwrap_or(wow_entities::GoState::Ready as i8),
                 created_by: state.owner_guid.unwrap_or(ObjectGuid::EMPTY),
-                faction_template: 0,
+                faction_template: state.faction_template.unwrap_or(0) as i32,
+                gameobject_flags: state.gameobject_flags,
                 scale: state.scale,
             });
         }
@@ -11418,6 +11448,7 @@ impl WorldSession {
             let send_despawn_at_action = is_despawn_at_action || go_anim_progress > 0;
             if send_despawn_at_action && !delete_after_clear && !schedule_respawn {
                 self.send_represented_gameobject_despawn_like_cpp(guid);
+                self.restore_represented_gameobject_override_flags_like_cpp(guid);
             }
             if delete_after_clear || schedule_respawn {
                 self.client_visible_guids_like_cpp.remove(&guid);
@@ -11825,6 +11856,7 @@ impl WorldSession {
 
     fn send_represented_gameobject_delete_packets_like_cpp(&mut self, gameobject_guid: ObjectGuid) {
         self.send_represented_gameobject_despawn_like_cpp(gameobject_guid);
+        self.restore_represented_gameobject_override_flags_like_cpp(gameobject_guid);
         let map_id = self
             .represented_gameobject_use_states
             .get(&gameobject_guid)
@@ -29352,6 +29384,71 @@ mod tests {
         assert_eq!(state.loot_state, Some(wow_entities::LootState::NotReady));
         let opcodes = drain_server_opcodes(&send_rx);
         assert_eq!(opcodes, vec![ServerOpcodes::GameObjectDespawn]);
+    }
+
+    #[tokio::test]
+    async fn gameobject_override_flags_restore_after_generic_just_deactivated_despawn_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        session.set_state(SessionState::LoggedIn);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 250);
+        session.record_represented_gameobject_override_like_cpp(gameobject_guid, 0, 0, true);
+        let state = session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        state.go_type = Some(5);
+        state.loot_state = Some(wow_entities::LootState::JustDeactivated);
+        state.despawn_at_action = false;
+        state.go_anim_progress = 1;
+        state.gameobject_flags = wow_entities::GO_FLAG_IN_USE;
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+
+        session.process_pending().await;
+
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.gameobject_flags, 0);
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![ServerOpcodes::GameObjectDespawn]
+        );
+    }
+
+    #[tokio::test]
+    async fn gameobject_without_override_source_does_not_restore_false_zero_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        session.set_state(SessionState::LoggedIn);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 251);
+        session.record_represented_gameobject_override_like_cpp(gameobject_guid, 0, 0, false);
+        let state = session
+            .represented_gameobject_use_states
+            .entry(gameobject_guid)
+            .or_default();
+        state.go_type = Some(5);
+        state.loot_state = Some(wow_entities::LootState::JustDeactivated);
+        state.go_anim_progress = 1;
+        state.gameobject_flags = wow_entities::GO_FLAG_IN_USE;
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+
+        session.process_pending().await;
+
+        let state = session
+            .represented_gameobject_use_states
+            .get(&gameobject_guid)
+            .unwrap();
+        assert_eq!(state.gameobject_flags, wow_entities::GO_FLAG_IN_USE);
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![ServerOpcodes::GameObjectDespawn]
+        );
     }
 
     #[tokio::test]

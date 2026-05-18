@@ -1309,3 +1309,13 @@
 - [ ] **#NEXT.R8.ENTITIES.035** Complete `Pet` create/load/save/update runtime: pet GUID/create from DB/tamed creature, stable persistence, action bar, XP/level sync, stats, auras/cooldowns/charges, specialization/talents/passives, PetAI/charm info, group updates and map/object-store insertion.
 - [ ] **#NEXT.R8.ENTITIES.037** Complete `Vehicle` runtime: DB2 vehicle/seat lookup, npc flags, install/uninstall/reset scripts, accessories, control auras, immunities, passenger relocation/exit, pending join events, despawn delay and integration with Unit movement/transport state.
 - [ ] **#NEXT.R8.ENTITIES.039** Complete `Transport` runtime: `TransportMgr` template loading/path generation, `Transport::Create`, path update/event triggering, map transition teleport/hide behavior, static creature/GameObject passenger spawning, summon passenger path, passenger movement-info transport offsets, script hooks, model/collision update and map/grid integration.
+
+### #NEXT.R8.ENTITIES.351 — GameObjectOverride/template-addon flags/faction source + restore hook
+
+Status: complete (represented dependency only).
+
+C++ anchors: `GameObjectOverride` / `GameObjectTemplateAddon` shape in `GameObjectData.h:1317-1332`, `ObjectMgr::LoadGameObjectTemplateAddons` / `LoadGameObjectOverrides` in `ObjectMgr.cpp:7770-7892`, and `GameObject::Update` / `Delete` restore hooks in `GameObject.cpp:1641-1648,1684-1693,1751-1757`.
+
+Implemented Rust dependency: `SEL_GAMEOBJECTS_IN_RANGE` now appends effective flags/faction selected with C++ priority (`gameobject_overrides.spawnId` over `gameobject_template_addon.entry` over zero), visibility spawn paths propagate them into `GameObjectCreateData` and represented session state, and represented `GO_JUST_DEACTIVATED`/delete cleanup restores known override/template-addon flags after visual despawn instead of preserving contaminated mutable flags such as `GO_FLAG_IN_USE`.
+
+Remaining gaps: this does not complete `#NEXT.R8.ENTITIES.021`; canonical ObjectMgr/map ownership, cross-session values update/fanout, full template-addon artkit/worldEffect/AIAnimKit validation/consumption, canonical map removal, and complete UpdateObject values delta remain open.
