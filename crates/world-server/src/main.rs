@@ -14,7 +14,7 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use tracing::{debug, info, warn};
@@ -2214,6 +2214,10 @@ struct CanonicalSpawnGroupConditionTickSummaryLikeCpp {
     applied_set_inactive: usize,
     planned_spawn: usize,
     planned_despawn: usize,
+    respawn_deleted_inactive_spawn_group: usize,
+    respawn_blocked_missing_spawn_data: usize,
+    respawn_blocked_pool_runtime: usize,
+    respawn_blocked_do_respawn_runtime: usize,
 }
 
 fn canonical_map_update_tick_set_inactive_like_cpp(
@@ -2232,11 +2236,31 @@ fn canonical_map_update_tick_set_inactive_like_cpp(
 
     // C++ `Map::Update` runs `ProcessRespawns()` immediately before
     // `UpdateSpawnGroupConditions()` when `_respawnCheckTimer` expires.
-    // RustyCore does not yet implement ProcessRespawns or live spawn/despawn;
-    // this tick only applies the already-safe SetSpawnGroupInactive branch.
+    // This tick executes only the safe in-memory ProcessRespawns delete branch
+    // produced by the inactive spawn-group CheckRespawn guard, then applies the
+    // existing SetInactive-only condition update seam. PoolMgr, DoRespawn, DB
+    // persistence/delete, linked-respawn checks, entity creation and fanout remain
+    // blocked gaps, and blocked oldest due timers are left intact.
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| {
+            i64::try_from(duration.as_secs()).unwrap_or(i64::MAX)
+        });
     let mut summary = CanonicalSpawnGroupConditionTickSummaryLikeCpp::default();
     manager.do_for_all_maps_mut(|managed_map| {
         summary.maps_evaluated += 1;
+        let respawn_summary = managed_map
+            .map_mut()
+            .process_due_respawns_spawn_group_delete_only_like_cpp(
+                now_secs,
+                canonical_spawn_metadata.spawn_store(),
+            );
+        summary.respawn_deleted_inactive_spawn_group +=
+            respawn_summary.deleted_inactive_spawn_group;
+        summary.respawn_blocked_missing_spawn_data += respawn_summary.blocked_missing_spawn_data;
+        summary.respawn_blocked_pool_runtime += respawn_summary.blocked_pool_runtime;
+        summary.respawn_blocked_do_respawn_runtime += respawn_summary.blocked_do_respawn_runtime;
+
         let outcomes = apply_canonical_spawn_group_condition_update_set_inactive_like_cpp(
             managed_map,
             canonical_spawn_metadata,
@@ -2316,7 +2340,12 @@ fn spawn_canonical_map_update_loop(
                     applied_set_inactive = summary.applied_set_inactive,
                     planned_spawn = summary.planned_spawn,
                     planned_despawn = summary.planned_despawn,
-                    "C++ respawn-check timer fired; ProcessRespawns remains unimplemented and only the safe UpdateSpawnGroupConditions SetInactive branch was applied"
+                    respawn_deleted_inactive_spawn_group =
+                        summary.respawn_deleted_inactive_spawn_group,
+                    respawn_blocked_missing_spawn_data = summary.respawn_blocked_missing_spawn_data,
+                    respawn_blocked_pool_runtime = summary.respawn_blocked_pool_runtime,
+                    respawn_blocked_do_respawn_runtime = summary.respawn_blocked_do_respawn_runtime,
+                    "C++ respawn-check timer fired; executed safe ProcessRespawns delete-only inactive-spawn-group branch, then applied UpdateSpawnGroupConditions SetInactive seam; PoolMgr/DoRespawn/DB/linked-respawn/live stores/fanout remain pending"
                 );
             }
         }
@@ -2784,8 +2813,8 @@ mod tests {
     use wow_constants::{ConditionSourceType, ConditionType};
     use wow_data::{Condition, ConditionEntriesByTypeStore};
     use wow_map::{
-        SpawnData, SpawnGroupFlags, SpawnGroupTemplateData, SpawnObjectType, SpawnPosition,
-        SpawnStore, spawn::SpawnGroupMemberRow,
+        RespawnInfoLikeCpp, SpawnData, SpawnGroupFlags, SpawnGroupTemplateData, SpawnObjectType,
+        SpawnPosition, SpawnStore, spawn::SpawnGroupMemberRow,
     };
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -3235,6 +3264,89 @@ mmap.enablePathFinding = 0
                 .unwrap()
                 .map()
                 .is_spawn_group_active_like_cpp(Some(&group))
+        );
+    }
+
+    #[test]
+    fn spawn_group_condition_update_tick_process_respawns_delete_only_removes_inactive_due_timer() {
+        let metadata = test_spawn_metadata_with_flags([(60, 571, SpawnGroupFlags::MANUAL_SPAWN)]);
+        let condition_store = ConditionEntriesByTypeStore::default();
+        let mut manager = wow_map::MapManager::new(60_000, 1);
+        let map = manager.create_world_map(571, 0);
+        map.map_mut().add_respawn_info_like_cpp(RespawnInfoLikeCpp {
+            object_type: SpawnObjectType::Creature,
+            spawn_id: 1,
+            entry: 42,
+            respawn_time: 0,
+            grid_id: 7,
+        });
+        let mut scheduler = CanonicalRespawnConditionSchedulerLikeCpp::new(1);
+
+        let summary = canonical_map_update_tick_set_inactive_like_cpp(
+            &mut manager,
+            1,
+            &mut scheduler,
+            &metadata,
+            &condition_store,
+        )
+        .expect("scheduler fires");
+
+        assert_eq!(summary.maps_evaluated, 1);
+        assert_eq!(summary.respawn_deleted_inactive_spawn_group, 1);
+        assert_eq!(summary.respawn_blocked_do_respawn_runtime, 0);
+        assert_eq!(
+            manager
+                .find_map(571, 0)
+                .unwrap()
+                .map()
+                .get_respawn_time_like_cpp(SpawnObjectType::Creature, 1),
+            0
+        );
+    }
+
+    #[test]
+    fn spawn_group_condition_update_tick_process_respawns_active_due_timer_blocks_do_respawn_fake()
+    {
+        let metadata = test_spawn_metadata_with_flags([(61, 571, SpawnGroupFlags::NONE)]);
+        let condition_store = ConditionEntriesByTypeStore::default();
+        let mut manager = wow_map::MapManager::new(60_000, 1);
+        let map = manager.create_world_map(571, 0);
+        map.map_mut().add_respawn_info_like_cpp(RespawnInfoLikeCpp {
+            object_type: SpawnObjectType::Creature,
+            spawn_id: 1,
+            entry: 42,
+            respawn_time: 0,
+            grid_id: 7,
+        });
+        let mut scheduler = CanonicalRespawnConditionSchedulerLikeCpp::new(1);
+
+        let summary = canonical_map_update_tick_set_inactive_like_cpp(
+            &mut manager,
+            1,
+            &mut scheduler,
+            &metadata,
+            &condition_store,
+        )
+        .expect("scheduler fires");
+
+        assert_eq!(summary.maps_evaluated, 1);
+        assert_eq!(summary.respawn_deleted_inactive_spawn_group, 0);
+        assert_eq!(summary.respawn_blocked_do_respawn_runtime, 1);
+        assert_eq!(
+            manager
+                .find_map(571, 0)
+                .unwrap()
+                .map()
+                .get_respawn_time_like_cpp(SpawnObjectType::Creature, 1),
+            0
+        );
+        assert!(
+            manager
+                .find_map(571, 0)
+                .unwrap()
+                .map()
+                .get_respawn_info_like_cpp(SpawnObjectType::Creature, 1)
+                .is_some()
         );
     }
 

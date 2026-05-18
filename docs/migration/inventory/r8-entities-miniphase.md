@@ -1535,3 +1535,18 @@ Files touched: `crates/wow-map/src/spawn.rs`; `crates/wow-map/src/lib.rs`; `crat
 Checks expected: `cargo fmt --check`; `cargo test -p wow-map check_respawn_spawn_group_guard`; `cargo test -p wow-map process_respawns`; `cargo check -p world-server`; `git diff --check`.
 
 Remaining gaps: this does not complete `#NEXT.R8.ENTITIES.021`, full `Map::CheckRespawn`, or live `ProcessRespawns`. Still missing: live scheduler execution, by-spawn live existence checks, escort dynamic exceptions, linked respawn including random 5-15 reschedule, real `PoolMgr`, real `DoRespawn` entity creation/`LoadFromDB`, DB persistence/delete, real creature/gameobject by-spawn stores, ObjectAccessor/map-local entity ownership, grid/session fanout, and session/world-server fallback-state migration into the map-owned canonical store.
+
+
+### #NEXT.R8.ENTITIES.369 — ProcessRespawns delete-only inactive spawn-group branch over map-owned timers
+
+Status: complete only for the safe in-memory `ProcessRespawns` delete branch where the represented `CheckRespawn` spawn-group guard clears `respawn_time` because the spawn group is inactive. This does not complete full live `ProcessRespawns`, `DoRespawn`, `PoolMgr`, DB persistence/delete, linked respawn, by-spawn live stores, or fanout.
+
+C++ anchors: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:666-688` (`Map::Update` calls `ProcessRespawns(); UpdateSpawnGroupConditions();` when `_respawnCheckTimer` fires), `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1950-2023` (`CheckRespawn` contract; first guard clears `respawnTime` for inactive spawn groups), `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2191-2240` (`ProcessRespawns` due-timer order, PoolMgr branch, DoRespawn branch, zero-respawn-time delete branch, future reschedule/save branch), `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2165-2188` (`DoRespawn` entity creation/LoadFromDB out of scope), and `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2152-2163` (`DeleteRespawnInfoFromDB` DB delete out of scope).
+
+Implemented Rust slice: `wow-map::Map::process_due_respawns_spawn_group_delete_only_like_cpp(now, &SpawnStore)` iterates map-owned respawn timer keys in C++ order, stops at future timers, resolves metadata through the explicit `SpawnStore` bridge, blocks and preserves the oldest due timer for missing metadata, `pool_id != 0`, or active/allowed `DoRespawn` cases, and only removes the real map-owned timer when `check_respawn_spawn_group_guard_like_cpp` returns inactive-group deletion with copied `respawn_time == 0`. `world-server` now calls this delete-only seam before the existing SetInactive-only `UpdateSpawnGroupConditions` seam when the C++-style scheduler fires, and logs explicit counters for deleted/blocked respawn branches.
+
+Files touched: `crates/wow-map/src/map.rs`; `crates/world-server/src/main.rs`; `docs/migration/current-session-handoff.md`; `docs/migration/inventory/r8-entities-miniphase.md`; `docs/migration/inventory/r8-entities-miniphase.tsv`.
+
+Checks expected: `cargo fmt --check`; `cargo test -p wow-map process_respawns`; `cargo test -p world-server spawn_group_condition_update`; `cargo check -p world-server`; `git diff --check`.
+
+Remaining gaps: full live `ProcessRespawns` remains partial. Pool timers, missing metadata, active/allowed `DoRespawn`, DB save/delete, linked-respawn reschedule, by-spawn live existence, escort exceptions, real entity creation/LoadFromDB, ObjectAccessor/map-local entity ownership, grid/session fanout and persistence are still blocked/pending and are not faked by this slice.
