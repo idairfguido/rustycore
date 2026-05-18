@@ -14,10 +14,11 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 - Current branch state after #385 local commit: `develop...origin/develop [ahead 40]`.
 - Current branch state after #386 local commit: `develop...origin/develop [ahead 41]` with a clean tree.
 - Working tree before #387: HEAD `4806d3b` on `develop...origin/develop [ahead 41]`, clean.
-- Current branch state after #388 review correction: `develop...origin/develop [ahead 42]` with uncommitted #388 runtime/docs changes; no push/install/restart.
-- Latest completed slice in this handoff: `#NEXT.R8.ENTITIES.388 — PoolMgr LoadFromDB canonical metadata + autospawn candidate metadata` (code technically reviewed OK; first reviewer pass returned `CAMBIOS NECESARIOS` only because docs/inventory/handoff were missing; this docs correction records the slice honestly; no commit/push/install/restart).
-- Previous completed slice: `#NEXT.R8.ENTITIES.387 — PoolMgr DespawnPool/DespawnObject deterministic plan` (implemented/tested locally; final review `APROBADO`; validation passed; committed locally by foreman; no push/install/restart).
-- No push/install/restart performed for #383, #384, #385, #386, #387, or #388.
+- Current branch state after #388 review correction/local commit: `develop...origin/develop [ahead 43]` with a clean tree; no push/install/restart.
+- Current branch state after #389 review/validation/local commit: `develop...origin/develop [ahead 44]` with a clean tree; no push/install/restart.
+- Latest completed slice in this handoff: `#NEXT.R8.ENTITIES.389 — PoolMgr InitPoolsForMap deterministic autospawn planning seam` (review `APROBADO`, focused checks passed, committed locally in the current #389 HEAD).
+- Previous completed slice: `#NEXT.R8.ENTITIES.388 — PoolMgr LoadFromDB canonical metadata + autospawn candidate metadata` (reviewed/validated and committed locally; no push/install/restart).
+- No push/install/restart performed for #383, #384, #385, #386, #387, #388, or #389.
 
 ## Critical Rules
 
@@ -29,13 +30,21 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 
 ## Progress Estimate
 
-Overall core migration estimate after #388 `PoolMgr LoadFromDB canonical metadata + autospawn candidate metadata`: `~84.5%` (was `~84%` before #388; do not claim >95%).
+Overall core migration estimate after #389 `PoolMgr InitPoolsForMap deterministic autospawn planning seam`: `~85%` (was `~84.5%` before #389; do not claim >95%).
 
-This remains intentionally below the R8 TSV row-completion ratio because heavy runtime ownership gaps remain: real `PoolMgr` runtime execution, live `SpawnPool`/`DespawnPool` RNG/chance execution, recursive subpool live integration, full live `ProcessRespawns` pool and `DoRespawn` branches, real entity creation / `LoadFromDB`, `AddToMap`/`RemoveFromMap`, corpse load, AreaTrigger Create/Load/Update runtime, templates/spawns, AI, caster unregister, unit enter/exit, movement/visibility/transport, real terrain/vmap/dynamic-tree collision, transports, visibility overrides/cinematic/sight runtime, full entity-specific `AddToWorld`/`RemoveFromWorld` side effects beyond the object/spawn-id store, real dynamic escort config/runtime feeding the closure, grid/session fanout, ObjectAccessor ownership, DB save/delete for runtime branches, and broader Unit/Player inventory/auras/threat/motion/update-field work.
+This remains intentionally below the R8 TSV row-completion ratio because heavy runtime ownership gaps remain: real `PoolMgr` runtime execution, live `SpawnPool`/`DespawnPool` RNG/chance execution beyond deterministic planning/report, recursive subpool live integration, full live `ProcessRespawns` pool and `DoRespawn` branches, real entity creation / `LoadFromDB`, `AddToMap`/`RemoveFromMap`, corpse load, AreaTrigger Create/Load/Update runtime, templates/spawns, AI, caster unregister, unit enter/exit, movement/visibility/transport, real terrain/vmap/dynamic-tree collision, transports, visibility overrides/cinematic/sight runtime, full entity-specific `AddToWorld`/`RemoveFromWorld` side effects beyond the object/spawn-id store, real dynamic escort config/runtime feeding the closure, grid/session fanout, ObjectAccessor ownership, DB save/delete for runtime branches, and broader Unit/Player inventory/auras/threat/motion/update-field work.
 
-Manual test point: no new client-facing manual milestone from #388; this is canonical C++-shaped `PoolMgr::LoadFromDB` metadata/planning plus autospawn candidate-list metadata only. It does not execute live pool runtime or spawn entities.
+Manual test point: no new client-facing manual milestone from #389; this is C++-shaped `PoolMgr::InitPoolsForMap` deterministic autospawn planning plus map-owned `SpawnedPoolDataLikeCpp` mutation/report only. It does not execute `Spawn1Object`/`ReSpawn1Object`/`DespawnObject`, create live entities, call `LoadFromDB`, `AddToMap`/`RemoveFromMap`, DB writes, or grid/session fanout.
 
 ## Most Recent Completed Slices
+
+- `#NEXT.R8.ENTITIES.389` (review `APROBADO`; focused checks passed; committed locally in the current #389 HEAD; no push/install/restart)
+  - Adds C++-shaped `PoolMgrLikeCpp::init_pools_for_map_plan_like_cpp` and `Map::init_pools_for_map_like_cpp` for `PoolMgr::InitPoolsForMap(Map*)`: a fresh/new map's owned `SpawnedPoolDataLikeCpp` remains the runtime source of truth, metadata/autospawn candidates come from `CanonicalSpawnMetadataLikeCpp::pool_mgr_like_cpp()`, and the only sync direction is PoolMgr metadata + deterministic `SpawnPool` plan -> map-owned pool data mutation + report/action records.
+  - C++ anchors: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:145-168`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapManager.cpp:71-76`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapManager.cpp:100-110`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:922-929`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:806-811`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:288-407`, and `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.h:162-176`.
+  - Rust targets: `crates/wow-map/src/pool.rs`, `crates/wow-map/src/map.rs`, `crates/wow-map/src/lib.rs`, `crates/world-server/src/main.rs`, docs/inventory.
+  - Acceptance: preserves `mAutoSpawnPoolsPerMap[mapId]` vector order, uses existing `SpawnPool` top-level order Pool -> GameObject -> Creature, reports map-id overflow/missing-pool errors without panic/truncation, exposes counters for planned pools and SpawnOne/RespawnOne/DespawnOne records, logs report counters/errors in the world-server map-creation initializer, and applies the hook before persisted respawn snapshots and before `InitSpawnGroupState`.
+  - Checks executed: `cargo fmt --check`, `cargo test -p wow-map pool_mgr`, `cargo test -p wow-map init_pools_for_map`, `cargo test -p world-server init_pools_before_persisted_respawns`, `cargo test -p world-server spawn_group_condition_update`, `PROTOC=/home/cdmonio/.local/protoc/bin/protoc cargo check -p world-server`, and `git diff --check` passed with pre-existing warnings only.
+  - Remaining gaps: report/action records are not executed; no real `Spawn1Object`/`ReSpawn1Object`/`DespawnObject`, no full RNG parity beyond deterministic provider, no entity `LoadFromDB`/`AddToMap`/`RemoveFromMap`, no grid/session fanout, no `ProcessRespawns` pool branch, no DB save/delete runtime, and no full live PoolMgr runtime.
 
 - `#NEXT.R8.ENTITIES.388` (code reviewed technically OK; first reviewer result `CAMBIOS NECESARIOS` only for missing docs/inventory/handoff; docs correction now applied; no commit/push/install/restart)
   - Adds canonical C++-shaped `PoolMgr::LoadFromDB` loading from world DB into metadata/planning only: prepared statements for `pool_template`, typed `pool_members`, and default autospawn candidates; `CanonicalSpawnMetadataLikeCpp` owns `PoolMgrLikeCpp`; load reports count templates, member skips, relation removals, empty/missing-map, and autospawn skips.

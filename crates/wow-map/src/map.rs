@@ -14,6 +14,9 @@ use crate::coords::{
 use crate::grid::{GridStateKind, MapGridHost, NGrid, update_grid_state};
 use crate::object_grid_loader::{GridSpawnLoadFilter, ObjectGridLoader};
 use crate::personal_phase::{MultiPersonalPhaseTracker, PhaseShift};
+use crate::pool::{
+    PoolInitForMapPlanLikeCpp, PoolMemberKindLikeCpp, PoolMgrLikeCpp, PoolObjectLikeCpp,
+};
 use crate::spawn::{
     AddRespawnInfoOutcomeLikeCpp, CheckRespawnOutcomeLikeCpp,
     CheckRespawnSpawnGroupGuardOutcomeLikeCpp, Difficulty, LinkedRespawnStoreLikeCpp,
@@ -1196,6 +1199,26 @@ where
 
     pub const fn pool_data_mut_like_cpp(&mut self) -> &mut SpawnedPoolDataLikeCpp {
         &mut self.pool_data
+    }
+
+    /// C++ `Map` constructor calls `sPoolMgr->InitPoolsForMap(this)` before
+    /// startup respawn and spawn-group initialization. This represented seam
+    /// applies deterministic autospawn `SpawnPool` plans into the map-owned
+    /// `SpawnedPoolDataLikeCpp` and returns action records for future live
+    /// `Spawn1Object`/`ReSpawn1Object`/`DespawnObject` owners; it does not create
+    /// entities or fan out packets.
+    pub fn init_pools_for_map_like_cpp(
+        &mut self,
+        pool_mgr: &PoolMgrLikeCpp,
+        explicit_roll_for: impl FnMut(PoolMemberKindLikeCpp, u32) -> f32,
+        choose_equal: impl FnMut(&[PoolObjectLikeCpp], usize) -> Vec<usize>,
+    ) -> PoolInitForMapPlanLikeCpp {
+        pool_mgr.init_pools_for_map_plan_like_cpp(
+            self.map_id,
+            &mut self.pool_data,
+            explicit_roll_for,
+            choose_equal,
+        )
     }
 
     /// Bridge for C++ `Map::ShouldBeSpawnedOnGridLoad` callers while `Map` does
@@ -3639,6 +3662,7 @@ pub const fn total_cell_count() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pool::{PoolGroupLikeCpp, PoolTemplateDataLikeCpp};
     use std::cell::RefCell;
     use wow_constants::{DeathState, TypeId, TypeMask};
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
@@ -3839,6 +3863,30 @@ mod tests {
             terrain,
             RecordingLifecycle::default(),
         )
+    }
+
+    #[test]
+    fn map_init_pools_for_map_mutates_map_owned_pool_data_like_cpp() {
+        let mut pool_mgr = PoolMgrLikeCpp::new();
+        pool_mgr.insert_template_like_cpp(10, PoolTemplateDataLikeCpp::new(1, 571));
+        let mut group = PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Creature, 10);
+        group.add_entry_like_cpp(PoolObjectLikeCpp::new(101, 0.0), 1);
+        pool_mgr
+            .insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Creature, 10, group)
+            .expect("test pool group");
+        pool_mgr.add_auto_spawn_pool_like_cpp(571, 10);
+        let mut map = test_map();
+
+        let plan = map.init_pools_for_map_like_cpp(
+            &pool_mgr,
+            |_, _| 0.0,
+            |_candidates, count| (0..count).collect(),
+        );
+
+        assert_eq!(plan.map_id, 571);
+        assert_eq!(plan.planned(), 1);
+        assert!(map.pool_data_like_cpp().is_spawned_creature_like_cpp(101));
+        assert_eq!(map.pool_data_like_cpp().get_spawned_objects_like_cpp(10), 1);
     }
 
     #[test]

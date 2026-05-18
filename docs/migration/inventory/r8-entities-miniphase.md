@@ -5,6 +5,11 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.389** `PoolMgr::InitPoolsForMap` deterministic autospawn planning + map-owned pool-data mutation/report.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:145-168`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapManager.cpp:71-76`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapManager.cpp:100-110`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:922-929`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:806-811`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:288-407`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.h:162-176`.
+  Rust targets: `crates/wow-map/src/pool.rs`, `crates/wow-map/src/map.rs`, `crates/wow-map/src/lib.rs`, `crates/world-server/src/main.rs`, docs/inventory.
+  Acceptance: adds `PoolMgrLikeCpp::init_pools_for_map_plan_like_cpp` and `Map::init_pools_for_map_like_cpp`, preserving C++ autospawn vector order and existing top-level `SpawnPool` order Pool -> GameObject -> Creature; mutates only map-owned `SpawnedPoolDataLikeCpp`; reports per-pool errors without panic/truncation; world-server creation hook applies represented autospawn planning before persisted respawn snapshot and before `InitSpawnGroupState`; action records remain report-only. Complete only for deterministic planning + map-owned spawned-pool state mutation/report, not full live PoolMgr runtime.
+
 - [x] **#NEXT.R8.ENTITIES.388** `PoolMgr::LoadFromDB` canonical metadata/planning + autospawn candidate metadata.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:442-774`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:715-764`.
   Rust targets: `crates/world-server/src/spawn_store_loader.rs`, `crates/world-server/src/main.rs`, `crates/wow-database/src/statements/world.rs`, `crates/wow-map/src/pool.rs`, docs/inventory.

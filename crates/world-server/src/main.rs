@@ -2177,6 +2177,36 @@ fn install_canonical_spawn_group_initializer_like_cpp(
         let instance_id = managed_map.instance_id();
         let difficulty_id = u32::from(managed_map.map().spawn_mode());
 
+        let pool_init_report = managed_map.map_mut().init_pools_for_map_like_cpp(
+            canonical_spawn_metadata.pool_mgr_like_cpp(),
+            |_kind, _pool_id| 0.0,
+            |_candidates, count| (0..count).collect(),
+        );
+        if pool_init_report.attempted() > 0 || pool_init_report.error_count() > 0 {
+            debug!(
+                map_id,
+                instance_id,
+                difficulty_id,
+                attempted = pool_init_report.attempted(),
+                planned = pool_init_report.planned(),
+                errors = pool_init_report.error_count(),
+                spawn_one_actions = pool_init_report.spawn_one_actions(),
+                respawn_one_actions = pool_init_report.respawn_one_actions(),
+                despawn_one_actions = pool_init_report.despawn_one_actions(),
+                "Applied represented C++ PoolMgr::InitPoolsForMap autospawn plans to map-owned pool data before LoadRespawnTimes; live entity side effects remain report-only"
+            );
+        }
+        for error in &pool_init_report.errors {
+            warn!(
+                map_id,
+                instance_id,
+                difficulty_id,
+                pool_id = error.pool_id,
+                error = ?error.error,
+                "PoolMgr::InitPoolsForMap represented autospawn planning failed for pool; leaving entity side effects unexecuted"
+            );
+        }
+
         let respawn_report = apply_persisted_respawns_to_managed_map_like_cpp(
             managed_map,
             persisted_respawn_times.as_ref(),
@@ -3293,7 +3323,8 @@ mod tests {
     use wow_data::{Condition, ConditionEntriesByTypeStore};
     use wow_database::{CharStatements, SqlParam, StatementDef};
     use wow_map::{
-        LinkedRespawnStoreLikeCpp, RespawnInfoLikeCpp, SpawnData, SpawnGroupFlags,
+        LinkedRespawnStoreLikeCpp, PoolGroupLikeCpp, PoolMemberKindLikeCpp, PoolMgrLikeCpp,
+        PoolObjectLikeCpp, PoolTemplateDataLikeCpp, RespawnInfoLikeCpp, SpawnData, SpawnGroupFlags,
         SpawnGroupTemplateData, SpawnObjectType, SpawnPosition, SpawnStore,
         spawn::SpawnGroupMemberRow,
     };
@@ -3627,6 +3658,69 @@ mmap.enablePathFinding = 0
                 .expect("creature respawn loaded")
                 .grid_id,
             wow_map::compute_grid_coord(creature.spawn_point.x, creature.spawn_point.y).get_id()
+        );
+    }
+
+    #[test]
+    fn canonical_map_creation_init_pools_before_persisted_respawns_and_spawn_groups() {
+        let mut pool_mgr = PoolMgrLikeCpp::new();
+        pool_mgr.insert_template_like_cpp(10, PoolTemplateDataLikeCpp::new(1, 571));
+        let mut group = PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::GameObject, 10);
+        group.add_entry_like_cpp(PoolObjectLikeCpp::new(88, 0.0), 1);
+        pool_mgr
+            .insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::GameObject, 10, group)
+            .expect("test pool group");
+        pool_mgr.add_auto_spawn_pool_like_cpp(571, 10);
+
+        let mut store = SpawnStore::new();
+        let mut gameobject = test_spawn(88, 571);
+        gameobject.object_type = SpawnObjectType::GameObject;
+        gameobject.id = 9001;
+        gameobject.spawn_point = SpawnPosition::new(-100.0, 200.0, 13.0, 2.0);
+        store.add_object_spawn(&gameobject, |_| false);
+        let metadata = Arc::new(
+            super::spawn_store_loader::CanonicalSpawnMetadataLikeCpp::new(store, BTreeMap::new())
+                .with_pool_mgr_like_cpp(pool_mgr),
+        );
+        let mut snapshot = PersistedRespawnTimesLikeCpp::default();
+        snapshot.push(
+            wow_map::MapKey::new(571, 0),
+            RespawnInfoLikeCpp {
+                object_type: SpawnObjectType::GameObject,
+                spawn_id: 88,
+                entry: 9001,
+                respawn_time: 67890,
+                grid_id: wow_map::compute_grid_coord(
+                    gameobject.spawn_point.x,
+                    gameobject.spawn_point.y,
+                )
+                .get_id(),
+            },
+        );
+        let mut manager = wow_map::MapManager::new(60_000, 10);
+        install_canonical_spawn_group_initializer_like_cpp(
+            &mut manager,
+            metadata,
+            Arc::new(ConditionEntriesByTypeStore::default()),
+            Arc::new(snapshot),
+        );
+
+        let map = manager.create_world_map(571, 0);
+        assert!(
+            map.map()
+                .pool_data_like_cpp()
+                .is_spawned_gameobject_like_cpp(88)
+        );
+        assert_eq!(
+            map.map()
+                .pool_data_like_cpp()
+                .get_spawned_objects_like_cpp(10),
+            1
+        );
+        assert_eq!(
+            map.map()
+                .get_respawn_time_like_cpp(SpawnObjectType::GameObject, 88),
+            67890
         );
     }
 

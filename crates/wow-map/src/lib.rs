@@ -59,6 +59,7 @@ pub use personal_phase::{
 };
 pub use pool::{
     PoolDespawnObjectPlanLikeCpp, PoolDespawnPoolPlanLikeCpp, PoolGroupLikeCpp,
+    PoolInitForMapErrorKindLikeCpp, PoolInitForMapErrorLikeCpp, PoolInitForMapPlanLikeCpp,
     PoolMemberKindLikeCpp, PoolMgrLikeCpp, PoolMgrPlanErrorLikeCpp, PoolMgrPlanSkipReasonLikeCpp,
     PoolObjectLikeCpp, PoolRelationRemovalLikeCpp, PoolSpawnObjectActionLikeCpp,
     PoolSpawnObjectPlanLikeCpp, PoolSpawnPoolPlanLikeCpp, PoolTemplateDataLikeCpp,

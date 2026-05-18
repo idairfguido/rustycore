@@ -167,6 +167,90 @@ pub struct PoolSpawnPoolPlanLikeCpp {
     pub subplans: Vec<PoolTypedSpawnPlanLikeCpp>,
 }
 
+/// Non-panicking report item for represented C++ `PoolMgr::InitPoolsForMap`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PoolInitForMapErrorLikeCpp {
+    pub map_id: u32,
+    pub pool_id: Option<u32>,
+    pub error: PoolInitForMapErrorKindLikeCpp,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PoolInitForMapErrorKindLikeCpp {
+    MapIdOutOfI32Range,
+    PoolPlan(PoolMgrPlanErrorLikeCpp),
+}
+
+/// Deterministic represented result of C++ `PoolMgr::InitPoolsForMap(Map*)`.
+///
+/// C++ allocates fresh `SpawnedPoolData(map)`, looks up
+/// `mAutoSpawnPoolsPerMap[map->GetId()]`, then calls `SpawnPool` for each pool
+/// id in vector order. Rust keeps the caller-owned map `SpawnedPoolDataLikeCpp`
+/// as source of truth, mutates it through `spawn_pool_plan_like_cpp`, and records
+/// side-effect actions instead of creating/removing live entities.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PoolInitForMapPlanLikeCpp {
+    pub map_id: u32,
+    pub pools: Vec<PoolSpawnPoolPlanLikeCpp>,
+    pub errors: Vec<PoolInitForMapErrorLikeCpp>,
+}
+
+impl PoolInitForMapPlanLikeCpp {
+    #[must_use]
+    pub fn attempted(&self) -> usize {
+        self.pools.len()
+            + self
+                .errors
+                .iter()
+                .filter(|error| error.pool_id.is_some())
+                .count()
+    }
+
+    #[must_use]
+    pub fn planned(&self) -> usize {
+        self.pools.len()
+    }
+
+    #[must_use]
+    pub fn error_count(&self) -> usize {
+        self.errors.len()
+    }
+
+    #[must_use]
+    pub fn spawn_one_actions(&self) -> usize {
+        self.count_actions_like_cpp(|action| {
+            matches!(action, PoolSpawnObjectActionLikeCpp::SpawnOne { .. })
+        })
+    }
+
+    #[must_use]
+    pub fn respawn_one_actions(&self) -> usize {
+        self.count_actions_like_cpp(|action| {
+            matches!(action, PoolSpawnObjectActionLikeCpp::RespawnOne { .. })
+        })
+    }
+
+    #[must_use]
+    pub fn despawn_one_actions(&self) -> usize {
+        self.count_actions_like_cpp(|action| {
+            matches!(action, PoolSpawnObjectActionLikeCpp::DespawnOne { .. })
+        })
+    }
+
+    fn count_actions_like_cpp(
+        &self,
+        mut matches_action: impl FnMut(&PoolSpawnObjectActionLikeCpp) -> bool,
+    ) -> usize {
+        self.pools
+            .iter()
+            .flat_map(|pool| pool.subplans.iter())
+            .filter_map(|subplan| subplan.object_plan.as_ref())
+            .flat_map(|object_plan| object_plan.actions.iter())
+            .filter(|action| matches_action(action))
+            .count()
+    }
+}
+
 /// C++-shaped pure `PoolMgr` planner.
 ///
 /// This struct owns only template/group/index data needed to plan C++
@@ -269,6 +353,45 @@ impl PoolMgrLikeCpp {
     #[must_use]
     pub fn auto_spawn_pools_per_map_like_cpp(&self) -> &HashMap<i32, Vec<u32>> {
         &self.auto_spawn_pools_per_map
+    }
+
+    pub fn init_pools_for_map_plan_like_cpp(
+        &self,
+        map_id: u32,
+        spawns: &mut SpawnedPoolDataLikeCpp,
+        mut explicit_roll_for: impl FnMut(PoolMemberKindLikeCpp, u32) -> f32,
+        mut choose_equal: impl FnMut(&[PoolObjectLikeCpp], usize) -> Vec<usize>,
+    ) -> PoolInitForMapPlanLikeCpp {
+        let mut plan = PoolInitForMapPlanLikeCpp {
+            map_id,
+            ..PoolInitForMapPlanLikeCpp::default()
+        };
+        let Ok(map_id_key) = i32::try_from(map_id) else {
+            plan.errors.push(PoolInitForMapErrorLikeCpp {
+                map_id,
+                pool_id: None,
+                error: PoolInitForMapErrorKindLikeCpp::MapIdOutOfI32Range,
+            });
+            return plan;
+        };
+
+        for pool_id in self.auto_spawn_pools_for_map_like_cpp(map_id_key) {
+            match self.spawn_pool_plan_like_cpp(
+                spawns,
+                *pool_id,
+                &mut explicit_roll_for,
+                &mut choose_equal,
+            ) {
+                Ok(pool_plan) => plan.pools.push(pool_plan),
+                Err(error) => plan.errors.push(PoolInitForMapErrorLikeCpp {
+                    map_id,
+                    pool_id: Some(*pool_id),
+                    error: PoolInitForMapErrorKindLikeCpp::PoolPlan(error),
+                }),
+            }
+        }
+
+        plan
     }
 
     pub fn remove_child_pool_relation_like_cpp(
@@ -1460,6 +1583,125 @@ mod tests {
         let mut group = PoolGroupLikeCpp::with_pool_id(kind, pool_id);
         group.add_entry_like_cpp(PoolObjectLikeCpp::new(guid, 0.0), 1);
         group
+    }
+
+    #[test]
+    fn pool_mgr_init_pools_for_map_no_autospawn_is_noop_like_cpp() {
+        let mgr = PoolMgrLikeCpp::new();
+        let mut spawns = SpawnedPoolDataLikeCpp::new();
+        let mut rolls = 0;
+        let plan = mgr.init_pools_for_map_plan_like_cpp(
+            571,
+            &mut spawns,
+            |_, _| {
+                rolls += 1;
+                0.0
+            },
+            choose_first_indices,
+        );
+
+        assert_eq!(plan.map_id, 571);
+        assert_eq!(plan.attempted(), 0);
+        assert_eq!(plan.planned(), 0);
+        assert_eq!(plan.error_count(), 0);
+        assert_eq!(rolls, 0);
+        assert!(spawns.spawned_objects_like_cpp().is_empty());
+    }
+
+    #[test]
+    fn pool_mgr_init_pools_for_map_applies_autospawn_order_and_mutates_state_like_cpp() {
+        let mut mgr = PoolMgrLikeCpp::new();
+        mgr.insert_template_like_cpp(10, PoolTemplateDataLikeCpp::new(2, 571));
+        mgr.insert_or_replace_group_like_cpp(
+            PoolMemberKindLikeCpp::GameObject,
+            10,
+            group_with_one(PoolMemberKindLikeCpp::GameObject, 10, 201),
+        )
+        .unwrap();
+        mgr.insert_template_like_cpp(20, PoolTemplateDataLikeCpp::new(2, 571));
+        mgr.insert_or_replace_group_like_cpp(
+            PoolMemberKindLikeCpp::Creature,
+            20,
+            group_with_one(PoolMemberKindLikeCpp::Creature, 20, 101),
+        )
+        .unwrap();
+        mgr.insert_or_replace_group_like_cpp(
+            PoolMemberKindLikeCpp::Pool,
+            20,
+            group_with_one(PoolMemberKindLikeCpp::Pool, 20, 301),
+        )
+        .unwrap();
+        mgr.add_auto_spawn_pool_like_cpp(571, 20);
+        mgr.add_auto_spawn_pool_like_cpp(571, 10);
+        mgr.add_auto_spawn_pool_like_cpp(530, 99);
+        let mut spawns = SpawnedPoolDataLikeCpp::new();
+
+        let plan = mgr.init_pools_for_map_plan_like_cpp(
+            571,
+            &mut spawns,
+            |_, _| 0.0,
+            choose_first_indices,
+        );
+
+        assert_eq!(
+            plan.pools
+                .iter()
+                .map(|pool| pool.pool_id)
+                .collect::<Vec<_>>(),
+            vec![20, 10]
+        );
+        assert_eq!(plan.attempted(), 2);
+        assert_eq!(plan.spawn_one_actions(), 3);
+        assert!(spawns.is_spawned_pool_like_cpp(301));
+        assert!(spawns.is_spawned_creature_like_cpp(101));
+        assert!(spawns.is_spawned_gameobject_like_cpp(201));
+        assert_eq!(spawns.get_spawned_objects_like_cpp(20), 2);
+        assert_eq!(spawns.get_spawned_objects_like_cpp(10), 1);
+    }
+
+    #[test]
+    fn pool_mgr_init_pools_for_map_reports_errors_without_truncating_or_panicking_like_cpp() {
+        let mut mgr = PoolMgrLikeCpp::new();
+        mgr.insert_or_replace_group_like_cpp(
+            PoolMemberKindLikeCpp::Creature,
+            10,
+            group_with_one(PoolMemberKindLikeCpp::Creature, 10, 101),
+        )
+        .unwrap();
+        mgr.add_auto_spawn_pool_like_cpp(571, 10);
+        let mut spawns = SpawnedPoolDataLikeCpp::new();
+
+        let plan = mgr.init_pools_for_map_plan_like_cpp(
+            571,
+            &mut spawns,
+            |_, _| 0.0,
+            choose_first_indices,
+        );
+
+        assert_eq!(plan.pools, Vec::<PoolSpawnPoolPlanLikeCpp>::new());
+        assert_eq!(plan.attempted(), 1);
+        assert_eq!(plan.error_count(), 1);
+        assert_eq!(plan.errors[0].pool_id, Some(10));
+        assert_eq!(
+            plan.errors[0].error,
+            PoolInitForMapErrorKindLikeCpp::PoolPlan(PoolMgrPlanErrorLikeCpp::MissingTemplate {
+                pool_id: 10,
+            })
+        );
+        assert!(!spawns.is_spawned_creature_like_cpp(101));
+
+        let overflow = mgr.init_pools_for_map_plan_like_cpp(
+            u32::MAX,
+            &mut spawns,
+            |_, _| 0.0,
+            choose_first_indices,
+        );
+        assert_eq!(overflow.attempted(), 0);
+        assert_eq!(overflow.error_count(), 1);
+        assert_eq!(
+            overflow.errors[0].error,
+            PoolInitForMapErrorKindLikeCpp::MapIdOutOfI32Range
+        );
     }
 
     #[test]
