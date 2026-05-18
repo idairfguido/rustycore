@@ -51,10 +51,10 @@ pub struct LineOfSightOptions {
 /// Endpoint passed to the LOS bridge.
 ///
 /// TrinityCore adjusts object LOS endpoints with `GetCollisionHeight()` and
-/// `GetHitSpherePointFor(...)` before calling `Map::isInLineOfSight`. RustyCore does not yet
-/// have canonical collision-height / hit-sphere ownership in `wow-entities`, so current
-/// endpoint constructors intentionally expose raw positions and mark both adjustments as not
-/// applied. Keep this metadata explicit until the canonical collision model can fill it in.
+/// `GetHitSpherePointFor(...)` before calling `Map::isInLineOfSight`. RustyCore models those
+/// endpoint transforms here when higher layers have hydrated the resolved runtime scalar state
+/// (`WorldObject::collision_height_like_cpp` and combat reach). Metadata is true only when the
+/// endpoint position was actually changed by that mechanism.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub struct LineOfSightEndpoint {
@@ -75,8 +75,9 @@ impl LineOfSightEndpoint {
 
 /// Query passed from `WorldObject` LOS helpers to the map/terrain bridge.
 ///
-/// `target` is populated for `is_within_los_in_map`, allowing a future map bridge to reproduce
-/// TrinityCore's target-aware hit-sphere endpoint adjustment without changing the trait shape.
+/// `from` and `to` are already shaped like TrinityCore's LOS endpoints: collision-height and
+/// hit-sphere transforms are applied in `wow-entities` from resolved runtime scalars, while the
+/// environment remains a consumer that performs terrain/dynamic-tree LOS only.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub struct LineOfSightQuery<'a> {
@@ -88,30 +89,54 @@ pub struct LineOfSightQuery<'a> {
 }
 
 impl<'a> LineOfSightQuery<'a> {
-    pub fn raw_to_position(
+    pub fn to_position_like_cpp(
         source: &'a WorldObject,
         position: Position,
         options: LineOfSightOptions,
     ) -> Self {
+        let to = source.position_with_collision_height_like_cpp(position);
+        let from = if source.is_player() {
+            source.own_position_with_collision_height_like_cpp()
+        } else {
+            source.get_hit_sphere_point_for_like_cpp(to.position)
+        };
+
         Self {
             source,
             target: None,
-            from: LineOfSightEndpoint::raw_position(source.position()),
-            to: LineOfSightEndpoint::raw_position(position),
+            from,
+            to,
             options,
         }
     }
 
-    pub fn raw_to_object(
+    pub fn to_object_like_cpp(
         source: &'a WorldObject,
         target: &'a WorldObject,
         options: LineOfSightOptions,
     ) -> Self {
+        let target_dest = source.position_with_collision_height_like_cpp(source.position());
+        let to = if target.is_player() {
+            target.position_with_explicit_collision_height_like_cpp(
+                target.position(),
+                source.collision_height_like_cpp(),
+            )
+        } else {
+            target.get_hit_sphere_point_for_like_cpp(target_dest.position)
+        };
+
+        let source_dest = target.position_with_collision_height_like_cpp(target.position());
+        let from = if source.is_player() {
+            source.own_position_with_collision_height_like_cpp()
+        } else {
+            source.get_hit_sphere_point_for_like_cpp(source_dest.position)
+        };
+
         Self {
             source,
             target: Some(target),
-            from: LineOfSightEndpoint::raw_position(source.position()),
-            to: LineOfSightEndpoint::raw_position(target.position()),
+            from,
+            to,
             options,
         }
     }
@@ -120,9 +145,9 @@ impl<'a> LineOfSightQuery<'a> {
 /// Bridge for `WorldObject` helpers whose C++ implementation delegates to `Map`/terrain.
 ///
 /// This keeps `wow-entities` independent from `wow-map` while preserving the represented C++
-/// call shape. LOS is still a partial bridge: endpoint collision-height and hit-sphere
-/// adjustment are documented in `LineOfSightEndpoint` metadata but not computed until canonical
-/// collision data exists.
+/// call shape. LOS endpoints are built here with C++ collision-height/hit-sphere semantics when
+/// the resolved runtime scalar state is present; terrain/vmap/dynamic-tree collision remains
+/// owned by the environment implementation.
 pub trait WorldObjectEnvironment {
     fn map_id(&self) -> u32;
     fn instance_id(&self) -> u32;
@@ -735,6 +760,7 @@ pub struct WorldObject {
     zone_id: u32,
     area_id: u32,
     combat_reach: f32,
+    collision_height_like_cpp: f32,
     current_cell: Option<(u32, u32)>,
     smooth_phasing: Option<SmoothPhasingLikeCpp>,
 }
@@ -757,6 +783,7 @@ impl WorldObject {
             zone_id: 0,
             area_id: 0,
             combat_reach: 0.0,
+            collision_height_like_cpp: 0.0,
             current_cell: None,
             smooth_phasing: None,
         }
@@ -947,6 +974,39 @@ impl WorldObject {
 
     pub fn set_combat_reach(&mut self, combat_reach: f32) {
         self.combat_reach = combat_reach.max(0.0);
+    }
+
+    pub const fn collision_height_like_cpp(&self) -> f32 {
+        self.collision_height_like_cpp
+    }
+
+    pub fn set_collision_height_like_cpp(&mut self, height: f32) {
+        self.collision_height_like_cpp = height.max(0.0);
+    }
+
+    pub fn get_hit_sphere_point_for_like_cpp(&self, dest: Position) -> LineOfSightEndpoint {
+        let height = self.collision_height_like_cpp();
+        let mut contact = self.position();
+        contact.z += height;
+
+        let dx = dest.x - contact.x;
+        let dy = dest.y - contact.y;
+        let dz = dest.z - contact.z;
+        let len = (dx * dx + dy * dy + dz * dz).sqrt();
+        let move_dist = dest.distance(&self.position()).min(self.combat_reach());
+        let hit_sphere_adjusted = len > 0.0 && move_dist > 0.0;
+        if hit_sphere_adjusted {
+            contact.x += dx / len * move_dist;
+            contact.y += dy / len * move_dist;
+            contact.z += dz / len * move_dist;
+        }
+        contact.orientation = self.absolute_angle_to_position(contact);
+
+        LineOfSightEndpoint {
+            position: contact,
+            collision_height_adjusted: height > 0.0,
+            hit_sphere_adjusted,
+        }
     }
 
     pub fn exact_distance(&self, other: &Self) -> f32 {
@@ -1182,7 +1242,9 @@ impl WorldObject {
             return false;
         }
 
-        environment.line_of_sight(LineOfSightQuery::raw_to_position(self, position, options))
+        environment.line_of_sight(LineOfSightQuery::to_position_like_cpp(
+            self, position, options,
+        ))
     }
 
     pub fn is_within_los_in_map(
@@ -1193,7 +1255,7 @@ impl WorldObject {
     ) -> bool {
         self.is_in_map(other)
             && self.is_in_environment(environment)
-            && environment.line_of_sight(LineOfSightQuery::raw_to_object(self, other, options))
+            && environment.line_of_sight(LineOfSightQuery::to_object_like_cpp(self, other, options))
     }
 
     pub fn get_map_height(
@@ -1270,6 +1332,34 @@ impl WorldObject {
         global
     }
 
+    fn own_position_with_collision_height_like_cpp(&self) -> LineOfSightEndpoint {
+        self.position_with_collision_height_like_cpp(self.position())
+    }
+
+    fn position_with_collision_height_like_cpp(&self, position: Position) -> LineOfSightEndpoint {
+        self.position_with_explicit_collision_height_like_cpp(
+            position,
+            self.collision_height_like_cpp(),
+        )
+    }
+
+    fn position_with_explicit_collision_height_like_cpp(
+        &self,
+        mut position: Position,
+        height: f32,
+    ) -> LineOfSightEndpoint {
+        let adjusted_height = height.max(0.0);
+        if adjusted_height > 0.0 {
+            position.z += adjusted_height;
+        }
+
+        LineOfSightEndpoint {
+            position,
+            collision_height_adjusted: adjusted_height > 0.0,
+            hit_sphere_adjusted: false,
+        }
+    }
+
     fn is_in_environment(&self, environment: &impl WorldObjectEnvironment) -> bool {
         self.has_current_map
             && self.map_id() == environment.map_id()
@@ -1322,9 +1412,16 @@ fn normalize_orientation(mut orientation: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
 
     use super::*;
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    struct LosSnapshot {
+        from: LineOfSightEndpoint,
+        to: LineOfSightEndpoint,
+        has_target: bool,
+    }
 
     #[derive(Debug, Clone)]
     struct TestEnvironment {
@@ -1336,6 +1433,7 @@ mod tests {
         cinematic: bool,
         los: bool,
         los_calls: Cell<usize>,
+        last_los: RefCell<Option<LosSnapshot>>,
         height: f32,
         floor: f32,
     }
@@ -1351,6 +1449,7 @@ mod tests {
                 cinematic: false,
                 los: true,
                 los_calls: Cell::new(0),
+                last_los: RefCell::new(None),
                 height: INVALID_HEIGHT,
                 floor: INVALID_HEIGHT,
             }
@@ -1384,10 +1483,11 @@ mod tests {
 
         fn line_of_sight(&self, query: LineOfSightQuery<'_>) -> bool {
             self.los_calls.set(self.los_calls.get() + 1);
-            assert!(!query.from.collision_height_adjusted);
-            assert!(!query.from.hit_sphere_adjusted);
-            assert!(!query.to.collision_height_adjusted);
-            assert!(!query.to.hit_sphere_adjusted);
+            *self.last_los.borrow_mut() = Some(LosSnapshot {
+                from: query.from,
+                to: query.to,
+                has_target: query.target.is_some(),
+            });
             self.los
         }
 
@@ -1415,6 +1515,38 @@ mod tests {
         }
     }
 
+    fn assert_position_close(actual: Position, expected: Position) {
+        assert!(
+            (actual.x - expected.x).abs() < 0.0001,
+            "x: {actual:?} != {expected:?}"
+        );
+        assert!(
+            (actual.y - expected.y).abs() < 0.0001,
+            "y: {actual:?} != {expected:?}"
+        );
+        assert!(
+            (actual.z - expected.z).abs() < 0.0001,
+            "z: {actual:?} != {expected:?}"
+        );
+        assert!(
+            (actual.orientation - expected.orientation).abs() < 0.0001,
+            "orientation: {actual:?} != {expected:?}"
+        );
+    }
+
+    fn prepare_in_world(object: &mut WorldObject, position: Position) {
+        object.set_map(571, 1).unwrap();
+        object.object_mut().add_to_world();
+        object.relocate(position);
+    }
+
+    fn last_los(environment: &TestEnvironment) -> LosSnapshot {
+        environment
+            .last_los
+            .borrow()
+            .expect("LOS query should be captured")
+    }
+
     #[test]
     fn world_location_defaults_match_cpp_world_location() {
         let location = WorldLocation::default();
@@ -1439,6 +1571,7 @@ mod tests {
         assert_eq!(object.area_id(), 0);
         assert_eq!(object.db_phase(), 0);
         assert_eq!(object.combat_reach(), 0.0);
+        assert_eq!(object.collision_height_like_cpp(), 0.0);
         assert_eq!(object.static_floor_z(), INVALID_HEIGHT);
         assert_eq!(object.current_cell(), None);
         assert!(object.smooth_phasing_like_cpp().is_none());
@@ -1824,6 +1957,128 @@ mod tests {
         };
         assert!(source.is_within_los_in_map(&target, &environment, LineOfSightOptions::default()));
         assert_eq!(environment.los_calls.get(), 2);
+    }
+
+    #[test]
+    fn base_world_object_default_los_endpoints_remain_raw_without_adjustments() {
+        let environment = TestEnvironment::default();
+        let mut source = WorldObject::new(false, TypeId::Unit, TypeMask::UNIT);
+        prepare_in_world(&mut source, Position::new(1.0, 2.0, 3.0, 0.25));
+
+        assert_eq!(source.collision_height_like_cpp(), 0.0);
+        assert_eq!(source.combat_reach(), 0.0);
+        assert!(source.is_within_los(
+            Position::new(4.0, 6.0, 8.0, 1.0),
+            &environment,
+            LineOfSightOptions::default()
+        ));
+
+        let query = last_los(&environment);
+        assert!(!query.has_target);
+        assert_position_close(query.from.position, Position::new(1.0, 2.0, 3.0, 0.0));
+        assert_position_close(query.to.position, Position::new(4.0, 6.0, 8.0, 1.0));
+        assert!(!query.from.collision_height_adjusted);
+        assert!(!query.from.hit_sphere_adjusted);
+        assert!(!query.to.collision_height_adjusted);
+        assert!(!query.to.hit_sphere_adjusted);
+    }
+
+    #[test]
+    fn point_los_non_player_uses_collision_height_and_hit_sphere_like_cpp() {
+        let environment = TestEnvironment::default();
+        let mut source = WorldObject::new(false, TypeId::Unit, TypeMask::UNIT);
+        prepare_in_world(&mut source, Position::xyz(0.0, 0.0, 0.0));
+        source.set_collision_height_like_cpp(2.0);
+        source.set_combat_reach(1.0);
+
+        assert!(source.is_within_los(
+            Position::xyz(4.0, 0.0, 0.0),
+            &environment,
+            LineOfSightOptions::default()
+        ));
+
+        let query = last_los(&environment);
+        assert_position_close(query.to.position, Position::xyz(4.0, 0.0, 2.0));
+        assert!(query.to.collision_height_adjusted);
+        assert!(!query.to.hit_sphere_adjusted);
+        assert_position_close(query.from.position, Position::xyz(1.0, 0.0, 2.0));
+        assert!(query.from.collision_height_adjusted);
+        assert!(query.from.hit_sphere_adjusted);
+    }
+
+    #[test]
+    fn los_in_map_non_player_endpoints_use_opposite_collision_height_destinations() {
+        let environment = TestEnvironment::default();
+        let mut source = WorldObject::new(false, TypeId::Unit, TypeMask::UNIT);
+        let mut target = WorldObject::new(false, TypeId::Unit, TypeMask::UNIT);
+        prepare_in_world(&mut source, Position::xyz(0.0, 0.0, 0.0));
+        prepare_in_world(&mut target, Position::xyz(10.0, 0.0, 0.0));
+        source.set_collision_height_like_cpp(2.0);
+        source.set_combat_reach(1.0);
+        target.set_collision_height_like_cpp(4.0);
+        target.set_combat_reach(2.0);
+
+        assert!(source.is_within_los_in_map(&target, &environment, LineOfSightOptions::default()));
+
+        let query = last_los(&environment);
+        assert!(query.has_target);
+        assert_position_close(
+            query.from.position,
+            Position::xyz(0.9805807, 0.0, 2.1961162),
+        );
+        assert!(query.from.collision_height_adjusted);
+        assert!(query.from.hit_sphere_adjusted);
+        assert_position_close(
+            query.to.position,
+            Position::new(8.038839, 0.0, 3.6077678, PI),
+        );
+        assert!(query.to.collision_height_adjusted);
+        assert!(query.to.hit_sphere_adjusted);
+    }
+
+    #[test]
+    fn los_in_map_target_player_uses_source_collision_height_cpp_quirk() {
+        let environment = TestEnvironment::default();
+        let mut source = WorldObject::new(false, TypeId::Unit, TypeMask::UNIT);
+        let mut target = WorldObject::new(false, TypeId::Player, TypeMask::PLAYER | TypeMask::UNIT);
+        prepare_in_world(&mut source, Position::xyz(0.0, 0.0, 0.0));
+        prepare_in_world(&mut target, Position::xyz(5.0, 0.0, 10.0));
+        source.set_collision_height_like_cpp(2.0);
+        source.set_combat_reach(0.0);
+        target.set_collision_height_like_cpp(7.0);
+
+        assert!(source.is_within_los_in_map(&target, &environment, LineOfSightOptions::default()));
+
+        let query = last_los(&environment);
+        assert_position_close(query.to.position, Position::xyz(5.0, 0.0, 12.0));
+        assert!(query.to.collision_height_adjusted);
+        assert!(!query.to.hit_sphere_adjusted);
+        assert_position_close(query.from.position, Position::xyz(0.0, 0.0, 2.0));
+        assert!(query.from.collision_height_adjusted);
+        assert!(!query.from.hit_sphere_adjusted);
+    }
+
+    #[test]
+    fn player_source_los_endpoint_uses_position_plus_collision_height_not_hit_sphere() {
+        let environment = TestEnvironment::default();
+        let mut source = WorldObject::new(false, TypeId::Player, TypeMask::PLAYER | TypeMask::UNIT);
+        prepare_in_world(&mut source, Position::xyz(1.0, 2.0, 3.0));
+        source.set_collision_height_like_cpp(2.5);
+        source.set_combat_reach(3.0);
+
+        assert!(source.is_within_los(
+            Position::xyz(11.0, 2.0, 3.0),
+            &environment,
+            LineOfSightOptions::default()
+        ));
+
+        let query = last_los(&environment);
+        assert_position_close(query.from.position, Position::xyz(1.0, 2.0, 5.5));
+        assert!(query.from.collision_height_adjusted);
+        assert!(!query.from.hit_sphere_adjusted);
+        assert_position_close(query.to.position, Position::xyz(11.0, 2.0, 5.5));
+        assert!(query.to.collision_height_adjusted);
+        assert!(!query.to.hit_sphere_adjusted);
     }
 
     #[test]

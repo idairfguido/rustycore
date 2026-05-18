@@ -319,6 +319,14 @@ impl Unit {
         &mut self.world
     }
 
+    pub const fn collision_height_like_cpp(&self) -> f32 {
+        self.world.collision_height_like_cpp()
+    }
+
+    pub fn set_collision_height_like_cpp(&mut self, height: f32) {
+        self.world.set_collision_height_like_cpp(height);
+    }
+
     pub const fn visibility_detection_like_cpp(&self) -> &UnitVisibilityDetectionStateLikeCpp {
         &self.visibility_detection
     }
@@ -1221,9 +1229,11 @@ impl Unit {
     }
 
     pub fn set_combat_reach(&mut self, reach: f32) {
+        let reach = reach.max(0.0);
         self.set_f32_field(UNIT_DATA_COMBAT_REACH_BIT, reach, |data| {
             &mut data.combat_reach
         });
+        self.world.set_combat_reach(reach);
     }
 
     pub fn set_display_id(&mut self, display_id: u32, set_native: bool) {
@@ -1602,6 +1612,8 @@ mod tests {
         assert_eq!(unit.emote_state_like_cpp(), 0);
         assert_eq!(unit.weapon_damage(WeaponAttackType::BaseAttack), [1.0, 2.0]);
         assert_eq!(unit.speed_rate(), [1.0; MAX_MOVE_TYPE]);
+        assert_eq!(unit.collision_height_like_cpp(), 0.0);
+        assert_eq!(unit.world().collision_height_like_cpp(), 0.0);
         assert!(unit.subsystems().auras.owned_auras.is_empty());
         assert!(unit.subsystems().auras.applied_auras.is_empty());
         assert!(unit.subsystems().auras.interruptible_auras.is_empty());
@@ -2908,6 +2920,32 @@ mod tests {
     }
 
     #[test]
+    fn unit_collision_height_setter_delegates_to_embedded_world_object() {
+        let mut unit = Unit::new(true);
+
+        unit.set_collision_height_like_cpp(2.03128);
+        assert_eq!(unit.collision_height_like_cpp(), 2.03128);
+        assert_eq!(unit.world().collision_height_like_cpp(), 2.03128);
+
+        unit.set_collision_height_like_cpp(-10.0);
+        assert_eq!(unit.collision_height_like_cpp(), 0.0);
+        assert_eq!(unit.world().collision_height_like_cpp(), 0.0);
+    }
+
+    #[test]
+    fn unit_set_combat_reach_keeps_unit_data_and_world_object_coherent() {
+        let mut unit = Unit::new(true);
+
+        unit.set_combat_reach(1.75);
+        assert_eq!(unit.data().combat_reach, 1.75);
+        assert_eq!(unit.world().combat_reach(), 1.75);
+
+        unit.set_combat_reach(-1.0);
+        assert_eq!(unit.data().combat_reach, 0.0);
+        assert_eq!(unit.world().combat_reach(), 0.0);
+    }
+
+    #[test]
     fn display_level_faction_and_reach_mark_unitdata_bits() {
         let mut unit = Unit::new(true);
 
@@ -2931,6 +2969,7 @@ mod tests {
         assert_eq!(unit.data().faction_template, 35);
         assert_eq!(unit.data().bounding_radius, 0.5);
         assert_eq!(unit.data().combat_reach, 1.5);
+        assert_eq!(unit.world().combat_reach(), 1.5);
         assert_eq!(unit.data().display_id, 1234);
         assert_eq!(unit.data().display_scale, DEFAULT_PLAYER_DISPLAY_SCALE);
         assert_eq!(unit.data().native_display_id, 1234);

@@ -8,8 +8,8 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 
 - Branch: `develop`
 - Current branch state before #380 finalization: `develop...origin/develop [ahead 34]` with a clean tree.
-- Current branch state after #380 local commit: `develop...origin/develop [ahead 35]`.
-- Latest completed local slice: `#NEXT.R8.ENTITIES.380 — Map como WorldObjectEnvironment con hooks explícitos de terreno/LOS`.
+- Current branch state after #381 local commit: `develop...origin/develop [ahead 36]`.
+- Latest completed local slice: `#NEXT.R8.ENTITIES.381 — WorldObject LOS endpoints: collision-height + hit-sphere parity` (review `APROBADO`, focused validation passed, committed locally at current HEAD).
 - No push/install/restart performed.
 
 ## Critical Rules
@@ -22,13 +22,18 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 
 ## Progress Estimate
 
-Overall core migration estimate during #380 `Map como WorldObjectEnvironment con hooks explícitos de terreno/LOS`: `~87.4%`.
+Overall core migration estimate after #381 `WorldObject LOS endpoints: collision-height + hit-sphere parity`: `~87.7%`.
 
-This remains intentionally below the R8 TSV row-completion ratio because heavy runtime ownership gaps remain: full live `ProcessRespawns` branches beyond represented safe zero-delete/reschedule branches, real `PoolMgr`, `DoRespawn` entity creation/`LoadFromDB`, corpse load, AreaTrigger Create/Load/Update runtime, templates/spawns, AI, caster unregister, unit enter/exit, movement/visibility/transport, real terrain/vmap/dynamic-tree collision, exact collision-height/hit-sphere endpoint adjustment, visibility overrides/cinematic/sight runtime, full entity-specific `AddToWorld`/`RemoveFromWorld` side effects beyond the object/spawn-id store, real dynamic escort config/runtime feeding the closure, grid/session fanout, ObjectAccessor ownership, DB save/delete coverage beyond current seams, and broader Unit/Player inventory/auras/threat/motion/update-field work.
+This remains intentionally below the R8 TSV row-completion ratio because heavy runtime ownership gaps remain: full live `ProcessRespawns` branches beyond represented safe zero-delete/reschedule branches, real `PoolMgr`, `DoRespawn` entity creation/`LoadFromDB`, corpse load, AreaTrigger Create/Load/Update runtime, templates/spawns, AI, caster unregister, unit enter/exit, movement/visibility/transport, real terrain/vmap/dynamic-tree collision, transports, visibility overrides/cinematic/sight runtime, full entity-specific `AddToWorld`/`RemoveFromWorld` side effects beyond the object/spawn-id store, real dynamic escort config/runtime feeding the closure, grid/session fanout, ObjectAccessor ownership, DB save/delete coverage beyond current seams, and broader Unit/Player inventory/auras/threat/motion/update-field work.
 
-Manual test point: no new client-facing manual milestone from #380; this is a map-to-world-object environment hook integration slice, validated with focused unit checks.
+Manual test point: no new client-facing manual milestone from #381; this is a canonical LOS endpoint-construction slice in `wow-entities`, validated with focused unit checks.
 
 ## Most Recent Completed Slices
+
+- `#NEXT.R8.ENTITIES.381` (completed; review `APROBADO`; focused validation passed; committed locally at current HEAD)
+  - Adds resolved runtime `WorldObject::collision_height_like_cpp` state (base default `0.0`) plus C++-shaped LOS endpoint construction for `IsWithinLOS`, `IsWithinLOSInMap`, and `GetHitSpherePointFor`.
+  - `Unit::set_collision_height_like_cpp` hydrates the embedded `WorldObject` scalar, and `Unit::set_combat_reach` keeps `UnitData` and embedded `WorldObject` reach coherent for hit-sphere/distance helpers.
+  - This is bounded endpoint parity only; it does not close #NEXT.R8.ENTITIES.005. Terrain/vmap/dynamic-tree collision, transports, visibility overrides/cinematic/sight runtime, DB2/model collision-height hydration, and broader Unit/Player runtime remain gaps.
 
 - `#NEXT.R8.ENTITIES.380`
   - Adds `MapWorldObjectEnvironment` as the explicit terrain/dynamic-tree hook for `Map` when it implements `wow_entities::WorldObjectEnvironment`.
@@ -98,6 +103,30 @@ Previous completed local slice:
   - Adds linked respawn metadata/load/store and the pure linked-time guard dependency for `Map::CheckRespawn`.
   - Source-of-truth runtime timers remain map-owned `wow_map::Map` / `RespawnStoreLikeCpp`; linked respawn metadata is loaded DB -> validated canonical metadata -> read-only linked store.
   - Does not implement full `CheckRespawn`/`ProcessRespawns`, PoolMgr, `DoRespawn`, DB save/delete, live entity creation or fanout.
+
+## C++ Anchors for #381
+
+- `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.h:146` — `DEFAULT_COLLISION_HEIGHT = 2.03128f`; not used as a blanket `wow-entities` fallback.
+- `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.h:496` — base `WorldObject::GetCombatReach() const { return 0.0f; }`.
+- `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.h:557-560` — declarations for `IsWithinLOS`, `IsWithinLOSInMap`, and `GetHitSpherePointFor`.
+- `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.h:748-752` — base `GetCollisionHeight() const { return 0.0f; }` and `GetMapHeight`.
+- `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.cpp:1158-1165` — `WorldObject::GetHitSpherePointFor` uses position plus collision height, direction-or-zero toward dest, movement limited by `min(dest.GetExactDist(GetPosition()), GetCombatReach())`, and absolute angle to contact.
+- `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.cpp:1167-1185` — `IsWithinLOS(point)` adds source collision height to target z; player source uses raw position plus collision height; non-player source uses hit sphere; not-in-world returns true.
+- `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.cpp:1187-1210` — `IsWithinLOSInMap(obj)` branch order and endpoint construction, including target-player z using source `GetCollisionHeight()`.
+- `/home/server/woltk-trinity-legacy/src/server/game/Entities/Unit/Unit.h:1743` and `/home/server/woltk-trinity-legacy/src/server/game/Entities/Unit/Unit.cpp:13571-13596` — `Unit::GetCollisionHeight()` override is DB2/model/mount-derived with default fallback; Rust hydration is external to `wow-entities`.
+
+## Expected Validation for #381
+
+```bash
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo fmt --check
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo test -p wow-entities los
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo test -p wow-entities collision_height
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo check -p world-server
+git diff --check
+git status --short --branch
+```
+
+Expected remaining gaps: #381 completes only canonical LOS endpoint construction from resolved runtime scalar state. It does not close #NEXT.R8.ENTITIES.005; real terrain/vmap/dynamic-tree collision, transports, DB2/model collision-height hydration, visibility overrides/cinematic/sight runtime and broader object ownership remain pending.
 
 ## C++ Anchors for #380
 
