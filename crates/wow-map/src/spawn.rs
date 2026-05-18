@@ -727,6 +727,285 @@ fn remove_spawn_from_cells(
     }
 }
 
+/// C++ `Map::RespawnInfo` equivalent owned by the map respawn store.
+///
+/// This is a dependency slice for future live `Map::ProcessRespawns` wiring: it
+/// stores and plans respawn timers, but intentionally does not execute PoolMgr,
+/// `DoRespawn`, DB persistence/delete, linked-respawn checks, or entity loading.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RespawnInfoLikeCpp {
+    pub object_type: SpawnObjectType,
+    pub spawn_id: SpawnId,
+    pub entry: u32,
+    pub respawn_time: i64,
+    pub grid_id: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddRespawnInfoOutcomeLikeCpp {
+    Inserted,
+    ReplacedExisting,
+    RejectedZeroSpawnId,
+    RejectedUnsupportedType,
+    RejectedExistingSoonerOrEqual,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckRespawnOutcomeLikeCpp {
+    Allowed,
+    Blocked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProcessRespawnActionLikeCpp {
+    UpdatePool {
+        pool_id: u32,
+        object_type: SpawnObjectType,
+        spawn_id: SpawnId,
+    },
+    DoRespawn {
+        object_type: SpawnObjectType,
+        spawn_id: SpawnId,
+        grid_id: u32,
+    },
+    DeleteRespawn {
+        object_type: SpawnObjectType,
+        spawn_id: SpawnId,
+    },
+    RescheduleAndSave {
+        info: RespawnInfoLikeCpp,
+    },
+    InvalidRescheduleNotFuture {
+        info: RespawnInfoLikeCpp,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RespawnQueueKey {
+    respawn_time: i64,
+    spawn_id: SpawnId,
+    object_type: SpawnObjectType,
+}
+
+impl RespawnQueueKey {
+    const fn from_info(info: &RespawnInfoLikeCpp) -> Self {
+        Self {
+            respawn_time: info.respawn_time,
+            spawn_id: info.spawn_id,
+            object_type: info.object_type,
+        }
+    }
+}
+
+impl Ord for RespawnQueueKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.respawn_time
+            .cmp(&other.respawn_time)
+            // Trinity's heap comparator makes larger spawn ids win equal-time ties.
+            .then_with(|| other.spawn_id.cmp(&self.spawn_id))
+            // Same spawn id can exist for different types; C++ then orders larger type first.
+            .then_with(|| other.object_type.cmp(&self.object_type))
+    }
+}
+
+impl PartialOrd for RespawnQueueKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RespawnStoreLikeCpp {
+    creature_respawn_times_by_spawn_id: BTreeMap<SpawnId, RespawnInfoLikeCpp>,
+    gameobject_respawn_times_by_spawn_id: BTreeMap<SpawnId, RespawnInfoLikeCpp>,
+    respawn_times: BTreeSet<RespawnQueueKey>,
+}
+
+impl RespawnStoreLikeCpp {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add_respawn_info_like_cpp(
+        &mut self,
+        info: RespawnInfoLikeCpp,
+    ) -> AddRespawnInfoOutcomeLikeCpp {
+        if info.spawn_id == 0 {
+            return AddRespawnInfoOutcomeLikeCpp::RejectedZeroSpawnId;
+        }
+        if !Self::has_respawn_map_like_cpp(info.object_type) {
+            return AddRespawnInfoOutcomeLikeCpp::RejectedUnsupportedType;
+        }
+
+        let existing = self
+            .get_respawn_info_like_cpp(info.object_type, info.spawn_id)
+            .cloned();
+        let replaced_existing = if let Some(existing) = existing {
+            if info.respawn_time <= existing.respawn_time {
+                self.remove_respawn_time_like_cpp(info.object_type, info.spawn_id);
+                true
+            } else {
+                return AddRespawnInfoOutcomeLikeCpp::RejectedExistingSoonerOrEqual;
+            }
+        } else {
+            false
+        };
+
+        self.respawn_times.insert(RespawnQueueKey::from_info(&info));
+        let Some(by_spawn_id) = self.map_mut_for_type_like_cpp(info.object_type) else {
+            self.respawn_times
+                .remove(&RespawnQueueKey::from_info(&info));
+            return AddRespawnInfoOutcomeLikeCpp::RejectedUnsupportedType;
+        };
+        by_spawn_id.insert(info.spawn_id, info);
+
+        if replaced_existing {
+            AddRespawnInfoOutcomeLikeCpp::ReplacedExisting
+        } else {
+            AddRespawnInfoOutcomeLikeCpp::Inserted
+        }
+    }
+
+    pub fn get_respawn_time_like_cpp(
+        &self,
+        object_type: SpawnObjectType,
+        spawn_id: SpawnId,
+    ) -> i64 {
+        self.get_respawn_info_like_cpp(object_type, spawn_id)
+            .map_or(0, |info| info.respawn_time)
+    }
+
+    pub fn get_respawn_info_like_cpp(
+        &self,
+        object_type: SpawnObjectType,
+        spawn_id: SpawnId,
+    ) -> Option<&RespawnInfoLikeCpp> {
+        self.map_for_type_like_cpp(object_type)
+            .and_then(|map| map.get(&spawn_id))
+    }
+
+    pub fn remove_respawn_time_like_cpp(
+        &mut self,
+        object_type: SpawnObjectType,
+        spawn_id: SpawnId,
+    ) -> Option<RespawnInfoLikeCpp> {
+        let info = self
+            .map_mut_for_type_like_cpp(object_type)
+            .and_then(|map| map.remove(&spawn_id))?;
+        self.respawn_times
+            .remove(&RespawnQueueKey::from_info(&info));
+        Some(info)
+    }
+
+    pub fn unload_all_respawn_infos_like_cpp(&mut self) {
+        self.respawn_times.clear();
+        self.creature_respawn_times_by_spawn_id.clear();
+        self.gameobject_respawn_times_by_spawn_id.clear();
+    }
+
+    pub fn respawn_timer_keys_like_cpp(
+        &self,
+    ) -> impl Iterator<Item = (SpawnObjectType, SpawnId)> + '_ {
+        self.respawn_times
+            .iter()
+            .map(|key| (key.object_type, key.spawn_id))
+    }
+
+    pub fn process_due_respawns_like_cpp(
+        &mut self,
+        now: i64,
+        mut is_part_of_pool: impl FnMut(SpawnObjectType, SpawnId) -> Option<u32>,
+        mut check_respawn: impl FnMut(&mut RespawnInfoLikeCpp) -> CheckRespawnOutcomeLikeCpp,
+    ) -> Vec<ProcessRespawnActionLikeCpp> {
+        let mut actions = Vec::new();
+
+        while let Some(next_key) = self.respawn_times.iter().next().copied() {
+            if now < next_key.respawn_time {
+                break;
+            }
+
+            let Some(mut info) =
+                self.remove_respawn_time_like_cpp(next_key.object_type, next_key.spawn_id)
+            else {
+                self.respawn_times.remove(&next_key);
+                continue;
+            };
+
+            if let Some(pool_id) = is_part_of_pool(info.object_type, info.spawn_id) {
+                actions.push(ProcessRespawnActionLikeCpp::UpdatePool {
+                    pool_id,
+                    object_type: info.object_type,
+                    spawn_id: info.spawn_id,
+                });
+                continue;
+            }
+
+            match check_respawn(&mut info) {
+                CheckRespawnOutcomeLikeCpp::Allowed => {
+                    actions.push(ProcessRespawnActionLikeCpp::DoRespawn {
+                        object_type: info.object_type,
+                        spawn_id: info.spawn_id,
+                        grid_id: info.grid_id,
+                    });
+                }
+                CheckRespawnOutcomeLikeCpp::Blocked if info.respawn_time == 0 => {
+                    actions.push(ProcessRespawnActionLikeCpp::DeleteRespawn {
+                        object_type: info.object_type,
+                        spawn_id: info.spawn_id,
+                    });
+                }
+                CheckRespawnOutcomeLikeCpp::Blocked if now < info.respawn_time => {
+                    let stored_info = info.clone();
+                    let outcome = self.add_respawn_info_like_cpp(info);
+                    debug_assert!(matches!(outcome, AddRespawnInfoOutcomeLikeCpp::Inserted));
+                    actions
+                        .push(ProcessRespawnActionLikeCpp::RescheduleAndSave { info: stored_info });
+                }
+                CheckRespawnOutcomeLikeCpp::Blocked => {
+                    let stored_info = info.clone();
+                    let outcome = self.add_respawn_info_like_cpp(info);
+                    debug_assert!(matches!(outcome, AddRespawnInfoOutcomeLikeCpp::Inserted));
+                    actions.push(ProcessRespawnActionLikeCpp::InvalidRescheduleNotFuture {
+                        info: stored_info,
+                    });
+                    break;
+                }
+            }
+        }
+
+        actions
+    }
+
+    const fn has_respawn_map_like_cpp(object_type: SpawnObjectType) -> bool {
+        matches!(
+            object_type,
+            SpawnObjectType::Creature | SpawnObjectType::GameObject
+        )
+    }
+
+    fn map_for_type_like_cpp(
+        &self,
+        object_type: SpawnObjectType,
+    ) -> Option<&BTreeMap<SpawnId, RespawnInfoLikeCpp>> {
+        match object_type {
+            SpawnObjectType::Creature => Some(&self.creature_respawn_times_by_spawn_id),
+            SpawnObjectType::GameObject => Some(&self.gameobject_respawn_times_by_spawn_id),
+            SpawnObjectType::AreaTrigger => None,
+        }
+    }
+
+    fn map_mut_for_type_like_cpp(
+        &mut self,
+        object_type: SpawnObjectType,
+    ) -> Option<&mut BTreeMap<SpawnId, RespawnInfoLikeCpp>> {
+        match object_type {
+            SpawnObjectType::Creature => Some(&mut self.creature_respawn_times_by_spawn_id),
+            SpawnObjectType::GameObject => Some(&mut self.gameobject_respawn_times_by_spawn_id),
+            SpawnObjectType::AreaTrigger => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -750,6 +1029,296 @@ mod tests {
             script_id: 0,
             string_id: String::new(),
         }
+    }
+
+    fn respawn_info(
+        object_type: SpawnObjectType,
+        spawn_id: SpawnId,
+        respawn_time: i64,
+    ) -> RespawnInfoLikeCpp {
+        RespawnInfoLikeCpp {
+            object_type,
+            spawn_id,
+            entry: 42,
+            respawn_time,
+            grid_id: 7,
+        }
+    }
+
+    #[test]
+    fn respawn_info_rejects_area_trigger_and_zero_spawn_id_like_cpp() {
+        let mut store = RespawnStoreLikeCpp::new();
+
+        assert_eq!(
+            store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::AreaTrigger, 10, 100)),
+            AddRespawnInfoOutcomeLikeCpp::RejectedUnsupportedType
+        );
+        assert_eq!(
+            store.get_respawn_time_like_cpp(SpawnObjectType::AreaTrigger, 10),
+            0
+        );
+        assert_eq!(
+            store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 0, 100)),
+            AddRespawnInfoOutcomeLikeCpp::RejectedZeroSpawnId
+        );
+        assert!(store.respawn_timer_keys_like_cpp().next().is_none());
+    }
+
+    #[test]
+    fn respawn_info_add_replace_and_later_reject_follow_cpp_ordering() {
+        let mut store = RespawnStoreLikeCpp::new();
+
+        assert_eq!(
+            store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 10, 200)),
+            AddRespawnInfoOutcomeLikeCpp::Inserted
+        );
+        assert_eq!(
+            store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 10, 250)),
+            AddRespawnInfoOutcomeLikeCpp::RejectedExistingSoonerOrEqual
+        );
+        assert_eq!(
+            store.get_respawn_time_like_cpp(SpawnObjectType::Creature, 10),
+            200
+        );
+
+        assert_eq!(
+            store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 10, 200)),
+            AddRespawnInfoOutcomeLikeCpp::ReplacedExisting
+        );
+        assert_eq!(
+            store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 10, 150)),
+            AddRespawnInfoOutcomeLikeCpp::ReplacedExisting
+        );
+        assert_eq!(
+            store.get_respawn_time_like_cpp(SpawnObjectType::Creature, 10),
+            150
+        );
+        assert_eq!(
+            store.respawn_timer_keys_like_cpp().collect::<Vec<_>>(),
+            vec![(SpawnObjectType::Creature, 10)]
+        );
+    }
+
+    #[test]
+    fn respawn_info_remove_and_unload_keep_maps_and_queue_coherent() {
+        let mut store = RespawnStoreLikeCpp::new();
+        store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 10, 100));
+        store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::GameObject, 20, 90));
+
+        let removed = store.remove_respawn_time_like_cpp(SpawnObjectType::Creature, 10);
+        assert_eq!(removed.map(|info| info.spawn_id), Some(10));
+        assert_eq!(
+            store.get_respawn_time_like_cpp(SpawnObjectType::Creature, 10),
+            0
+        );
+        assert_eq!(
+            store.respawn_timer_keys_like_cpp().collect::<Vec<_>>(),
+            vec![(SpawnObjectType::GameObject, 20)]
+        );
+
+        store.unload_all_respawn_infos_like_cpp();
+        assert_eq!(
+            store.get_respawn_time_like_cpp(SpawnObjectType::GameObject, 20),
+            0
+        );
+        assert!(store.respawn_timer_keys_like_cpp().next().is_none());
+    }
+
+    #[test]
+    fn process_respawns_stops_at_first_future_timer_like_cpp() {
+        let mut store = RespawnStoreLikeCpp::new();
+        store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 1, 200));
+        store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 2, 100));
+
+        let actions = store.process_due_respawns_like_cpp(
+            99,
+            |_, _| None,
+            |_| CheckRespawnOutcomeLikeCpp::Allowed,
+        );
+
+        assert!(actions.is_empty());
+        assert_eq!(store.respawn_timer_keys_like_cpp().count(), 2);
+    }
+
+    #[test]
+    fn process_respawns_equal_time_ties_match_cpp_spawn_and_type_priority() {
+        let mut store = RespawnStoreLikeCpp::new();
+        store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 5, 100));
+        store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::GameObject, 5, 100));
+        store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 6, 100));
+        store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 1, 90));
+
+        let actions = store.process_due_respawns_like_cpp(
+            100,
+            |_, _| None,
+            |_| CheckRespawnOutcomeLikeCpp::Allowed,
+        );
+
+        assert_eq!(
+            actions,
+            vec![
+                ProcessRespawnActionLikeCpp::DoRespawn {
+                    object_type: SpawnObjectType::Creature,
+                    spawn_id: 1,
+                    grid_id: 7,
+                },
+                ProcessRespawnActionLikeCpp::DoRespawn {
+                    object_type: SpawnObjectType::Creature,
+                    spawn_id: 6,
+                    grid_id: 7,
+                },
+                ProcessRespawnActionLikeCpp::DoRespawn {
+                    object_type: SpawnObjectType::GameObject,
+                    spawn_id: 5,
+                    grid_id: 7,
+                },
+                ProcessRespawnActionLikeCpp::DoRespawn {
+                    object_type: SpawnObjectType::Creature,
+                    spawn_id: 5,
+                    grid_id: 7,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn process_respawns_pool_branch_deletes_before_check_respawn_like_cpp() {
+        let mut store = RespawnStoreLikeCpp::new();
+        store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 1, 100));
+        let mut check_called = false;
+
+        let actions = store.process_due_respawns_like_cpp(
+            100,
+            |object_type, spawn_id| {
+                assert_eq!(object_type, SpawnObjectType::Creature);
+                assert_eq!(spawn_id, 1);
+                Some(55)
+            },
+            |_| {
+                check_called = true;
+                CheckRespawnOutcomeLikeCpp::Allowed
+            },
+        );
+
+        assert_eq!(
+            actions,
+            vec![ProcessRespawnActionLikeCpp::UpdatePool {
+                pool_id: 55,
+                object_type: SpawnObjectType::Creature,
+                spawn_id: 1,
+            }]
+        );
+        assert!(!check_called);
+        assert_eq!(
+            store.get_respawn_time_like_cpp(SpawnObjectType::Creature, 1),
+            0
+        );
+    }
+
+    #[test]
+    fn process_respawns_check_true_deletes_and_plans_do_respawn_like_cpp() {
+        let mut store = RespawnStoreLikeCpp::new();
+        store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::GameObject, 2, 100));
+
+        let actions = store.process_due_respawns_like_cpp(
+            100,
+            |_, _| None,
+            |_| CheckRespawnOutcomeLikeCpp::Allowed,
+        );
+
+        assert_eq!(
+            actions,
+            vec![ProcessRespawnActionLikeCpp::DoRespawn {
+                object_type: SpawnObjectType::GameObject,
+                spawn_id: 2,
+                grid_id: 7,
+            }]
+        );
+        assert_eq!(
+            store.get_respawn_time_like_cpp(SpawnObjectType::GameObject, 2),
+            0
+        );
+    }
+
+    #[test]
+    fn process_respawns_check_false_zero_deletes_entry_like_cpp() {
+        let mut store = RespawnStoreLikeCpp::new();
+        store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 3, 100));
+
+        let actions = store.process_due_respawns_like_cpp(
+            100,
+            |_, _| None,
+            |info| {
+                info.respawn_time = 0;
+                CheckRespawnOutcomeLikeCpp::Blocked
+            },
+        );
+
+        assert_eq!(
+            actions,
+            vec![ProcessRespawnActionLikeCpp::DeleteRespawn {
+                object_type: SpawnObjectType::Creature,
+                spawn_id: 3,
+            }]
+        );
+        assert_eq!(
+            store.get_respawn_time_like_cpp(SpawnObjectType::Creature, 3),
+            0
+        );
+    }
+
+    #[test]
+    fn process_respawns_check_false_future_reschedules_and_saves_like_cpp() {
+        let mut store = RespawnStoreLikeCpp::new();
+        store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 4, 100));
+
+        let actions = store.process_due_respawns_like_cpp(
+            100,
+            |_, _| None,
+            |info| {
+                info.respawn_time = 150;
+                CheckRespawnOutcomeLikeCpp::Blocked
+            },
+        );
+
+        assert_eq!(
+            actions,
+            vec![ProcessRespawnActionLikeCpp::RescheduleAndSave {
+                info: respawn_info(SpawnObjectType::Creature, 4, 150),
+            }]
+        );
+        assert_eq!(
+            store.get_respawn_time_like_cpp(SpawnObjectType::Creature, 4),
+            150
+        );
+    }
+
+    #[test]
+    fn process_respawns_invalid_non_future_reschedule_reports_and_does_not_loop() {
+        let mut store = RespawnStoreLikeCpp::new();
+        store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 5, 100));
+        store.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 6, 100));
+
+        let actions = store.process_due_respawns_like_cpp(
+            100,
+            |_, _| None,
+            |info| {
+                info.respawn_time = 99;
+                CheckRespawnOutcomeLikeCpp::Blocked
+            },
+        );
+
+        assert_eq!(
+            actions,
+            vec![ProcessRespawnActionLikeCpp::InvalidRescheduleNotFuture {
+                info: respawn_info(SpawnObjectType::Creature, 6, 99),
+            }]
+        );
+        assert_eq!(
+            store.get_respawn_time_like_cpp(SpawnObjectType::Creature, 6),
+            99
+        );
+        assert_eq!(store.respawn_timer_keys_like_cpp().count(), 2);
     }
 
     #[test]

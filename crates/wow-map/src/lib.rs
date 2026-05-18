@@ -55,9 +55,11 @@ pub use personal_phase::{
     PhaseRef, PhaseShift, PlayerPersonalPhasesTracker,
 };
 pub use spawn::{
-    CellSpawnGuids, Difficulty, PersonalSpawnMapKey, SpawnData, SpawnGridLoadStateLikeCpp,
-    SpawnGroupActiveChange, SpawnGroupFlags, SpawnGroupRuntimeState, SpawnGroupTemplateData,
-    SpawnId, SpawnMapKey, SpawnObjectType, SpawnPosition, SpawnStore,
+    AddRespawnInfoOutcomeLikeCpp, CellSpawnGuids, CheckRespawnOutcomeLikeCpp, Difficulty,
+    PersonalSpawnMapKey, ProcessRespawnActionLikeCpp, RespawnInfoLikeCpp, RespawnStoreLikeCpp,
+    SpawnData, SpawnGridLoadStateLikeCpp, SpawnGroupActiveChange, SpawnGroupFlags,
+    SpawnGroupRuntimeState, SpawnGroupTemplateData, SpawnId, SpawnMapKey, SpawnObjectType,
+    SpawnPosition, SpawnStore,
 };
 
 /// Key used by `MapManager` for world and instance map lookup.
