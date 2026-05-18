@@ -59,7 +59,7 @@ pub use personal_phase::{
 };
 pub use pool::{
     PoolGroupLikeCpp, PoolMemberKindLikeCpp, PoolObjectLikeCpp, PoolRelationRemovalLikeCpp,
-    PoolTemplateDataLikeCpp,
+    PoolSpawnObjectActionLikeCpp, PoolSpawnObjectPlanLikeCpp, PoolTemplateDataLikeCpp,
 };
 pub use spawn::{
     AddRespawnInfoOutcomeLikeCpp, CellSpawnGuids, CheckRespawnOutcomeLikeCpp,

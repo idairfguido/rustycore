@@ -10,8 +10,10 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 - Current branch state before #380 finalization: `develop...origin/develop [ahead 34]` with a clean tree.
 - Current branch state after #382 local commit: `develop...origin/develop [ahead 37]`.
 - Current branch state after #383 local commit: `develop...origin/develop [ahead 38]`.
-- Latest completed slice prepared in this handoff: `#NEXT.R8.ENTITIES.384 — PoolGroup pure data/chance foundation` (review/validation complete for this slice).
-- No push/install/restart performed for #383 or #384.
+- Current branch state after #384 local commit: `develop...origin/develop [ahead 39]`.
+- Current branch state after #385 local commit: `develop...origin/develop [ahead 40]`.
+- Latest completed slice prepared in this handoff: `#NEXT.R8.ENTITIES.385 — PoolGroup SpawnObject deterministic selection plan + map-owned spawned-pool state mutations` (review `APROBADO`; focused validation complete for this slice).
+- No push/install/restart performed for #383, #384, or #385.
 
 ## Critical Rules
 
@@ -23,13 +25,18 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 
 ## Progress Estimate
 
-Overall core migration estimate after #384 `PoolGroup pure data/chance foundation`: `~88.2%`.
+Overall core migration estimate after #385 `PoolGroup SpawnObject deterministic selection plan + map-owned spawned-pool state mutations`: `~88.3%`.
 
-This remains intentionally below the R8 TSV row-completion ratio because heavy runtime ownership gaps remain: real `PoolMgr::SpawnPool`/`DespawnPool` with chance/RNG and recursive subpools, full live `ProcessRespawns` pool and `DoRespawn` branches, entity creation/`LoadFromDB`, corpse load, AreaTrigger Create/Load/Update runtime, templates/spawns, AI, caster unregister, unit enter/exit, movement/visibility/transport, real terrain/vmap/dynamic-tree collision, transports, visibility overrides/cinematic/sight runtime, full entity-specific `AddToWorld`/`RemoveFromWorld` side effects beyond the object/spawn-id store, real dynamic escort config/runtime feeding the closure, grid/session fanout, ObjectAccessor ownership, DB save/delete coverage beyond current seams, and broader Unit/Player inventory/auras/threat/motion/update-field work.
+This remains intentionally below the R8 TSV row-completion ratio because heavy runtime ownership gaps remain: real `PoolMgr::SpawnPool`/`DespawnPool` orchestration, live chance/RNG integration, recursive subpool live integration, full live `ProcessRespawns` pool and `DoRespawn` branches, entity creation/`LoadFromDB`, corpse load, AreaTrigger Create/Load/Update runtime, templates/spawns, AI, caster unregister, unit enter/exit, movement/visibility/transport, real terrain/vmap/dynamic-tree collision, transports, visibility overrides/cinematic/sight runtime, full entity-specific `AddToWorld`/`RemoveFromWorld` side effects beyond the object/spawn-id store, real dynamic escort config/runtime feeding the closure, grid/session fanout, ObjectAccessor ownership, DB save/delete coverage beyond current seams, and broader Unit/Player inventory/auras/threat/motion/update-field work.
 
-Manual test point: no new client-facing manual milestone from #384; this is a pure `PoolGroup`/pool data foundation for later PoolMgr ownership, validated with focused `wow-map` unit checks.
+Manual test point: no new client-facing manual milestone from #385; this is a deterministic `PoolGroup::SpawnObject` selection/mutation plan seam for later PoolMgr ownership, validated with focused `wow-map` unit checks.
 
 ## Most Recent Completed Slices
+
+- `#NEXT.R8.ENTITIES.385` (completed; review `APROBADO`; focused validation passed; committed locally at current HEAD)
+  - Adds deterministic `PoolGroupLikeCpp::spawn_object_plan_like_cpp` over map-owned `SpawnedPoolDataLikeCpp`: signed count calculation, trigger increment semantics, required explicit-chanced single-roll selection representing C++ `rand_chance()` when that bucket is non-empty, equal-chanced deterministic selection hook, normal spawn mutations, trigger respawn no-counter-change, and fallback trigger despawn/removal.
+  - Returns explicit action records for future side-effect owners (`SpawnOne`, `RespawnOne`, `DespawnOne`) without live entity creation, DB writes, recursive live `PoolMgr`, grid-loaded checks, AddToMap/RemoveFromMap, install/restart, fanout, or server startup.
+  - Remaining gaps: `PoolMgr::SpawnPool` orchestration order, `DespawnPool`, entity `CreateFromDB`/`AddToMap`/`RemoveFromMap`, grid-loaded checks, DB save/delete, `ProcessRespawns` pool branch, recursive live PoolMgr integration, and grid/session fanout.
 
 - `#NEXT.R8.ENTITIES.384` (completed; review/validation complete for this slice)
   - Adds `wow_map::pool` pure C++-shaped `PoolTemplateDataLikeCpp`, `PoolObjectLikeCpp`, `PoolMemberKindLikeCpp`, `PoolGroupLikeCpp`, and `PoolRelationRemovalLikeCpp`, reexported from `wow-map`.
@@ -119,6 +126,30 @@ Previous completed local slice:
   - Adds linked respawn metadata/load/store and the pure linked-time guard dependency for `Map::CheckRespawn`.
   - Source-of-truth runtime timers remain map-owned `wow_map::Map` / `RespawnStoreLikeCpp`; linked respawn metadata is loaded DB -> validated canonical metadata -> read-only linked store.
   - Does not implement full `CheckRespawn`/`ProcessRespawns`, PoolMgr, `DoRespawn`, DB save/delete, live entity creation or fanout.
+
+## C++ Anchors for #385
+
+- `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:288-350` — `PoolGroup<T>::SpawnObject`: signed `count = limit - spawns.GetSpawnedObjects(poolId)`, trigger increment, explicit-chanced single `rand_chance()` roll before equal fallback, `AddSpawn<T>` before `Spawn1Object`, trigger `ReSpawn1Object`, and final `DespawnObject(triggerFrom)` if trigger remains.
+- `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:184-218` — `DespawnObject` removes/despawns only entries currently spawned; represented final-trigger removal mutates map-owned `SpawnedPoolDataLikeCpp` only for spawned trigger entries.
+- `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:353-422` — `Spawn1Object`, `ReSpawn1Object`, and `RemoveRespawnTimeFromDB` live side effects remain future owners and are represented only as action records/gaps.
+- `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:776-811` — full `PoolMgr::SpawnPool` orchestration order Pool -> GameObject -> Creature remains a gap.
+- `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.h:51-83` and `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:39-125` — C++ `SpawnedPoolData` map-owned state shape.
+
+## Validation for #385
+
+Independent review:
+
+- Initial `wow-reviewer`: `CAMBIOS NECESARIOS` because `explicit_roll: Option<f32>` allowed bypassing mandatory C++ explicit `rand_chance()`.
+- Correction applied: `spawn_object_plan_like_cpp` now requires `explicit_roll: f32`; no `Option`/`None` path remains, and tests use deterministic rolls.
+- Final `wow-reviewer`: `APROBADO`.
+
+Final observed results before local commit, with `RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo`:
+
+- `cargo fmt --check`: OK.
+- `cargo test -p wow-map pool_group`: OK, 12 passed.
+- `PROTOC=/home/cdmonio/.local/protoc/bin/protoc cargo check -p world-server`: OK (warnings only; pre-existing workspace warnings).
+- `git diff --check`: OK.
+- `git status --short --branch`: dirty only with the five expected #385 files before commit; expected clean/ahead 40 after commit.
 
 ## C++ Anchors for #381
 
