@@ -28,6 +28,15 @@ impl SpawnObjectType {
     pub const fn mask(self) -> u32 {
         1 << self as u8
     }
+
+    pub const fn from_raw(raw: u8) -> Option<Self> {
+        match raw {
+            0 => Some(Self::Creature),
+            1 => Some(Self::GameObject),
+            2 => Some(Self::AreaTrigger),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -78,6 +87,8 @@ impl SpawnPosition {
     }
 }
 
+pub const SPAWNGROUP_MAP_UNSET: u32 = 0xffff_ffff;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpawnGroupTemplateData {
     pub group_id: u32,
@@ -86,12 +97,39 @@ pub struct SpawnGroupTemplateData {
     pub flags: SpawnGroupFlags,
 }
 
+impl SpawnGroupTemplateData {
+    pub fn default_group() -> Self {
+        Self {
+            group_id: 0,
+            name: "Default Group".to_string(),
+            map_id: 0,
+            flags: SpawnGroupFlags::SYSTEM,
+        }
+    }
+
+    pub fn legacy_group() -> Self {
+        Self {
+            group_id: 1,
+            name: "Legacy Group".to_string(),
+            map_id: 0,
+            flags: SpawnGroupFlags(
+                SpawnGroupFlags::SYSTEM.0 | SpawnGroupFlags::COMPATIBILITY_MODE.0,
+            ),
+        }
+    }
+
+    pub const fn is_system(&self) -> bool {
+        self.flags.contains(SpawnGroupFlags::SYSTEM)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpawnData {
     pub object_type: SpawnObjectType,
     pub spawn_id: SpawnId,
     pub map_id: u32,
     pub db_data: bool,
+    pub spawn_group: SpawnGroupTemplateData,
     pub id: u32,
     pub spawn_point: SpawnPosition,
     pub phase_use_flags: u8,
@@ -108,6 +146,67 @@ pub struct SpawnData {
 impl SpawnData {
     pub fn cell_id(&self) -> u32 {
         compute_cell_coord(self.spawn_point.x, self.spawn_point.y).get_id()
+    }
+
+    pub const fn spawn_group_id(&self) -> u32 {
+        self.spawn_group.group_id
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpawnGroupMemberRow {
+    pub group_id: u32,
+    pub spawn_type: u8,
+    pub spawn_id: SpawnId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SpawnGroupMember {
+    pub object_type: SpawnObjectType,
+    pub spawn_id: SpawnId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnGroupApplyIssueKind {
+    InvalidType,
+    MissingSpawn,
+    DuplicateSpawnGroup,
+    MissingGroup,
+    MapMismatch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpawnGroupApplyIssue {
+    pub kind: SpawnGroupApplyIssueKind,
+    pub group_id: u32,
+    pub spawn_type: u8,
+    pub spawn_id: SpawnId,
+    pub existing_group_id: Option<u32>,
+    pub group_map_id: Option<u32>,
+    pub spawn_map_id: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SpawnGroupApplyReport {
+    pub assigned: usize,
+    pub invalid_type: usize,
+    pub missing_spawn: usize,
+    pub duplicate_spawn_group: usize,
+    pub missing_group: usize,
+    pub map_mismatch: usize,
+    pub issues: Vec<SpawnGroupApplyIssue>,
+}
+
+impl SpawnGroupApplyReport {
+    fn push(&mut self, issue: SpawnGroupApplyIssue) {
+        match issue.kind {
+            SpawnGroupApplyIssueKind::InvalidType => self.invalid_type += 1,
+            SpawnGroupApplyIssueKind::MissingSpawn => self.missing_spawn += 1,
+            SpawnGroupApplyIssueKind::DuplicateSpawnGroup => self.duplicate_spawn_group += 1,
+            SpawnGroupApplyIssueKind::MissingGroup => self.missing_group += 1,
+            SpawnGroupApplyIssueKind::MapMismatch => self.map_mismatch += 1,
+        }
+        self.issues.push(issue);
     }
 }
 
@@ -158,11 +257,137 @@ pub struct SpawnStore {
     spawns: BTreeMap<(SpawnObjectType, SpawnId), SpawnData>,
     object_guids: BTreeMap<SpawnMapKey, BTreeMap<u32, CellSpawnGuids>>,
     personal_object_guids: BTreeMap<PersonalSpawnMapKey, BTreeMap<u32, CellSpawnGuids>>,
+    spawn_groups_by_map: BTreeMap<u32, BTreeSet<u32>>,
+    spawn_group_members: BTreeMap<u32, BTreeSet<SpawnGroupMember>>,
 }
 
 impl SpawnStore {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// C++ `ObjectMgr::LoadSpawnGroups`: apply `spawn_group` rows to loaded spawn metadata.
+    ///
+    /// This is intentionally pure/in-memory. DB loading and map runtime activation stay outside
+    /// `wow-map` until the ObjectMgr/world-server wiring slice.
+    pub fn apply_spawn_groups_like_cpp(
+        &mut self,
+        templates: &mut BTreeMap<u32, SpawnGroupTemplateData>,
+        rows: impl IntoIterator<Item = SpawnGroupMemberRow>,
+    ) -> SpawnGroupApplyReport {
+        let mut report = SpawnGroupApplyReport::default();
+
+        for row in rows {
+            let Some(object_type) = SpawnObjectType::from_raw(row.spawn_type) else {
+                report.push(SpawnGroupApplyIssue {
+                    kind: SpawnGroupApplyIssueKind::InvalidType,
+                    group_id: row.group_id,
+                    spawn_type: row.spawn_type,
+                    spawn_id: row.spawn_id,
+                    existing_group_id: None,
+                    group_map_id: None,
+                    spawn_map_id: None,
+                });
+                continue;
+            };
+
+            let key = (object_type, row.spawn_id);
+            let Some(spawn) = self.spawns.get_mut(&key) else {
+                report.push(SpawnGroupApplyIssue {
+                    kind: SpawnGroupApplyIssueKind::MissingSpawn,
+                    group_id: row.group_id,
+                    spawn_type: row.spawn_type,
+                    spawn_id: row.spawn_id,
+                    existing_group_id: None,
+                    group_map_id: None,
+                    spawn_map_id: None,
+                });
+                continue;
+            };
+
+            if spawn.spawn_group.group_id != 0 {
+                report.push(SpawnGroupApplyIssue {
+                    kind: SpawnGroupApplyIssueKind::DuplicateSpawnGroup,
+                    group_id: row.group_id,
+                    spawn_type: row.spawn_type,
+                    spawn_id: row.spawn_id,
+                    existing_group_id: Some(spawn.spawn_group.group_id),
+                    group_map_id: None,
+                    spawn_map_id: Some(spawn.map_id),
+                });
+                continue;
+            }
+
+            let Some(group_template) = templates.get_mut(&row.group_id) else {
+                report.push(SpawnGroupApplyIssue {
+                    kind: SpawnGroupApplyIssueKind::MissingGroup,
+                    group_id: row.group_id,
+                    spawn_type: row.spawn_type,
+                    spawn_id: row.spawn_id,
+                    existing_group_id: None,
+                    group_map_id: None,
+                    spawn_map_id: Some(spawn.map_id),
+                });
+                continue;
+            };
+
+            if group_template.map_id == SPAWNGROUP_MAP_UNSET {
+                group_template.map_id = spawn.map_id;
+                self.spawn_groups_by_map
+                    .entry(spawn.map_id)
+                    .or_default()
+                    .insert(row.group_id);
+            } else if group_template.map_id != spawn.map_id && !group_template.is_system() {
+                report.push(SpawnGroupApplyIssue {
+                    kind: SpawnGroupApplyIssueKind::MapMismatch,
+                    group_id: row.group_id,
+                    spawn_type: row.spawn_type,
+                    spawn_id: row.spawn_id,
+                    existing_group_id: None,
+                    group_map_id: Some(group_template.map_id),
+                    spawn_map_id: Some(spawn.map_id),
+                });
+                continue;
+            }
+
+            spawn.spawn_group = group_template.clone();
+            if !group_template.is_system() {
+                self.spawn_group_members
+                    .entry(row.group_id)
+                    .or_default()
+                    .insert(SpawnGroupMember {
+                        object_type,
+                        spawn_id: row.spawn_id,
+                    });
+            }
+            report.assigned += 1;
+        }
+
+        report
+    }
+
+    /// C++ `_spawnGroupsByMap`: groups whose template map was first resolved by a spawn row.
+    pub fn spawn_group_ids_by_map(&self, map_id: u32) -> Option<&BTreeSet<u32>> {
+        self.spawn_groups_by_map.get(&map_id)
+    }
+
+    /// C++ `_spawnGroupMapStore`: non-system spawn members indexed by group id.
+    pub fn spawn_group_members(&self, group_id: u32) -> Option<&BTreeSet<SpawnGroupMember>> {
+        self.spawn_group_members.get(&group_id)
+    }
+
+    /// C++ `Map::GetSpawnGroupData` map filter shape for future runtime consumers.
+    pub fn spawn_group_template_for_map<'a>(
+        templates: &'a BTreeMap<u32, SpawnGroupTemplateData>,
+        group_id: u32,
+        map_id: u32,
+    ) -> Option<&'a SpawnGroupTemplateData> {
+        let data = templates.get(&group_id)?;
+        if data.is_system() || data.map_id == map_id {
+            Some(data)
+        } else {
+            None
+        }
     }
 
     /// C++ `ObjectMgr::AddSpawnDataToGrid` for creature/gameobject spawns.
@@ -361,6 +586,7 @@ mod tests {
             spawn_id,
             map_id: 571,
             db_data: true,
+            spawn_group: SpawnGroupTemplateData::default_group(),
             id: 42,
             spawn_point: SpawnPosition::new(x, y, 1.0, 2.0),
             phase_use_flags: 0,
@@ -471,5 +697,309 @@ mod tests {
         store.remove_object_spawn(&data, |_| false);
         assert!(store.cell_object_guids(571, 0, cell_id).is_none());
         assert!(store.cell_object_guids(571, 1, cell_id).is_none());
+    }
+
+    fn template(group_id: u32, map_id: u32, flags: SpawnGroupFlags) -> SpawnGroupTemplateData {
+        SpawnGroupTemplateData {
+            group_id,
+            name: format!("group-{group_id}"),
+            map_id,
+            flags,
+        }
+    }
+
+    #[test]
+    fn spawn_group_defaults_match_cpp_system_unassigned_shape() {
+        let default = SpawnGroupTemplateData::default_group();
+
+        assert_eq!(SPAWNGROUP_MAP_UNSET, 0xffff_ffff);
+        assert_eq!(default.group_id, 0);
+        assert_eq!(default.name, "Default Group");
+        assert_eq!(default.map_id, 0);
+        assert!(default.is_system());
+
+        let legacy = SpawnGroupTemplateData::legacy_group();
+        assert_eq!(legacy.group_id, 1);
+        assert_eq!(legacy.map_id, 0);
+        assert!(legacy.is_system());
+        assert!(legacy.flags.contains(SpawnGroupFlags::COMPATIBILITY_MODE));
+    }
+
+    #[test]
+    fn apply_spawn_groups_assigns_all_spawn_types_and_preserves_flags() {
+        let mut store = SpawnStore::new();
+        for (object_type, spawn_id) in [
+            (SpawnObjectType::Creature, 100),
+            (SpawnObjectType::GameObject, 200),
+            (SpawnObjectType::AreaTrigger, 300),
+        ] {
+            store.add_object_spawn(&spawn(object_type, spawn_id, 0.0, 0.0), |_| false);
+        }
+        let mut templates = BTreeMap::from([
+            (10, template(10, 571, SpawnGroupFlags::MANUAL_SPAWN)),
+            (11, template(11, 571, SpawnGroupFlags::DYNAMIC_SPAWN_RATE)),
+            (
+                12,
+                template(12, 571, SpawnGroupFlags::DESPAWN_ON_CONDITION_FAILURE),
+            ),
+        ]);
+
+        let report = store.apply_spawn_groups_like_cpp(
+            &mut templates,
+            [
+                SpawnGroupMemberRow {
+                    group_id: 10,
+                    spawn_type: 0,
+                    spawn_id: 100,
+                },
+                SpawnGroupMemberRow {
+                    group_id: 11,
+                    spawn_type: 1,
+                    spawn_id: 200,
+                },
+                SpawnGroupMemberRow {
+                    group_id: 12,
+                    spawn_type: 2,
+                    spawn_id: 300,
+                },
+            ],
+        );
+
+        assert_eq!(report.assigned, 3);
+        assert_eq!(
+            store
+                .spawn_data(SpawnObjectType::Creature, 100)
+                .unwrap()
+                .spawn_group
+                .flags,
+            SpawnGroupFlags::MANUAL_SPAWN
+        );
+        assert_eq!(
+            store
+                .spawn_data(SpawnObjectType::GameObject, 200)
+                .unwrap()
+                .spawn_group
+                .flags,
+            SpawnGroupFlags::DYNAMIC_SPAWN_RATE
+        );
+        assert_eq!(
+            store
+                .spawn_data(SpawnObjectType::AreaTrigger, 300)
+                .unwrap()
+                .spawn_group
+                .flags,
+            SpawnGroupFlags::DESPAWN_ON_CONDITION_FAILURE
+        );
+        assert!(
+            store
+                .spawn_group_members(10)
+                .unwrap()
+                .contains(&SpawnGroupMember {
+                    object_type: SpawnObjectType::Creature,
+                    spawn_id: 100
+                })
+        );
+        assert!(
+            store
+                .spawn_group_members(11)
+                .unwrap()
+                .contains(&SpawnGroupMember {
+                    object_type: SpawnObjectType::GameObject,
+                    spawn_id: 200
+                })
+        );
+        assert!(
+            store
+                .spawn_group_members(12)
+                .unwrap()
+                .contains(&SpawnGroupMember {
+                    object_type: SpawnObjectType::AreaTrigger,
+                    spawn_id: 300
+                })
+        );
+    }
+
+    #[test]
+    fn first_assignment_sets_unset_group_map_and_indexes_group_by_map() {
+        let mut store = SpawnStore::new();
+        store.add_object_spawn(&spawn(SpawnObjectType::Creature, 100, 0.0, 0.0), |_| false);
+        let mut templates = BTreeMap::from([(
+            10,
+            template(10, SPAWNGROUP_MAP_UNSET, SpawnGroupFlags::NONE),
+        )]);
+
+        let report = store.apply_spawn_groups_like_cpp(
+            &mut templates,
+            [SpawnGroupMemberRow {
+                group_id: 10,
+                spawn_type: 0,
+                spawn_id: 100,
+            }],
+        );
+
+        assert_eq!(report.assigned, 1);
+        assert_eq!(templates.get(&10).unwrap().map_id, 571);
+        assert!(store.spawn_group_ids_by_map(571).unwrap().contains(&10));
+        assert_eq!(
+            store
+                .spawn_data(SpawnObjectType::Creature, 100)
+                .unwrap()
+                .spawn_group
+                .map_id,
+            571
+        );
+    }
+
+    #[test]
+    fn system_group_allows_cross_map_without_member_index_but_non_system_skips() {
+        let mut store = SpawnStore::new();
+        let mut cross_map = spawn(SpawnObjectType::Creature, 100, 0.0, 0.0);
+        cross_map.map_id = 571;
+        store.add_object_spawn(&cross_map, |_| false);
+        let mut blocked = spawn(SpawnObjectType::GameObject, 200, 0.0, 0.0);
+        blocked.map_id = 571;
+        store.add_object_spawn(&blocked, |_| false);
+        let mut templates = BTreeMap::from([
+            (10, template(10, 1, SpawnGroupFlags::SYSTEM)),
+            (11, template(11, 1, SpawnGroupFlags::NONE)),
+        ]);
+
+        let report = store.apply_spawn_groups_like_cpp(
+            &mut templates,
+            [
+                SpawnGroupMemberRow {
+                    group_id: 10,
+                    spawn_type: 0,
+                    spawn_id: 100,
+                },
+                SpawnGroupMemberRow {
+                    group_id: 11,
+                    spawn_type: 1,
+                    spawn_id: 200,
+                },
+            ],
+        );
+
+        assert_eq!(report.assigned, 1);
+        assert_eq!(report.map_mismatch, 1);
+        assert_eq!(
+            store
+                .spawn_data(SpawnObjectType::Creature, 100)
+                .unwrap()
+                .spawn_group
+                .group_id,
+            10
+        );
+        assert_eq!(
+            store
+                .spawn_data(SpawnObjectType::GameObject, 200)
+                .unwrap()
+                .spawn_group
+                .group_id,
+            0
+        );
+        assert!(store.spawn_group_members(10).is_none());
+        assert!(store.spawn_group_members(11).is_none());
+    }
+
+    #[test]
+    fn duplicate_nonzero_group_is_reported_and_skipped() {
+        let mut store = SpawnStore::new();
+        let mut data = spawn(SpawnObjectType::Creature, 100, 0.0, 0.0);
+        data.spawn_group = template(20, 571, SpawnGroupFlags::NONE);
+        store.add_object_spawn(&data, |_| false);
+        let mut templates = BTreeMap::from([(10, template(10, 571, SpawnGroupFlags::NONE))]);
+
+        let report = store.apply_spawn_groups_like_cpp(
+            &mut templates,
+            [SpawnGroupMemberRow {
+                group_id: 10,
+                spawn_type: 0,
+                spawn_id: 100,
+            }],
+        );
+
+        assert_eq!(report.assigned, 0);
+        assert_eq!(report.duplicate_spawn_group, 1);
+        assert_eq!(report.issues[0].existing_group_id, Some(20));
+        assert_eq!(
+            store
+                .spawn_data(SpawnObjectType::Creature, 100)
+                .unwrap()
+                .spawn_group
+                .group_id,
+            20
+        );
+    }
+
+    #[test]
+    fn invalid_type_missing_spawn_and_missing_group_report_without_mutation() {
+        let mut store = SpawnStore::new();
+        store.add_object_spawn(&spawn(SpawnObjectType::Creature, 100, 0.0, 0.0), |_| false);
+        let mut templates = BTreeMap::from([(10, template(10, 571, SpawnGroupFlags::NONE))]);
+
+        let report = store.apply_spawn_groups_like_cpp(
+            &mut templates,
+            [
+                SpawnGroupMemberRow {
+                    group_id: 10,
+                    spawn_type: 99,
+                    spawn_id: 100,
+                },
+                SpawnGroupMemberRow {
+                    group_id: 10,
+                    spawn_type: 1,
+                    spawn_id: 999,
+                },
+                SpawnGroupMemberRow {
+                    group_id: 99,
+                    spawn_type: 0,
+                    spawn_id: 100,
+                },
+            ],
+        );
+
+        assert_eq!(report.assigned, 0);
+        assert_eq!(report.invalid_type, 1);
+        assert_eq!(report.missing_spawn, 1);
+        assert_eq!(report.missing_group, 1);
+        assert_eq!(
+            store
+                .spawn_data(SpawnObjectType::Creature, 100)
+                .unwrap()
+                .spawn_group
+                .group_id,
+            0
+        );
+        assert!(store.spawn_group_members(10).is_none());
+    }
+
+    #[test]
+    fn default_group_zero_does_not_trigger_duplicate_and_behaves_unassigned() {
+        let mut store = SpawnStore::new();
+        let mut data = spawn(SpawnObjectType::Creature, 100, 0.0, 0.0);
+        data.spawn_group = SpawnGroupTemplateData::default_group();
+        store.add_object_spawn(&data, |_| false);
+        let mut templates = BTreeMap::from([(10, template(10, 571, SpawnGroupFlags::NONE))]);
+
+        let report = store.apply_spawn_groups_like_cpp(
+            &mut templates,
+            [SpawnGroupMemberRow {
+                group_id: 10,
+                spawn_type: 0,
+                spawn_id: 100,
+            }],
+        );
+
+        assert_eq!(report.assigned, 1);
+        assert_eq!(report.duplicate_spawn_group, 0);
+        assert_eq!(
+            store
+                .spawn_data(SpawnObjectType::Creature, 100)
+                .unwrap()
+                .spawn_group
+                .group_id,
+            10
+        );
     }
 }

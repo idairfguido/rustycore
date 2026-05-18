@@ -4336,6 +4336,7 @@ mod tests {
             spawn_id: 100,
             map_id: 571,
             db_data: true,
+            spawn_group: crate::spawn::SpawnGroupTemplateData::default_group(),
             id: 42,
             spawn_point: crate::spawn::SpawnPosition::new(0.0, 0.0, 1.0, 2.0),
             phase_use_flags: 0,

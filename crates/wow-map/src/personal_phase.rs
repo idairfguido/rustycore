@@ -288,7 +288,9 @@ mod tests {
     use wow_core::guid::HighGuid;
 
     use crate::object_grid_loader::{CorpseCellStore, ObjectGridLoader};
-    use crate::spawn::{SpawnData, SpawnObjectType, SpawnPosition, SpawnStore};
+    use crate::spawn::{
+        SpawnData, SpawnGroupTemplateData, SpawnObjectType, SpawnPosition, SpawnStore,
+    };
 
     fn owner_guid() -> ObjectGuid {
         ObjectGuid::create_player(1, 100)
@@ -300,6 +302,7 @@ mod tests {
             spawn_id,
             map_id: 571,
             db_data: true,
+            spawn_group: SpawnGroupTemplateData::default_group(),
             id: 42,
             spawn_point: SpawnPosition::new(0.0, 0.0, 1.0, 2.0),
             phase_use_flags: 0,

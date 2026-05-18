@@ -337,7 +337,7 @@ mod tests {
     use super::*;
     use crate::coords::GridCoord;
     use crate::grid::NGrid;
-    use crate::spawn::{SpawnData, SpawnPosition};
+    use crate::spawn::{SpawnData, SpawnGroupTemplateData, SpawnPosition};
 
     fn spawn(object_type: SpawnObjectType, spawn_id: SpawnId, x: f32, y: f32) -> SpawnData {
         SpawnData {
@@ -345,6 +345,7 @@ mod tests {
             spawn_id,
             map_id: 571,
             db_data: true,
+            spawn_group: SpawnGroupTemplateData::default_group(),
             id: match object_type {
                 SpawnObjectType::Creature => 123,
                 SpawnObjectType::GameObject => 456,
