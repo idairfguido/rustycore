@@ -432,6 +432,18 @@ pub struct ProcessRespawnsSafeSideEffectsSummaryLikeCpp {
     pub pool_unsupported_action_kind: usize,
     pub blocked_pool_plan_errors: Vec<PoolMgrPlanErrorLikeCpp>,
     pub blocked_missing_spawn_data: usize,
+    /// Loaded-grid non-pooled `DoRespawn` timers whose caller-supplied typed
+    /// `MapObjectRecord` was successfully loaded and inserted through
+    /// `AddToMap`. This is only the map-owned execution seam; DB/template
+    /// resolution stays with the caller-provided loader.
+    pub executed_loaded_grid_respawns: usize,
+    /// Loaded-grid non-pooled `DoRespawn` timers that stayed queued because the
+    /// explicit caller loader did not return a typed DB-backed record.
+    pub blocked_loaded_grid_respawn_loads: usize,
+    /// Loaded-grid non-pooled `DoRespawn` timers whose loader returned a record,
+    /// after which C++ has already popped/erased the timer before `AddToMap`; the
+    /// timer therefore stays removed even when Rust `AddToMap` rejects it.
+    pub blocked_loaded_grid_respawn_add_to_map: usize,
     /// Legacy compatibility counter for the pre-#390 seam where any pooled timer
     /// blocked `ProcessRespawns`. New pooled-timer planner errors are reported in
     /// `blocked_pool_plan_errors`; successful pooled timers increment
@@ -1124,13 +1136,15 @@ where
     /// This helper executes only safe map-owned in-memory effects represented so
     /// far: pooled timer -> deterministic `UpdatePool` plan + map-owned
     /// `SpawnedPoolDataLikeCpp` mutation + timer removal, `DoRespawn`'s unloaded-grid
-    /// early return after timer removal, zero-delete for inactive spawn-groups/live-object
-    /// blockers, and linked-respawn future reschedule by replacing the same map-owned
-    /// respawn timer. DB effects, loaded-grid `DoRespawn`, live entity creation and
-    /// grid/session fanout stay outside this lock-owned helper.
+    /// early return after timer removal, loaded-grid non-pooled `DoRespawn` via a
+    /// caller-supplied typed `MapObjectRecord` loader, zero-delete for inactive
+    /// spawn-groups/live-object blockers, and linked-respawn future reschedule by
+    /// replacing the same map-owned respawn timer. DB effects, live record
+    /// construction, grid/session fanout, and scripts stay outside this lock-owned
+    /// helper.
     /// If the oldest due timer needs an unavailable/error branch, it is left intact
     /// and processing stops to preserve C++ queue order.
-    pub fn process_due_respawns_composite_safe_side_effects_like_cpp<F, R, C>(
+    pub fn process_due_respawns_composite_loaded_grid_respawns_like_cpp<F, R, C, L>(
         &mut self,
         now: i64,
         spawn_store: &SpawnStore,
@@ -1141,11 +1155,13 @@ where
         mut is_creature_escorted: F,
         mut explicit_roll_for: R,
         mut choose_equal: C,
+        mut load_record: L,
     ) -> ProcessRespawnsSafeSideEffectsSummaryLikeCpp
     where
         F: FnMut(ObjectGuid, &Creature) -> bool,
         R: FnMut(PoolMemberKindLikeCpp, u32) -> f32,
         C: FnMut(&[PoolObjectLikeCpp], usize) -> Vec<usize>,
+        L: FnMut(SpawnObjectType, SpawnId) -> Option<MapObjectRecord>,
     {
         let mut summary = ProcessRespawnsSafeSideEffectsSummaryLikeCpp::default();
 
@@ -1233,8 +1249,27 @@ where
                 }
                 CheckRespawnCompositeOutcomeLikeCpp::Allowed => {
                     if is_grid_id_loaded(self, checked_info.grid_id) {
-                        summary.blocked_do_respawn_runtime += 1;
-                        break;
+                        let Some(record) = load_record(object_type, spawn_id) else {
+                            summary.blocked_loaded_grid_respawn_loads += 1;
+                            summary.blocked_do_respawn_runtime += 1;
+                            break;
+                        };
+
+                        // C++ `ProcessRespawns` pops/erases the timer before
+                        // calling `DoRespawn`; `LoadFromDB(..., addToMap=true)`
+                        // then returns false on `AddToMap` failure and the
+                        // temporary object is deleted, but the respawn timer has
+                        // already been removed and DB deletion continues.
+                        self.remove_respawn_time_like_cpp(object_type, spawn_id);
+                        match self.add_map_object_record_to_map_like_cpp(record) {
+                            Ok(_outcome) => {
+                                summary.executed_loaded_grid_respawns += 1;
+                            }
+                            Err(_error) => {
+                                summary.blocked_loaded_grid_respawn_add_to_map += 1;
+                            }
+                        }
+                        continue;
                     }
 
                     self.remove_respawn_time_like_cpp(object_type, spawn_id);
@@ -1266,6 +1301,40 @@ where
         }
 
         summary
+    }
+
+    /// Compatibility wrapper that preserves the old safe-side-effects API by
+    /// keeping loaded-grid non-pooled `DoRespawn` blocked through a loader that
+    /// returns no typed record.
+    pub fn process_due_respawns_composite_safe_side_effects_like_cpp<F, R, C>(
+        &mut self,
+        now: i64,
+        spawn_store: &SpawnStore,
+        linked_store: &LinkedRespawnStoreLikeCpp,
+        pool_mgr: &PoolMgrLikeCpp,
+        jitter_secs: u32,
+        respawn_dynamic_escortnpc: bool,
+        is_creature_escorted: F,
+        explicit_roll_for: R,
+        choose_equal: C,
+    ) -> ProcessRespawnsSafeSideEffectsSummaryLikeCpp
+    where
+        F: FnMut(ObjectGuid, &Creature) -> bool,
+        R: FnMut(PoolMemberKindLikeCpp, u32) -> f32,
+        C: FnMut(&[PoolObjectLikeCpp], usize) -> Vec<usize>,
+    {
+        self.process_due_respawns_composite_loaded_grid_respawns_like_cpp(
+            now,
+            spawn_store,
+            linked_store,
+            pool_mgr,
+            jitter_secs,
+            respawn_dynamic_escortnpc,
+            is_creature_escorted,
+            explicit_roll_for,
+            choose_equal,
+            |_object_type, _spawn_id| None,
+        )
     }
 
     /// Compatibility wrapper for callers that still use the old delete-only name.
@@ -5206,6 +5275,251 @@ mod tests {
             map.get_respawn_time_like_cpp(SpawnObjectType::Creature, 44),
             100
         );
+    }
+
+    #[test]
+    fn process_respawns_loaded_grid_creature_loader_adds_record_and_removes_timer_like_cpp() {
+        let mut map = test_map();
+        let mut store = SpawnStore::new();
+        let active = spawn_group(397, SpawnGroupFlags::NONE);
+        store.add_object_spawn(
+            &spawn_data(SpawnObjectType::Creature, 39701, active),
+            |_| false,
+        );
+        map.ensure_grid_loaded(&cell_from_grid_center(GridCoord::new(7, 0)));
+        map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 39701, 100));
+        let expected_guid = guid(HighGuid::Creature, 3970101);
+        let mut loader_calls = 0;
+
+        let summary = map.process_due_respawns_composite_loaded_grid_respawns_like_cpp(
+            100,
+            &store,
+            &LinkedRespawnStoreLikeCpp::new(),
+            &PoolMgrLikeCpp::new(),
+            5,
+            false,
+            |_, _| false,
+            |_, _| 0.0,
+            |_candidates, count| (0..count).collect(),
+            |object_type, spawn_id| {
+                loader_calls += 1;
+                assert_eq!(object_type, SpawnObjectType::Creature);
+                assert_eq!(spawn_id, 39701);
+                let mut creature = test_creature_for_spawn(39701, 3970101, true);
+                creature
+                    .unit_mut()
+                    .world_mut()
+                    .object_mut()
+                    .remove_from_world();
+                Some(MapObjectRecord::new_creature(creature).unwrap())
+            },
+        );
+
+        assert_eq!(loader_calls, 1);
+        assert_eq!(summary.executed_loaded_grid_respawns, 1);
+        assert_eq!(summary.blocked_loaded_grid_respawn_loads, 0);
+        assert_eq!(summary.blocked_loaded_grid_respawn_add_to_map, 0);
+        assert_eq!(summary.blocked_do_respawn_runtime, 0);
+        assert_eq!(
+            map.get_respawn_time_like_cpp(SpawnObjectType::Creature, 39701),
+            0
+        );
+        assert_eq!(map.creature_spawn_id_store_count_like_cpp(39701), 1);
+        let record = map.map_object_record(expected_guid).unwrap();
+        assert!(record.object().object().is_in_world());
+        assert!(record.creature().is_some());
+        assert!(map.get_creature_by_spawn_id_like_cpp(39701).is_some());
+        let cell = Cell::from_world(record.object().position().x, record.object().position().y);
+        let grid = map
+            .get_ngrid(GridCoord::new(cell.grid_x(), cell.grid_y()))
+            .unwrap();
+        let local_cell = grid
+            .get_grid_type(cell.cell_x(), cell.cell_y())
+            .expect("record inserted into target cell");
+        assert!(local_cell.grid_objects.creatures.contains(&expected_guid));
+    }
+
+    #[test]
+    fn process_respawns_loaded_grid_gameobject_loader_adds_record_and_removes_timer_like_cpp() {
+        let mut map = test_map();
+        let mut store = SpawnStore::new();
+        let active = spawn_group(398, SpawnGroupFlags::NONE);
+        store.add_object_spawn(
+            &spawn_data(SpawnObjectType::GameObject, 39801, active),
+            |_| false,
+        );
+        map.ensure_grid_loaded(&cell_from_grid_center(GridCoord::new(7, 0)));
+        map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::GameObject, 39801, 100));
+        let expected_guid = guid(HighGuid::GameObject, 3980101);
+
+        let summary = map.process_due_respawns_composite_loaded_grid_respawns_like_cpp(
+            100,
+            &store,
+            &LinkedRespawnStoreLikeCpp::new(),
+            &PoolMgrLikeCpp::new(),
+            5,
+            false,
+            |_, _| false,
+            |_, _| 0.0,
+            |_candidates, count| (0..count).collect(),
+            |object_type, spawn_id| {
+                assert_eq!(object_type, SpawnObjectType::GameObject);
+                assert_eq!(spawn_id, 39801);
+                let mut gameobject = test_gameobject_for_spawn(39801, 3980101);
+                gameobject.world_mut().object_mut().remove_from_world();
+                Some(MapObjectRecord::new_game_object(gameobject).unwrap())
+            },
+        );
+
+        assert_eq!(summary.executed_loaded_grid_respawns, 1);
+        assert_eq!(summary.blocked_loaded_grid_respawn_loads, 0);
+        assert_eq!(summary.blocked_loaded_grid_respawn_add_to_map, 0);
+        assert_eq!(
+            map.get_respawn_time_like_cpp(SpawnObjectType::GameObject, 39801),
+            0
+        );
+        assert_eq!(map.gameobject_spawn_id_store_count_like_cpp(39801), 1);
+        let record = map.map_object_record(expected_guid).unwrap();
+        assert!(record.object().object().is_in_world());
+        assert!(record.game_object().is_some());
+        assert!(map.get_gameobject_by_spawn_id_like_cpp(39801).is_some());
+        let cell = Cell::from_world(record.object().position().x, record.object().position().y);
+        let grid = map
+            .get_ngrid(GridCoord::new(cell.grid_x(), cell.grid_y()))
+            .unwrap();
+        let local_cell = grid
+            .get_grid_type(cell.cell_x(), cell.cell_y())
+            .expect("record inserted into target cell");
+        assert!(local_cell.grid_objects.gameobjects.contains(&expected_guid));
+    }
+
+    #[test]
+    fn process_respawns_loaded_grid_loader_none_preserves_timer_and_stops_like_cpp() {
+        let mut map = test_map();
+        let mut store = SpawnStore::new();
+        let active = spawn_group(399, SpawnGroupFlags::NONE);
+        store.add_object_spawn(
+            &spawn_data(SpawnObjectType::Creature, 39901, active.clone()),
+            |_| false,
+        );
+        store.add_object_spawn(
+            &spawn_data(SpawnObjectType::Creature, 39902, active),
+            |_| false,
+        );
+        map.ensure_grid_loaded(&cell_from_grid_center(GridCoord::new(7, 0)));
+        map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 39901, 90));
+        map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 39902, 100));
+
+        let summary = map.process_due_respawns_composite_loaded_grid_respawns_like_cpp(
+            100,
+            &store,
+            &LinkedRespawnStoreLikeCpp::new(),
+            &PoolMgrLikeCpp::new(),
+            5,
+            false,
+            |_, _| false,
+            |_, _| 0.0,
+            |_candidates, count| (0..count).collect(),
+            |_object_type, _spawn_id| None,
+        );
+
+        assert_eq!(summary.executed_loaded_grid_respawns, 0);
+        assert_eq!(summary.blocked_loaded_grid_respawn_loads, 1);
+        assert_eq!(map.map_object_count(), 0);
+        assert_eq!(
+            map.get_respawn_time_like_cpp(SpawnObjectType::Creature, 39901),
+            90
+        );
+        assert_eq!(
+            map.get_respawn_time_like_cpp(SpawnObjectType::Creature, 39902),
+            100
+        );
+    }
+
+    #[test]
+    fn process_respawns_unloaded_grid_allowed_branch_does_not_call_loader_like_cpp() {
+        let mut map = test_map();
+        let mut store = SpawnStore::new();
+        let active = spawn_group(400, SpawnGroupFlags::NONE);
+        let mut far_spawn = spawn_data(SpawnObjectType::Creature, 40001, active);
+        far_spawn.spawn_point = crate::spawn::SpawnPosition::new(1_000.0, 1_000.0, 0.0, 0.0);
+        store.add_object_spawn(&far_spawn, |_| false);
+        map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 40001, 100));
+        let mut loader_calls = 0;
+
+        let summary = map.process_due_respawns_composite_loaded_grid_respawns_like_cpp(
+            100,
+            &store,
+            &LinkedRespawnStoreLikeCpp::new(),
+            &PoolMgrLikeCpp::new(),
+            5,
+            false,
+            |_, _| false,
+            |_, _| 0.0,
+            |_candidates, count| (0..count).collect(),
+            |_object_type, _spawn_id| {
+                loader_calls += 1;
+                None
+            },
+        );
+
+        assert_eq!(loader_calls, 0);
+        assert_eq!(summary.processed_unloaded_grid_respawns, 1);
+        assert_eq!(summary.executed_loaded_grid_respawns, 0);
+        assert_eq!(
+            map.get_respawn_time_like_cpp(SpawnObjectType::Creature, 40001),
+            0
+        );
+    }
+
+    #[test]
+    fn process_respawns_loaded_grid_add_to_map_failure_counts_and_removes_timer_like_cpp() {
+        let mut map = test_map();
+        let mut store = SpawnStore::new();
+        let active = spawn_group(401, SpawnGroupFlags::NONE);
+        store.add_object_spawn(
+            &spawn_data(SpawnObjectType::Creature, 40101, active),
+            |_| false,
+        );
+        map.ensure_grid_loaded(&cell_from_grid_center(GridCoord::new(7, 0)));
+        map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 40101, 100));
+        let expected_guid = guid(HighGuid::Creature, 4010101);
+
+        let summary = map.process_due_respawns_composite_loaded_grid_respawns_like_cpp(
+            100,
+            &store,
+            &LinkedRespawnStoreLikeCpp::new(),
+            &PoolMgrLikeCpp::new(),
+            5,
+            false,
+            |_, _| false,
+            |_, _| 0.0,
+            |_candidates, count| (0..count).collect(),
+            |_object_type, _spawn_id| {
+                let mut creature = test_creature_for_spawn(40101, 4010101, true);
+                creature
+                    .unit_mut()
+                    .world_mut()
+                    .object_mut()
+                    .remove_from_world();
+                creature.unit_mut().world_mut().relocate(Position::xyz(
+                    1_000_000.0,
+                    1_000_000.0,
+                    0.0,
+                ));
+                Some(MapObjectRecord::new_creature(creature).unwrap())
+            },
+        );
+
+        assert_eq!(summary.executed_loaded_grid_respawns, 0);
+        assert_eq!(summary.blocked_loaded_grid_respawn_add_to_map, 1);
+        assert_eq!(summary.blocked_loaded_grid_respawn_loads, 0);
+        assert_eq!(
+            map.get_respawn_time_like_cpp(SpawnObjectType::Creature, 40101),
+            0
+        );
+        assert!(map.map_object_record(expected_guid).is_none());
+        assert_eq!(map.creature_spawn_id_store_count_like_cpp(40101), 0);
     }
 
     #[test]

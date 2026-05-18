@@ -5,6 +5,11 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.397** `Map::DoRespawn` loaded-grid `AddToMap` execution seam via supplied `MapObjectRecord` loader.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2165-2189`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2191-2240`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Creature/Creature.cpp:1815-1923`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:1911-1978`, and `/home/server/woltk-trinity-legacy/src/server/game/Grids/ObjectGridLoader.cpp:103-128`.
+  Rust targets: `crates/wow-map/src/map.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: `Map::process_due_respawns_composite_loaded_grid_respawns_like_cpp` executes only the loaded-grid non-pooled `ProcessRespawns -> DoRespawn` seam when `CheckRespawn` allows and an explicit caller loader returns a fully constructed typed `MapObjectRecord`; it removes the map-owned timer before `AddToMap` in C++ order, inserts the typed Creature/GameObject record through the #396 AddToMap seam, preserves timer/order on loader `None`, skips the loader for unloaded grids, and counts AddToMap failure after timer removal without inventing entities. Complete only for the map-owned execution seam; remaining gaps are real DB-backed `Creature::CreateCreatureFromDB`/`GameObject::CreateGameObjectFromDB` record construction, world-server DB loader wiring, fanout/scripts, PoolMgr live spawn execution, and AreaTrigger runtime.
+
 - [x] **#NEXT.R8.ENTITIES.396** Typed `MapObjectRecord` `AddToMap` seam for loaded-grid `LoadFromDB`/respawn work.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:529-577`, `/home/server/woltk-trinity-legacy/src/server/game/Grids/ObjectGridLoader.cpp:91-128`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2165-2189`, and `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:355-379`.
   Rust targets: `crates/wow-map/src/map.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
