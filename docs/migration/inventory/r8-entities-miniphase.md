@@ -1521,3 +1521,17 @@ Files touched: `crates/wow-map/src/map.rs`; `docs/migration/inventory/r8-entitie
 Checks expected: `cargo test -p wow-map map_owned_respawn`; `cargo fmt --check`; `git diff --check`.
 
 Remaining gaps: this does not complete `#NEXT.R8.ENTITIES.021` or live `ProcessRespawns`. Still missing: live scheduler execution, real `PoolMgr`, real `DoRespawn` entity creation/`LoadFromDB`, DB persistence/delete, linked-respawn `CheckRespawn`, real creature/gameobject by-spawn stores, ObjectAccessor/map-local entity ownership, and grid/session fanout.
+
+### #NEXT.R8.ENTITIES.368 — Representar primera guarda de Map::CheckRespawn por spawn group inactivo
+
+Status: partial/represented dependency only. This implements the first C++ `Map::CheckRespawn` guard and deliberately does not claim full `CheckRespawn` or live `ProcessRespawns` completion.
+
+C++ anchors: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1956-1957` resolves `SpawnData` and asserts if missing; `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1959-1964` clears `info->respawnTime = 0` and returns false if the spawn group is inactive; `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.h:663-668` documents that false means delete when respawn time is zero or reschedule when it is future.
+
+Implemented Rust dependency: `wow-map::Map::check_respawn_spawn_group_guard_like_cpp(&mut RespawnInfoLikeCpp, &SpawnStore)` reads caller-supplied `SpawnStore` metadata, consults map-owned `SpawnGroupRuntimeState`, clears `respawn_time` for inactive groups, preserves timers for active/system groups, and returns `MissingSpawnData` without mutation as a defensive temporary fallback where C++ would assert while ObjectMgr/SpawnStore ownership is still bridged.
+
+Files touched: `crates/wow-map/src/spawn.rs`; `crates/wow-map/src/lib.rs`; `crates/wow-map/src/map.rs`; `docs/migration/current-session-handoff.md`; `docs/migration/inventory/r8-entities-miniphase.md`; `docs/migration/inventory/r8-entities-miniphase.tsv`.
+
+Checks expected: `cargo fmt --check`; `cargo test -p wow-map check_respawn_spawn_group_guard`; `cargo test -p wow-map process_respawns`; `cargo check -p world-server`; `git diff --check`.
+
+Remaining gaps: this does not complete `#NEXT.R8.ENTITIES.021`, full `Map::CheckRespawn`, or live `ProcessRespawns`. Still missing: live scheduler execution, by-spawn live existence checks, escort dynamic exceptions, linked respawn including random 5-15 reschedule, real `PoolMgr`, real `DoRespawn` entity creation/`LoadFromDB`, DB persistence/delete, real creature/gameobject by-spawn stores, ObjectAccessor/map-local entity ownership, grid/session fanout, and session/world-server fallback-state migration into the map-owned canonical store.

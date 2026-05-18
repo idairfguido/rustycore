@@ -756,6 +756,13 @@ pub enum CheckRespawnOutcomeLikeCpp {
     Blocked,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckRespawnSpawnGroupGuardOutcomeLikeCpp {
+    Allowed,
+    InactiveSpawnGroupDeletedTimer,
+    MissingSpawnData,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProcessRespawnActionLikeCpp {
     UpdatePool {

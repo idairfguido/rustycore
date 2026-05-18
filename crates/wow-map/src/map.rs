@@ -15,10 +15,11 @@ use crate::grid::{GridStateKind, MapGridHost, NGrid, update_grid_state};
 use crate::object_grid_loader::{GridSpawnLoadFilter, ObjectGridLoader};
 use crate::personal_phase::{MultiPersonalPhaseTracker, PhaseShift};
 use crate::spawn::{
-    AddRespawnInfoOutcomeLikeCpp, CheckRespawnOutcomeLikeCpp, Difficulty,
-    ProcessRespawnActionLikeCpp, RespawnInfoLikeCpp, RespawnStoreLikeCpp,
-    SpawnGridLoadStateLikeCpp, SpawnGroupActiveChange, SpawnGroupFlags, SpawnGroupRuntimeState,
-    SpawnGroupTemplateData, SpawnId, SpawnObjectType, SpawnStore,
+    AddRespawnInfoOutcomeLikeCpp, CheckRespawnOutcomeLikeCpp,
+    CheckRespawnSpawnGroupGuardOutcomeLikeCpp, Difficulty, ProcessRespawnActionLikeCpp,
+    RespawnInfoLikeCpp, RespawnStoreLikeCpp, SpawnGridLoadStateLikeCpp, SpawnGroupActiveChange,
+    SpawnGroupFlags, SpawnGroupRuntimeState, SpawnGroupTemplateData, SpawnId, SpawnObjectType,
+    SpawnStore,
 };
 use wow_core::{ObjectGuid, Position};
 use wow_entities::{
@@ -477,6 +478,37 @@ where
     ) -> Vec<ProcessRespawnActionLikeCpp> {
         self.respawn_store
             .process_due_respawns_like_cpp(now, is_part_of_pool, check_respawn)
+    }
+
+    /// First represented guard from C++ `Map::CheckRespawn`.
+    ///
+    /// C++ anchors:
+    /// - `Map.cpp:1956-1957` resolves `SpawnData` and asserts when missing.
+    /// - `Map.cpp:1959-1964` clears `respawnTime` and returns false when the
+    ///   spawn group is inactive.
+    ///
+    /// This is only the spawn-group subdependency of `CheckRespawn`. It does not
+    /// implement live by-spawn existence, escort dynamic rules, gameobject live
+    /// checks, linked respawn, random 5-15 reschedule, PoolMgr, `DoRespawn`, DB
+    /// save/delete, or world-server tick integration. Missing `SpawnData` is a
+    /// temporary defensive fallback for incomplete ownership: C++ would assert;
+    /// RustyCore returns `MissingSpawnData`, does not mutate `respawn_time`, and
+    /// leaves timer deletion/reschedule decisions to the caller.
+    pub fn check_respawn_spawn_group_guard_like_cpp(
+        &self,
+        info: &mut RespawnInfoLikeCpp,
+        spawn_store: &SpawnStore,
+    ) -> CheckRespawnSpawnGroupGuardOutcomeLikeCpp {
+        let Some(spawn_data) = spawn_store.spawn_data(info.object_type, info.spawn_id) else {
+            return CheckRespawnSpawnGroupGuardOutcomeLikeCpp::MissingSpawnData;
+        };
+
+        if !self.is_spawn_group_active_like_cpp(Some(&spawn_data.spawn_group)) {
+            info.respawn_time = 0;
+            return CheckRespawnSpawnGroupGuardOutcomeLikeCpp::InactiveSpawnGroupDeletedTimer;
+        }
+
+        CheckRespawnSpawnGroupGuardOutcomeLikeCpp::Allowed
     }
 
     /// Map-owned bridge for C++ `Map::_toggledSpawnGroupIds`.
@@ -2977,6 +3009,74 @@ mod tests {
             map.get_respawn_time_like_cpp(SpawnObjectType::GameObject, 20),
             200
         );
+    }
+
+    #[test]
+    fn check_respawn_spawn_group_guard_inactive_manual_group_clears_timer_like_cpp() {
+        let map = test_map();
+        let mut store = SpawnStore::new();
+        let manual = spawn_group(12, SpawnGroupFlags::MANUAL_SPAWN);
+        store.add_object_spawn(&spawn_data(SpawnObjectType::Creature, 42, manual), |_| {
+            false
+        });
+        let mut info = respawn_info(SpawnObjectType::Creature, 42, 100);
+
+        let outcome = map.check_respawn_spawn_group_guard_like_cpp(&mut info, &store);
+
+        assert_eq!(
+            outcome,
+            CheckRespawnSpawnGroupGuardOutcomeLikeCpp::InactiveSpawnGroupDeletedTimer
+        );
+        assert_eq!(info.respawn_time, 0);
+    }
+
+    #[test]
+    fn check_respawn_spawn_group_guard_active_manual_group_preserves_timer_like_cpp() {
+        let mut map = test_map();
+        let mut store = SpawnStore::new();
+        let manual = spawn_group(12, SpawnGroupFlags::MANUAL_SPAWN);
+        store.add_object_spawn(
+            &spawn_data(SpawnObjectType::Creature, 42, manual.clone()),
+            |_| false,
+        );
+        map.set_spawn_group_active_like_cpp(Some(&manual), true);
+        let mut info = respawn_info(SpawnObjectType::Creature, 42, 100);
+
+        let outcome = map.check_respawn_spawn_group_guard_like_cpp(&mut info, &store);
+
+        assert_eq!(outcome, CheckRespawnSpawnGroupGuardOutcomeLikeCpp::Allowed);
+        assert_eq!(info.respawn_time, 100);
+    }
+
+    #[test]
+    fn check_respawn_spawn_group_guard_system_group_preserves_timer_like_cpp() {
+        let map = test_map();
+        let mut store = SpawnStore::new();
+        let system = spawn_group(1, SpawnGroupFlags::SYSTEM);
+        store.add_object_spawn(&spawn_data(SpawnObjectType::GameObject, 43, system), |_| {
+            false
+        });
+        let mut info = respawn_info(SpawnObjectType::GameObject, 43, 100);
+
+        let outcome = map.check_respawn_spawn_group_guard_like_cpp(&mut info, &store);
+
+        assert_eq!(outcome, CheckRespawnSpawnGroupGuardOutcomeLikeCpp::Allowed);
+        assert_eq!(info.respawn_time, 100);
+    }
+
+    #[test]
+    fn check_respawn_spawn_group_guard_missing_metadata_preserves_timer_like_cpp() {
+        let map = test_map();
+        let store = SpawnStore::new();
+        let mut info = respawn_info(SpawnObjectType::Creature, 44, 100);
+
+        let outcome = map.check_respawn_spawn_group_guard_like_cpp(&mut info, &store);
+
+        assert_eq!(
+            outcome,
+            CheckRespawnSpawnGroupGuardOutcomeLikeCpp::MissingSpawnData
+        );
+        assert_eq!(info.respawn_time, 100);
     }
 
     #[test]

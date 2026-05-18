@@ -7,11 +7,10 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 ## Repository State
 
 - Branch: `develop`
-- Base before this slice: `8595022 #NEXT.R8.ENTITIES.366 map respawn timer planner`
-- Local branch relation before committing #367: `develop...origin/develop [ahead 20]`
-- Most recent completed slice: `#NEXT.R8.ENTITIES.367 — Map-owned RespawnStore integration into Map`
-- Commit: `c340401576a93d31c9a682da04c908b0d0990c7d #NEXT.R8.ENTITIES.367 map owned respawn store integration`
-- Expected tree after this handoff update is amended into #367: clean, ahead 21. No push/install/restart performed.
+- Base before this slice: `64d42b1 #NEXT.R8.ENTITIES.367 map owned respawn store integration`
+- Local branch relation before committing #368: `develop...origin/develop [ahead 21]`
+- Most recent completed slice after this commit: `#NEXT.R8.ENTITIES.368 — Represented Map::CheckRespawn spawn-group guard`
+- Expected tree after committing #368: clean, ahead 22. No push/install/restart performed.
 
 ## Critical Rules
 
@@ -23,11 +22,11 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 
 ## Progress Estimate
 
-Overall core migration estimate after #367: `~84.5%`.
+Overall core migration estimate after #367 plus current uncommitted #368 dependency slice: `~84.6%`.
 
 This remains intentionally below the R8 TSV row-completion ratio because heavy runtime ownership gaps remain: live `ProcessRespawns` execution, real `PoolMgr`, `DoRespawn` entity creation/`LoadFromDB`, DB respawn persistence/delete, linked respawn checks, real map-local by-spawn creature/gameobject stores, grid/session fanout, ObjectAccessor ownership, and broader Unit/Player inventory/auras/threat/motion/update-field work.
 
-Manual test point: no new client-facing manual milestone from #367; this is a map-owned store integration dependency validated with focused unit/integration checks.
+Manual test point: no new client-facing manual milestone from #368; this is a map-owned respawn/check-respawn dependency validated with focused unit/integration checks.
 
 ## Most Recent Completed Slices
 
@@ -45,6 +44,13 @@ Current completed slice:
   - Added C++-shaped map wrappers for add/get time/get info/remove/unload/timer-key iteration and planned due-respawn processing.
   - `Map::spawn_grid_load_state_like_cpp(&SpawnStore)` now feeds `SpawnGridLoadStateLikeCpp` from map-owned respawn timer keys plus map-owned spawn-group state while preserving caller-supplied `SpawnStore` metadata as the bridge.
   - Updated R8 inventory/roadmap honestly as complete only for the Map-owned respawn-store integration dependency.
+
+Current slice:
+
+- `#NEXT.R8.ENTITIES.368`
+  - Represents only the first `Map::CheckRespawn` spawn-group guard from `Map.cpp:1956-1964`: caller-supplied `SpawnStore` metadata -> map-owned `SpawnGroupRuntimeState` -> mutate `RespawnInfoLikeCpp::respawn_time = 0` for inactive groups.
+  - Missing `SpawnData` is explicit `MissingSpawnData` fallback with no mutation; C++ would assert, but RustyCore still uses a caller-supplied metadata bridge.
+  - Full `Map::CheckRespawn`, live `ProcessRespawns`, by-spawn live existence checks, escort exceptions, linked respawn, PoolMgr, DoRespawn and DB persistence/delete remain partial/pending.
 
 ## C++ Anchors for #367
 
@@ -91,10 +97,10 @@ Warnings observed are pre-existing workspace warnings (for example `unsafe` in `
 
 ## Remaining Gaps / Next Dependency
 
-`#NEXT.R8.ENTITIES.367` does **not** complete full live respawn runtime. Remaining heavy dependencies toward >95% core include:
+`#NEXT.R8.ENTITIES.367` plus the current #368 guard dependency do **not** complete full live respawn runtime. Remaining heavy dependencies toward >95% core include:
 
 1. Wire live `ProcessRespawns` scheduler execution from `MapManager`/world-server using the map-owned #367 store, without faking PoolMgr/DB/entity side effects.
-2. Implement C++-shaped `CheckRespawn` against spawn group activity, real map-local creature/gameobject by-spawn stores, escort exceptions, and linked respawn data.
+2. Complete C++-shaped `CheckRespawn` beyond the represented spawn-group guard: real map-local creature/gameobject by-spawn stores, escort exceptions, and linked respawn data.
 3. Implement real `PoolMgr`/pool selection state or explicitly block pool branches until its source-of-truth owner exists.
 4. Implement `DoRespawn` entity creation/`LoadFromDB`, DB respawn persistence/delete, and grid/session fanout.
 5. Add real map-local creature/gameobject by-spawn stores and ObjectAccessor-like ownership instead of session-local fallback state.
