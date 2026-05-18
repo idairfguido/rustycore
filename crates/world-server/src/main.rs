@@ -9,7 +9,7 @@
 //! world-server handshake (challenge → auth → encryption), creates a
 //! WorldSession for each client, and dispatches packets to handlers.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -751,6 +751,22 @@ async fn main() -> Result<()> {
         canonical_spawn_report.gameobject.validation_skipped,
         canonical_spawn_report.area_trigger.validation_skipped,
     );
+    let (persisted_respawn_times, persisted_respawn_report) =
+        load_persisted_respawn_times_like_cpp(&char_db, canonical_spawn_metadata.as_ref())
+            .await
+            .context("Failed to load persisted respawn times from character database")?;
+    let persisted_respawn_times = Arc::new(persisted_respawn_times);
+    info!(
+        "Loaded persisted C++ respawn timers: rows={} loaded={} maps={} timers={} invalid-type={} unsupported-areatrigger={} missing-spawn-metadata={}",
+        persisted_respawn_report.rows,
+        persisted_respawn_report.loaded,
+        persisted_respawn_times.maps_len(),
+        persisted_respawn_times.respawns_len(),
+        persisted_respawn_report.invalid_type,
+        persisted_respawn_report.unsupported_area_trigger,
+        persisted_respawn_report.missing_spawn_metadata,
+    );
+
     let mount_store = Arc::new(
         wow_data::MountStore::load_with_hotfixes(&data_dir, &locale, &hotfix_db)
             .await
@@ -1324,6 +1340,7 @@ async fn main() -> Result<()> {
             &mut manager,
             Arc::clone(&canonical_spawn_metadata),
             Arc::clone(&condition_store),
+            Arc::clone(&persisted_respawn_times),
         ),
         Err(_) => {
             warn!("Canonical MapManager lock poisoned; InitSpawnGroupState hook not installed")
@@ -1947,15 +1964,220 @@ fn loot_store_all_rows_statement_like_cpp(kind: LootStoreKind) -> WorldStatement
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct PersistedRespawnTimesLikeCpp {
+    by_map: BTreeMap<wow_map::MapKey, Vec<wow_map::RespawnInfoLikeCpp>>,
+}
+
+impl PersistedRespawnTimesLikeCpp {
+    fn push(&mut self, key: wow_map::MapKey, info: wow_map::RespawnInfoLikeCpp) {
+        self.by_map.entry(key).or_default().push(info);
+    }
+
+    fn for_map(&self, key: wow_map::MapKey) -> &[wow_map::RespawnInfoLikeCpp] {
+        self.by_map.get(&key).map_or(&[], Vec::as_slice)
+    }
+
+    fn maps_len(&self) -> usize {
+        self.by_map.len()
+    }
+
+    fn respawns_len(&self) -> usize {
+        self.by_map.values().map(Vec::len).sum()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct PersistedRespawnLoadReportLikeCpp {
+    rows: usize,
+    loaded: usize,
+    invalid_type: usize,
+    unsupported_area_trigger: usize,
+    missing_spawn_metadata: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PersistedRespawnRowLikeCpp {
+    object_type_raw: u16,
+    spawn_id: u64,
+    respawn_time: i64,
+    map_id: u32,
+    instance_id: u32,
+}
+
+async fn load_persisted_respawn_times_like_cpp(
+    character_db: &CharacterDatabase,
+    canonical_spawn_metadata: &spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
+) -> Result<(
+    PersistedRespawnTimesLikeCpp,
+    PersistedRespawnLoadReportLikeCpp,
+)> {
+    let mut result = character_db
+        .query(&character_db.prepare(CharStatements::SEL_ALL_RESPAWNS))
+        .await?;
+    let mut snapshot = PersistedRespawnTimesLikeCpp::default();
+    let mut report = PersistedRespawnLoadReportLikeCpp::default();
+
+    if result.is_empty() {
+        return Ok((snapshot, report));
+    }
+
+    loop {
+        let row = PersistedRespawnRowLikeCpp {
+            object_type_raw: result
+                .try_read::<u16>(0)
+                .or_else(|| result.try_read::<u8>(0).map(u16::from))
+                .unwrap_or(u16::MAX),
+            spawn_id: result
+                .try_read::<u64>(1)
+                .or_else(|| result.try_read::<i64>(1).map(|value| value as u64))
+                .unwrap_or(0),
+            respawn_time: result.try_read::<i64>(2).unwrap_or(0),
+            map_id: result
+                .try_read::<u32>(3)
+                .or_else(|| result.try_read::<u16>(3).map(u32::from))
+                .unwrap_or(0),
+            instance_id: result.try_read::<u32>(4).unwrap_or(0),
+        };
+        if let Some((key, info)) =
+            persisted_respawn_info_from_row_like_cpp(row, canonical_spawn_metadata, &mut report)
+        {
+            snapshot.push(key, info);
+        }
+        if !result.next_row() {
+            break;
+        }
+    }
+
+    Ok((snapshot, report))
+}
+
+fn persisted_respawn_info_from_row_like_cpp(
+    row: PersistedRespawnRowLikeCpp,
+    canonical_spawn_metadata: &spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
+    report: &mut PersistedRespawnLoadReportLikeCpp,
+) -> Option<(wow_map::MapKey, wow_map::RespawnInfoLikeCpp)> {
+    report.rows += 1;
+    let Ok(object_type_raw) = u8::try_from(row.object_type_raw) else {
+        report.invalid_type += 1;
+        return None;
+    };
+    let Some(object_type) = wow_map::SpawnObjectType::from_raw(object_type_raw) else {
+        report.invalid_type += 1;
+        return None;
+    };
+    if matches!(object_type, wow_map::SpawnObjectType::AreaTrigger) {
+        report.unsupported_area_trigger += 1;
+        return None;
+    }
+
+    let Some(spawn_data) = canonical_spawn_metadata
+        .spawn_store()
+        .spawn_data(object_type, row.spawn_id)
+    else {
+        report.missing_spawn_metadata += 1;
+        return None;
+    };
+
+    report.loaded += 1;
+    Some((
+        wow_map::MapKey::new(row.map_id, row.instance_id),
+        wow_map::RespawnInfoLikeCpp {
+            object_type,
+            spawn_id: row.spawn_id,
+            entry: spawn_data.id,
+            respawn_time: row.respawn_time,
+            grid_id: wow_map::compute_grid_coord(
+                spawn_data.spawn_point.x,
+                spawn_data.spawn_point.y,
+            )
+            .get_id(),
+        },
+    ))
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct PersistedRespawnApplyReportLikeCpp {
+    candidates: usize,
+    inserted: usize,
+    replaced_existing: usize,
+    rejected_zero_spawn_id: usize,
+    rejected_unsupported_type: usize,
+    rejected_existing_sooner_or_equal: usize,
+    skipped_non_world_map: usize,
+}
+
+fn apply_persisted_respawns_to_managed_map_like_cpp(
+    managed_map: &mut wow_map::ManagedMap,
+    persisted_respawn_times: &PersistedRespawnTimesLikeCpp,
+) -> PersistedRespawnApplyReportLikeCpp {
+    let key = wow_map::MapKey::new(managed_map.map_id(), managed_map.instance_id());
+    let respawns = persisted_respawn_times.for_map(key);
+    let mut report = PersistedRespawnApplyReportLikeCpp {
+        candidates: respawns.len(),
+        ..PersistedRespawnApplyReportLikeCpp::default()
+    };
+
+    if !matches!(managed_map.kind(), wow_map::ManagedMapKind::World) {
+        report.skipped_non_world_map = respawns.len();
+        return report;
+    }
+
+    for info in respawns {
+        match managed_map
+            .map_mut()
+            .add_respawn_info_like_cpp(info.clone())
+        {
+            wow_map::AddRespawnInfoOutcomeLikeCpp::Inserted => report.inserted += 1,
+            wow_map::AddRespawnInfoOutcomeLikeCpp::ReplacedExisting => {
+                report.replaced_existing += 1
+            }
+            wow_map::AddRespawnInfoOutcomeLikeCpp::RejectedZeroSpawnId => {
+                report.rejected_zero_spawn_id += 1;
+            }
+            wow_map::AddRespawnInfoOutcomeLikeCpp::RejectedUnsupportedType => {
+                report.rejected_unsupported_type += 1;
+            }
+            wow_map::AddRespawnInfoOutcomeLikeCpp::RejectedExistingSoonerOrEqual => {
+                report.rejected_existing_sooner_or_equal += 1;
+            }
+        }
+    }
+
+    report
+}
+
 fn install_canonical_spawn_group_initializer_like_cpp(
     manager: &mut wow_map::MapManager,
     canonical_spawn_metadata: Arc<spawn_store_loader::CanonicalSpawnMetadataLikeCpp>,
     condition_store: Arc<wow_data::ConditionEntriesByTypeStore>,
+    persisted_respawn_times: Arc<PersistedRespawnTimesLikeCpp>,
 ) {
     manager.set_spawn_group_initializer_like_cpp(move |managed_map| {
         let map_id = managed_map.map_id();
         let instance_id = managed_map.instance_id();
         let difficulty_id = u32::from(managed_map.map().spawn_mode());
+
+        let respawn_report = apply_persisted_respawns_to_managed_map_like_cpp(
+            managed_map,
+            persisted_respawn_times.as_ref(),
+        );
+        if respawn_report.candidates > 0 {
+            debug!(
+                map_id,
+                instance_id,
+                difficulty_id,
+                candidates = respawn_report.candidates,
+                inserted = respawn_report.inserted,
+                replaced_existing = respawn_report.replaced_existing,
+                rejected_zero_spawn_id = respawn_report.rejected_zero_spawn_id,
+                rejected_unsupported_type = respawn_report.rejected_unsupported_type,
+                rejected_existing_sooner_or_equal = respawn_report.rejected_existing_sooner_or_equal,
+                skipped_non_world_map = respawn_report.skipped_non_world_map,
+                "Applied C++ startup LoadRespawnTimes snapshot to canonical map before InitSpawnGroupState"
+            );
+        }
+
         let groups = canonical_spawn_metadata.spawn_group_templates_for_map_like_cpp(map_id);
         if groups.is_empty() {
             debug!(
@@ -2819,11 +3041,13 @@ fn locale_id_to_name(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        CanonicalRespawnConditionSchedulerLikeCpp,
+        CanonicalRespawnConditionSchedulerLikeCpp, PersistedRespawnLoadReportLikeCpp,
+        PersistedRespawnRowLikeCpp, PersistedRespawnTimesLikeCpp,
         apply_canonical_spawn_group_condition_update_set_inactive_like_cpp,
         canonical_map_update_tick_set_inactive_like_cpp,
         install_canonical_spawn_group_initializer_like_cpp, load_world_config_from,
-        loot_drop_rates_like_cpp, mmap_runtime_config_like_cpp, world_config_bool, world_config_u8,
+        loot_drop_rates_like_cpp, mmap_runtime_config_like_cpp,
+        persisted_respawn_info_from_row_like_cpp, world_config_bool, world_config_u8,
         world_config_u16,
     };
     use std::collections::{BTreeMap, HashSet};
@@ -2962,6 +3186,7 @@ mmap.enablePathFinding = 0
             &mut manager,
             Arc::clone(&metadata),
             condition_store,
+            Arc::new(PersistedRespawnTimesLikeCpp::default()),
         );
 
         let group_571 = metadata
@@ -2998,6 +3223,7 @@ mmap.enablePathFinding = 0
             &mut manager,
             Arc::clone(&metadata),
             condition_store,
+            Arc::new(PersistedRespawnTimesLikeCpp::default()),
         );
 
         let group = metadata
@@ -3019,7 +3245,12 @@ mmap.enablePathFinding = 0
         let metadata = Arc::new(test_spawn_metadata([]));
         let condition_store = Arc::new(ConditionEntriesByTypeStore::default());
         let mut manager = wow_map::MapManager::new(60_000, 10);
-        install_canonical_spawn_group_initializer_like_cpp(&mut manager, metadata, condition_store);
+        install_canonical_spawn_group_initializer_like_cpp(
+            &mut manager,
+            metadata,
+            condition_store,
+            Arc::new(PersistedRespawnTimesLikeCpp::default()),
+        );
 
         let map = manager.create_world_map(999, 0);
         assert!(
@@ -3028,6 +3259,184 @@ mmap.enablePathFinding = 0
                 .toggled_spawn_group_ids()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn canonical_map_creation_loads_persisted_respawns_for_world_maps_before_spawn_groups() {
+        let mut store = SpawnStore::new();
+        let mut creature = test_spawn(77, 571);
+        creature.id = 7001;
+        creature.spawn_point = SpawnPosition::new(533.0, -533.0, 12.0, 1.0);
+        store.add_object_spawn(&creature, |_| false);
+        let mut gameobject = test_spawn(88, 571);
+        gameobject.object_type = SpawnObjectType::GameObject;
+        gameobject.id = 9001;
+        gameobject.spawn_point = SpawnPosition::new(-100.0, 200.0, 13.0, 2.0);
+        store.add_object_spawn(&gameobject, |_| false);
+        let metadata = Arc::new(
+            super::spawn_store_loader::CanonicalSpawnMetadataLikeCpp::new(store, BTreeMap::new()),
+        );
+        let mut snapshot = PersistedRespawnTimesLikeCpp::default();
+        snapshot.push(
+            wow_map::MapKey::new(571, 0),
+            RespawnInfoLikeCpp {
+                object_type: SpawnObjectType::Creature,
+                spawn_id: 77,
+                entry: 7001,
+                respawn_time: 12345,
+                grid_id: wow_map::compute_grid_coord(
+                    creature.spawn_point.x,
+                    creature.spawn_point.y,
+                )
+                .get_id(),
+            },
+        );
+        snapshot.push(
+            wow_map::MapKey::new(571, 0),
+            RespawnInfoLikeCpp {
+                object_type: SpawnObjectType::GameObject,
+                spawn_id: 88,
+                entry: 9001,
+                respawn_time: 67890,
+                grid_id: wow_map::compute_grid_coord(
+                    gameobject.spawn_point.x,
+                    gameobject.spawn_point.y,
+                )
+                .get_id(),
+            },
+        );
+        let mut manager = wow_map::MapManager::new(60_000, 10);
+        install_canonical_spawn_group_initializer_like_cpp(
+            &mut manager,
+            metadata,
+            Arc::new(ConditionEntriesByTypeStore::default()),
+            Arc::new(snapshot),
+        );
+
+        let map = manager.create_world_map(571, 0);
+        assert_eq!(
+            map.map()
+                .get_respawn_time_like_cpp(SpawnObjectType::Creature, 77),
+            12345
+        );
+        assert_eq!(
+            map.map()
+                .get_respawn_time_like_cpp(SpawnObjectType::GameObject, 88),
+            67890
+        );
+        assert_eq!(
+            map.map()
+                .get_respawn_info_like_cpp(SpawnObjectType::Creature, 77)
+                .expect("creature respawn loaded")
+                .grid_id,
+            wow_map::compute_grid_coord(creature.spawn_point.x, creature.spawn_point.y).get_id()
+        );
+    }
+
+    #[test]
+    fn canonical_map_creation_skips_persisted_respawns_for_dungeon_maps() {
+        let metadata = Arc::new(test_spawn_metadata([]));
+        let mut snapshot = PersistedRespawnTimesLikeCpp::default();
+        snapshot.push(
+            wow_map::MapKey::new(571, 1),
+            RespawnInfoLikeCpp {
+                object_type: SpawnObjectType::Creature,
+                spawn_id: 1,
+                entry: 42,
+                respawn_time: 12345,
+                grid_id: 7,
+            },
+        );
+        let mut manager = wow_map::MapManager::new(60_000, 10);
+        install_canonical_spawn_group_initializer_like_cpp(
+            &mut manager,
+            metadata,
+            Arc::new(ConditionEntriesByTypeStore::default()),
+            Arc::new(snapshot),
+        );
+
+        let map = manager.create_map_entry(
+            571,
+            1,
+            0,
+            wow_map::ManagedMapKind::Dungeon {
+                has_reset_schedule: false,
+            },
+        );
+        assert_eq!(
+            map.map()
+                .get_respawn_time_like_cpp(SpawnObjectType::Creature, 1),
+            0
+        );
+    }
+
+    #[test]
+    fn persisted_respawn_loader_rejects_invalid_areatrigger_and_missing_metadata_rows() {
+        let metadata = test_spawn_metadata([]);
+        let mut report = PersistedRespawnLoadReportLikeCpp::default();
+
+        assert!(
+            persisted_respawn_info_from_row_like_cpp(
+                PersistedRespawnRowLikeCpp {
+                    object_type_raw: 99,
+                    spawn_id: 1,
+                    respawn_time: 10,
+                    map_id: 571,
+                    instance_id: 0,
+                },
+                &metadata,
+                &mut report,
+            )
+            .is_none()
+        );
+        assert!(
+            persisted_respawn_info_from_row_like_cpp(
+                PersistedRespawnRowLikeCpp {
+                    object_type_raw: 256,
+                    spawn_id: 1,
+                    respawn_time: 10,
+                    map_id: 571,
+                    instance_id: 0,
+                },
+                &metadata,
+                &mut report,
+            )
+            .is_none()
+        );
+        assert!(
+            persisted_respawn_info_from_row_like_cpp(
+                PersistedRespawnRowLikeCpp {
+                    object_type_raw: SpawnObjectType::AreaTrigger as u16,
+                    spawn_id: 1,
+                    respawn_time: 10,
+                    map_id: 571,
+                    instance_id: 0,
+                },
+                &metadata,
+                &mut report,
+            )
+            .is_none()
+        );
+        assert!(
+            persisted_respawn_info_from_row_like_cpp(
+                PersistedRespawnRowLikeCpp {
+                    object_type_raw: SpawnObjectType::Creature as u16,
+                    spawn_id: 404,
+                    respawn_time: 10,
+                    map_id: 571,
+                    instance_id: 0,
+                },
+                &metadata,
+                &mut report,
+            )
+            .is_none()
+        );
+
+        assert_eq!(report.rows, 4);
+        assert_eq!(report.loaded, 0);
+        assert_eq!(report.invalid_type, 2);
+        assert_eq!(report.unsupported_area_trigger, 1);
+        assert_eq!(report.missing_spawn_metadata, 1);
     }
 
     // C++ anchors for the focused condition-update helper tests:

@@ -126,6 +126,8 @@ pub enum CharStatements {
     INS_INSTANCE,
     /// SELECT type, spawnId, respawnTime FROM respawn WHERE mapId = ? AND instanceId = ?
     SEL_RESPAWNS,
+    /// SELECT type, spawnId, respawnTime, mapId, instanceId FROM respawn
+    SEL_ALL_RESPAWNS,
     /// REPLACE INTO respawn (type, spawnId, respawnTime, mapId, instanceId) VALUES (?, ?, ?, ?, ?)
     REP_RESPAWN,
     /// DELETE FROM respawn WHERE type = ? AND spawnId = ? AND mapId = ? AND instanceId = ?
@@ -362,6 +364,9 @@ impl StatementDef for CharStatements {
             Self::SEL_RESPAWNS => {
                 "SELECT type, spawnId, respawnTime FROM respawn WHERE mapId = ? AND instanceId = ?"
             }
+            Self::SEL_ALL_RESPAWNS => {
+                "SELECT type, spawnId, respawnTime, mapId, instanceId FROM respawn"
+            }
             Self::REP_RESPAWN => {
                 "REPLACE INTO respawn (type, spawnId, respawnTime, mapId, instanceId) VALUES (?, ?, ?, ?, ?)"
             }
@@ -561,6 +566,16 @@ mod tests {
     }
 
     #[test]
+    fn respawn_startup_load_statement_reads_all_rows_without_placeholders() {
+        let sql = CharStatements::SEL_ALL_RESPAWNS.sql();
+        assert_eq!(
+            sql,
+            "SELECT type, spawnId, respawnTime, mapId, instanceId FROM respawn"
+        );
+        assert_eq!(sql.matches('?').count(), 0);
+    }
+
+    #[test]
     fn char_statements_have_sql() {
         assert!(!CharStatements::SEL_ENUM.sql().is_empty());
         assert!(!CharStatements::SEL_CHECK_NAME.sql().is_empty());
@@ -581,6 +596,7 @@ mod tests {
         assert!(!CharStatements::INS_CHARACTER_INSTANCE_LOCK.sql().is_empty());
         assert!(!CharStatements::INS_INSTANCE.sql().is_empty());
         assert!(!CharStatements::SEL_RESPAWNS.sql().is_empty());
+        assert!(!CharStatements::SEL_ALL_RESPAWNS.sql().is_empty());
         assert!(!CharStatements::REP_RESPAWN.sql().is_empty());
         assert!(!CharStatements::DEL_RESPAWN.sql().is_empty());
         assert!(!CharStatements::DEL_ALL_RESPAWNS.sql().is_empty());

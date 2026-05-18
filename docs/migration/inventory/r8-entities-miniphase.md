@@ -5,6 +5,11 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.374** Startup `Map::LoadRespawnTimes` into map-owned respawn store.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapManager.cpp:71-76`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/MapManager.cpp:100-110`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:3516-3546`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:3563-3594`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2057-2090`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.h:748-777`.
+  Rust targets: `crates/world-server/src/main.rs`, `crates/wow-database/src/statements/character.rs`.
+  Acceptance: world-server reads `characters.respawn` at startup into a snapshot, validates rows through canonical spawn metadata, computes C++ grid ids from spawn points, and applies Creature/GameObject timers to map-owned `RespawnStoreLikeCpp` for `ManagedMapKind::World` before `InitSpawnGroupState`; invalid type, AreaTrigger, missing metadata and non-world maps are counted/ignored without DB writes. This does not implement DB save/delete during tick, `DoRespawn`/`LoadFromDB`, PoolMgr, linked-respawn persistence, entity live creation/fanout or corpse load.
+
 - [x] **#NEXT.R8.ENTITIES.373** `Map::ProcessRespawns` safe composite zero-delete seam.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:666-688`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1950-2023`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1959-1964`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1966-2002`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2004-2020`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2191-2240`.
   Rust targets: `crates/wow-map/src/map.rs`, `crates/world-server/src/main.rs`.
