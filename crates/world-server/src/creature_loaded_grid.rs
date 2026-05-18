@@ -293,10 +293,17 @@ pub fn build_loaded_grid_creature_inputs_from_db_like_cpp(
     let max_health =
         u64::from((base_stats.generate_health_like_cpp(difficulty) as f32 * health_rate) as u32);
     let max_mana = i32::try_from(base_stats.generate_mana_like_cpp(difficulty)).unwrap_or(i32::MAX);
-    // C++ `Creature::SetSpawnHealth`: `_regenerateHealth` selects full spawned health/mana;
-    // otherwise DB curhealth/curmana are preserved, with current health scaled by
-    // `Creature::GetHealthMod(template.Classification)` and min-clamped only when non-zero.
-    let (health, mana) = if template.regen_health {
+    // C++ `Creature::SetSpawnHealth`: flags5 `NO_HEALTH_REGEN` returns before reading
+    // `_regenerateHealth` or DB `curhealth`/`curmana`, preserving the Create/UpdateLevel-
+    // DependantStats current health/mana. Otherwise `_regenerateHealth` selects full spawned
+    // health/mana; DB current health is scaled by `GetHealthMod(template.Classification)` and
+    // min-clamped only when non-zero.
+    let flags5 = wow_constants::creature::CreatureStaticFlags5::from_bits_truncate(
+        difficulty.static_flags[4],
+    );
+    let no_health_regen =
+        flags5.contains(wow_constants::creature::CreatureStaticFlags5::NO_HEALTH_REGEN);
+    let (health, mana) = if no_health_regen || template.regen_health {
         (max_health, max_mana)
     } else {
         let health = if runtime_row.curhealth == 0 {
@@ -689,6 +696,13 @@ mod tests {
     }
 
     fn db_backed_difficulty_store(entry: u32) -> CreatureDifficultyStoreLikeCpp {
+        db_backed_difficulty_store_with_static_flags(entry, [0; 8])
+    }
+
+    fn db_backed_difficulty_store_with_static_flags(
+        entry: u32,
+        static_flags: [u32; 8],
+    ) -> CreatureDifficultyStoreLikeCpp {
         CreatureDifficultyStoreLikeCpp::from_records(
             [wow_data::CreatureDifficultyRecordLikeCpp {
                 entry,
@@ -708,7 +722,7 @@ mod tests {
                 skin_loot_id: 0,
                 gold_min: 0,
                 gold_max: 0,
-                static_flags: [0; 8],
+                static_flags,
             }],
             |_| 1.0,
         )
@@ -849,6 +863,57 @@ mod tests {
         assert_eq!(runtime.stats.health, 400);
         assert_eq!(runtime.stats.max_mana, 150);
         assert_eq!(runtime.stats.mana, 150);
+    }
+
+    #[test]
+    fn loaded_grid_db_backed_builder_flags5_no_health_regen_preserves_initial_stats_like_cpp() {
+        let entry = 12_406;
+        let spawn = db_backed_spawn(entry);
+        let runtime_row = CreatureSpawnRuntimeRowLikeCpp {
+            spawn_id: spawn.spawn_id,
+            model_id: 999,
+            equipment_id: 1,
+            wander_distance: 0.0,
+            curhealth: 77,
+            curmana: 33,
+            movement_type: 0,
+            string_id: String::new(),
+            spawn_time_secs: 20,
+        };
+        let health_rates = CreatureClassificationHealthRatesLikeCpp {
+            elite: 2.0,
+            ..CreatureClassificationHealthRatesLikeCpp::default()
+        };
+        let mut static_flags = [0; 8];
+        static_flags[4] = wow_constants::creature::CreatureStaticFlags5::NO_HEALTH_REGEN.bits();
+        let (display_store, model_store) = empty_display_stores();
+
+        let (_, _, runtime) = build_loaded_grid_creature_inputs_from_db_like_cpp(
+            &spawn,
+            &runtime_row,
+            &db_backed_template_store_with_regen(entry, false),
+            &db_backed_difficulty_store_with_static_flags(entry, static_flags),
+            &db_backed_base_stats_store(),
+            &health_rates,
+            &display_store,
+            &model_store,
+            2,
+            0,
+            0,
+            false,
+            |_, _| 19,
+        )
+        .expect("flags5 NO_HEALTH_REGEN should preserve initial spawned stats");
+
+        assert_eq!(runtime.stats.max_health, 400);
+        assert_eq!(runtime.stats.health, runtime.stats.max_health);
+        assert_eq!(runtime.stats.max_mana, 150);
+        assert_eq!(runtime.stats.mana, runtime.stats.max_mana);
+        assert_ne!(runtime.stats.health, u64::from(runtime_row.curhealth) * 2);
+        assert_ne!(
+            runtime.stats.mana,
+            i32::try_from(runtime_row.curmana).unwrap()
+        );
     }
 
     #[test]

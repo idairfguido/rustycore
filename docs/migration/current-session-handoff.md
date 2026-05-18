@@ -30,8 +30,8 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 - Current branch state after #401 review/validation/local commit: `develop...origin/develop [ahead 56]` with a clean tree; no push/install/restart.
 - Current branch state after #402 review/validation/local commit: `develop...origin/develop [ahead 57]` with a clean tree; no push/install/restart.
 - Current branch state after #403 review/validation/local commit: `develop...origin/develop [ahead 58]` with a clean tree; no push/install/restart.
-- #404 implementation prepared in working tree only (no review/commit yet): DB-backed input stores/builder dependency for Creature loaded-grid LoadFromDB resolver. Requires reviewer verdict before marking completed.
-- Latest completed committed slice in this handoff: `#NEXT.R8.ENTITIES.403 — Map-owned caller GUID seam for Creature loaded-grid resolver/DoRespawn loader closure` (review `APROBADO`; focused checks passed; committed locally in the current #403 HEAD).
+- Current working tree after #405 implementation: `#NEXT.R8.ENTITIES.405` is prepared for foreman review/checks/commit only; no push/install/restart.
+- Latest completed committed slice in this handoff: `#NEXT.R8.ENTITIES.404 — DB-backed input stores for Creature loaded-grid LoadFromDB resolver` committed locally at `2f509b3` (reviewed/checked; no push/install/restart).
 - Previous completed committed slice: `#NEXT.R8.ENTITIES.402 — Map-local GUID sequence seam for loaded-grid Creature/GameObject LoadFromDB/DoRespawn` (review `APROBADO`; focused checks passed; committed locally in the current #402 HEAD).
 - Previous completed committed slice: `#NEXT.R8.ENTITIES.401 — Creature loaded-grid lifecycle resolver for real Map insertion path` (review `APROBADO`; focused checks passed; committed locally in the current #401 HEAD).
 - Previous completed committed slice: `#NEXT.R8.ENTITIES.400 — Creature template classification/rate wiring for C++-normalized creature difficulty/base-stat runtime stores` (review `APROBADO`; focused checks passed; committed locally in the current #400 HEAD).
@@ -56,6 +56,12 @@ This remains intentionally below the R8 TSV row-completion ratio because heavy r
 Manual test point: no new client-facing manual milestone from #403; this closes only the ownership seam that lets a future loaded-grid Creature loader obtain/use a map-owned runtime GUID instead of misusing spawn ids. It still does not wire the world-server DB loader into `Map::process_due_respawns`, execute DB-backed loaded-grid Creature creation, support creature vehicle templates, perform AddToMap/fanout/scripts/AI/vehicle/zonescript initialization, rewrite ObjectGridLoader, execute PoolMgr live spawn work, complete AreaTrigger runtime, CleanupsBeforeDelete, dynamic tree/session fanout, or install/restart the server.
 
 ## Most Recent Completed Slices
+
+- `#NEXT.R8.ENTITIES.405` (prepared in working tree for review/checks/commit; no push/install/restart)
+  - Corrects the DB-backed loaded-grid Creature builder dependency for C++ `Creature::SetSpawnHealth`: when difficulty `static_flags[4]`/flags5 contains `CREATURE_STATIC_FLAG_5_NO_HEALTH_REGEN`, the builder preserves the initial `Create`/`UpdateLevelDependantStats` health/mana and returns before applying `_regenerateHealth` or DB `curhealth`/`curmana` semantics.
+  - C++ anchors: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Creature/Creature.cpp:1815-1923`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Creature/Creature.cpp:1954-1978`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Creature/CreatureData.h:188-223`, and `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:940-1040`.
+  - Rust targets: `crates/world-server/src/creature_loaded_grid.rs`, docs/inventory/handoff.
+  - Acceptance claim is limited to dependency/builder parity. It does not wire live `ProcessRespawns`, mutate maps, execute AddToMap/fanout/scripts/AI, create entities, or mark live Creature `LoadFromDB` complete.
 
 - `#NEXT.R8.ENTITIES.404` (reviewed/checked for local commit; no push/install/restart)
   - Adds a DB-backed input dependency for the future Creature loaded-grid `LoadFromDB` resolver: `wow-data` template lifecycle store for C++-shaped `creature_template`, spells and ordered models; `world-server` raw creature runtime rows preserved from the existing spawn query; and a pure builder composing `SpawnData` + raw creature row + template/difficulty/base-stats/display/model stores into resolver inputs.
@@ -745,7 +751,7 @@ Warnings observed are pre-existing workspace warnings (for example `unsafe` in `
 
 ## Remaining Gaps / Next Dependency
 
-`#NEXT.R8.ENTITIES.404` closes only the DB-backed data/builder dependency for the pure Creature loaded-grid resolver/loader closure; it does **not** complete full live respawn/runtime ownership. Remaining heavy dependencies toward >95% core include:
+`#NEXT.R8.ENTITIES.405` corrects only the DB-backed data/builder dependency for the pure Creature loaded-grid resolver/loader closure; it does **not** complete full live respawn/runtime ownership. Remaining heavy dependencies toward >95% core include:
 
 1. Wire the now-available DB-backed Creature loader inputs into the live world-server loaded-grid `DoRespawn` closure: select the map-owned runtime GUID from the `&mut Map` seam, compose `CreatureLoadedGridLifecycleResolverLikeCpp`, and pass typed `MapObjectRecord::Creature` records into `Map::process_due_respawns_composite_loaded_grid_respawns_like_cpp` without holding map locks across DB/async work.
 2. Implement or precisely block creature vehicle-template runtime (`vehicle_id`) before treating those spawns as complete; #403 deliberately rejects them as `UnsupportedVehicle` rather than faking `HighGuid::Creature`.
@@ -754,4 +760,4 @@ Warnings observed are pre-existing workspace warnings (for example `unsafe` in `
 5. Complete `AddToWorld`/`RemoveFromWorld`, ObjectAccessor map-local ownership, grid/session fanout, dynamic tree/collision hooks, scripts/AI/vehicle/zonescript initialization, and cleanup side effects after typed records enter/leave `Map`.
 6. Continue reducing Player/Unit/Creature/GameObject lifecycle, UpdateFields, inventory/equipment, auras, threat, motion, spawn/despawn/respawn and AreaTrigger runtime gaps.
 
-Recommended next slice: `#NEXT.R8.ENTITIES.405` should wire the reviewed DB-backed Creature inputs from #404 into the existing world-server loaded-grid `DoRespawn` loader seam, using #403 for map-owned GUID generation and returning typed blocked/error paths that preserve timers/order for missing inputs or unsupported vehicle templates. Do not fake missing template/runtime selection with defaults.
+Recommended next slice after #405 review/commit: wire the corrected DB-backed Creature inputs from #404/#405 into the existing world-server loaded-grid `DoRespawn` loader seam, using #403 for map-owned GUID generation and returning typed blocked/error paths that preserve timers/order for missing inputs or unsupported vehicle templates. Do not fake missing template/runtime selection with defaults.
