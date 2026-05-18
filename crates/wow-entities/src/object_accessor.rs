@@ -4,7 +4,7 @@ use wow_constants::{TypeId, TypeMask};
 use wow_core::ObjectGuid;
 use wow_core::guid::HighGuid;
 
-use crate::{Creature, GameObject, Item, Player, PlayerInventoryStorage, WorldObject};
+use crate::{AreaTrigger, Creature, GameObject, Item, Player, PlayerInventoryStorage, WorldObject};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AccessorObjectKind {
@@ -180,6 +180,7 @@ pub struct MapObjectRecord {
 #[derive(Debug, Clone, PartialEq)]
 enum MapObjectBody {
     WorldObject(WorldObject),
+    AreaTrigger(AreaTrigger),
     Creature(Box<Creature>),
     GameObject(GameObject),
     Player(Box<Player>),
@@ -230,6 +231,17 @@ impl MapObjectRecord {
         })
     }
 
+    pub fn new_area_trigger(area_trigger: AreaTrigger) -> Result<Self, ObjectAccessorError> {
+        let record = Self::new(
+            AccessorObjectKind::AreaTrigger,
+            area_trigger.world().clone(),
+        )?;
+        Ok(Self {
+            kind: record.kind,
+            body: MapObjectBody::AreaTrigger(area_trigger),
+        })
+    }
+
     pub fn new_player(player: Player) -> Result<Self, ObjectAccessorError> {
         let record = Self::new(AccessorObjectKind::Player, player.unit().world().clone())?;
         Ok(Self {
@@ -245,6 +257,7 @@ impl MapObjectRecord {
     pub fn object(&self) -> &WorldObject {
         match &self.body {
             MapObjectBody::WorldObject(object) => object,
+            MapObjectBody::AreaTrigger(area_trigger) => area_trigger.world(),
             MapObjectBody::Creature(creature) => creature.unit().world(),
             MapObjectBody::GameObject(game_object) => game_object.world(),
             MapObjectBody::Player(player) => player.unit().world(),
@@ -254,9 +267,30 @@ impl MapObjectRecord {
     pub fn object_mut(&mut self) -> &mut WorldObject {
         match &mut self.body {
             MapObjectBody::WorldObject(object) => object,
+            MapObjectBody::AreaTrigger(area_trigger) => area_trigger.world_mut(),
             MapObjectBody::Creature(creature) => creature.unit_mut().world_mut(),
             MapObjectBody::GameObject(game_object) => game_object.world_mut(),
             MapObjectBody::Player(player) => player.unit_mut().world_mut(),
+        }
+    }
+
+    pub fn area_trigger(&self) -> Option<&AreaTrigger> {
+        match &self.body {
+            MapObjectBody::AreaTrigger(area_trigger) => Some(area_trigger),
+            MapObjectBody::WorldObject(_)
+            | MapObjectBody::Creature(_)
+            | MapObjectBody::GameObject(_)
+            | MapObjectBody::Player(_) => None,
+        }
+    }
+
+    pub fn area_trigger_mut(&mut self) -> Option<&mut AreaTrigger> {
+        match &mut self.body {
+            MapObjectBody::AreaTrigger(area_trigger) => Some(area_trigger),
+            MapObjectBody::WorldObject(_)
+            | MapObjectBody::Creature(_)
+            | MapObjectBody::GameObject(_)
+            | MapObjectBody::Player(_) => None,
         }
     }
 
@@ -264,6 +298,7 @@ impl MapObjectRecord {
         match &self.body {
             MapObjectBody::Creature(creature) => Some(creature.as_ref()),
             MapObjectBody::WorldObject(_)
+            | MapObjectBody::AreaTrigger(_)
             | MapObjectBody::GameObject(_)
             | MapObjectBody::Player(_) => None,
         }
@@ -273,6 +308,7 @@ impl MapObjectRecord {
         match &mut self.body {
             MapObjectBody::Creature(creature) => Some(creature.as_mut()),
             MapObjectBody::WorldObject(_)
+            | MapObjectBody::AreaTrigger(_)
             | MapObjectBody::GameObject(_)
             | MapObjectBody::Player(_) => None,
         }
@@ -282,6 +318,7 @@ impl MapObjectRecord {
         match &self.body {
             MapObjectBody::GameObject(game_object) => Some(game_object),
             MapObjectBody::WorldObject(_)
+            | MapObjectBody::AreaTrigger(_)
             | MapObjectBody::Creature(_)
             | MapObjectBody::Player(_) => None,
         }
@@ -291,6 +328,7 @@ impl MapObjectRecord {
         match &mut self.body {
             MapObjectBody::GameObject(game_object) => Some(game_object),
             MapObjectBody::WorldObject(_)
+            | MapObjectBody::AreaTrigger(_)
             | MapObjectBody::Creature(_)
             | MapObjectBody::Player(_) => None,
         }
@@ -300,6 +338,7 @@ impl MapObjectRecord {
         match &self.body {
             MapObjectBody::Player(player) => Some(player.as_ref()),
             MapObjectBody::WorldObject(_)
+            | MapObjectBody::AreaTrigger(_)
             | MapObjectBody::Creature(_)
             | MapObjectBody::GameObject(_) => None,
         }
@@ -309,6 +348,7 @@ impl MapObjectRecord {
         match &mut self.body {
             MapObjectBody::Player(player) => Some(player.as_mut()),
             MapObjectBody::WorldObject(_)
+            | MapObjectBody::AreaTrigger(_)
             | MapObjectBody::Creature(_)
             | MapObjectBody::GameObject(_) => None,
         }
@@ -317,6 +357,7 @@ impl MapObjectRecord {
     pub fn into_object(self) -> WorldObject {
         match self.body {
             MapObjectBody::WorldObject(object) => object,
+            MapObjectBody::AreaTrigger(area_trigger) => area_trigger.world().clone(),
             MapObjectBody::Creature(creature) => creature.unit().world().clone(),
             MapObjectBody::GameObject(game_object) => game_object.world().clone(),
             MapObjectBody::Player(player) => player.unit().world().clone(),

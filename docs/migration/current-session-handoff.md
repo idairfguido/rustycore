@@ -7,9 +7,9 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 ## Repository State
 
 - Branch: `develop`
-- Base before #377: clean `develop...origin/develop [ahead 30]` after `#NEXT.R8.ENTITIES.376`.
-- Current in-review slice: `#NEXT.R8.ENTITIES.377 — Map spawn-id live-object indexes like Trinity multimap`.
-- Expected tree after review/commit of #377: clean, ahead 31. No push/install/restart performed.
+- Base before #378: clean `develop...origin/develop [ahead 31]` after `#NEXT.R8.ENTITIES.377`.
+- Latest completed local slice: `#NEXT.R8.ENTITIES.378 — AreaTrigger by-spawn store en Map`.
+- Expected tree after #378 commit: clean local worktree, `develop` ahead of origin by 32 commits. No push/install/restart performed.
 
 ## Critical Rules
 
@@ -21,13 +21,19 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 
 ## Progress Estimate
 
-Overall core migration estimate after #377 `Map spawn-id live-object indexes like Trinity multimap`: `~86.9%`.
+Overall core migration estimate during #378 `AreaTrigger by-spawn store en Map`: `~87.0%`.
 
-This remains intentionally below the R8 TSV row-completion ratio because heavy runtime ownership gaps remain: full live `ProcessRespawns` branches beyond represented safe zero-delete/reschedule branches, real `PoolMgr`, `DoRespawn` entity creation/`LoadFromDB`, corpse load, AreaTrigger by-spawn store, real entity-specific `AddToWorld`/`RemoveFromWorld` side effects beyond `MapObjectRecord`, real dynamic escort config/runtime feeding the closure, grid/session fanout, ObjectAccessor ownership, DB save/delete coverage beyond current seams, and broader Unit/Player inventory/auras/threat/motion/update-field work.
+This remains intentionally below the R8 TSV row-completion ratio because heavy runtime ownership gaps remain: full live `ProcessRespawns` branches beyond represented safe zero-delete/reschedule branches, real `PoolMgr`, `DoRespawn` entity creation/`LoadFromDB`, corpse load, AreaTrigger Create/Load/Update runtime, templates/spawns, AI, caster unregister, unit enter/exit, movement/visibility/transport, full entity-specific `AddToWorld`/`RemoveFromWorld` side effects beyond the object/spawn-id store, real dynamic escort config/runtime feeding the closure, grid/session fanout, ObjectAccessor ownership, DB save/delete coverage beyond current seams, and broader Unit/Player inventory/auras/threat/motion/update-field work.
 
-Manual test point: no new client-facing manual milestone from #377; this is a map-owned live-object indexing and respawn-guard correctness slice, validated with focused unit checks.
+Manual test point: no new client-facing manual milestone from #378; this is a map-owned AreaTrigger by-spawn indexing slice, validated with focused unit checks.
 
 ## Most Recent Completed Slices
+
+- `#NEXT.R8.ENTITIES.378` (completed; review `APROBADO`; focused validation passed; committed locally by Foreman after validation)
+  - Adds typed `MapObjectRecord::AreaTrigger` and `MapObjectRecord::new_area_trigger` while preserving generic `MapObjectRecord::new(AccessorObjectKind::AreaTrigger, WorldObject)` bridge behavior.
+  - Adds map-owned derived `area_triggers_by_spawn_id` GUID-set index beside Creature/GameObject indexes, updated only through `insert_map_object_record`/`remove_map_object` replace/remove paths, skipping spawn id zero per C++ `if (_spawnId)` / `IsStaticSpawn()`.
+  - Adds C++-shaped AreaTrigger count/GUID/get-by-spawn helpers that resolve through canonical `map_objects` and do not scan the full store.
+  - Does not implement AreaTrigger Create/Load/Update runtime, templates/spawns, AI, caster unregister, unit enter/exit, movement/visibility/transport, full entity-specific AddToWorld/RemoveFromWorld side effects outside the store, ObjectAccessor/grid/session fanout, PoolMgr/DoRespawn, or broader Unit/Player systems.
 
 - `#NEXT.R8.ENTITIES.377`
   - Adds map-owned typed multimap-like by-spawn-id indexes for Creature and GameObject live records beside the primary `map_objects` GUID store, matching Trinity's `_creatureBySpawnIdStore` and `_gameobjectBySpawnIdStore` ownership shape.
@@ -81,6 +87,27 @@ Previous completed local slice:
   - Adds linked respawn metadata/load/store and the pure linked-time guard dependency for `Map::CheckRespawn`.
   - Source-of-truth runtime timers remain map-owned `wow_map::Map` / `RespawnStoreLikeCpp`; linked respawn metadata is loaded DB -> validated canonical metadata -> read-only linked store.
   - Does not implement full `CheckRespawn`/`ProcessRespawns`, PoolMgr, `DoRespawn`, DB save/delete, live entity creation or fanout.
+
+## C++ Anchors for #378
+
+- `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.h:418-430` — `Map` exposes `_objectsStore` and typed by-spawn unordered multimaps for Creature, GameObject and AreaTrigger.
+- `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.h:793-796` — private `_objectsStore`, `_creatureBySpawnIdStore`, `_gameobjectBySpawnIdStore`, `_areaTriggerBySpawnIdStore` fields.
+- `/home/server/woltk-trinity-legacy/src/server/game/Entities/AreaTrigger/AreaTrigger.cpp:62-76` — `AreaTrigger::AddToWorld` inserts into object store and, when `_spawnId != 0`, into `GetAreaTriggerBySpawnIdStore()` before `WorldObject::AddToWorld()`.
+- `/home/server/woltk-trinity-legacy/src/server/game/Entities/AreaTrigger/AreaTrigger.cpp:78-102` — `AreaTrigger::RemoveFromWorld` runs script/caster/AI/enter-exit side effects, removes from world, erases static spawn-id pair, then removes from object store.
+- `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:3501-3508` — `Map::GetAreaTriggerBySpawnId` uses `equal_range`, returns null if empty, otherwise returns `bounds.first->second` without spawned filtering.
+
+## Expected Validation for #378
+
+```bash
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo fmt --check
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo test -p wow-map area_trigger_spawn_id
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo test -p wow-map spawn_id_store
+RUSTUP_HOME=/home/cdmonio/.rustup CARGO_HOME=/home/cdmonio/.cargo cargo check -p world-server
+git diff --check
+git status --short --branch
+```
+
+Expected remaining gaps: AreaTrigger Create/Load/Update runtime, templates/spawns, AI, caster unregister, unit enter/exit, movement/visibility/transport, full entity-specific AddToWorld/RemoveFromWorld side effects outside the store, ObjectAccessor/grid/session fanout, PoolMgr/DoRespawn, broader Unit/Player systems.
 
 ## C++ Anchors for #377
 

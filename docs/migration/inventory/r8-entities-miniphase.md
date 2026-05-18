@@ -5,6 +5,11 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.378** `AreaTrigger` by-spawn store en `Map`.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.h:418-430`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.h:793-796`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/AreaTrigger/AreaTrigger.cpp:62-76`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/AreaTrigger/AreaTrigger.cpp:78-102`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:3501-3508`.
+  Rust targets: `crates/wow-entities/src/object_accessor.rs`, `crates/wow-map/src/map.rs`.
+  Acceptance: `MapObjectRecord` now has a typed `AreaTrigger` variant while preserving generic `MapObjectRecord::new(AccessorObjectKind::AreaTrigger, WorldObject)` bridge behavior; `Map` owns a derived multimap-like `area_triggers_by_spawn_id` GUID-set index beside the Creature/GameObject indexes, keeps it coherent through insert/remove/replace, skips spawn id zero, resolves helpers back through canonical `map_objects`, and exposes C++-shaped count/GUID/get-by-spawn helpers. Complete only for typed `MapObjectRecord` AreaTrigger plus map-local by-spawn index/store helper; remaining gaps include AreaTrigger Create/Load/Update runtime, templates/spawns, AI, caster unregister, unit enter/exit, movement/visibility/transport, full entity-specific AddToWorld/RemoveFromWorld side effects outside the store, ObjectAccessor/grid/session fanout, PoolMgr/DoRespawn, and broader Unit/Player systems.
+
 - [x] **#NEXT.R8.ENTITIES.377** `Map` spawn-id live-object indexes like Trinity multimap.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.h:414-493`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.h:793-796` (foreman spec also cited nearby respawn fields at `Map.h:748-777`), `/home/server/woltk-trinity-legacy/src/server/game/Entities/Creature/Creature.cpp:330-419`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:899-968`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1966-2002`.
   Rust targets: `crates/wow-map/src/map.rs`.

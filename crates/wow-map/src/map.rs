@@ -23,8 +23,8 @@ use crate::spawn::{
 };
 use wow_core::{ObjectGuid, Position, guid::HighGuid};
 use wow_entities::{
-    AccessorObjectKind, CombatBeginContextLikeCpp, CombatSubsystem, Creature, GameObject,
-    MAX_VISIBILITY_DISTANCE, MapBindingError, MapObjectRecord, ObjectAccessorError,
+    AccessorObjectKind, AreaTrigger, CombatBeginContextLikeCpp, CombatSubsystem, Creature,
+    GameObject, MAX_VISIBILITY_DISTANCE, MapBindingError, MapObjectRecord, ObjectAccessorError,
     ObjectAccessorMapSource, ObjectNotifyFlags, Player, Unit, WorldObject,
 };
 
@@ -360,26 +360,24 @@ pub struct Map<Terrain = NoopTerrainGridLoader, Lifecycle = NoopGridLifecycle> {
     spawn_group_state: SpawnGroupRuntimeState,
     respawn_store: RespawnStoreLikeCpp,
     grid_state_unloaded: bool,
-    /// Map-local typed by-spawn-id live creature store, matching C++
-    /// `Map::_creatureBySpawnIdStore` (`Map.h:414-493`, private field at
-    /// `Map.h:793-796` in this checkout; foreman spec referenced nearby
-    /// respawn-store fields at `Map.h:748-777`).
+    /// Map-local typed by-spawn-id live-object stores, matching C++
+    /// `_creatureBySpawnIdStore`, `_gameobjectBySpawnIdStore`, and
+    /// `_areaTriggerBySpawnIdStore` beside `_objectsStore` (`Map.h:418-430`,
+    /// private fields at `Map.h:793-796`).
     ///
-    /// Trinity keeps this beside `_objectsStore` and updates it from
-    /// `Creature::AddToWorld`/`RemoveFromWorld` (`Creature.cpp:330-419`). Rust
-    /// uses GUID sets as the multimap-like values because `map_objects` remains
-    /// the primary object store. Spawn id zero is not indexed, matching C++
-    /// `if (m_spawnId)`.
+    /// Rust keeps `map_objects` as the source-of-truth object store. These
+    /// indexes are derived only from `insert_map_object_record`/`remove_map_object`
+    /// and store GUID sets to preserve Trinity's unordered-multimap-like
+    /// cardinality without making pointers canonical state. Spawn id zero is
+    /// omitted, matching C++ `if (_spawnId)` / `IsStaticSpawn()`.
+    ///
+    /// AreaTrigger runtime side effects outside the object/spawn-id store
+    /// (`ZoneScript`, caster unregister, AI removal, unit enter/exit, visibility,
+    /// movement/transport, full entity-specific AddToWorld/RemoveFromWorld) remain
+    /// outside this slice.
     creatures_by_spawn_id: HashMap<SpawnId, HashSet<ObjectGuid>>,
-    /// Map-local typed by-spawn-id live gameobject store, matching C++
-    /// `Map::_gameobjectBySpawnIdStore` (`Map.h:414-493`, private field at
-    /// `Map.h:793-796` in this checkout; foreman spec referenced nearby
-    /// respawn-store fields at `Map.h:748-777`).
-    ///
-    /// Trinity also has `_areaTriggerBySpawnIdStore`, but `MapObjectRecord` has
-    /// no AreaTrigger variant in this slice, so AreaTrigger indexing remains a
-    /// documented future gap.
     gameobjects_by_spawn_id: HashMap<SpawnId, HashSet<ObjectGuid>>,
+    area_triggers_by_spawn_id: HashMap<SpawnId, HashSet<ObjectGuid>>,
     map_objects: HashMap<ObjectGuid, MapObjectRecord>,
 }
 
@@ -433,6 +431,7 @@ where
             grid_state_unloaded: false,
             creatures_by_spawn_id: HashMap::new(),
             gameobjects_by_spawn_id: HashMap::new(),
+            area_triggers_by_spawn_id: HashMap::new(),
             map_objects: HashMap::new(),
         }
     }
@@ -1167,18 +1166,50 @@ where
             .map_or(0, HashSet::len)
     }
 
+    pub fn area_trigger_spawn_id_store_count_like_cpp(&self, spawn_id: SpawnId) -> usize {
+        self.area_triggers_by_spawn_id
+            .get(&spawn_id)
+            .map_or(0, HashSet::len)
+    }
+
     pub fn creature_spawn_id_store_guids_like_cpp(&self, spawn_id: SpawnId) -> Vec<ObjectGuid> {
         self.creatures_by_spawn_id
             .get(&spawn_id)
-            .map(|guids| guids.iter().copied().collect())
+            .map(|guids| {
+                let mut guids: Vec<_> = guids.iter().copied().collect();
+                guids.sort();
+                guids
+            })
             .unwrap_or_default()
     }
 
     pub fn gameobject_spawn_id_store_guids_like_cpp(&self, spawn_id: SpawnId) -> Vec<ObjectGuid> {
         self.gameobjects_by_spawn_id
             .get(&spawn_id)
-            .map(|guids| guids.iter().copied().collect())
+            .map(|guids| {
+                let mut guids: Vec<_> = guids.iter().copied().collect();
+                guids.sort();
+                guids
+            })
             .unwrap_or_default()
+    }
+
+    pub fn area_trigger_spawn_id_store_guids_like_cpp(&self, spawn_id: SpawnId) -> Vec<ObjectGuid> {
+        self.area_triggers_by_spawn_id
+            .get(&spawn_id)
+            .map(|guids| {
+                let mut guids: Vec<_> = guids.iter().copied().collect();
+                // C++ returns the first unordered_multimap entry; Rust sorts for deterministic tests.
+                guids.sort();
+                guids
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn get_area_trigger_by_spawn_id_like_cpp(&self, spawn_id: SpawnId) -> Option<&AreaTrigger> {
+        self.area_trigger_spawn_id_store_guids_like_cpp(spawn_id)
+            .into_iter()
+            .find_map(|guid| self.map_object_record(guid)?.area_trigger())
     }
 
     pub fn insert_map_object(
@@ -1225,6 +1256,17 @@ where
                     .or_default()
                     .insert(gameobject.world().guid());
             }
+            return;
+        }
+
+        if let Some(area_trigger) = record.area_trigger() {
+            let spawn_id = area_trigger.spawn_id();
+            if spawn_id != 0 {
+                self.area_triggers_by_spawn_id
+                    .entry(spawn_id)
+                    .or_default()
+                    .insert(area_trigger.world().guid());
+            }
         }
     }
 
@@ -1243,6 +1285,15 @@ where
                 &mut self.gameobjects_by_spawn_id,
                 gameobject.spawn_id(),
                 gameobject.world().guid(),
+            );
+            return;
+        }
+
+        if let Some(area_trigger) = record.area_trigger() {
+            Self::remove_spawn_id_index_entry_like_cpp(
+                &mut self.area_triggers_by_spawn_id,
+                area_trigger.spawn_id(),
+                area_trigger.world().guid(),
             );
         }
     }
@@ -3442,6 +3493,22 @@ mod tests {
         gameobject
     }
 
+    fn test_area_trigger_for_spawn(spawn_id: SpawnId, counter: i64) -> AreaTrigger {
+        let mut area_trigger = AreaTrigger::new();
+        area_trigger
+            .world_mut()
+            .object_mut()
+            .create(guid(HighGuid::AreaTrigger, counter));
+        area_trigger.world_mut().object_mut().set_entry(42);
+        area_trigger.world_mut().set_map(571, 7).unwrap();
+        area_trigger
+            .world_mut()
+            .relocate(Position::xyz(1.0, 2.0, 3.0));
+        area_trigger.world_mut().object_mut().add_to_world();
+        area_trigger.set_spawn_id(spawn_id);
+        area_trigger
+    }
+
     #[test]
     fn map_owned_respawn_get_time_zero_area_trigger_and_inserted_timers_like_cpp() {
         let mut map = test_map();
@@ -4040,10 +4107,115 @@ mod tests {
             MapObjectRecord::new_game_object(test_gameobject_for_spawn(0, 6002)).unwrap(),
         )
         .unwrap();
+        map.insert_map_object_record(
+            MapObjectRecord::new_area_trigger(test_area_trigger_for_spawn(0, 6003)).unwrap(),
+        )
+        .unwrap();
 
         assert_eq!(map.creature_spawn_id_store_count_like_cpp(0), 0);
         assert_eq!(map.gameobject_spawn_id_store_count_like_cpp(0), 0);
-        assert_eq!(map.map_object_count(), 2);
+        assert_eq!(map.area_trigger_spawn_id_store_count_like_cpp(0), 0);
+        assert_eq!(map.map_object_count(), 3);
+    }
+
+    #[test]
+    fn area_trigger_spawn_id_store_indexes_and_gets_typed_object_like_cpp() {
+        let mut map = test_map();
+        let area_trigger = test_area_trigger_for_spawn(70, 7001);
+        let guid = area_trigger.world().guid();
+
+        map.insert_map_object_record(MapObjectRecord::new_area_trigger(area_trigger).unwrap())
+            .unwrap();
+
+        assert_eq!(map.area_trigger_spawn_id_store_count_like_cpp(70), 1);
+        assert_eq!(
+            map.area_trigger_spawn_id_store_guids_like_cpp(70),
+            vec![guid]
+        );
+        let stored = map.get_area_trigger_by_spawn_id_like_cpp(70).unwrap();
+        assert_eq!(stored.world().guid(), guid);
+        assert_eq!(stored.spawn_id(), 70);
+    }
+
+    #[test]
+    fn area_trigger_spawn_id_store_remove_desindexes_like_cpp() {
+        let mut map = test_map();
+        let guid = guid(HighGuid::AreaTrigger, 7101);
+
+        map.insert_map_object_record(
+            MapObjectRecord::new_area_trigger(test_area_trigger_for_spawn(71, 7101)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(map.area_trigger_spawn_id_store_count_like_cpp(71), 1);
+
+        assert!(map.remove_map_object(guid).is_some());
+        assert_eq!(map.area_trigger_spawn_id_store_count_like_cpp(71), 0);
+        assert!(map.get_area_trigger_by_spawn_id_like_cpp(71).is_none());
+    }
+
+    #[test]
+    fn area_trigger_spawn_id_store_replacing_same_guid_moves_spawn_id_like_cpp() {
+        let mut map = test_map();
+        let guid = guid(HighGuid::AreaTrigger, 7201);
+
+        map.insert_map_object_record(
+            MapObjectRecord::new_area_trigger(test_area_trigger_for_spawn(72, 7201)).unwrap(),
+        )
+        .unwrap();
+        let previous = map
+            .insert_map_object_record(
+                MapObjectRecord::new_area_trigger(test_area_trigger_for_spawn(73, 7201)).unwrap(),
+            )
+            .unwrap();
+
+        assert!(previous.is_some());
+        assert_eq!(map.area_trigger_spawn_id_store_count_like_cpp(72), 0);
+        assert_eq!(map.area_trigger_spawn_id_store_count_like_cpp(73), 1);
+        assert_eq!(
+            map.area_trigger_spawn_id_store_guids_like_cpp(73),
+            vec![guid]
+        );
+    }
+
+    #[test]
+    fn area_trigger_spawn_id_store_multiple_same_spawn_keeps_multimap_cardinality_like_cpp() {
+        let mut map = test_map();
+        let first_guid = guid(HighGuid::AreaTrigger, 7401);
+        let second_guid = guid(HighGuid::AreaTrigger, 7402);
+
+        map.insert_map_object_record(
+            MapObjectRecord::new_area_trigger(test_area_trigger_for_spawn(74, 7402)).unwrap(),
+        )
+        .unwrap();
+        map.insert_map_object_record(
+            MapObjectRecord::new_area_trigger(test_area_trigger_for_spawn(74, 7401)).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(map.area_trigger_spawn_id_store_count_like_cpp(74), 2);
+        assert_eq!(
+            map.area_trigger_spawn_id_store_guids_like_cpp(74),
+            vec![first_guid, second_guid]
+        );
+        assert_eq!(
+            map.get_area_trigger_by_spawn_id_like_cpp(74)
+                .unwrap()
+                .world()
+                .guid(),
+            first_guid
+        );
+    }
+
+    #[test]
+    fn area_trigger_spawn_id_store_absent_query_returns_none_like_cpp() {
+        let map = test_map();
+
+        assert_eq!(map.area_trigger_spawn_id_store_count_like_cpp(75), 0);
+        assert!(
+            map.area_trigger_spawn_id_store_guids_like_cpp(75)
+                .is_empty()
+        );
+        assert!(map.get_area_trigger_by_spawn_id_like_cpp(75).is_none());
     }
 
     #[test]
