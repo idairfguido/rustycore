@@ -53,6 +53,7 @@ const WORLD_CONFIG_CANDIDATES: &[&str] = &[
     "WorldServer.conf.dist",
 ];
 const WORLD_CONFIG_DIR: &str = "worldserver.conf.d";
+const DEFAULT_RESPAWN_MIN_CHECK_INTERVAL_MS: u32 = 5_000;
 
 // ── Account lookup implementation ────────────────────────────────
 
@@ -1502,8 +1503,19 @@ async fn main() -> Result<()> {
 
     let map_update_interval_ms = world_config_u32(&world_configs, "CONFIG_INTERVAL_MAPUPDATE", 10)
         .max(wow_map::MIN_MAP_UPDATE_DELAY_MS);
-    let map_update_handle =
-        spawn_canonical_map_update_loop(Arc::clone(&canonical_map_manager), map_update_interval_ms);
+    let respawn_condition_interval_ms = world_config_u32(
+        &world_configs,
+        "CONFIG_RESPAWN_MINCHECKINTERVALMS",
+        DEFAULT_RESPAWN_MIN_CHECK_INTERVAL_MS,
+    )
+    .max(1);
+    let map_update_handle = spawn_canonical_map_update_loop(
+        Arc::clone(&canonical_map_manager),
+        map_update_interval_ms,
+        respawn_condition_interval_ms,
+        Arc::clone(&canonical_spawn_metadata),
+        Arc::clone(&condition_store),
+    );
 
     set_realm_online(&login_db, realm_id).await?;
 
@@ -2164,9 +2176,106 @@ fn register_loaded_instance_ids(
     );
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CanonicalRespawnConditionSchedulerLikeCpp {
+    timer_ms: u32,
+    interval_ms: u32,
+}
+
+impl CanonicalRespawnConditionSchedulerLikeCpp {
+    fn new(interval_ms: u32) -> Self {
+        let interval_ms = interval_ms.max(1);
+        Self {
+            timer_ms: interval_ms,
+            interval_ms,
+        }
+    }
+
+    fn update(&mut self, diff_ms: u32) -> bool {
+        if self.timer_ms <= diff_ms {
+            self.timer_ms = self.interval_ms;
+            true
+        } else {
+            self.timer_ms -= diff_ms;
+            false
+        }
+    }
+
+    #[cfg(test)]
+    const fn timer_ms(&self) -> u32 {
+        self.timer_ms
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct CanonicalSpawnGroupConditionTickSummaryLikeCpp {
+    maps_evaluated: usize,
+    outcomes: usize,
+    applied_set_inactive: usize,
+    planned_spawn: usize,
+    planned_despawn: usize,
+}
+
+fn canonical_map_update_tick_set_inactive_like_cpp(
+    manager: &mut wow_map::MapManager,
+    diff_ms: u32,
+    scheduler: &mut CanonicalRespawnConditionSchedulerLikeCpp,
+    canonical_spawn_metadata: &spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
+    condition_store: &wow_data::ConditionEntriesByTypeStore,
+) -> Option<CanonicalSpawnGroupConditionTickSummaryLikeCpp> {
+    let Some(effective_diff_ms) = manager.update(diff_ms) else {
+        return None;
+    };
+    if !scheduler.update(effective_diff_ms) {
+        return None;
+    }
+
+    // C++ `Map::Update` runs `ProcessRespawns()` immediately before
+    // `UpdateSpawnGroupConditions()` when `_respawnCheckTimer` expires.
+    // RustyCore does not yet implement ProcessRespawns or live spawn/despawn;
+    // this tick only applies the already-safe SetSpawnGroupInactive branch.
+    let mut summary = CanonicalSpawnGroupConditionTickSummaryLikeCpp::default();
+    manager.do_for_all_maps_mut(|managed_map| {
+        summary.maps_evaluated += 1;
+        let outcomes = apply_canonical_spawn_group_condition_update_set_inactive_like_cpp(
+            managed_map,
+            canonical_spawn_metadata,
+            condition_store,
+        );
+        summary.outcomes += outcomes.len();
+        summary.applied_set_inactive += outcomes
+            .iter()
+            .filter(|outcome| outcome.applied_change.is_some())
+            .count();
+        summary.planned_spawn += outcomes
+            .iter()
+            .filter(|outcome| {
+                matches!(
+                    outcome.action,
+                    wow_map::map::SpawnGroupConditionActionLikeCpp::Spawn { .. }
+                )
+            })
+            .count();
+        summary.planned_despawn += outcomes
+            .iter()
+            .filter(|outcome| {
+                matches!(
+                    outcome.action,
+                    wow_map::map::SpawnGroupConditionActionLikeCpp::Despawn { .. }
+                )
+            })
+            .count();
+    });
+
+    Some(summary)
+}
+
 fn spawn_canonical_map_update_loop(
     map_manager: SharedCanonicalMapManager,
     tick_interval_ms: u32,
+    respawn_condition_interval_ms: u32,
+    canonical_spawn_metadata: Arc<spawn_store_loader::CanonicalSpawnMetadataLikeCpp>,
+    condition_store: Arc<wow_data::ConditionEntriesByTypeStore>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval =
@@ -2174,6 +2283,8 @@ fn spawn_canonical_map_update_loop(
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         let mut last_tick = Instant::now();
+        let mut respawn_condition_scheduler =
+            CanonicalRespawnConditionSchedulerLikeCpp::new(respawn_condition_interval_ms);
         loop {
             interval.tick().await;
 
@@ -2192,7 +2303,22 @@ fn spawn_canonical_map_update_loop(
                 tracing::error!("Canonical MapManager mutex poisoned; stopping map update loop");
                 break;
             };
-            manager.update(diff_ms);
+            if let Some(summary) = canonical_map_update_tick_set_inactive_like_cpp(
+                &mut manager,
+                diff_ms,
+                &mut respawn_condition_scheduler,
+                canonical_spawn_metadata.as_ref(),
+                condition_store.as_ref(),
+            ) {
+                debug!(
+                    maps_evaluated = summary.maps_evaluated,
+                    outcomes = summary.outcomes,
+                    applied_set_inactive = summary.applied_set_inactive,
+                    planned_spawn = summary.planned_spawn,
+                    planned_despawn = summary.planned_despawn,
+                    "C++ respawn-check timer fired; ProcessRespawns remains unimplemented and only the safe UpdateSpawnGroupConditions SetInactive branch was applied"
+                );
+            }
         }
     })
 }
@@ -2643,7 +2769,9 @@ fn locale_id_to_name(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
+        CanonicalRespawnConditionSchedulerLikeCpp,
         apply_canonical_spawn_group_condition_update_set_inactive_like_cpp,
+        canonical_map_update_tick_set_inactive_like_cpp,
         install_canonical_spawn_group_initializer_like_cpp, load_world_config_from,
         loot_drop_rates_like_cpp, mmap_runtime_config_like_cpp, world_config_bool, world_config_u8,
         world_config_u16,
@@ -2970,6 +3098,143 @@ mmap.enablePathFinding = 0
                 .spawn_group_state()
                 .toggled_spawn_group_ids()
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn respawn_condition_scheduler_like_cpp_waits_fires_and_resets() {
+        let mut scheduler = CanonicalRespawnConditionSchedulerLikeCpp::new(100);
+
+        assert!(!scheduler.update(40));
+        assert_eq!(scheduler.timer_ms(), 60);
+        assert!(!scheduler.update(59));
+        assert_eq!(scheduler.timer_ms(), 1);
+        assert!(scheduler.update(1));
+        assert_eq!(scheduler.timer_ms(), 100);
+        assert!(scheduler.update(150));
+        assert_eq!(scheduler.timer_ms(), 100);
+        assert!(!scheduler.update(25));
+        assert_eq!(scheduler.timer_ms(), 75);
+    }
+
+    #[test]
+    fn spawn_group_condition_update_tick_uses_effective_map_update_diff_only() {
+        let metadata = test_spawn_metadata([(51, 571)]);
+        let condition_store =
+            ConditionEntriesByTypeStore::from_conditions_like_cpp([mapid_condition(51, 530)]);
+        let mut manager = wow_map::MapManager::new(60_000, 10);
+        let group = metadata
+            .spawn_group_templates()
+            .get(&51)
+            .expect("test group 51")
+            .clone();
+        manager.create_world_map(571, 0);
+        assert!(
+            manager
+                .find_map(571, 0)
+                .unwrap()
+                .map()
+                .is_spawn_group_active_like_cpp(Some(&group))
+        );
+        let mut scheduler = CanonicalRespawnConditionSchedulerLikeCpp::new(10);
+
+        let early = canonical_map_update_tick_set_inactive_like_cpp(
+            &mut manager,
+            9,
+            &mut scheduler,
+            &metadata,
+            &condition_store,
+        );
+        assert_eq!(early, None);
+        assert_eq!(scheduler.timer_ms(), 10);
+        assert!(
+            manager
+                .find_map(571, 0)
+                .unwrap()
+                .map()
+                .is_spawn_group_active_like_cpp(Some(&group))
+        );
+
+        let summary = canonical_map_update_tick_set_inactive_like_cpp(
+            &mut manager,
+            1,
+            &mut scheduler,
+            &metadata,
+            &condition_store,
+        )
+        .expect("map update accumulates 10ms and scheduler fires with effective diff");
+        assert_eq!(summary.maps_evaluated, 1);
+        assert_eq!(summary.outcomes, 1);
+        assert_eq!(summary.applied_set_inactive, 1);
+        assert_eq!(summary.planned_spawn, 0);
+        assert_eq!(summary.planned_despawn, 0);
+        assert_eq!(scheduler.timer_ms(), 10);
+        assert!(
+            !manager
+                .find_map(571, 0)
+                .unwrap()
+                .map()
+                .is_spawn_group_active_like_cpp(Some(&group))
+        );
+    }
+
+    #[test]
+    fn spawn_group_condition_update_tick_applies_set_inactive_only_when_scheduler_fires() {
+        let metadata = test_spawn_metadata([(50, 571)]);
+        let condition_store =
+            ConditionEntriesByTypeStore::from_conditions_like_cpp([mapid_condition(50, 530)]);
+        let mut manager = wow_map::MapManager::new(60_000, 1);
+        let group = metadata
+            .spawn_group_templates()
+            .get(&50)
+            .expect("test group 50")
+            .clone();
+        manager.create_world_map(571, 0);
+        assert!(
+            manager
+                .find_map(571, 0)
+                .unwrap()
+                .map()
+                .is_spawn_group_active_like_cpp(Some(&group))
+        );
+        let mut scheduler = CanonicalRespawnConditionSchedulerLikeCpp::new(100);
+
+        let early = canonical_map_update_tick_set_inactive_like_cpp(
+            &mut manager,
+            99,
+            &mut scheduler,
+            &metadata,
+            &condition_store,
+        );
+        assert_eq!(early, None);
+        assert!(
+            manager
+                .find_map(571, 0)
+                .unwrap()
+                .map()
+                .is_spawn_group_active_like_cpp(Some(&group))
+        );
+
+        let summary = canonical_map_update_tick_set_inactive_like_cpp(
+            &mut manager,
+            1,
+            &mut scheduler,
+            &metadata,
+            &condition_store,
+        )
+        .expect("scheduler fires at interval");
+        assert_eq!(summary.maps_evaluated, 1);
+        assert_eq!(summary.outcomes, 1);
+        assert_eq!(summary.applied_set_inactive, 1);
+        assert_eq!(summary.planned_spawn, 0);
+        assert_eq!(summary.planned_despawn, 0);
+        assert_eq!(scheduler.timer_ms(), 100);
+        assert!(
+            !manager
+                .find_map(571, 0)
+                .unwrap()
+                .map()
+                .is_spawn_group_active_like_cpp(Some(&group))
         );
     }
 

@@ -724,6 +724,15 @@ impl MapManager {
         }
     }
 
+    pub fn do_for_all_maps_mut<F>(&mut self, mut worker: F)
+    where
+        F: FnMut(&mut ManagedMap),
+    {
+        for map in self.maps.values_mut() {
+            worker(map);
+        }
+    }
+
     pub fn do_for_all_maps_with_map_id<F>(&self, map_id: u32, mut worker: F)
     where
         F: FnMut(&ManagedMap),
@@ -735,10 +744,10 @@ impl MapManager {
         }
     }
 
-    pub fn update(&mut self, diff_ms: u32) {
+    pub fn update(&mut self, diff_ms: u32) -> Option<u32> {
         self.timer.update(diff_ms);
         if !self.timer.passed() {
-            return;
+            return None;
         }
 
         let current = self.timer.current();
@@ -777,6 +786,7 @@ impl MapManager {
         }
 
         self.timer.set_current(0);
+        Some(current)
     }
 
     pub fn destroy_map(&mut self, map_id: u32, instance_id: u32) -> bool {
@@ -1039,14 +1049,33 @@ mod tests {
     }
 
     #[test]
+    fn do_for_all_maps_mut_visits_maps_in_btreemap_order_and_allows_mutation() {
+        let mut manager = MapManager::default();
+        manager.create_world_map(2, 0);
+        manager.create_map_entry(1, 3, 0, ManagedMapKind::World);
+        manager.create_world_map(1, 0);
+
+        let mut keys = Vec::new();
+        manager.do_for_all_maps_mut(|map| {
+            keys.push((map.map_id(), map.instance_id()));
+            map.set_player_count(map.map_id() + map.instance_id());
+        });
+
+        assert_eq!(keys, vec![(1, 0), (1, 3), (2, 0)]);
+        assert_eq!(manager.find_map(1, 0).unwrap().player_count(), 1);
+        assert_eq!(manager.find_map(1, 3).unwrap().player_count(), 4);
+        assert_eq!(manager.find_map(2, 0).unwrap().player_count(), 2);
+    }
+
+    #[test]
     fn update_waits_for_interval_then_updates_and_delayed_updates_maps() {
         let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 10);
         manager.create_world_map(1, 0);
 
-        manager.update(9);
+        assert_eq!(manager.update(9), None);
         assert!(manager.find_map(1, 0).unwrap().update_calls().is_empty());
 
-        manager.update(1);
+        assert_eq!(manager.update(1), Some(10));
 
         let map = manager.find_map(1, 0).unwrap();
         assert_eq!(map.update_calls(), &[10]);
@@ -1070,7 +1099,7 @@ mod tests {
             manager.register_instance_id(instance_id);
         }
 
-        manager.update(1);
+        assert_eq!(manager.update(1), Some(1));
 
         assert!(manager.find_map(33, 7).is_none());
         assert_eq!(manager.next_instance_id(), 7);
@@ -1132,7 +1161,7 @@ mod tests {
         manager.create_world_map(1, 0);
         manager.map_updater_mut().activate(2);
 
-        manager.update(1);
+        assert_eq!(manager.update(1), Some(1));
 
         let map = manager.find_map(1, 0).unwrap();
         assert_eq!(map.update_calls(), &[1]);
