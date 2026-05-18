@@ -58,10 +58,11 @@ pub use personal_phase::{
     PhaseRef, PhaseShift, PlayerPersonalPhasesTracker,
 };
 pub use pool::{
-    PoolGroupLikeCpp, PoolMemberKindLikeCpp, PoolMgrLikeCpp, PoolMgrPlanErrorLikeCpp,
-    PoolMgrPlanSkipReasonLikeCpp, PoolObjectLikeCpp, PoolRelationRemovalLikeCpp,
-    PoolSpawnObjectActionLikeCpp, PoolSpawnObjectPlanLikeCpp, PoolSpawnPoolPlanLikeCpp,
-    PoolTemplateDataLikeCpp, PoolTypedSpawnPlanLikeCpp,
+    PoolDespawnObjectPlanLikeCpp, PoolDespawnPoolPlanLikeCpp, PoolGroupLikeCpp,
+    PoolMemberKindLikeCpp, PoolMgrLikeCpp, PoolMgrPlanErrorLikeCpp, PoolMgrPlanSkipReasonLikeCpp,
+    PoolObjectLikeCpp, PoolRelationRemovalLikeCpp, PoolSpawnObjectActionLikeCpp,
+    PoolSpawnObjectPlanLikeCpp, PoolSpawnPoolPlanLikeCpp, PoolTemplateDataLikeCpp,
+    PoolTypedDespawnPlanLikeCpp, PoolTypedSpawnPlanLikeCpp,
 };
 pub use spawn::{
     AddRespawnInfoOutcomeLikeCpp, CellSpawnGuids, CheckRespawnOutcomeLikeCpp,

@@ -5,6 +5,11 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.387** `PoolMgr` DespawnPool/DespawnObject deterministic plan.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:183-218`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:220-264`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:409-422`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:813-830`.
+  Rust targets: `crates/wow-map/src/pool.rs`, `crates/wow-map/src/lib.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: adds deterministic C++-shaped despawn plans for `PoolMgrLikeCpp`/`PoolGroupLikeCpp` over caller-owned `SpawnedPoolDataLikeCpp`: top-level `DespawnPool` order Creature -> GameObject -> Pool, `DespawnObject` bucket order EqualChanced -> ExplicitlyChanced, missing/empty skips without template lookup, `DespawnOne` and `RemoveRespawnTime` action records for future side-effect owners, map-owned RemoveSpawn mutations only for spawned matching objects, no respawn-time action for Pool, child-pool recursive plans before parent relation removal, safe child-pool id overflow errors, and a Rust-only `ChildPoolCycle` guard for invalid cyclic pool data. Complete only for deterministic planning/state mutation; live `AddObjectToRemoveList`, `RemoveRespawnTime` DB deletes, entity destruction, live recursive PoolMgr execution, ProcessRespawns integration, grid/session fanout, install/restart, and push remain separate gaps.
+
 - [x] **#NEXT.R8.ENTITIES.386** `PoolMgr` SpawnPool/UpdatePool deterministic orchestration plan.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:776-811`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:891-920`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:850-888`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:833-848`, `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:288-407`.
   Rust targets: `crates/wow-map/src/pool.rs`, `crates/wow-map/src/lib.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.

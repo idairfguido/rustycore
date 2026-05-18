@@ -13,8 +13,10 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 - Current branch state after #384 local commit: `develop...origin/develop [ahead 39]`.
 - Current branch state after #385 local commit: `develop...origin/develop [ahead 40]`.
 - Current branch state after #386 local commit: `develop...origin/develop [ahead 41]` with a clean tree.
-- Latest completed slice in this handoff: `#NEXT.R8.ENTITIES.386 — PoolMgr SpawnPool/UpdatePool deterministic orchestration plan` (implemented/tested locally; independent review found eager RNG consumption and the final fix uses lazy per-specialization explicit rolls only at the C++ rand_chance point; final review `APROBADO`; validation passed; committed locally).
-- No push/install/restart performed for #383, #384, #385, or #386.
+- Working tree before #387: HEAD `4806d3b` on `develop...origin/develop [ahead 41]`, clean.
+- Latest completed slice in this handoff: `#NEXT.R8.ENTITIES.387 — PoolMgr DespawnPool/DespawnObject deterministic plan` (implemented/tested locally; final review `APROBADO`; validation passed; committed locally by foreman; no push/install/restart).
+- Previous completed slice: `#NEXT.R8.ENTITIES.386 — PoolMgr SpawnPool/UpdatePool deterministic orchestration plan` (implemented/tested locally; independent review found eager RNG consumption and the final fix uses lazy per-specialization explicit rolls only at the C++ rand_chance point; final review `APROBADO`; validation passed; committed locally).
+- No push/install/restart performed for #383, #384, #385, #386, or #387.
 
 ## Critical Rules
 
@@ -26,13 +28,19 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 
 ## Progress Estimate
 
-Overall core migration estimate after #386 `PoolMgr SpawnPool/UpdatePool deterministic orchestration plan`: `~88.9%`.
+Overall core migration estimate after #387 `PoolMgr DespawnPool/DespawnObject deterministic plan`: `~89.0%`.
 
 This remains intentionally below the R8 TSV row-completion ratio because heavy runtime ownership gaps remain: real `PoolMgr::SpawnPool`/`DespawnPool` orchestration, live chance/RNG integration, recursive subpool live integration, full live `ProcessRespawns` pool and `DoRespawn` branches, entity creation/`LoadFromDB`, corpse load, AreaTrigger Create/Load/Update runtime, templates/spawns, AI, caster unregister, unit enter/exit, movement/visibility/transport, real terrain/vmap/dynamic-tree collision, transports, visibility overrides/cinematic/sight runtime, full entity-specific `AddToWorld`/`RemoveFromWorld` side effects beyond the object/spawn-id store, real dynamic escort config/runtime feeding the closure, grid/session fanout, ObjectAccessor ownership, DB save/delete coverage beyond current seams, and broader Unit/Player inventory/auras/threat/motion/update-field work.
 
-Manual test point: no new client-facing manual milestone from #386; this is a deterministic `PoolMgr::SpawnPool`/`UpdatePool` orchestration plan seam for later live PoolMgr ownership, validated with focused `wow-map` unit checks.
+Manual test point: no new client-facing manual milestone from #387; this is a deterministic `PoolMgr::DespawnPool`/`PoolGroup<T>::DespawnObject` plan seam for later live PoolMgr ownership, validated with focused `wow-map` unit checks.
 
 ## Most Recent Completed Slices
+
+- `#NEXT.R8.ENTITIES.387` (implemented/tested locally; final review `APROBADO`; validation passed; committed locally)
+  - Adds deterministic C++-shaped `PoolMgrLikeCpp::despawn_pool_plan_like_cpp` and `PoolGroupLikeCpp::despawn_object_plan_like_cpp` over caller-owned map `SpawnedPoolDataLikeCpp`.
+  - C++ anchors: `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:183-218`, `220-264`, `409-422`, `813-830`.
+  - Preserves C++ top-level order Creature -> GameObject -> Pool, bucket order EqualChanced -> ExplicitlyChanced, no template/MaxLimit lookup, RemoveSpawn mutation only after represented `Despawn1Object`, child-pool recursive plan before parent spawned relation removal, `RemoveRespawnTime` actions only for unspawned Creature/GameObject with `alwaysDeleteRespawnTime`, Pool no-op respawn-time deletion, child-pool overflow error, and Rust-only `ChildPoolCycle` guard for invalid cyclic pool data.
+  - Checks executed: `cargo fmt --check`, `cargo test -p wow-map pool`, `cargo check -p world-server`, and `git diff --check` passed. Remaining gaps: live AddObjectToRemoveList, real RemoveRespawnTime DB delete, entity destruction, live recursive PoolMgr execution, ProcessRespawns pool branch integration, grid/session fanout, install/restart, push.
 
 - `#NEXT.R8.ENTITIES.386` (implemented/tested locally; final review `APROBADO`; validation passed; committed locally)
   - Adds pure C++-shaped `PoolMgrLikeCpp` planning state in `wow-map`: templates, separate Creature/GameObject/Pool groups, spawn->pool and child-pool->mother-pool indices, builder validation, typed errors, and public plan/result wrappers for represented `SpawnPool<T>`, top-level `SpawnPool`, `UpdatePool`, `IsPartOfAPool`, `IsEmpty`, and `CheckPool`.
