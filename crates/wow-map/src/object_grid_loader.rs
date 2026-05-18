@@ -76,6 +76,19 @@ impl GridSpawnLoadFilter for LoadAllGridSpawns {
     }
 }
 
+impl<Filter> GridSpawnLoadFilter for &mut Filter
+where
+    Filter: GridSpawnLoadFilter + ?Sized,
+{
+    fn should_spawn_on_grid_load(
+        &mut self,
+        object_type: SpawnObjectType,
+        spawn_id: SpawnId,
+    ) -> bool {
+        (**self).should_spawn_on_grid_load(object_type, spawn_id)
+    }
+}
+
 impl GridSpawnLoadFilter for SpawnGridLoadStateLikeCpp<'_> {
     fn should_spawn_on_grid_load(
         &mut self,
@@ -98,17 +111,18 @@ pub struct ObjectGridLoader<'a, Filter = LoadAllGridSpawns> {
 }
 
 #[derive(Debug)]
-pub struct SpawnGridLifecycle<'a> {
+pub struct SpawnGridLifecycle<'a, Filter = LoadAllGridSpawns> {
     spawn_store: &'a SpawnStore,
     corpse_store: &'a CorpseCellStore,
     map_id: u32,
     difficulty: Difficulty,
     realm_id: u16,
     server_id: u32,
+    filter: Filter,
     last_counts: ObjectGridLoadCounts,
 }
 
-impl<'a> SpawnGridLifecycle<'a> {
+impl<'a> SpawnGridLifecycle<'a, LoadAllGridSpawns> {
     pub fn new(
         spawn_store: &'a SpawnStore,
         corpse_store: &'a CorpseCellStore,
@@ -124,6 +138,33 @@ impl<'a> SpawnGridLifecycle<'a> {
             difficulty,
             realm_id,
             server_id,
+            filter: LoadAllGridSpawns,
+            last_counts: ObjectGridLoadCounts::default(),
+        }
+    }
+}
+
+impl<'a, Filter> SpawnGridLifecycle<'a, Filter>
+where
+    Filter: GridSpawnLoadFilter,
+{
+    pub fn with_filter(
+        spawn_store: &'a SpawnStore,
+        corpse_store: &'a CorpseCellStore,
+        map_id: u32,
+        difficulty: Difficulty,
+        realm_id: u16,
+        server_id: u32,
+        filter: Filter,
+    ) -> Self {
+        Self {
+            spawn_store,
+            corpse_store,
+            map_id,
+            difficulty,
+            realm_id,
+            server_id,
+            filter,
             last_counts: ObjectGridLoadCounts::default(),
         }
     }
@@ -133,15 +174,19 @@ impl<'a> SpawnGridLifecycle<'a> {
     }
 }
 
-impl GridLifecycle for SpawnGridLifecycle<'_> {
+impl<Filter> GridLifecycle for SpawnGridLifecycle<'_, Filter>
+where
+    Filter: GridSpawnLoadFilter,
+{
     fn load_grid_objects(&mut self, grid: &mut NGrid, _cell: &Cell) {
-        let mut loader = ObjectGridLoader::new(
+        let mut loader = ObjectGridLoader::with_filter(
             self.spawn_store,
             self.corpse_store,
             self.map_id,
             self.difficulty,
             self.realm_id,
             self.server_id,
+            &mut self.filter,
         );
         self.last_counts = loader.load_n(grid);
     }
@@ -578,9 +623,17 @@ mod tests {
     }
 
     #[test]
-    fn spawn_grid_lifecycle_wires_loader_into_map_ensure_grid_loaded_hook() {
+    fn spawn_grid_lifecycle_new_preserves_legacy_load_all_filter() {
         let mut store = SpawnStore::new();
-        let spawn = spawn(SpawnObjectType::Creature, 100, 0.0, 0.0);
+        let manual_group = SpawnGroupTemplateData {
+            group_id: 10,
+            name: "manual".to_string(),
+            map_id: 571,
+            flags: SpawnGroupFlags::MANUAL_SPAWN,
+        };
+        let mut spawn = spawn(SpawnObjectType::Creature, 100, 0.0, 0.0);
+        spawn.spawn_group = manual_group;
+        let expected_guid = spawn_guid(&spawn, 1, 1, HighGuid::Creature);
         store.add_object_spawn(&spawn, |_| false);
         let corpses = CorpseCellStore::new();
         let lifecycle = SpawnGridLifecycle::new(&store, &corpses, 571, 1, 1, 1);
@@ -597,13 +650,82 @@ mod tests {
 
         map.ensure_grid_loaded(&crate::map::cell_from_grid_center(GridCoord::new(32, 32)));
 
-        assert_eq!(map.lifecycle().last_counts().creatures, 1);
+        assert_eq!(
+            map.lifecycle().last_counts(),
+            ObjectGridLoadCounts {
+                gameobjects: 0,
+                creatures: 1,
+                corpses: 0,
+                area_triggers: 0,
+            }
+        );
         let cell = map
             .get_ngrid(GridCoord::new(32, 32))
             .unwrap()
             .get_grid_type(0, 0)
             .unwrap();
         assert_eq!(cell.grid_objects.creatures.len(), 1);
+        assert!(cell.grid_objects.creatures.contains(&expected_guid));
+    }
+
+    #[test]
+    fn spawn_grid_lifecycle_with_cpp_filter_omits_inactive_manual_group_on_grid_load() {
+        let mut store = SpawnStore::new();
+        let manual_group = SpawnGroupTemplateData {
+            group_id: 10,
+            name: "manual".to_string(),
+            map_id: 571,
+            flags: SpawnGroupFlags::MANUAL_SPAWN,
+        };
+        let default_group = SpawnGroupTemplateData {
+            group_id: 11,
+            name: "default".to_string(),
+            map_id: 571,
+            flags: SpawnGroupFlags::NONE,
+        };
+        let mut inactive = spawn(SpawnObjectType::Creature, 100, 0.0, 0.0);
+        inactive.spawn_group = manual_group;
+        let inactive_guid = spawn_guid(&inactive, 1, 1, HighGuid::Creature);
+        let mut active = spawn(SpawnObjectType::Creature, 101, 0.0, 0.0);
+        active.spawn_group = default_group;
+        let active_guid = spawn_guid(&active, 1, 1, HighGuid::Creature);
+        store.add_object_spawn(&inactive, |_| false);
+        store.add_object_spawn(&active, |_| false);
+
+        let state = SpawnGroupRuntimeState::new();
+        let filter = SpawnGridLoadStateLikeCpp::new(&store, &state);
+        let corpses = CorpseCellStore::new();
+        let lifecycle = SpawnGridLifecycle::with_filter(&store, &corpses, 571, 1, 1, 1, filter);
+        let mut map = crate::map::Map::with_hooks(
+            571,
+            0,
+            1,
+            1000,
+            true,
+            100.0,
+            crate::map::NoopTerrainGridLoader,
+            lifecycle,
+        );
+
+        map.ensure_grid_loaded(&crate::map::cell_from_grid_center(GridCoord::new(32, 32)));
+
+        assert_eq!(
+            map.lifecycle().last_counts(),
+            ObjectGridLoadCounts {
+                gameobjects: 0,
+                creatures: 1,
+                corpses: 0,
+                area_triggers: 0,
+            }
+        );
+        let cell = map
+            .get_ngrid(GridCoord::new(32, 32))
+            .unwrap()
+            .get_grid_type(0, 0)
+            .unwrap();
+        assert_eq!(cell.grid_objects.creatures.len(), 1);
+        assert!(cell.grid_objects.creatures.contains(&active_guid));
+        assert!(!cell.grid_objects.creatures.contains(&inactive_guid));
     }
 
     #[test]
