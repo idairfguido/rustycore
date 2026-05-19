@@ -5,6 +5,11 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.406** Review correction for live Creature loaded-grid DB-backed respawn loader wiring (fixed-level cases only; variable-level deferred).
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2165-2188`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2191-2240`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Creature/Creature.cpp:1770-1813`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Creature/Creature.cpp:1815-1923`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2505-2511`.
+  Scope: `runtime` wiring correction in `world-server` only; `wow_map::Map` remains source-of-truth for respawn timers, map objects and GUID sequence; `world-server` composes DB/template/difficulty/stats/model caches under `&mut Map` with no async/DB inside the map lock.
+  Acceptance: tests pass explicit test-only empty loaded-grid caches; live loader uses real canonical spawn metadata and DB-backed caches, rejects missing difficulty rows and `MinLevel != MaxLevel` with `None` to preserve map-owned timer/order until map RNG ownership exists, and only allows fixed-level supported Creature records through the pure builder/resolver seam. Not full `Creature::LoadFromDB`: gaps remain variable-level RNG/map RNG ownership, vehicle runtime, AddToWorld/ObjectAccessor/fanout/scripts/AI/zonescript/formation/dynamic-tree, GameObject DB-backed loaded-grid loader, AreaTrigger runtime, PoolMgr full live spawn, corpse load, and broader Unit/Player systems.
+
 - [x] **#NEXT.R8.ENTITIES.405** `Creature::SetSpawnHealth` flags5 `NO_HEALTH_REGEN` correction in DB-backed loaded-grid builder (dependency/builder only; not live runtime complete).
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Creature/Creature.cpp:1815-1923`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Creature/Creature.cpp:1954-1978`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Creature/CreatureData.h:188-223`, `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:940-1040`.
   Rust targets: `crates/world-server/src/creature_loaded_grid.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
