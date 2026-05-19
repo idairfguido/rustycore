@@ -6,6 +6,12 @@
 ## Pending Review Tasks
 
 ## Closed Tasks
+- [x] **#NEXT.R8.ENTITIES.430** DynamicObject `RemoveFromWorld` aura/unbind cleanup seam.
+  Status: represented/complete for the bounded map-owned DynamicObject `RemoveFromWorld` local `RemoveAura()` + `UnbindFromCaster()` state cleanup during `Map::remove_from_map_like_cpp` only; review `APROBADO`; validation OK; committed locally at `current #430 HEAD`; no push/install/restart.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/DynamicObject/DynamicObject.cpp:63-80`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/DynamicObject/DynamicObject.cpp:200-207`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/DynamicObject/DynamicObject.cpp:218-225`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/DynamicObject/DynamicObject.cpp:242-247`.
+  Rust targets: `crates/wow-map/src/map.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: `Map::remove_from_map_like_cpp` keeps the existing in-world DynamicObject caster-viewpoint cleanup first, then while the canonical typed `MapObjectRecord::DynamicObject` is still in `Map::map_objects` represents `RemoveAura()` by moving local aura-bound state to pending-delete evidence and represents `UnbindFromCaster()` by clearing the represented bound caster and reporting the previous caster GUID. Non-DynamicObject, missing, and not-in-world records skip this special cleanup; in-world DynamicObjects without aura/caster report explicit false/no-op evidence. Remaining gaps: aura-bound `DynamicObject::Update`, real `Aura::_Remove`, target maps/applications, ObjectAccessor/session/fanout/scripts/DB/DynamicTree and full DynamicObject lifecycle.
+
 - [x] **#NEXT.R8.ENTITIES.429** `DynamicObject::Update` non-aura expiry -> remove-list enqueue seam.
   Status: represented/complete for the bounded map-owned non-aura Update expiry -> remove-list enqueue seam only; review `APROBADO`; validation OK; committed locally at `current #429 HEAD`; no push/install/restart.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/DynamicObject/DynamicObject.cpp:136-165`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/DynamicObject/DynamicObject.cpp:167-171`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2547-2555`.

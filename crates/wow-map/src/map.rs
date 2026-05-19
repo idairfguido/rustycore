@@ -3797,6 +3797,31 @@ where
             });
         let dynamic_object_caster_viewpoint = should_cleanup_dynamic_object_caster_viewpoint
             .then(|| self.apply_dynamic_object_caster_viewpoint_like_cpp(guid, false));
+        let dynamic_object_remove_cleanup = self
+            .map_objects
+            .get_mut(&guid)
+            .and_then(MapObjectRecord::dynamic_object_mut)
+            .and_then(|dynamic_object| {
+                if !dynamic_object.world().object().is_in_world() {
+                    return None;
+                }
+
+                let had_aura = dynamic_object.has_aura();
+                if had_aura {
+                    dynamic_object.remove_aura();
+                }
+
+                let unbound_caster = dynamic_object.bound_caster();
+                if unbound_caster.is_some() {
+                    dynamic_object.unbind_from_caster();
+                }
+
+                Some(DynamicObjectRemoveCleanupOutcomeLikeCpp {
+                    had_aura,
+                    removed_aura_pending_delete: dynamic_object.has_removed_aura_pending_delete(),
+                    unbound_caster,
+                })
+            });
         let record = self
             .remove_map_object(guid)
             .ok_or(RemoveFromMapError::ObjectNotFound { guid })?;
@@ -3850,6 +3875,7 @@ where
             removed_from_cell,
             delete_from_world,
             dynamic_object_caster_viewpoint,
+            dynamic_object_remove_cleanup,
             object: if delete_from_world {
                 None
             } else {
@@ -5082,7 +5108,15 @@ pub struct RemoveFromMapOutcome {
     pub removed_from_cell: bool,
     pub delete_from_world: bool,
     pub dynamic_object_caster_viewpoint: Option<DynamicObjectCasterViewpointOutcomeLikeCpp>,
+    pub dynamic_object_remove_cleanup: Option<DynamicObjectRemoveCleanupOutcomeLikeCpp>,
     pub object: Option<WorldObject>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DynamicObjectRemoveCleanupOutcomeLikeCpp {
+    pub had_aura: bool,
+    pub removed_aura_pending_delete: bool,
+    pub unbound_caster: Option<ObjectGuid>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11485,6 +11519,129 @@ mod tests {
             dynamic_object_guid
         );
         assert!(map.map_object_record(dynamic_object_guid).is_none());
+    }
+
+    #[test]
+    fn remove_from_map_like_cpp_dynamic_object_aura_and_caster_cleanup_like_cpp() {
+        let mut map = test_map();
+        let caster_guid = guid(HighGuid::Player, 4300101);
+        let mut dynamic_object = test_dynamic_object_for_viewpoint(4300102);
+        let dynamic_object_guid = dynamic_object.world().guid();
+        dynamic_object.set_caster_guid(caster_guid);
+        dynamic_object.set_aura_bound();
+        dynamic_object.bind_to_caster(caster_guid);
+        map.insert_map_object_record(MapObjectRecord::new_dynamic_object(dynamic_object).unwrap())
+            .unwrap();
+
+        let removed = map
+            .remove_from_map_like_cpp(dynamic_object_guid, false)
+            .unwrap();
+
+        assert_eq!(removed.dynamic_object_caster_viewpoint, None);
+        assert_eq!(
+            removed.dynamic_object_remove_cleanup,
+            Some(DynamicObjectRemoveCleanupOutcomeLikeCpp {
+                had_aura: true,
+                removed_aura_pending_delete: true,
+                unbound_caster: Some(caster_guid),
+            })
+        );
+        assert!(!removed.object.unwrap().object().is_in_world());
+        assert!(map.map_object_record(dynamic_object_guid).is_none());
+    }
+
+    #[test]
+    fn remove_from_map_like_cpp_dynamic_object_without_aura_or_caster_reports_no_cleanup_like_cpp()
+    {
+        let mut map = test_map();
+        let dynamic_object = test_dynamic_object_for_viewpoint(4300201);
+        let dynamic_object_guid = dynamic_object.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_dynamic_object(dynamic_object).unwrap())
+            .unwrap();
+
+        let removed = map
+            .remove_from_map_like_cpp(dynamic_object_guid, false)
+            .unwrap();
+
+        assert_eq!(removed.dynamic_object_caster_viewpoint, None);
+        assert_eq!(
+            removed.dynamic_object_remove_cleanup,
+            Some(DynamicObjectRemoveCleanupOutcomeLikeCpp {
+                had_aura: false,
+                removed_aura_pending_delete: false,
+                unbound_caster: None,
+            })
+        );
+        assert!(!removed.object.unwrap().object().is_in_world());
+    }
+
+    #[test]
+    fn remove_from_map_like_cpp_dynamic_object_not_in_world_skips_aura_and_caster_cleanup_like_cpp()
+    {
+        let mut map = test_map();
+        let caster_guid = guid(HighGuid::Player, 4300301);
+        let mut dynamic_object = test_dynamic_object_for_viewpoint(4300302);
+        let dynamic_object_guid = dynamic_object.world().guid();
+        dynamic_object.set_caster_guid(caster_guid);
+        dynamic_object.set_aura_bound();
+        dynamic_object.bind_to_caster(caster_guid);
+        dynamic_object.world_mut().object_mut().remove_from_world();
+        map.insert_map_object_record(MapObjectRecord::new_dynamic_object(dynamic_object).unwrap())
+            .unwrap();
+
+        let removed = map
+            .remove_from_map_like_cpp(dynamic_object_guid, false)
+            .unwrap();
+
+        assert_eq!(removed.dynamic_object_caster_viewpoint, None);
+        assert_eq!(removed.dynamic_object_remove_cleanup, None);
+        assert!(!removed.was_in_world);
+        assert!(!removed.object.unwrap().object().is_in_world());
+    }
+
+    #[test]
+    fn remove_from_map_like_cpp_dynamic_object_viewpoint_aura_and_caster_order_evidence_like_cpp() {
+        let mut map = test_map();
+        let mut player = test_player_for_viewpoint(4300401);
+        let player_guid = player.guid();
+        let mut dynamic_object = test_dynamic_object_for_viewpoint(4300402);
+        let dynamic_object_guid = dynamic_object.world().guid();
+        player.set_farsight_object_like_cpp(dynamic_object_guid);
+        dynamic_object.set_caster_guid(player_guid);
+        dynamic_object.bind_to_caster(player_guid);
+        dynamic_object.set_caster_viewpoint();
+        dynamic_object.set_aura_bound();
+        map.insert_map_object_record(MapObjectRecord::new_player(player).unwrap())
+            .unwrap();
+        map.insert_map_object_record(MapObjectRecord::new_dynamic_object(dynamic_object).unwrap())
+            .unwrap();
+
+        let removed = map
+            .remove_from_map_like_cpp(dynamic_object_guid, false)
+            .unwrap();
+
+        let viewpoint = removed.dynamic_object_caster_viewpoint.unwrap();
+        assert_eq!(
+            viewpoint.player_set_viewpoint.status,
+            PlayerSetViewpointStatusLikeCpp::Removed
+        );
+        assert!(viewpoint.dynamic_object_viewpoint_toggled);
+        assert_eq!(
+            removed.dynamic_object_remove_cleanup,
+            Some(DynamicObjectRemoveCleanupOutcomeLikeCpp {
+                had_aura: true,
+                removed_aura_pending_delete: true,
+                unbound_caster: Some(player_guid),
+            })
+        );
+        assert_eq!(
+            map.get_typed_player(player_guid)
+                .unwrap()
+                .active_data()
+                .farsight_object,
+            ObjectGuid::EMPTY
+        );
+        assert!(!removed.object.unwrap().object().is_in_world());
     }
 
     #[test]
