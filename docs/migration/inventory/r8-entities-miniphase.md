@@ -6,6 +6,12 @@
 ## Pending Review Tasks
 
 ## Closed Tasks
+- [x] **#NEXT.R8.ENTITIES.426** DynamicObject caster `SetViewpoint` map-owned seam.
+  Status: complete for bounded map-owned DynamicObject caster-viewpoint helper only; review `APROBADO`; validation OK; committed locally at `current #426 HEAD`; no push/install/restart.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp:25344-25387`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/DynamicObject/DynamicObject.cpp:209-225; /home/server/woltk-trinity-legacy/src/server/game/Entities/DynamicObject/DynamicObject.cpp:233-239`, `/home/server/woltk-trinity-legacy/src/server/game/Spells/Auras/SpellAuraEffects.cpp:4983-4996`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/CinematicMgr.cpp:69-75,92-99`.
+  Rust targets: `crates/wow-map/src/map.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: `Map::apply_dynamic_object_caster_viewpoint_like_cpp(dynamic_object_guid,apply)` reads only canonical `Map::map_objects`, validates the typed DynamicObject first, resolves the Player caster from canonical `DynamicObject::bound_caster()` / represented `_caster` only, applies Player::SetViewpoint-like FarsightObject semantics for a DynamicObject target without Unit shared-vision/SetWorldObject, and then toggles DynamicObject `caster_viewpoint` after the Player helper result whenever typed DynamicObject plus bound typed Player caster exist. Existing-viewpoint and mismatch early returns leave Player state/request booleans unchanged but still toggle the DynamicObject flag, matching the C++ caller quirk. Missing DynamicObject, absent bound caster, or bound caster missing/not Player creates no records, does not mutate Player state, and does not toggle the DynamicObject. Not full `Player::SetViewpoint`, not live ObjectAccessor `BindToCaster`, no fallback from `caster_guid`, not live aura/cinematic/DynamicObject lifecycle wiring, not real `SetSeer`/`UpdateVisibilityOf` fanout, not ObjectAccessor/session/packet/DB runtime.
+
 
 - [x] **#NEXT.R8.ENTITIES.425** `CMSG_FAR_SIGHT` represented `SetSeer`/visibility handler seam.
   Status: complete for the represented CMSG_FAR_SIGHT parser/handler + session `m_seer` GUID seam only; review `APROBADO`; validation OK; committed locally at current #425 HEAD; no push/install/restart.
