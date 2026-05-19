@@ -476,6 +476,37 @@ pub struct AreaTriggersUpdateSummaryLikeCpp {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConversationUpdateStatusLikeCpp {
+    Updated,
+    ExpiredRemoveQueued,
+    MissingConversation,
+    NotConversation,
+    NotInWorld,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConversationUpdateOutcomeLikeCpp {
+    pub conversation_guid: ObjectGuid,
+    pub elapsed_ms: u32,
+    pub status: ConversationUpdateStatusLikeCpp,
+    pub duration_before_ms: Option<i32>,
+    pub duration_after_ms: Option<i32>,
+    pub script_update_would_run: bool,
+    pub world_update_would_run: bool,
+    pub remove_list: Option<AddObjectToRemoveListOutcomeLikeCpp>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ConversationsUpdateSummaryLikeCpp {
+    pub visited: usize,
+    pub updated: usize,
+    pub expired_remove_queued: usize,
+    pub missing_or_stale: usize,
+    pub not_conversation: usize,
+    pub not_in_world: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FarsightDynamicObjectCreateStatusLikeCpp {
     Created,
     MissingCasterPlayer,
@@ -3251,6 +3282,177 @@ where
                 }
                 AreaTriggerUpdateStatusLikeCpp::NotAreaTrigger => summary.not_area_trigger += 1,
                 AreaTriggerUpdateStatusLikeCpp::NotInWorld => summary.not_in_world += 1,
+            }
+        }
+
+        summary
+    }
+
+    /// Map-owned seam for C++ `Conversation::Update` under `ObjectUpdater`.
+    ///
+    /// C++ anchors:
+    /// - `Conversation.cpp:67-80` runs `sScriptMgr->OnConversationUpdate` before
+    ///   duration handling; on expiry it calls `Remove(); return;`, otherwise it
+    ///   runs `WorldObject::Update(diff)`.
+    /// - `Conversation.cpp:82-87` makes `Remove()` enqueue through
+    ///   `AddObjectToRemoveList()` only when the object is in world.
+    /// - `GridNotifiers.cpp:258-264,296-301` calls `Update(i_timeDiff)` only for
+    ///   in-world objects and explicitly instantiates `Conversation`.
+    ///
+    /// Ownership: source-of-truth is canonical `Map::map_objects`. Missing,
+    /// non-Conversation, and not-in-world outcomes do not mutate, enqueue, or
+    /// create fallback records. This helper represents script and WorldObject
+    /// update callsites as booleans only; it does not execute scripts, fanout,
+    /// visibility, ObjectAccessor/session mirrors, DB writes, or remove-list drain.
+    pub fn update_conversation_like_cpp(
+        &mut self,
+        conversation_guid: ObjectGuid,
+        elapsed_ms: u32,
+    ) -> ConversationUpdateOutcomeLikeCpp {
+        let Some(record) = self.map_object_record(conversation_guid) else {
+            return ConversationUpdateOutcomeLikeCpp {
+                conversation_guid,
+                elapsed_ms,
+                status: ConversationUpdateStatusLikeCpp::MissingConversation,
+                duration_before_ms: None,
+                duration_after_ms: None,
+                script_update_would_run: false,
+                world_update_would_run: false,
+                remove_list: None,
+            };
+        };
+
+        if record.kind() != AccessorObjectKind::Conversation {
+            return ConversationUpdateOutcomeLikeCpp {
+                conversation_guid,
+                elapsed_ms,
+                status: ConversationUpdateStatusLikeCpp::NotConversation,
+                duration_before_ms: None,
+                duration_after_ms: None,
+                script_update_would_run: false,
+                world_update_would_run: false,
+                remove_list: None,
+            };
+        }
+
+        let Some(conversation) = record.conversation() else {
+            return ConversationUpdateOutcomeLikeCpp {
+                conversation_guid,
+                elapsed_ms,
+                status: ConversationUpdateStatusLikeCpp::NotConversation,
+                duration_before_ms: None,
+                duration_after_ms: None,
+                script_update_would_run: false,
+                world_update_would_run: false,
+                remove_list: None,
+            };
+        };
+
+        let duration_before_ms = conversation.duration_ms();
+        if !conversation.world().object().is_in_world() {
+            return ConversationUpdateOutcomeLikeCpp {
+                conversation_guid,
+                elapsed_ms,
+                status: ConversationUpdateStatusLikeCpp::NotInWorld,
+                duration_before_ms: Some(duration_before_ms),
+                duration_after_ms: Some(duration_before_ms),
+                script_update_would_run: false,
+                world_update_would_run: false,
+                remove_list: None,
+            };
+        }
+
+        let (expired, duration_after_ms) = {
+            let Some(record) = self.map_objects.get_mut(&conversation_guid) else {
+                return ConversationUpdateOutcomeLikeCpp {
+                    conversation_guid,
+                    elapsed_ms,
+                    status: ConversationUpdateStatusLikeCpp::MissingConversation,
+                    duration_before_ms: Some(duration_before_ms),
+                    duration_after_ms: Some(duration_before_ms),
+                    script_update_would_run: false,
+                    world_update_would_run: false,
+                    remove_list: None,
+                };
+            };
+            let Some(conversation) = record.conversation_mut() else {
+                return ConversationUpdateOutcomeLikeCpp {
+                    conversation_guid,
+                    elapsed_ms,
+                    status: ConversationUpdateStatusLikeCpp::NotConversation,
+                    duration_before_ms: Some(duration_before_ms),
+                    duration_after_ms: Some(duration_before_ms),
+                    script_update_would_run: false,
+                    world_update_would_run: false,
+                    remove_list: None,
+                };
+            };
+            let expired = conversation.update_duration(elapsed_ms);
+            (expired, conversation.duration_ms())
+        };
+
+        if expired {
+            let remove_list = self.add_object_to_remove_list_like_cpp(conversation_guid);
+            ConversationUpdateOutcomeLikeCpp {
+                conversation_guid,
+                elapsed_ms,
+                status: ConversationUpdateStatusLikeCpp::ExpiredRemoveQueued,
+                duration_before_ms: Some(duration_before_ms),
+                duration_after_ms: Some(duration_after_ms),
+                script_update_would_run: true,
+                world_update_would_run: false,
+                remove_list: Some(remove_list),
+            }
+        } else {
+            ConversationUpdateOutcomeLikeCpp {
+                conversation_guid,
+                elapsed_ms,
+                status: ConversationUpdateStatusLikeCpp::Updated,
+                duration_before_ms: Some(duration_before_ms),
+                duration_after_ms: Some(duration_after_ms),
+                script_update_would_run: true,
+                world_update_would_run: true,
+                remove_list: None,
+            }
+        }
+    }
+
+    /// Bounded map-owned live visitation seam for C++ `Map::Update` consuming
+    /// `Trinity::ObjectUpdater` for `Conversation` records only.
+    ///
+    /// This snapshots canonical typed Conversation GUIDs from `Map::map_objects`,
+    /// then delegates every GUID to `update_conversation_like_cpp`. It does not
+    /// model exact `TypeContainerVisitor` order/cell traversal, players/sessions,
+    /// other object families, `SendObjectUpdates`, real scripts, visibility,
+    /// packets, DB, ObjectAccessor/session mirrors, or remove-list drain.
+    pub fn update_conversations_like_cpp(
+        &mut self,
+        elapsed_ms: u32,
+    ) -> ConversationsUpdateSummaryLikeCpp {
+        let conversation_guids = self
+            .map_objects
+            .iter()
+            .filter_map(|(guid, record)| {
+                (record.kind() == AccessorObjectKind::Conversation
+                    && record.conversation().is_some())
+                .then_some(*guid)
+            })
+            .collect::<Vec<_>>();
+
+        let mut summary = ConversationsUpdateSummaryLikeCpp::default();
+        for guid in conversation_guids {
+            summary.visited += 1;
+            let outcome = self.update_conversation_like_cpp(guid, elapsed_ms);
+            match outcome.status {
+                ConversationUpdateStatusLikeCpp::Updated => summary.updated += 1,
+                ConversationUpdateStatusLikeCpp::ExpiredRemoveQueued => {
+                    summary.expired_remove_queued += 1;
+                }
+                ConversationUpdateStatusLikeCpp::MissingConversation => {
+                    summary.missing_or_stale += 1;
+                }
+                ConversationUpdateStatusLikeCpp::NotConversation => summary.not_conversation += 1,
+                ConversationUpdateStatusLikeCpp::NotInWorld => summary.not_in_world += 1,
             }
         }
 
@@ -12323,6 +12525,149 @@ mod tests {
         assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
         assert!(map.map_object_record(missing_guid).is_none());
         assert!(map.map_object_record(creature_guid).is_some());
+    }
+
+    fn test_conversation_for_update(
+        counter: i64,
+        duration_ms: i32,
+        in_world: bool,
+    ) -> Conversation {
+        let mut conversation = Conversation::new();
+        conversation
+            .world_mut()
+            .object_mut()
+            .create(guid(HighGuid::Conversation, counter));
+        conversation.world_mut().object_mut().set_entry(42);
+        conversation.world_mut().set_map(571, 7).unwrap();
+        conversation
+            .world_mut()
+            .relocate(Position::xyz(1.0, 2.0, 3.0));
+        if in_world {
+            conversation.world_mut().object_mut().add_to_world();
+        }
+        conversation.set_duration_ms(duration_ms);
+        conversation
+    }
+
+    #[test]
+    fn conversation_update_decrements_duration_without_queue_like_cpp() {
+        let mut map = test_map();
+        let conversation = test_conversation_for_update(4360101, 1_000, true);
+        let conversation_guid = conversation.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_conversation(conversation).unwrap())
+            .unwrap();
+
+        let outcome = map.update_conversation_like_cpp(conversation_guid, 250);
+
+        assert_eq!(outcome.status, ConversationUpdateStatusLikeCpp::Updated);
+        assert_eq!(outcome.duration_before_ms, Some(1_000));
+        assert_eq!(outcome.duration_after_ms, Some(750));
+        assert!(outcome.script_update_would_run);
+        assert!(outcome.world_update_would_run);
+        assert!(outcome.remove_list.is_none());
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+        let conversation = map
+            .map_object_record(conversation_guid)
+            .unwrap()
+            .conversation()
+            .unwrap();
+        assert_eq!(conversation.duration_ms(), 750);
+        assert!(!conversation.is_removed());
+    }
+
+    #[test]
+    fn conversation_update_expiry_queues_remove_list_and_preserves_record_like_cpp() {
+        let mut map = test_map();
+        let conversation = test_conversation_for_update(4360201, 250, true);
+        let conversation_guid = conversation.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_conversation(conversation).unwrap())
+            .unwrap();
+
+        let outcome = map.update_conversation_like_cpp(conversation_guid, 250);
+
+        assert_eq!(
+            outcome.status,
+            ConversationUpdateStatusLikeCpp::ExpiredRemoveQueued
+        );
+        assert_eq!(outcome.duration_before_ms, Some(250));
+        assert_eq!(outcome.duration_after_ms, Some(250));
+        assert!(outcome.script_update_would_run);
+        assert!(!outcome.world_update_would_run);
+        assert_eq!(outcome.remove_list.unwrap().queued, true);
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 1);
+        let conversation = map
+            .map_object_record(conversation_guid)
+            .unwrap()
+            .conversation()
+            .unwrap();
+        assert!(conversation.is_removed());
+    }
+
+    #[test]
+    fn conversation_update_not_in_world_returns_no_mutation_or_queue_like_cpp() {
+        let mut map = test_map();
+        let conversation = test_conversation_for_update(4360301, 500, false);
+        let conversation_guid = conversation.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_conversation(conversation).unwrap())
+            .unwrap();
+
+        let outcome = map.update_conversation_like_cpp(conversation_guid, 250);
+
+        assert_eq!(outcome.status, ConversationUpdateStatusLikeCpp::NotInWorld);
+        assert_eq!(outcome.duration_before_ms, Some(500));
+        assert_eq!(outcome.duration_after_ms, Some(500));
+        assert!(!outcome.script_update_would_run);
+        assert!(!outcome.world_update_would_run);
+        assert!(outcome.remove_list.is_none());
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+        let conversation = map
+            .map_object_record(conversation_guid)
+            .unwrap()
+            .conversation()
+            .unwrap();
+        assert_eq!(conversation.duration_ms(), 500);
+        assert!(!conversation.is_removed());
+    }
+
+    #[test]
+    fn conversation_update_missing_non_conversation_or_untyped_creates_no_dummy_or_queue_like_cpp()
+    {
+        let mut map = test_map();
+        let missing_guid = guid(HighGuid::Conversation, 4360401);
+        let creature = test_creature_for_spawn(43604, 4360402, true);
+        let creature_guid = creature.guid();
+        map.insert_map_object_record(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+        let untyped_conversation =
+            world_object_with_counter(HighGuid::Conversation, 4360403, 571, 7, true);
+        let untyped_conversation_guid = untyped_conversation.guid();
+        map.insert_map_object(AccessorObjectKind::Conversation, untyped_conversation)
+            .unwrap();
+
+        let missing = map.update_conversation_like_cpp(missing_guid, 250);
+        let non_conversation = map.update_conversation_like_cpp(creature_guid, 250);
+        let untyped = map.update_conversation_like_cpp(untyped_conversation_guid, 250);
+
+        assert_eq!(
+            missing.status,
+            ConversationUpdateStatusLikeCpp::MissingConversation
+        );
+        assert_eq!(
+            non_conversation.status,
+            ConversationUpdateStatusLikeCpp::NotConversation
+        );
+        assert_eq!(
+            untyped.status,
+            ConversationUpdateStatusLikeCpp::NotConversation
+        );
+        assert_eq!(missing.remove_list, None);
+        assert_eq!(non_conversation.remove_list, None);
+        assert_eq!(untyped.remove_list, None);
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+        assert_eq!(map.map_object_count(), 2);
+        assert!(map.map_object_record(missing_guid).is_none());
+        assert!(map.map_object_record(creature_guid).is_some());
+        assert!(map.map_object_record(untyped_conversation_guid).is_some());
     }
 
     #[test]

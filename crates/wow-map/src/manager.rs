@@ -10,8 +10,9 @@ use std::sync::Arc;
 
 use crate::MapKey;
 use crate::map::{
-    AreaTriggersUpdateSummaryLikeCpp, CreatureUpdateSummaryLikeCpp,
-    DynamicObjectsUpdateSummaryLikeCpp, Map, NoopGridLifecycle, NoopTerrainGridLoader,
+    AreaTriggersUpdateSummaryLikeCpp, ConversationsUpdateSummaryLikeCpp,
+    CreatureUpdateSummaryLikeCpp, DynamicObjectsUpdateSummaryLikeCpp, Map, NoopGridLifecycle,
+    NoopTerrainGridLoader,
 };
 use crate::spawn::Difficulty;
 use wow_core::GameTime;
@@ -147,6 +148,7 @@ pub struct ManagedMap {
     last_dynamic_objects_update_summary: DynamicObjectsUpdateSummaryLikeCpp,
     last_creatures_update_summary: CreatureUpdateSummaryLikeCpp,
     last_area_triggers_update_summary: AreaTriggersUpdateSummaryLikeCpp,
+    last_conversations_update_summary: ConversationsUpdateSummaryLikeCpp,
     unload_all_calls: u32,
 }
 
@@ -174,6 +176,7 @@ impl ManagedMap {
             last_dynamic_objects_update_summary: DynamicObjectsUpdateSummaryLikeCpp::default(),
             last_creatures_update_summary: CreatureUpdateSummaryLikeCpp::default(),
             last_area_triggers_update_summary: AreaTriggersUpdateSummaryLikeCpp::default(),
+            last_conversations_update_summary: ConversationsUpdateSummaryLikeCpp::default(),
             unload_all_calls: 0,
         }
     }
@@ -238,6 +241,10 @@ impl ManagedMap {
         self.last_area_triggers_update_summary
     }
 
+    pub const fn last_conversations_update_summary(&self) -> ConversationsUpdateSummaryLikeCpp {
+        self.last_conversations_update_summary
+    }
+
     pub const fn unload_all_calls(&self) -> u32 {
         self.unload_all_calls
     }
@@ -272,6 +279,11 @@ impl ManagedMap {
         // nearby-cell traversal, player/session updates, fanout and scripts stay
         // explicit remaining gaps.
         self.last_area_triggers_update_summary = self.map.update_area_triggers_like_cpp(diff_ms);
+        // Partial C++ ObjectUpdater seam: visit represented map-owned
+        // Conversation records after AreaTrigger for this Rust slice. Exact
+        // TypeContainerVisitor ordering/cell traversal, real scripts,
+        // SendObjectUpdates and fanout remain explicit gaps.
+        self.last_conversations_update_summary = self.map.update_conversations_like_cpp(diff_ms);
     }
 
     fn delayed_update(&mut self, diff_ms: u32) {
@@ -985,7 +997,9 @@ mod tests {
 
     use crate::spawn::{SpawnGroupFlags, SpawnGroupTemplateData};
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
-    use wow_entities::{AreaTrigger, Creature, DynamicObject, GameObject, MapObjectRecord};
+    use wow_entities::{
+        AreaTrigger, Conversation, Creature, DynamicObject, GameObject, MapObjectRecord,
+    };
 
     #[test]
     fn delays_are_clamped_like_map_manager_h() {
@@ -1593,6 +1607,70 @@ mod tests {
     }
 
     #[test]
+    fn map_manager_update_visits_live_conversation_without_expiry_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let conversation_guid = insert_conversation_for_update(&mut manager, 4360101, 10, true);
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        assert_eq!(managed_map.update_calls(), &[1]);
+        assert_eq!(managed_map.delayed_update_calls(), &[1]);
+        assert_eq!(managed_map.map().objects_to_remove_count_like_cpp(), 0);
+        assert_eq!(
+            managed_map.last_conversations_update_summary(),
+            ConversationsUpdateSummaryLikeCpp {
+                visited: 1,
+                updated: 1,
+                expired_remove_queued: 0,
+                missing_or_stale: 0,
+                not_conversation: 0,
+                not_in_world: 0,
+            }
+        );
+        let conversation = managed_map
+            .map()
+            .map_object_record(conversation_guid)
+            .unwrap()
+            .conversation()
+            .unwrap();
+        assert_eq!(conversation.duration_ms(), 9);
+        assert!(!conversation.is_removed());
+    }
+
+    #[test]
+    fn map_manager_update_expires_conversation_then_delayed_update_drains_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let conversation_guid = insert_conversation_for_update(&mut manager, 4360201, 1, true);
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        assert_eq!(managed_map.update_calls(), &[1]);
+        assert_eq!(managed_map.delayed_update_calls(), &[1]);
+        assert_eq!(managed_map.map().objects_to_remove_count_like_cpp(), 0);
+        assert_eq!(
+            managed_map.last_conversations_update_summary(),
+            ConversationsUpdateSummaryLikeCpp {
+                visited: 1,
+                updated: 0,
+                expired_remove_queued: 1,
+                missing_or_stale: 0,
+                not_conversation: 0,
+                not_in_world: 0,
+            }
+        );
+        assert!(
+            managed_map
+                .map()
+                .map_object_record(conversation_guid)
+                .is_none()
+        );
+    }
+
+    #[test]
     fn update_destroys_unloadable_maps_before_delayed_update() {
         let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
         manager.create_map_entry(
@@ -1781,6 +1859,36 @@ mod tests {
             map.insert_map_object_record(record).unwrap();
         }
         area_trigger_guid
+    }
+
+    fn insert_conversation_for_update(
+        manager: &mut MapManager,
+        counter: i64,
+        duration_ms: i32,
+        in_world: bool,
+    ) -> ObjectGuid {
+        let conversation_guid = guid(HighGuid::Conversation, counter, 1, 0);
+        let mut conversation = Conversation::new();
+        conversation
+            .world_mut()
+            .object_mut()
+            .create(conversation_guid);
+        conversation.world_mut().set_map(1, 0).unwrap();
+        conversation
+            .world_mut()
+            .relocate(Position::xyz(13.0, 23.0, 33.0));
+        if in_world {
+            conversation.world_mut().object_mut().add_to_world();
+        }
+        conversation.set_duration_ms(duration_ms);
+        let record = MapObjectRecord::new_conversation(conversation).unwrap();
+        let map = manager.find_map_mut(1, 0).unwrap().map_mut();
+        if in_world {
+            map.add_map_object_record_to_map_like_cpp(record).unwrap();
+        } else {
+            map.insert_map_object_record(record).unwrap();
+        }
+        conversation_guid
     }
 
     fn world_entry(map_id: u32) -> CreateMapEntryContext {
