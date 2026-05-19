@@ -5,6 +5,12 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.418** `Map::UnloadGrid` applies GUID unload actions and purges personal phases.
+  Status: complete (represented action application/personal-phase purge only; no physical remove-list/fanout).
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1561-1627`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2547-2555`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2574-2646`, `/home/server/woltk-trinity-legacy/src/server/game/Grids/ObjectGridLoader.cpp:35-63`, `/home/server/woltk-trinity-legacy/src/server/game/Grids/ObjectGridLoader.cpp:232-245`, `/home/server/woltk-trinity-legacy/src/server/game/Grids/ObjectGridLoader.cpp:260-267`.
+  Rust targets: `crates/wow-map/src/map.rs`, `crates/wow-map/src/grid_unload.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: live `Map::run_unload_lifecycle` drains/applies represented `GridUnloadAction`s to canonical `Map::map_objects` after evacuator/cleaner/unloader, `MapGridHost::stop_grid_objects` drains stoper actions for Active->Idle, and personal phase trackers are purged before unloader. Fallback lifecycles with no emitted actions remain no-op. This is not full unload/remove-list parity: `DeleteObject` remains represented by flags/requests on entities, and full `RemoveAllObjectsInRemoveList` physical removal/fanout, per-type `RemoveFromMap` side effects, ObjectAccessor/session visibility, dynamic tree, corpse unloader parity and full lifecycle cleanup remain pending.
+
 - [x] **#NEXT.R8.ENTITIES.417** Map-owned GridUnloadEntityStore bridge.
   Status: complete (map-owned bridge only; no live unload/remove-list fanout).
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Grids/ObjectGridLoader.cpp:35-48`, `/home/server/woltk-trinity-legacy/src/server/game/Grids/ObjectGridLoader.cpp:50-63`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1561-1613`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2551-2554`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2631-2645`.

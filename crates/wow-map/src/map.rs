@@ -14,7 +14,9 @@ use crate::coords::{
     TOTAL_NUMBER_OF_CELLS_PER_MAP, compute_cell_coord, is_valid_map_coord_2d,
 };
 use crate::grid::{GridStateKind, MapGridHost, NGrid, update_grid_state};
-use crate::grid_unload::GridUnloadEntityStore;
+use crate::grid_unload::{
+    GridUnloadAction, GridUnloadApplyOutcome, GridUnloadEntityStore, apply_grid_unload_actions,
+};
 use crate::object_grid_loader::{GridSpawnLoadFilter, ObjectGridLoader};
 use crate::personal_phase::{MultiPersonalPhaseTracker, PhaseShift};
 use crate::pool::{
@@ -738,6 +740,9 @@ pub trait GridLifecycle {
     fn evacuate_grid(&mut self, grid: &mut NGrid);
     fn clean_grid(&mut self, grid: &mut NGrid);
     fn unload_grid_objects(&mut self, grid: &mut NGrid);
+    fn take_unload_actions_like_cpp(&mut self) -> Vec<GridUnloadAction> {
+        Vec::new()
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -3790,14 +3795,27 @@ where
     fn run_unload_lifecycle(&mut self, grid: &mut NGrid, unload_all: bool) {
         if !unload_all {
             self.lifecycle.evacuate_grid(grid);
+            self.drain_grid_unload_actions_like_cpp();
         }
 
         self.lifecycle.clean_grid(grid);
+        self.drain_grid_unload_actions_like_cpp();
+        self.personal_phase_tracker.unload_grid(grid);
         self.lifecycle.unload_grid_objects(grid);
+        self.drain_grid_unload_actions_like_cpp();
 
         let coord = GridCoord::new(grid.x() as u32, grid.y() as u32);
         let (terrain_x, terrain_y) = terrain_grid_coords(coord);
         self.terrain.unload_map(terrain_x, terrain_y);
+    }
+
+    fn drain_grid_unload_actions_like_cpp(&mut self) -> Vec<GridUnloadApplyOutcome> {
+        let actions = self.lifecycle.take_unload_actions_like_cpp();
+        if actions.is_empty() {
+            return Vec::new();
+        }
+
+        apply_grid_unload_actions(self, actions)
     }
 }
 
@@ -4535,6 +4553,7 @@ where
 
     fn stop_grid_objects(&mut self, grid: &NGrid) {
         self.lifecycle.stop_grid_objects(grid);
+        self.drain_grid_unload_actions_like_cpp();
     }
 
     fn reset_grid_expiry(&mut self, grid: &mut NGrid, factor: f32) {
@@ -4638,8 +4657,8 @@ pub const fn total_cell_count() -> u32 {
 mod tests {
     use super::*;
     use crate::grid_unload::{
-        GridObjectKind, GridUnloadAction, GridUnloadApplyOutcome, apply_grid_unload_action,
-        apply_grid_unload_actions,
+        GridObjectKind, GridUnloadAction, GridUnloadApplyOutcome, GuidGridUnloadLifecycle,
+        apply_grid_unload_action, apply_grid_unload_actions,
     };
     use crate::pool::{PoolGroupLikeCpp, PoolTemplateDataLikeCpp};
     use std::cell::RefCell;
@@ -4826,6 +4845,19 @@ mod tests {
             100.0,
             RecordingTerrain::default(),
             RecordingLifecycle::default(),
+        )
+    }
+
+    fn guid_unload_test_map() -> Map<RecordingTerrain, GuidGridUnloadLifecycle> {
+        Map::with_hooks(
+            571,
+            7,
+            1,
+            1000,
+            true,
+            100.0,
+            RecordingTerrain::default(),
+            GuidGridUnloadLifecycle::new(),
         )
     }
 
@@ -10425,6 +10457,147 @@ mod tests {
             1
         );
         assert_eq!(map.personal_phase_tracker().tracker_count(), 1);
+    }
+
+    #[test]
+    fn unload_grid_applies_guid_lifecycle_actions_to_canonical_map_objects_like_cpp() {
+        let mut map = guid_unload_test_map();
+        let coord = GridCoord::new(2, 3);
+        let cell = cell_from_grid_center(coord);
+        assert!(map.ensure_grid_loaded(&cell));
+
+        let creature = test_creature_for_spawn(4181, 4181, true);
+        let creature_guid = creature.unit().world().guid();
+        let gameobject = test_gameobject_for_spawn(4182, 4182);
+        let gameobject_guid = gameobject.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+        map.insert_map_object_record(MapObjectRecord::new_game_object(gameobject).unwrap())
+            .unwrap();
+
+        let grid_cell = map
+            .get_ngrid_mut(coord)
+            .unwrap()
+            .get_grid_type_mut(0, 0)
+            .unwrap();
+        grid_cell.grid_objects.creatures.insert(creature_guid);
+        grid_cell.grid_objects.gameobjects.insert(gameobject_guid);
+
+        assert!(map.unload_grid_at(coord, true));
+
+        assert!(map.get_ngrid(coord).is_none());
+        assert_eq!(map.terrain().unloads, vec![(61, 60)]);
+        assert_eq!(map.map_object_count(), 2);
+
+        let creature = map
+            .map_object_record(creature_guid)
+            .unwrap()
+            .creature()
+            .unwrap();
+        assert!(creature.unit().world().object().is_destroyed_object());
+        assert_eq!(creature.cleanup_before_delete_count(), 2);
+        assert!(creature.grid_unload_delete_requested());
+        assert!(!creature.grid_unload_respawn_relocation_requested());
+
+        let gameobject = map
+            .map_object_record(gameobject_guid)
+            .unwrap()
+            .game_object()
+            .unwrap();
+        assert!(gameobject.world().object().is_destroyed_object());
+        assert_eq!(gameobject.cleanup_before_delete_count(), 2);
+        assert!(gameobject.grid_unload_delete_requested());
+        assert!(!gameobject.grid_unload_respawn_relocation_requested());
+    }
+
+    #[test]
+    fn unload_grid_purges_personal_phase_tracker_before_unloader_like_cpp() {
+        let mut store = crate::spawn::SpawnStore::new();
+        let spawn = crate::spawn::SpawnData {
+            object_type: crate::spawn::SpawnObjectType::Creature,
+            spawn_id: 4183,
+            map_id: 571,
+            db_data: true,
+            spawn_group: crate::spawn::SpawnGroupTemplateData::default_group(),
+            id: 42,
+            spawn_point: crate::spawn::SpawnPosition::new(0.0, 0.0, 1.0, 2.0),
+            phase_use_flags: 0,
+            phase_id: 9,
+            phase_group: 0,
+            terrain_swap_map: -1,
+            pool_id: 0,
+            spawn_time_secs: 120,
+            spawn_difficulties: vec![1],
+            script_id: 0,
+            string_id: String::new(),
+        };
+        store.add_object_spawn(&spawn, |phase_id| phase_id == 9);
+        let corpses = crate::object_grid_loader::CorpseCellStore::new();
+        let mut loader =
+            crate::object_grid_loader::ObjectGridLoader::new(&store, &corpses, 571, 1, 1, 1);
+        let owner = ObjectGuid::create_player(1, 4183);
+        let phase_shift = crate::personal_phase::PhaseShift::new(
+            Some(owner),
+            vec![crate::personal_phase::PhaseRef::new(9, true)],
+        );
+        let mut map = test_map();
+        let coord = GridCoord::new(32, 32);
+        let cell = cell_from_grid_center(coord);
+
+        assert!(map.ensure_grid_loaded_for_player_phase(&cell, &phase_shift, &mut loader));
+        assert_eq!(map.personal_phase_tracker().tracker_count(), 1);
+
+        assert!(map.unload_grid_at(coord, true));
+
+        assert_eq!(map.personal_phase_tracker().tracker_count(), 0);
+        assert!(map.get_ngrid(coord).is_none());
+    }
+
+    #[test]
+    fn active_to_idle_stop_drains_guid_lifecycle_stoper_actions_into_creature_like_cpp() {
+        let mut map = guid_unload_test_map();
+        let coord = GridCoord::new(2, 3);
+        assert!(map.ensure_grid_loaded(&cell_from_grid_center(coord)));
+
+        let dynamic_object_guid = guid(HighGuid::DynamicObject, 4184);
+        let area_trigger_guid = guid(HighGuid::AreaTrigger, 4185);
+        let victim_guid = guid(HighGuid::Creature, 4186);
+        let mut creature = test_creature_for_spawn(4184, 4184, true);
+        let creature_guid = creature.unit().world().guid();
+        creature.register_dynamic_object(dynamic_object_guid);
+        creature.register_area_trigger(area_trigger_guid);
+        creature.unit_mut().set_attacking(Some(victim_guid));
+        map.insert_map_object_record(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+
+        let grid = map.get_ngrid_mut(coord).unwrap();
+        grid.get_grid_type_mut(0, 0)
+            .unwrap()
+            .grid_objects
+            .creatures
+            .insert(creature_guid);
+        grid.set_state(GridStateKind::Active);
+
+        assert!(!map.update_grid_state_at(coord, 1001));
+
+        let grid = map.get_ngrid(coord).unwrap();
+        assert_eq!(grid.state(), GridStateKind::Idle);
+        let creature = map
+            .map_object_record(creature_guid)
+            .unwrap()
+            .creature()
+            .unwrap();
+        assert!(!creature.is_in_combat());
+        assert!(creature.dynamic_objects().is_empty());
+        assert_eq!(
+            creature.removed_dynamic_objects_from_grid_unload(),
+            &[dynamic_object_guid]
+        );
+        assert!(creature.area_triggers().is_empty());
+        assert_eq!(
+            creature.removed_area_triggers_from_grid_unload(),
+            &[area_trigger_guid]
+        );
     }
 
     #[test]
