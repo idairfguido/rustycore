@@ -5,6 +5,12 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.419** Map deferred remove-list physical removal seam.
+  Status: complete for map-owned deferred remove-list queue + physical map-local drain only.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2547-2555`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2574-2646`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.cpp:1826-1835`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2034-2055`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:933-951`.
+  Rust targets: `crates/wow-map/src/map.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: `wow_map::Map` owns `objects_to_remove`; `add_object_to_remove_list_like_cpp` validates canonical `MapObjectRecord`, marks destroyed and runs represented cleanup before enqueue, `remove_all_objects_in_remove_list_like_cpp` drains GUIDs via `remove_from_map_like_cpp(..., true)`, tolerates missing/stale GUIDs without dummy insertion, applies Creature second cleanup, and `despawn_all_by_spawn_id_like_cpp` queues instead of physically removing. Pool safe despawn actions queue through the same seam. Remaining gaps: switch-list, visibility/fanout, ObjectAccessor, dynamic tree, full per-type RemoveFromMap side effects, scripts/AI, corpse ObjectAccessor path, DB/install/restart/push.
+
 - [x] **#NEXT.R8.ENTITIES.418** `Map::UnloadGrid` applies GUID unload actions and purges personal phases.
   Status: complete (represented action application/personal-phase purge only; no physical remove-list/fanout).
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1561-1627`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2547-2555`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2574-2646`, `/home/server/woltk-trinity-legacy/src/server/game/Grids/ObjectGridLoader.cpp:35-63`, `/home/server/woltk-trinity-legacy/src/server/game/Grids/ObjectGridLoader.cpp:232-245`, `/home/server/woltk-trinity-legacy/src/server/game/Grids/ObjectGridLoader.cpp:260-267`.

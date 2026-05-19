@@ -15,7 +15,8 @@ use crate::coords::{
 };
 use crate::grid::{GridStateKind, MapGridHost, NGrid, update_grid_state};
 use crate::grid_unload::{
-    GridUnloadAction, GridUnloadApplyOutcome, GridUnloadEntityStore, apply_grid_unload_actions,
+    GridObjectKind, GridUnloadAction, GridUnloadApplyOutcome, GridUnloadEntityStore,
+    apply_grid_unload_actions,
 };
 use crate::object_grid_loader::{GridSpawnLoadFilter, ObjectGridLoader};
 use crate::personal_phase::{MultiPersonalPhaseTracker, PhaseShift};
@@ -298,10 +299,39 @@ pub enum SpawnGroupConditionActionLikeCpp {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AddObjectToRemoveListOutcomeLikeCpp {
+    pub guid: ObjectGuid,
+    pub queued: bool,
+    pub duplicate: bool,
+    pub missing_or_stale: bool,
+    pub unsupported_kind: Option<AccessorObjectKind>,
+    pub cleanup_before_delete_count: usize,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct RemoveAllObjectsInRemoveListOutcomeLikeCpp {
+    pub processed: usize,
+    pub removed: usize,
+    pub missing_or_stale: usize,
+    pub remove_errors: usize,
+    pub unsupported_kinds: usize,
+    pub creature_second_cleanup_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DespawnAllBySpawnIdOutcomeLikeCpp {
     pub object_type: SpawnObjectType,
     pub spawn_id: SpawnId,
+    /// Number of live objects snapshotted from the by-spawn store and queued via
+    /// `AddObjectToRemoveList`; physical deletion is deferred to
+    /// `remove_all_objects_in_remove_list_like_cpp`.
+    pub queued: usize,
+    /// Legacy compatibility counter retained for callers from the pre-#419 seam.
+    /// It is no longer incremented by `despawn_all_by_spawn_id_like_cpp`; use
+    /// `queued` for C++ `Map::DespawnAll` parity and drain the map remove-list for
+    /// physical removal.
     pub removed: usize,
+    pub duplicates: usize,
     pub stale_index_entries: usize,
     pub remove_errors: usize,
     pub unsupported_live_despawn_type: usize,
@@ -792,6 +822,14 @@ pub struct Map<Terrain = NoopTerrainGridLoader, Lifecycle = NoopGridLifecycle> {
     gameobjects_by_spawn_id: HashMap<SpawnId, HashSet<ObjectGuid>>,
     area_triggers_by_spawn_id: HashMap<SpawnId, HashSet<ObjectGuid>>,
     map_objects: HashMap<ObjectGuid, MapObjectRecord>,
+    /// Map-owned deferred physical removal queue matching C++
+    /// `Map::i_objectsToRemove` (`Map.cpp:2547-2555`, `2574-2646`).
+    ///
+    /// Source of truth remains `map_objects`: enqueue mutates the canonical
+    /// record, and only `remove_all_objects_in_remove_list_like_cpp` drains this
+    /// set into `remove_from_map_like_cpp(..., true)`. Session/ObjectAccessor/DB
+    /// caches must not drain or reconstruct this queue.
+    objects_to_remove: HashSet<ObjectGuid>,
     /// C++ `Map::_guidGenerators` (`Map.h:789-791`), lazy initialized by
     /// `Map::GetGuidSequenceGenerator` (`Map.cpp:2505-2511`). This stores only
     /// map-owned sequence counters; callers must compose full ObjectGuids with
@@ -861,6 +899,7 @@ where
             gameobjects_by_spawn_id: HashMap::new(),
             area_triggers_by_spawn_id: HashMap::new(),
             map_objects: HashMap::new(),
+            objects_to_remove: HashSet::new(),
             guid_generators: HashMap::new(),
             creature_level_rng_like_cpp: StdRng::from_entropy(),
         }
@@ -1246,9 +1285,13 @@ where
                 summary.pool_stale_index_entries += 1;
                 continue;
             }
-            match self.remove_from_map_like_cpp(guid, true) {
-                Ok(_) => summary.pool_objects_removed += 1,
-                Err(_) => summary.pool_remove_errors += 1,
+            let outcome = self.add_object_to_remove_list_like_cpp(guid);
+            if outcome.missing_or_stale {
+                summary.pool_stale_index_entries += 1;
+            } else if outcome.unsupported_kind.is_some() {
+                summary.pool_unsupported_action_kind += 1;
+            } else if outcome.queued {
+                summary.pool_objects_removed += 1;
             }
         }
     }
@@ -1919,16 +1962,106 @@ where
         actions
     }
 
+    /// C++ `Map::AddObjectToRemoveList` represented over canonical map records.
+    ///
+    /// C++ anchors:
+    /// - `Map.cpp:2547-2555` asserts same map/instance, marks destroyed, runs
+    ///   `CleanupsBeforeDelete(false)`, and inserts into `i_objectsToRemove`.
+    /// - `Object.cpp:1826-1835` delegates `WorldObject::AddObjectToRemoveList` to
+    ///   the owning map when present.
+    ///
+    /// Divergence note: the C++ `std::set` insert is deduplicated, but the
+    /// cleanup call happens before insertion; this Rust seam preserves that order
+    /// and reports `duplicate=true` while still incrementing represented cleanup.
+    pub fn add_object_to_remove_list_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+    ) -> AddObjectToRemoveListOutcomeLikeCpp {
+        let Some(record) = self.map_objects.get_mut(&guid) else {
+            return AddObjectToRemoveListOutcomeLikeCpp {
+                guid,
+                queued: false,
+                duplicate: false,
+                missing_or_stale: true,
+                unsupported_kind: None,
+                cleanup_before_delete_count: 0,
+            };
+        };
+
+        let kind = record.kind();
+        debug_assert_eq!(record.object().map_id(), self.map_id);
+        debug_assert_eq!(record.object().instance_id(), self.instance_id);
+
+        let cleanup_before_delete_count =
+            cleanup_map_object_record_before_delete_like_cpp(record, kind, false);
+        let inserted = self.objects_to_remove.insert(guid);
+        AddObjectToRemoveListOutcomeLikeCpp {
+            guid,
+            queued: inserted,
+            duplicate: !inserted,
+            missing_or_stale: false,
+            unsupported_kind: remove_list_grid_kind_like_cpp(kind)
+                .is_none()
+                .then_some(kind),
+            cleanup_before_delete_count,
+        }
+    }
+
+    /// C++ `Map::RemoveAllObjectsInRemoveList` physical map-local drain.
+    ///
+    /// C++ anchors:
+    /// - `Map.cpp:2574-2646` drains switch-list first (out of scope here), then
+    ///   drains `i_objectsToRemove`; supported grid object types call
+    ///   `RemoveFromMap(..., true)`, Creature runs a second
+    ///   `CleanupsBeforeDelete()` immediately before removal, and non-grid types
+    ///   are logged/ignored.
+    /// - `Map.cpp:933-951` shows `RemoveFromMap(T*, true)` does the physical map
+    ///   removal/reset/delete path.
+    pub fn remove_all_objects_in_remove_list_like_cpp(
+        &mut self,
+    ) -> RemoveAllObjectsInRemoveListOutcomeLikeCpp {
+        let guids = self.objects_to_remove.drain().collect::<Vec<_>>();
+        let mut outcome = RemoveAllObjectsInRemoveListOutcomeLikeCpp {
+            processed: guids.len(),
+            ..Default::default()
+        };
+
+        for guid in guids {
+            let Some(kind) = self.map_object_record(guid).map(MapObjectRecord::kind) else {
+                outcome.missing_or_stale += 1;
+                continue;
+            };
+
+            if remove_list_grid_kind_like_cpp(kind).is_none() {
+                outcome.unsupported_kinds += 1;
+                continue;
+            }
+
+            if matches!(kind, AccessorObjectKind::Creature | AccessorObjectKind::Pet) {
+                if let Some(record) = self.map_objects.get_mut(&guid) {
+                    outcome.creature_second_cleanup_count +=
+                        cleanup_map_object_record_before_delete_like_cpp(record, kind, true);
+                }
+            }
+
+            match self.remove_from_map_like_cpp(guid, true) {
+                Ok(_) => outcome.removed += 1,
+                Err(RemoveFromMapError::ObjectNotFound { .. }) => outcome.missing_or_stale += 1,
+                Err(_) => outcome.remove_errors += 1,
+            }
+        }
+
+        outcome
+    }
+
     /// C++ `Map::DespawnAll` represented over map-local by-spawn indexes.
     ///
     /// C++ anchors:
     /// - `Map.cpp:2034-2055` snapshots Creature/GameObject by-spawn stores and
     ///   queues each object through `AddObjectToRemoveList`.
-    /// - `Map.cpp:2574-2646` later drains the remove list through
-    ///   `RemoveFromMap(..., true)`. Rust has no safe deferred remove list here,
-    ///   so this bounded seam executes the already-owned
-    ///   `remove_from_map_like_cpp(guid, true)` immediately for live
-    ///   Creature/GameObject records present in `map_objects`.
+    /// - `Map.cpp:2547-2555` marks each queued object destroyed and runs cleanup
+    ///   before insertion into the map-owned remove-list.
+    /// - `Map.cpp:2574-2646` later physically drains the list.
     pub fn despawn_all_by_spawn_id_like_cpp(
         &mut self,
         object_type: SpawnObjectType,
@@ -1937,7 +2070,9 @@ where
         let mut outcome = DespawnAllBySpawnIdOutcomeLikeCpp {
             object_type,
             spawn_id,
+            queued: 0,
             removed: 0,
+            duplicates: 0,
             stale_index_entries: 0,
             remove_errors: 0,
             unsupported_live_despawn_type: 0,
@@ -1969,9 +2104,15 @@ where
                 continue;
             }
 
-            match self.remove_from_map_like_cpp(guid, true) {
-                Ok(_) => outcome.removed += 1,
-                Err(_) => outcome.remove_errors += 1,
+            let queued = self.add_object_to_remove_list_like_cpp(guid);
+            if queued.missing_or_stale {
+                outcome.stale_index_entries += 1;
+            } else if queued.unsupported_kind.is_some() {
+                outcome.unsupported_live_despawn_type += 1;
+            } else if queued.duplicate {
+                outcome.duplicates += 1;
+            } else if queued.queued {
+                outcome.queued += 1;
             }
         }
 
@@ -2036,7 +2177,7 @@ where
 
                 let despawn =
                     self.despawn_all_by_spawn_id_like_cpp(member.object_type, member.spawn_id);
-                outcome.objects_removed += despawn.removed;
+                outcome.objects_removed += despawn.queued;
                 outcome.stale_index_entries += despawn.stale_index_entries;
                 outcome.remove_errors += despawn.remove_errors;
                 outcome.unsupported_live_despawn_types += despawn.unsupported_live_despawn_type;
@@ -2266,6 +2407,15 @@ where
 
     pub fn map_object_count(&self) -> usize {
         self.map_objects.len()
+    }
+
+    pub fn objects_to_remove_count_like_cpp(&self) -> usize {
+        self.objects_to_remove.len()
+    }
+
+    #[cfg(test)]
+    fn enqueue_object_to_remove_for_test(&mut self, guid: ObjectGuid) {
+        self.objects_to_remove.insert(guid);
     }
 
     pub fn creature_spawn_id_store_count_like_cpp(&self, spawn_id: SpawnId) -> usize {
@@ -4344,6 +4494,89 @@ fn nearby_creature_guids_excluding(
     nearby_creatures.sort();
     nearby_creatures.dedup();
     nearby_creatures
+}
+
+fn remove_list_grid_kind_like_cpp(kind: AccessorObjectKind) -> Option<GridObjectKind> {
+    match kind {
+        AccessorObjectKind::Creature | AccessorObjectKind::Pet => Some(GridObjectKind::Creature),
+        AccessorObjectKind::GameObject | AccessorObjectKind::Transport => {
+            Some(GridObjectKind::GameObject)
+        }
+        AccessorObjectKind::DynamicObject => Some(GridObjectKind::DynamicObject),
+        AccessorObjectKind::AreaTrigger => Some(GridObjectKind::AreaTrigger),
+        AccessorObjectKind::Corpse => Some(GridObjectKind::Corpse),
+        AccessorObjectKind::SceneObject => Some(GridObjectKind::SceneObject),
+        AccessorObjectKind::Conversation => Some(GridObjectKind::Conversation),
+        AccessorObjectKind::Player => None,
+    }
+}
+
+fn cleanup_map_object_record_before_delete_like_cpp(
+    record: &mut MapObjectRecord,
+    kind: AccessorObjectKind,
+    creature_second_cleanup: bool,
+) -> usize {
+    match kind {
+        AccessorObjectKind::Creature => record.creature_mut().map_or(0, |creature| {
+            if !creature_second_cleanup {
+                creature.set_destroyed_object(true);
+            }
+            creature.cleanup_before_delete();
+            1
+        }),
+        AccessorObjectKind::Pet => record.pet_mut().map_or(0, |pet| {
+            if !creature_second_cleanup {
+                pet.creature_mut().set_destroyed_object(true);
+            }
+            pet.creature_mut().cleanup_before_delete();
+            1
+        }),
+        AccessorObjectKind::GameObject => record.game_object_mut().map_or(0, |game_object| {
+            game_object.set_destroyed_object(true);
+            game_object.cleanup_before_delete();
+            1
+        }),
+        AccessorObjectKind::Transport => record.transport_mut().map_or(0, |transport| {
+            transport.game_object_mut().set_destroyed_object(true);
+            let _removed_static_passengers = transport.cleanup_before_delete();
+            1
+        }),
+        AccessorObjectKind::DynamicObject => {
+            record.dynamic_object_mut().map_or(0, |dynamic_object| {
+                dynamic_object.set_destroyed_object(true);
+                dynamic_object.cleanup_before_delete();
+                1
+            })
+        }
+        AccessorObjectKind::AreaTrigger => record.area_trigger_mut().map_or(0, |area_trigger| {
+            area_trigger.set_destroyed_object(true);
+            area_trigger.cleanup_before_delete();
+            1
+        }),
+        AccessorObjectKind::Corpse => record.corpse_mut().map_or(0, |corpse| {
+            corpse.set_destroyed_object(true);
+            corpse.cleanup_before_delete();
+            1
+        }),
+        AccessorObjectKind::SceneObject => record.scene_object_mut().map_or(0, |scene_object| {
+            scene_object.set_destroyed_object(true);
+            scene_object.cleanup_before_delete();
+            1
+        }),
+        AccessorObjectKind::Conversation => record.conversation_mut().map_or(0, |conversation| {
+            conversation.set_destroyed_object(true);
+            conversation.cleanup_before_delete();
+            1
+        }),
+        AccessorObjectKind::Player => {
+            // No typed represented `CleanupsBeforeDelete` exists for Player in this
+            // bounded map remove-list seam. Preserve at least the base
+            // `WorldObject::SetDestroyedObject(true)` mutation and report no
+            // represented cleanup.
+            record.object_mut().object_mut().set_destroyed_object(true);
+            0
+        }
+    }
 }
 
 fn insert_object_guid_in_cell_like_cpp(
@@ -9235,6 +9468,168 @@ mod tests {
         assert!(!object.object().is_in_grid());
         assert!(!object.has_current_map());
         assert_eq!(object.current_cell(), None);
+    }
+
+    #[test]
+    fn remove_list_enqueue_creature_marks_destroyed_cleans_and_keeps_record_like_cpp() {
+        let mut map = test_map();
+        let spawn_id = 41901;
+        let mut creature = test_creature_for_spawn(spawn_id, 4190101, true);
+        let guid = creature.guid();
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        let added = map
+            .add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+
+        let outcome = map.add_object_to_remove_list_like_cpp(guid);
+
+        assert_eq!(outcome.guid, guid);
+        assert!(outcome.queued);
+        assert!(!outcome.duplicate);
+        assert_eq!(outcome.cleanup_before_delete_count, 1);
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 1);
+        assert_eq!(map.map_object_count(), 1);
+        assert_eq!(map.creature_spawn_id_store_count_like_cpp(spawn_id), 1);
+        assert!(
+            map.exact_cell_guids_like_cpp(added.cell)
+                .grid
+                .creatures
+                .contains(&guid)
+        );
+        let creature = map.get_typed_creature(guid).unwrap();
+        assert!(creature.unit().world().object().is_destroyed_object());
+        assert_eq!(creature.cleanup_before_delete_count(), 1);
+    }
+
+    #[test]
+    fn remove_list_drain_physically_removes_creature_and_second_cleanup_like_cpp() {
+        let mut map = test_map();
+        let spawn_id = 41902;
+        let mut creature = test_creature_for_spawn(spawn_id, 4190201, true);
+        let guid = creature.guid();
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        let added = map
+            .add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+        assert!(map.add_object_to_remove_list_like_cpp(guid).queued);
+
+        let outcome = map.remove_all_objects_in_remove_list_like_cpp();
+
+        assert_eq!(outcome.processed, 1);
+        assert_eq!(outcome.removed, 1);
+        assert_eq!(outcome.creature_second_cleanup_count, 1);
+        assert_eq!(outcome.missing_or_stale, 0);
+        assert_eq!(outcome.remove_errors, 0);
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+        assert!(map.map_object_record(guid).is_none());
+        assert_eq!(map.creature_spawn_id_store_count_like_cpp(spawn_id), 0);
+        assert!(
+            !map.exact_cell_guids_like_cpp(added.cell)
+                .grid
+                .creatures
+                .contains(&guid)
+        );
+    }
+
+    #[test]
+    fn remove_list_duplicate_enqueue_follows_cpp_cleanup_before_set_insert_like_cpp() {
+        let mut map = test_map();
+        let mut creature = test_creature_for_spawn(41903, 4190301, true);
+        let guid = creature.guid();
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+
+        let first = map.add_object_to_remove_list_like_cpp(guid);
+        let second = map.add_object_to_remove_list_like_cpp(guid);
+
+        assert!(first.queued);
+        assert!(second.duplicate);
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 1);
+        assert_eq!(
+            map.get_typed_creature(guid)
+                .unwrap()
+                .cleanup_before_delete_count(),
+            2
+        );
+    }
+
+    #[test]
+    fn remove_list_drain_missing_stale_guid_does_not_create_object_like_cpp() {
+        let mut map = test_map();
+        let guid = guid(HighGuid::Creature, 4190401);
+        map.enqueue_object_to_remove_for_test(guid);
+
+        let outcome = map.remove_all_objects_in_remove_list_like_cpp();
+
+        assert_eq!(outcome.processed, 1);
+        assert_eq!(outcome.missing_or_stale, 1);
+        assert_eq!(outcome.removed, 0);
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+        assert_eq!(map.map_object_count(), 0);
+    }
+
+    #[test]
+    fn despawn_all_by_spawn_id_queues_and_defers_physical_removal_like_cpp() {
+        let mut map = test_map();
+        let spawn_id = 41905;
+        let mut creature = test_creature_for_spawn(spawn_id, 4190501, true);
+        let guid = creature.guid();
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+
+        let outcome = map.despawn_all_by_spawn_id_like_cpp(SpawnObjectType::Creature, spawn_id);
+
+        assert_eq!(outcome.queued, 1);
+        assert_eq!(outcome.removed, 0);
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 1);
+        assert!(map.map_object_record(guid).is_some());
+        assert_eq!(map.creature_spawn_id_store_count_like_cpp(spawn_id), 1);
+
+        let drain = map.remove_all_objects_in_remove_list_like_cpp();
+        assert_eq!(drain.removed, 1);
+        assert!(map.map_object_record(guid).is_none());
+        assert_eq!(map.creature_spawn_id_store_count_like_cpp(spawn_id), 0);
+    }
+
+    #[test]
+    fn remove_list_drain_gameobject_owner_removes_linked_trap_like_cpp() {
+        let mut map = test_map();
+        let mut owner = game_object_with_counter(4190601, 571, 7, false);
+        let trap = game_object_with_counter(4190602, 571, 7, false);
+        let owner_guid = owner.world().guid();
+        let trap_guid = trap.world().guid();
+        owner.set_linked_trap_like_cpp(trap_guid);
+
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(trap).unwrap())
+            .unwrap();
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(owner).unwrap())
+            .unwrap();
+        assert!(map.add_object_to_remove_list_like_cpp(owner_guid).queued);
+
+        let outcome = map.remove_all_objects_in_remove_list_like_cpp();
+
+        assert_eq!(outcome.removed, 1);
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+        assert!(map.map_object_record(owner_guid).is_none());
+        assert!(map.map_object_record(trap_guid).is_none());
     }
 
     #[test]
