@@ -30,7 +30,7 @@ use wow_constants::unit::{
 use wow_constants::{
     BagFamilyMask, BuyResult, ClientOpcodes, InventoryResult, InventoryType, ItemBondingType,
     ItemClass, ItemContext, ItemEnchantmentType, ItemFlags, ItemFlags2, ItemQuality, SellResult,
-    TypeId, TypeMask, UnitState,
+    TypeId, UnitState,
 };
 use wow_core::{ObjectGuid, ObjectGuidGenerator, Position};
 use wow_data::{
@@ -2483,6 +2483,12 @@ impl WorldSession {
             gender_from_u8(self.player_gender_like_cpp()),
         );
         player.unit_mut().set_level(self.player_level_like_cpp());
+        player
+            .unit_mut()
+            .set_max_health(u64::from(self.player_max_health_like_cpp));
+        player
+            .unit_mut()
+            .set_health(u64::from(self.player_health_like_cpp));
         player.set_xp(self.player_xp_like_cpp() as i32);
         player.set_next_level_xp(self.player_next_level_xp_like_cpp() as i32);
         player.set_money(self.player_gold_like_cpp());
@@ -6862,30 +6868,6 @@ impl WorldSession {
         }
     }
 
-    fn object_accessor_player_object(&self) -> Option<WorldObject> {
-        let (Some(guid), Some(pos), Some(name)) = (
-            self.player_guid(),
-            self.player_position_like_cpp(),
-            self.player_name_like_cpp(),
-        ) else {
-            return None;
-        };
-
-        let mut object = WorldObject::new(true, TypeId::Player, TypeMask::PLAYER);
-        object.object_mut().create(guid);
-        object.set_name(name);
-        if object
-            .set_map(u32::from(self.player_map_id_like_cpp()), 0)
-            .is_err()
-        {
-            return None;
-        }
-        object.relocate(pos);
-        *object.phase_shift_mut() = self.represented_player_phase_shift.clone();
-        object.object_mut().add_to_world();
-        Some(object)
-    }
-
     fn object_accessor_inventory_snapshot(&self) -> PlayerInventoryStorage {
         let mut inventory = PlayerInventoryStorage::default();
         for (&slot, item) in self.inventory_items_like_cpp() {
@@ -6900,7 +6882,7 @@ impl WorldSession {
         let Some(accessor) = &self.object_accessor else {
             return;
         };
-        let Some(object) = self.object_accessor_player_object() else {
+        let Some(player) = self.canonical_player_entity_snapshot_like_cpp() else {
             return;
         };
         let Some(name) = self.player_name_like_cpp() else {
@@ -6911,9 +6893,9 @@ impl WorldSession {
         let items = self.inventory_item_objects_like_cpp().values().cloned();
         if let Err(err) = accessor
             .write()
-            .add_player_with_inventory_and_items(name, object, inventory, items)
+            .add_player_entity_with_inventory_and_items(name, player, inventory, items)
         {
-            warn!("Failed to sync player into ObjectAccessor: {err:?}");
+            warn!("Failed to sync typed Player into ObjectAccessor: {err:?}");
         }
     }
 
@@ -24655,100 +24637,210 @@ mod tests {
         assert!(!session.inventory_item_objects.contains_key(&item_guid));
     }
 
+    fn run_object_accessor_sync_test(test: impl FnOnce() + Send + 'static) {
+        std::thread::Builder::new()
+            .name("object-accessor-sync".into())
+            .stack_size(8 * 1024 * 1024)
+            .spawn(test)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
     #[test]
     fn object_accessor_sync_exposes_session_inventory_items_like_cpp() {
-        let (mut session, _, _) = make_session();
-        let accessor = new_shared_object_accessor();
-        let player_guid = ObjectGuid::create_player(1, 42);
-        let item_guid = ObjectGuid::create_item(1, 900);
+        run_object_accessor_sync_test(|| {
+            let (mut session, _, _) = make_session();
+            let accessor = new_shared_object_accessor();
+            let player_guid = ObjectGuid::create_player(1, 42);
+            let item_guid = ObjectGuid::create_item(1, 900);
 
-        session.set_object_accessor(Arc::clone(&accessor));
-        session.set_player_guid(Some(player_guid));
-        session.player_name = Some("Jaina".into());
-        session.player_position = Some(Position::new(1.0, 2.0, 3.0, 0.0));
-        session.current_map_id = 571;
-        session.inventory_items.insert(
-            23,
-            InventoryItem {
-                guid: item_guid,
-                entry_id: 700,
-                db_guid: 900,
-                inventory_type: None,
-            },
-        );
-        let item = session.make_inventory_item_object(
-            item_guid,
-            700,
-            player_guid,
-            2,
-            0,
-            ItemContext::None,
-            23,
-        );
-        session.insert_inventory_item_object(item);
-        session.sync_object_accessor_player();
+            session.set_object_accessor(Arc::clone(&accessor));
+            session.set_player_guid(Some(player_guid));
+            session.player_name = Some("Jaina".into());
+            session.player_position = Some(Position::new(1.0, 2.0, 3.0, 0.0));
+            session.current_map_id = 571;
+            session.inventory_items.insert(
+                23,
+                InventoryItem {
+                    guid: item_guid,
+                    entry_id: 700,
+                    db_guid: 900,
+                    inventory_type: None,
+                },
+            );
+            let item = session.make_inventory_item_object(
+                item_guid,
+                700,
+                player_guid,
+                2,
+                0,
+                ItemContext::None,
+                23,
+            );
+            session.insert_inventory_item_object(item);
+            session.sync_object_accessor_player();
 
-        {
-            let accessor = accessor.read();
-            let player = accessor.find_connected_player(player_guid).unwrap();
-            match accessor.get_object_ref_by_type_mask(player, item_guid, TypeMask::ITEM) {
-                Some(AccessorObjectRef::Item(item)) => {
-                    assert_eq!(item.object().guid(), item_guid);
-                    assert_eq!(item.slot(), 23);
-                    assert_eq!(item.count(), 2);
+            {
+                let accessor = accessor.read();
+                assert!(accessor.find_connected_player_entity(player_guid).is_some());
+                assert!(accessor.find_player_entity(player_guid).is_some());
+                let player = accessor.find_connected_player(player_guid).unwrap();
+                match accessor.get_object_ref_by_type_mask(
+                    player,
+                    item_guid,
+                    wow_constants::TypeMask::ITEM,
+                ) {
+                    Some(AccessorObjectRef::Item(item)) => {
+                        assert_eq!(item.object().guid(), item_guid);
+                        assert_eq!(item.slot(), 23);
+                        assert_eq!(item.count(), 2);
+                    }
+                    other => panic!("expected item ref, got {other:?}"),
                 }
-                other => panic!("expected item ref, got {other:?}"),
             }
-        }
 
-        let moved = session.inventory_items.remove(&23).unwrap();
-        session.inventory_items.insert(24, moved);
-        session.set_inventory_item_object_slot(item_guid, 24);
-        session.sync_object_accessor_player();
-        {
+            let moved = session.inventory_items.remove(&23).unwrap();
+            session.inventory_items.insert(24, moved);
+            session.set_inventory_item_object_slot(item_guid, 24);
+            session.sync_object_accessor_player();
+            {
+                let accessor = accessor.read();
+                let item = accessor.player_item(player_guid, item_guid).unwrap();
+                assert_eq!(item.slot(), 24);
+            }
+
+            session.inventory_items.remove(&24);
+            session.remove_inventory_item_object(item_guid);
+            session.sync_object_accessor_player();
+            assert!(
+                accessor
+                    .read()
+                    .player_item(player_guid, item_guid)
+                    .is_none()
+            );
+
+            session.cleanup_shared_runtime_state();
             let accessor = accessor.read();
-            let item = accessor.player_item(player_guid, item_guid).unwrap();
-            assert_eq!(item.slot(), 24);
-        }
+            assert!(accessor.find_connected_player(player_guid).is_none());
+            assert!(session.inventory_items.is_empty());
+            assert!(session.inventory_item_objects.is_empty());
+        });
+    }
 
-        session.inventory_items.remove(&24);
-        session.remove_inventory_item_object(item_guid);
-        session.sync_object_accessor_player();
-        assert!(
-            accessor
-                .read()
-                .player_item(player_guid, item_guid)
-                .is_none()
-        );
+    #[test]
+    fn object_accessor_sync_typed_player_preserves_session_world_shape_like_cpp() {
+        run_object_accessor_sync_test(|| {
+            let (mut session, _, _) = make_session();
+            let accessor = new_shared_object_accessor();
+            let player_guid = ObjectGuid::create_player(1, 44);
+            let position = Position::new(11.0, 22.0, 33.0, 1.5);
+            let mut player_phase_shift = PhaseShift::default();
+            player_phase_shift.add_phase_like_cpp(77, wow_constants::PhaseFlags::empty(), 1);
 
-        session.cleanup_shared_runtime_state();
-        let accessor = accessor.read();
-        assert!(accessor.find_connected_player(player_guid).is_none());
-        assert!(session.inventory_items.is_empty());
-        assert!(session.inventory_item_objects.is_empty());
+            session.set_object_accessor(Arc::clone(&accessor));
+            session.set_player_guid(Some(player_guid));
+            session.player_name = Some("Valeera".into());
+            session.player_position = Some(position);
+            session.current_map_id = 530;
+            session.set_represented_player_phase_shift_like_cpp(player_phase_shift.clone());
+            session.sync_object_accessor_player();
+
+            let accessor = accessor.read();
+            let typed_player = accessor.find_connected_player_entity(player_guid).unwrap();
+            let typed_world = typed_player.unit().world();
+            assert_eq!(typed_world.name(), "Valeera");
+            assert_eq!(typed_world.map_id(), 530);
+            assert_eq!(typed_world.position(), position);
+            assert!(typed_world.phase_shift().can_see(&player_phase_shift));
+            assert!(typed_world.phase_shift().has_phase_like_cpp(77));
+
+            let legacy_view = accessor.find_connected_player(player_guid).unwrap();
+            assert_eq!(legacy_view.name(), "Valeera");
+            assert_eq!(legacy_view.map_id(), 530);
+            assert_eq!(legacy_view.position(), position);
+            assert!(legacy_view.phase_shift().can_see(&player_phase_shift));
+        });
+    }
+
+    #[test]
+    fn object_accessor_sync_typed_player_replaces_previous_snapshot_like_cpp() {
+        run_object_accessor_sync_test(|| {
+            let (mut session, _, _) = make_session();
+            let accessor = new_shared_object_accessor();
+            let player_guid = ObjectGuid::create_player(1, 45);
+
+            session.set_object_accessor(Arc::clone(&accessor));
+            session.set_player_guid(Some(player_guid));
+            session.player_name = Some("Anduin".into());
+            session.player_position = Some(Position::new(1.0, 2.0, 3.0, 0.0));
+            session.current_map_id = 0;
+            session.set_player_level_like_cpp(12);
+            session.set_player_health_like_cpp(90, 120);
+            session.sync_object_accessor_player();
+
+            let updated_position = Position::new(4.0, 5.0, 6.0, 2.0);
+            let mut updated_phase_shift = PhaseShift::default();
+            updated_phase_shift.add_phase_like_cpp(88, wow_constants::PhaseFlags::empty(), 1);
+            session.player_position = Some(updated_position);
+            session.current_map_id = 1;
+            session.set_player_level_like_cpp(13);
+            session.set_player_health_like_cpp(77, 140);
+            session.set_represented_player_phase_shift_like_cpp(updated_phase_shift.clone());
+            session.sync_object_accessor_player();
+
+            let accessor = accessor.read();
+            let typed_player = accessor.find_connected_player_entity(player_guid).unwrap();
+            assert_eq!(typed_player.unit().world().position(), updated_position);
+            assert_eq!(typed_player.unit().world().map_id(), 1);
+            assert_eq!(typed_player.unit().data().level, 13);
+            assert_eq!(typed_player.unit().data().health, 77);
+            assert_eq!(typed_player.unit().data().max_health, 140);
+            assert!(
+                typed_player
+                    .unit()
+                    .world()
+                    .phase_shift()
+                    .can_see(&updated_phase_shift)
+            );
+            assert!(
+                typed_player
+                    .unit()
+                    .world()
+                    .phase_shift()
+                    .has_phase_like_cpp(88)
+            );
+
+            let legacy_view = accessor.find_connected_player(player_guid).unwrap();
+            assert_eq!(legacy_view.position(), updated_position);
+            assert_eq!(legacy_view.map_id(), 1);
+            assert!(legacy_view.phase_shift().has_phase_like_cpp(88));
+        });
     }
 
     #[test]
     fn object_accessor_sync_preserves_represented_player_phase_shift_like_cpp() {
-        let (mut session, _, _) = make_session();
-        let accessor = new_shared_object_accessor();
-        let player_guid = ObjectGuid::create_player(1, 43);
+        run_object_accessor_sync_test(|| {
+            let (mut session, _, _) = make_session();
+            let accessor = new_shared_object_accessor();
+            let player_guid = ObjectGuid::create_player(1, 43);
 
-        let mut player_phase_shift = PhaseShift::default();
-        player_phase_shift.add_phase_like_cpp(20, wow_constants::PhaseFlags::empty(), 1);
-        session.set_represented_player_phase_shift_like_cpp(player_phase_shift.clone());
+            let mut player_phase_shift = PhaseShift::default();
+            player_phase_shift.add_phase_like_cpp(20, wow_constants::PhaseFlags::empty(), 1);
+            session.set_represented_player_phase_shift_like_cpp(player_phase_shift.clone());
 
-        session.set_object_accessor(Arc::clone(&accessor));
-        session.set_player_guid(Some(player_guid));
-        session.player_name = Some("Thrall".into());
-        session.player_position = Some(Position::new(1.0, 2.0, 3.0, 0.0));
-        session.current_map_id = 1;
-        session.sync_object_accessor_player();
+            session.set_object_accessor(Arc::clone(&accessor));
+            session.set_player_guid(Some(player_guid));
+            session.player_name = Some("Thrall".into());
+            session.player_position = Some(Position::new(1.0, 2.0, 3.0, 0.0));
+            session.current_map_id = 1;
+            session.sync_object_accessor_player();
 
-        let accessor = accessor.read();
-        let player = accessor.find_connected_player(player_guid).unwrap();
-        assert!(player.phase_shift().can_see(&player_phase_shift));
-        assert!(player.phase_shift().has_phase_like_cpp(20));
+            let accessor = accessor.read();
+            let player = accessor.find_connected_player(player_guid).unwrap();
+            assert!(player.phase_shift().can_see(&player_phase_shift));
+            assert!(player.phase_shift().has_phase_like_cpp(20));
+        });
     }
 
     #[tokio::test]
