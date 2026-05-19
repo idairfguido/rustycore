@@ -4,7 +4,10 @@ use wow_constants::{TypeId, TypeMask};
 use wow_core::ObjectGuid;
 use wow_core::guid::HighGuid;
 
-use crate::{AreaTrigger, Creature, GameObject, Item, Player, PlayerInventoryStorage, WorldObject};
+use crate::{
+    AreaTrigger, Conversation, Corpse, Creature, DynamicObject, GameObject, Item, Player,
+    PlayerInventoryStorage, SceneObject, WorldObject,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AccessorObjectKind {
@@ -181,9 +184,13 @@ pub struct MapObjectRecord {
 enum MapObjectBody {
     WorldObject(WorldObject),
     AreaTrigger(AreaTrigger),
+    Conversation(Conversation),
+    Corpse(Corpse),
     Creature(Box<Creature>),
+    DynamicObject(DynamicObject),
     GameObject(GameObject),
     Player(Box<Player>),
+    SceneObject(SceneObject),
 }
 
 impl MapObjectRecord {
@@ -242,6 +249,47 @@ impl MapObjectRecord {
         })
     }
 
+    pub fn new_conversation(conversation: Conversation) -> Result<Self, ObjectAccessorError> {
+        let record = Self::new(
+            AccessorObjectKind::Conversation,
+            conversation.world().clone(),
+        )?;
+        Ok(Self {
+            kind: record.kind,
+            body: MapObjectBody::Conversation(conversation),
+        })
+    }
+
+    pub fn new_corpse(corpse: Corpse) -> Result<Self, ObjectAccessorError> {
+        let record = Self::new(AccessorObjectKind::Corpse, corpse.world().clone())?;
+        Ok(Self {
+            kind: record.kind,
+            body: MapObjectBody::Corpse(corpse),
+        })
+    }
+
+    pub fn new_dynamic_object(dynamic_object: DynamicObject) -> Result<Self, ObjectAccessorError> {
+        let record = Self::new(
+            AccessorObjectKind::DynamicObject,
+            dynamic_object.world().clone(),
+        )?;
+        Ok(Self {
+            kind: record.kind,
+            body: MapObjectBody::DynamicObject(dynamic_object),
+        })
+    }
+
+    pub fn new_scene_object(scene_object: SceneObject) -> Result<Self, ObjectAccessorError> {
+        let record = Self::new(
+            AccessorObjectKind::SceneObject,
+            scene_object.world().clone(),
+        )?;
+        Ok(Self {
+            kind: record.kind,
+            body: MapObjectBody::SceneObject(scene_object),
+        })
+    }
+
     pub fn new_player(player: Player) -> Result<Self, ObjectAccessorError> {
         let record = Self::new(AccessorObjectKind::Player, player.unit().world().clone())?;
         Ok(Self {
@@ -258,9 +306,13 @@ impl MapObjectRecord {
         match &self.body {
             MapObjectBody::WorldObject(object) => object,
             MapObjectBody::AreaTrigger(area_trigger) => area_trigger.world(),
+            MapObjectBody::Conversation(conversation) => conversation.world(),
+            MapObjectBody::Corpse(corpse) => corpse.world(),
             MapObjectBody::Creature(creature) => creature.unit().world(),
+            MapObjectBody::DynamicObject(dynamic_object) => dynamic_object.world(),
             MapObjectBody::GameObject(game_object) => game_object.world(),
             MapObjectBody::Player(player) => player.unit().world(),
+            MapObjectBody::SceneObject(scene_object) => scene_object.world(),
         }
     }
 
@@ -268,89 +320,125 @@ impl MapObjectRecord {
         match &mut self.body {
             MapObjectBody::WorldObject(object) => object,
             MapObjectBody::AreaTrigger(area_trigger) => area_trigger.world_mut(),
+            MapObjectBody::Conversation(conversation) => conversation.world_mut(),
+            MapObjectBody::Corpse(corpse) => corpse.world_mut(),
             MapObjectBody::Creature(creature) => creature.unit_mut().world_mut(),
+            MapObjectBody::DynamicObject(dynamic_object) => dynamic_object.world_mut(),
             MapObjectBody::GameObject(game_object) => game_object.world_mut(),
             MapObjectBody::Player(player) => player.unit_mut().world_mut(),
+            MapObjectBody::SceneObject(scene_object) => scene_object.world_mut(),
         }
     }
 
     pub fn area_trigger(&self) -> Option<&AreaTrigger> {
         match &self.body {
             MapObjectBody::AreaTrigger(area_trigger) => Some(area_trigger),
-            MapObjectBody::WorldObject(_)
-            | MapObjectBody::Creature(_)
-            | MapObjectBody::GameObject(_)
-            | MapObjectBody::Player(_) => None,
+            _ => None,
         }
     }
 
     pub fn area_trigger_mut(&mut self) -> Option<&mut AreaTrigger> {
         match &mut self.body {
             MapObjectBody::AreaTrigger(area_trigger) => Some(area_trigger),
-            MapObjectBody::WorldObject(_)
-            | MapObjectBody::Creature(_)
-            | MapObjectBody::GameObject(_)
-            | MapObjectBody::Player(_) => None,
+            _ => None,
+        }
+    }
+
+    pub fn conversation(&self) -> Option<&Conversation> {
+        match &self.body {
+            MapObjectBody::Conversation(conversation) => Some(conversation),
+            _ => None,
+        }
+    }
+
+    pub fn conversation_mut(&mut self) -> Option<&mut Conversation> {
+        match &mut self.body {
+            MapObjectBody::Conversation(conversation) => Some(conversation),
+            _ => None,
+        }
+    }
+
+    pub fn corpse(&self) -> Option<&Corpse> {
+        match &self.body {
+            MapObjectBody::Corpse(corpse) => Some(corpse),
+            _ => None,
+        }
+    }
+
+    pub fn corpse_mut(&mut self) -> Option<&mut Corpse> {
+        match &mut self.body {
+            MapObjectBody::Corpse(corpse) => Some(corpse),
+            _ => None,
         }
     }
 
     pub fn creature(&self) -> Option<&Creature> {
         match &self.body {
             MapObjectBody::Creature(creature) => Some(creature.as_ref()),
-            MapObjectBody::WorldObject(_)
-            | MapObjectBody::AreaTrigger(_)
-            | MapObjectBody::GameObject(_)
-            | MapObjectBody::Player(_) => None,
+            _ => None,
         }
     }
 
     pub fn creature_mut(&mut self) -> Option<&mut Creature> {
         match &mut self.body {
             MapObjectBody::Creature(creature) => Some(creature.as_mut()),
-            MapObjectBody::WorldObject(_)
-            | MapObjectBody::AreaTrigger(_)
-            | MapObjectBody::GameObject(_)
-            | MapObjectBody::Player(_) => None,
+            _ => None,
+        }
+    }
+
+    pub fn dynamic_object(&self) -> Option<&DynamicObject> {
+        match &self.body {
+            MapObjectBody::DynamicObject(dynamic_object) => Some(dynamic_object),
+            _ => None,
+        }
+    }
+
+    pub fn dynamic_object_mut(&mut self) -> Option<&mut DynamicObject> {
+        match &mut self.body {
+            MapObjectBody::DynamicObject(dynamic_object) => Some(dynamic_object),
+            _ => None,
         }
     }
 
     pub fn game_object(&self) -> Option<&GameObject> {
         match &self.body {
             MapObjectBody::GameObject(game_object) => Some(game_object),
-            MapObjectBody::WorldObject(_)
-            | MapObjectBody::AreaTrigger(_)
-            | MapObjectBody::Creature(_)
-            | MapObjectBody::Player(_) => None,
+            _ => None,
         }
     }
 
     pub fn game_object_mut(&mut self) -> Option<&mut GameObject> {
         match &mut self.body {
             MapObjectBody::GameObject(game_object) => Some(game_object),
-            MapObjectBody::WorldObject(_)
-            | MapObjectBody::AreaTrigger(_)
-            | MapObjectBody::Creature(_)
-            | MapObjectBody::Player(_) => None,
+            _ => None,
         }
     }
 
     pub fn player(&self) -> Option<&Player> {
         match &self.body {
             MapObjectBody::Player(player) => Some(player.as_ref()),
-            MapObjectBody::WorldObject(_)
-            | MapObjectBody::AreaTrigger(_)
-            | MapObjectBody::Creature(_)
-            | MapObjectBody::GameObject(_) => None,
+            _ => None,
         }
     }
 
     pub fn player_mut(&mut self) -> Option<&mut Player> {
         match &mut self.body {
             MapObjectBody::Player(player) => Some(player.as_mut()),
-            MapObjectBody::WorldObject(_)
-            | MapObjectBody::AreaTrigger(_)
-            | MapObjectBody::Creature(_)
-            | MapObjectBody::GameObject(_) => None,
+            _ => None,
+        }
+    }
+
+    pub fn scene_object(&self) -> Option<&SceneObject> {
+        match &self.body {
+            MapObjectBody::SceneObject(scene_object) => Some(scene_object),
+            _ => None,
+        }
+    }
+
+    pub fn scene_object_mut(&mut self) -> Option<&mut SceneObject> {
+        match &mut self.body {
+            MapObjectBody::SceneObject(scene_object) => Some(scene_object),
+            _ => None,
         }
     }
 
@@ -358,9 +446,13 @@ impl MapObjectRecord {
         match self.body {
             MapObjectBody::WorldObject(object) => object,
             MapObjectBody::AreaTrigger(area_trigger) => area_trigger.world().clone(),
+            MapObjectBody::Conversation(conversation) => conversation.world().clone(),
+            MapObjectBody::Corpse(corpse) => corpse.world().clone(),
             MapObjectBody::Creature(creature) => creature.unit().world().clone(),
+            MapObjectBody::DynamicObject(dynamic_object) => dynamic_object.world().clone(),
             MapObjectBody::GameObject(game_object) => game_object.world().clone(),
             MapObjectBody::Player(player) => player.unit().world().clone(),
+            MapObjectBody::SceneObject(scene_object) => scene_object.world().clone(),
         }
     }
 }
@@ -827,6 +919,61 @@ impl ObjectAccessor {
         .game_object()
     }
 
+    pub fn get_dynamic_object_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a WorldObject>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        self.get_map_object_from_source(context, source, guid, &[AccessorObjectKind::DynamicObject])
+    }
+
+    pub fn get_typed_dynamic_object_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a DynamicObject>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        self.get_map_record_from_source(
+            context,
+            source,
+            guid,
+            &[AccessorObjectKind::DynamicObject],
+        )?
+        .dynamic_object()
+    }
+
+    pub fn get_area_trigger_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a WorldObject>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        self.get_map_object_from_source(context, source, guid, &[AccessorObjectKind::AreaTrigger])
+    }
+
+    pub fn get_typed_area_trigger_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a AreaTrigger>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        self.get_map_record_from_source(context, source, guid, &[AccessorObjectKind::AreaTrigger])?
+            .area_trigger()
+    }
+
     pub fn get_corpse_from_map_source<'a, Source>(
         &'a self,
         context: &WorldObject,
@@ -837,6 +984,69 @@ impl ObjectAccessor {
         Source: ObjectAccessorMapSource + ?Sized,
     {
         self.get_map_object_from_source(context, source, guid, &[AccessorObjectKind::Corpse])
+    }
+
+    pub fn get_typed_corpse_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a Corpse>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        self.get_map_record_from_source(context, source, guid, &[AccessorObjectKind::Corpse])?
+            .corpse()
+    }
+
+    pub fn get_scene_object_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a WorldObject>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        self.get_map_object_from_source(context, source, guid, &[AccessorObjectKind::SceneObject])
+    }
+
+    pub fn get_typed_scene_object_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a SceneObject>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        self.get_map_record_from_source(context, source, guid, &[AccessorObjectKind::SceneObject])?
+            .scene_object()
+    }
+
+    pub fn get_conversation_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a WorldObject>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        self.get_map_object_from_source(context, source, guid, &[AccessorObjectKind::Conversation])
+    }
+
+    pub fn get_typed_conversation_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a Conversation>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        self.get_map_record_from_source(context, source, guid, &[AccessorObjectKind::Conversation])?
+            .conversation()
     }
 
     pub fn get_player(&self, context: &WorldObject, guid: ObjectGuid) -> Option<&WorldObject> {
@@ -1496,6 +1706,434 @@ mod tests {
         assert!(
             accessor
                 .get_typed_game_object_from_map_source(&context, &source, creature_guid)
+                .is_none()
+        );
+    }
+
+    fn typed_dynamic_object_record(
+        map_id: u32,
+        instance_id: u32,
+        counter: i64,
+        caster: ObjectGuid,
+        spell_id: i32,
+    ) -> (ObjectGuid, MapObjectRecord) {
+        let mut dynamic_object = DynamicObject::new(false);
+        let dynamic_object_guid = guid(HighGuid::DynamicObject, counter);
+        dynamic_object
+            .world_mut()
+            .object_mut()
+            .create(dynamic_object_guid);
+        dynamic_object
+            .world_mut()
+            .set_map(map_id, instance_id)
+            .unwrap();
+        dynamic_object
+            .world_mut()
+            .relocate(Position::xyz(10.0, 20.0, 30.0));
+        dynamic_object.set_caster_guid(caster);
+        dynamic_object.set_spell_id(spell_id);
+        dynamic_object.set_radius(12.5);
+
+        (
+            dynamic_object_guid,
+            MapObjectRecord::new_dynamic_object(dynamic_object).unwrap(),
+        )
+    }
+
+    fn typed_area_trigger_record(
+        map_id: u32,
+        instance_id: u32,
+        counter: i64,
+        caster: ObjectGuid,
+        spell_id: i32,
+    ) -> (ObjectGuid, MapObjectRecord) {
+        let mut area_trigger = AreaTrigger::new();
+        let area_trigger_guid = guid(HighGuid::AreaTrigger, counter);
+        area_trigger
+            .world_mut()
+            .object_mut()
+            .create(area_trigger_guid);
+        area_trigger
+            .world_mut()
+            .set_map(map_id, instance_id)
+            .unwrap();
+        area_trigger
+            .world_mut()
+            .relocate(Position::xyz(10.0, 20.0, 30.0));
+        area_trigger.set_caster_guid(caster);
+        area_trigger.set_spell_id(spell_id);
+        area_trigger.set_duration(4_500);
+
+        (
+            area_trigger_guid,
+            MapObjectRecord::new_area_trigger(area_trigger).unwrap(),
+        )
+    }
+
+    fn typed_corpse_record(
+        map_id: u32,
+        instance_id: u32,
+        counter: i64,
+        owner: ObjectGuid,
+        ghost_time: i64,
+    ) -> (ObjectGuid, MapObjectRecord) {
+        let mut corpse = Corpse::new_at(crate::CorpseType::ResurrectablePve, ghost_time);
+        let corpse_guid = guid(HighGuid::Corpse, counter);
+        corpse.world_mut().object_mut().create(corpse_guid);
+        corpse.world_mut().set_map(map_id, instance_id).unwrap();
+        corpse.world_mut().relocate(Position::xyz(10.0, 20.0, 30.0));
+        corpse.set_owner_guid(owner);
+        corpse.set_display_id(11_111);
+
+        (corpse_guid, MapObjectRecord::new_corpse(corpse).unwrap())
+    }
+
+    fn typed_scene_object_record(
+        map_id: u32,
+        instance_id: u32,
+        counter: i64,
+        creator: ObjectGuid,
+        script_package_id: i32,
+    ) -> (ObjectGuid, MapObjectRecord) {
+        let mut scene_object = SceneObject::new();
+        let scene_object_guid = guid(HighGuid::SceneObject, counter);
+        scene_object
+            .world_mut()
+            .object_mut()
+            .create(scene_object_guid);
+        scene_object
+            .world_mut()
+            .set_map(map_id, instance_id)
+            .unwrap();
+        scene_object
+            .world_mut()
+            .relocate(Position::xyz(10.0, 20.0, 30.0));
+        scene_object.set_created_by(creator);
+        scene_object.set_script_package_id(script_package_id);
+        scene_object.set_scene_type(crate::SceneType::PetBattle);
+
+        (
+            scene_object_guid,
+            MapObjectRecord::new_scene_object(scene_object).unwrap(),
+        )
+    }
+
+    fn typed_conversation_record(
+        map_id: u32,
+        instance_id: u32,
+        counter: i64,
+        creator: ObjectGuid,
+        duration_ms: i32,
+    ) -> (ObjectGuid, MapObjectRecord) {
+        let mut conversation = Conversation::new();
+        let conversation_guid = guid(HighGuid::Conversation, counter);
+        conversation
+            .world_mut()
+            .object_mut()
+            .create(conversation_guid);
+        conversation
+            .world_mut()
+            .set_map(map_id, instance_id)
+            .unwrap();
+        conversation
+            .world_mut()
+            .relocate(Position::xyz(10.0, 20.0, 30.0));
+        conversation.set_creator_guid(creator);
+        conversation.set_duration_ms(duration_ms);
+        conversation.set_texture_kit_id(77);
+        conversation.add_line(crate::ConversationLine {
+            conversation_line_id: 9901,
+            start_time: 12,
+            ui_camera_id: 34,
+            actor_index: 1,
+            flags: 2,
+        });
+
+        (
+            conversation_guid,
+            MapObjectRecord::new_conversation(conversation).unwrap(),
+        )
+    }
+
+    #[test]
+    fn typed_map_source_lookup_preserves_non_creature_gameobject_bodies_like_cpp() {
+        let accessor = ObjectAccessor::default();
+        let context = world_object(HighGuid::Player, 530, 1, true);
+        let caster = guid(HighGuid::Creature, 4110);
+        let creator = guid(HighGuid::Player, 4111);
+        let (dynamic_guid, dynamic_record) =
+            typed_dynamic_object_record(530, 1, 4112, caster, 12345);
+        let (area_trigger_guid, area_trigger_record) =
+            typed_area_trigger_record(530, 1, 4113, caster, 12346);
+        let (corpse_guid, corpse_record) = typed_corpse_record(530, 1, 4114, creator, 98765);
+        let (scene_guid, scene_record) = typed_scene_object_record(530, 1, 4115, creator, 4567);
+        let (conversation_guid, conversation_record) =
+            typed_conversation_record(530, 1, 4116, creator, 8901);
+        let mut source = TestMapSource {
+            map_id: 530,
+            instance_id: 1,
+            records: std::collections::HashMap::new(),
+        };
+        source.records.insert(dynamic_guid, dynamic_record);
+        source
+            .records
+            .insert(area_trigger_guid, area_trigger_record);
+        source.records.insert(corpse_guid, corpse_record);
+        source.records.insert(scene_guid, scene_record);
+        source
+            .records
+            .insert(conversation_guid, conversation_record);
+
+        let dynamic_object = accessor
+            .get_typed_dynamic_object_from_map_source(&context, &source, dynamic_guid)
+            .unwrap();
+        assert_eq!(dynamic_object.caster_guid(), caster);
+        assert_eq!(dynamic_object.spell_id(), 12345);
+        assert_eq!(dynamic_object.radius(), 12.5);
+        assert_eq!(dynamic_object.world().guid(), dynamic_guid);
+
+        let area_trigger = accessor
+            .get_typed_area_trigger_from_map_source(&context, &source, area_trigger_guid)
+            .unwrap();
+        assert_eq!(area_trigger.caster_guid(), caster);
+        assert_eq!(area_trigger.spell_id(), 12346);
+        assert_eq!(area_trigger.duration_ms(), 4_500);
+        assert_eq!(area_trigger.world().guid(), area_trigger_guid);
+
+        let corpse = accessor
+            .get_typed_corpse_from_map_source(&context, &source, corpse_guid)
+            .unwrap();
+        assert_eq!(corpse.corpse_type(), crate::CorpseType::ResurrectablePve);
+        assert_eq!(corpse.ghost_time(), 98765);
+        assert_eq!(corpse.data().owner, creator);
+        assert_eq!(corpse.data().display_id, 11_111);
+        assert_eq!(corpse.world().guid(), corpse_guid);
+
+        let scene_object = accessor
+            .get_typed_scene_object_from_map_source(&context, &source, scene_guid)
+            .unwrap();
+        assert_eq!(scene_object.creator_guid(), creator);
+        assert_eq!(scene_object.data().script_package_id, 4567);
+        assert_eq!(
+            scene_object.data().scene_type,
+            crate::SceneType::PetBattle as u32
+        );
+        assert_eq!(scene_object.world().guid(), scene_guid);
+
+        let conversation = accessor
+            .get_typed_conversation_from_map_source(&context, &source, conversation_guid)
+            .unwrap();
+        assert_eq!(conversation.creator_guid(), creator);
+        assert_eq!(conversation.duration_ms(), 8901);
+        assert_eq!(conversation.texture_kit_id(), 77);
+        assert_eq!(conversation.data().lines[0].conversation_line_id, 9901);
+        assert_eq!(conversation.world().guid(), conversation_guid);
+    }
+
+    #[test]
+    fn typed_map_source_lookup_rejects_generic_non_creature_gameobject_fallbacks_like_cpp() {
+        let accessor = ObjectAccessor::default();
+        let context = world_object(HighGuid::Player, 530, 1, true);
+        let generic_dynamic = world_object(HighGuid::DynamicObject, 530, 1, true);
+        let generic_dynamic_guid = generic_dynamic.guid();
+        let generic_area_trigger = world_object(HighGuid::AreaTrigger, 530, 1, true);
+        let generic_area_trigger_guid = generic_area_trigger.guid();
+        let generic_corpse = world_object(HighGuid::Corpse, 530, 1, true);
+        let generic_corpse_guid = generic_corpse.guid();
+        let generic_scene = world_object(HighGuid::SceneObject, 530, 1, true);
+        let generic_scene_guid = generic_scene.guid();
+        let generic_conversation = world_object(HighGuid::Conversation, 530, 1, true);
+        let generic_conversation_guid = generic_conversation.guid();
+        let mut source = TestMapSource {
+            map_id: 530,
+            instance_id: 1,
+            records: std::collections::HashMap::new(),
+        };
+        source.records.insert(
+            generic_dynamic_guid,
+            MapObjectRecord::new(AccessorObjectKind::DynamicObject, generic_dynamic).unwrap(),
+        );
+        source.records.insert(
+            generic_area_trigger_guid,
+            MapObjectRecord::new(AccessorObjectKind::AreaTrigger, generic_area_trigger).unwrap(),
+        );
+        source.records.insert(
+            generic_corpse_guid,
+            MapObjectRecord::new(AccessorObjectKind::Corpse, generic_corpse).unwrap(),
+        );
+        source.records.insert(
+            generic_scene_guid,
+            MapObjectRecord::new(AccessorObjectKind::SceneObject, generic_scene).unwrap(),
+        );
+        source.records.insert(
+            generic_conversation_guid,
+            MapObjectRecord::new(AccessorObjectKind::Conversation, generic_conversation).unwrap(),
+        );
+
+        assert_eq!(
+            accessor
+                .get_dynamic_object_from_map_source(&context, &source, generic_dynamic_guid)
+                .unwrap()
+                .guid(),
+            generic_dynamic_guid
+        );
+        assert_eq!(
+            accessor
+                .get_area_trigger_from_map_source(&context, &source, generic_area_trigger_guid)
+                .unwrap()
+                .guid(),
+            generic_area_trigger_guid
+        );
+        assert_eq!(
+            accessor
+                .get_corpse_from_map_source(&context, &source, generic_corpse_guid)
+                .unwrap()
+                .guid(),
+            generic_corpse_guid
+        );
+        assert_eq!(
+            accessor
+                .get_scene_object_from_map_source(&context, &source, generic_scene_guid)
+                .unwrap()
+                .guid(),
+            generic_scene_guid
+        );
+        assert_eq!(
+            accessor
+                .get_conversation_from_map_source(&context, &source, generic_conversation_guid)
+                .unwrap()
+                .guid(),
+            generic_conversation_guid
+        );
+
+        assert!(
+            accessor
+                .get_typed_dynamic_object_from_map_source(&context, &source, generic_dynamic_guid)
+                .is_none()
+        );
+        assert!(
+            accessor
+                .get_typed_area_trigger_from_map_source(
+                    &context,
+                    &source,
+                    generic_area_trigger_guid
+                )
+                .is_none()
+        );
+        assert!(
+            accessor
+                .get_typed_corpse_from_map_source(&context, &source, generic_corpse_guid)
+                .is_none()
+        );
+        assert!(
+            accessor
+                .get_typed_scene_object_from_map_source(&context, &source, generic_scene_guid)
+                .is_none()
+        );
+        assert!(
+            accessor
+                .get_typed_conversation_from_map_source(
+                    &context,
+                    &source,
+                    generic_conversation_guid
+                )
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn typed_map_source_lookup_does_not_cross_non_creature_gameobject_kinds_like_cpp() {
+        let accessor = ObjectAccessor::default();
+        let context = world_object(HighGuid::Player, 530, 1, true);
+        let caster = guid(HighGuid::Creature, 4120);
+        let creator = guid(HighGuid::Player, 4121);
+        let (dynamic_guid, dynamic_record) = typed_dynamic_object_record(530, 1, 4122, caster, 1);
+        let (area_trigger_guid, area_trigger_record) =
+            typed_area_trigger_record(530, 1, 4123, caster, 2);
+        let (corpse_guid, corpse_record) = typed_corpse_record(530, 1, 4124, creator, 3);
+        let (scene_guid, scene_record) = typed_scene_object_record(530, 1, 4125, creator, 4);
+        let (conversation_guid, conversation_record) =
+            typed_conversation_record(530, 1, 4126, creator, 5);
+        let mut source = TestMapSource {
+            map_id: 530,
+            instance_id: 1,
+            records: std::collections::HashMap::new(),
+        };
+        source.records.insert(dynamic_guid, dynamic_record);
+        source
+            .records
+            .insert(area_trigger_guid, area_trigger_record);
+        source.records.insert(corpse_guid, corpse_record);
+        source.records.insert(scene_guid, scene_record);
+        source
+            .records
+            .insert(conversation_guid, conversation_record);
+
+        assert!(
+            accessor
+                .get_typed_dynamic_object_from_map_source(&context, &source, area_trigger_guid)
+                .is_none()
+        );
+        assert!(
+            accessor
+                .get_typed_area_trigger_from_map_source(&context, &source, dynamic_guid)
+                .is_none()
+        );
+        assert!(
+            accessor
+                .get_typed_corpse_from_map_source(&context, &source, scene_guid)
+                .is_none()
+        );
+        assert!(
+            accessor
+                .get_typed_scene_object_from_map_source(&context, &source, corpse_guid)
+                .is_none()
+        );
+        assert!(
+            accessor
+                .get_typed_conversation_from_map_source(&context, &source, dynamic_guid)
+                .is_none()
+        );
+        assert!(
+            accessor
+                .get_typed_dynamic_object_from_map_source(&context, &source, conversation_guid)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn typed_map_source_lookup_requires_source_and_context_same_map_for_non_creature_gameobject_like_cpp()
+     {
+        let accessor = ObjectAccessor::default();
+        let context = world_object(HighGuid::Player, 530, 1, true);
+        let (dynamic_guid, dynamic_record) =
+            typed_dynamic_object_record(530, 1, 4130, guid(HighGuid::Creature, 4131), 7);
+        let mut source = TestMapSource {
+            map_id: 530,
+            instance_id: 1,
+            records: std::collections::HashMap::new(),
+        };
+        source.records.insert(dynamic_guid, dynamic_record);
+
+        source.map_id = 571;
+        assert!(
+            accessor
+                .get_typed_dynamic_object_from_map_source(&context, &source, dynamic_guid)
+                .is_none()
+        );
+        source.map_id = 530;
+        source.instance_id = 2;
+        assert!(
+            accessor
+                .get_typed_dynamic_object_from_map_source(&context, &source, dynamic_guid)
+                .is_none()
+        );
+        source.instance_id = 1;
+
+        let wrong_context = world_object(HighGuid::Player, 571, 1, true);
+        assert!(
+            accessor
+                .get_typed_dynamic_object_from_map_source(&wrong_context, &source, dynamic_guid)
                 .is_none()
         );
     }
