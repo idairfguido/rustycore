@@ -414,6 +414,40 @@ pub struct DynamicObjectsUpdateSummaryLikeCpp {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AreaTriggerUpdateStatusLikeCpp {
+    Updated,
+    ExpiredRemoveQueued,
+    MissingAreaTrigger,
+    NotAreaTrigger,
+    NotInWorld,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AreaTriggerUpdateOutcomeLikeCpp {
+    pub area_trigger_guid: ObjectGuid,
+    pub elapsed_ms: u32,
+    pub status: AreaTriggerUpdateStatusLikeCpp,
+    pub duration_before_ms: Option<i32>,
+    pub duration_after_ms: Option<i32>,
+    pub time_since_created_before_ms: Option<u32>,
+    pub time_since_created_after_ms: Option<u32>,
+    pub non_static_movement_would_run: bool,
+    pub ai_update_would_run: bool,
+    pub target_list_update_would_run: bool,
+    pub remove_list: Option<AddObjectToRemoveListOutcomeLikeCpp>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct AreaTriggersUpdateSummaryLikeCpp {
+    pub visited: usize,
+    pub updated: usize,
+    pub expired_remove_queued: usize,
+    pub missing_or_stale: usize,
+    pub not_area_trigger: usize,
+    pub not_in_world: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FarsightDynamicObjectCreateStatusLikeCpp {
     Created,
     MissingCasterPlayer,
@@ -2821,6 +2855,209 @@ where
                     summary.not_dynamic_object += 1;
                 }
                 DynamicObjectUpdateStatusLikeCpp::NotInWorld => summary.not_in_world += 1,
+            }
+        }
+
+        summary
+    }
+
+    /// Map-owned seam for C++ `AreaTrigger::Update` under `ObjectUpdater`.
+    ///
+    /// C++ anchors:
+    /// - `AreaTrigger.cpp:297-364` runs `WorldObject::Update(diff)`, increments
+    ///   `_timeSinceCreated`, runs the non-static movement/orbit/shape branch
+    ///   before duration expiry, calls `Remove(); return;` on duration expiry,
+    ///   and only then runs AI update plus target-list update.
+    /// - `AreaTrigger.cpp:366-372` makes `Remove()` enqueue through
+    ///   `AddObjectToRemoveList()` only when the object is in world.
+    /// - `GridNotifiers.cpp:258-264,296-301` calls `Update(i_timeDiff)` only for
+    ///   in-world objects and explicitly instantiates `AreaTrigger`.
+    ///
+    /// Ownership: source-of-truth is canonical `Map::map_objects`. This helper
+    /// mutates only typed `MapObjectRecord::AreaTrigger` time/duration state and,
+    /// after dropping that mutable borrow, enqueues the same GUID through the
+    /// existing remove-list facade on expiry. It does not drain removal, run real
+    /// movement/shape, AI, target-list runtime, ObjectAccessor/session mirrors,
+    /// fanout, packets, dynamic tree, scripts, or create fallback records.
+    pub fn update_area_trigger_like_cpp(
+        &mut self,
+        area_trigger_guid: ObjectGuid,
+        elapsed_ms: u32,
+    ) -> AreaTriggerUpdateOutcomeLikeCpp {
+        let Some(record) = self.map_object_record(area_trigger_guid) else {
+            return AreaTriggerUpdateOutcomeLikeCpp {
+                area_trigger_guid,
+                elapsed_ms,
+                status: AreaTriggerUpdateStatusLikeCpp::MissingAreaTrigger,
+                duration_before_ms: None,
+                duration_after_ms: None,
+                time_since_created_before_ms: None,
+                time_since_created_after_ms: None,
+                non_static_movement_would_run: false,
+                ai_update_would_run: false,
+                target_list_update_would_run: false,
+                remove_list: None,
+            };
+        };
+
+        if record.kind() != AccessorObjectKind::AreaTrigger {
+            return AreaTriggerUpdateOutcomeLikeCpp {
+                area_trigger_guid,
+                elapsed_ms,
+                status: AreaTriggerUpdateStatusLikeCpp::NotAreaTrigger,
+                duration_before_ms: None,
+                duration_after_ms: None,
+                time_since_created_before_ms: None,
+                time_since_created_after_ms: None,
+                non_static_movement_would_run: false,
+                ai_update_would_run: false,
+                target_list_update_would_run: false,
+                remove_list: None,
+            };
+        }
+
+        let Some(area_trigger) = record.area_trigger() else {
+            return AreaTriggerUpdateOutcomeLikeCpp {
+                area_trigger_guid,
+                elapsed_ms,
+                status: AreaTriggerUpdateStatusLikeCpp::NotAreaTrigger,
+                duration_before_ms: None,
+                duration_after_ms: None,
+                time_since_created_before_ms: None,
+                time_since_created_after_ms: None,
+                non_static_movement_would_run: false,
+                ai_update_would_run: false,
+                target_list_update_would_run: false,
+                remove_list: None,
+            };
+        };
+
+        let duration_before_ms = area_trigger.duration_ms();
+        let time_since_created_before_ms = area_trigger.time_since_created_ms();
+        let non_static_movement_would_run = !area_trigger.is_static_spawn();
+        if !area_trigger.world().object().is_in_world() {
+            return AreaTriggerUpdateOutcomeLikeCpp {
+                area_trigger_guid,
+                elapsed_ms,
+                status: AreaTriggerUpdateStatusLikeCpp::NotInWorld,
+                duration_before_ms: Some(duration_before_ms),
+                duration_after_ms: Some(duration_before_ms),
+                time_since_created_before_ms: Some(time_since_created_before_ms),
+                time_since_created_after_ms: Some(time_since_created_before_ms),
+                non_static_movement_would_run: false,
+                ai_update_would_run: false,
+                target_list_update_would_run: false,
+                remove_list: None,
+            };
+        }
+
+        let (expired, duration_after_ms, time_since_created_after_ms) = {
+            let Some(record) = self.map_objects.get_mut(&area_trigger_guid) else {
+                return AreaTriggerUpdateOutcomeLikeCpp {
+                    area_trigger_guid,
+                    elapsed_ms,
+                    status: AreaTriggerUpdateStatusLikeCpp::MissingAreaTrigger,
+                    duration_before_ms: Some(duration_before_ms),
+                    duration_after_ms: Some(duration_before_ms),
+                    time_since_created_before_ms: Some(time_since_created_before_ms),
+                    time_since_created_after_ms: Some(time_since_created_before_ms),
+                    non_static_movement_would_run: false,
+                    ai_update_would_run: false,
+                    target_list_update_would_run: false,
+                    remove_list: None,
+                };
+            };
+            let Some(area_trigger) = record.area_trigger_mut() else {
+                return AreaTriggerUpdateOutcomeLikeCpp {
+                    area_trigger_guid,
+                    elapsed_ms,
+                    status: AreaTriggerUpdateStatusLikeCpp::NotAreaTrigger,
+                    duration_before_ms: Some(duration_before_ms),
+                    duration_after_ms: Some(duration_before_ms),
+                    time_since_created_before_ms: Some(time_since_created_before_ms),
+                    time_since_created_after_ms: Some(time_since_created_before_ms),
+                    non_static_movement_would_run: false,
+                    ai_update_would_run: false,
+                    target_list_update_would_run: false,
+                    remove_list: None,
+                };
+            };
+            let expired = area_trigger.update_time_and_duration(elapsed_ms);
+            (
+                expired,
+                area_trigger.duration_ms(),
+                area_trigger.time_since_created_ms(),
+            )
+        };
+
+        if expired {
+            let remove_list = self.add_object_to_remove_list_like_cpp(area_trigger_guid);
+            AreaTriggerUpdateOutcomeLikeCpp {
+                area_trigger_guid,
+                elapsed_ms,
+                status: AreaTriggerUpdateStatusLikeCpp::ExpiredRemoveQueued,
+                duration_before_ms: Some(duration_before_ms),
+                duration_after_ms: Some(duration_after_ms),
+                time_since_created_before_ms: Some(time_since_created_before_ms),
+                time_since_created_after_ms: Some(time_since_created_after_ms),
+                non_static_movement_would_run,
+                ai_update_would_run: false,
+                target_list_update_would_run: false,
+                remove_list: Some(remove_list),
+            }
+        } else {
+            AreaTriggerUpdateOutcomeLikeCpp {
+                area_trigger_guid,
+                elapsed_ms,
+                status: AreaTriggerUpdateStatusLikeCpp::Updated,
+                duration_before_ms: Some(duration_before_ms),
+                duration_after_ms: Some(duration_after_ms),
+                time_since_created_before_ms: Some(time_since_created_before_ms),
+                time_since_created_after_ms: Some(time_since_created_after_ms),
+                non_static_movement_would_run,
+                ai_update_would_run: true,
+                target_list_update_would_run: true,
+                remove_list: None,
+            }
+        }
+    }
+
+    /// Bounded map-owned live visitation seam for C++ `Map::Update` consuming
+    /// `Trinity::ObjectUpdater` for `AreaTrigger` records only.
+    ///
+    /// This follows the same partial ObjectUpdater seam as DynamicObject: it
+    /// snapshots canonical typed AreaTrigger GUIDs from `Map::map_objects`, then
+    /// delegates every GUID to `update_area_trigger_like_cpp`. It does not visit
+    /// nearby cells, players/sessions, other object families, SendObjectUpdates,
+    /// scripts/AI real runtime, visibility, dynamic tree, packets, DB, or mirrors.
+    pub fn update_area_triggers_like_cpp(
+        &mut self,
+        elapsed_ms: u32,
+    ) -> AreaTriggersUpdateSummaryLikeCpp {
+        let area_trigger_guids = self
+            .map_objects
+            .iter()
+            .filter_map(|(guid, record)| {
+                (record.kind() == AccessorObjectKind::AreaTrigger
+                    && record.area_trigger().is_some())
+                .then_some(*guid)
+            })
+            .collect::<Vec<_>>();
+
+        let mut summary = AreaTriggersUpdateSummaryLikeCpp::default();
+        for guid in area_trigger_guids {
+            summary.visited += 1;
+            let outcome = self.update_area_trigger_like_cpp(guid, elapsed_ms);
+            match outcome.status {
+                AreaTriggerUpdateStatusLikeCpp::Updated => summary.updated += 1,
+                AreaTriggerUpdateStatusLikeCpp::ExpiredRemoveQueued => {
+                    summary.expired_remove_queued += 1;
+                }
+                AreaTriggerUpdateStatusLikeCpp::MissingAreaTrigger => {
+                    summary.missing_or_stale += 1;
+                }
+                AreaTriggerUpdateStatusLikeCpp::NotAreaTrigger => summary.not_area_trigger += 1,
+                AreaTriggerUpdateStatusLikeCpp::NotInWorld => summary.not_in_world += 1,
             }
         }
 
@@ -11737,6 +11974,162 @@ mod tests {
             ObjectGuid::EMPTY
         );
         assert!(!removed.object.unwrap().object().is_in_world());
+    }
+
+    fn test_area_trigger_for_update(counter: i64, duration_ms: i32, in_world: bool) -> AreaTrigger {
+        let mut area_trigger = AreaTrigger::new();
+        area_trigger
+            .world_mut()
+            .object_mut()
+            .create(guid(HighGuid::AreaTrigger, counter));
+        area_trigger.world_mut().object_mut().set_entry(42);
+        area_trigger.world_mut().set_map(571, 7).unwrap();
+        area_trigger
+            .world_mut()
+            .relocate(Position::xyz(1.0, 2.0, 3.0));
+        if in_world {
+            area_trigger.world_mut().object_mut().add_to_world();
+        }
+        area_trigger.set_duration(duration_ms);
+        area_trigger
+    }
+
+    #[test]
+    fn area_trigger_update_decrements_duration_without_queue_like_cpp() {
+        let mut map = test_map();
+        let area_trigger = test_area_trigger_for_update(4340101, 1_000, true);
+        let area_trigger_guid = area_trigger.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_area_trigger(area_trigger).unwrap())
+            .unwrap();
+
+        let outcome = map.update_area_trigger_like_cpp(area_trigger_guid, 250);
+
+        assert_eq!(outcome.status, AreaTriggerUpdateStatusLikeCpp::Updated);
+        assert_eq!(outcome.duration_before_ms, Some(1_000));
+        assert_eq!(outcome.duration_after_ms, Some(750));
+        assert_eq!(outcome.time_since_created_before_ms, Some(0));
+        assert_eq!(outcome.time_since_created_after_ms, Some(250));
+        assert!(outcome.non_static_movement_would_run);
+        assert!(outcome.ai_update_would_run);
+        assert!(outcome.target_list_update_would_run);
+        assert!(outcome.remove_list.is_none());
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+        let area_trigger = map
+            .map_object_record(area_trigger_guid)
+            .unwrap()
+            .area_trigger()
+            .unwrap();
+        assert_eq!(area_trigger.duration_ms(), 750);
+        assert_eq!(area_trigger.time_since_created_ms(), 250);
+        assert!(!area_trigger.is_removed());
+    }
+
+    #[test]
+    fn area_trigger_update_expiry_queues_remove_list_and_preserves_record_like_cpp() {
+        let mut map = test_map();
+        let area_trigger = test_area_trigger_for_update(4340201, 250, true);
+        let area_trigger_guid = area_trigger.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_area_trigger(area_trigger).unwrap())
+            .unwrap();
+
+        let outcome = map.update_area_trigger_like_cpp(area_trigger_guid, 250);
+
+        assert_eq!(
+            outcome.status,
+            AreaTriggerUpdateStatusLikeCpp::ExpiredRemoveQueued
+        );
+        assert_eq!(outcome.duration_before_ms, Some(250));
+        assert_eq!(outcome.duration_after_ms, Some(250));
+        assert_eq!(outcome.time_since_created_before_ms, Some(0));
+        assert_eq!(outcome.time_since_created_after_ms, Some(250));
+        assert!(outcome.non_static_movement_would_run);
+        assert!(!outcome.ai_update_would_run);
+        assert!(!outcome.target_list_update_would_run);
+        assert_eq!(outcome.remove_list.unwrap().queued, true);
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 1);
+        let area_trigger = map
+            .map_object_record(area_trigger_guid)
+            .unwrap()
+            .area_trigger()
+            .unwrap();
+        assert!(area_trigger.is_removed());
+    }
+
+    #[test]
+    fn area_trigger_update_permanent_duration_increments_time_without_queue_like_cpp() {
+        let mut map = test_map();
+        let mut area_trigger = test_area_trigger_for_update(4340301, -1, true);
+        area_trigger.set_spawn_id(4340301);
+        let area_trigger_guid = area_trigger.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_area_trigger(area_trigger).unwrap())
+            .unwrap();
+
+        let outcome = map.update_area_trigger_like_cpp(area_trigger_guid, 1_000);
+
+        assert_eq!(outcome.status, AreaTriggerUpdateStatusLikeCpp::Updated);
+        assert_eq!(outcome.duration_before_ms, Some(-1));
+        assert_eq!(outcome.duration_after_ms, Some(-1));
+        assert_eq!(outcome.time_since_created_after_ms, Some(1_000));
+        assert!(!outcome.non_static_movement_would_run);
+        assert!(outcome.ai_update_would_run);
+        assert!(outcome.target_list_update_would_run);
+        assert!(outcome.remove_list.is_none());
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+    }
+
+    #[test]
+    fn area_trigger_update_not_in_world_returns_no_mutation_or_queue_like_cpp() {
+        let mut map = test_map();
+        let area_trigger = test_area_trigger_for_update(4340401, 500, false);
+        let area_trigger_guid = area_trigger.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_area_trigger(area_trigger).unwrap())
+            .unwrap();
+
+        let outcome = map.update_area_trigger_like_cpp(area_trigger_guid, 250);
+
+        assert_eq!(outcome.status, AreaTriggerUpdateStatusLikeCpp::NotInWorld);
+        assert_eq!(outcome.duration_before_ms, Some(500));
+        assert_eq!(outcome.duration_after_ms, Some(500));
+        assert_eq!(outcome.time_since_created_before_ms, Some(0));
+        assert_eq!(outcome.time_since_created_after_ms, Some(0));
+        assert!(!outcome.non_static_movement_would_run);
+        assert!(!outcome.ai_update_would_run);
+        assert!(!outcome.target_list_update_would_run);
+        assert!(outcome.remove_list.is_none());
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+        let area_trigger = map
+            .map_object_record(area_trigger_guid)
+            .unwrap()
+            .area_trigger()
+            .unwrap();
+        assert_eq!(area_trigger.duration_ms(), 500);
+        assert_eq!(area_trigger.time_since_created_ms(), 0);
+        assert!(!area_trigger.is_removed());
+    }
+
+    #[test]
+    fn area_trigger_update_missing_or_non_area_creates_no_dummy_or_queue_like_cpp() {
+        let mut map = test_map();
+        let missing_guid = guid(HighGuid::AreaTrigger, 4340501);
+        let creature_guid = guid(HighGuid::Creature, 4340502);
+        let creature = test_creature_for_spawn(43405, 4340502, true);
+        map.insert_map_object_record(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+
+        let missing = map.update_area_trigger_like_cpp(missing_guid, 250);
+        let non_area = map.update_area_trigger_like_cpp(creature_guid, 250);
+
+        assert_eq!(
+            missing.status,
+            AreaTriggerUpdateStatusLikeCpp::MissingAreaTrigger
+        );
+        assert_eq!(
+            non_area.status,
+            AreaTriggerUpdateStatusLikeCpp::NotAreaTrigger
+        );
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+        assert!(map.map_object_record(missing_guid).is_none());
+        assert!(map.map_object_record(creature_guid).is_some());
     }
 
     #[test]

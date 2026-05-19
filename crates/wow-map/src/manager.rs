@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use crate::MapKey;
 use crate::map::{
-    DynamicObjectsUpdateSummaryLikeCpp, Map, NoopGridLifecycle, NoopTerrainGridLoader,
+    AreaTriggersUpdateSummaryLikeCpp, DynamicObjectsUpdateSummaryLikeCpp, Map, NoopGridLifecycle,
+    NoopTerrainGridLoader,
 };
 use crate::spawn::Difficulty;
 
@@ -142,6 +143,7 @@ pub struct ManagedMap {
     update_calls: Vec<u32>,
     delayed_update_calls: Vec<u32>,
     last_dynamic_objects_update_summary: DynamicObjectsUpdateSummaryLikeCpp,
+    last_area_triggers_update_summary: AreaTriggersUpdateSummaryLikeCpp,
     unload_all_calls: u32,
 }
 
@@ -162,6 +164,7 @@ impl ManagedMap {
             update_calls: Vec::new(),
             delayed_update_calls: Vec::new(),
             last_dynamic_objects_update_summary: DynamicObjectsUpdateSummaryLikeCpp::default(),
+            last_area_triggers_update_summary: AreaTriggersUpdateSummaryLikeCpp::default(),
             unload_all_calls: 0,
         }
     }
@@ -218,6 +221,10 @@ impl ManagedMap {
         self.last_dynamic_objects_update_summary
     }
 
+    pub const fn last_area_triggers_update_summary(&self) -> AreaTriggersUpdateSummaryLikeCpp {
+        self.last_area_triggers_update_summary
+    }
+
     pub const fn unload_all_calls(&self) -> u32 {
         self.unload_all_calls
     }
@@ -238,6 +245,11 @@ impl ManagedMap {
         self.update_calls.push(diff_ms);
         self.last_dynamic_objects_update_summary =
             self.map.update_dynamic_objects_like_cpp(diff_ms);
+        // Partial C++ ObjectUpdater seam: after DynamicObject, visit only the
+        // represented map-owned AreaTrigger family in this slice. Other families,
+        // nearby-cell traversal, player/session updates, fanout and scripts stay
+        // explicit remaining gaps.
+        self.last_area_triggers_update_summary = self.map.update_area_triggers_like_cpp(diff_ms);
     }
 
     fn delayed_update(&mut self, diff_ms: u32) {
@@ -951,7 +963,7 @@ mod tests {
 
     use crate::spawn::{SpawnGroupFlags, SpawnGroupTemplateData};
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
-    use wow_entities::{Creature, DynamicObject, GameObject, MapObjectRecord};
+    use wow_entities::{AreaTrigger, Creature, DynamicObject, GameObject, MapObjectRecord};
 
     #[test]
     fn delays_are_clamped_like_map_manager_h() {
@@ -1315,6 +1327,144 @@ mod tests {
     }
 
     #[test]
+    fn map_manager_update_visits_live_area_trigger_without_expiry_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let area_trigger_guid = insert_area_trigger_for_update(&mut manager, 4340101, 10, true);
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        assert_eq!(managed_map.update_calls(), &[1]);
+        assert_eq!(managed_map.delayed_update_calls(), &[1]);
+        assert_eq!(managed_map.map().objects_to_remove_count_like_cpp(), 0);
+        assert_eq!(
+            managed_map.last_area_triggers_update_summary(),
+            AreaTriggersUpdateSummaryLikeCpp {
+                visited: 1,
+                updated: 1,
+                expired_remove_queued: 0,
+                missing_or_stale: 0,
+                not_area_trigger: 0,
+                not_in_world: 0,
+            }
+        );
+        let area_trigger = managed_map
+            .map()
+            .map_object_record(area_trigger_guid)
+            .unwrap()
+            .area_trigger()
+            .unwrap();
+        assert_eq!(area_trigger.duration_ms(), 9);
+        assert_eq!(area_trigger.time_since_created_ms(), 1);
+    }
+
+    #[test]
+    fn map_manager_update_expires_area_trigger_then_delayed_update_drains_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let area_trigger_guid = insert_area_trigger_for_update(&mut manager, 4340201, 1, true);
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        assert_eq!(managed_map.update_calls(), &[1]);
+        assert_eq!(managed_map.delayed_update_calls(), &[1]);
+        assert_eq!(managed_map.map().objects_to_remove_count_like_cpp(), 0);
+        assert_eq!(
+            managed_map.last_area_triggers_update_summary(),
+            AreaTriggersUpdateSummaryLikeCpp {
+                visited: 1,
+                updated: 0,
+                expired_remove_queued: 1,
+                missing_or_stale: 0,
+                not_area_trigger: 0,
+                not_in_world: 0,
+            }
+        );
+        assert!(
+            managed_map
+                .map()
+                .map_object_record(area_trigger_guid)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn map_manager_update_skips_not_in_world_area_trigger_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let area_trigger_guid = insert_area_trigger_for_update(&mut manager, 4340301, 10, false);
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        assert_eq!(managed_map.update_calls(), &[1]);
+        assert_eq!(managed_map.delayed_update_calls(), &[1]);
+        assert_eq!(managed_map.map().objects_to_remove_count_like_cpp(), 0);
+        assert_eq!(
+            managed_map.last_area_triggers_update_summary(),
+            AreaTriggersUpdateSummaryLikeCpp {
+                visited: 1,
+                updated: 0,
+                expired_remove_queued: 0,
+                missing_or_stale: 0,
+                not_area_trigger: 0,
+                not_in_world: 1,
+            }
+        );
+        let area_trigger = managed_map
+            .map()
+            .map_object_record(area_trigger_guid)
+            .unwrap()
+            .area_trigger()
+            .unwrap();
+        assert_eq!(area_trigger.duration_ms(), 10);
+        assert_eq!(area_trigger.time_since_created_ms(), 0);
+    }
+
+    #[test]
+    fn map_manager_update_area_trigger_slice_ignores_other_families_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let area_trigger_guid = insert_area_trigger_for_update(&mut manager, 4340401, 10, true);
+        let dynamic_object_guid = insert_dynamic_object_for_update(&mut manager, 4340402, 10, true);
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        assert_eq!(
+            managed_map.last_area_triggers_update_summary(),
+            AreaTriggersUpdateSummaryLikeCpp {
+                visited: 1,
+                updated: 1,
+                expired_remove_queued: 0,
+                missing_or_stale: 0,
+                not_area_trigger: 0,
+                not_in_world: 0,
+            }
+        );
+        assert_eq!(
+            managed_map
+                .map()
+                .map_object_record(area_trigger_guid)
+                .unwrap()
+                .area_trigger()
+                .unwrap()
+                .duration_ms(),
+            9
+        );
+        assert_eq!(
+            managed_map
+                .map()
+                .get_typed_dynamic_object(dynamic_object_guid)
+                .unwrap()
+                .duration_ms(),
+            9
+        );
+    }
+
+    #[test]
     fn update_destroys_unloadable_maps_before_delayed_update() {
         let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
         manager.create_map_entry(
@@ -1443,6 +1593,36 @@ mod tests {
             map.insert_map_object_record(record).unwrap();
         }
         dynamic_object_guid
+    }
+
+    fn insert_area_trigger_for_update(
+        manager: &mut MapManager,
+        counter: i64,
+        duration_ms: i32,
+        in_world: bool,
+    ) -> ObjectGuid {
+        let area_trigger_guid = guid(HighGuid::AreaTrigger, counter, 1, 0);
+        let mut area_trigger = AreaTrigger::new();
+        area_trigger
+            .world_mut()
+            .object_mut()
+            .create(area_trigger_guid);
+        area_trigger.world_mut().set_map(1, 0).unwrap();
+        area_trigger
+            .world_mut()
+            .relocate(Position::xyz(12.0, 22.0, 32.0));
+        if in_world {
+            area_trigger.world_mut().object_mut().add_to_world();
+        }
+        area_trigger.set_duration(duration_ms);
+        let record = MapObjectRecord::new_area_trigger(area_trigger).unwrap();
+        let map = manager.find_map_mut(1, 0).unwrap().map_mut();
+        if in_world {
+            map.add_map_object_record_to_map_like_cpp(record).unwrap();
+        } else {
+            map.insert_map_object_record(record).unwrap();
+        }
+        area_trigger_guid
     }
 
     fn world_entry(map_id: u32) -> CreateMapEntryContext {
