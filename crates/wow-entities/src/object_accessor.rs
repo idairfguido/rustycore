@@ -743,6 +743,19 @@ impl ObjectAccessor {
         self.get_map_object_from_source(context, source, guid, &[AccessorObjectKind::Creature])
     }
 
+    pub fn get_typed_creature_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a Creature>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        self.get_map_record_from_source(context, source, guid, &[AccessorObjectKind::Creature])?
+            .creature()
+    }
+
     pub fn get_pet_from_map_source<'a, Source>(
         &'a self,
         context: &WorldObject,
@@ -791,6 +804,27 @@ impl ObjectAccessor {
                 AccessorObjectKind::Transport,
             ],
         )
+    }
+
+    pub fn get_typed_game_object_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a GameObject>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        self.get_map_record_from_source(
+            context,
+            source,
+            guid,
+            &[
+                AccessorObjectKind::GameObject,
+                AccessorObjectKind::Transport,
+            ],
+        )?
+        .game_object()
     }
 
     pub fn get_corpse_from_map_source<'a, Source>(
@@ -913,6 +947,22 @@ impl ObjectAccessor {
     where
         Source: ObjectAccessorMapSource + ?Sized,
     {
+        Some(
+            self.get_map_record_from_source(context, source, guid, allowed)?
+                .object(),
+        )
+    }
+
+    fn get_map_record_from_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+        allowed: &[AccessorObjectKind],
+    ) -> Option<&'a MapObjectRecord>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
         if !context.has_current_map()
             || context.map_id() != source.map_id()
             || context.instance_id() != source.instance_id()
@@ -925,7 +975,7 @@ impl ObjectAccessor {
             return None;
         }
 
-        Some(record.object())
+        Some(record)
     }
 
     fn get_item_ref_for_player_context(
@@ -1252,6 +1302,202 @@ mod tests {
         fn map_object_record(&self, guid: ObjectGuid) -> Option<&MapObjectRecord> {
             self.records.get(&guid)
         }
+    }
+
+    fn typed_creature_record(
+        map_id: u32,
+        instance_id: u32,
+        counter: i64,
+        level: u8,
+    ) -> (ObjectGuid, MapObjectRecord) {
+        let mut creature = Creature::new(false);
+        let creature_guid = guid(HighGuid::Creature, counter);
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(creature_guid);
+        creature
+            .unit_mut()
+            .world_mut()
+            .set_map(map_id, instance_id)
+            .unwrap();
+        creature
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::xyz(10.0, 20.0, 30.0));
+        creature.unit_mut().set_level(level);
+
+        (
+            creature_guid,
+            MapObjectRecord::new_creature(creature).unwrap(),
+        )
+    }
+
+    fn typed_game_object_record(
+        map_id: u32,
+        instance_id: u32,
+        counter: i64,
+        linked_trap: ObjectGuid,
+    ) -> (ObjectGuid, MapObjectRecord) {
+        let mut game_object = GameObject::new();
+        let game_object_guid = guid(HighGuid::GameObject, counter);
+        game_object
+            .world_mut()
+            .object_mut()
+            .create(game_object_guid);
+        game_object
+            .world_mut()
+            .set_map(map_id, instance_id)
+            .unwrap();
+        game_object
+            .world_mut()
+            .relocate(Position::xyz(10.0, 20.0, 30.0));
+        game_object.set_linked_trap_like_cpp(linked_trap);
+
+        (
+            game_object_guid,
+            MapObjectRecord::new_game_object(game_object).unwrap(),
+        )
+    }
+
+    #[test]
+    fn typed_map_source_lookup_preserves_creature_and_gameobject_bodies_like_cpp() {
+        let accessor = ObjectAccessor::default();
+        let context = world_object(HighGuid::Player, 530, 1, true);
+        let linked_trap = guid(HighGuid::GameObject, 4101);
+        let (creature_guid, creature_record) = typed_creature_record(530, 1, 4102, 61);
+        let (game_object_guid, game_object_record) =
+            typed_game_object_record(530, 1, 4103, linked_trap);
+        let mut source = TestMapSource {
+            map_id: 530,
+            instance_id: 1,
+            records: std::collections::HashMap::new(),
+        };
+        source.records.insert(creature_guid, creature_record);
+        source.records.insert(game_object_guid, game_object_record);
+
+        let creature = accessor
+            .get_typed_creature_from_map_source(&context, &source, creature_guid)
+            .unwrap();
+        assert_eq!(creature.level(), 61);
+        assert_eq!(creature.unit().world().guid(), creature_guid);
+
+        let game_object = accessor
+            .get_typed_game_object_from_map_source(&context, &source, game_object_guid)
+            .unwrap();
+        assert_eq!(game_object.linked_trap_guid_like_cpp(), linked_trap);
+        assert_eq!(game_object.world().guid(), game_object_guid);
+    }
+
+    #[test]
+    fn typed_map_source_lookup_rejects_generic_worldobject_fallback_like_cpp() {
+        let accessor = ObjectAccessor::default();
+        let context = world_object(HighGuid::Player, 530, 1, true);
+        let generic_creature = world_object(HighGuid::Creature, 530, 1, true);
+        let generic_creature_guid = generic_creature.guid();
+        let generic_game_object = world_object(HighGuid::GameObject, 530, 1, true);
+        let generic_game_object_guid = generic_game_object.guid();
+        let mut source = TestMapSource {
+            map_id: 530,
+            instance_id: 1,
+            records: std::collections::HashMap::new(),
+        };
+        source.records.insert(
+            generic_creature_guid,
+            MapObjectRecord::new(AccessorObjectKind::Creature, generic_creature).unwrap(),
+        );
+        source.records.insert(
+            generic_game_object_guid,
+            MapObjectRecord::new(AccessorObjectKind::GameObject, generic_game_object).unwrap(),
+        );
+
+        assert_eq!(
+            accessor
+                .get_creature_from_map_source(&context, &source, generic_creature_guid)
+                .unwrap()
+                .guid(),
+            generic_creature_guid
+        );
+        assert_eq!(
+            accessor
+                .get_game_object_from_map_source(&context, &source, generic_game_object_guid)
+                .unwrap()
+                .guid(),
+            generic_game_object_guid
+        );
+        assert!(
+            accessor
+                .get_typed_creature_from_map_source(&context, &source, generic_creature_guid)
+                .is_none()
+        );
+        assert!(
+            accessor
+                .get_typed_game_object_from_map_source(&context, &source, generic_game_object_guid)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn typed_map_source_lookup_requires_source_and_context_same_map_like_cpp() {
+        let accessor = ObjectAccessor::default();
+        let context = world_object(HighGuid::Player, 530, 1, true);
+        let (creature_guid, creature_record) = typed_creature_record(530, 1, 4104, 62);
+        let mut source = TestMapSource {
+            map_id: 530,
+            instance_id: 1,
+            records: std::collections::HashMap::new(),
+        };
+        source.records.insert(creature_guid, creature_record);
+
+        source.map_id = 571;
+        assert!(
+            accessor
+                .get_typed_creature_from_map_source(&context, &source, creature_guid)
+                .is_none()
+        );
+        source.map_id = 530;
+        source.instance_id = 2;
+        assert!(
+            accessor
+                .get_typed_creature_from_map_source(&context, &source, creature_guid)
+                .is_none()
+        );
+        source.instance_id = 1;
+
+        let wrong_context = world_object(HighGuid::Player, 571, 1, true);
+        assert!(
+            accessor
+                .get_typed_creature_from_map_source(&wrong_context, &source, creature_guid)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn typed_map_source_lookup_does_not_cross_creature_and_gameobject_kinds_like_cpp() {
+        let accessor = ObjectAccessor::default();
+        let context = world_object(HighGuid::Player, 530, 1, true);
+        let (creature_guid, creature_record) = typed_creature_record(530, 1, 4105, 63);
+        let (game_object_guid, game_object_record) =
+            typed_game_object_record(530, 1, 4106, guid(HighGuid::GameObject, 4107));
+        let mut source = TestMapSource {
+            map_id: 530,
+            instance_id: 1,
+            records: std::collections::HashMap::new(),
+        };
+        source.records.insert(creature_guid, creature_record);
+        source.records.insert(game_object_guid, game_object_record);
+
+        assert!(
+            accessor
+                .get_typed_creature_from_map_source(&context, &source, game_object_guid)
+                .is_none()
+        );
+        assert!(
+            accessor
+                .get_typed_game_object_from_map_source(&context, &source, creature_guid)
+                .is_none()
+        );
     }
 
     #[test]
