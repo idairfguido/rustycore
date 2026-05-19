@@ -1377,6 +1377,13 @@ impl Creature {
         self.is_temp_world_object
     }
 
+    /// C++ `Creature::m_isTempWorldObject` (`Creature.h:365`), toggled by
+    /// `Map::SwitchGridContainers<Creature>` after moving between grid/world
+    /// containers (`Map.cpp:294-305`).
+    pub fn set_temp_world_object_like_cpp(&mut self, on: bool) {
+        self.is_temp_world_object = on;
+    }
+
     pub const fn cleanup_before_delete_count(&self) -> u32 {
         self.grid_unload_cleanup_before_delete_count
     }

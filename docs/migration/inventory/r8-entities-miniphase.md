@@ -5,6 +5,12 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.420** Map-owned switch-list drain for temporary Unit world-object container toggles.
+  Status: complete after review `APROBADO`, focused validation, and local commit. Complete only for map-local queue+drain/container move.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.h:345-346`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.h:651-652`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2557-2572`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2574-2594`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:260-305`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.cpp:910-925`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.h:723-724`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Creature/Creature.h:365`.
+  Rust targets: `crates/wow-map/src/map.rs`, `crates/wow-entities/src/creature.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: `wow_map::Map` owns `objects_to_switch`; enqueue validates canonical `MapObjectRecord`, supports Creature/Pet only, cancels opposite toggles, reports duplicate same-direction conflicts, and drain runs before `objects_to_remove`, moving GUIDs between existing loaded-grid Creature buckets and updating `Creature::is_temp_world_object` only on executed switches. Stale/missing and unloaded-grid cases drain without dummy insertion or grid creation. Remaining gaps: live `WorldObject::SetWorldObject` callsites/fanout, full visibility/AddToWorld/RemoveFromWorld/scripts/AI/ObjectAccessor/dynamic-tree/DB persistence/full Unit shared vision runtime; do not claim full `#NEXT.R8.ENTITIES.021`.
+
 - [x] **#NEXT.R8.ENTITIES.419** Map deferred remove-list physical removal seam.
   Status: complete for map-owned deferred remove-list queue + physical map-local drain only.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2547-2555`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2574-2646`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.cpp:1826-1835`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2034-2055`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:933-951`.

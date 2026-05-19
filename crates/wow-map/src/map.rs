@@ -308,14 +308,45 @@ pub struct AddObjectToRemoveListOutcomeLikeCpp {
     pub cleanup_before_delete_count: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddObjectToSwitchListStatusLikeCpp {
+    Queued,
+    CancelledOppositeToggle,
+    DuplicateSameDirectionAbort,
+    MissingOrStale,
+    IgnoredNonUnit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AddObjectToSwitchListOutcomeLikeCpp {
+    pub guid: ObjectGuid,
+    pub on: bool,
+    pub status: AddObjectToSwitchListStatusLikeCpp,
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RemoveAllObjectsInRemoveListOutcomeLikeCpp {
+    pub switch_processed: usize,
+    pub switch_executed: usize,
+    pub switch_missing_or_stale: usize,
+    pub switch_unsupported_kinds: usize,
+    pub switch_permanent_world_objects: usize,
+    pub switch_invalid_or_unloaded_grid: usize,
     pub processed: usize,
     pub removed: usize,
     pub missing_or_stale: usize,
     pub remove_errors: usize,
     pub unsupported_kinds: usize,
     pub creature_second_cleanup_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SwitchGridContainersOutcomeLikeCpp {
+    executed: bool,
+    missing_or_stale: bool,
+    unsupported_kind: bool,
+    permanent_world_object: bool,
+    invalid_or_unloaded_grid: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -830,6 +861,16 @@ pub struct Map<Terrain = NoopTerrainGridLoader, Lifecycle = NoopGridLifecycle> {
     /// set into `remove_from_map_like_cpp(..., true)`. Session/ObjectAccessor/DB
     /// caches must not drain or reconstruct this queue.
     objects_to_remove: HashSet<ObjectGuid>,
+    /// Map-owned temporary Unit world-object switch queue matching C++
+    /// `Map::i_objectsToSwitch` (`Map.h:651-652`) and
+    /// `Map::AddObjectToSwitchList` (`Map.cpp:2557-2572`).
+    ///
+    /// Source of truth remains `map_objects`; callers representing
+    /// `WorldObject::SetWorldObject(on)` may enqueue `guid -> on`, and only
+    /// `remove_all_objects_in_remove_list_like_cpp` drains this map-local queue
+    /// before `objects_to_remove` (`Map.cpp:2574-2594`). Session/ObjectAccessor/DB
+    /// caches must not reconstruct or drain it.
+    objects_to_switch: HashMap<ObjectGuid, bool>,
     /// C++ `Map::_guidGenerators` (`Map.h:789-791`), lazy initialized by
     /// `Map::GetGuidSequenceGenerator` (`Map.cpp:2505-2511`). This stores only
     /// map-owned sequence counters; callers must compose full ObjectGuids with
@@ -900,6 +941,7 @@ where
             area_triggers_by_spawn_id: HashMap::new(),
             map_objects: HashMap::new(),
             objects_to_remove: HashSet::new(),
+            objects_to_switch: HashMap::new(),
             guid_generators: HashMap::new(),
             creature_level_rng_like_cpp: StdRng::from_entropy(),
         }
@@ -2007,12 +2049,71 @@ where
         }
     }
 
+    /// C++ `Map::AddObjectToSwitchList` represented over canonical map records.
+    ///
+    /// C++ anchors:
+    /// - `Map.h:345-346` declares `AddObjectToRemoveList` beside
+    ///   `AddObjectToSwitchList`; `Map.h:651-652` owns both queues.
+    /// - `Map.cpp:2557-2572` accepts only `TYPEID_UNIT`, inserts first toggle,
+    ///   cancels an opposite pending toggle, and aborts on duplicate direction.
+    /// - `Object.cpp:910-915` shows `WorldObject::SetWorldObject(on)` enqueues
+    ///   through the owning map only when the object is already in world.
+    pub fn add_object_to_switch_list_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        on: bool,
+    ) -> AddObjectToSwitchListOutcomeLikeCpp {
+        let Some(record) = self.map_object_record(guid) else {
+            return AddObjectToSwitchListOutcomeLikeCpp {
+                guid,
+                on,
+                status: AddObjectToSwitchListStatusLikeCpp::MissingOrStale,
+            };
+        };
+
+        debug_assert_eq!(record.object().map_id(), self.map_id);
+        debug_assert_eq!(record.object().instance_id(), self.instance_id);
+
+        if !switch_list_unit_kind_like_cpp(record.kind()) {
+            return AddObjectToSwitchListOutcomeLikeCpp {
+                guid,
+                on,
+                status: AddObjectToSwitchListStatusLikeCpp::IgnoredNonUnit,
+            };
+        }
+
+        match self.objects_to_switch.get(&guid).copied() {
+            None => {
+                self.objects_to_switch.insert(guid, on);
+                AddObjectToSwitchListOutcomeLikeCpp {
+                    guid,
+                    on,
+                    status: AddObjectToSwitchListStatusLikeCpp::Queued,
+                }
+            }
+            Some(existing) if existing != on => {
+                self.objects_to_switch.remove(&guid);
+                AddObjectToSwitchListOutcomeLikeCpp {
+                    guid,
+                    on,
+                    status: AddObjectToSwitchListStatusLikeCpp::CancelledOppositeToggle,
+                }
+            }
+            Some(_) => AddObjectToSwitchListOutcomeLikeCpp {
+                guid,
+                on,
+                status: AddObjectToSwitchListStatusLikeCpp::DuplicateSameDirectionAbort,
+            },
+        }
+    }
+
     /// C++ `Map::RemoveAllObjectsInRemoveList` physical map-local drain.
     ///
     /// C++ anchors:
-    /// - `Map.cpp:2574-2646` drains switch-list first (out of scope here), then
-    ///   drains `i_objectsToRemove`; supported grid object types call
-    ///   `RemoveFromMap(..., true)`, Creature runs a second
+    /// - `Map.cpp:2574-2594` drains `i_objectsToSwitch` first and calls
+    ///   `SwitchGridContainers<Creature>` for non-permanent Unit objects.
+    /// - `Map.cpp:2596-2646` then drains `i_objectsToRemove`; supported grid
+    ///   object types call `RemoveFromMap(..., true)`, Creature runs a second
     ///   `CleanupsBeforeDelete()` immediately before removal, and non-grid types
     ///   are logged/ignored.
     /// - `Map.cpp:933-951` shows `RemoveFromMap(T*, true)` does the physical map
@@ -2020,11 +2121,29 @@ where
     pub fn remove_all_objects_in_remove_list_like_cpp(
         &mut self,
     ) -> RemoveAllObjectsInRemoveListOutcomeLikeCpp {
+        let mut switches = self.objects_to_switch.drain().collect::<Vec<_>>();
+        switches.sort_by_key(|(guid, _)| guid.to_raw_bytes());
         let guids = self.objects_to_remove.drain().collect::<Vec<_>>();
         let mut outcome = RemoveAllObjectsInRemoveListOutcomeLikeCpp {
+            switch_processed: switches.len(),
             processed: guids.len(),
             ..Default::default()
         };
+
+        for (guid, on) in switches {
+            let switch = self.switch_grid_containers_like_cpp(guid, on);
+            if switch.executed {
+                outcome.switch_executed += 1;
+            } else if switch.missing_or_stale {
+                outcome.switch_missing_or_stale += 1;
+            } else if switch.unsupported_kind {
+                outcome.switch_unsupported_kinds += 1;
+            } else if switch.permanent_world_object {
+                outcome.switch_permanent_world_objects += 1;
+            } else if switch.invalid_or_unloaded_grid {
+                outcome.switch_invalid_or_unloaded_grid += 1;
+            }
+        }
 
         for guid in guids {
             let Some(kind) = self.map_object_record(guid).map(MapObjectRecord::kind) else {
@@ -2052,6 +2171,64 @@ where
         }
 
         outcome
+    }
+
+    /// C++ `Map::SwitchGridContainers<Creature>` represented for Creature/Pet.
+    ///
+    /// C++ anchors:
+    /// - `Map.cpp:260-305` computes the current cell, returns on invalid coords or
+    ///   unloaded grid, moves Unit GUID between `grid_objects.creatures` and
+    ///   `world_objects.creatures`, then writes `Creature::m_isTempWorldObject`.
+    /// - `Object.cpp:918-925` makes `WorldObject::IsWorldObject` true for a
+    ///   Creature with `m_isTempWorldObject`, while `Object.h:723-724` keeps
+    ///   permanent world-object state in base `m_isWorldObject`.
+    fn switch_grid_containers_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        on: bool,
+    ) -> SwitchGridContainersOutcomeLikeCpp {
+        let Some(record) = self.map_object_record(guid) else {
+            return SwitchGridContainersOutcomeLikeCpp::missing_or_stale();
+        };
+        let kind = record.kind();
+        if !switch_list_unit_kind_like_cpp(kind) {
+            return SwitchGridContainersOutcomeLikeCpp::unsupported_kind();
+        }
+        if record.object().is_world_object() {
+            return SwitchGridContainersOutcomeLikeCpp::permanent_world_object();
+        }
+
+        let position = record.object().position();
+        if !is_valid_map_coord_2d(position.x, position.y) {
+            return SwitchGridContainersOutcomeLikeCpp::invalid_or_unloaded_grid();
+        }
+
+        let cell = Cell::from_world(position.x, position.y);
+        let grid = GridCoord::new(cell.grid_x(), cell.grid_y());
+        if !self.is_grid_loaded(grid) {
+            return SwitchGridContainersOutcomeLikeCpp::invalid_or_unloaded_grid();
+        }
+
+        let Some(ngrid) = self.get_ngrid_mut(grid) else {
+            return SwitchGridContainersOutcomeLikeCpp::invalid_or_unloaded_grid();
+        };
+        let Some(local_cell) = ngrid.get_grid_type_mut(cell.cell_x(), cell.cell_y()) else {
+            return SwitchGridContainersOutcomeLikeCpp::invalid_or_unloaded_grid();
+        };
+
+        if on {
+            local_cell.grid_objects.creatures.remove(&guid);
+            local_cell.world_objects.creatures.insert(guid);
+        } else {
+            local_cell.world_objects.creatures.remove(&guid);
+            local_cell.grid_objects.creatures.insert(guid);
+        }
+
+        if let Some(record) = self.map_objects.get_mut(&guid) {
+            set_record_temp_world_object_like_cpp(record, on);
+        }
+
+        SwitchGridContainersOutcomeLikeCpp::executed()
     }
 
     /// C++ `Map::DespawnAll` represented over map-local by-spawn indexes.
@@ -2413,9 +2590,22 @@ where
         self.objects_to_remove.len()
     }
 
+    pub fn objects_to_switch_count_like_cpp(&self) -> usize {
+        self.objects_to_switch.len()
+    }
+
+    pub fn pending_switch_like_cpp(&self, guid: ObjectGuid) -> Option<bool> {
+        self.objects_to_switch.get(&guid).copied()
+    }
+
     #[cfg(test)]
     fn enqueue_object_to_remove_for_test(&mut self, guid: ObjectGuid) {
         self.objects_to_remove.insert(guid);
+    }
+
+    #[cfg(test)]
+    fn enqueue_object_to_switch_for_test(&mut self, guid: ObjectGuid, on: bool) {
+        self.objects_to_switch.insert(guid, on);
     }
 
     pub fn creature_spawn_id_store_count_like_cpp(&self, spawn_id: SpawnId) -> usize {
@@ -2762,6 +2952,7 @@ where
             .map(GameObject::linked_trap_guid_like_cpp)
             .filter(|linked_guid| !linked_guid.is_empty() && *linked_guid != guid);
         let kind = record.kind();
+        let was_world_object_like_cpp = map_record_is_world_object_like_cpp(&record);
         let mut object = record.into_object();
         let was_in_world = object.object().is_in_world();
         let was_active = is_active_object_like_cpp(kind, &object);
@@ -2787,7 +2978,7 @@ where
             grid,
             &cell,
             kind,
-            object.is_world_object(),
+            was_world_object_like_cpp,
             guid,
         );
         if was_active {
@@ -4508,6 +4699,91 @@ fn remove_list_grid_kind_like_cpp(kind: AccessorObjectKind) -> Option<GridObject
         AccessorObjectKind::SceneObject => Some(GridObjectKind::SceneObject),
         AccessorObjectKind::Conversation => Some(GridObjectKind::Conversation),
         AccessorObjectKind::Player => None,
+    }
+}
+
+fn switch_list_unit_kind_like_cpp(kind: AccessorObjectKind) -> bool {
+    matches!(kind, AccessorObjectKind::Creature | AccessorObjectKind::Pet)
+}
+
+fn set_record_temp_world_object_like_cpp(record: &mut MapObjectRecord, on: bool) {
+    match record.kind() {
+        AccessorObjectKind::Creature => {
+            if let Some(creature) = record.creature_mut() {
+                creature.set_temp_world_object_like_cpp(on);
+            }
+        }
+        AccessorObjectKind::Pet => {
+            if let Some(pet) = record.pet_mut() {
+                pet.creature_mut().set_temp_world_object_like_cpp(on);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn map_record_is_world_object_like_cpp(record: &MapObjectRecord) -> bool {
+    if record.object().is_world_object() {
+        return true;
+    }
+    if let Some(creature) = record.creature() {
+        return creature.is_temp_world_object();
+    }
+    if let Some(pet) = record.pet() {
+        return pet.creature().is_temp_world_object();
+    }
+    false
+}
+
+impl SwitchGridContainersOutcomeLikeCpp {
+    const fn executed() -> Self {
+        Self {
+            executed: true,
+            missing_or_stale: false,
+            unsupported_kind: false,
+            permanent_world_object: false,
+            invalid_or_unloaded_grid: false,
+        }
+    }
+
+    const fn missing_or_stale() -> Self {
+        Self {
+            executed: false,
+            missing_or_stale: true,
+            unsupported_kind: false,
+            permanent_world_object: false,
+            invalid_or_unloaded_grid: false,
+        }
+    }
+
+    const fn unsupported_kind() -> Self {
+        Self {
+            executed: false,
+            missing_or_stale: false,
+            unsupported_kind: true,
+            permanent_world_object: false,
+            invalid_or_unloaded_grid: false,
+        }
+    }
+
+    const fn permanent_world_object() -> Self {
+        Self {
+            executed: false,
+            missing_or_stale: false,
+            unsupported_kind: false,
+            permanent_world_object: true,
+            invalid_or_unloaded_grid: false,
+        }
+    }
+
+    const fn invalid_or_unloaded_grid() -> Self {
+        Self {
+            executed: false,
+            missing_or_stale: false,
+            unsupported_kind: false,
+            permanent_world_object: false,
+            invalid_or_unloaded_grid: true,
+        }
     }
 }
 
@@ -9579,6 +9855,213 @@ mod tests {
         assert_eq!(outcome.removed, 0);
         assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
         assert_eq!(map.map_object_count(), 0);
+    }
+
+    fn add_loaded_grid_creature_for_switch(
+        map: &mut Map<RecordingTerrain, RecordingLifecycle>,
+        spawn_id: SpawnId,
+        counter: i64,
+    ) -> (ObjectGuid, CellCoord, GridCoord) {
+        let cell = Cell::from_world(1.0, 2.0);
+        let grid = GridCoord::new(cell.grid_x(), cell.grid_y());
+        map.ensure_grid_loaded(&cell);
+        let mut creature = test_creature_for_spawn(spawn_id, counter, true);
+        let guid = creature.guid();
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        let outcome = map
+            .add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+        assert!(outcome.inserted_into_cell);
+        (guid, outcome.cell, grid)
+    }
+
+    fn local_cell_for_switch<'a>(
+        map: &'a Map<RecordingTerrain, RecordingLifecycle>,
+        grid: GridCoord,
+        cell: CellCoord,
+    ) -> &'a Cell {
+        map.get_ngrid(grid)
+            .unwrap()
+            .get_grid_type(
+                cell.x_coord % MAX_NUMBER_OF_CELLS,
+                cell.y_coord % MAX_NUMBER_OF_CELLS,
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn switch_list_on_moves_creature_from_grid_to_world_container_like_cpp() {
+        let mut map = test_map();
+        let spawn_id = 420010;
+        let (guid, cell, grid) = add_loaded_grid_creature_for_switch(&mut map, spawn_id, 4200101);
+        assert!(
+            local_cell_for_switch(&map, grid, cell)
+                .grid_objects
+                .creatures
+                .contains(&guid)
+        );
+
+        let queued = map.add_object_to_switch_list_like_cpp(guid, true);
+        assert_eq!(queued.status, AddObjectToSwitchListStatusLikeCpp::Queued);
+        let drain = map.remove_all_objects_in_remove_list_like_cpp();
+
+        assert_eq!(drain.switch_processed, 1);
+        assert_eq!(drain.switch_executed, 1);
+        assert!(map.map_object_record(guid).is_some());
+        assert_eq!(map.creature_spawn_id_store_count_like_cpp(spawn_id), 1);
+        let local_cell = local_cell_for_switch(&map, grid, cell);
+        assert!(!local_cell.grid_objects.creatures.contains(&guid));
+        assert!(local_cell.world_objects.creatures.contains(&guid));
+        assert!(map.get_typed_creature(guid).unwrap().is_temp_world_object());
+    }
+
+    #[test]
+    fn switch_list_off_moves_temp_creature_from_world_to_grid_container_like_cpp() {
+        let mut map = test_map();
+        let (guid, cell, grid) = add_loaded_grid_creature_for_switch(&mut map, 420020, 4200201);
+        assert_eq!(
+            map.add_object_to_switch_list_like_cpp(guid, true).status,
+            AddObjectToSwitchListStatusLikeCpp::Queued
+        );
+        assert_eq!(
+            map.remove_all_objects_in_remove_list_like_cpp()
+                .switch_executed,
+            1
+        );
+        assert!(map.get_typed_creature(guid).unwrap().is_temp_world_object());
+
+        assert_eq!(
+            map.add_object_to_switch_list_like_cpp(guid, false).status,
+            AddObjectToSwitchListStatusLikeCpp::Queued
+        );
+        let drain = map.remove_all_objects_in_remove_list_like_cpp();
+
+        assert_eq!(drain.switch_executed, 1);
+        let local_cell = local_cell_for_switch(&map, grid, cell);
+        assert!(local_cell.grid_objects.creatures.contains(&guid));
+        assert!(!local_cell.world_objects.creatures.contains(&guid));
+        assert!(!map.get_typed_creature(guid).unwrap().is_temp_world_object());
+    }
+
+    #[test]
+    fn switch_list_opposite_toggle_before_drain_cancels_like_cpp() {
+        let mut map = test_map();
+        let (guid, cell, grid) = add_loaded_grid_creature_for_switch(&mut map, 420030, 4200301);
+
+        assert_eq!(
+            map.add_object_to_switch_list_like_cpp(guid, true).status,
+            AddObjectToSwitchListStatusLikeCpp::Queued
+        );
+        assert_eq!(
+            map.add_object_to_switch_list_like_cpp(guid, false).status,
+            AddObjectToSwitchListStatusLikeCpp::CancelledOppositeToggle
+        );
+        assert_eq!(map.objects_to_switch_count_like_cpp(), 0);
+        let drain = map.remove_all_objects_in_remove_list_like_cpp();
+
+        assert_eq!(drain.switch_processed, 0);
+        let local_cell = local_cell_for_switch(&map, grid, cell);
+        assert!(local_cell.grid_objects.creatures.contains(&guid));
+        assert!(!local_cell.world_objects.creatures.contains(&guid));
+        assert!(!map.get_typed_creature(guid).unwrap().is_temp_world_object());
+    }
+
+    #[test]
+    fn switch_list_duplicate_same_direction_reports_abort_outcome_like_cpp() {
+        let mut map = test_map();
+        let (guid, _, _) = add_loaded_grid_creature_for_switch(&mut map, 420040, 4200401);
+
+        assert_eq!(
+            map.add_object_to_switch_list_like_cpp(guid, true).status,
+            AddObjectToSwitchListStatusLikeCpp::Queued
+        );
+        assert_eq!(
+            map.add_object_to_switch_list_like_cpp(guid, true).status,
+            AddObjectToSwitchListStatusLikeCpp::DuplicateSameDirectionAbort
+        );
+        assert_eq!(map.objects_to_switch_count_like_cpp(), 1);
+        assert_eq!(map.pending_switch_like_cpp(guid), Some(true));
+    }
+
+    #[test]
+    fn switch_list_non_unit_gameobject_enqueue_is_ignored_like_cpp() {
+        let mut map = test_map();
+        let gameobject = test_gameobject_for_spawn(420050, 4200501);
+        let guid = gameobject.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_game_object(gameobject).unwrap())
+            .unwrap();
+
+        let outcome = map.add_object_to_switch_list_like_cpp(guid, true);
+
+        assert_eq!(
+            outcome.status,
+            AddObjectToSwitchListStatusLikeCpp::IgnoredNonUnit
+        );
+        assert_eq!(map.objects_to_switch_count_like_cpp(), 0);
+    }
+
+    #[test]
+    fn switch_list_stale_guid_drain_does_not_create_dummy_like_cpp() {
+        let mut map = test_map();
+        let guid = guid(HighGuid::Creature, 4200601);
+        map.enqueue_object_to_switch_for_test(guid, true);
+
+        let drain = map.remove_all_objects_in_remove_list_like_cpp();
+
+        assert_eq!(drain.switch_processed, 1);
+        assert_eq!(drain.switch_missing_or_stale, 1);
+        assert_eq!(map.objects_to_switch_count_like_cpp(), 0);
+        assert_eq!(map.map_object_count(), 0);
+    }
+
+    #[test]
+    fn switch_list_unloaded_grid_does_not_create_grid_and_drains_like_cpp() {
+        let mut map = test_map();
+        let creature = test_creature_for_spawn(420070, 4200701, true);
+        let guid = creature.guid();
+        let cell = Cell::from_world(1.0, 2.0);
+        let grid = GridCoord::new(cell.grid_x(), cell.grid_y());
+        map.insert_map_object_record(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+        assert!(map.get_ngrid(grid).is_none());
+
+        assert_eq!(
+            map.add_object_to_switch_list_like_cpp(guid, true).status,
+            AddObjectToSwitchListStatusLikeCpp::Queued
+        );
+        let drain = map.remove_all_objects_in_remove_list_like_cpp();
+
+        assert_eq!(drain.switch_processed, 1);
+        assert_eq!(drain.switch_invalid_or_unloaded_grid, 1);
+        assert!(map.get_ngrid(grid).is_none());
+        assert!(!map.get_typed_creature(guid).unwrap().is_temp_world_object());
+    }
+
+    #[test]
+    fn remove_list_drain_runs_switch_list_before_physical_remove_like_cpp() {
+        let mut map = test_map();
+        let spawn_id = 420080;
+        let (guid, _, _) = add_loaded_grid_creature_for_switch(&mut map, spawn_id, 4200801);
+
+        assert_eq!(
+            map.add_object_to_switch_list_like_cpp(guid, true).status,
+            AddObjectToSwitchListStatusLikeCpp::Queued
+        );
+        assert!(map.add_object_to_remove_list_like_cpp(guid).queued);
+        let drain = map.remove_all_objects_in_remove_list_like_cpp();
+
+        assert_eq!(drain.switch_processed, 1);
+        assert_eq!(drain.switch_executed, 1);
+        assert_eq!(drain.processed, 1);
+        assert_eq!(drain.removed, 1);
+        assert_eq!(map.objects_to_switch_count_like_cpp(), 0);
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+        assert!(map.map_object_record(guid).is_none());
+        assert_eq!(map.creature_spawn_id_store_count_like_cpp(spawn_id), 0);
     }
 
     #[test]
