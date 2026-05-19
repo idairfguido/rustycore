@@ -9,7 +9,9 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::MapKey;
-use crate::map::{Map, NoopGridLifecycle, NoopTerrainGridLoader};
+use crate::map::{
+    DynamicObjectsUpdateSummaryLikeCpp, Map, NoopGridLifecycle, NoopTerrainGridLoader,
+};
 use crate::spawn::Difficulty;
 
 pub const MIN_GRID_DELAY_MS: u32 = 60_000;
@@ -139,6 +141,7 @@ pub struct ManagedMap {
     instance_lock_token: Option<u64>,
     update_calls: Vec<u32>,
     delayed_update_calls: Vec<u32>,
+    last_dynamic_objects_update_summary: DynamicObjectsUpdateSummaryLikeCpp,
     unload_all_calls: u32,
 }
 
@@ -158,6 +161,7 @@ impl ManagedMap {
             instance_lock_token: None,
             update_calls: Vec::new(),
             delayed_update_calls: Vec::new(),
+            last_dynamic_objects_update_summary: DynamicObjectsUpdateSummaryLikeCpp::default(),
             unload_all_calls: 0,
         }
     }
@@ -210,6 +214,10 @@ impl ManagedMap {
         &self.delayed_update_calls
     }
 
+    pub const fn last_dynamic_objects_update_summary(&self) -> DynamicObjectsUpdateSummaryLikeCpp {
+        self.last_dynamic_objects_update_summary
+    }
+
     pub const fn unload_all_calls(&self) -> u32 {
         self.unload_all_calls
     }
@@ -228,6 +236,8 @@ impl ManagedMap {
 
     fn update(&mut self, diff_ms: u32) {
         self.update_calls.push(diff_ms);
+        self.last_dynamic_objects_update_summary =
+            self.map.update_dynamic_objects_like_cpp(diff_ms);
     }
 
     fn delayed_update(&mut self, diff_ms: u32) {
@@ -941,7 +951,7 @@ mod tests {
 
     use crate::spawn::{SpawnGroupFlags, SpawnGroupTemplateData};
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
-    use wow_entities::{DynamicObject, MapObjectRecord};
+    use wow_entities::{Creature, DynamicObject, GameObject, MapObjectRecord};
 
     #[test]
     fn delays_are_clamped_like_map_manager_h() {
@@ -1136,6 +1146,175 @@ mod tests {
     }
 
     #[test]
+    fn map_manager_update_visits_live_dynamic_object_without_expiry_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let dynamic_object_guid = insert_dynamic_object_for_update(&mut manager, 4330101, 10, true);
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        assert_eq!(managed_map.update_calls(), &[1]);
+        assert_eq!(managed_map.delayed_update_calls(), &[1]);
+        assert_eq!(managed_map.map().objects_to_remove_count_like_cpp(), 0);
+        assert_eq!(
+            managed_map.last_dynamic_objects_update_summary(),
+            DynamicObjectsUpdateSummaryLikeCpp {
+                visited: 1,
+                updated: 1,
+                expired_remove_queued: 0,
+                missing_or_stale: 0,
+                not_dynamic_object: 0,
+                not_in_world: 0,
+            }
+        );
+        let dynamic_object = managed_map
+            .map()
+            .get_typed_dynamic_object(dynamic_object_guid)
+            .unwrap();
+        assert_eq!(dynamic_object.duration_ms(), 9);
+    }
+
+    #[test]
+    fn map_manager_update_expires_dynamic_object_then_delayed_update_drains_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let dynamic_object_guid = insert_dynamic_object_for_update(&mut manager, 4330201, 1, true);
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        assert_eq!(managed_map.update_calls(), &[1]);
+        assert_eq!(managed_map.delayed_update_calls(), &[1]);
+        assert_eq!(managed_map.map().objects_to_remove_count_like_cpp(), 0);
+        assert_eq!(
+            managed_map.last_dynamic_objects_update_summary(),
+            DynamicObjectsUpdateSummaryLikeCpp {
+                visited: 1,
+                updated: 0,
+                expired_remove_queued: 1,
+                missing_or_stale: 0,
+                not_dynamic_object: 0,
+                not_in_world: 0,
+            }
+        );
+        assert!(
+            managed_map
+                .map()
+                .map_object_record(dynamic_object_guid)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn map_manager_update_skips_not_in_world_dynamic_object_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let dynamic_object_guid =
+            insert_dynamic_object_for_update(&mut manager, 4330301, 10, false);
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        assert_eq!(managed_map.update_calls(), &[1]);
+        assert_eq!(managed_map.delayed_update_calls(), &[1]);
+        assert_eq!(managed_map.map().objects_to_remove_count_like_cpp(), 0);
+        assert_eq!(
+            managed_map.last_dynamic_objects_update_summary(),
+            DynamicObjectsUpdateSummaryLikeCpp {
+                visited: 1,
+                updated: 0,
+                expired_remove_queued: 0,
+                missing_or_stale: 0,
+                not_dynamic_object: 0,
+                not_in_world: 1,
+            }
+        );
+        let dynamic_object = managed_map
+            .map()
+            .get_typed_dynamic_object(dynamic_object_guid)
+            .unwrap();
+        assert_eq!(dynamic_object.duration_ms(), 10);
+    }
+
+    #[test]
+    fn map_manager_update_dynamic_object_slice_ignores_creature_and_gameobject_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let dynamic_object_guid = insert_dynamic_object_for_update(&mut manager, 4330401, 10, true);
+        let creature_guid = guid(HighGuid::Creature, 4330402, 1, 0);
+        let game_object_guid = guid(HighGuid::GameObject, 4330403, 1, 0);
+        {
+            let managed_map = manager.find_map_mut(1, 0).unwrap();
+            let mut creature = Creature::new(false);
+            creature
+                .unit_mut()
+                .world_mut()
+                .object_mut()
+                .create(creature_guid);
+            creature.unit_mut().world_mut().set_map(1, 0).unwrap();
+            creature
+                .unit_mut()
+                .world_mut()
+                .relocate(Position::xyz(12.0, 22.0, 32.0));
+            creature.unit_mut().world_mut().object_mut().add_to_world();
+            managed_map
+                .map_mut()
+                .add_map_object_record_to_map_like_cpp(
+                    MapObjectRecord::new_creature(creature).unwrap(),
+                )
+                .unwrap();
+
+            let mut game_object = GameObject::new();
+            game_object
+                .world_mut()
+                .object_mut()
+                .create(game_object_guid);
+            game_object.world_mut().set_map(1, 0).unwrap();
+            game_object
+                .world_mut()
+                .relocate(Position::xyz(13.0, 23.0, 33.0));
+            game_object.world_mut().object_mut().add_to_world();
+            managed_map
+                .map_mut()
+                .add_map_object_record_to_map_like_cpp(
+                    MapObjectRecord::new_game_object(game_object).unwrap(),
+                )
+                .unwrap();
+        }
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        assert_eq!(
+            managed_map.last_dynamic_objects_update_summary(),
+            DynamicObjectsUpdateSummaryLikeCpp {
+                visited: 1,
+                updated: 1,
+                expired_remove_queued: 0,
+                missing_or_stale: 0,
+                not_dynamic_object: 0,
+                not_in_world: 0,
+            }
+        );
+        assert!(managed_map.map().map_object_record(creature_guid).is_some());
+        assert!(
+            managed_map
+                .map()
+                .map_object_record(game_object_guid)
+                .is_some()
+        );
+        assert_eq!(
+            managed_map
+                .map()
+                .get_typed_dynamic_object(dynamic_object_guid)
+                .unwrap()
+                .duration_ms(),
+            9
+        );
+    }
+
+    #[test]
     fn update_destroys_unloadable_maps_before_delayed_update() {
         let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
         manager.create_map_entry(
@@ -1234,6 +1413,36 @@ mod tests {
         } else {
             ObjectGuid::create_world_object(high, 0, 1, map_id as u16, instance_id, 100, counter)
         }
+    }
+
+    fn insert_dynamic_object_for_update(
+        manager: &mut MapManager,
+        counter: i64,
+        duration_ms: i32,
+        in_world: bool,
+    ) -> ObjectGuid {
+        let dynamic_object_guid = guid(HighGuid::DynamicObject, counter, 1, 0);
+        let mut dynamic_object = DynamicObject::new(true);
+        dynamic_object
+            .world_mut()
+            .object_mut()
+            .create(dynamic_object_guid);
+        dynamic_object.world_mut().set_map(1, 0).unwrap();
+        dynamic_object
+            .world_mut()
+            .relocate(Position::xyz(11.0, 21.0, 31.0));
+        if in_world {
+            dynamic_object.world_mut().object_mut().add_to_world();
+        }
+        dynamic_object.set_duration(duration_ms);
+        let record = MapObjectRecord::new_dynamic_object(dynamic_object).unwrap();
+        let map = manager.find_map_mut(1, 0).unwrap().map_mut();
+        if in_world {
+            map.add_map_object_record_to_map_like_cpp(record).unwrap();
+        } else {
+            map.insert_map_object_record(record).unwrap();
+        }
+        dynamic_object_guid
     }
 
     fn world_entry(map_id: u32) -> CreateMapEntryContext {

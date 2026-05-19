@@ -403,6 +403,16 @@ pub struct DynamicObjectUpdateOutcomeLikeCpp {
     pub remove_list: Option<AddObjectToRemoveListOutcomeLikeCpp>,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct DynamicObjectsUpdateSummaryLikeCpp {
+    pub visited: usize,
+    pub updated: usize,
+    pub expired_remove_queued: usize,
+    pub missing_or_stale: usize,
+    pub not_dynamic_object: usize,
+    pub not_in_world: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FarsightDynamicObjectCreateStatusLikeCpp {
     Created,
@@ -2759,6 +2769,62 @@ where
                 remove_list: None,
             }
         }
+    }
+
+    /// Bounded map-owned live visitation seam for C++ `Map::Update` consuming
+    /// `Trinity::ObjectUpdater` for `DynamicObject` records only.
+    ///
+    /// C++ anchors:
+    /// - `Map.cpp:666-785` creates `Trinity::ObjectUpdater updater(t_diff)`
+    ///   during `Map::Update` and visits object containers before
+    ///   `SendObjectUpdates()` / scripts.
+    /// - `GridNotifiers.cpp:258-264,296-301` visits each object and calls
+    ///   `Update(i_timeDiff)` only when `IsInWorld()`, including the explicit
+    ///   `DynamicObject` instantiation.
+    /// - `DynamicObject.cpp:136-171` is represented by
+    ///   `update_dynamic_object_like_cpp`, including duration/aura-bound evidence
+    ///   and expiry enqueue through `AddObjectToRemoveList()`.
+    ///
+    /// Ownership: source-of-truth is canonical `Map::map_objects`. This method
+    /// snapshots typed DynamicObject GUIDs only, then delegates each GUID to the
+    /// existing per-object helper. It does not drain the remove-list, visit nearby
+    /// cells, update players/sessions or other object families, send object
+    /// updates, run scripts/AI, touch dynamic tree/collision, fan out visibility,
+    /// write ObjectAccessor/session mirrors, or create fallback records.
+    pub fn update_dynamic_objects_like_cpp(
+        &mut self,
+        elapsed_ms: u32,
+    ) -> DynamicObjectsUpdateSummaryLikeCpp {
+        let dynamic_object_guids = self
+            .map_objects
+            .iter()
+            .filter_map(|(guid, record)| {
+                (record.kind() == AccessorObjectKind::DynamicObject
+                    && record.dynamic_object().is_some())
+                .then_some(*guid)
+            })
+            .collect::<Vec<_>>();
+
+        let mut summary = DynamicObjectsUpdateSummaryLikeCpp::default();
+        for guid in dynamic_object_guids {
+            summary.visited += 1;
+            let outcome = self.update_dynamic_object_like_cpp(guid, elapsed_ms);
+            match outcome.status {
+                DynamicObjectUpdateStatusLikeCpp::Updated => summary.updated += 1,
+                DynamicObjectUpdateStatusLikeCpp::ExpiredRemoveQueued => {
+                    summary.expired_remove_queued += 1;
+                }
+                DynamicObjectUpdateStatusLikeCpp::MissingDynamicObject => {
+                    summary.missing_or_stale += 1;
+                }
+                DynamicObjectUpdateStatusLikeCpp::NotDynamicObject => {
+                    summary.not_dynamic_object += 1;
+                }
+                DynamicObjectUpdateStatusLikeCpp::NotInWorld => summary.not_in_world += 1,
+            }
+        }
+
+        summary
     }
 
     /// Bounded map-owned caller-consumption seam for C++
