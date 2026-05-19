@@ -232,6 +232,7 @@ impl ManagedMap {
 
     fn delayed_update(&mut self, diff_ms: u32) {
         self.delayed_update_calls.push(diff_ms);
+        self.map.remove_all_objects_in_remove_list_like_cpp();
     }
 
     fn unload_all(&mut self) {
@@ -939,6 +940,8 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use crate::spawn::{SpawnGroupFlags, SpawnGroupTemplateData};
+    use wow_core::{ObjectGuid, Position, guid::HighGuid};
+    use wow_entities::{DynamicObject, MapObjectRecord};
 
     #[test]
     fn delays_are_clamped_like_map_manager_h() {
@@ -1083,6 +1086,56 @@ mod tests {
     }
 
     #[test]
+    fn live_update_delayed_update_drains_dynamic_object_remove_list_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let dynamic_object_guid = guid(HighGuid::DynamicObject, 4320101, 1, 0);
+        let mut dynamic_object = DynamicObject::new(true);
+        dynamic_object
+            .world_mut()
+            .object_mut()
+            .create(dynamic_object_guid);
+        dynamic_object.world_mut().set_map(1, 0).unwrap();
+        dynamic_object
+            .world_mut()
+            .relocate(Position::xyz(11.0, 21.0, 31.0));
+        dynamic_object.world_mut().object_mut().add_to_world();
+
+        {
+            let managed_map = manager.find_map_mut(1, 0).unwrap();
+            managed_map
+                .map_mut()
+                .add_map_object_record_to_map_like_cpp(
+                    MapObjectRecord::new_dynamic_object(dynamic_object).unwrap(),
+                )
+                .unwrap();
+            let queued = managed_map
+                .map_mut()
+                .add_object_to_remove_list_like_cpp(dynamic_object_guid);
+            assert!(queued.queued);
+            assert!(
+                managed_map
+                    .map()
+                    .map_object_record(dynamic_object_guid)
+                    .is_some()
+            );
+            assert_eq!(managed_map.map().objects_to_remove_count_like_cpp(), 1);
+        }
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        assert_eq!(managed_map.delayed_update_calls(), &[1]);
+        assert_eq!(managed_map.map().objects_to_remove_count_like_cpp(), 0);
+        assert!(
+            managed_map
+                .map()
+                .map_object_record(dynamic_object_guid)
+                .is_none()
+        );
+    }
+
+    #[test]
     fn update_destroys_unloadable_maps_before_delayed_update() {
         let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
         manager.create_map_entry(
@@ -1171,6 +1224,16 @@ mod tests {
 
         manager.map_updater_mut().deactivate();
         assert!(!manager.map_updater().activated());
+    }
+
+    fn guid(high: HighGuid, counter: i64, map_id: u32, instance_id: u32) -> ObjectGuid {
+        if high == HighGuid::Player {
+            ObjectGuid::create_global(high, 0, counter)
+        } else if high == HighGuid::Transport {
+            ObjectGuid::create_transport(high, counter)
+        } else {
+            ObjectGuid::create_world_object(high, 0, 1, map_id as u16, instance_id, 100, counter)
+        }
     }
 
     fn world_entry(map_id: u32) -> CreateMapEntryContext {
