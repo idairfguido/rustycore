@@ -32,8 +32,9 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 - Current branch state after #403 review/validation/local commit: `develop...origin/develop [ahead 58]` with a clean tree; no push/install/restart.
 - Current branch state after #404 review/validation/local commit: `develop...origin/develop [ahead 59]` with a clean tree; no push/install/restart.
 - Current branch state after #405 review/validation/local commit: `develop...origin/develop [ahead 60]` at `3ee1f21` with a clean tree; no push/install/restart.
-- Current working tree after #406 review correction: `#NEXT.R8.ENTITIES.406` has independent review `APROBADO` and validation OK; ready for local foreman commit only, no push/install/restart.
-- Latest completed committed slice in this handoff before #406 commit: `#NEXT.R8.ENTITIES.405 — Creature::SetSpawnHealth flags5 NO_HEALTH_REGEN correction in DB-backed loaded-grid builder` committed locally at `3ee1f21` (reviewed/checked; no push/install/restart).
+- Current branch state after #406 review/validation/local commit: `develop...origin/develop [ahead 61]` at `585d3ab` with a clean tree; no push/install/restart.
+- Latest completed committed slice in this handoff: `#NEXT.R8.ENTITIES.406 — fixed-level live Creature loaded-grid DB-backed respawn loader wiring` committed locally at `585d3ab` (reviewed/checked; no push/install/restart).
+- Previous completed committed slice: `#NEXT.R8.ENTITIES.405 — Creature::SetSpawnHealth flags5 NO_HEALTH_REGEN correction in DB-backed loaded-grid builder` committed locally at `3ee1f21` (reviewed/checked; no push/install/restart).
 - Previous completed committed slice: `#NEXT.R8.ENTITIES.404 — DB-backed input stores for Creature loaded-grid LoadFromDB resolver` committed locally at `2f509b3` (reviewed/checked; no push/install/restart).
 - Previous completed committed slice: `#NEXT.R8.ENTITIES.402 — Map-local GUID sequence seam for loaded-grid Creature/GameObject LoadFromDB/DoRespawn` (review `APROBADO`; focused checks passed; committed locally in the current #402 HEAD).
 - Previous completed committed slice: `#NEXT.R8.ENTITIES.401 — Creature loaded-grid lifecycle resolver for real Map insertion path` (review `APROBADO`; focused checks passed; committed locally in the current #401 HEAD).
@@ -60,7 +61,7 @@ Manual test point: no new client-facing manual milestone from #406. Fixed-level 
 
 ## Most Recent Completed Slices
 
-- `#NEXT.R8.ENTITIES.406` (review `APROBADO`; validation OK; ready for local foreman commit; no push/install/restart)
+- `#NEXT.R8.ENTITIES.406` (review `APROBADO`; validation OK; committed locally at `585d3ab`; no push/install/restart)
   - Corrects the #405 live `world-server` Creature loaded-grid DB-backed loader wiring for review/CI: focused tick tests now pass explicit test-only empty `LoadedGridCreatureRespawnCachesLikeCpp` fixtures instead of relying on hidden/global mutable state.
   - Live runtime no longer uses deterministic minimum level as if it were C++ `SelectLevel` parity. The loaded-grid loader checks the real `creature_template_difficulty` row first and returns `None` with debug logging when `MinLevel != MaxLevel`, preserving the map-owned respawn timer/order until map RNG ownership is wired. Fixed-level supported cases still flow through DB/template/difficulty/base-stats/display/model caches into the pure builder/resolver and map seam.
   - C++ anchors: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2165-2188`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2191-2240`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Creature/Creature.cpp:1770-1813`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Creature/Creature.cpp:1815-1923`, and `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2505-2511`.
