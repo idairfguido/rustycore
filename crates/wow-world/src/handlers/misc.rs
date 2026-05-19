@@ -32,13 +32,22 @@ use wow_packet::packets::item::{
 };
 use wow_packet::packets::loot::{LOOT_TYPE_FISHING_JUNK_LIKE_CPP, LOOT_TYPE_FISHING_LIKE_CPP};
 use wow_packet::packets::misc::{
-    MountSetFavorite, RatedPvpInfo, RequestCemeteryListResponse, TaxiNodeStatusPkt,
+    FarSight, MountSetFavorite, RatedPvpInfo, RequestCemeteryListResponse, TaxiNodeStatusPkt,
 };
 
 use crate::handlers::loot::represented_gameobject_interaction_distance_like_cpp;
 use crate::session::{RepresentedGameObjectAccessLikeCpp, RepresentedGameObjectUseEffect};
 
 // ── inventory registrations ───────────────────────────────────────────────────
+
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::FarSight,
+        status: SessionStatus::LoggedIn,
+        processing: PacketProcessing::ThreadUnsafe,
+        handler_name: "handle_far_sight",
+    }
+}
 
 inventory::submit! {
     PacketHandlerEntry {
@@ -537,8 +546,23 @@ pub(crate) fn item_purchase_contents_from_extended_cost(
 }
 
 impl crate::session::WorldSession {
-    /// CMSG_SET_SELECTION — player selected a new target.
-    /// C# ref: MiscHandler.HandleSetSelection → player.SetSelection(guid)
+    /// C++ `WorldSession::HandleFarSightOpcode`: does not create/remove the
+    /// viewpoint; it only switches the represented seer and forces visibility.
+    pub async fn handle_far_sight(&mut self, mut pkt: wow_packet::WorldPacket) {
+        let far_sight = match FarSight::read(&mut pkt) {
+            Ok(far_sight) => far_sight,
+            Err(err) => {
+                warn!("Failed to read FarSight: {err}");
+                return;
+            }
+        };
+
+        self.apply_far_sight_like_cpp(far_sight.enable);
+        self.force_update_visibility_like_cpp().await;
+    }
+
+    /// CMSG_SET_SELECTION — client clicked/targeted an object.
+    /// Payload: packed GUID of selected object (0 clears selection).
     pub async fn handle_set_selection(&mut self, mut pkt: wow_packet::WorldPacket) {
         let target_guid = pkt
             .read_packed_guid()

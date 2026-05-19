@@ -13,6 +13,24 @@ use crate::{ClientPacket, ServerPacket, WorldPacket};
 
 pub use wow_constants::{BuyResult, SellResult};
 
+// ── FarSight (CMSG 0x34e8) ──────────────────────────────────────────
+
+/// C++ `WorldPackets::Misc::FarSight`: one bit toggling seer to current viewpoint/self.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FarSight {
+    pub enable: bool,
+}
+
+impl ClientPacket for FarSight {
+    const OPCODE: ClientOpcodes = ClientOpcodes::FarSight;
+
+    fn read(pkt: &mut WorldPacket) -> Result<Self, PacketError> {
+        Ok(Self {
+            enable: pkt.read_bit()?,
+        })
+    }
+}
+
 // ── AccountDataTimes (SMSG 0x270a) ──────────────────────────────────
 
 /// Number of AccountDataTypes (from C# AccountDataTypes.Max = 15).
@@ -3732,6 +3750,19 @@ mod tests {
         assert_eq!(&bytes[2..6], &444_u32.to_le_bytes());
         assert_eq!(&bytes[6..22], &ObjectGuid::EMPTY.to_raw_bytes());
         assert_eq!(bytes.len(), 22);
+    }
+
+    #[test]
+    fn far_sight_reads_enable_bit_true_and_false_like_cpp() {
+        for enable in [false, true] {
+            let mut pkt = WorldPacket::new_empty();
+            pkt.write_bit(enable);
+            pkt.flush_bits();
+            pkt.reset_read();
+
+            let far_sight = FarSight::read(&mut pkt).unwrap();
+            assert_eq!(far_sight.enable, enable);
+        }
     }
 }
 

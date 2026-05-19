@@ -7,6 +7,12 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.425** `CMSG_FAR_SIGHT` represented `SetSeer`/visibility handler seam.
+  Status: complete for the represented CMSG_FAR_SIGHT parser/handler + session `m_seer` GUID seam only; review `APROBADO`; validation OK; committed locally at current #425 HEAD; no push/install/restart.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/MiscPackets.h:712-720`, `/home/server/woltk-trinity-legacy/src/server/game/Server/Packets/MiscPackets.cpp:537-540`, `/home/server/woltk-trinity-legacy/src/server/game/Handlers/MiscHandler.cpp:863-880`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.h:2432-2438`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp:25389-25395`.
+  Rust targets: `crates/wow-packet/src/packets/misc.rs`, `crates/wow-world/src/handlers/misc.rs`, `crates/wow-world/src/session.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: packet parser reads exactly one `Enable` bit for `CMSG_FAR_SIGHT`; handler is inventory-registered and dispatch-wired, switches only the represented session `m_seer` GUID seam to self or the current canonical `ActivePlayerData::farsight_object` when that target matches C++ `TYPEMASK_SEER` (`Player`, Unit-like `Creature`/`Pet`, or `DynamicObject`), never mutates `farsight_object` or calls `Map::apply_player_set_viewpoint_unit_like_cpp`, and forces the existing visibility refresh wrapper after parsing. Missing player/viewpoint/target or non-`TYPEMASK_SEER` targets keep current seer and still request refresh. Remaining gaps: full SetSeer fanout/grid notifier/ObjectAccessor visibility, aura/cinematic/dynamic-object SetViewpoint callsites, full `Player::SetViewpoint`, install/restart/push.
+
 - [x] **#NEXT.R8.ENTITIES.424** Map-owned `Player::SetViewpoint` Unit-target shared-vision consumption seam.
   Status: complete for map-owned Player::SetViewpoint Unit-target shared-vision consumption seam only; pending review/commit; no push/install/restart.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp:25344-25387`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Unit/Unit.cpp:6489-6509`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.cpp:910-916`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2557-2594`.
