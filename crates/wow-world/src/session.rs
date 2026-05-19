@@ -6906,7 +6906,49 @@ impl WorldSession {
         accessor.write().remove_player(guid);
     }
 
+    fn unregister_canonical_player_from_map_like_cpp(&self) {
+        let Some(guid) = self.player_guid() else {
+            return;
+        };
+        let Some(manager) = self.canonical_map_manager.as_ref() else {
+            return;
+        };
+        let map_id = u32::from(self.player_map_id_like_cpp());
+        let Ok(mut manager) = manager.lock() else {
+            return;
+        };
+
+        let mut instance_id = None;
+        manager.do_for_all_maps_with_map_id(map_id, |managed| {
+            if instance_id.is_none() && managed.map().get_typed_player(guid).is_some() {
+                instance_id = Some(managed.instance_id());
+            }
+        });
+
+        let Some(instance_id) = instance_id else {
+            return;
+        };
+        let Some(managed) = manager.find_map_mut(map_id, instance_id) else {
+            return;
+        };
+
+        if let Err(err) = managed.map_mut().remove_from_map_like_cpp(guid, true) {
+            match err {
+                wow_map::RemoveFromMapError::ObjectNotFound { .. } => {
+                    debug!("Canonical Player {:?} already removed from map", guid);
+                }
+                wow_map::RemoveFromMapError::ResetMap(reset_err) => {
+                    warn!(
+                        "Failed to remove canonical Player {:?} from map: {reset_err:?}",
+                        guid
+                    );
+                }
+            }
+        }
+    }
+
     pub fn cleanup_shared_runtime_state(&mut self) {
+        self.unregister_canonical_player_from_map_like_cpp();
         self.unregister_from_player_registry();
         self.unregister_from_object_accessor();
         self.clear_inventory_items_and_objects_like_cpp();
@@ -24725,6 +24767,212 @@ mod tests {
             assert!(accessor.find_connected_player(player_guid).is_none());
             assert!(session.inventory_items.is_empty());
             assert!(session.inventory_item_objects.is_empty());
+        });
+    }
+
+    fn insert_session_player_into_canonical_map_like_cpp(
+        session: &WorldSession,
+        canonical: &SharedCanonicalMapManager,
+        map_id: u32,
+        instance_id: u32,
+    ) {
+        let player = session.canonical_player_entity_snapshot_like_cpp().unwrap();
+        let mut manager = canonical.lock().unwrap();
+        let managed = manager.create_world_map(map_id, instance_id);
+        session.sync_canonical_player_entity_like_cpp(managed, player);
+    }
+
+    #[test]
+    fn canonical_player_logout_cleanup_removes_player_from_map_before_accessor_like_cpp() {
+        run_object_accessor_sync_test(|| {
+            let (mut session, _, _) = make_session();
+            let canonical = shared_canonical_map_manager();
+            let accessor = new_shared_object_accessor();
+            let player_guid = ObjectGuid::create_player(1, 46);
+            let item_guid = ObjectGuid::create_item(1, 901);
+
+            session.set_canonical_map_manager(Arc::clone(&canonical));
+            session.set_object_accessor(Arc::clone(&accessor));
+            session.set_player_guid(Some(player_guid));
+            session.player_name = Some("LogoutMap".into());
+            session.player_position = Some(Position::new(1.0, 2.0, 3.0, 0.0));
+            session.current_map_id = 571;
+            session.inventory_items.insert(
+                23,
+                InventoryItem {
+                    guid: item_guid,
+                    entry_id: 700,
+                    db_guid: 901,
+                    inventory_type: None,
+                },
+            );
+            let item = session.make_inventory_item_object(
+                item_guid,
+                700,
+                player_guid,
+                1,
+                0,
+                ItemContext::None,
+                23,
+            );
+            session.insert_inventory_item_object(item);
+
+            insert_session_player_into_canonical_map_like_cpp(&session, &canonical, 571, 0);
+            session.sync_object_accessor_player();
+
+            assert!(
+                canonical
+                    .lock()
+                    .unwrap()
+                    .find_map(571, 0)
+                    .unwrap()
+                    .map()
+                    .get_typed_player(player_guid)
+                    .is_some()
+            );
+            assert!(
+                accessor
+                    .read()
+                    .find_connected_player_entity(player_guid)
+                    .is_some()
+            );
+
+            session.cleanup_shared_runtime_state();
+
+            assert!(
+                canonical
+                    .lock()
+                    .unwrap()
+                    .find_map(571, 0)
+                    .unwrap()
+                    .map()
+                    .get_typed_player(player_guid)
+                    .is_none()
+            );
+            assert!(
+                accessor
+                    .read()
+                    .find_connected_player_entity(player_guid)
+                    .is_none()
+            );
+            assert!(session.inventory_items.is_empty());
+            assert!(session.inventory_item_objects.is_empty());
+        });
+    }
+
+    #[test]
+    fn canonical_player_logout_cleanup_preserves_other_map_objects_like_cpp() {
+        run_object_accessor_sync_test(|| {
+            let (mut session, _, _) = make_session();
+            let (mut other_session, _, _) = make_session();
+            let canonical = shared_canonical_map_manager();
+            let player_guid = ObjectGuid::create_player(1, 47);
+            let other_player_guid = ObjectGuid::create_player(1, 48);
+            let creature_guid = test_creature_guid(19_041);
+
+            session.set_canonical_map_manager(Arc::clone(&canonical));
+            session.set_player_guid(Some(player_guid));
+            session.player_name = Some("LogoutOnlySelf".into());
+            session.player_position = Some(Position::new(1.0, 2.0, 3.0, 0.0));
+            session.current_map_id = 571;
+
+            other_session.set_player_guid(Some(other_player_guid));
+            other_session.player_name = Some("OtherStays".into());
+            other_session.player_position = Some(Position::new(4.0, 5.0, 6.0, 0.0));
+            other_session.current_map_id = 571;
+
+            insert_session_player_into_canonical_map_like_cpp(&session, &canonical, 571, 0);
+            let other_player = other_session
+                .canonical_player_entity_snapshot_like_cpp()
+                .unwrap();
+            {
+                let mut manager = canonical.lock().unwrap();
+                other_session.sync_canonical_player_entity_like_cpp(
+                    manager.find_map_mut(571, 0).unwrap(),
+                    other_player,
+                );
+            }
+            add_canonical_test_creature(
+                &canonical,
+                creature_guid,
+                123,
+                Position::new(7.0, 8.0, 9.0, 0.0),
+                0,
+            );
+
+            session.cleanup_shared_runtime_state();
+
+            let manager = canonical.lock().unwrap();
+            let map = manager.find_map(571, 0).unwrap().map();
+            assert!(map.get_typed_player(player_guid).is_none());
+            assert!(map.get_typed_player(other_player_guid).is_some());
+            assert!(map.get_typed_creature(creature_guid).is_some());
+        });
+    }
+
+    #[test]
+    fn canonical_player_logout_cleanup_missing_map_is_noop_like_cpp() {
+        run_object_accessor_sync_test(|| {
+            let (mut session, _, _) = make_session();
+            let canonical = shared_canonical_map_manager();
+            let player_guid = ObjectGuid::create_player(1, 49);
+
+            session.set_canonical_map_manager(Arc::clone(&canonical));
+            session.set_player_guid(Some(player_guid));
+            session.player_name = Some("NoMap".into());
+            session.player_position = Some(Position::new(1.0, 2.0, 3.0, 0.0));
+            session.current_map_id = 571;
+
+            assert!(canonical.lock().unwrap().find_map(571, 0).is_none());
+            session.cleanup_shared_runtime_state();
+            assert!(canonical.lock().unwrap().find_map(571, 0).is_none());
+        });
+    }
+
+    #[test]
+    fn canonical_player_logout_disconnect_cleanup_removes_player_from_map_like_cpp() {
+        run_object_accessor_sync_test(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    let (mut session, _, _) = make_session();
+                    let canonical = shared_canonical_map_manager();
+                    let accessor = new_shared_object_accessor();
+                    let player_guid = ObjectGuid::create_player(1, 50);
+
+                    session.set_canonical_map_manager(Arc::clone(&canonical));
+                    session.set_object_accessor(Arc::clone(&accessor));
+                    session.set_player_guid(Some(player_guid));
+                    session.player_name = Some("DisconnectMap".into());
+                    session.player_position = Some(Position::new(1.0, 2.0, 3.0, 0.0));
+                    session.current_map_id = 571;
+
+                    insert_session_player_into_canonical_map_like_cpp(&session, &canonical, 571, 0);
+                    session.sync_object_accessor_player();
+
+                    session
+                        .cleanup_shared_runtime_state_on_disconnect_like_cpp()
+                        .await;
+
+                    assert!(
+                        canonical
+                            .lock()
+                            .unwrap()
+                            .find_map(571, 0)
+                            .unwrap()
+                            .map()
+                            .get_typed_player(player_guid)
+                            .is_none()
+                    );
+                    assert!(
+                        accessor
+                            .read()
+                            .find_connected_player_entity(player_guid)
+                            .is_none()
+                    );
+                });
         });
     }
 
