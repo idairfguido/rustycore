@@ -14,6 +14,7 @@ use crate::coords::{
     TOTAL_NUMBER_OF_CELLS_PER_MAP, compute_cell_coord, is_valid_map_coord_2d,
 };
 use crate::grid::{GridStateKind, MapGridHost, NGrid, update_grid_state};
+use crate::grid_unload::GridUnloadEntityStore;
 use crate::object_grid_loader::{GridSpawnLoadFilter, ObjectGridLoader};
 use crate::personal_phase::{MultiPersonalPhaseTracker, PhaseShift};
 use crate::pool::{
@@ -30,10 +31,11 @@ use crate::spawn::{
 };
 use wow_core::{ObjectGuid, ObjectGuidGenerator, Position, guid::HighGuid};
 use wow_entities::{
-    AccessorObjectKind, AreaTrigger, CombatBeginContextLikeCpp, CombatSubsystem, Creature,
-    GameObject, INVALID_HEIGHT, LineOfSightQuery, MAX_VISIBILITY_DISTANCE, MapBindingError,
-    MapObjectRecord, ObjectAccessorError, ObjectAccessorMapSource, ObjectNotifyFlags, Player, Unit,
-    WorldObject, WorldObjectEnvironment, WorldObjectHeightQuery,
+    AccessorObjectKind, AreaTrigger, CombatBeginContextLikeCpp, CombatSubsystem, Conversation,
+    Corpse, Creature, DynamicObject, GameObject, INVALID_HEIGHT, LineOfSightQuery,
+    MAX_VISIBILITY_DISTANCE, MapBindingError, MapObjectRecord, ObjectAccessorError,
+    ObjectAccessorMapSource, ObjectNotifyFlags, Player, SceneObject, Unit, WorldObject,
+    WorldObjectEnvironment, WorldObjectHeightQuery,
 };
 
 const GRID_SLOT_COUNT: usize = (MAX_NUMBER_OF_GRIDS * MAX_NUMBER_OF_GRIDS) as usize;
@@ -4423,6 +4425,50 @@ where
     }
 }
 
+impl<Terrain, Lifecycle> GridUnloadEntityStore for Map<Terrain, Lifecycle> {
+    fn creature_mut(&mut self, guid: ObjectGuid) -> Option<&mut Creature> {
+        self.map_objects
+            .get_mut(&guid)
+            .and_then(MapObjectRecord::creature_mut)
+    }
+
+    fn game_object_mut(&mut self, guid: ObjectGuid) -> Option<&mut GameObject> {
+        self.map_objects
+            .get_mut(&guid)
+            .and_then(MapObjectRecord::game_object_mut)
+    }
+
+    fn dynamic_object_mut(&mut self, guid: ObjectGuid) -> Option<&mut DynamicObject> {
+        self.map_objects
+            .get_mut(&guid)
+            .and_then(MapObjectRecord::dynamic_object_mut)
+    }
+
+    fn corpse_mut(&mut self, guid: ObjectGuid) -> Option<&mut Corpse> {
+        self.map_objects
+            .get_mut(&guid)
+            .and_then(MapObjectRecord::corpse_mut)
+    }
+
+    fn area_trigger_mut(&mut self, guid: ObjectGuid) -> Option<&mut AreaTrigger> {
+        self.map_objects
+            .get_mut(&guid)
+            .and_then(MapObjectRecord::area_trigger_mut)
+    }
+
+    fn scene_object_mut(&mut self, guid: ObjectGuid) -> Option<&mut SceneObject> {
+        self.map_objects
+            .get_mut(&guid)
+            .and_then(MapObjectRecord::scene_object_mut)
+    }
+
+    fn conversation_mut(&mut self, guid: ObjectGuid) -> Option<&mut Conversation> {
+        self.map_objects
+            .get_mut(&guid)
+            .and_then(MapObjectRecord::conversation_mut)
+    }
+}
+
 impl<Terrain, Lifecycle> ObjectAccessorMapSource for Map<Terrain, Lifecycle>
 where
     Terrain: TerrainGridLoader,
@@ -4591,6 +4637,10 @@ pub const fn total_cell_count() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::grid_unload::{
+        GridObjectKind, GridUnloadAction, GridUnloadApplyOutcome, apply_grid_unload_action,
+        apply_grid_unload_actions,
+    };
     use crate::pool::{PoolGroupLikeCpp, PoolTemplateDataLikeCpp};
     use std::cell::RefCell;
     use std::collections::BTreeMap;
@@ -5170,6 +5220,101 @@ mod tests {
         area_trigger.world_mut().object_mut().add_to_world();
         area_trigger.set_spawn_id(spawn_id);
         area_trigger
+    }
+
+    #[test]
+    fn grid_unload_actions_apply_to_map_owned_creature_record() {
+        let mut map = test_map();
+        let creature_guid = guid(HighGuid::Creature, 3711);
+        let mut creature = test_creature_for_spawn(371, 3711, true);
+        creature.unit_mut().world_mut().set_current_cell(3, 4);
+        map.insert_map_object_record(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+
+        let outcomes = apply_grid_unload_actions(
+            &mut map,
+            [
+                GridUnloadAction::CreatureRespawnRelocation(creature_guid),
+                GridUnloadAction::CleanupsBeforeDelete(GridObjectKind::Creature, creature_guid),
+                GridUnloadAction::DeleteObject(GridObjectKind::Creature, creature_guid),
+            ],
+        );
+
+        assert_eq!(outcomes, vec![GridUnloadApplyOutcome::Applied; 3]);
+        assert_eq!(map.map_object_count(), 1);
+        let creature = map
+            .map_object_record(creature_guid)
+            .unwrap()
+            .creature()
+            .unwrap();
+        assert!(creature.grid_unload_respawn_relocation_requested());
+        assert_eq!(creature.cleanup_before_delete_count(), 1);
+        assert!(creature.grid_unload_delete_requested());
+        assert_eq!(creature.unit().world().current_cell(), None);
+    }
+
+    #[test]
+    fn grid_unload_actions_apply_to_map_owned_gameobject_record() {
+        let mut map = test_map();
+        let go_guid = guid(HighGuid::GameObject, 3712);
+        let mut gameobject = test_gameobject_for_spawn(372, 3712);
+        gameobject.world_mut().set_current_cell(5, 6);
+        map.insert_map_object_record(MapObjectRecord::new_game_object(gameobject).unwrap())
+            .unwrap();
+
+        let outcomes = apply_grid_unload_actions(
+            &mut map,
+            [
+                GridUnloadAction::GameObjectRespawnRelocation(go_guid),
+                GridUnloadAction::CleanupsBeforeDelete(GridObjectKind::GameObject, go_guid),
+                GridUnloadAction::DeleteObject(GridObjectKind::GameObject, go_guid),
+            ],
+        );
+
+        assert_eq!(outcomes, vec![GridUnloadApplyOutcome::Applied; 3]);
+        assert_eq!(map.map_object_count(), 1);
+        let gameobject = map
+            .map_object_record(go_guid)
+            .unwrap()
+            .game_object()
+            .unwrap();
+        assert!(gameobject.grid_unload_respawn_relocation_requested());
+        assert_eq!(gameobject.cleanup_before_delete_count(), 1);
+        assert!(gameobject.grid_unload_delete_requested());
+        assert_eq!(gameobject.world().current_cell(), None);
+    }
+
+    #[test]
+    fn grid_unload_map_store_missing_and_kind_mismatch_are_best_effort() {
+        let mut map = test_map();
+        let go_guid = guid(HighGuid::GameObject, 3713);
+        let gameobject = test_gameobject_for_spawn(373, 3713);
+        map.insert_map_object_record(MapObjectRecord::new_game_object(gameobject).unwrap())
+            .unwrap();
+
+        assert_eq!(
+            apply_grid_unload_action(
+                &mut map,
+                GridUnloadAction::CreatureRespawnRelocation(go_guid),
+            ),
+            GridUnloadApplyOutcome::MissingEntity
+        );
+        assert_eq!(
+            apply_grid_unload_action(
+                &mut map,
+                GridUnloadAction::CreatureRespawnRelocation(guid(HighGuid::Creature, 3714)),
+            ),
+            GridUnloadApplyOutcome::MissingEntity
+        );
+
+        let gameobject = map
+            .map_object_record(go_guid)
+            .unwrap()
+            .game_object()
+            .unwrap();
+        assert!(!gameobject.grid_unload_respawn_relocation_requested());
+        assert_eq!(gameobject.cleanup_before_delete_count(), 0);
+        assert!(!gameobject.grid_unload_delete_requested());
     }
 
     #[test]
