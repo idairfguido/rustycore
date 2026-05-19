@@ -35,11 +35,11 @@ use crate::spawn::{
 use wow_core::{ObjectGuid, ObjectGuidGenerator, Position, guid::HighGuid};
 use wow_entities::{
     AccessorObjectKind, AreaTrigger, CombatBeginContextLikeCpp, CombatSubsystem, Conversation,
-    Corpse, Creature, DynamicObject, DynamicObjectType, GameObject, INVALID_HEIGHT,
-    LineOfSightQuery, MAX_VISIBILITY_DISTANCE, MapBindingError, MapObjectRecord,
-    ObjectAccessorError, ObjectAccessorMapSource, ObjectNotifyFlags, Player, SceneObject, Unit,
-    UnitSharedVisionSetWorldObjectRequestLikeCpp, WorldObject, WorldObjectEnvironment,
-    WorldObjectHeightQuery,
+    Corpse, Creature, CreatureRuntimePlan, CreatureRuntimeUpdateContext, DynamicObject,
+    DynamicObjectType, GameObject, INVALID_HEIGHT, LineOfSightQuery, MAX_VISIBILITY_DISTANCE,
+    MapBindingError, MapObjectRecord, ObjectAccessorError, ObjectAccessorMapSource,
+    ObjectNotifyFlags, Player, SceneObject, Unit, UnitSharedVisionSetWorldObjectRequestLikeCpp,
+    WorldObject, WorldObjectEnvironment, WorldObjectHeightQuery,
 };
 
 const GRID_SLOT_COUNT: usize = (MAX_NUMBER_OF_GRIDS * MAX_NUMBER_OF_GRIDS) as usize;
@@ -411,6 +411,34 @@ pub struct DynamicObjectsUpdateSummaryLikeCpp {
     pub missing_or_stale: usize,
     pub not_dynamic_object: usize,
     pub not_in_world: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreatureUpdateStatusLikeCpp {
+    Updated,
+    MissingCreature,
+    NotCreature,
+    NotInWorld,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreatureUpdateOutcomeLikeCpp {
+    pub creature_guid: ObjectGuid,
+    pub diff_ms: u32,
+    pub now_secs: i64,
+    pub status: CreatureUpdateStatusLikeCpp,
+    pub plan: Option<CreatureRuntimePlan>,
+    pub actions_recorded: usize,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct CreatureUpdateSummaryLikeCpp {
+    pub visited: usize,
+    pub updated: usize,
+    pub skipped_missing: usize,
+    pub skipped_non_creature: usize,
+    pub skipped_not_in_world: usize,
+    pub actions_recorded: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2855,6 +2883,171 @@ where
                     summary.not_dynamic_object += 1;
                 }
                 DynamicObjectUpdateStatusLikeCpp::NotInWorld => summary.not_in_world += 1,
+            }
+        }
+
+        summary
+    }
+
+    /// Map-owned seam for C++ `Creature::Update` under `ObjectUpdater`.
+    ///
+    /// C++ anchors:
+    /// - `Map.cpp:666-785` uses `Trinity::ObjectUpdater` during `Map::Update`.
+    /// - `GridNotifiers.cpp:258-264,296-301` calls `Update(i_timeDiff)` only for
+    ///   in-world objects, including the explicit `Creature` instantiation.
+    /// - `Creature.cpp:696-903` is represented here only through the existing
+    ///   `Creature::runtime_update_plan(diff, GameTime::GetGameTime(), context)`
+    ///   helper; real AI/scripts/Unit::Update/fanout remain outside this slice.
+    ///
+    /// Ownership: source-of-truth is canonical `Map::map_objects`. Missing,
+    /// non-Creature, and not-in-world outcomes do not mutate state. This helper
+    /// never creates fallback records, reads session/ObjectAccessor mirrors,
+    /// sends packets, runs DB writes, or drains map queues.
+    pub fn update_creature_like_cpp(
+        &mut self,
+        creature_guid: ObjectGuid,
+        diff_ms: u32,
+        now_secs: i64,
+        context: CreatureRuntimeUpdateContext,
+    ) -> CreatureUpdateOutcomeLikeCpp {
+        let Some(record) = self.map_object_record(creature_guid) else {
+            return CreatureUpdateOutcomeLikeCpp {
+                creature_guid,
+                diff_ms,
+                now_secs,
+                status: CreatureUpdateStatusLikeCpp::MissingCreature,
+                plan: None,
+                actions_recorded: 0,
+            };
+        };
+
+        if record.kind() != AccessorObjectKind::Creature {
+            return CreatureUpdateOutcomeLikeCpp {
+                creature_guid,
+                diff_ms,
+                now_secs,
+                status: CreatureUpdateStatusLikeCpp::NotCreature,
+                plan: None,
+                actions_recorded: 0,
+            };
+        }
+
+        let Some(creature) = record.creature() else {
+            return CreatureUpdateOutcomeLikeCpp {
+                creature_guid,
+                diff_ms,
+                now_secs,
+                status: CreatureUpdateStatusLikeCpp::NotCreature,
+                plan: None,
+                actions_recorded: 0,
+            };
+        };
+
+        if !creature.unit().world().object().is_in_world() {
+            return CreatureUpdateOutcomeLikeCpp {
+                creature_guid,
+                diff_ms,
+                now_secs,
+                status: CreatureUpdateStatusLikeCpp::NotInWorld,
+                plan: None,
+                actions_recorded: 0,
+            };
+        }
+
+        let Some(record) = self.map_objects.get_mut(&creature_guid) else {
+            return CreatureUpdateOutcomeLikeCpp {
+                creature_guid,
+                diff_ms,
+                now_secs,
+                status: CreatureUpdateStatusLikeCpp::MissingCreature,
+                plan: None,
+                actions_recorded: 0,
+            };
+        };
+        let Some(creature) = record.creature_mut() else {
+            return CreatureUpdateOutcomeLikeCpp {
+                creature_guid,
+                diff_ms,
+                now_secs,
+                status: CreatureUpdateStatusLikeCpp::NotCreature,
+                plan: None,
+                actions_recorded: 0,
+            };
+        };
+
+        let plan = creature.runtime_update_plan(diff_ms, now_secs, context);
+        let actions_recorded = plan.actions().len();
+        CreatureUpdateOutcomeLikeCpp {
+            creature_guid,
+            diff_ms,
+            now_secs,
+            status: CreatureUpdateStatusLikeCpp::Updated,
+            plan: Some(plan),
+            actions_recorded,
+        }
+    }
+
+    /// Bounded map-owned live visitation seam for C++ `Map::Update` consuming
+    /// `Trinity::ObjectUpdater` for `CreatureMapType` records only.
+    ///
+    /// This snapshots canonical typed Creature GUIDs from `Map::map_objects`,
+    /// resolves a represented runtime context from the caller before mutable
+    /// access, then delegates to `update_creature_like_cpp`. It intentionally
+    /// excludes Pet and every non-Creature family unless already stored as a typed
+    /// `MapObjectRecord::Creature`.
+    pub fn update_creatures_like_cpp<F>(
+        &mut self,
+        diff_ms: u32,
+        now_secs: i64,
+        mut context_resolver: F,
+    ) -> CreatureUpdateSummaryLikeCpp
+    where
+        F: FnMut(ObjectGuid, &Creature) -> CreatureRuntimeUpdateContext,
+    {
+        let creature_guids = self
+            .map_objects
+            .iter()
+            .filter_map(|(guid, record)| {
+                (record.kind() == AccessorObjectKind::Creature && record.creature().is_some())
+                    .then_some(*guid)
+            })
+            .collect::<Vec<_>>();
+
+        let mut summary = CreatureUpdateSummaryLikeCpp::default();
+        for guid in creature_guids {
+            summary.visited += 1;
+            let Some(context) = self
+                .map_object_record(guid)
+                .and_then(MapObjectRecord::creature)
+                .map(|creature| context_resolver(guid, creature))
+            else {
+                let outcome = self.update_creature_like_cpp(
+                    guid,
+                    diff_ms,
+                    now_secs,
+                    CreatureRuntimeUpdateContext::default(),
+                );
+                match outcome.status {
+                    CreatureUpdateStatusLikeCpp::MissingCreature => summary.skipped_missing += 1,
+                    CreatureUpdateStatusLikeCpp::NotCreature => summary.skipped_non_creature += 1,
+                    CreatureUpdateStatusLikeCpp::NotInWorld => summary.skipped_not_in_world += 1,
+                    CreatureUpdateStatusLikeCpp::Updated => {
+                        summary.updated += 1;
+                        summary.actions_recorded += outcome.actions_recorded;
+                    }
+                }
+                continue;
+            };
+
+            let outcome = self.update_creature_like_cpp(guid, diff_ms, now_secs, context);
+            match outcome.status {
+                CreatureUpdateStatusLikeCpp::Updated => {
+                    summary.updated += 1;
+                    summary.actions_recorded += outcome.actions_recorded;
+                }
+                CreatureUpdateStatusLikeCpp::MissingCreature => summary.skipped_missing += 1,
+                CreatureUpdateStatusLikeCpp::NotCreature => summary.skipped_non_creature += 1,
+                CreatureUpdateStatusLikeCpp::NotInWorld => summary.skipped_not_in_world += 1,
             }
         }
 
@@ -12130,6 +12323,173 @@ mod tests {
         assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
         assert!(map.map_object_record(missing_guid).is_none());
         assert!(map.map_object_record(creature_guid).is_some());
+    }
+
+    #[test]
+    fn creature_update_in_world_consumes_runtime_plan_once_like_cpp() {
+        let mut map = test_map();
+        let creature_guid = guid(HighGuid::Creature, 4350101);
+        let creature = test_creature_for_spawn(43501, 4350101, true);
+        assert!(creature.trigger_just_appeared());
+        map.insert_map_object_record(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+
+        let first = map.update_creature_like_cpp(
+            creature_guid,
+            1,
+            1_000,
+            CreatureRuntimeUpdateContext::default(),
+        );
+        let second = map.update_creature_like_cpp(
+            creature_guid,
+            1,
+            1_001,
+            CreatureRuntimeUpdateContext::default(),
+        );
+
+        assert_eq!(first.status, CreatureUpdateStatusLikeCpp::Updated);
+        assert!(
+            first
+                .plan
+                .as_ref()
+                .unwrap()
+                .contains(wow_entities::CreatureRuntimeAction::NotifyJustAppeared)
+        );
+        assert!(
+            !map.map_object_record(creature_guid)
+                .unwrap()
+                .creature()
+                .unwrap()
+                .trigger_just_appeared()
+        );
+        assert_eq!(second.status, CreatureUpdateStatusLikeCpp::Updated);
+        assert!(
+            !second
+                .plan
+                .as_ref()
+                .unwrap()
+                .contains(wow_entities::CreatureRuntimeAction::NotifyJustAppeared)
+        );
+    }
+
+    #[test]
+    fn creature_update_not_in_world_skips_without_mutation_like_cpp() {
+        let mut map = test_map();
+        let creature_guid = guid(HighGuid::Creature, 4350201);
+        let mut creature = test_creature_for_spawn(43502, 4350201, true);
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        assert!(creature.trigger_just_appeared());
+        map.insert_map_object_record(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+
+        let outcome = map.update_creature_like_cpp(
+            creature_guid,
+            1,
+            1_000,
+            CreatureRuntimeUpdateContext::default(),
+        );
+
+        assert_eq!(outcome.status, CreatureUpdateStatusLikeCpp::NotInWorld);
+        assert_eq!(outcome.actions_recorded, 0);
+        assert!(
+            map.map_object_record(creature_guid)
+                .unwrap()
+                .creature()
+                .unwrap()
+                .trigger_just_appeared()
+        );
+    }
+
+    #[test]
+    fn creature_update_snapshot_ignores_gameobject_areatrigger_dynamicobject_like_cpp() {
+        let mut map = test_map();
+        let creature_guid = guid(HighGuid::Creature, 4350301);
+        map.insert_map_object_record(
+            MapObjectRecord::new_creature(test_creature_for_spawn(43503, 4350301, true)).unwrap(),
+        )
+        .unwrap();
+        map.insert_map_object_record(
+            MapObjectRecord::new_game_object(test_gameobject_for_spawn(43504, 4350302)).unwrap(),
+        )
+        .unwrap();
+        let mut area_trigger = test_area_trigger_for_update(4350303, 10, true);
+        area_trigger.set_duration(10);
+        let area_trigger_guid = area_trigger.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_area_trigger(area_trigger).unwrap())
+            .unwrap();
+        let mut dynamic_object = test_dynamic_object_for_viewpoint(4350304);
+        dynamic_object.set_duration(10);
+        let dynamic_object_guid = dynamic_object.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_dynamic_object(dynamic_object).unwrap())
+            .unwrap();
+
+        let summary = map.update_creatures_like_cpp(1, 1_000, |_guid, _creature| {
+            CreatureRuntimeUpdateContext::default()
+        });
+
+        assert_eq!(summary.visited, 1);
+        assert_eq!(summary.updated, 1);
+        assert_eq!(summary.skipped_non_creature, 0);
+        assert!(summary.actions_recorded > 0);
+        assert!(
+            !map.map_object_record(creature_guid)
+                .unwrap()
+                .creature()
+                .unwrap()
+                .trigger_just_appeared()
+        );
+        assert_eq!(
+            map.map_object_record(area_trigger_guid)
+                .unwrap()
+                .area_trigger()
+                .unwrap()
+                .duration_ms(),
+            10
+        );
+        assert_eq!(
+            map.get_typed_dynamic_object(dynamic_object_guid)
+                .unwrap()
+                .duration_ms(),
+            10
+        );
+    }
+
+    #[test]
+    fn creature_update_context_resolver_affects_plan_like_cpp() {
+        let mut default_map = test_map();
+        default_map
+            .insert_map_object_record(
+                MapObjectRecord::new_creature(test_creature_for_spawn(43504, 4350401, true))
+                    .unwrap(),
+            )
+            .unwrap();
+        let default_summary =
+            default_map.update_creatures_like_cpp(1, 1_000, |_guid, _creature| {
+                CreatureRuntimeUpdateContext::default()
+            });
+
+        let mut disabled_ai_map = test_map();
+        disabled_ai_map
+            .insert_map_object_record(
+                MapObjectRecord::new_creature(test_creature_for_spawn(43504, 4350402, true))
+                    .unwrap(),
+            )
+            .unwrap();
+        let disabled_ai_summary =
+            disabled_ai_map.update_creatures_like_cpp(1, 1_000, |_guid, _creature| {
+                CreatureRuntimeUpdateContext {
+                    ai_enabled: false,
+                    ..CreatureRuntimeUpdateContext::default()
+                }
+            });
+
+        assert_eq!(default_summary.visited, 1);
+        assert_eq!(disabled_ai_summary.visited, 1);
+        assert!(default_summary.actions_recorded > disabled_ai_summary.actions_recorded);
     }
 
     #[test]
