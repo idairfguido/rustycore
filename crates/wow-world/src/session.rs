@@ -2655,6 +2655,29 @@ impl WorldSession {
         let _ = map.insert_map_object_record(record);
     }
 
+    fn sync_canonical_player_entity_for_map_like_cpp(
+        &self,
+        manager: &mut wow_map::MapManager,
+        key: wow_map::MapKey,
+        player: Player,
+    ) {
+        let guid = player.guid();
+        manager.do_for_all_maps_mut(|managed| {
+            if managed.map_id() == key.map_id && managed.instance_id() == key.instance_id {
+                return;
+            }
+
+            match managed.map_mut().remove_from_map_like_cpp(guid, false) {
+                Ok(_) | Err(wow_map::RemoveFromMapError::ObjectNotFound { .. }) => {}
+                Err(_) => {}
+            }
+        });
+
+        if let Some(managed) = manager.find_map_mut(key.map_id, key.instance_id) {
+            self.sync_canonical_player_entity_like_cpp(managed, player);
+        }
+    }
+
     pub(crate) fn mutate_canonical_player_like_cpp<R>(
         &mut self,
         f: impl FnOnce(&mut Player) -> R,
@@ -3739,9 +3762,7 @@ impl WorldSession {
                 wow_map::CreateMapDecision::Reject { .. } => None,
             };
             if let Some(key) = key {
-                if let Some(managed) = manager.find_map_mut(key.map_id, key.instance_id) {
-                    self.sync_canonical_player_entity_like_cpp(managed, player);
-                }
+                self.sync_canonical_player_entity_for_map_like_cpp(&mut manager, key, player);
             }
         }
 
@@ -17194,6 +17215,184 @@ mod tests {
             }
         );
         assert!(canonical.lock().unwrap().find_map(609, 1).is_some());
+    }
+
+    fn canonical_player_transfer_test_map_store_like_cpp() -> Arc<wow_data::MapStore> {
+        Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 0,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ]))
+    }
+
+    #[test]
+    fn canonical_player_map_transfer_sync_removes_stale_old_map_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let (mut other_session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 51);
+        let other_player_guid = ObjectGuid::create_player(1, 52);
+        let creature_guid = test_creature_guid(19_051);
+        let target_position = Position::new(-8815.0, 635.0, 94.0, 1.0);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(canonical_player_transfer_test_map_store_like_cpp());
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "TransferSelf".to_string(),
+            Position::new(3700.0, 1500.0, 120.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        insert_session_player_into_canonical_map_like_cpp(&session, &canonical, 571, 0);
+
+        other_session.set_player_guid(Some(other_player_guid));
+        other_session.player_name = Some("TransferOther".into());
+        other_session.player_position = Some(Position::new(3710.0, 1510.0, 120.0, 0.0));
+        other_session.current_map_id = 571;
+        {
+            let other_player = other_session
+                .canonical_player_entity_snapshot_like_cpp()
+                .unwrap();
+            let mut manager = canonical.lock().unwrap();
+            other_session.sync_canonical_player_entity_like_cpp(
+                manager.find_map_mut(571, 0).unwrap(),
+                other_player,
+            );
+        }
+        add_canonical_test_creature(
+            &canonical,
+            creature_guid,
+            123,
+            Position::new(3720.0, 1520.0, 120.0, 0.0),
+            0,
+        );
+
+        session.set_player_map_position_like_cpp(0, target_position);
+        session
+            .ensure_canonical_world_map_for_current_player_like_cpp()
+            .expect("target world map decision");
+
+        let manager = canonical.lock().unwrap();
+        let old_map = manager.find_map(571, 0).unwrap().map();
+        assert!(old_map.get_typed_player(player_guid).is_none());
+        assert!(old_map.get_typed_player(other_player_guid).is_some());
+        assert!(old_map.get_typed_creature(creature_guid).is_some());
+
+        let target_player = manager
+            .find_map(0, 0)
+            .unwrap()
+            .map()
+            .get_typed_player(player_guid)
+            .unwrap();
+        assert_eq!(target_player.unit().world().map_id(), 0);
+        assert_eq!(target_player.unit().world().position(), target_position);
+    }
+
+    #[test]
+    fn canonical_player_same_target_sync_preserves_mutable_state_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 53);
+        let target_guid = test_creature_guid(19_053);
+        let updated_position = Position::new(3725.0, 1525.0, 120.0, 2.0);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(canonical_player_transfer_test_map_store_like_cpp());
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "SameTarget".to_string(),
+            Position::new(3700.0, 1500.0, 120.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session
+            .ensure_canonical_world_map_for_current_player_like_cpp()
+            .expect("initial world map");
+        session
+            .mutate_canonical_player_like_cpp(|player| {
+                player.unit_mut().set_attacking(Some(target_guid));
+                player.set_player_flag(PLAYER_FLAGS_UBER_LIKE_CPP);
+            })
+            .unwrap();
+
+        session.set_player_map_position_like_cpp(571, updated_position);
+        session
+            .ensure_canonical_world_map_for_current_player_like_cpp()
+            .expect("same target world map");
+
+        let manager = canonical.lock().unwrap();
+        let player = manager
+            .find_map(571, 0)
+            .unwrap()
+            .map()
+            .get_typed_player(player_guid)
+            .unwrap();
+        assert_eq!(player.unit().attacking(), Some(target_guid));
+        assert!(player.has_player_flag(PLAYER_FLAGS_UBER_LIKE_CPP));
+        assert_eq!(player.unit().world().position(), updated_position);
+    }
+
+    #[test]
+    fn canonical_player_rejected_map_sync_does_not_remove_existing_map_player_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 54);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_INSTANCE,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "RejectMap".to_string(),
+            Position::new(3700.0, 1500.0, 120.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        insert_session_player_into_canonical_map_like_cpp(&session, &canonical, 571, 0);
+
+        assert!(
+            session
+                .ensure_canonical_world_map_for_current_player_like_cpp()
+                .is_none()
+        );
+        let manager = canonical.lock().unwrap();
+        assert!(manager.find_map(0, 0).is_none());
+        assert!(
+            manager
+                .find_map(571, 0)
+                .unwrap()
+                .map()
+                .get_typed_player(player_guid)
+                .is_some()
+        );
     }
 
     #[test]
