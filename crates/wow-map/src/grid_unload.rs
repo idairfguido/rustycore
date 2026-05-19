@@ -74,6 +74,10 @@ impl GridLifecycle for GuidGridUnloadLifecycle {
     fn unload_grid_objects(&mut self, grid: &mut NGrid) {
         object_grid_unloader(grid, &mut self.actions);
     }
+
+    fn take_unload_actions_like_cpp(&mut self) -> Vec<GridUnloadAction> {
+        std::mem::take(&mut self.actions)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

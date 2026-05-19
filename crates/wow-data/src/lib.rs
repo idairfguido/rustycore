@@ -21,6 +21,7 @@ pub mod difficulty;
 pub mod disable_mgr;
 pub mod dungeon_encounter;
 pub mod entities_movement;
+pub mod gameobject_template;
 pub mod gossip;
 pub mod graveyard;
 pub mod hotfix_cache;
@@ -88,8 +89,14 @@ pub use creature_display::{
     CreatureModelDataStore, DEFAULT_COLLISION_HEIGHT_LIKE_CPP, unit_collision_height_like_cpp,
 };
 pub use creature_template::{
+    CREATURE_CURRENT_EXPANSION_LIKE_CPP, CREATURE_EXPANSION_LEVEL_CURRENT_LIKE_CPP,
+    CreatureBaseStatsRecordLikeCpp, CreatureBaseStatsStoreLikeCpp,
+    CreatureClassificationDamageRatesLikeCpp, CreatureClassificationHealthRatesLikeCpp,
+    CreatureDifficultyRecordLikeCpp, CreatureDifficultyStoreLikeCpp,
+    CreatureTemplateClassificationStoreLikeCpp, CreatureTemplateLifecycleModelLikeCpp,
+    CreatureTemplateLifecycleRecordLikeCpp, CreatureTemplateLifecycleStoreLikeCpp,
     CreatureTemplateMountEntryLikeCpp, CreatureTemplateMountModelLikeCpp,
-    CreatureTemplateMountStoreLikeCpp,
+    CreatureTemplateMountStoreLikeCpp, MAX_CREATURE_SPELLS_LIKE_CPP,
 };
 pub use currency::{CurrencyTypesEntry, CurrencyTypesStore};
 pub use db2_id_store::Db2IdStore;
@@ -109,6 +116,11 @@ pub use entities_movement::{
     EmotesTextSoundStore, EmotesTextStore, GameObjectArtKitEntry, GameObjectArtKitStore,
     GameObjectDisplayInfoEntry, GameObjectDisplayInfoStore, GameObjectsEntry, GameObjectsStore,
     UnitConditionEntry, UnitConditionStore, UnitPowerBarEntry, UnitPowerBarStore,
+};
+pub use gameobject_template::{
+    GameObjectOverrideLifecycleRecordLikeCpp, GameObjectOverrideLifecycleStoreLikeCpp,
+    GameObjectTemplateAddonLifecycleRecordLikeCpp, GameObjectTemplateLifecycleRecordLikeCpp,
+    GameObjectTemplateLifecycleStoreLikeCpp,
 };
 pub use gossip::{GossipConditionAttachmentReport, GossipMenu, GossipMenuItem, GossipStore};
 pub use graveyard::{

@@ -1202,6 +1202,38 @@ pub fn is_object_meeting_not_grouped_conditions_like_cpp<'a>(
     true
 }
 
+/// C++ `ConditionMgr::IsMapMeetingNotGroupedConditions` for spawn-group map conditions.
+///
+/// This is a map-only evaluation helper for `CONDITION_SOURCE_TYPE_SPAWN_GROUP` buckets keyed as
+/// `{ source_group = 0, source_entry = spawn_group_id, source_id = 0 }`. It deliberately does not
+/// mutate `wow_map::Map` or execute `SpawnGroupSpawn`/`SpawnGroupDespawn`; future live callers must
+/// pass the returned bool into the map-side planner/executor.
+pub fn is_spawn_group_meeting_map_conditions_like_cpp<'a>(
+    condition_store: &'a ConditionEntriesByTypeStore,
+    spawn_group_id: u32,
+    condition_map: ConditionMapRef,
+    map_state: Option<ConditionMapStateSnapshot<'a>>,
+    realm_achievement_ids: &'a [u32],
+) -> bool {
+    let mut source_info = ConditionSourceInfo::from_map(condition_map);
+    if let Some(map_state) = map_state {
+        source_info.set_map_state_snapshot(map_state);
+    }
+    source_info.set_realm_achievement_ids(realm_achievement_ids);
+
+    is_object_meeting_not_grouped_conditions_like_cpp(
+        condition_store,
+        ConditionSourceType::SpawnGroup,
+        spawn_group_id,
+        &mut source_info,
+        |condition, source_info| {
+            condition_meets_basic_like_cpp(condition, source_info, |_area, _zone| false)
+                .value()
+                .unwrap_or(false)
+        },
+    )
+}
+
 /// C++ `ConditionMgr::HasConditionsForNotGroupedEntry`.
 pub fn has_conditions_for_not_grouped_entry_like_cpp(
     condition_store: &ConditionEntriesByTypeStore,
@@ -2609,6 +2641,210 @@ mod tests {
             &store,
             ConditionSourceType::None,
             u32::MAX,
+        ));
+    }
+
+    fn spawn_group_condition(
+        spawn_group_id: u32,
+        condition_type: ConditionType,
+        value1: u32,
+        value2: u32,
+        value3: u32,
+    ) -> Condition {
+        Condition {
+            source_type: ConditionSourceType::SpawnGroup,
+            source_group: 0,
+            source_entry: spawn_group_id as i32,
+            source_id: 0,
+            condition_type,
+            condition_value1: value1,
+            condition_value2: value2,
+            condition_value3: value3,
+            ..Condition::default()
+        }
+    }
+
+    #[test]
+    fn spawn_group_meeting_map_conditions_missing_bucket_passes_like_cpp() {
+        let store = ConditionEntriesByTypeStore::default();
+
+        assert!(is_spawn_group_meeting_map_conditions_like_cpp(
+            &store,
+            123,
+            ConditionMapRef::new(571, 1),
+            None,
+            &[],
+        ));
+    }
+
+    #[test]
+    fn spawn_group_meeting_map_conditions_map_id_matches_cpp_bucket_key() {
+        let spawn_group_id = 123;
+        let store = ConditionEntriesByTypeStore::from_conditions_like_cpp([spawn_group_condition(
+            spawn_group_id,
+            ConditionType::MapId,
+            571,
+            0,
+            0,
+        )]);
+
+        assert!(is_spawn_group_meeting_map_conditions_like_cpp(
+            &store,
+            spawn_group_id,
+            ConditionMapRef::new(571, 1),
+            None,
+            &[],
+        ));
+        assert!(!is_spawn_group_meeting_map_conditions_like_cpp(
+            &store,
+            spawn_group_id,
+            ConditionMapRef::new(530, 1),
+            None,
+            &[],
+        ));
+    }
+
+    #[test]
+    fn spawn_group_meeting_map_conditions_world_state_snapshot_matches_cpp() {
+        let spawn_group_id = 124;
+        let store = ConditionEntriesByTypeStore::from_conditions_like_cpp([spawn_group_condition(
+            spawn_group_id,
+            ConditionType::WorldState,
+            77,
+            42,
+            0,
+        )]);
+        let matching_world_states = [ConditionWorldStateSnapshot { id: 77, value: 42 }];
+        let non_matching_world_states = [ConditionWorldStateSnapshot { id: 77, value: 7 }];
+        let matching_state = ConditionMapStateSnapshot {
+            active_event_ids: &[],
+            world_states: &matching_world_states,
+            difficulty_id: 0,
+            instance_data: &[],
+            instance_data64: &[],
+            boss_states: &[],
+            scenario_step_id: None,
+        };
+        let non_matching_state = ConditionMapStateSnapshot {
+            active_event_ids: &[],
+            world_states: &non_matching_world_states,
+            difficulty_id: 0,
+            instance_data: &[],
+            instance_data64: &[],
+            boss_states: &[],
+            scenario_step_id: None,
+        };
+
+        assert!(is_spawn_group_meeting_map_conditions_like_cpp(
+            &store,
+            spawn_group_id,
+            ConditionMapRef::new(571, 1),
+            Some(matching_state),
+            &[],
+        ));
+        assert!(!is_spawn_group_meeting_map_conditions_like_cpp(
+            &store,
+            spawn_group_id,
+            ConditionMapRef::new(571, 1),
+            Some(non_matching_state),
+            &[],
+        ));
+    }
+
+    #[test]
+    fn spawn_group_meeting_map_conditions_realm_achievement_ids_match_cpp() {
+        let spawn_group_id = 125;
+        let store = ConditionEntriesByTypeStore::from_conditions_like_cpp([spawn_group_condition(
+            spawn_group_id,
+            ConditionType::RealmAchievement,
+            9001,
+            0,
+            0,
+        )]);
+
+        assert!(is_spawn_group_meeting_map_conditions_like_cpp(
+            &store,
+            spawn_group_id,
+            ConditionMapRef::new(571, 1),
+            None,
+            &[9001],
+        ));
+        assert!(!is_spawn_group_meeting_map_conditions_like_cpp(
+            &store,
+            spawn_group_id,
+            ConditionMapRef::new(571, 1),
+            None,
+            &[42],
+        ));
+    }
+
+    #[test]
+    fn spawn_group_meeting_map_conditions_map_only_unsupported_type_fails_without_panic() {
+        let spawn_group_id = 126;
+        let store = ConditionEntriesByTypeStore::from_conditions_like_cpp([spawn_group_condition(
+            spawn_group_id,
+            ConditionType::Aura,
+            1234,
+            0,
+            0,
+        )]);
+
+        assert!(!is_spawn_group_meeting_map_conditions_like_cpp(
+            &store,
+            spawn_group_id,
+            ConditionMapRef::new(571, 1),
+            None,
+            &[],
+        ));
+    }
+
+    #[test]
+    fn spawn_group_meeting_map_conditions_reference_conditions_are_expanded_like_cpp() {
+        let spawn_group_id = 127;
+        let passing_reference_id = 700;
+        let failing_reference_id = 701;
+        let passing_spawn_group_condition = Condition {
+            reference_id: passing_reference_id,
+            ..spawn_group_condition(spawn_group_id, ConditionType::None, 0, 0, 0)
+        };
+        let failing_spawn_group_condition = Condition {
+            reference_id: failing_reference_id,
+            ..spawn_group_condition(spawn_group_id + 1, ConditionType::None, 0, 0, 0)
+        };
+        let passing_reference_condition = Condition {
+            source_type: ConditionSourceType::ReferenceCondition,
+            source_group: passing_reference_id,
+            condition_type: ConditionType::MapId,
+            condition_value1: 571,
+            ..Condition::default()
+        };
+        let failing_reference_condition = Condition {
+            source_type: ConditionSourceType::ReferenceCondition,
+            source_group: failing_reference_id,
+            condition_type: ConditionType::MapId,
+            condition_value1: 530,
+            ..Condition::default()
+        };
+        let store = ConditionEntriesByTypeStore::from_conditions_like_cpp([
+            passing_spawn_group_condition,
+            failing_spawn_group_condition,
+            passing_reference_condition,
+            failing_reference_condition,
+        ]);
+
+        assert!(is_spawn_group_meeting_map_conditions_like_cpp(
+            &store,
+            spawn_group_id,
+            ConditionMapRef::new(571, 1),
+            None,
+            &[],
+        ));
+        assert!(!is_spawn_group_meeting_map_conditions_like_cpp(
+            &store,
+            spawn_group_id + 1,
+            ConditionMapRef::new(571, 1),
+            None,
+            &[],
         ));
     }
 

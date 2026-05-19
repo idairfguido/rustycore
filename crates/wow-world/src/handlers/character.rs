@@ -51,6 +51,9 @@ const GO_SPAWN_PHASE_USE_FLAGS_COLUMN: usize = GO_SPAWN_TEMPLATE_DATA_START + MA
 const GO_SPAWN_PHASE_ID_COLUMN: usize = GO_SPAWN_PHASE_USE_FLAGS_COLUMN + 1;
 const GO_SPAWN_PHASE_GROUP_COLUMN: usize = GO_SPAWN_PHASE_USE_FLAGS_COLUMN + 2;
 const GO_SPAWN_TERRAIN_SWAP_MAP_COLUMN: usize = GO_SPAWN_PHASE_USE_FLAGS_COLUMN + 3;
+const GO_SPAWN_EFFECTIVE_FLAGS_COLUMN: usize = GO_SPAWN_PHASE_USE_FLAGS_COLUMN + 4;
+const GO_SPAWN_EFFECTIVE_FACTION_COLUMN: usize = GO_SPAWN_PHASE_USE_FLAGS_COLUMN + 5;
+const GO_SPAWN_OVERRIDE_SOURCE_KNOWN_COLUMN: usize = GO_SPAWN_PHASE_USE_FLAGS_COLUMN + 6;
 const TACT_KEY_TABLE_HASH_LIKE_CPP: u32 = 0xD3F6_1A9E;
 
 inventory::submit! {
@@ -3701,6 +3704,31 @@ impl WorldSession {
                 let terrain_swap_map: i32 = go_result
                     .try_read(GO_SPAWN_TERRAIN_SWAP_MAP_COLUMN)
                     .unwrap_or(-1);
+                let effective_flags: u32 = go_result
+                    .try_read::<u32>(GO_SPAWN_EFFECTIVE_FLAGS_COLUMN)
+                    .or_else(|| {
+                        go_result
+                            .try_read::<i64>(GO_SPAWN_EFFECTIVE_FLAGS_COLUMN)
+                            .and_then(|value| u32::try_from(value).ok())
+                    })
+                    .unwrap_or(0);
+                let effective_faction: u32 = go_result
+                    .try_read::<u32>(GO_SPAWN_EFFECTIVE_FACTION_COLUMN)
+                    .or_else(|| {
+                        go_result
+                            .try_read::<i64>(GO_SPAWN_EFFECTIVE_FACTION_COLUMN)
+                            .and_then(|value| u32::try_from(value).ok())
+                    })
+                    .unwrap_or(0);
+                let override_source_known = go_result
+                    .try_read::<u8>(GO_SPAWN_OVERRIDE_SOURCE_KNOWN_COLUMN)
+                    .map(|value| value != 0)
+                    .or_else(|| {
+                        go_result
+                            .try_read::<i64>(GO_SPAWN_OVERRIDE_SOURCE_KNOWN_COLUMN)
+                            .map(|value| value != 0)
+                    })
+                    .unwrap_or(false);
 
                 if display_id == 0 {
                     if !go_result.next_row() {
@@ -3760,7 +3788,8 @@ impl WorldSession {
                         anim_progress,
                         state,
                         created_by: ObjectGuid::EMPTY,
-                        faction_template: 0,
+                        faction_template: effective_faction as i32,
+                        gameobject_flags: effective_flags,
                         scale,
                     };
                     new_go_blocks.push(UpdateObject::create_gameobject_block(create_data));
@@ -3776,6 +3805,12 @@ impl WorldSession {
                         go_type,
                     );
                 }
+                self.record_represented_gameobject_override_like_cpp(
+                    guid,
+                    effective_flags,
+                    effective_faction,
+                    override_source_known,
+                );
                 if u32::from(go_type) == GAMEOBJECT_TYPE_FISHING_HOLE {
                     let max_opens = if data2 <= data3 {
                         rand::thread_rng().gen_range(data2..=data3)
@@ -4383,6 +4418,31 @@ impl WorldSession {
             let terrain_swap_map: i32 = result
                 .try_read(GO_SPAWN_TERRAIN_SWAP_MAP_COLUMN)
                 .unwrap_or(-1);
+            let effective_flags: u32 = result
+                .try_read::<u32>(GO_SPAWN_EFFECTIVE_FLAGS_COLUMN)
+                .or_else(|| {
+                    result
+                        .try_read::<i64>(GO_SPAWN_EFFECTIVE_FLAGS_COLUMN)
+                        .and_then(|value| u32::try_from(value).ok())
+                })
+                .unwrap_or(0);
+            let effective_faction: u32 = result
+                .try_read::<u32>(GO_SPAWN_EFFECTIVE_FACTION_COLUMN)
+                .or_else(|| {
+                    result
+                        .try_read::<i64>(GO_SPAWN_EFFECTIVE_FACTION_COLUMN)
+                        .and_then(|value| u32::try_from(value).ok())
+                })
+                .unwrap_or(0);
+            let override_source_known = result
+                .try_read::<u8>(GO_SPAWN_OVERRIDE_SOURCE_KNOWN_COLUMN)
+                .map(|value| value != 0)
+                .or_else(|| {
+                    result
+                        .try_read::<i64>(GO_SPAWN_OVERRIDE_SOURCE_KNOWN_COLUMN)
+                        .map(|value| value != 0)
+                })
+                .unwrap_or(false);
 
             // Skip gameobjects with no display
             if display_id == 0 {
@@ -4427,7 +4487,8 @@ impl WorldSession {
                 anim_progress,
                 state,
                 created_by: ObjectGuid::EMPTY,
-                faction_template: 0,
+                faction_template: effective_faction as i32,
+                gameobject_flags: effective_flags,
                 scale,
             };
 
@@ -4443,6 +4504,12 @@ impl WorldSession {
             );
             self.record_represented_gameobject_runtime_state_like_cpp(
                 map_id, guid, entry, go_pos, go_type,
+            );
+            self.record_represented_gameobject_override_like_cpp(
+                guid,
+                effective_flags,
+                effective_faction,
+                override_source_known,
             );
             if u32::from(go_type) == GAMEOBJECT_TYPE_FISHING_HOLE {
                 let max_opens = if data2 <= data3 {

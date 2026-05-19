@@ -11,6 +11,7 @@ pub enum WorldStatements {
     DEL_LINKED_RESPAWN,
     DEL_LINKED_RESPAWN_MASTER,
     REP_LINKED_RESPAWN,
+    SEL_LINKED_RESPAWNS,
     SEL_CREATURE_TEXT,
     SEL_SMART_SCRIPTS,
     DEL_GAMEOBJECT,
@@ -106,6 +107,12 @@ pub enum WorldStatements {
     SEL_SPAWN_GROUP_TEMPLATES,
     /// Load C++ spawn group members.
     SEL_SPAWN_GROUP_MEMBERS,
+    /// Load C++ PoolMgr pool templates.
+    SEL_POOL_TEMPLATES,
+    /// Load C++ PoolMgr pool members filtered by type.
+    SEL_POOL_MEMBERS_BY_TYPE,
+    /// Load C++ PoolMgr default autospawn candidates.
+    SEL_POOL_AUTOSPAWN_CANDIDATES,
     /// Load C++ instance spawn groups.
     SEL_INSTANCE_SPAWN_GROUPS,
     /// Load gameobject template for query response.
@@ -265,6 +272,9 @@ impl StatementDef for WorldStatements {
             }
             Self::REP_LINKED_RESPAWN => {
                 "REPLACE INTO linked_respawn (guid, linkedGuid, linkType) VALUES (?, ?, ?)"
+            }
+            Self::SEL_LINKED_RESPAWNS => {
+                "SELECT guid, linkedGuid, linkType FROM linked_respawn ORDER BY guid ASC"
             }
             Self::SEL_CREATURE_TEXT => {
                 "SELECT CreatureID, GroupID, ID, Text, Type, Language, Probability, Emote, Duration, Sound, SoundPlayType, BroadcastTextId, TextRange FROM creature_text"
@@ -497,9 +507,13 @@ impl StatementDef for WorldStatements {
                 "gt.Data16, gt.Data17, gt.Data18, gt.Data19, gt.Data20, gt.Data21, gt.Data22, gt.Data23, ",
                 "gt.Data24, gt.Data25, gt.Data26, gt.Data27, gt.Data28, gt.Data29, gt.Data30, gt.Data31, ",
                 "gt.Data32, gt.Data33, gt.Data34, ",
-                "g.phaseUseFlags, g.phaseid, g.phasegroup, g.terrainSwapMap ",
+                "g.phaseUseFlags, g.phaseid, g.phasegroup, g.terrainSwapMap, ",
+                "COALESCE(goo.flags, gta.flags, 0), COALESCE(goo.faction, gta.faction, 0), ",
+                "CASE WHEN goo.spawnId IS NOT NULL OR gta.entry IS NOT NULL THEN 1 ELSE 0 END ",
                 "FROM gameobject g ",
                 "JOIN gameobject_template gt ON g.id = gt.entry ",
+                "LEFT JOIN gameobject_template_addon gta ON gta.entry = g.id ",
+                "LEFT JOIN gameobject_overrides goo ON goo.spawnId = g.guid ",
                 "WHERE g.map = ? AND g.position_x BETWEEN ? AND ? AND g.position_y BETWEEN ? AND ?",
             ),
             Self::SEL_GAMEOBJECT_SPAWNS => concat!(
@@ -523,6 +537,15 @@ impl StatementDef for WorldStatements {
                 "SELECT groupId, groupName, groupFlags FROM spawn_group_template"
             }
             Self::SEL_SPAWN_GROUP_MEMBERS => "SELECT groupId, spawnType, spawnId FROM spawn_group",
+            Self::SEL_POOL_TEMPLATES => "SELECT entry, max_limit FROM pool_template",
+            Self::SEL_POOL_MEMBERS_BY_TYPE => {
+                "SELECT spawnId, poolSpawnId, chance FROM pool_members WHERE type = ?"
+            }
+            Self::SEL_POOL_AUTOSPAWN_CANDIDATES => concat!(
+                "SELECT DISTINCT pool_template.entry, pool_members.spawnId, pool_members.poolSpawnId FROM pool_template",
+                " LEFT JOIN game_event_pool ON pool_template.entry = game_event_pool.pool_entry",
+                " LEFT JOIN pool_members ON pool_members.type = 2 AND pool_template.entry = pool_members.spawnId WHERE game_event_pool.pool_entry IS NULL",
+            ),
             Self::SEL_INSTANCE_SPAWN_GROUPS => {
                 "SELECT instanceMapId, bossStateId, bossStates, spawnGroupId, flags FROM instance_spawn_groups"
             }

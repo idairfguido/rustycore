@@ -72,6 +72,9 @@ pub struct DynamicObject {
     bound_caster: Option<ObjectGuid>,
     duration_ms: i32,
     aura_bound: bool,
+    aura_removed: bool,
+    aura_expired: bool,
+    represented_aura_update_owner_count: u32,
     removed_aura_pending: bool,
     caster_viewpoint: bool,
     grid_unload_cleanup_before_delete_count: u32,
@@ -97,6 +100,9 @@ impl DynamicObject {
             bound_caster: None,
             duration_ms: 0,
             aura_bound: false,
+            aura_removed: false,
+            aura_expired: false,
+            represented_aura_update_owner_count: 0,
             removed_aura_pending: false,
             caster_viewpoint: false,
             grid_unload_cleanup_before_delete_count: 0,
@@ -138,6 +144,18 @@ impl DynamicObject {
 
     pub const fn has_removed_aura_pending_delete(&self) -> bool {
         self.removed_aura_pending
+    }
+
+    pub const fn aura_is_removed_like_cpp(&self) -> bool {
+        self.aura_removed
+    }
+
+    pub const fn aura_is_expired_like_cpp(&self) -> bool {
+        self.aura_expired
+    }
+
+    pub const fn represented_aura_update_owner_count(&self) -> u32 {
+        self.represented_aura_update_owner_count
     }
 
     pub const fn is_caster_viewpoint(&self) -> bool {
@@ -250,12 +268,38 @@ impl DynamicObject {
 
     pub fn set_aura_bound(&mut self) {
         self.aura_bound = true;
+        self.aura_removed = false;
+        self.aura_expired = false;
+        self.represented_aura_update_owner_count = 0;
         self.removed_aura_pending = false;
+    }
+
+    pub fn set_aura_removed_like_cpp(&mut self, removed: bool) {
+        self.aura_removed = removed;
+    }
+
+    pub fn set_aura_expired_like_cpp(&mut self, expired: bool) {
+        self.aura_expired = expired;
+    }
+
+    pub fn update_aura_bound_like_cpp(&mut self, _elapsed_ms: u32) -> bool {
+        if !self.aura_bound {
+            return false;
+        }
+
+        if !self.aura_removed {
+            self.represented_aura_update_owner_count =
+                self.represented_aura_update_owner_count.saturating_add(1);
+        }
+
+        self.aura_bound && (self.aura_removed || self.aura_expired)
     }
 
     pub fn remove_aura(&mut self) {
         if self.aura_bound && !self.removed_aura_pending {
             self.aura_bound = false;
+            self.aura_removed = false;
+            self.aura_expired = false;
             self.removed_aura_pending = true;
         }
     }
@@ -401,6 +445,9 @@ mod tests {
         assert_eq!(dyn_object.duration_ms(), 0);
         assert!(!dyn_object.has_aura());
         assert!(!dyn_object.has_removed_aura_pending_delete());
+        assert!(!dyn_object.aura_is_removed_like_cpp());
+        assert!(!dyn_object.aura_is_expired_like_cpp());
+        assert_eq!(dyn_object.represented_aura_update_owner_count(), 0);
         assert!(!dyn_object.is_caster_viewpoint());
 
         let farsight_focus = DynamicObject::new(true);
@@ -448,6 +495,8 @@ mod tests {
         dyn_object.set_aura_bound();
         assert!(dyn_object.has_aura());
         assert!(!dyn_object.update_non_aura_duration(200));
+        assert!(!dyn_object.update_aura_bound_like_cpp(200));
+        assert_eq!(dyn_object.represented_aura_update_owner_count(), 1);
         dyn_object.remove_aura();
         assert!(!dyn_object.has_aura());
         assert!(dyn_object.has_removed_aura_pending_delete());
@@ -461,6 +510,39 @@ mod tests {
         assert!(dyn_object.is_caster_viewpoint());
         dyn_object.remove_caster_viewpoint();
         assert!(!dyn_object.is_caster_viewpoint());
+    }
+
+    #[test]
+    fn dynamic_object_aura_bound_update_owner_represented_without_duration_decrement_like_cpp() {
+        let mut dyn_object = DynamicObject::new(false);
+        dyn_object.set_duration(1_000);
+        dyn_object.set_aura_bound();
+
+        let expired = dyn_object.update_aura_bound_like_cpp(250);
+
+        assert!(!expired);
+        assert!(dyn_object.has_aura());
+        assert_eq!(dyn_object.duration_ms(), 1_000);
+        assert!(!dyn_object.aura_is_removed_like_cpp());
+        assert!(!dyn_object.aura_is_expired_like_cpp());
+        assert_eq!(dyn_object.represented_aura_update_owner_count(), 1);
+    }
+
+    #[test]
+    fn dynamic_object_aura_bound_removed_or_expired_expires_like_cpp() {
+        let mut removed = DynamicObject::new(false);
+        removed.set_aura_bound();
+        removed.set_aura_removed_like_cpp(true);
+
+        assert!(removed.update_aura_bound_like_cpp(250));
+        assert_eq!(removed.represented_aura_update_owner_count(), 0);
+
+        let mut expired = DynamicObject::new(false);
+        expired.set_aura_bound();
+        expired.set_aura_expired_like_cpp(true);
+
+        assert!(expired.update_aura_bound_like_cpp(250));
+        assert_eq!(expired.represented_aura_update_owner_count(), 1);
     }
 
     #[test]

@@ -270,7 +270,7 @@ Numera los items para poder referenciarlos desde `MIGRATION_ROADMAP.md` sección
 Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>12h, splitear).
 
 - [ ] **#SKILLS.1** Add `SkillTiers.db2` reader to `crates/wow-data/src/skill.rs` exposing `Cost[16]`/`Value[16]` per tier id (M)
-- [ ] **#SKILLS.2** Add `SkillLine.db2` reader (currently absent — `CategoryID`, `ParentSkillLineID`, `ParentTierIndex`, flags) (M)
+- [ ] **#SKILLS.2** Extend `SkillLine.db2` coverage beyond the represented reader now used by `GetProfessionSkillForExp` (#NEXT.R8.ENTITIES.325): wire all remaining skill metadata consumers (`CategoryID`, `ParentSkillLineID`, `ParentTierIndex`, flags) into canonical skill state/commands (M)
 - [ ] **#SKILLS.3** Define `SkillStatus` enum, `SkillStatusData { pos: u8, status: SkillStatus }`, `PlayerSkillState` per-session struct in `crates/wow-world/src/skill/state.rs` (M)
 - [ ] **#SKILLS.4** Implement update-field slot allocator: 256 slots in PlayerData::SkillInfo, find first free / reuse pos on `SetSkill` (M)
 - [ ] **#SKILLS.5** Add prepared statements: `SEL_CHARACTER_SKILLS`, `INS_CHAR_SKILLS`, `UPD_CHAR_SKILLS`, `DEL_CHARACTER_SKILL`, `DEL_CHAR_SKILLS`, `DEL_CHAR_SKILL_LANGUAGES`, `INS_CHAR_SKILL_LANGUAGE` in `crates/wow-database/src/statements/character.rs` (L)
@@ -422,8 +422,8 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 **Verdict: ⚠️ partial — confirmed, but slightly more complete than the doc claims.** Status header stays at "DB2 readers only", however **one** CMSG handler is wired and `character_skills` is read at login.
 
 **Inventory verified:**
-- `crates/wow-data/src/skill.rs` — **608 lines** (matches doc). Reads `SkillLineAbility.db2` + `SkillRaceClassInfo.db2`. Public API: `load`, `starting_skill_info(race, class, level)`, `starting_spells(...)`, `racial_spells(race)`, `trade_skill_spells(skill_id, known_spells)`. Plus 6 unit tests. `SkillTiers.db2` and `SkillLine.db2` readers absent (confirmed).
-- `crates/wow-database/src/statements/character.rs:174` — has `SEL_CHARACTER_SKILLS` only: `SELECT skill FROM character_skills WHERE guid = ?`. Note: returns only the `skill` column, **not** `value, max, professionSlot`. So even what is loaded is severely incomplete.
+- `crates/wow-data/src/skill.rs` — reads `SkillLineAbility.db2` + `SkillRaceClassInfo.db2`. Public API: `load`, `starting_skill_info(race, class, level)`, `starting_spells(...)`, `racial_spells(race)`, `trade_skill_spells(skill_id, known_spells)`. `crates/wow-data/src/skill_talent.rs` also now reads `SkillLine.db2` for represented `GetProfessionSkillForExp` consumers (#NEXT.R8.ENTITIES.325). `SkillTiers.db2` reader remains absent.
+- `crates/wow-database/src/statements/character.rs` — has `SEL_CHARACTER_SKILLS`: `SELECT skill, value, max, professionSlot FROM character_skills WHERE guid = ?`. Note: represented consumers can read persisted `value`, but canonical `SkillStatus`, `max`, save/update and `professionSlot` behavior remain incomplete.
 - `crates/wow-world/src/handlers/character.rs:1483-1551` — at login: queries `SEL_CHARACTER_SKILLS`, builds `known_skill_ids: HashSet<u16>`, then calls `skill_store.starting_skill_info(race, class, level)` to populate `skill_info_tuples` for the SkillInfo update field array. So per-character skill **slots** are sent on the initial UpdateObject — but their `rank` / `max_rank` come from a hard-coded computation (`level * 5` for weapon-ish skills, tier defaults) rather than persisted DB values.
 - `crates/wow-world/src/handlers/character.rs:4466-4501` — `handle_show_trade_skill` IS implemented (the doc says it isn't). It returns `SMSG_SHOW_TRADE_SKILL_RESPONSE` with `skill_rank = level*5, skill_max_rank = level*5` and the known recipe spell IDs filtered by `trade_skill_spells`. Registered via `inventory::submit!` at `character.rs:411`.
 - `CMSG_UNLEARN_SKILL` and `CMSG_TRADE_SKILL_SET_FAVORITE`: **not** wired (confirmed — no `inventory::submit!`, no match arm).
@@ -431,14 +431,14 @@ Complejidad: **L** (low, <1h), **M** (med, 1-4h), **H** (high, 4-12h), **XL** (>
 **Confirmed bugs / divergences (doc §8 hypotheses):**
 1. **No re-evaluation of auto-learn on tier-up**: confirmed. `starting_spells` is called once at login. There is no `SetSkill`/`set_skill` function anywhere — searching `crates/` found 0 matches for `set_skill`, `update_craft_skill`, `update_weapon_skill`, `update_gather_skill`, `update_fishing_skill`. Skill rank can never go up.
 2. **No update-field slot allocator**: skills come pre-baked from `starting_skill_info(race, class, level)`. There is no dynamic add/remove. If a player learns a new profession at runtime, no slot is allocated.
-3. **`character_skills.value, max, professionSlot` ignored**: the SELECT only fetches the `skill` column. Persisted rank values are unused — every skill's rank is recomputed from level.
+3. **`character_skills.max, professionSlot` ignored and bonuses absent**: the login path now reads represented skill values for consumers such as fishing rolls, but there is still no canonical `SkillStatus` state, max-rank tracking, temp/perm bonuses or save/update path.
 4. **Faction-change language remap**: confirmed absent (no `DEL_CHAR_SKILL_LANGUAGES`, no `INS_CHAR_SKILL_LANGUAGE`).
 
 **Largest missing surfaces (confirmed):**
 - All skill-up / skill-modify functions: `set_skill`, `update_craft_skill`, `update_gather_skill`, `update_weapon_skill`, `update_fishing_skill`, `modify_skill_bonus`, `get_skill_value`, `get_pure_skill_value`, `get_max_skill_value`, `has_skill`.
 - `character_skills` write path: no `INS_CHAR_SKILLS`, `UPD_CHAR_SKILLS`, `DEL_CHARACTER_SKILL` prepared statements (verified).
-- `skill_discovery_template`, `skill_extra_item_template`, `skill_perfect_item_template`, `skill_fishing_base_level` worldserver tables — none loaded.
-- `SkillTiers.db2` and `SkillLine.db2` DB2 readers.
+- `skill_discovery_template`, `skill_extra_item_template`, `skill_perfect_item_template` worldserver tables — none loaded. `skill_fishing_base_level` is loaded for represented fishing bobber rolls only (#NEXT.R8.ENTITIES.324).
+- `SkillTiers.db2` reader. `SkillLine.db2` is loaded for represented `GetProfessionSkillForExp` consumers only (#NEXT.R8.ENTITIES.325).
 - Profession slot bookkeeping (max 2 primary).
 - `CMSG_UNLEARN_SKILL`, `CMSG_TRADE_SKILL_SET_FAVORITE` handlers.
 - Equip rejection on skill mismatch and lockpicking integration.

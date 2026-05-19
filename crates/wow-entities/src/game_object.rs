@@ -1,8 +1,11 @@
+use std::collections::{HashMap, HashSet};
+
 use wow_constants::{TypeId, TypeMask};
 use wow_core::{ObjectGuid, Position};
 
 use crate::{
-    CreateObjectFlags, ObjectChangedFields, ObjectDataUpdate, UpdateMask, WorldObject,
+    CreateObjectFlags, MapBindingError, ObjectChangedFields, ObjectDataUpdate, UpdateMask,
+    WorldObject,
     update_fields::{GAME_OBJECT_DATA_BITS, TYPEID_GAME_OBJECT},
 };
 
@@ -19,12 +22,16 @@ pub const GAMEOBJECT_TYPE_CHAIR: u32 = 7;
 pub const GAMEOBJECT_TYPE_SPELL_FOCUS: u32 = 8;
 pub const GAMEOBJECT_TYPE_TEXT: u32 = 9;
 pub const GAMEOBJECT_TYPE_GOOBER: u32 = 10;
+pub const GAMEOBJECT_TYPE_TRANSPORT: u32 = 11;
 pub const GAMEOBJECT_TYPE_AREADAMAGE: u32 = 12;
 pub const GAMEOBJECT_TYPE_CAMERA: u32 = 13;
 pub const GAMEOBJECT_TYPE_MAP_OBJECT: u32 = 14;
+// C++ anchor: /home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/SharedDefines.h:2842
+pub const GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT: u32 = 15;
 pub const GAMEOBJECT_TYPE_FISHING_NODE: u32 = 17;
 pub const GAMEOBJECT_TYPE_RITUAL: u32 = 18;
 pub const GAMEOBJECT_TYPE_MAILBOX: u32 = 19;
+pub const GAMEOBJECT_TYPE_GUARDPOST: u32 = 21;
 pub const GAMEOBJECT_TYPE_SPELLCASTER: u32 = 22;
 pub const GAMEOBJECT_TYPE_MEETINGSTONE: u32 = 23;
 pub const GAMEOBJECT_TYPE_FLAGSTAND: u32 = 24;
@@ -45,6 +52,8 @@ pub const GAMEOBJECT_TYPE_GATHERING_NODE: u32 = 50;
 
 pub const GO_DYNFLAG_LO_NO_INTERACT: u32 = 0x0080;
 
+// C++ anchor: /home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/SharedDefines.h:2892
+pub const MAX_GAMEOBJECT_TYPE: u32 = 63;
 pub const MAX_GAMEOBJECT_DATA: usize = 35;
 pub const GAMEOBJECT_DATA_CHEST_LOOT: usize = 1;
 pub const GAMEOBJECT_DATA_CHEST_RESTOCK_TIME: usize = 2;
@@ -55,6 +64,9 @@ pub const GAMEOBJECT_DATA_CHEST_USE_GROUP_LOOT_RULES: usize = 15;
 pub const GAMEOBJECT_DATA_CHEST_DUNGEON_ENCOUNTER: usize = 25;
 pub const GAMEOBJECT_DATA_CHEST_PERSONAL_LOOT: usize = 30;
 pub const GAMEOBJECT_DATA_CHEST_PUSH_LOOT: usize = 33;
+// C++ anchor: /home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObjectData.h:65-68
+pub const GAMEOBJECT_DATA_BUTTON_LINKED_TRAP: usize = 3;
+pub const GAMEOBJECT_DATA_GOOBER_CONSUMABLE: usize = 5;
 pub const GAMEOBJECT_DATA_GATHERING_NODE_DESPAWN_DELAY: usize = 6;
 pub const GAMEOBJECT_DATA_GATHERING_NODE_TRIGGERED_EVENT: usize = 7;
 pub const GAMEOBJECT_DATA_GATHERING_NODE_XP_DIFFICULTY: usize = 13;
@@ -63,6 +75,8 @@ pub const GAMEOBJECT_DATA_GATHERING_NODE_MAX_LOOTS: usize = 18;
 pub const GAMEOBJECT_DATA_GATHERING_NODE_LINKED_TRAP: usize = 20;
 
 pub const GO_FLAG_IN_USE: u32 = 0x0000_0001;
+// C++ anchor: /home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/SharedDefines.h:2902
+pub const GO_FLAG_NODESPAWN: u32 = 0x0000_0020;
 pub const GO_FLAG_IN_MULTI_USE: u32 = 0x0020_0000;
 pub const GAME_OBJECT_DATA_PARENT_BIT: usize = 0;
 pub const GAME_OBJECT_DATA_DISPLAY_ID_BIT: usize = 4;
@@ -108,6 +122,33 @@ pub struct GameObjectLootSource {
     pub chest_consumable: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameObjectOwnedLoot {
+    gold: u32,
+    unlooted_count: u32,
+}
+
+impl GameObjectOwnedLoot {
+    pub const fn new(gold: u32, unlooted_count: u32) -> Self {
+        Self {
+            gold,
+            unlooted_count,
+        }
+    }
+
+    pub const fn gold(&self) -> u32 {
+        self.gold
+    }
+
+    pub const fn unlooted_count(&self) -> u32 {
+        self.unlooted_count
+    }
+
+    pub const fn is_looted_like_cpp(&self) -> bool {
+        self.gold == 0 && self.unlooted_count == 0
+    }
+}
+
 impl GameObjectLootSource {
     pub const fn is_empty(&self) -> bool {
         self.loot_id == 0 && self.personal_loot_id == 0 && self.push_loot_id == 0
@@ -140,6 +181,76 @@ pub struct GameObjectTemplateData {
     pub data: [u32; MAX_GAMEOBJECT_DATA],
 }
 
+/// Represented subset of TrinityCore `GameObjectTemplate`, template addon and override data
+/// consumed by `GameObject::Create`.
+///
+/// ObjectMgr lookups, zone-script entry overrides, model creation, phasing, terrain visible-map
+/// setup and AddToMap are deliberately external. Callers pass values already resolved from the
+/// C++ template/addon/override sources that `wow-entities` can intrinsically own.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameObjectTemplateLifecycleRecord {
+    pub entry: u32,
+    pub name: String,
+    pub go_type: u32,
+    pub display_id: u32,
+    pub scale: f32,
+    pub faction: u32,
+    pub flags: u32,
+    pub data: [u32; MAX_GAMEOBJECT_DATA],
+    pub world_effect_id: u32,
+    pub anim_kit_id: u16,
+    pub level: u32,
+    pub percent_health: u8,
+    pub custom_param: u32,
+}
+
+/// Resolved, testable input for TrinityCore `GameObject::Create`.
+///
+/// Transport type 11 remains a resolved intrinsic shape only here: transport GUID/server-time,
+/// implementation data, `startOpen`, active state transitions, pathing and passenger runtime are
+/// owned by future transport/map wiring, not by this entity lifecycle record.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameObjectCreateLifecycleRecord {
+    pub guid: ObjectGuid,
+    pub map_id: u32,
+    pub instance_id: u32,
+    pub position: Position,
+    pub rotation: [f32; 4],
+    pub anim_progress: u8,
+    pub go_state: GoState,
+    pub art_kit: u32,
+    pub dynamic: bool,
+    pub spawn_id: u64,
+    pub template: GameObjectTemplateLifecycleRecord,
+}
+
+/// Represented subset of TrinityCore `GameObjectData` consumed by `GameObject::LoadFromDB`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameObjectLoadFromDbLifecycleRecord {
+    pub create: GameObjectCreateLifecycleRecord,
+    pub spawntimesecs: i32,
+    /// Effective map-owned respawn time after caller-owned `Map`/time processing.
+    ///
+    /// C++ `LoadFromDB` clears due timers (`respawnTime <= now`) and calls `RemoveRespawnTime`
+    /// before applying entity state. `wow-entities` does not own Map time or DB timer removal, so
+    /// callers must pre-normalize due timers to `0` before building this record.
+    pub effective_map_respawn_time: i64,
+    pub despawn_possible: bool,
+    pub despawn_at_action: bool,
+    pub respawn_compatibility_mode: bool,
+    /// C++ stores `GameObjectData::StringId` in `m_stringIds[1]`; Rust stores the represented
+    /// lifecycle handoff value as entity metadata only, with DB/phasing/AddToMap still external.
+    pub string_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GameObjectLifecycleError {
+    InvalidGameObjectType { entry: u32, go_type: u32 },
+    InvalidMapObjectTransportType { entry: u32 },
+    InvalidPosition { entry: u32, position: Position },
+    MapBinding { entry: u32, source: MapBindingError },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GatheringNodeUseSource {
     pub loot_id: u32,
@@ -153,9 +264,13 @@ pub struct GatheringNodeUseSource {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TrapUseSource {
+    pub radius: u32,
     pub spell_id: u32,
     pub charges: u32,
     pub cooldown_secs: u32,
+    pub start_delay_secs: u32,
+    pub ignore_totems: bool,
+    pub check_all_units: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -186,9 +301,20 @@ pub struct ItemForgeUseSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CapturePointUseSource {
     pub capture_time_ms: u32,
+    pub assault_broadcast_horde: u32,
+    pub capture_broadcast_horde: u32,
+    pub defended_broadcast_horde: u32,
+    pub assault_broadcast_alliance: u32,
+    pub capture_broadcast_alliance: u32,
+    pub defended_broadcast_alliance: u32,
     pub world_state_id: u32,
     pub contested_event_horde: u32,
+    pub capture_event_horde: u32,
+    pub defended_event_horde: u32,
     pub contested_event_alliance: u32,
+    pub capture_event_alliance: u32,
+    pub defended_event_alliance: u32,
+    pub spell_visual_ids: [u32; 5],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -247,6 +373,13 @@ pub struct QuestgiverUseSource {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GuardPostUseSource {
+    pub creature_id: u32,
+    pub charges: u32,
+    pub prefer_only_if_in_line_of_sight: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SpellcasterUseSource {
     pub spell_id: u32,
     pub charges: u32,
@@ -286,6 +419,14 @@ impl GameObjectTemplateData {
             | GAMEOBJECT_TYPE_FISHING_HOLE
             | GAMEOBJECT_TYPE_GATHERING_NODE => self.data[GAMEOBJECT_DATA_CHEST_LOOT],
             _ => 0,
+        }
+    }
+
+    pub const fn is_despawn_at_action_like_cpp(&self) -> bool {
+        match self.go_type {
+            GAMEOBJECT_TYPE_CHEST => self.data[GAMEOBJECT_DATA_CHEST_CONSUMABLE] != 0,
+            GAMEOBJECT_TYPE_GOOBER => self.data[GAMEOBJECT_DATA_GOOBER_CONSUMABLE] != 0,
+            _ => false,
         }
     }
 
@@ -428,9 +569,13 @@ impl GameObjectTemplateData {
         }
 
         Some(TrapUseSource {
+            radius: self.data[2],
             spell_id: self.data[3],
             charges: self.data[4],
             cooldown_secs: self.data[5],
+            start_delay_secs: self.data[7],
+            ignore_totems: self.data[14] != 0,
+            check_all_units: self.data[20] != 0,
         })
     }
 
@@ -486,9 +631,26 @@ impl GameObjectTemplateData {
 
         Some(CapturePointUseSource {
             capture_time_ms: self.data[0],
+            assault_broadcast_horde: self.data[4],
+            capture_broadcast_horde: self.data[5],
+            defended_broadcast_horde: self.data[6],
+            assault_broadcast_alliance: self.data[7],
+            capture_broadcast_alliance: self.data[8],
+            defended_broadcast_alliance: self.data[9],
             world_state_id: self.data[10],
             contested_event_horde: self.data[11],
+            capture_event_horde: self.data[12],
+            defended_event_horde: self.data[13],
             contested_event_alliance: self.data[14],
+            capture_event_alliance: self.data[15],
+            defended_event_alliance: self.data[16],
+            spell_visual_ids: [
+                self.data[17],
+                self.data[18],
+                self.data[19],
+                self.data[20],
+                self.data[21],
+            ],
         })
     }
 
@@ -594,6 +756,18 @@ impl GameObjectTemplateData {
         })
     }
 
+    pub const fn guard_post_use_source_like_cpp(&self) -> Option<GuardPostUseSource> {
+        if self.go_type != GAMEOBJECT_TYPE_GUARDPOST {
+            return None;
+        }
+
+        Some(GuardPostUseSource {
+            creature_id: self.data[0],
+            charges: self.data[1],
+            prefer_only_if_in_line_of_sight: self.data[2] != 0,
+        })
+    }
+
     pub const fn spell_focus_linked_trap_like_cpp(&self) -> u32 {
         if self.go_type != GAMEOBJECT_TYPE_SPELL_FOCUS {
             return 0;
@@ -624,7 +798,7 @@ impl GameObjectTemplateData {
             event_id: self.data[2],
             auto_close_ms: self.data[3],
             custom_anim: self.data[4],
-            consumable: self.data[5] != 0,
+            consumable: self.data[GAMEOBJECT_DATA_GOOBER_CONSUMABLE] != 0,
             page_id: self.data[7],
             spell_id: self.data[10],
             linked_trap_entry: self.data[12],
@@ -666,6 +840,18 @@ impl GameObjectTemplateData {
             max_loots: self.data[GAMEOBJECT_DATA_GATHERING_NODE_MAX_LOOTS],
             linked_trap_entry: self.data[GAMEOBJECT_DATA_GATHERING_NODE_LINKED_TRAP],
         })
+    }
+
+    pub const fn get_linked_gameobject_entry_like_cpp(&self) -> u32 {
+        match self.go_type {
+            // C++ anchor: GameObjectData.h:1049-1059 `GAMEOBJECT_TYPE_BUTTON` -> `button.linkedTrap`.
+            GAMEOBJECT_TYPE_BUTTON => self.data[GAMEOBJECT_DATA_BUTTON_LINKED_TRAP],
+            GAMEOBJECT_TYPE_SPELL_FOCUS => self.spell_focus_linked_trap_like_cpp(),
+            GAMEOBJECT_TYPE_GOOBER => self.data[12],
+            GAMEOBJECT_TYPE_CHEST => self.data[GAMEOBJECT_DATA_CHEST_LINKED_TRAP],
+            GAMEOBJECT_TYPE_GATHERING_NODE => self.data[GAMEOBJECT_DATA_GATHERING_NODE_LINKED_TRAP],
+            _ => 0,
+        }
     }
 }
 
@@ -732,6 +918,9 @@ pub struct GameObject {
     restock_time: i64,
     loot_state: LootState,
     loot_state_unit_guid: ObjectGuid,
+    shared_loot: Option<GameObjectOwnedLoot>,
+    personal_loot: HashMap<ObjectGuid, GameObjectOwnedLoot>,
+    unique_users: HashSet<ObjectGuid>,
     spawned_by_default: bool,
     use_times: u32,
     cooldown_time: i64,
@@ -742,6 +931,8 @@ pub struct GameObject {
     respawn_compatibility_mode: bool,
     anim_kit_id: u16,
     world_effect_id: u32,
+    lifecycle_string_id: String,
+    linked_trap_guid: ObjectGuid,
     stationary_position: Position,
     grid_unload_cleanup_before_delete_count: u32,
     grid_unload_delete_requested: bool,
@@ -772,6 +963,9 @@ impl GameObject {
             restock_time: 0,
             loot_state: LootState::NotReady,
             loot_state_unit_guid: ObjectGuid::EMPTY,
+            shared_loot: None,
+            personal_loot: HashMap::new(),
+            unique_users: HashSet::new(),
             spawned_by_default: true,
             use_times: 0,
             cooldown_time: 0,
@@ -782,11 +976,135 @@ impl GameObject {
             respawn_compatibility_mode: false,
             anim_kit_id: 0,
             world_effect_id: 0,
+            lifecycle_string_id: String::new(),
+            linked_trap_guid: ObjectGuid::EMPTY,
             stationary_position: Position::new(0.0, 0.0, 0.0, 0.0),
             grid_unload_cleanup_before_delete_count: 0,
             grid_unload_delete_requested: false,
             grid_unload_respawn_relocation_requested: false,
         }
+    }
+
+    pub fn try_create_from_lifecycle(
+        record: GameObjectCreateLifecycleRecord,
+    ) -> Result<Self, GameObjectLifecycleError> {
+        let mut game_object = Self::new();
+        game_object.apply_create_lifecycle(record)?;
+        Ok(game_object)
+    }
+
+    pub fn try_load_from_db_lifecycle(
+        record: GameObjectLoadFromDbLifecycleRecord,
+    ) -> Result<Self, GameObjectLifecycleError> {
+        let mut game_object = Self::try_create_from_lifecycle(record.create.clone())?;
+        game_object.apply_load_from_db_lifecycle(record);
+        Ok(game_object)
+    }
+
+    pub fn apply_create_lifecycle(
+        &mut self,
+        record: GameObjectCreateLifecycleRecord,
+    ) -> Result<(), GameObjectLifecycleError> {
+        Self::validate_create_lifecycle(&record)?;
+        let template = &record.template;
+        self.world_mut()
+            .set_map(record.map_id, record.instance_id)
+            .map_err(|source| GameObjectLifecycleError::MapBinding {
+                entry: template.entry,
+                source,
+            })?;
+        self.world_mut().relocate(record.position);
+        self.stationary_position = record.position;
+        self.world_mut().object_mut().create(record.guid);
+        self.world_mut().object_mut().set_entry(template.entry);
+        self.world_mut().object_mut().set_scale(template.scale);
+        self.world_mut().set_name(template.name.clone());
+
+        self.set_respawn_compatibility_mode(!record.dynamic);
+        self.set_spawn_id(record.spawn_id);
+        self.packed_rotation = pack_gameobject_local_rotation(record.rotation);
+        self.world_effect_id = template.world_effect_id;
+        self.anim_kit_id = template.anim_kit_id;
+
+        self.set_display_id(template.display_id);
+        self.set_faction(template.faction);
+        self.set_flags(template.flags);
+        self.set_go_type(template.go_type as u8);
+        self.prev_go_state = record.go_state;
+        self.set_go_state(record.go_state);
+        self.set_art_kit(record.art_kit);
+        self.set_level(template.level);
+        self.set_percent_health(template.percent_health);
+        self.set_custom_param(template.custom_param);
+
+        // C++ keeps template `data` through `m_goInfo`; Rust has only the resolved handoff for
+        // future type-specific users. Active GO type implementations, model creation, zone scripts,
+        // DB phasing and AddToMap remain external/unrepresented in this entity constructor.
+        let _ = template.data;
+        match template.go_type {
+            GAMEOBJECT_TYPE_FISHING_HOLE | GAMEOBJECT_TYPE_TRANSPORT => {
+                // Represented C++ branches call SetGoAnimProgress(animProgress); no Rust field yet.
+                let _ = record.anim_progress;
+            }
+            GAMEOBJECT_TYPE_FISHING_NODE => {
+                self.set_level(0);
+                let _ = record.anim_progress;
+            }
+            _ => {
+                let _ = record.anim_progress;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_create_lifecycle(
+        record: &GameObjectCreateLifecycleRecord,
+    ) -> Result<(), GameObjectLifecycleError> {
+        if record.template.go_type >= MAX_GAMEOBJECT_TYPE {
+            return Err(GameObjectLifecycleError::InvalidGameObjectType {
+                entry: record.template.entry,
+                go_type: record.template.go_type,
+            });
+        }
+        if record.template.go_type == GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT {
+            return Err(GameObjectLifecycleError::InvalidMapObjectTransportType {
+                entry: record.template.entry,
+            });
+        }
+        if !record.position.is_valid_map_coord_like_cpp() {
+            return Err(GameObjectLifecycleError::InvalidPosition {
+                entry: record.template.entry,
+                position: record.position,
+            });
+        }
+
+        Ok(())
+    }
+
+    pub fn apply_load_from_db_lifecycle(&mut self, record: GameObjectLoadFromDbLifecycleRecord) {
+        let mut respawn_compatibility_mode = record.respawn_compatibility_mode;
+        let (spawned_by_default, respawn_delay_time, respawn_time) = if record.spawntimesecs >= 0 {
+            if !record.despawn_possible && !record.despawn_at_action {
+                self.set_flags(self.data().flags | GO_FLAG_NODESPAWN);
+                (true, 0, 0)
+            } else {
+                (
+                    true,
+                    record.spawntimesecs as u32,
+                    record.effective_map_respawn_time,
+                )
+            }
+        } else {
+            respawn_compatibility_mode = true;
+            (false, record.spawntimesecs.unsigned_abs(), 0)
+        };
+
+        self.set_respawn_compatibility_mode(respawn_compatibility_mode);
+        self.set_spawned_by_default(spawned_by_default);
+        self.set_respawn_delay_time(respawn_delay_time);
+        self.set_respawn_time(respawn_time);
+        self.lifecycle_string_id = record.string_id;
     }
 
     pub const fn world(&self) -> &WorldObject {
@@ -815,9 +1133,7 @@ impl GameObject {
 
     pub fn set_spell_id(&mut self, spell_id: u32) {
         self.spell_id = spell_id;
-        if spell_id != 0 {
-            self.spawned_by_default = false;
-        }
+        self.spawned_by_default = false;
     }
 
     pub const fn respawn_time(&self) -> i64 {
@@ -877,6 +1193,72 @@ impl GameObject {
         self.use_times
     }
 
+    pub const fn shared_loot_like_cpp(&self) -> Option<&GameObjectOwnedLoot> {
+        self.shared_loot.as_ref()
+    }
+
+    pub fn set_shared_loot_like_cpp(&mut self, loot: GameObjectOwnedLoot) {
+        self.shared_loot = Some(loot);
+    }
+
+    pub fn clear_shared_loot_like_cpp(&mut self) {
+        self.shared_loot = None;
+    }
+
+    pub fn personal_loot_like_cpp(&self, guid: ObjectGuid) -> Option<&GameObjectOwnedLoot> {
+        self.personal_loot.get(&guid)
+    }
+
+    pub fn set_personal_loot_like_cpp(&mut self, guid: ObjectGuid, loot: GameObjectOwnedLoot) {
+        self.personal_loot.insert(guid, loot);
+    }
+
+    pub fn personal_loot_count_like_cpp(&self) -> usize {
+        self.personal_loot.len()
+    }
+
+    pub fn add_unique_use_like_cpp(&mut self, guid: ObjectGuid) -> bool {
+        self.add_use_like_cpp();
+        self.unique_users.insert(guid)
+    }
+
+    pub fn unique_user_count_like_cpp(&self) -> usize {
+        self.unique_users.len()
+    }
+
+    pub fn add_use_like_cpp(&mut self) {
+        self.use_times = self.use_times.saturating_add(1);
+    }
+
+    pub fn reset_use_times_like_cpp(&mut self) {
+        self.use_times = 0;
+    }
+
+    pub fn clear_loot_like_cpp(&mut self) {
+        self.shared_loot = None;
+        self.personal_loot.clear();
+        self.unique_users.clear();
+        self.use_times = 0;
+    }
+
+    pub fn is_fully_looted_like_cpp(&self) -> bool {
+        if self
+            .shared_loot
+            .as_ref()
+            .is_some_and(|loot| !loot.is_looted_like_cpp())
+        {
+            return false;
+        }
+
+        for loot in self.personal_loot.values() {
+            if !loot.is_looted_like_cpp() {
+                return false;
+            }
+        }
+
+        true
+    }
+
     pub const fn cooldown_time(&self) -> i64 {
         self.cooldown_time
     }
@@ -923,6 +1305,10 @@ impl GameObject {
 
     pub const fn world_effect_id(&self) -> u32 {
         self.world_effect_id
+    }
+
+    pub fn lifecycle_string_id(&self) -> &str {
+        &self.lifecycle_string_id
     }
 
     pub const fn stationary_position(&self) -> Position {
@@ -1020,6 +1406,14 @@ impl GameObject {
         self.set_guid_field(GAME_OBJECT_DATA_CREATED_BY_BIT, created_by, |data| {
             &mut data.created_by
         });
+    }
+
+    pub const fn linked_trap_guid_like_cpp(&self) -> ObjectGuid {
+        self.linked_trap_guid
+    }
+
+    pub fn set_linked_trap_like_cpp(&mut self, linked_trap_guid: ObjectGuid) {
+        self.linked_trap_guid = linked_trap_guid;
     }
 
     pub const fn owner_guid(&self) -> ObjectGuid {
@@ -1141,6 +1535,34 @@ impl GameObject {
     }
 }
 
+fn pack_gameobject_local_rotation(rotation: [f32; 4]) -> i64 {
+    const PACK_YZ: i64 = 1 << 20;
+    const PACK_X: i64 = PACK_YZ << 1;
+    const PACK_YZ_MASK: i64 = (PACK_YZ << 1) - 1;
+    const PACK_X_MASK: i64 = (PACK_X << 1) - 1;
+
+    let dot = rotation[0] * rotation[0]
+        + rotation[1] * rotation[1]
+        + rotation[2] * rotation[2]
+        + rotation[3] * rotation[3];
+    if dot <= f32::EPSILON {
+        return 0;
+    }
+
+    let inv_len = 1.0 / dot.sqrt();
+    let rx = rotation[0] * inv_len;
+    let ry = rotation[1] * inv_len;
+    let rz = rotation[2] * inv_len;
+    let rw = rotation[3] * inv_len;
+    let w_sign = if rw >= 0.0 { 1 } else { -1 };
+
+    let x = ((rx * PACK_X as f32) as i32 as i64) * i64::from(w_sign) & PACK_X_MASK;
+    let y = ((ry * PACK_YZ as f32) as i32 as i64) * i64::from(w_sign) & PACK_YZ_MASK;
+    let z = ((rz * PACK_YZ as f32) as i32 as i64) * i64::from(w_sign) & PACK_YZ_MASK;
+
+    z | (y << 21) | (x << 42)
+}
+
 impl Default for GameObject {
     fn default() -> Self {
         Self::new()
@@ -1150,6 +1572,7 @@ impl Default for GameObject {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wow_core::guid::HighGuid;
 
     #[test]
     fn gameobject_constructor_matches_cpp_base_state() {
@@ -1201,6 +1624,220 @@ mod tests {
         assert!(!go.game_object_data_changes_mask().is_any_set());
     }
 
+    fn lifecycle_template() -> GameObjectTemplateLifecycleRecord {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[GAMEOBJECT_DATA_CHEST_LOOT] = 9001;
+        GameObjectTemplateLifecycleRecord {
+            entry: 17_000,
+            name: "C++ anchored chest".to_string(),
+            go_type: GAMEOBJECT_TYPE_CHEST,
+            display_id: 400,
+            scale: 1.75,
+            faction: 35,
+            flags: GO_FLAG_IN_USE | GO_FLAG_IN_MULTI_USE,
+            data,
+            world_effect_id: 77,
+            anim_kit_id: 12,
+            level: 80,
+            percent_health: 100,
+            custom_param: 44,
+        }
+    }
+
+    fn lifecycle_create(dynamic: bool) -> GameObjectCreateLifecycleRecord {
+        GameObjectCreateLifecycleRecord {
+            guid: ObjectGuid::new(8, 17_000),
+            map_id: 571,
+            instance_id: 3,
+            position: Position::new(1.0, 2.0, 3.0, 4.0),
+            rotation: [0.125, 0.25, 0.375, 0.875],
+            anim_progress: 33,
+            go_state: GoState::Ready,
+            art_kit: 6,
+            dynamic,
+            spawn_id: 98_765,
+            template: lifecycle_template(),
+        }
+    }
+
+    #[test]
+    fn gameobject_create_from_lifecycle_applies_cpp_create_state() {
+        let record = lifecycle_create(false);
+        let position = record.position;
+        let guid = record.guid;
+        let go = GameObject::try_create_from_lifecycle(record).expect("valid lifecycle record");
+
+        assert_eq!(go.world().guid(), guid);
+        assert_eq!(go.world().map_id(), 571);
+        assert_eq!(go.world().instance_id(), 3);
+        assert_eq!(go.world().position(), position);
+        assert_eq!(go.stationary_position(), position);
+        assert_eq!(go.world().object().entry(), 17_000);
+        assert_eq!(go.world().object().scale(), 1.75);
+        assert_eq!(go.world().name(), "C++ anchored chest");
+        assert_eq!(go.data().display_id, 400);
+        assert_eq!(go.data().faction_template, 35);
+        assert_eq!(go.data().flags, GO_FLAG_IN_USE | GO_FLAG_IN_MULTI_USE);
+        assert_eq!(go.data().type_id, GAMEOBJECT_TYPE_CHEST as i8);
+        assert_eq!(go.data().state, GoState::Ready as i8);
+        assert_eq!(go.prev_go_state(), GoState::Ready);
+        assert_eq!(go.data().art_kit, 6);
+        assert_eq!(go.data().level, 80);
+        assert_eq!(go.data().percent_health, 100);
+        assert_eq!(go.data().custom_param, 44);
+        assert_eq!(go.anim_kit_id(), 12);
+        assert_eq!(go.world_effect_id(), 77);
+        assert_eq!(go.spawn_id(), 98_765);
+        assert_ne!(go.packed_rotation(), 0);
+        assert!(go.respawn_compatibility_mode());
+    }
+
+    #[test]
+    fn gameobject_try_create_from_lifecycle_rejects_invalid_go_type_like_cpp() {
+        let mut record = lifecycle_create(true);
+        record.template.go_type = MAX_GAMEOBJECT_TYPE;
+
+        assert_eq!(
+            GameObject::try_create_from_lifecycle(record),
+            Err(GameObjectLifecycleError::InvalidGameObjectType {
+                entry: 17_000,
+                go_type: MAX_GAMEOBJECT_TYPE,
+            })
+        );
+    }
+
+    #[test]
+    fn gameobject_try_create_from_lifecycle_rejects_map_obj_transport_like_cpp() {
+        let mut record = lifecycle_create(true);
+        record.template.go_type = GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT;
+
+        assert_eq!(
+            GameObject::try_create_from_lifecycle(record),
+            Err(GameObjectLifecycleError::InvalidMapObjectTransportType { entry: 17_000 })
+        );
+    }
+
+    #[test]
+    fn gameobject_try_create_from_lifecycle_rejects_invalid_position_without_partial_state() {
+        let mut record = lifecycle_create(true);
+        record.position = Position::new(f32::INFINITY, 2.0, 3.0, 4.0);
+        let mut go = GameObject::new();
+
+        assert_eq!(
+            go.apply_create_lifecycle(record.clone()),
+            Err(GameObjectLifecycleError::InvalidPosition {
+                entry: 17_000,
+                position: record.position,
+            })
+        );
+        assert_eq!(go.world().guid(), ObjectGuid::EMPTY);
+        assert!(!go.world().has_current_map());
+        assert_eq!(go.world().position(), Position::new(0.0, 0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn gameobject_apply_create_lifecycle_propagates_map_binding_error() {
+        let mut record = lifecycle_create(true);
+        record.map_id = 571;
+        record.instance_id = 3;
+        let mut go = GameObject::new();
+        go.world_mut().set_map(1, 2).expect("initial binding");
+
+        assert_eq!(
+            go.apply_create_lifecycle(record),
+            Err(GameObjectLifecycleError::MapBinding {
+                entry: 17_000,
+                source: MapBindingError::AlreadyBound {
+                    old_map_id: 1,
+                    old_instance_id: 2,
+                    new_map_id: 571,
+                    new_instance_id: 3,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn gameobject_load_from_db_lifecycle_applies_respawn_state_like_cpp() {
+        let go = GameObject::try_load_from_db_lifecycle(GameObjectLoadFromDbLifecycleRecord {
+            create: lifecycle_create(true),
+            spawntimesecs: 300,
+            effective_map_respawn_time: 123_456,
+            despawn_possible: true,
+            despawn_at_action: false,
+            respawn_compatibility_mode: true,
+            string_id: "db-string-id".to_string(),
+        })
+        .expect("valid lifecycle record");
+
+        assert!(go.spawned_by_default());
+        assert_eq!(go.respawn_delay_time(), 300);
+        assert_eq!(go.respawn_time(), 123_456);
+        assert!(go.respawn_compatibility_mode());
+        assert_eq!(go.lifecycle_string_id(), "db-string-id");
+    }
+
+    #[test]
+    fn gameobject_load_from_db_lifecycle_handles_negative_spawntime_state() {
+        let go = GameObject::try_load_from_db_lifecycle(GameObjectLoadFromDbLifecycleRecord {
+            create: lifecycle_create(true),
+            spawntimesecs: -45,
+            effective_map_respawn_time: 123_456,
+            despawn_possible: true,
+            despawn_at_action: false,
+            respawn_compatibility_mode: false,
+            string_id: String::new(),
+        })
+        .expect("valid lifecycle record");
+
+        assert!(!go.spawned_by_default());
+        assert_eq!(go.respawn_delay_time(), 45);
+        assert_eq!(go.respawn_time(), 0);
+        assert!(go.respawn_compatibility_mode());
+    }
+
+    #[test]
+    fn gameobject_load_from_db_lifecycle_zeroes_respawn_for_nodespawn_like_cpp() {
+        let go = GameObject::try_load_from_db_lifecycle(GameObjectLoadFromDbLifecycleRecord {
+            create: lifecycle_create(true),
+            spawntimesecs: 300,
+            effective_map_respawn_time: 123_456,
+            despawn_possible: false,
+            despawn_at_action: false,
+            respawn_compatibility_mode: false,
+            string_id: String::new(),
+        })
+        .expect("valid lifecycle record");
+
+        assert!(go.spawned_by_default());
+        assert_eq!(go.respawn_delay_time(), 0);
+        assert_eq!(go.respawn_time(), 0);
+        assert_eq!(
+            go.data().flags,
+            GO_FLAG_IN_USE | GO_FLAG_IN_MULTI_USE | GO_FLAG_NODESPAWN
+        );
+        assert!(!go.respawn_compatibility_mode());
+    }
+
+    #[test]
+    fn gameobject_load_from_db_lifecycle_preserves_prenormalized_zero_respawn_time() {
+        let go = GameObject::try_load_from_db_lifecycle(GameObjectLoadFromDbLifecycleRecord {
+            create: lifecycle_create(true),
+            spawntimesecs: 300,
+            effective_map_respawn_time: 0,
+            despawn_possible: true,
+            despawn_at_action: false,
+            respawn_compatibility_mode: false,
+            string_id: String::new(),
+        })
+        .expect("valid lifecycle record");
+
+        assert!(go.spawned_by_default());
+        assert_eq!(go.respawn_delay_time(), 300);
+        assert_eq!(go.respawn_time(), 0);
+        assert!(!go.respawn_compatibility_mode());
+    }
+
     #[test]
     fn gameobject_template_get_loot_id_matches_cpp_switch() {
         let mut data = [0; MAX_GAMEOBJECT_DATA];
@@ -1222,6 +1859,39 @@ mod tests {
         assert_eq!(
             GameObjectTemplateData::new(2, data).get_loot_id_like_cpp(),
             0
+        );
+    }
+
+    #[test]
+    fn gameobject_template_is_despawn_at_action_like_cpp_matches_switch() {
+        let mut chest_data = [0; MAX_GAMEOBJECT_DATA];
+        assert!(
+            !GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, chest_data)
+                .is_despawn_at_action_like_cpp()
+        );
+        chest_data[GAMEOBJECT_DATA_CHEST_CONSUMABLE] = 1;
+        assert!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, chest_data)
+                .is_despawn_at_action_like_cpp()
+        );
+
+        let mut goober_data = [0; MAX_GAMEOBJECT_DATA];
+        assert!(
+            !GameObjectTemplateData::new(GAMEOBJECT_TYPE_GOOBER, goober_data)
+                .is_despawn_at_action_like_cpp()
+        );
+        goober_data[GAMEOBJECT_DATA_GOOBER_CONSUMABLE] = 1;
+        assert!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_GOOBER, goober_data)
+                .is_despawn_at_action_like_cpp()
+        );
+
+        let mut generic_data = [0; MAX_GAMEOBJECT_DATA];
+        generic_data[GAMEOBJECT_DATA_CHEST_CONSUMABLE] = 1;
+        generic_data[GAMEOBJECT_DATA_GOOBER_CONSUMABLE] = 1;
+        assert!(
+            !GameObjectTemplateData::new(GAMEOBJECT_TYPE_GENERIC, generic_data)
+                .is_despawn_at_action_like_cpp()
         );
     }
 
@@ -1488,16 +2158,24 @@ mod tests {
     #[test]
     fn trap_use_source_uses_cpp_data_indices() {
         let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[2] = 20;
         data[3] = 123;
         data[4] = 1;
         data[5] = 9;
+        data[7] = 3;
+        data[14] = 1;
+        data[20] = 1;
 
         assert_eq!(
             GameObjectTemplateData::new(GAMEOBJECT_TYPE_TRAP, data).trap_use_source_like_cpp(),
             Some(TrapUseSource {
+                radius: 20,
                 spell_id: 123,
                 charges: 1,
                 cooldown_secs: 9,
+                start_delay_secs: 3,
+                ignore_totems: true,
+                check_all_units: true,
             })
         );
         assert_eq!(
@@ -1592,18 +2270,44 @@ mod tests {
     fn capture_point_use_source_uses_cpp_data_indices() {
         let mut data = [0; MAX_GAMEOBJECT_DATA];
         data[0] = 60_000;
+        data[4] = 401;
+        data[5] = 501;
+        data[6] = 601;
+        data[7] = 701;
+        data[8] = 801;
+        data[9] = 901;
         data[10] = 123;
         data[11] = 456;
+        data[12] = 1200;
+        data[13] = 1300;
         data[14] = 789;
+        data[15] = 1500;
+        data[16] = 1600;
+        data[17] = 1700;
+        data[18] = 1800;
+        data[19] = 1900;
+        data[20] = 2000;
+        data[21] = 2100;
 
         assert_eq!(
             GameObjectTemplateData::new(GAMEOBJECT_TYPE_CAPTURE_POINT, data)
                 .capture_point_use_source_like_cpp(),
             Some(CapturePointUseSource {
                 capture_time_ms: 60_000,
+                assault_broadcast_horde: 401,
+                capture_broadcast_horde: 501,
+                defended_broadcast_horde: 601,
+                assault_broadcast_alliance: 701,
+                capture_broadcast_alliance: 801,
+                defended_broadcast_alliance: 901,
                 world_state_id: 123,
                 contested_event_horde: 456,
+                capture_event_horde: 1200,
+                defended_event_horde: 1300,
                 contested_event_alliance: 789,
+                capture_event_alliance: 1500,
+                defended_event_alliance: 1600,
+                spell_visual_ids: [1700, 1800, 1900, 2000, 2100],
             })
         );
         assert_eq!(
@@ -1775,6 +2479,29 @@ mod tests {
     }
 
     #[test]
+    fn guard_post_use_source_uses_cpp_data_indices() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[0] = 4321;
+        data[1] = 5;
+        data[2] = 1;
+
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_GUARDPOST, data)
+                .guard_post_use_source_like_cpp(),
+            Some(GuardPostUseSource {
+                creature_id: 4321,
+                charges: 5,
+                prefer_only_if_in_line_of_sight: true,
+            })
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data)
+                .guard_post_use_source_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
     fn spell_focus_linked_trap_uses_cpp_data_index() {
         let mut data = [0; MAX_GAMEOBJECT_DATA];
         data[2] = 987;
@@ -1789,6 +2516,68 @@ mod tests {
                 .spell_focus_linked_trap_like_cpp(),
             0
         );
+    }
+
+    #[test]
+    fn gameobject_template_linked_gameobject_entry_dispatches_cpp_sources() {
+        let mut data = [0; MAX_GAMEOBJECT_DATA];
+        data[GAMEOBJECT_DATA_BUTTON_LINKED_TRAP] = 103;
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_BUTTON, data)
+                .get_linked_gameobject_entry_like_cpp(),
+            103
+        );
+
+        data = [0; MAX_GAMEOBJECT_DATA];
+        data[2] = 802;
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_SPELL_FOCUS, data)
+                .get_linked_gameobject_entry_like_cpp(),
+            802
+        );
+
+        data = [0; MAX_GAMEOBJECT_DATA];
+        data[12] = 1012;
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_GOOBER, data)
+                .get_linked_gameobject_entry_like_cpp(),
+            1012
+        );
+
+        data = [0; MAX_GAMEOBJECT_DATA];
+        data[GAMEOBJECT_DATA_CHEST_LINKED_TRAP] = 307;
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_CHEST, data)
+                .get_linked_gameobject_entry_like_cpp(),
+            307
+        );
+
+        data = [0; MAX_GAMEOBJECT_DATA];
+        data[GAMEOBJECT_DATA_GATHERING_NODE_LINKED_TRAP] = 5020;
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_GATHERING_NODE, data)
+                .get_linked_gameobject_entry_like_cpp(),
+            5020
+        );
+        assert_eq!(
+            GameObjectTemplateData::new(GAMEOBJECT_TYPE_TRAP, data)
+                .get_linked_gameobject_entry_like_cpp(),
+            0
+        );
+    }
+
+    #[test]
+    fn gameobject_linked_trap_guid_defaults_and_can_be_cleared_like_cpp() {
+        let mut go = GameObject::new();
+        assert_eq!(go.linked_trap_guid_like_cpp(), ObjectGuid::EMPTY);
+        let trap_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 1, 9002, 2);
+
+        go.set_linked_trap_like_cpp(trap_guid);
+        assert_eq!(go.linked_trap_guid_like_cpp(), trap_guid);
+
+        go.set_linked_trap_like_cpp(ObjectGuid::EMPTY);
+        assert_eq!(go.linked_trap_guid_like_cpp(), ObjectGuid::EMPTY);
     }
 
     #[test]
@@ -1942,6 +2731,105 @@ mod tests {
     }
 
     #[test]
+    fn gameobject_owned_loot_is_looted_matches_cpp_gold_and_unlooted_count() {
+        let empty = GameObjectOwnedLoot::default();
+        assert_eq!(empty.gold(), 0);
+        assert_eq!(empty.unlooted_count(), 0);
+        assert!(empty.is_looted_like_cpp());
+
+        let gold_only = GameObjectOwnedLoot::new(1, 0);
+        assert_eq!(gold_only.gold(), 1);
+        assert_eq!(gold_only.unlooted_count(), 0);
+        assert!(!gold_only.is_looted_like_cpp());
+
+        let items_only = GameObjectOwnedLoot::new(0, 1);
+        assert_eq!(items_only.gold(), 0);
+        assert_eq!(items_only.unlooted_count(), 1);
+        assert!(!items_only.is_looted_like_cpp());
+
+        assert!(!GameObjectOwnedLoot::new(1, 1).is_looted_like_cpp());
+    }
+
+    #[test]
+    fn gameobject_is_fully_looted_checks_shared_and_personal_loot_like_cpp() {
+        let mut go = GameObject::new();
+        assert!(go.is_fully_looted_like_cpp());
+        assert_eq!(go.shared_loot_like_cpp(), None);
+        assert_eq!(go.personal_loot_count_like_cpp(), 0);
+
+        go.set_shared_loot_like_cpp(GameObjectOwnedLoot::new(10, 0));
+        assert!(!go.is_fully_looted_like_cpp());
+
+        go.set_shared_loot_like_cpp(GameObjectOwnedLoot::default());
+        assert!(go.is_fully_looted_like_cpp());
+
+        let looted_player = ObjectGuid::new(1, 100);
+        let unlooted_player = ObjectGuid::new(1, 200);
+        go.set_personal_loot_like_cpp(looted_player, GameObjectOwnedLoot::default());
+        assert!(go.is_fully_looted_like_cpp());
+        assert_eq!(
+            go.personal_loot_like_cpp(looted_player),
+            Some(&GameObjectOwnedLoot::default())
+        );
+
+        go.set_personal_loot_like_cpp(unlooted_player, GameObjectOwnedLoot::new(0, 1));
+        assert_eq!(go.personal_loot_count_like_cpp(), 2);
+        assert!(!go.is_fully_looted_like_cpp());
+
+        go.set_personal_loot_like_cpp(unlooted_player, GameObjectOwnedLoot::default());
+        assert!(go.is_fully_looted_like_cpp());
+    }
+
+    #[test]
+    fn gameobject_clear_loot_clears_owned_loot_unique_users_and_use_count_like_cpp() {
+        let mut go = GameObject::new();
+        let first = ObjectGuid::new(1, 100);
+        let second = ObjectGuid::new(1, 200);
+
+        go.set_shared_loot_like_cpp(GameObjectOwnedLoot::new(1, 1));
+        go.set_personal_loot_like_cpp(first, GameObjectOwnedLoot::new(0, 1));
+        assert!(go.add_unique_use_like_cpp(first));
+        assert!(!go.add_unique_use_like_cpp(first));
+        assert!(go.add_unique_use_like_cpp(second));
+        go.add_use_like_cpp();
+        go.add_use_like_cpp();
+
+        assert_eq!(
+            go.shared_loot_like_cpp(),
+            Some(&GameObjectOwnedLoot::new(1, 1))
+        );
+        assert_eq!(go.personal_loot_count_like_cpp(), 1);
+        assert_eq!(go.unique_user_count_like_cpp(), 2);
+        assert_eq!(go.use_times(), 5);
+        assert!(!go.is_fully_looted_like_cpp());
+
+        go.clear_loot_like_cpp();
+
+        assert_eq!(go.shared_loot_like_cpp(), None);
+        assert_eq!(go.personal_loot_count_like_cpp(), 0);
+        assert_eq!(go.unique_user_count_like_cpp(), 0);
+        assert_eq!(go.use_times(), 0);
+        assert!(go.is_fully_looted_like_cpp());
+    }
+
+    #[test]
+    fn gameobject_add_unique_use_increments_use_times_before_unique_insert_like_cpp() {
+        let mut go = GameObject::new();
+        let player = ObjectGuid::new(1, 100);
+
+        assert_eq!(go.use_times(), 0);
+        assert_eq!(go.unique_user_count_like_cpp(), 0);
+
+        assert!(go.add_unique_use_like_cpp(player));
+        assert_eq!(go.use_times(), 1);
+        assert_eq!(go.unique_user_count_like_cpp(), 1);
+
+        assert!(!go.add_unique_use_like_cpp(player));
+        assert_eq!(go.use_times(), 2);
+        assert_eq!(go.unique_user_count_like_cpp(), 1);
+    }
+
+    #[test]
     fn gameobject_data_setters_mark_cpp_bits() {
         let mut go = GameObject::new();
 
@@ -2047,6 +2935,11 @@ mod tests {
         assert!(go.spawned_by_default());
         assert_eq!(go.cooldown_time(), 77);
         assert!(go.respawn_compatibility_mode());
+
+        go.set_spawned_by_default(true);
+        go.set_spell_id(0);
+        assert_eq!(go.spell_id(), 0);
+        assert!(!go.spawned_by_default());
     }
 
     #[test]

@@ -2514,6 +2514,7 @@ pub struct GameObjectCreateData {
     pub state: i8,
     pub created_by: ObjectGuid,
     pub faction_template: i32,
+    pub gameobject_flags: u32,
     pub scale: f32,
 }
 
@@ -2542,7 +2543,7 @@ impl GameObjectCreateData {
         // No StateWorldEffectIDs entries (count=0)
         buf.write_packed_guid(&self.created_by); // CreatedBy
         write_empty_guid(&mut buf); // GuildGUID
-        buf.write_uint32(0); // Flags
+        buf.write_uint32(self.gameobject_flags); // Flags
         // ParentRotation (Quaternion: x, y, z, w)
         // In C# this comes from gameobject_addon.parent_rotation, NOT from gameobject.rotation0-3.
         // For most GameObjects it's the identity quaternion (0, 0, 0, 1).
@@ -7422,6 +7423,7 @@ mod tests {
             state: 1,
             created_by: ObjectGuid::EMPTY,
             faction_template: 0,
+            gameobject_flags: 0,
             scale: 1.0,
         };
 
@@ -7435,6 +7437,44 @@ mod tests {
 
         assert!(owned_packet.data().len() > empty_owner_packet.data().len());
         assert_ne!(owned_packet.data(), empty_owner_packet.data());
+    }
+
+    #[test]
+    fn gameobject_create_values_serializes_flags_and_faction_template_like_cpp() {
+        let create = GameObjectCreateData {
+            guid: ObjectGuid::create_world_object(
+                wow_core::guid::HighGuid::GameObject,
+                0,
+                1,
+                0,
+                0,
+                123,
+                456,
+            ),
+            entry: 123,
+            display_id: 456,
+            go_type: 3,
+            position: Position::ZERO,
+            rotation: [0.0, 0.0, 0.0, 1.0],
+            anim_progress: 255,
+            state: 1,
+            created_by: ObjectGuid::EMPTY,
+            faction_template: 1735,
+            gameobject_flags: 0x20,
+            scale: 1.0,
+        };
+
+        let mut packet = WorldPacket::new_empty();
+        create.write_values_create(&mut packet);
+        let data = packet.data();
+        assert!(
+            data.windows(4)
+                .any(|window| window == 1735i32.to_le_bytes())
+        );
+        assert!(
+            data.windows(4)
+                .any(|window| window == 0x20u32.to_le_bytes())
+        );
     }
 
     #[test]

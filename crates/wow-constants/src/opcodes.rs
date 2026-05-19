@@ -1587,6 +1587,7 @@ pub enum ServerOpcodes {
     UpdateCharacterFlags = 0x27c4,
     UpdateChargeCategoryCooldown = 0x276a,
     UpdateCooldown = 0x2769,
+    UpdateCapturePoint = 0xbadd,
     UpdateExpansionLevel = 0x2646,
     UpdateGameTimeState = 0x2828,
     UpdateInstanceOwnership = 0x26a9,

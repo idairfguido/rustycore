@@ -69,6 +69,10 @@ impl SpawnGroupTemplateStore {
         self.templates.is_empty()
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = &SpawnGroupTemplate> {
+        self.templates.values()
+    }
+
     pub fn from_rows_like_cpp(
         rows: impl IntoIterator<Item = SpawnGroupTemplateRow>,
     ) -> (Self, SpawnGroupTemplateLoadReport) {

@@ -466,6 +466,39 @@ impl SkillLineStore {
             }
         })
     }
+
+    /// C++ `Player::GetProfessionSkillForExp`.
+    pub fn profession_skill_for_exp_like_cpp(&self, skill_id: u32, mut expansion: i32) -> u32 {
+        const SKILL_CATEGORY_SECONDARY_LIKE_CPP: i8 = 9;
+        const SKILL_CATEGORY_PROFESSION_LIKE_CPP: i8 = 11;
+        const CURRENT_EXPANSION_LIKE_CPP: i32 = 2;
+        const BASE_PARENT_TIER_INDEX_LIKE_CPP: i32 = 4;
+
+        let Some(skill) = self.get(skill_id) else {
+            return 0;
+        };
+        if skill.parent_skill_line_id != 0
+            || !matches!(
+                skill.category_id,
+                SKILL_CATEGORY_PROFESSION_LIKE_CPP | SKILL_CATEGORY_SECONDARY_LIKE_CPP
+            )
+        {
+            return 0;
+        }
+
+        if expansion < 0 {
+            expansion = CURRENT_EXPANSION_LIKE_CPP;
+        }
+
+        self.entries
+            .values()
+            .find(|child| {
+                child.parent_skill_line_id == skill.id
+                    && child.parent_tier_index - BASE_PARENT_TIER_INDEX_LIKE_CPP == expansion
+            })
+            .map(|child| child.id)
+            .unwrap_or(0)
+    }
 }
 
 impl SkillLineXTraitTreeStore {
@@ -588,6 +621,29 @@ impl_from_entries!(TalentTabStore, TalentTabEntry);
 mod tests {
     use super::*;
 
+    fn skill_line(
+        id: u32,
+        category_id: i8,
+        parent_skill_line_id: u32,
+        parent_tier_index: i32,
+    ) -> SkillLineEntry {
+        SkillLineEntry {
+            id,
+            display_name: String::new(),
+            alternate_verb: String::new(),
+            description: String::new(),
+            horde_display_name: String::new(),
+            override_source_info_display_name: String::new(),
+            category_id,
+            spell_icon_file_id: 0,
+            can_link: 0,
+            parent_skill_line_id,
+            parent_tier_index,
+            flags: 0,
+            spell_book_spell_id: 0,
+        }
+    }
+
     #[test]
     fn glyph_required_spec_uses_cpp_parent_relationship() {
         let store = GlyphRequiredSpecStore::from_entries([GlyphRequiredSpecEntry {
@@ -597,6 +653,33 @@ mod tests {
         }]);
 
         assert_eq!(store.get(1).unwrap().glyph_properties_id, 3);
+    }
+
+    #[test]
+    fn profession_skill_for_exp_matches_cpp_parent_child_rules() {
+        let store = SkillLineStore::from_entries([
+            skill_line(356, 9, 0, 0),
+            skill_line(1_000, 9, 356, 4),
+            skill_line(1_001, 9, 356, 5),
+            skill_line(777, 11, 0, 0),
+            skill_line(2_000, 11, 777, 6),
+            skill_line(3_000, 7, 0, 0),
+        ]);
+
+        assert_eq!(store.profession_skill_for_exp_like_cpp(356, 0), 1_000);
+        assert_eq!(store.profession_skill_for_exp_like_cpp(356, 1), 1_001);
+        assert_eq!(store.profession_skill_for_exp_like_cpp(777, 2), 2_000);
+        assert_eq!(store.profession_skill_for_exp_like_cpp(1_000, 0), 0);
+        assert_eq!(store.profession_skill_for_exp_like_cpp(3_000, 0), 0);
+        assert_eq!(store.profession_skill_for_exp_like_cpp(999, 0), 0);
+    }
+
+    #[test]
+    fn profession_skill_for_negative_expansion_uses_current_expansion_like_cpp() {
+        let store =
+            SkillLineStore::from_entries([skill_line(356, 9, 0, 0), skill_line(1_002, 9, 356, 6)]);
+
+        assert_eq!(store.profession_skill_for_exp_like_cpp(356, -3), 1_002);
     }
 
     #[test]

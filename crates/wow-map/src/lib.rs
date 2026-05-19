@@ -6,6 +6,7 @@ pub mod manager;
 pub mod map;
 pub mod object_grid_loader;
 pub mod personal_phase;
+pub mod pool;
 pub mod spawn;
 
 use std::fmt;
@@ -34,6 +35,7 @@ pub use manager::{
 };
 pub use map::{
     AIRelocationPlan, ActiveObjectKind, AddToMapError, AddToMapOutcome,
+    CheckRespawnCompositeOutcomeLikeCpp, CheckRespawnLinkedRespawnGuardOutcomeLikeCpp,
     CreatureDelayedRelocationVisibilityPlan, CreatureRelocationVisibilityPlan,
     DelayedCreatureRelocationContext, DelayedPlayerRelocationContext,
     DelayedUnitRelocationCellPlan, DelayedUnitRelocationForCellsPlan, DelayedUnitRelocationPlan,
@@ -43,8 +45,9 @@ pub use map::{
     NearbyCellGuids, NearbyCellVisitCenter, NearbyCellVisitPlan, NoopGridLifecycle,
     NoopTerrainGridLoader, ObjectUpdatePlan, PlayerDelayedRelocationVisibilityPlan,
     PlayerRelocationVisibilityPlan, ProcessRelocationNotifiesOutcome, RelocationNotifyProcessPlan,
-    RemoveFromMapError, RemoveFromMapOutcome, ResetNotifyFlagsOutcome, TerrainGridLoader,
-    cell_from_grid_center, cell_from_world, is_grid_id_loaded,
+    RemoveFromMapError, RemoveFromMapOutcome, ResetNotifyFlagsOutcome, SpawnedPoolDataErrorLikeCpp,
+    SpawnedPoolDataLikeCpp, TerrainGridLoader, cell_from_grid_center, cell_from_world,
+    is_grid_id_loaded,
 };
 pub use object_grid_loader::{
     CorpseCellStore, CorpseGridObject, GridSpawnLoadFilter, LoadAllGridSpawns,
@@ -54,8 +57,21 @@ pub use personal_phase::{
     MultiPersonalPhaseTracker, PERSONAL_PHASE_DELETE_TIME_DEFAULT_MS, PersonalPhaseSpawns,
     PhaseRef, PhaseShift, PlayerPersonalPhasesTracker,
 };
+pub use pool::{
+    PoolDespawnObjectPlanLikeCpp, PoolDespawnPoolPlanLikeCpp, PoolGroupLikeCpp,
+    PoolInitForMapErrorKindLikeCpp, PoolInitForMapErrorLikeCpp, PoolInitForMapPlanLikeCpp,
+    PoolMemberKindLikeCpp, PoolMgrLikeCpp, PoolMgrPlanErrorLikeCpp, PoolMgrPlanSkipReasonLikeCpp,
+    PoolObjectLikeCpp, PoolRelationRemovalLikeCpp, PoolSpawnObjectActionLikeCpp,
+    PoolSpawnObjectPlanLikeCpp, PoolSpawnPoolPlanLikeCpp, PoolTemplateDataLikeCpp,
+    PoolTypedDespawnPlanLikeCpp, PoolTypedSpawnPlanLikeCpp,
+};
 pub use spawn::{
-    CellSpawnGuids, Difficulty, PersonalSpawnMapKey, SpawnData, SpawnGroupFlags,
+    AddRespawnInfoOutcomeLikeCpp, CellSpawnGuids, CheckRespawnOutcomeLikeCpp,
+    CheckRespawnSpawnGroupGuardOutcomeLikeCpp, Difficulty, LinkedRespawnLoadIssueKindLikeCpp,
+    LinkedRespawnLoadIssueLikeCpp, LinkedRespawnLoadReportLikeCpp, LinkedRespawnRowLikeCpp,
+    LinkedRespawnStoreLikeCpp, LinkedRespawnTypeLikeCpp, PersonalSpawnMapKey,
+    ProcessRespawnActionLikeCpp, RespawnInfoLikeCpp, RespawnStoreLikeCpp, SpawnData,
+    SpawnGridLoadStateLikeCpp, SpawnGroupActiveChange, SpawnGroupFlags, SpawnGroupRuntimeState,
     SpawnGroupTemplateData, SpawnId, SpawnMapKey, SpawnObjectType, SpawnPosition, SpawnStore,
 };
 

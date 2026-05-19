@@ -90,6 +90,7 @@ pub struct SessionResources {
     pub spell_item_enchantment_store: Option<Arc<wow_data::SpellItemEnchantmentStore>>,
     pub hotfix_blob_cache: Option<Arc<wow_data::HotfixBlobCache>>,
     pub skill_store: Option<Arc<wow_data::SkillStore>>,
+    pub skill_line_store: Option<Arc<wow_data::SkillLineStore>>,
     pub spell_store: Option<Arc<wow_data::SpellStore>>,
     pub spell_misc_store: Option<Arc<wow_data::SpellMiscStore>>,
     pub spell_range_store: Option<Arc<wow_data::SpellRangeStore>>,

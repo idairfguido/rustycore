@@ -80,6 +80,20 @@ mod tests {
     }
 
     #[test]
+    fn gameobjects_in_range_sql_uses_cpp_override_template_addon_priority() {
+        let sql = WorldStatements::SEL_GAMEOBJECTS_IN_RANGE.sql();
+        assert!(sql.contains("LEFT JOIN gameobject_template_addon gta ON gta.entry = g.id"));
+        assert!(sql.contains("LEFT JOIN gameobject_overrides goo ON goo.spawnId = g.guid"));
+        assert!(sql.contains("COALESCE(goo.flags, gta.flags, 0)"));
+        assert!(sql.contains("COALESCE(goo.faction, gta.faction, 0)"));
+        assert!(sql.contains(
+            "CASE WHEN goo.spawnId IS NOT NULL OR gta.entry IS NOT NULL THEN 1 ELSE 0 END"
+        ));
+        assert!(sql.find("goo.flags").unwrap() < sql.find("gta.flags").unwrap());
+        assert!(sql.find("goo.faction").unwrap() < sql.find("gta.faction").unwrap());
+    }
+
+    #[test]
     fn world_sql_contains_expected_tables() {
         assert!(
             WorldStatements::SEL_CREATURE_TEXT
