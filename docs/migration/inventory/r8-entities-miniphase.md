@@ -7,6 +7,12 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.423** Map bridge for Unit shared-vision `SetWorldObject` requests.
+-  Status: complete for the explicit request -> Map facade bridge only; review `APROBADO`; validation OK; committed locally; no push/install/restart.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Unit/Unit.cpp:6489-6509`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.cpp:910-916`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2557-2572`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2574-2594`.
+  Rust targets: `crates/wow-entities/src/lib.rs`, `crates/wow-map/src/map.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: `wow-entities` publicly reexports `UnitSharedVisionSetWorldObjectRequestLikeCpp`, and `Map::apply_unit_shared_vision_set_world_object_request_like_cpp` consumes that DTO by delegating to `Map::set_world_object_like_cpp(request.unit_guid, request.on)`. Ownership remains map-owned over canonical `map_objects` and `objects_to_switch`; missing/stale, not-in-world, and ignored non-unit outcomes remain the existing facade fallbacks without dummy records or queue creation. Focused wrapper tests cover enqueue+drain, opposite-toggle cancellation, and fallback/no-record creation. Remaining gaps stay live `Player::SetViewpoint` callsites, fanout/visibility/ObjectAccessor/AddToWorld/RemoveFromWorld/scripts/AI, session wiring, and full shared-vision runtime.
+
 - [x] **#NEXT.R8.ENTITIES.422** Unit shared-vision `SetWorldObject` request seam.
   Status: complete for Unit shared-vision SetWorldObject request seam only; review APROBADO; validation OK; committed locally; no push/install/restart.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Unit/Unit.cpp:6489-6509`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp:25344-25387`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.cpp:910-916`.

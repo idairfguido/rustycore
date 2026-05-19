@@ -249,7 +249,7 @@ pub use unit::{
     UNIT_DATA_RACE_BIT, UNIT_DATA_SEX_BIT, UNIT_DATA_STAND_STATE_BIT, UNIT_DATA_TARGET_BIT,
     UNIT_DATA_VIRTUAL_ITEMS_FIRST_BIT, UNIT_DATA_VIRTUAL_ITEMS_PARENT_BIT, Unit,
     UnitAttackContextLikeCpp, UnitAttackStartOutcome, UnitAttackStopOutcome, UnitDataUpdate,
-    UnitDataValues, UnitValuesUpdate,
+    UnitDataValues, UnitSharedVisionSetWorldObjectRequestLikeCpp, UnitValuesUpdate,
 };
 pub use unit_subsystems::{
     AURA_STATE_DEFENSIVE, AURA_STATE_ENRAGED, AURA_STATE_NONE, AURA_STATE_RAID_ENCOUNTER_2,
