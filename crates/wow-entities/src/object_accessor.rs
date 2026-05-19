@@ -5,8 +5,8 @@ use wow_core::ObjectGuid;
 use wow_core::guid::HighGuid;
 
 use crate::{
-    AreaTrigger, Conversation, Corpse, Creature, DynamicObject, GameObject, Item, Player,
-    PlayerInventoryStorage, SceneObject, WorldObject,
+    AreaTrigger, Conversation, Corpse, Creature, DynamicObject, GameObject, Item, Pet, Player,
+    PlayerInventoryStorage, SceneObject, Transport, WorldObject,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -189,8 +189,10 @@ enum MapObjectBody {
     Creature(Box<Creature>),
     DynamicObject(DynamicObject),
     GameObject(GameObject),
+    Pet(Box<Pet>),
     Player(Box<Player>),
     SceneObject(SceneObject),
+    Transport(Box<Transport>),
 }
 
 impl MapObjectRecord {
@@ -227,6 +229,14 @@ impl MapObjectRecord {
         })
     }
 
+    pub fn new_transport(transport: Transport) -> Result<Self, ObjectAccessorError> {
+        let record = Self::new(AccessorObjectKind::Transport, transport.world().clone())?;
+        Ok(Self {
+            kind: record.kind,
+            body: MapObjectBody::Transport(Box::new(transport)),
+        })
+    }
+
     pub fn new_creature(creature: Creature) -> Result<Self, ObjectAccessorError> {
         let record = Self::new(
             AccessorObjectKind::Creature,
@@ -235,6 +245,17 @@ impl MapObjectRecord {
         Ok(Self {
             kind: record.kind,
             body: MapObjectBody::Creature(Box::new(creature)),
+        })
+    }
+
+    pub fn new_pet(pet: Pet) -> Result<Self, ObjectAccessorError> {
+        let record = Self::new(
+            AccessorObjectKind::Pet,
+            pet.creature().unit().world().clone(),
+        )?;
+        Ok(Self {
+            kind: record.kind,
+            body: MapObjectBody::Pet(Box::new(pet)),
         })
     }
 
@@ -311,8 +332,10 @@ impl MapObjectRecord {
             MapObjectBody::Creature(creature) => creature.unit().world(),
             MapObjectBody::DynamicObject(dynamic_object) => dynamic_object.world(),
             MapObjectBody::GameObject(game_object) => game_object.world(),
+            MapObjectBody::Pet(pet) => pet.creature().unit().world(),
             MapObjectBody::Player(player) => player.unit().world(),
             MapObjectBody::SceneObject(scene_object) => scene_object.world(),
+            MapObjectBody::Transport(transport) => transport.world(),
         }
     }
 
@@ -325,8 +348,10 @@ impl MapObjectRecord {
             MapObjectBody::Creature(creature) => creature.unit_mut().world_mut(),
             MapObjectBody::DynamicObject(dynamic_object) => dynamic_object.world_mut(),
             MapObjectBody::GameObject(game_object) => game_object.world_mut(),
+            MapObjectBody::Pet(pet) => pet.creature_mut().unit_mut().world_mut(),
             MapObjectBody::Player(player) => player.unit_mut().world_mut(),
             MapObjectBody::SceneObject(scene_object) => scene_object.world_mut(),
+            MapObjectBody::Transport(transport) => transport.world_mut(),
         }
     }
 
@@ -403,6 +428,7 @@ impl MapObjectRecord {
     pub fn game_object(&self) -> Option<&GameObject> {
         match &self.body {
             MapObjectBody::GameObject(game_object) => Some(game_object),
+            MapObjectBody::Transport(transport) => Some(transport.game_object()),
             _ => None,
         }
     }
@@ -410,6 +436,21 @@ impl MapObjectRecord {
     pub fn game_object_mut(&mut self) -> Option<&mut GameObject> {
         match &mut self.body {
             MapObjectBody::GameObject(game_object) => Some(game_object),
+            MapObjectBody::Transport(transport) => Some(transport.game_object_mut()),
+            _ => None,
+        }
+    }
+
+    pub fn pet(&self) -> Option<&Pet> {
+        match &self.body {
+            MapObjectBody::Pet(pet) => Some(pet.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn pet_mut(&mut self) -> Option<&mut Pet> {
+        match &mut self.body {
+            MapObjectBody::Pet(pet) => Some(pet.as_mut()),
             _ => None,
         }
     }
@@ -442,6 +483,20 @@ impl MapObjectRecord {
         }
     }
 
+    pub fn transport(&self) -> Option<&Transport> {
+        match &self.body {
+            MapObjectBody::Transport(transport) => Some(transport.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn transport_mut(&mut self) -> Option<&mut Transport> {
+        match &mut self.body {
+            MapObjectBody::Transport(transport) => Some(transport.as_mut()),
+            _ => None,
+        }
+    }
+
     pub fn into_object(self) -> WorldObject {
         match self.body {
             MapObjectBody::WorldObject(object) => object,
@@ -451,8 +506,10 @@ impl MapObjectRecord {
             MapObjectBody::Creature(creature) => creature.unit().world().clone(),
             MapObjectBody::DynamicObject(dynamic_object) => dynamic_object.world().clone(),
             MapObjectBody::GameObject(game_object) => game_object.world().clone(),
+            MapObjectBody::Pet(pet) => pet.creature().unit().world().clone(),
             MapObjectBody::Player(player) => player.unit().world().clone(),
             MapObjectBody::SceneObject(scene_object) => scene_object.world().clone(),
+            MapObjectBody::Transport(transport) => transport.world().clone(),
         }
     }
 }
@@ -860,6 +917,19 @@ impl ObjectAccessor {
         self.get_map_object_from_source(context, source, guid, &[AccessorObjectKind::Pet])
     }
 
+    pub fn get_typed_pet_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a Pet>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        self.get_map_record_from_source(context, source, guid, &[AccessorObjectKind::Pet])?
+            .pet()
+    }
+
     pub fn get_creature_or_pet_or_vehicle_from_map_source<'a, Source>(
         &'a self,
         context: &WorldObject,
@@ -917,6 +987,19 @@ impl ObjectAccessor {
             ],
         )?
         .game_object()
+    }
+
+    pub fn get_typed_transport_from_map_source<'a, Source>(
+        &'a self,
+        context: &WorldObject,
+        source: &'a Source,
+        guid: ObjectGuid,
+    ) -> Option<&'a Transport>
+    where
+        Source: ObjectAccessorMapSource + ?Sized,
+    {
+        self.get_map_record_from_source(context, source, guid, &[AccessorObjectKind::Transport])?
+            .transport()
     }
 
     pub fn get_dynamic_object_from_map_source<'a, Source>(
@@ -2381,6 +2464,275 @@ mod tests {
                     corpse_guid,
                     TypeMask::CORPSE
                 )
+                .is_none()
+        );
+    }
+
+    fn typed_pet_record(
+        map_id: u32,
+        instance_id: u32,
+        counter: i64,
+        owner: ObjectGuid,
+        specialization: u16,
+    ) -> (ObjectGuid, MapObjectRecord) {
+        let mut pet = Pet::new(owner, crate::PetType::Hunter);
+        let pet_guid = guid(HighGuid::Pet, counter);
+        pet.creature_mut()
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(pet_guid);
+        pet.creature_mut()
+            .unit_mut()
+            .world_mut()
+            .set_map(map_id, instance_id)
+            .unwrap();
+        pet.creature_mut()
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::xyz(10.0, 20.0, 30.0));
+        pet.set_duration(12_345);
+        pet.set_specialization(specialization);
+
+        (pet_guid, MapObjectRecord::new_pet(pet).unwrap())
+    }
+
+    fn typed_transport_record(
+        map_id: u32,
+        instance_id: u32,
+        counter: i64,
+        passenger: ObjectGuid,
+    ) -> (ObjectGuid, MapObjectRecord) {
+        let mut transport = Transport::new();
+        let transport_guid = guid(HighGuid::Transport, counter);
+        transport.world_mut().object_mut().create(transport_guid);
+        transport.world_mut().set_map(map_id, instance_id).unwrap();
+        transport
+            .world_mut()
+            .relocate(Position::xyz(10.0, 20.0, 30.0));
+        transport.world_mut().object_mut().add_to_world();
+        transport
+            .game_object_mut()
+            .set_linked_trap_like_cpp(guid(HighGuid::GameObject, 9_901));
+        transport.set_movement_state(crate::TransportMovementState::WaitingOnPauseWaypoint);
+        transport.set_path_progress_ms(4_321);
+        transport.set_position_change_timer_ms(222);
+        assert!(transport.add_passenger(passenger));
+
+        (
+            transport_guid,
+            MapObjectRecord::new_transport(transport).unwrap(),
+        )
+    }
+
+    #[test]
+    fn typed_pet_map_source_preserves_body_and_generic_pet_lookup_like_cpp() {
+        let accessor = ObjectAccessor::default();
+        let context = world_object(HighGuid::Player, 530, 1, true);
+        let owner = guid(HighGuid::Player, 4_120);
+        let (pet_guid, pet_record) = typed_pet_record(530, 1, 4_121, owner, 77);
+        let mut source = TestMapSource {
+            map_id: 530,
+            instance_id: 1,
+            records: std::collections::HashMap::new(),
+        };
+        source.records.insert(pet_guid, pet_record);
+
+        let generic = accessor
+            .get_pet_from_map_source(&context, &source, pet_guid)
+            .unwrap();
+        assert_eq!(generic.guid(), pet_guid);
+
+        let pet = accessor
+            .get_typed_pet_from_map_source(&context, &source, pet_guid)
+            .unwrap();
+        assert_eq!(pet.owner_guid(), owner);
+        assert_eq!(pet.pet_type(), crate::PetType::Hunter);
+        assert_eq!(pet.specialization(), 77);
+        assert_eq!(pet.duration_ms(), 12_345);
+        assert_eq!(pet.creature().unit().world().guid(), pet_guid);
+    }
+
+    #[test]
+    fn typed_transport_map_source_preserves_body_and_embedded_gameobject_like_cpp() {
+        let accessor = ObjectAccessor::default();
+        let context = world_object(HighGuid::Player, 530, 1, true);
+        let passenger = guid(HighGuid::Player, 4_130);
+        let (transport_guid, transport_record) = typed_transport_record(530, 1, 4_131, passenger);
+        let mut source = TestMapSource {
+            map_id: 530,
+            instance_id: 1,
+            records: std::collections::HashMap::new(),
+        };
+        source.records.insert(transport_guid, transport_record);
+
+        let game_object = accessor
+            .get_typed_game_object_from_map_source(&context, &source, transport_guid)
+            .unwrap();
+        assert_eq!(game_object.world().guid(), transport_guid);
+        assert_eq!(
+            game_object.linked_trap_guid_like_cpp(),
+            guid(HighGuid::GameObject, 9_901)
+        );
+
+        let transport = accessor
+            .get_typed_transport_from_map_source(&context, &source, transport_guid)
+            .unwrap();
+        assert_eq!(
+            transport.movement_state(),
+            crate::TransportMovementState::WaitingOnPauseWaypoint
+        );
+        assert_eq!(transport.path_progress_ms(), 4_321);
+        assert_eq!(transport.position_change_timer_ms(), 222);
+        assert!(transport.passengers().contains(&passenger));
+        assert_eq!(transport.world().guid(), transport_guid);
+    }
+
+    #[test]
+    fn typed_pet_transport_helpers_reject_generic_worldobject_fallbacks_like_cpp() {
+        let accessor = ObjectAccessor::default();
+        let context = world_object(HighGuid::Player, 530, 1, true);
+        let generic_pet = world_object(HighGuid::Pet, 530, 1, true);
+        let generic_pet_guid = generic_pet.guid();
+        let generic_transport = world_object(HighGuid::Transport, 530, 1, true);
+        let generic_transport_guid = generic_transport.guid();
+        let mut source = TestMapSource {
+            map_id: 530,
+            instance_id: 1,
+            records: std::collections::HashMap::new(),
+        };
+        source.records.insert(
+            generic_pet_guid,
+            MapObjectRecord::new(AccessorObjectKind::Pet, generic_pet).unwrap(),
+        );
+        source.records.insert(
+            generic_transport_guid,
+            MapObjectRecord::new(AccessorObjectKind::Transport, generic_transport).unwrap(),
+        );
+
+        assert_eq!(
+            accessor
+                .get_pet_from_map_source(&context, &source, generic_pet_guid)
+                .unwrap()
+                .guid(),
+            generic_pet_guid
+        );
+        assert_eq!(
+            accessor
+                .get_world_object_from_map_source(&context, &source, generic_transport_guid)
+                .unwrap()
+                .guid(),
+            generic_transport_guid
+        );
+        assert_eq!(
+            accessor
+                .get_game_object_from_map_source(&context, &source, generic_transport_guid)
+                .unwrap()
+                .guid(),
+            generic_transport_guid
+        );
+        assert!(
+            accessor
+                .get_typed_pet_from_map_source(&context, &source, generic_pet_guid)
+                .is_none()
+        );
+        assert!(
+            accessor
+                .get_typed_transport_from_map_source(&context, &source, generic_transport_guid)
+                .is_none()
+        );
+        assert!(
+            accessor
+                .get_typed_game_object_from_map_source(&context, &source, generic_transport_guid)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn typed_pet_transport_lookup_does_not_cross_kinds_like_cpp() {
+        let accessor = ObjectAccessor::default();
+        let context = world_object(HighGuid::Player, 530, 1, true);
+        let owner = guid(HighGuid::Player, 4_140);
+        let (creature_guid, creature_record) = typed_creature_record(530, 1, 4_141, 60);
+        let (pet_guid, pet_record) = typed_pet_record(530, 1, 4_142, owner, 11);
+        let (game_object_guid, game_object_record) =
+            typed_game_object_record(530, 1, 4_143, guid(HighGuid::GameObject, 4_144));
+        let (transport_guid, transport_record) =
+            typed_transport_record(530, 1, 4_145, guid(HighGuid::Player, 4_146));
+        let mut source = TestMapSource {
+            map_id: 530,
+            instance_id: 1,
+            records: std::collections::HashMap::new(),
+        };
+        source.records.insert(creature_guid, creature_record);
+        source.records.insert(pet_guid, pet_record);
+        source.records.insert(game_object_guid, game_object_record);
+        source.records.insert(transport_guid, transport_record);
+
+        assert!(
+            accessor
+                .get_typed_pet_from_map_source(&context, &source, creature_guid)
+                .is_none()
+        );
+        assert!(
+            accessor
+                .get_typed_creature_from_map_source(&context, &source, pet_guid)
+                .is_none()
+        );
+        assert!(
+            accessor
+                .get_typed_transport_from_map_source(&context, &source, game_object_guid)
+                .is_none()
+        );
+        assert!(
+            accessor
+                .get_typed_transport_from_map_source(&context, &source, transport_guid)
+                .is_some()
+        );
+        assert!(
+            accessor
+                .get_typed_game_object_from_map_source(&context, &source, transport_guid)
+                .is_some()
+        );
+        assert!(
+            accessor
+                .get_typed_transport_from_map_source(&context, &source, game_object_guid)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn typed_transport_lookup_requires_source_and_context_same_map_like_cpp() {
+        let accessor = ObjectAccessor::default();
+        let context = world_object(HighGuid::Player, 530, 1, true);
+        let (transport_guid, transport_record) =
+            typed_transport_record(530, 1, 4_150, guid(HighGuid::Player, 4_151));
+        let mut source = TestMapSource {
+            map_id: 530,
+            instance_id: 1,
+            records: std::collections::HashMap::new(),
+        };
+        source.records.insert(transport_guid, transport_record);
+
+        source.map_id = 571;
+        assert!(
+            accessor
+                .get_typed_transport_from_map_source(&context, &source, transport_guid)
+                .is_none()
+        );
+        source.map_id = 530;
+        source.instance_id = 2;
+        assert!(
+            accessor
+                .get_typed_transport_from_map_source(&context, &source, transport_guid)
+                .is_none()
+        );
+        source.instance_id = 1;
+
+        let wrong_context = world_object(HighGuid::Player, 571, 1, true);
+        assert!(
+            accessor
+                .get_typed_transport_from_map_source(&wrong_context, &source, transport_guid)
                 .is_none()
         );
     }
