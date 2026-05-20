@@ -4931,57 +4931,71 @@ impl WorldSession {
             .get(&guid)
             .and_then(|state| state.go_type)
             .map(u32::from);
-        if go_type == Some(GAMEOBJECT_TYPE_FISHING_HOLE) {
-            self.mutate_canonical_gameobject_by_guid_like_cpp(guid, |gameobject| {
-                gameobject.add_use_like_cpp();
-            });
-        }
+        let represented_chest_restock_time_secs = self
+            .represented_gameobject_use_states
+            .get(&guid)
+            .and_then(|state| state.chest_restock_time_secs)
+            .unwrap_or_default();
+        let represented_personal_loot_uses_after_release = self
+            .represented_gameobject_use_states
+            .get(&guid)
+            .map(|state| state.personal_loot_uses.saturating_add(1))
+            .unwrap_or(1);
+        // C++ `FishingHole.MaxOpens` is still template evidence from the represented
+        // GO value; the use counter source-of-truth is canonical `GameObject::use_times`
+        // when the canonical GameObject can be mutated.
+        let represented_fishing_hole_max_opens = self
+            .represented_gameobject_use_states
+            .get(&guid)
+            .and_then(|state| state.fishing_hole_max_opens);
+        let canonical_fishing_hole_use_count_after_release = (go_type
+            == Some(GAMEOBJECT_TYPE_FISHING_HOLE))
+        .then(|| self.add_use_and_get_canonical_gameobject_use_count_like_cpp(guid))
+        .flatten();
+
+        let canonical_loot_state_request = match go_type {
+            Some(GAMEOBJECT_TYPE_FISHING_NODE) => Some((LootState::JustDeactivated, None, false)),
+            Some(GAMEOBJECT_TYPE_FISHING_HOLE) => {
+                let use_count_after_release = canonical_fishing_hole_use_count_after_release
+                    .unwrap_or(represented_personal_loot_uses_after_release);
+                let state = if represented_fishing_hole_max_opens
+                    .is_some_and(|max_opens| use_count_after_release >= max_opens)
+                {
+                    LootState::JustDeactivated
+                } else {
+                    LootState::Ready
+                };
+                Some((state, None, false))
+            }
+            Some(GAMEOBJECT_TYPE_GATHERING_NODE) if fully_looted => None,
+            _ if fully_looted => Some((LootState::JustDeactivated, None, false)),
+            _ => Some((LootState::Activated, Some(player_guid), true)),
+        };
+        let canonical_loot_state_updated = canonical_loot_state_request.is_some_and(
+            |(loot_state, unit_guid, shared_loot_is_changed_like_cpp)| {
+                self.set_canonical_gameobject_loot_state_like_cpp(
+                    guid,
+                    loot_state,
+                    unit_guid,
+                    represented_chest_restock_time_secs,
+                    shared_loot_is_changed_like_cpp,
+                )
+                .is_some_and(|outcome| {
+                    outcome.status == wow_map::map::GameObjectSetLootStateStatusLikeCpp::Updated
+                })
+            },
+        );
+
         let state = self
             .represented_gameobject_use_states
             .entry(guid)
             .or_default();
-        match go_type {
-            Some(GAMEOBJECT_TYPE_FISHING_NODE) => {
-                state.loot_state = Some(LootState::JustDeactivated);
-                state.loot_state_unit_guid = ObjectGuid::EMPTY;
-            }
-            Some(GAMEOBJECT_TYPE_FISHING_HOLE) => {
-                state.personal_loot_uses = state.personal_loot_uses.saturating_add(1);
-                state.loot_state = if state
-                    .fishing_hole_max_opens
-                    .is_some_and(|max_opens| state.personal_loot_uses >= max_opens)
-                {
-                    Some(LootState::JustDeactivated)
-                } else {
-                    Some(LootState::Ready)
-                };
-                state.loot_state_unit_guid = ObjectGuid::EMPTY;
-            }
-            Some(GAMEOBJECT_TYPE_GATHERING_NODE) if fully_looted => {}
-            Some(GAMEOBJECT_TYPE_CHEST)
-                if fully_looted
-                    && state.chest_consumable == Some(false)
-                    && state
-                        .chest_personal_loot_id
-                        .is_none_or(|loot_id| loot_id == 0)
-                    && state
-                        .chest_restock_time_secs
-                        .is_some_and(|restock_time| restock_time != 0) =>
-            {
-                let restock_secs = state.chest_restock_time_secs.unwrap_or_default();
-                state.loot_state = Some(LootState::NotReady);
-                state.loot_state_unit_guid = ObjectGuid::EMPTY;
-                state.chest_restock_until =
-                    Some(Instant::now() + Duration::from_secs(u64::from(restock_secs)));
-            }
-            _ if fully_looted => {
-                state.loot_state = Some(LootState::JustDeactivated);
-                state.loot_state_unit_guid = ObjectGuid::EMPTY;
-            }
-            _ => {
-                state.loot_state = Some(LootState::Activated);
-                state.loot_state_unit_guid = player_guid;
-                if go_type == Some(GAMEOBJECT_TYPE_CHEST)
+        if canonical_loot_state_updated {
+            if let Some((loot_state, unit_guid, _)) = canonical_loot_state_request {
+                state.loot_state = Some(loot_state);
+                state.loot_state_unit_guid = unit_guid.unwrap_or(ObjectGuid::EMPTY);
+                if loot_state == LootState::Activated
+                    && go_type == Some(GAMEOBJECT_TYPE_CHEST)
                     && state.chest_consumable == Some(false)
                     && state.chest_restock_until.is_none()
                     && state
@@ -4993,6 +5007,65 @@ impl WorldSession {
                         Some(Instant::now() + Duration::from_secs(u64::from(restock_secs)));
                 }
             }
+        } else {
+            match go_type {
+                Some(GAMEOBJECT_TYPE_FISHING_NODE) => {
+                    state.loot_state = Some(LootState::JustDeactivated);
+                    state.loot_state_unit_guid = ObjectGuid::EMPTY;
+                }
+                Some(GAMEOBJECT_TYPE_FISHING_HOLE) => {
+                    state.personal_loot_uses = state.personal_loot_uses.saturating_add(1);
+                    state.loot_state = if state
+                        .fishing_hole_max_opens
+                        .is_some_and(|max_opens| state.personal_loot_uses >= max_opens)
+                    {
+                        Some(LootState::JustDeactivated)
+                    } else {
+                        Some(LootState::Ready)
+                    };
+                    state.loot_state_unit_guid = ObjectGuid::EMPTY;
+                }
+                Some(GAMEOBJECT_TYPE_GATHERING_NODE) if fully_looted => {}
+                Some(GAMEOBJECT_TYPE_CHEST)
+                    if fully_looted
+                        && state.chest_consumable == Some(false)
+                        && state
+                            .chest_personal_loot_id
+                            .is_none_or(|loot_id| loot_id == 0)
+                        && state
+                            .chest_restock_time_secs
+                            .is_some_and(|restock_time| restock_time != 0) =>
+                {
+                    let restock_secs = state.chest_restock_time_secs.unwrap_or_default();
+                    state.loot_state = Some(LootState::NotReady);
+                    state.loot_state_unit_guid = ObjectGuid::EMPTY;
+                    state.chest_restock_until =
+                        Some(Instant::now() + Duration::from_secs(u64::from(restock_secs)));
+                }
+                _ if fully_looted => {
+                    state.loot_state = Some(LootState::JustDeactivated);
+                    state.loot_state_unit_guid = ObjectGuid::EMPTY;
+                }
+                _ => {
+                    state.loot_state = Some(LootState::Activated);
+                    state.loot_state_unit_guid = player_guid;
+                    if go_type == Some(GAMEOBJECT_TYPE_CHEST)
+                        && state.chest_consumable == Some(false)
+                        && state.chest_restock_until.is_none()
+                        && state
+                            .chest_restock_time_secs
+                            .is_some_and(|restock_time| restock_time != 0)
+                    {
+                        let restock_secs = state.chest_restock_time_secs.unwrap_or_default();
+                        state.chest_restock_until =
+                            Some(Instant::now() + Duration::from_secs(u64::from(restock_secs)));
+                    }
+                }
+            }
+        }
+        if canonical_loot_state_updated && go_type == Some(GAMEOBJECT_TYPE_FISHING_HOLE) {
+            state.personal_loot_uses = canonical_fishing_hole_use_count_after_release
+                .unwrap_or(represented_personal_loot_uses_after_release);
         }
         if go_type == Some(GAMEOBJECT_TYPE_GATHERING_NODE) {
             state.go_state = Some(GoState::Active);
@@ -13649,6 +13722,14 @@ mod tests {
             Position::ZERO,
             GAMEOBJECT_TYPE_CHEST as u8,
         );
+        session.record_represented_gameobject_chest_release_metadata_like_cpp(
+            loot_guid,
+            GameObjectLootSource {
+                chest_consumable: false,
+                chest_restock_time_secs: 7,
+                ..Default::default()
+            },
+        );
         session.loot_table.insert(
             loot_guid,
             CreatureLoot {
@@ -13679,6 +13760,9 @@ mod tests {
             Some(&GameObjectOwnedLoot::new(0, 1))
         );
         assert!(!canonical.is_fully_looted_like_cpp());
+        assert_eq!(canonical.loot_state(), LootState::Activated);
+        assert_eq!(canonical.loot_state_unit_guid(), player_guid);
+        assert!(canonical.restock_time() > 0);
         assert!(session.loot_table.contains_key(&loot_guid));
         assert_eq!(
             session
@@ -13710,6 +13794,14 @@ mod tests {
             Position::ZERO,
             GAMEOBJECT_TYPE_CHEST as u8,
         );
+        session.record_represented_gameobject_chest_release_metadata_like_cpp(
+            loot_guid,
+            GameObjectLootSource {
+                chest_consumable: false,
+                chest_restock_time_secs: 7,
+                ..Default::default()
+            },
+        );
         session.loot_table.insert(
             loot_guid,
             CreatureLoot {
@@ -13740,6 +13832,9 @@ mod tests {
             Some(&GameObjectOwnedLoot::default())
         );
         assert!(canonical.is_fully_looted_like_cpp());
+        assert_eq!(canonical.loot_state(), LootState::JustDeactivated);
+        assert_eq!(canonical.loot_state_unit_guid(), ObjectGuid::EMPTY);
+        assert_eq!(canonical.restock_time(), 0);
         assert!(!session.loot_table.contains_key(&loot_guid));
         assert_eq!(
             session
@@ -13749,6 +13844,39 @@ mod tests {
                 .loot_state,
             Some(LootState::JustDeactivated)
         );
+    }
+
+    #[test]
+    fn gameobject_loot_release_without_canonical_manager_keeps_represented_restock_fallback_like_cpp()
+     {
+        let mut session = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let loot_guid = test_gameobject_guid(19_135);
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            0,
+            loot_guid,
+            loot_guid.entry(),
+            Position::ZERO,
+            GAMEOBJECT_TYPE_CHEST as u8,
+        );
+        session.record_represented_gameobject_chest_release_metadata_like_cpp(
+            loot_guid,
+            GameObjectLootSource {
+                chest_consumable: false,
+                chest_restock_time_secs: 7,
+                ..Default::default()
+            },
+        );
+
+        session.apply_represented_gameobject_loot_release_like_cpp(loot_guid, player_guid, true);
+
+        let state = session
+            .represented_gameobject_use_states
+            .get(&loot_guid)
+            .unwrap();
+        assert_eq!(state.loot_state, Some(LootState::NotReady));
+        assert_eq!(state.loot_state_unit_guid, ObjectGuid::EMPTY);
+        assert!(state.chest_restock_until.is_some());
     }
 
     #[tokio::test]
@@ -13968,6 +14096,77 @@ mod tests {
             .get(&fishing_hole)
             .unwrap();
         assert_eq!(hole_state.personal_loot_uses, 1);
+        assert_eq!(hole_state.loot_state, Some(LootState::JustDeactivated));
+    }
+
+    #[tokio::test]
+    async fn gameobject_loot_release_fishing_hole_uses_canonical_use_count_when_represented_stale_like_cpp()
+     {
+        let (mut session, send_rx) = make_session_with_send();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let fishing_hole = test_gameobject_guid(19_136);
+        let mut game_object = make_canonical_gameobject_for_session(
+            &session,
+            fishing_hole,
+            GAMEOBJECT_TYPE_FISHING_HOLE as u8,
+        );
+        game_object.add_use_like_cpp();
+        attach_canonical_gameobject(&mut session, game_object);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_position_like_cpp(Position::ZERO);
+        session.set_active_loot_guid(fishing_hole);
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            0,
+            fishing_hole,
+            fishing_hole.entry(),
+            Position::ZERO,
+            GAMEOBJECT_TYPE_FISHING_HOLE as u8,
+        );
+        session.record_represented_fishing_hole_max_opens_like_cpp(fishing_hole, 2);
+        session.loot_table.insert(
+            fishing_hole,
+            CreatureLoot {
+                loot_guid: fishing_hole,
+                coins: 0,
+                unlooted_count: 1,
+                loot_type: LOOT_TYPE_FISHINGHOLE_LIKE_CPP,
+                dungeon_encounter_id: 0,
+                loot_method: 0,
+                loot_master: ObjectGuid::EMPTY,
+                round_robin_player: ObjectGuid::EMPTY,
+                player_ffa_items: Vec::new(),
+                players_looting: Vec::new(),
+                allowed_looters: Vec::new(),
+                items: vec![LootEntry {
+                    loot_list_id: 0,
+                    item_id: 25,
+                    quantity: 1,
+                    random_properties_id: 0,
+                    random_properties_seed: 0,
+                    item_context: 0,
+                    flags: LootEntryFlags::default(),
+                    allowed_looters: vec![player_guid],
+                    roll_winner: ObjectGuid::EMPTY,
+                    ffa_looted_by: Vec::new(),
+                    taken: false,
+                }],
+                looted_by_player: false,
+            },
+        );
+
+        session
+            .handle_loot_release(loot_release_packet(fishing_hole))
+            .await;
+
+        assert!(send_rx.try_recv().is_ok());
+        let canonical = canonical_gameobject_snapshot(&session, fishing_hole).unwrap();
+        assert_eq!(canonical.use_times(), 2);
+        assert_eq!(canonical.loot_state(), LootState::JustDeactivated);
+        let hole_state = session
+            .represented_gameobject_use_states
+            .get(&fishing_hole)
+            .unwrap();
+        assert_eq!(hole_state.personal_loot_uses, 2);
         assert_eq!(hole_state.loot_state, Some(LootState::JustDeactivated));
     }
 

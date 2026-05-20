@@ -3009,6 +3009,39 @@ impl WorldSession {
         })
     }
 
+    pub(crate) fn set_canonical_gameobject_loot_state_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        state: wow_entities::LootState,
+        unit_guid: Option<ObjectGuid>,
+        chest_restock_time_secs: u32,
+        shared_loot_is_changed_like_cpp: bool,
+    ) -> Option<wow_map::map::GameObjectSetLootStateOutcomeLikeCpp> {
+        let map_id = u32::from(self.player_map_id_like_cpp());
+        let game_time_secs = i64::try_from(wow_core::GameTime::now().as_secs()).unwrap_or(i64::MAX);
+        let manager = Arc::clone(self.canonical_map_manager.as_ref()?);
+        let mut manager = manager.lock().ok()?;
+        let managed = manager.find_map_mut(map_id, 0)?;
+        Some(managed.map_mut().set_gameobject_loot_state_like_cpp(
+            guid,
+            state,
+            unit_guid,
+            game_time_secs,
+            chest_restock_time_secs,
+            shared_loot_is_changed_like_cpp,
+        ))
+    }
+
+    pub(crate) fn add_use_and_get_canonical_gameobject_use_count_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+    ) -> Option<u32> {
+        self.mutate_canonical_gameobject_by_guid_like_cpp(guid, |gameobject| {
+            gameobject.add_use_like_cpp();
+            gameobject.use_times()
+        })
+    }
+
     fn object_id_visibility_conditions_met_like_cpp(
         &self,
         target: &WorldObject,

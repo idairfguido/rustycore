@@ -6,6 +6,11 @@
 ## Pending Review Tasks
 
 ## Closed Tasks
+- [x] **#NEXT.R8.ENTITIES.457** live GameObject loot-release caller consumes canonical `SetLootState` seam.
+  Status: represented-complete for this bounded caller-consumption seam; review `APROBADO`; CI `CI_OK`; validation OK; committed locally at `current #457 HEAD`; no push/install/restart.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/LootHandler.cpp:262-320`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:3683-3709`.
+  Rust targets: `crates/wow-world/src/handlers/loot.rs`, `crates/wow-world/src/session.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: represented `WorldSession::DoLootRelease`/`handle_loot_release` GameObject release now delegates to canonical `Map::set_gameobject_loot_state_like_cpp(...)` when the current-map typed GameObject exists, and synchronizes the represented session mirror only after canonical success. FishingHole increments canonical `GameObject::use_times` when available and compares that canonical count with represented `FishingHole.MaxOpens`; missing canonical manager/map/GameObject preserves the prior represented fallback including non-consumable chest restock evidence. Remaining gaps: no new real ObjectAccessor/session fanout, GO AI `OnLootRelease`, distance/owner filter completion, live loot storage ownership, scripts/DB, install/restart/push, or full GameObject loot runtime parity.
 - [x] **#NEXT.R8.ENTITIES.456** represented `GameObject::SetLootState` collision/restock map-owned caller seam.
   Status: represented-complete for this bounded facade/local evidence slice; review `APROBADO`; CI `CI_OK`; validation OK; committed locally at `current #456 HEAD`; no push/install/restart.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:3683-3709`.
