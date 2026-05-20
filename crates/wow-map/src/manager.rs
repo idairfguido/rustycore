@@ -18,7 +18,7 @@ use crate::map::{
     NoopTerrainGridLoader, PersonalPhaseTrackerUpdateSummaryLikeCpp,
     ProcessRelocationNotifiesOutcome, SceneObjectUpdateContextLikeCpp,
     SceneObjectsUpdateSummaryLikeCpp, ScriptScheduleProcessSummaryLikeCpp,
-    SendObjectUpdatesSummaryLikeCpp, TransportsUpdateSummaryLikeCpp,
+    SendObjectUpdatesSummaryLikeCpp, TransportsUpdateSummaryLikeCpp, WeatherUpdateSummaryLikeCpp,
 };
 use crate::spawn::Difficulty;
 use wow_core::GameTime;
@@ -167,6 +167,7 @@ pub struct ManagedMap {
     last_scene_objects_update_summary: SceneObjectsUpdateSummaryLikeCpp,
     last_send_object_updates_summary_like_cpp: SendObjectUpdatesSummaryLikeCpp,
     last_script_schedule_process_summary_like_cpp: ScriptScheduleProcessSummaryLikeCpp,
+    last_weather_update_summary_like_cpp: WeatherUpdateSummaryLikeCpp,
     last_personal_phase_tracker_update_summary: PersonalPhaseTrackerUpdateSummaryLikeCpp,
     last_live_move_list_drain_summary: LiveMoveListDrainSummaryLikeCpp,
     last_process_relocation_notifies_outcome_like_cpp: ProcessRelocationNotifiesOutcome,
@@ -214,6 +215,7 @@ impl ManagedMap {
             last_send_object_updates_summary_like_cpp: SendObjectUpdatesSummaryLikeCpp::default(),
             last_script_schedule_process_summary_like_cpp:
                 ScriptScheduleProcessSummaryLikeCpp::default(),
+            last_weather_update_summary_like_cpp: WeatherUpdateSummaryLikeCpp::default(),
             last_personal_phase_tracker_update_summary:
                 PersonalPhaseTrackerUpdateSummaryLikeCpp::default(),
             last_live_move_list_drain_summary: LiveMoveListDrainSummaryLikeCpp::default(),
@@ -317,6 +319,10 @@ impl ManagedMap {
         self.last_script_schedule_process_summary_like_cpp.clone()
     }
 
+    pub const fn last_weather_update_summary_like_cpp(&self) -> WeatherUpdateSummaryLikeCpp {
+        self.last_weather_update_summary_like_cpp
+    }
+
     pub fn last_live_move_list_drain_summary_like_cpp(&self) -> LiveMoveListDrainSummaryLikeCpp {
         self.last_live_move_list_drain_summary.clone()
     }
@@ -401,6 +407,12 @@ impl ManagedMap {
         self.last_script_schedule_process_summary_like_cpp = self
             .map
             .process_script_schedule_update_order_like_cpp(now_secs);
+        // C++ updates `_weatherUpdateTimer` immediately after script schedule and
+        // before `GetMultiPersonalPhaseTracker().Update(this, t_diff)`
+        // (`Map.cpp:777-798`). Rust represents only the map-owned timer and
+        // `_zoneDynamicInfo.DefaultWeather` update/reset seam; WeatherMgr, RNG,
+        // script hooks, player fanout, packets, DB and zone messages remain gaps.
+        self.last_weather_update_summary_like_cpp = self.map.update_weather_like_cpp(diff_ms);
         // C++ calls `GetMultiPersonalPhaseTracker().Update(this, t_diff)` after
         // SendObjectUpdates/scripts/weather and before later move/remove drains.
         // Rust consumes the existing map-owned tracker here as a represented seam
@@ -1450,8 +1462,7 @@ mod tests {
     }
 
     #[test]
-    fn map_manager_update_processes_script_schedule_between_send_updates_and_personal_phase_like_cpp()
-     {
+    fn map_manager_update_processes_weather_between_scripts_and_personal_phase_like_cpp() {
         let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
         manager.create_world_map(1, 0);
         let creature_guid = insert_creature_for_update(&mut manager, 4460101, true);
@@ -1468,6 +1479,7 @@ mod tests {
             );
             assert!(schedule.immediate_process.is_none());
             assert_eq!(map.represented_script_schedule_count_like_cpp(), 1);
+            map.register_represented_zone_default_weather_for_test(447);
             map.register_personal_phase_object_for_test(446, owner, creature_guid);
             map.mark_personal_phases_for_deletion_for_test(owner);
         }
@@ -1486,6 +1498,20 @@ mod tests {
                 .map()
                 .represented_script_schedule_count_like_cpp(),
             0
+        );
+        let weather_summary = managed_map.last_weather_update_summary_like_cpp();
+        assert!(weather_summary.timer_passed);
+        assert_eq!(weather_summary.timer_current_before, 0);
+        assert_eq!(weather_summary.timer_current_after_update, 60_000);
+        assert_eq!(weather_summary.timer_current_after_reset, 0);
+        assert_eq!(weather_summary.zones_seen, 1);
+        assert_eq!(weather_summary.default_weather_updated, 1);
+        assert_eq!(weather_summary.weather_update_call_diff_ms, Some(1_000));
+        assert_eq!(
+            managed_map
+                .map()
+                .represented_zone_default_weather_update_diffs_like_cpp(447),
+            Some([1_000].as_slice())
         );
         assert_eq!(
             managed_map.last_personal_phase_tracker_update_summary(),

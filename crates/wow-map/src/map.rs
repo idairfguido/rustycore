@@ -46,6 +46,7 @@ use wow_entities::{
 };
 
 const GRID_SLOT_COUNT: usize = (MAX_NUMBER_OF_GRIDS * MAX_NUMBER_OF_GRIDS) as usize;
+const WEATHER_UPDATE_INTERVAL_MS_LIKE_CPP: u32 = 1_000;
 
 #[derive(Clone, Copy)]
 struct CombatUnitSnapshotLikeCpp<'a> {
@@ -342,6 +343,83 @@ pub struct SendObjectUpdatesSummaryLikeCpp {
     /// Evidence that C++ `UpdateDataMapType` player fanout/packet send is still
     /// intentionally not represented by this seam.
     pub fanout_not_represented: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepresentedZoneDefaultWeatherLikeCpp {
+    update_call_diffs_ms: Vec<u32>,
+    next_update_returns_alive: bool,
+}
+
+impl Default for RepresentedZoneDefaultWeatherLikeCpp {
+    fn default() -> Self {
+        Self {
+            update_call_diffs_ms: Vec::new(),
+            next_update_returns_alive: true,
+        }
+    }
+}
+
+impl RepresentedZoneDefaultWeatherLikeCpp {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn update_call_diffs_ms(&self) -> &[u32] {
+        &self.update_call_diffs_ms
+    }
+
+    pub const fn next_update_returns_alive(&self) -> bool {
+        self.next_update_returns_alive
+    }
+
+    pub fn set_next_update_returns_alive(&mut self, alive: bool) {
+        self.next_update_returns_alive = alive;
+    }
+
+    fn update_like_cpp(&mut self, diff_ms: u32) -> bool {
+        self.update_call_diffs_ms.push(diff_ms);
+        let alive = self.next_update_returns_alive;
+        self.next_update_returns_alive = true;
+        alive
+    }
+}
+
+/// Represented durable subset of C++ `ZoneDynamicInfo` (`Map.cpp:72-73`).
+///
+/// `DefaultWeather` is map-owned and optional like the C++ unique pointer. This
+/// does not represent WeatherMgr creation, DB weather data, player counts,
+/// packet fanout, script callbacks, regeneration, or zone messaging.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepresentedZoneDynamicInfoLikeCpp {
+    pub default_weather: Option<RepresentedZoneDefaultWeatherLikeCpp>,
+    pub weather_id: u32,
+    pub intensity: f32,
+}
+
+impl Default for RepresentedZoneDynamicInfoLikeCpp {
+    fn default() -> Self {
+        Self {
+            default_weather: None,
+            weather_id: 0,
+            intensity: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct WeatherUpdateSummaryLikeCpp {
+    pub interval_ms: u32,
+    pub timer_current_before: u32,
+    pub timer_current_after_update: u32,
+    pub timer_current_after_reset: u32,
+    pub timer_passed: bool,
+    pub zones_seen: usize,
+    pub zones_without_default_weather: usize,
+    pub default_weather_updated: usize,
+    pub default_weather_removed: usize,
+    pub weather_update_call_diff_ms: Option<u32>,
+    pub script_update_regeneration_fanout_not_represented: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1311,6 +1389,19 @@ pub struct Map<Terrain = NoopTerrainGridLoader, Lifecycle = NoopGridLifecycle> {
     script_schedule_like_cpp: BTreeMap<i64, Vec<RepresentedScriptScheduleActionLikeCpp>>,
     script_schedule_lock_like_cpp: bool,
     represented_executed_script_actions_like_cpp: Vec<RepresentedScriptScheduleActionLikeCpp>,
+    /// Map-owned represented C++ `_zoneDynamicInfo` plus `_weatherUpdateTimer`.
+    ///
+    /// Source-of-truth is this `Map` instance. The represented zone map is only
+    /// created by explicit control/test helpers; absence is a no-op and does not
+    /// synthesize `WeatherMgr` data. Timer semantics mirror `IntervalTimer`:
+    /// accumulate diff, pass on `>= interval`, reset with modulo to preserve
+    /// overshoot. The weather seam records `Weather::Update(interval)` evidence
+    /// and drops only `DefaultWeather` when represented update returns false.
+    /// It does not run regeneration/RNG, packet fanout, world zone messages,
+    /// script manager hooks, DB lookups, or player-count checks.
+    zone_dynamic_info_like_cpp: BTreeMap<u32, RepresentedZoneDynamicInfoLikeCpp>,
+    weather_update_timer_current_ms_like_cpp: u32,
+    weather_update_timer_interval_ms_like_cpp: u32,
     /// C++ `Map::_guidGenerators` (`Map.h:789-791`), lazy initialized by
     /// `Map::GetGuidSequenceGenerator` (`Map.cpp:2505-2511`). This stores only
     /// map-owned sequence counters; callers must compose full ObjectGuids with
@@ -1397,6 +1488,9 @@ where
             script_schedule_like_cpp: BTreeMap::new(),
             script_schedule_lock_like_cpp: false,
             represented_executed_script_actions_like_cpp: Vec::new(),
+            zone_dynamic_info_like_cpp: BTreeMap::new(),
+            weather_update_timer_current_ms_like_cpp: 0,
+            weather_update_timer_interval_ms_like_cpp: WEATHER_UPDATE_INTERVAL_MS_LIKE_CPP,
             guid_generators: HashMap::new(),
             creature_level_rng_like_cpp: StdRng::from_entropy(),
         }
@@ -2715,6 +2809,109 @@ where
     #[cfg(test)]
     fn set_script_schedule_lock_for_test(&mut self, locked: bool) {
         self.script_schedule_lock_like_cpp = locked;
+    }
+
+    pub const fn weather_update_timer_current_ms_like_cpp(&self) -> u32 {
+        self.weather_update_timer_current_ms_like_cpp
+    }
+
+    pub const fn weather_update_timer_interval_ms_like_cpp(&self) -> u32 {
+        self.weather_update_timer_interval_ms_like_cpp
+    }
+
+    pub fn represented_zone_dynamic_info_like_cpp(
+        &self,
+        zone_id: u32,
+    ) -> Option<&RepresentedZoneDynamicInfoLikeCpp> {
+        self.zone_dynamic_info_like_cpp.get(&zone_id)
+    }
+
+    pub fn represented_zone_default_weather_update_diffs_like_cpp(
+        &self,
+        zone_id: u32,
+    ) -> Option<&[u32]> {
+        self.zone_dynamic_info_like_cpp
+            .get(&zone_id)?
+            .default_weather
+            .as_ref()
+            .map(RepresentedZoneDefaultWeatherLikeCpp::update_call_diffs_ms)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn register_represented_zone_default_weather_for_test(&mut self, zone_id: u32) {
+        self.zone_dynamic_info_like_cpp
+            .entry(zone_id)
+            .or_default()
+            .default_weather = Some(RepresentedZoneDefaultWeatherLikeCpp::new());
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_represented_zone_default_weather_next_update_alive_for_test(
+        &mut self,
+        zone_id: u32,
+        alive: bool,
+    ) -> bool {
+        let Some(weather) = self
+            .zone_dynamic_info_like_cpp
+            .get_mut(&zone_id)
+            .and_then(|zone| zone.default_weather.as_mut())
+        else {
+            return false;
+        };
+        weather.set_next_update_returns_alive(alive);
+        true
+    }
+
+    /// Represented C++ `_weatherUpdateTimer` / `_zoneDynamicInfo.DefaultWeather`
+    /// step from `Map::Update` (`Map.cpp:777-798`).
+    ///
+    /// Timer semantics mirror `IntervalTimer` (`Timer.h:62-87`): update adds the
+    /// diff, `Passed()` is `current >= interval`, and `Reset()` keeps overshoot via
+    /// modulo. When passed, existing represented zones are iterated and only zones
+    /// with `DefaultWeather` call represented `Weather::Update(interval)`. A false
+    /// represented return removes only that optional weather pointer like C++
+    /// `DefaultWeather.reset()`. Weather regeneration/RNG, `UpdateWeather`, player
+    /// discovery/fanout, `sWorld->SendZoneMessage`, `sScriptMgr` hooks, DB and
+    /// WeatherMgr runtime are explicit gaps surfaced in the summary flag.
+    pub fn update_weather_like_cpp(&mut self, diff_ms: u32) -> WeatherUpdateSummaryLikeCpp {
+        let interval_ms = self.weather_update_timer_interval_ms_like_cpp;
+        let timer_current_before = self.weather_update_timer_current_ms_like_cpp;
+        self.weather_update_timer_current_ms_like_cpp = self
+            .weather_update_timer_current_ms_like_cpp
+            .saturating_add(diff_ms);
+        let timer_current_after_update = self.weather_update_timer_current_ms_like_cpp;
+        let timer_passed = timer_current_after_update >= interval_ms;
+        let mut summary = WeatherUpdateSummaryLikeCpp {
+            interval_ms,
+            timer_current_before,
+            timer_current_after_update,
+            timer_current_after_reset: timer_current_after_update,
+            timer_passed,
+            script_update_regeneration_fanout_not_represented: true,
+            ..Default::default()
+        };
+
+        if !timer_passed {
+            return summary;
+        }
+
+        summary.zones_seen = self.zone_dynamic_info_like_cpp.len();
+        for zone_info in self.zone_dynamic_info_like_cpp.values_mut() {
+            let Some(default_weather) = zone_info.default_weather.as_mut() else {
+                summary.zones_without_default_weather += 1;
+                continue;
+            };
+            summary.default_weather_updated += 1;
+            summary.weather_update_call_diff_ms = Some(interval_ms);
+            if !default_weather.update_like_cpp(interval_ms) {
+                zone_info.default_weather = None;
+                summary.default_weather_removed += 1;
+            }
+        }
+
+        self.weather_update_timer_current_ms_like_cpp %= interval_ms;
+        summary.timer_current_after_reset = self.weather_update_timer_current_ms_like_cpp;
+        summary
     }
 
     /// C++ `GetMultiPersonalPhaseTracker().Update(this, t_diff)` represented on `Map`.
@@ -8748,6 +8945,86 @@ mod tests {
         let summary = map.process_script_schedule_update_order_like_cpp(300);
         assert_eq!(summary.processed_actions, vec![outcome.scheduled]);
         assert_eq!(summary.remaining, 0);
+    }
+
+    #[test]
+    fn weather_timer_not_passed_does_not_call_default_weather_like_cpp() {
+        let mut map = Map::new(1, 0, 0, 60_000);
+        map.register_represented_zone_default_weather_for_test(44701);
+
+        let summary = map.update_weather_like_cpp(999);
+
+        assert_eq!(summary.interval_ms, 1_000);
+        assert_eq!(summary.timer_current_before, 0);
+        assert_eq!(summary.timer_current_after_update, 999);
+        assert_eq!(summary.timer_current_after_reset, 999);
+        assert!(!summary.timer_passed);
+        assert_eq!(summary.zones_seen, 0);
+        assert_eq!(summary.default_weather_updated, 0);
+        assert_eq!(map.weather_update_timer_current_ms_like_cpp(), 999);
+        assert_eq!(
+            map.represented_zone_default_weather_update_diffs_like_cpp(44701),
+            Some([].as_slice())
+        );
+    }
+
+    #[test]
+    fn weather_timer_passed_exact_interval_calls_default_weather_with_interval_like_cpp() {
+        let mut map = Map::new(1, 0, 0, 60_000);
+        map.register_represented_zone_default_weather_for_test(44702);
+
+        let summary = map.update_weather_like_cpp(1_000);
+
+        assert!(summary.timer_passed);
+        assert_eq!(summary.timer_current_before, 0);
+        assert_eq!(summary.timer_current_after_update, 1_000);
+        assert_eq!(summary.timer_current_after_reset, 0);
+        assert_eq!(summary.zones_seen, 1);
+        assert_eq!(summary.default_weather_updated, 1);
+        assert_eq!(summary.default_weather_removed, 0);
+        assert_eq!(summary.weather_update_call_diff_ms, Some(1_000));
+        assert!(summary.script_update_regeneration_fanout_not_represented);
+        assert_eq!(map.weather_update_timer_current_ms_like_cpp(), 0);
+        assert_eq!(
+            map.represented_zone_default_weather_update_diffs_like_cpp(44702),
+            Some([1_000].as_slice())
+        );
+    }
+
+    #[test]
+    fn weather_timer_overshoot_reset_preserves_modulo_like_cpp() {
+        let mut map = Map::new(1, 0, 0, 60_000);
+        map.register_represented_zone_default_weather_for_test(44703);
+
+        let summary = map.update_weather_like_cpp(2_500);
+
+        assert!(summary.timer_passed);
+        assert_eq!(summary.timer_current_after_update, 2_500);
+        assert_eq!(summary.timer_current_after_reset, 500);
+        assert_eq!(map.weather_update_timer_current_ms_like_cpp(), 500);
+        assert_eq!(summary.default_weather_updated, 1);
+        assert_eq!(
+            map.represented_zone_default_weather_update_diffs_like_cpp(44703),
+            Some([1_000].as_slice())
+        );
+    }
+
+    #[test]
+    fn weather_update_false_return_resets_default_weather_like_cpp() {
+        let mut map = Map::new(1, 0, 0, 60_000);
+        map.register_represented_zone_default_weather_for_test(44704);
+        assert!(map.set_represented_zone_default_weather_next_update_alive_for_test(44704, false));
+
+        let summary = map.update_weather_like_cpp(1_000);
+
+        assert!(summary.timer_passed);
+        assert_eq!(summary.default_weather_updated, 1);
+        assert_eq!(summary.default_weather_removed, 1);
+        assert!(
+            map.represented_zone_dynamic_info_like_cpp(44704)
+                .and_then(|zone| zone.default_weather.as_ref())
+                .is_none()
+        );
     }
 
     #[derive(Debug, Clone, Copy, PartialEq)]
