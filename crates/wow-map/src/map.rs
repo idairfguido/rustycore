@@ -1226,6 +1226,28 @@ pub struct Map<Terrain = NoopTerrainGridLoader, Lifecycle = NoopGridLifecycle> {
     /// before `objects_to_remove` (`Map.cpp:2574-2594`). Session/ObjectAccessor/DB
     /// caches must not reconstruct or drain it.
     objects_to_switch: HashMap<ObjectGuid, bool>,
+    /// Map-owned delayed cell/grid movement queues matching C++
+    /// `_creaturesToMove`, `_gameObjectsToMove`, `_dynamicObjectsToMove`, and
+    /// `_areaTriggersToMove` (`Map.h:566-579`, `Map.cpp:1163-1416`).
+    ///
+    /// `map_objects` remains the source-of-truth; these vectors preserve the
+    /// per-family delayed move-list order and the pending maps store only the
+    /// C++-like `_moveState`/`_newPosition` derivative. Future callers enqueue
+    /// through `Map::add_*_to_move_list_like_cpp`; only `Map` drains and mutates
+    /// canonical cell membership/positions. Session/ObjectAccessor/DB caches must
+    /// not drain or reconstruct these queues.
+    creatures_to_move: Vec<ObjectGuid>,
+    gameobjects_to_move: Vec<ObjectGuid>,
+    dynamic_objects_to_move: Vec<ObjectGuid>,
+    area_triggers_to_move: Vec<ObjectGuid>,
+    creature_move_states: HashMap<ObjectGuid, PendingCellMoveLikeCpp>,
+    gameobject_move_states: HashMap<ObjectGuid, PendingCellMoveLikeCpp>,
+    dynamic_object_move_states: HashMap<ObjectGuid, PendingCellMoveLikeCpp>,
+    area_trigger_move_states: HashMap<ObjectGuid, PendingCellMoveLikeCpp>,
+    creature_move_lock: bool,
+    gameobject_move_lock: bool,
+    dynamic_object_move_lock: bool,
+    area_trigger_move_lock: bool,
     /// C++ `Map::_guidGenerators` (`Map.h:789-791`), lazy initialized by
     /// `Map::GetGuidSequenceGenerator` (`Map.cpp:2505-2511`). This stores only
     /// map-owned sequence counters; callers must compose full ObjectGuids with
@@ -1297,6 +1319,18 @@ where
             map_objects: HashMap::new(),
             objects_to_remove: HashSet::new(),
             objects_to_switch: HashMap::new(),
+            creatures_to_move: Vec::new(),
+            gameobjects_to_move: Vec::new(),
+            dynamic_objects_to_move: Vec::new(),
+            area_triggers_to_move: Vec::new(),
+            creature_move_states: HashMap::new(),
+            gameobject_move_states: HashMap::new(),
+            dynamic_object_move_states: HashMap::new(),
+            area_trigger_move_states: HashMap::new(),
+            creature_move_lock: false,
+            gameobject_move_lock: false,
+            dynamic_object_move_lock: false,
+            area_trigger_move_lock: false,
             guid_generators: HashMap::new(),
             creature_level_rng_like_cpp: StdRng::from_entropy(),
         }
@@ -5479,7 +5513,7 @@ where
             object_is_world_object,
             guid,
         );
-        debug_assert!(removed, "relocated object should have been in its old cell");
+        let _removed_from_old_cell = removed;
         {
             let ngrid = self
                 .get_ngrid_mut(new_grid)
@@ -6077,6 +6111,374 @@ where
         plan
     }
 
+    /// C++ `Map::AddCreatureToMoveList` (`Map.cpp:1163-1176`) seam.
+    pub fn add_creature_to_move_list_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        position: Position,
+    ) -> AddObjectToMoveListOutcomeLikeCpp {
+        self.add_to_move_list_like_cpp(MapObjectMoveListFamilyLikeCpp::Creature, guid, position)
+    }
+
+    /// C++ `Map::RemoveCreatureFromMoveList` (`Map.cpp:1178-1187`) seam.
+    pub fn remove_creature_from_move_list_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+    ) -> RemoveObjectFromMoveListOutcomeLikeCpp {
+        self.remove_from_move_list_like_cpp(MapObjectMoveListFamilyLikeCpp::Creature, guid)
+    }
+
+    /// C++ `Map::AddGameObjectToMoveList` (`Map.cpp:1189-1202`) seam.
+    pub fn add_game_object_to_move_list_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        position: Position,
+    ) -> AddObjectToMoveListOutcomeLikeCpp {
+        self.add_to_move_list_like_cpp(MapObjectMoveListFamilyLikeCpp::GameObject, guid, position)
+    }
+
+    /// C++ `Map::RemoveGameObjectFromMoveList` (`Map.cpp:1204-1213`) seam.
+    pub fn remove_game_object_from_move_list_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+    ) -> RemoveObjectFromMoveListOutcomeLikeCpp {
+        self.remove_from_move_list_like_cpp(MapObjectMoveListFamilyLikeCpp::GameObject, guid)
+    }
+
+    /// C++ `Map::AddDynamicObjectToMoveList` (`Map.cpp:1215-1226`) seam.
+    pub fn add_dynamic_object_to_move_list_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        position: Position,
+    ) -> AddObjectToMoveListOutcomeLikeCpp {
+        self.add_to_move_list_like_cpp(
+            MapObjectMoveListFamilyLikeCpp::DynamicObject,
+            guid,
+            position,
+        )
+    }
+
+    /// C++ `Map::RemoveDynamicObjectFromMoveList` (`Map.cpp:1228-1237`) seam.
+    pub fn remove_dynamic_object_from_move_list_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+    ) -> RemoveObjectFromMoveListOutcomeLikeCpp {
+        self.remove_from_move_list_like_cpp(MapObjectMoveListFamilyLikeCpp::DynamicObject, guid)
+    }
+
+    /// C++ `Map::AddAreaTriggerToMoveList` (`Map.h:566-579`, `Map.cpp:1163-1237`) seam.
+    pub fn add_area_trigger_to_move_list_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        position: Position,
+    ) -> AddObjectToMoveListOutcomeLikeCpp {
+        self.add_to_move_list_like_cpp(MapObjectMoveListFamilyLikeCpp::AreaTrigger, guid, position)
+    }
+
+    /// C++ `Map::RemoveAreaTriggerFromMoveList` (`Map.h:566-579`, `Map.cpp:1163-1237`) seam.
+    pub fn remove_area_trigger_from_move_list_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+    ) -> RemoveObjectFromMoveListOutcomeLikeCpp {
+        self.remove_from_move_list_like_cpp(MapObjectMoveListFamilyLikeCpp::AreaTrigger, guid)
+    }
+
+    pub fn move_all_creatures_in_move_list_like_cpp(&mut self) -> MoveListDrainSummaryLikeCpp {
+        self.drain_move_list_like_cpp(MapObjectMoveListFamilyLikeCpp::Creature)
+    }
+
+    pub fn move_all_game_objects_in_move_list_like_cpp(&mut self) -> MoveListDrainSummaryLikeCpp {
+        self.drain_move_list_like_cpp(MapObjectMoveListFamilyLikeCpp::GameObject)
+    }
+
+    pub fn move_all_dynamic_objects_in_move_list_like_cpp(
+        &mut self,
+    ) -> MoveListDrainSummaryLikeCpp {
+        self.drain_move_list_like_cpp(MapObjectMoveListFamilyLikeCpp::DynamicObject)
+    }
+
+    pub fn move_all_area_triggers_in_move_list_like_cpp(&mut self) -> MoveListDrainSummaryLikeCpp {
+        self.drain_move_list_like_cpp(MapObjectMoveListFamilyLikeCpp::AreaTrigger)
+    }
+
+    /// C++ `Map::UnloadAll` clears only `_creaturesToMove` and
+    /// `_gameObjectsToMove` before calling `UnloadGrid(grid, true)`
+    /// (`Map.cpp:1646-1651`). It does not drain or relocate any move-list, and
+    /// it does not clear AreaTrigger/DynamicObject delayed moves in that branch.
+    ///
+    /// Rust has no broader `UnloadAll` entry point in this seam yet; callers
+    /// modeling that exact C++ pre-loop cleanup may invoke this helper before
+    /// repeatedly calling `unload_grid_at(..., true)`.
+    pub fn clear_unload_all_delayed_moves_like_cpp(&mut self) {
+        self.creatures_to_move.clear();
+        self.gameobjects_to_move.clear();
+        self.creature_move_states.clear();
+        self.gameobject_move_states.clear();
+    }
+
+    pub fn pending_cell_move_like_cpp(
+        &self,
+        family: MapObjectMoveListFamilyLikeCpp,
+        guid: ObjectGuid,
+    ) -> Option<PendingCellMoveLikeCpp> {
+        match family {
+            MapObjectMoveListFamilyLikeCpp::Creature => self.creature_move_states.get(&guid),
+            MapObjectMoveListFamilyLikeCpp::GameObject => self.gameobject_move_states.get(&guid),
+            MapObjectMoveListFamilyLikeCpp::DynamicObject => {
+                self.dynamic_object_move_states.get(&guid)
+            }
+            MapObjectMoveListFamilyLikeCpp::AreaTrigger => self.area_trigger_move_states.get(&guid),
+        }
+        .copied()
+    }
+
+    pub fn move_list_len_like_cpp(&self, family: MapObjectMoveListFamilyLikeCpp) -> usize {
+        match family {
+            MapObjectMoveListFamilyLikeCpp::Creature => self.creatures_to_move.len(),
+            MapObjectMoveListFamilyLikeCpp::GameObject => self.gameobjects_to_move.len(),
+            MapObjectMoveListFamilyLikeCpp::DynamicObject => self.dynamic_objects_to_move.len(),
+            MapObjectMoveListFamilyLikeCpp::AreaTrigger => self.area_triggers_to_move.len(),
+        }
+    }
+
+    fn add_to_move_list_like_cpp(
+        &mut self,
+        family: MapObjectMoveListFamilyLikeCpp,
+        guid: ObjectGuid,
+        position: Position,
+    ) -> AddObjectToMoveListOutcomeLikeCpp {
+        if self.move_list_locked_like_cpp(family) {
+            return AddObjectToMoveListOutcomeLikeCpp::LockedIgnored;
+        }
+        let Some(record) = self.map_object_record(guid) else {
+            return AddObjectToMoveListOutcomeLikeCpp::MissingOrStale;
+        };
+        let actual = record.kind();
+        if !move_list_family_accepts_kind_like_cpp(family, actual) {
+            return AddObjectToMoveListOutcomeLikeCpp::WrongKind { actual };
+        }
+
+        let pending = PendingCellMoveLikeCpp {
+            state: MapObjectCellMoveStateLikeCpp::Active,
+            new_position: position,
+        };
+        match family {
+            MapObjectMoveListFamilyLikeCpp::Creature => {
+                let existed = self.creature_move_states.insert(guid, pending).is_some();
+                if !existed {
+                    self.creatures_to_move.push(guid);
+                }
+                if existed {
+                    AddObjectToMoveListOutcomeLikeCpp::UpdatedExisting
+                } else {
+                    AddObjectToMoveListOutcomeLikeCpp::Queued
+                }
+            }
+            MapObjectMoveListFamilyLikeCpp::GameObject => {
+                let existed = self.gameobject_move_states.insert(guid, pending).is_some();
+                if !existed {
+                    self.gameobjects_to_move.push(guid);
+                }
+                if existed {
+                    AddObjectToMoveListOutcomeLikeCpp::UpdatedExisting
+                } else {
+                    AddObjectToMoveListOutcomeLikeCpp::Queued
+                }
+            }
+            MapObjectMoveListFamilyLikeCpp::DynamicObject => {
+                let existed = self
+                    .dynamic_object_move_states
+                    .insert(guid, pending)
+                    .is_some();
+                if !existed {
+                    self.dynamic_objects_to_move.push(guid);
+                }
+                if existed {
+                    AddObjectToMoveListOutcomeLikeCpp::UpdatedExisting
+                } else {
+                    AddObjectToMoveListOutcomeLikeCpp::Queued
+                }
+            }
+            MapObjectMoveListFamilyLikeCpp::AreaTrigger => {
+                let existed = self
+                    .area_trigger_move_states
+                    .insert(guid, pending)
+                    .is_some();
+                if !existed {
+                    self.area_triggers_to_move.push(guid);
+                }
+                if existed {
+                    AddObjectToMoveListOutcomeLikeCpp::UpdatedExisting
+                } else {
+                    AddObjectToMoveListOutcomeLikeCpp::Queued
+                }
+            }
+        }
+    }
+
+    fn remove_from_move_list_like_cpp(
+        &mut self,
+        family: MapObjectMoveListFamilyLikeCpp,
+        guid: ObjectGuid,
+    ) -> RemoveObjectFromMoveListOutcomeLikeCpp {
+        if self.move_list_locked_like_cpp(family) {
+            return RemoveObjectFromMoveListOutcomeLikeCpp::LockedIgnored;
+        }
+        let Some(record) = self.map_object_record(guid) else {
+            return RemoveObjectFromMoveListOutcomeLikeCpp::MissingOrStale;
+        };
+        let actual = record.kind();
+        if !move_list_family_accepts_kind_like_cpp(family, actual) {
+            return RemoveObjectFromMoveListOutcomeLikeCpp::WrongKind { actual };
+        }
+        let state = match family {
+            MapObjectMoveListFamilyLikeCpp::Creature => self.creature_move_states.get_mut(&guid),
+            MapObjectMoveListFamilyLikeCpp::GameObject => {
+                self.gameobject_move_states.get_mut(&guid)
+            }
+            MapObjectMoveListFamilyLikeCpp::DynamicObject => {
+                self.dynamic_object_move_states.get_mut(&guid)
+            }
+            MapObjectMoveListFamilyLikeCpp::AreaTrigger => {
+                self.area_trigger_move_states.get_mut(&guid)
+            }
+        };
+        let Some(pending) = state else {
+            return RemoveObjectFromMoveListOutcomeLikeCpp::NotQueued;
+        };
+        if pending.state == MapObjectCellMoveStateLikeCpp::Active {
+            pending.state = MapObjectCellMoveStateLikeCpp::Inactive;
+            RemoveObjectFromMoveListOutcomeLikeCpp::MarkedInactive
+        } else {
+            RemoveObjectFromMoveListOutcomeLikeCpp::AlreadyInactive
+        }
+    }
+
+    fn move_list_locked_like_cpp(&self, family: MapObjectMoveListFamilyLikeCpp) -> bool {
+        match family {
+            MapObjectMoveListFamilyLikeCpp::Creature => self.creature_move_lock,
+            MapObjectMoveListFamilyLikeCpp::GameObject => self.gameobject_move_lock,
+            MapObjectMoveListFamilyLikeCpp::DynamicObject => self.dynamic_object_move_lock,
+            MapObjectMoveListFamilyLikeCpp::AreaTrigger => self.area_trigger_move_lock,
+        }
+    }
+
+    fn set_move_list_lock_like_cpp(
+        &mut self,
+        family: MapObjectMoveListFamilyLikeCpp,
+        locked: bool,
+    ) {
+        match family {
+            MapObjectMoveListFamilyLikeCpp::Creature => self.creature_move_lock = locked,
+            MapObjectMoveListFamilyLikeCpp::GameObject => self.gameobject_move_lock = locked,
+            MapObjectMoveListFamilyLikeCpp::DynamicObject => self.dynamic_object_move_lock = locked,
+            MapObjectMoveListFamilyLikeCpp::AreaTrigger => self.area_trigger_move_lock = locked,
+        }
+    }
+
+    fn take_move_list_queue_like_cpp(
+        &mut self,
+        family: MapObjectMoveListFamilyLikeCpp,
+    ) -> Vec<ObjectGuid> {
+        match family {
+            MapObjectMoveListFamilyLikeCpp::Creature => std::mem::take(&mut self.creatures_to_move),
+            MapObjectMoveListFamilyLikeCpp::GameObject => {
+                std::mem::take(&mut self.gameobjects_to_move)
+            }
+            MapObjectMoveListFamilyLikeCpp::DynamicObject => {
+                std::mem::take(&mut self.dynamic_objects_to_move)
+            }
+            MapObjectMoveListFamilyLikeCpp::AreaTrigger => {
+                std::mem::take(&mut self.area_triggers_to_move)
+            }
+        }
+    }
+
+    fn remove_pending_move_like_cpp(
+        &mut self,
+        family: MapObjectMoveListFamilyLikeCpp,
+        guid: ObjectGuid,
+    ) -> Option<PendingCellMoveLikeCpp> {
+        match family {
+            MapObjectMoveListFamilyLikeCpp::Creature => self.creature_move_states.remove(&guid),
+            MapObjectMoveListFamilyLikeCpp::GameObject => self.gameobject_move_states.remove(&guid),
+            MapObjectMoveListFamilyLikeCpp::DynamicObject => {
+                self.dynamic_object_move_states.remove(&guid)
+            }
+            MapObjectMoveListFamilyLikeCpp::AreaTrigger => {
+                self.area_trigger_move_states.remove(&guid)
+            }
+        }
+    }
+
+    fn drain_move_list_like_cpp(
+        &mut self,
+        family: MapObjectMoveListFamilyLikeCpp,
+    ) -> MoveListDrainSummaryLikeCpp {
+        let mut summary = MoveListDrainSummaryLikeCpp {
+            family: Some(family),
+            ..Default::default()
+        };
+        if self.move_list_locked_like_cpp(family) {
+            summary.locked_ignored = 1;
+            return summary;
+        }
+
+        self.set_move_list_lock_like_cpp(family, true);
+        let queued = self.take_move_list_queue_like_cpp(family);
+        for guid in queued {
+            summary.processed += 1;
+            let Some(pending) = self.remove_pending_move_like_cpp(family, guid) else {
+                summary.inactive_reset += 1;
+                continue;
+            };
+            if pending.state != MapObjectCellMoveStateLikeCpp::Active {
+                summary.inactive_reset += 1;
+                continue;
+            }
+
+            let Some(record) = self.map_object_record(guid) else {
+                summary.missing_or_stale += 1;
+                continue;
+            };
+            let actual = record.kind();
+            if !move_list_family_accepts_kind_like_cpp(family, actual) {
+                summary.wrong_kind += 1;
+                continue;
+            }
+            if !record.object().object().is_in_world() {
+                summary.not_in_world += 1;
+                continue;
+            }
+
+            match self.relocate_map_object_like_cpp(guid, pending.new_position) {
+                Ok(outcome) if outcome.relocated => summary.relocated += 1,
+                Ok(outcome) if outcome.blocked_by_unloaded_grid => {
+                    summary.blocked_by_unloaded_grid += 1;
+                    if matches!(
+                        family,
+                        MapObjectMoveListFamilyLikeCpp::Creature
+                            | MapObjectMoveListFamilyLikeCpp::GameObject
+                    ) {
+                        summary.respawn_relocation_unsupported += 1;
+                    }
+                }
+                Ok(_) => summary.blocked_by_unloaded_grid += 1,
+                Err(MapObjectRelocationError::InvalidCoordinates { .. }) => {
+                    summary.failed_invalid_position += 1;
+                }
+                Err(MapObjectRelocationError::ObjectNotFound { .. }) => {
+                    summary.missing_or_stale += 1;
+                }
+                Err(MapObjectRelocationError::Record(_) | MapObjectRelocationError::Store(_)) => {
+                    summary.failed_store += 1;
+                }
+            }
+        }
+        self.set_move_list_lock_like_cpp(family, false);
+        summary
+    }
+
     pub fn map_object_record(&self, guid: ObjectGuid) -> Option<&MapObjectRecord> {
         self.map_objects.get(&guid)
     }
@@ -6541,9 +6943,22 @@ where
     }
 
     fn run_unload_lifecycle(&mut self, grid: &mut NGrid, unload_all: bool) {
+        // C++ `Map::UnloadGrid` drains Creature/GameObject/AreaTrigger move lists
+        // only in the `!unloadAll` branch, before and after the evacuator
+        // (`Map.cpp:1579-1596`). `UnloadGrid(..., true)` does not drain or
+        // relocate move-lists; `Map::UnloadAll` only clears Creature/GameObject
+        // delayed moves before entering that loop (`Map.cpp:1646-1651`). Rust
+        // still keeps the rest of this unload lifecycle represented: no
+        // DynamicObject drain in this path, no full visibility/fanout/scripts/DB.
         if !unload_all {
+            self.move_all_creatures_in_move_list_like_cpp();
+            self.move_all_game_objects_in_move_list_like_cpp();
+            self.move_all_area_triggers_in_move_list_like_cpp();
             self.lifecycle.evacuate_grid(grid);
             self.drain_grid_unload_actions_like_cpp();
+            self.move_all_creatures_in_move_list_like_cpp();
+            self.move_all_game_objects_in_move_list_like_cpp();
+            self.move_all_area_triggers_in_move_list_like_cpp();
         }
 
         self.lifecycle.clean_grid(grid);
@@ -7007,11 +7422,70 @@ pub struct ResetNotifyFlagsOutcome {
     pub missing_guids: Vec<ObjectGuid>,
 }
 
+/// C++ `MapObjectCellMoveState` (`MapObject.h:28-33`) represented for
+/// map-owned delayed cell/grid move-list state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MapObjectCellMoveState {
+pub enum MapObjectCellMoveStateLikeCpp {
     None,
     Active,
     Inactive,
+}
+
+pub type MapObjectCellMoveState = MapObjectCellMoveStateLikeCpp;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapObjectMoveListFamilyLikeCpp {
+    Creature,
+    GameObject,
+    DynamicObject,
+    AreaTrigger,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PendingCellMoveLikeCpp {
+    pub state: MapObjectCellMoveStateLikeCpp,
+    pub new_position: Position,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddObjectToMoveListOutcomeLikeCpp {
+    Queued,
+    UpdatedExisting,
+    LockedIgnored,
+    MissingOrStale,
+    WrongKind { actual: AccessorObjectKind },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoveObjectFromMoveListOutcomeLikeCpp {
+    MarkedInactive,
+    AlreadyInactive,
+    NotQueued,
+    LockedIgnored,
+    MissingOrStale,
+    WrongKind { actual: AccessorObjectKind },
+}
+
+/// Drain summary for C++ `Map::MoveAll*InMoveList` (`Map.cpp:1239-1416`).
+/// This is a map-owned seam only: it does not claim UpdatePositionData,
+/// visibility fanout, AfterRelocation, respawn relocation, Pet::Remove,
+/// dynamic tree, scripts/AI, ObjectAccessor, or session packet runtime.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MoveListDrainSummaryLikeCpp {
+    pub family: Option<MapObjectMoveListFamilyLikeCpp>,
+    pub processed: usize,
+    pub relocated: usize,
+    pub inactive_reset: usize,
+    pub not_in_world: usize,
+    pub missing_or_stale: usize,
+    pub wrong_kind: usize,
+    pub blocked_by_unloaded_grid: usize,
+    pub remove_list_queued: usize,
+    pub pet_remove_requested: usize,
+    pub respawn_relocation_unsupported: usize,
+    pub failed_invalid_position: usize,
+    pub failed_store: usize,
+    pub locked_ignored: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -7042,6 +7516,25 @@ pub struct MapObjectMoveListPlan {
 
 fn is_active_object_like_cpp(kind: AccessorObjectKind, object: &WorldObject) -> bool {
     kind == AccessorObjectKind::Player || object.is_active()
+}
+
+fn move_list_family_accepts_kind_like_cpp(
+    family: MapObjectMoveListFamilyLikeCpp,
+    kind: AccessorObjectKind,
+) -> bool {
+    match family {
+        MapObjectMoveListFamilyLikeCpp::Creature => {
+            matches!(kind, AccessorObjectKind::Creature | AccessorObjectKind::Pet)
+        }
+        MapObjectMoveListFamilyLikeCpp::GameObject => {
+            matches!(
+                kind,
+                AccessorObjectKind::GameObject | AccessorObjectKind::Transport
+            )
+        }
+        MapObjectMoveListFamilyLikeCpp::DynamicObject => kind == AccessorObjectKind::DynamicObject,
+        MapObjectMoveListFamilyLikeCpp::AreaTrigger => kind == AccessorObjectKind::AreaTrigger,
+    }
 }
 
 fn push_in_world_guids<Terrain, Lifecycle>(
@@ -13215,6 +13708,366 @@ mod tests {
             ObjectGuid::EMPTY
         );
         assert!(!removed.object.unwrap().object().is_in_world());
+    }
+
+    #[test]
+    fn move_list_add_same_guid_updates_position_without_duplicate_like_cpp() {
+        let mut map = test_map();
+        let creature = test_creature_for_spawn(44101, 4410101, true);
+        let guid = creature.guid();
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+        let first = Position::xyz(2.0, 3.0, 4.0);
+        let second = Position::xyz(3.0, 4.0, 5.0);
+
+        assert_eq!(
+            map.add_creature_to_move_list_like_cpp(guid, first),
+            AddObjectToMoveListOutcomeLikeCpp::Queued
+        );
+        assert_eq!(
+            map.add_creature_to_move_list_like_cpp(guid, second),
+            AddObjectToMoveListOutcomeLikeCpp::UpdatedExisting
+        );
+
+        assert_eq!(
+            map.move_list_len_like_cpp(MapObjectMoveListFamilyLikeCpp::Creature),
+            1
+        );
+        let pending = map
+            .pending_cell_move_like_cpp(MapObjectMoveListFamilyLikeCpp::Creature, guid)
+            .unwrap();
+        assert_eq!(pending.state, MapObjectCellMoveStateLikeCpp::Active);
+        assert_eq!(pending.new_position, second);
+    }
+
+    #[test]
+    fn move_list_remove_marks_inactive_and_drain_resets_without_relocation_like_cpp() {
+        let mut map = test_map();
+        let creature = test_creature_for_spawn(44102, 4410201, true);
+        let guid = creature.guid();
+        let original_position = creature.unit().world().position();
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+
+        assert_eq!(
+            map.add_creature_to_move_list_like_cpp(guid, Position::xyz(50.0, 50.0, 6.0)),
+            AddObjectToMoveListOutcomeLikeCpp::Queued
+        );
+        assert_eq!(
+            map.remove_creature_from_move_list_like_cpp(guid),
+            RemoveObjectFromMoveListOutcomeLikeCpp::MarkedInactive
+        );
+        let summary = map.move_all_creatures_in_move_list_like_cpp();
+
+        assert_eq!(summary.processed, 1);
+        assert_eq!(summary.inactive_reset, 1);
+        assert_eq!(summary.relocated, 0);
+        assert_eq!(
+            map.pending_cell_move_like_cpp(MapObjectMoveListFamilyLikeCpp::Creature, guid),
+            None
+        );
+        assert_eq!(map.map_object(guid).unwrap().position(), original_position);
+    }
+
+    #[test]
+    fn move_list_drain_active_in_world_relocates_cell_membership_like_cpp() {
+        let mut map = test_map();
+        let creature = test_creature_for_spawn(44103, 4410301, true);
+        let guid = creature.guid();
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+        let new_position = Position::xyz(120.0, 120.0, 7.0);
+        map.load_grid(new_position.x, new_position.y);
+        let new_cell = Cell::from_world(new_position.x, new_position.y);
+
+        assert_eq!(
+            map.add_creature_to_move_list_like_cpp(guid, new_position),
+            AddObjectToMoveListOutcomeLikeCpp::Queued
+        );
+        let summary = map.move_all_creatures_in_move_list_like_cpp();
+
+        assert_eq!(summary.processed, 1);
+        assert_eq!(summary.relocated, 1);
+        let stored = map.map_object(guid).unwrap();
+        assert_eq!(stored.position(), new_position);
+        assert_eq!(
+            stored.current_cell(),
+            Some((new_cell.cell_x(), new_cell.cell_y()))
+        );
+        let nearby = map.exact_cell_guids_like_cpp(new_cell.cell_coord());
+        assert!(nearby.grid.creatures.contains(&guid) || nearby.world.creatures.contains(&guid));
+    }
+
+    #[test]
+    fn move_list_drain_tolerates_missing_wrong_kind_and_not_in_world_like_cpp() {
+        let mut map = test_map();
+        let missing_guid = guid(HighGuid::Creature, 4410401);
+        let gameobject = test_gameobject_for_spawn(44104, 4410402);
+        let gameobject_guid = gameobject.world().guid();
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+        let mut not_in_world = test_creature_for_spawn(44105, 4410403, true);
+        not_in_world
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        let not_in_world_guid = not_in_world.guid();
+        map.insert_map_object_record(MapObjectRecord::new_creature(not_in_world).unwrap())
+            .unwrap();
+
+        assert_eq!(
+            map.add_creature_to_move_list_like_cpp(missing_guid, Position::xyz(2.0, 2.0, 2.0)),
+            AddObjectToMoveListOutcomeLikeCpp::MissingOrStale
+        );
+        assert!(matches!(
+            map.add_creature_to_move_list_like_cpp(gameobject_guid, Position::xyz(2.0, 2.0, 2.0)),
+            AddObjectToMoveListOutcomeLikeCpp::WrongKind {
+                actual: AccessorObjectKind::GameObject
+            }
+        ));
+        map.creatures_to_move.push(missing_guid);
+        map.creature_move_states.insert(
+            missing_guid,
+            PendingCellMoveLikeCpp {
+                state: MapObjectCellMoveStateLikeCpp::Active,
+                new_position: Position::xyz(2.0, 2.0, 2.0),
+            },
+        );
+        map.creatures_to_move.push(gameobject_guid);
+        map.creature_move_states.insert(
+            gameobject_guid,
+            PendingCellMoveLikeCpp {
+                state: MapObjectCellMoveStateLikeCpp::Active,
+                new_position: Position::xyz(2.0, 2.0, 2.0),
+            },
+        );
+        assert_eq!(
+            map.add_creature_to_move_list_like_cpp(not_in_world_guid, Position::xyz(2.0, 2.0, 2.0)),
+            AddObjectToMoveListOutcomeLikeCpp::Queued
+        );
+
+        let summary = map.move_all_creatures_in_move_list_like_cpp();
+
+        assert_eq!(summary.processed, 3);
+        assert_eq!(summary.missing_or_stale, 1);
+        assert_eq!(summary.wrong_kind, 1);
+        assert_eq!(summary.not_in_world, 1);
+        assert_eq!(
+            map.move_list_len_like_cpp(MapObjectMoveListFamilyLikeCpp::Creature),
+            0
+        );
+        assert_eq!(
+            map.pending_cell_move_like_cpp(MapObjectMoveListFamilyLikeCpp::Creature, missing_guid),
+            None
+        );
+    }
+
+    #[test]
+    fn move_list_dynamic_and_area_trigger_blocked_unloaded_grid_do_not_queue_remove_like_cpp() {
+        let mut map = test_map();
+        let mut dynamic_object = test_dynamic_object_for_viewpoint(4410501);
+        dynamic_object.world_mut().set_active(false);
+        let dynamic_guid = dynamic_object.world().guid();
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_dynamic_object(dynamic_object).unwrap(),
+        )
+        .unwrap();
+        let area_trigger = test_area_trigger_for_update(4410502, 10_000, true);
+        let area_guid = area_trigger.world().guid();
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_area_trigger(area_trigger).unwrap(),
+        )
+        .unwrap();
+        let unloaded_grid_position = Position::xyz(5_000.0, 5_000.0, 1.0);
+
+        assert_eq!(
+            map.add_dynamic_object_to_move_list_like_cpp(dynamic_guid, unloaded_grid_position),
+            AddObjectToMoveListOutcomeLikeCpp::Queued
+        );
+        assert_eq!(
+            map.add_area_trigger_to_move_list_like_cpp(area_guid, unloaded_grid_position),
+            AddObjectToMoveListOutcomeLikeCpp::Queued
+        );
+        let dyn_summary = map.move_all_dynamic_objects_in_move_list_like_cpp();
+        let area_summary = map.move_all_area_triggers_in_move_list_like_cpp();
+
+        assert_eq!(dyn_summary.blocked_by_unloaded_grid, 1);
+        assert_eq!(area_summary.blocked_by_unloaded_grid, 1);
+        assert_eq!(dyn_summary.remove_list_queued, 0);
+        assert_eq!(area_summary.remove_list_queued, 0);
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+        assert!(map.map_object_record(dynamic_guid).is_some());
+        assert!(map.map_object_record(area_guid).is_some());
+    }
+
+    #[test]
+    fn unload_grid_at_false_consumes_creature_gameobject_area_trigger_move_lists_like_cpp() {
+        let mut map = test_map();
+        let creature = test_creature_for_spawn(44106, 4410601, true);
+        let creature_guid = creature.guid();
+        let gameobject = test_gameobject_for_spawn(44106, 4410602);
+        let gameobject_guid = gameobject.world().guid();
+        let area_trigger = test_area_trigger_for_update(4410603, 10_000, true);
+        let area_guid = area_trigger.world().guid();
+
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_area_trigger(area_trigger).unwrap(),
+        )
+        .unwrap();
+        let same_cell_new_position = Position::xyz(2.0, 3.0, 4.0);
+        map.add_creature_to_move_list_like_cpp(creature_guid, same_cell_new_position);
+        map.add_game_object_to_move_list_like_cpp(gameobject_guid, same_cell_new_position);
+        map.add_area_trigger_to_move_list_like_cpp(area_guid, same_cell_new_position);
+
+        let unload_position = Position::xyz(3_000.0, 3_000.0, 0.0);
+        map.load_grid(unload_position.x, unload_position.y);
+        let unload_cell = Cell::from_world(unload_position.x, unload_position.y);
+        let unload_grid = GridCoord::new(unload_cell.grid_x(), unload_cell.grid_y());
+
+        assert!(map.unload_grid_at(unload_grid, false));
+
+        assert_eq!(
+            map.move_list_len_like_cpp(MapObjectMoveListFamilyLikeCpp::Creature),
+            0
+        );
+        assert_eq!(
+            map.move_list_len_like_cpp(MapObjectMoveListFamilyLikeCpp::GameObject),
+            0
+        );
+        assert_eq!(
+            map.move_list_len_like_cpp(MapObjectMoveListFamilyLikeCpp::AreaTrigger),
+            0
+        );
+        assert_eq!(
+            map.map_object(creature_guid).unwrap().position(),
+            same_cell_new_position
+        );
+        assert_eq!(
+            map.map_object(gameobject_guid).unwrap().position(),
+            same_cell_new_position
+        );
+        assert_eq!(
+            map.map_object(area_guid).unwrap().position(),
+            same_cell_new_position
+        );
+        assert_eq!(map.lifecycle().evacuates, 1);
+    }
+
+    #[test]
+    fn unload_grid_at_true_does_not_drain_move_lists_and_unload_all_helper_clears_cpp_subset_like_cpp()
+     {
+        let mut map = test_map();
+        let creature = test_creature_for_spawn(44107, 4410701, true);
+        let creature_guid = creature.guid();
+        let creature_original_position = creature.unit().world().position();
+        let gameobject = test_gameobject_for_spawn(44107, 4410702);
+        let gameobject_guid = gameobject.world().guid();
+        let gameobject_original_position = gameobject.world().position();
+        let area_trigger = test_area_trigger_for_update(4410703, 10_000, true);
+        let area_guid = area_trigger.world().guid();
+        let area_original_position = area_trigger.world().position();
+
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_area_trigger(area_trigger).unwrap(),
+        )
+        .unwrap();
+        let pending_position = Position::xyz(2.0, 3.0, 4.0);
+        assert_eq!(
+            map.add_creature_to_move_list_like_cpp(creature_guid, pending_position),
+            AddObjectToMoveListOutcomeLikeCpp::Queued
+        );
+        assert_eq!(
+            map.add_game_object_to_move_list_like_cpp(gameobject_guid, pending_position),
+            AddObjectToMoveListOutcomeLikeCpp::Queued
+        );
+        assert_eq!(
+            map.add_area_trigger_to_move_list_like_cpp(area_guid, pending_position),
+            AddObjectToMoveListOutcomeLikeCpp::Queued
+        );
+
+        let unload_position = Position::xyz(3_500.0, 3_500.0, 0.0);
+        map.load_grid(unload_position.x, unload_position.y);
+        let unload_cell = Cell::from_world(unload_position.x, unload_position.y);
+        let unload_grid = GridCoord::new(unload_cell.grid_x(), unload_cell.grid_y());
+
+        assert!(map.unload_grid_at(unload_grid, true));
+
+        assert_eq!(
+            map.map_object(creature_guid).unwrap().position(),
+            creature_original_position
+        );
+        assert_eq!(
+            map.map_object(gameobject_guid).unwrap().position(),
+            gameobject_original_position
+        );
+        assert_eq!(
+            map.map_object(area_guid).unwrap().position(),
+            area_original_position
+        );
+        assert_eq!(
+            map.move_list_len_like_cpp(MapObjectMoveListFamilyLikeCpp::Creature),
+            1
+        );
+        assert_eq!(
+            map.move_list_len_like_cpp(MapObjectMoveListFamilyLikeCpp::GameObject),
+            1
+        );
+        assert_eq!(
+            map.move_list_len_like_cpp(MapObjectMoveListFamilyLikeCpp::AreaTrigger),
+            1
+        );
+        assert_eq!(
+            map.pending_cell_move_like_cpp(MapObjectMoveListFamilyLikeCpp::Creature, creature_guid)
+                .unwrap()
+                .new_position,
+            pending_position
+        );
+        assert_eq!(map.lifecycle().evacuates, 0);
+
+        map.clear_unload_all_delayed_moves_like_cpp();
+
+        assert_eq!(
+            map.move_list_len_like_cpp(MapObjectMoveListFamilyLikeCpp::Creature),
+            0
+        );
+        assert_eq!(
+            map.move_list_len_like_cpp(MapObjectMoveListFamilyLikeCpp::GameObject),
+            0
+        );
+        assert_eq!(
+            map.move_list_len_like_cpp(MapObjectMoveListFamilyLikeCpp::AreaTrigger),
+            1
+        );
+        assert_eq!(
+            map.pending_cell_move_like_cpp(MapObjectMoveListFamilyLikeCpp::Creature, creature_guid),
+            None
+        );
+        assert_eq!(
+            map.pending_cell_move_like_cpp(
+                MapObjectMoveListFamilyLikeCpp::GameObject,
+                gameobject_guid
+            ),
+            None
+        );
+        assert!(
+            map.pending_cell_move_like_cpp(MapObjectMoveListFamilyLikeCpp::AreaTrigger, area_guid)
+                .is_some()
+        );
     }
 
     fn test_area_trigger_for_update(counter: i64, duration_ms: i32, in_world: bool) -> AreaTrigger {
