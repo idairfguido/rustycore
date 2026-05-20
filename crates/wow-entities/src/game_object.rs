@@ -77,6 +77,8 @@ pub const GAMEOBJECT_DATA_GATHERING_NODE_LINKED_TRAP: usize = 20;
 pub const GO_FLAG_IN_USE: u32 = 0x0000_0001;
 // C++ anchor: /home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/SharedDefines.h:2902
 pub const GO_FLAG_NODESPAWN: u32 = 0x0000_0020;
+// C++ anchor: /home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/SharedDefines.h:2914
+pub const GO_FLAG_MAP_OBJECT: u32 = 0x0010_0000;
 pub const GO_FLAG_IN_MULTI_USE: u32 = 0x0020_0000;
 pub const GAME_OBJECT_DATA_PARENT_BIT: usize = 0;
 pub const GAME_OBJECT_DATA_DISPLAY_ID_BIT: usize = 4;
@@ -138,6 +140,20 @@ pub struct GameObjectUpdateOutcomeLikeCpp {
     pub ai_update_not_represented: bool,
     pub go_type_impl_update_not_represented: bool,
     pub despawn_or_unsummon_requested: bool,
+}
+
+/// Evidence for the bounded Rust representation of TrinityCore
+/// `GameObject::EnableCollision(bool)`.
+///
+/// C++ anchor: `GameObject.cpp:3856-3864` returns early when `!m_model`; otherwise it only
+/// forwards the requested value to `m_model->enableCollision(enable)`. The commented map insert
+/// remains intentionally unrepresented here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameObjectCollisionOutcomeLikeCpp {
+    pub requested_enable: bool,
+    pub represented_model_present: bool,
+    pub previous_collision_enabled: Option<bool>,
+    pub new_collision_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -974,6 +990,18 @@ pub struct GameObject {
     /// Rust must not infer it from display id, template, or gameobject type until real
     /// `GameObjectModel::Create`/DB2 model runtime exists.
     represented_gameobject_model_like_cpp: bool,
+    /// Explicit represented evidence for TrinityCore `m_model && m_model->isMapObject()`.
+    ///
+    /// This is set only by a caller/test that represents `GameObject::CreateModel()` output.
+    /// It may be true only when `represented_gameobject_model_like_cpp` is true, and it is the
+    /// only represented source that toggles `GO_FLAG_MAP_OBJECT`.
+    represented_gameobject_model_is_map_object_like_cpp: bool,
+    /// Last represented `m_model->enableCollision(enable)` value.
+    ///
+    /// `None` means the C++ call has not been represented or returned early because there was no
+    /// represented model evidence. This is not real collision, BIH, LOS, intersection or height
+    /// runtime.
+    represented_gameobject_model_collision_enabled_like_cpp: Option<bool>,
     grid_unload_cleanup_before_delete_count: u32,
     grid_unload_delete_requested: bool,
     grid_unload_respawn_relocation_requested: bool,
@@ -1020,6 +1048,8 @@ impl GameObject {
             linked_trap_guid: ObjectGuid::EMPTY,
             stationary_position: Position::new(0.0, 0.0, 0.0, 0.0),
             represented_gameobject_model_like_cpp: false,
+            represented_gameobject_model_is_map_object_like_cpp: false,
+            represented_gameobject_model_collision_enabled_like_cpp: None,
             grid_unload_cleanup_before_delete_count: 0,
             grid_unload_delete_requested: false,
             grid_unload_respawn_relocation_requested: false,
@@ -1174,13 +1204,84 @@ impl GameObject {
         self.represented_gameobject_model_like_cpp
     }
 
+    pub const fn has_represented_gameobject_model_map_object_like_cpp(&self) -> bool {
+        self.represented_gameobject_model_is_map_object_like_cpp
+    }
+
+    pub const fn represented_gameobject_model_collision_enabled_like_cpp(&self) -> Option<bool> {
+        self.represented_gameobject_model_collision_enabled_like_cpp
+    }
+
     /// Sets explicit represented evidence for TrinityCore `GameObject::m_model != nullptr`.
     ///
     /// Callers must set this only when they have external evidence that the C++ object would have
     /// a model. The flag is consumed only by map-owned add/remove seams and does not create real
-    /// model geometry, collision, `GO_FLAG_MAP_OBJECT`, or DB/model-store state.
+    /// model geometry, collision, or DB/model-store state. Setting this false also mirrors losing
+    /// `m_model`: represented map-object evidence, `GO_FLAG_MAP_OBJECT`, and collision evidence
+    /// are cleared. Setting this true does not infer map-object or collision state.
     pub fn set_represented_gameobject_model_like_cpp(&mut self, has_model: bool) {
         self.represented_gameobject_model_like_cpp = has_model;
+        if !has_model {
+            self.represented_gameobject_model_is_map_object_like_cpp = false;
+            self.represented_gameobject_model_collision_enabled_like_cpp = None;
+            self.set_flags(self.data.flags & !GO_FLAG_MAP_OBJECT);
+        }
+    }
+
+    /// Applies explicit represented output from TrinityCore `GameObject::CreateModel()`.
+    ///
+    /// C++ anchor: `GameObject.cpp:4394-4399` assigns `m_model` from
+    /// `GameObjectModel::Create(...)` and sets `GO_FLAG_MAP_OBJECT` only when the resulting model
+    /// exists and `isMapObject()` is true. Rust does not infer either fact from display id,
+    /// template or type.
+    pub fn apply_represented_gameobject_model_creation_like_cpp(
+        &mut self,
+        has_model: bool,
+        is_map_object: bool,
+    ) {
+        self.set_represented_gameobject_model_like_cpp(has_model);
+        let represented_map_object = has_model && is_map_object;
+        self.represented_gameobject_model_is_map_object_like_cpp = represented_map_object;
+        if represented_map_object {
+            self.set_flags(self.data.flags | GO_FLAG_MAP_OBJECT);
+        } else {
+            self.set_flags(self.data.flags & !GO_FLAG_MAP_OBJECT);
+        }
+    }
+
+    pub fn set_represented_gameobject_model_map_object_like_cpp(&mut self, is_map_object: bool) {
+        self.apply_represented_gameobject_model_creation_like_cpp(
+            self.represented_gameobject_model_like_cpp,
+            is_map_object,
+        );
+    }
+
+    /// Bounded representation of TrinityCore `GameObject::EnableCollision(bool)`.
+    ///
+    /// This records only the local `m_model->enableCollision(enable)` evidence. With no represented
+    /// model, it mirrors the C++ early return and does not mutate collision state or insert a model.
+    pub fn enable_represented_gameobject_collision_like_cpp(
+        &mut self,
+        enable: bool,
+    ) -> GameObjectCollisionOutcomeLikeCpp {
+        let previous_collision_enabled =
+            self.represented_gameobject_model_collision_enabled_like_cpp;
+        if !self.represented_gameobject_model_like_cpp {
+            return GameObjectCollisionOutcomeLikeCpp {
+                requested_enable: enable,
+                represented_model_present: false,
+                previous_collision_enabled,
+                new_collision_enabled: previous_collision_enabled,
+            };
+        }
+
+        self.represented_gameobject_model_collision_enabled_like_cpp = Some(enable);
+        GameObjectCollisionOutcomeLikeCpp {
+            requested_enable: enable,
+            represented_model_present: true,
+            previous_collision_enabled,
+            new_collision_enabled: self.represented_gameobject_model_collision_enabled_like_cpp,
+        }
     }
 
     pub fn clear_game_object_data_changes(&mut self) {
@@ -1742,6 +1843,11 @@ mod tests {
         assert!(!go.grid_unload_delete_requested());
         assert!(!go.grid_unload_respawn_relocation_requested());
         assert!(!go.has_represented_gameobject_model_like_cpp());
+        assert!(!go.has_represented_gameobject_model_map_object_like_cpp());
+        assert_eq!(
+            go.represented_gameobject_model_collision_enabled_like_cpp(),
+            None
+        );
         assert!(!go.game_object_data_changes_mask().is_any_set());
     }
 
@@ -1750,10 +1856,107 @@ mod tests {
         let mut go = GameObject::new();
 
         assert!(!go.has_represented_gameobject_model_like_cpp());
+        assert!(!go.has_represented_gameobject_model_map_object_like_cpp());
+        assert_eq!(
+            go.represented_gameobject_model_collision_enabled_like_cpp(),
+            None
+        );
         go.set_represented_gameobject_model_like_cpp(true);
         assert!(go.has_represented_gameobject_model_like_cpp());
+        assert!(!go.has_represented_gameobject_model_map_object_like_cpp());
+        assert_eq!(
+            go.represented_gameobject_model_collision_enabled_like_cpp(),
+            None
+        );
         go.set_represented_gameobject_model_like_cpp(false);
         assert!(!go.has_represented_gameobject_model_like_cpp());
+        assert!(!go.has_represented_gameobject_model_map_object_like_cpp());
+        assert_eq!(
+            go.represented_gameobject_model_collision_enabled_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn gameobject_model_map_object_flag_requires_explicit_model_evidence_like_cpp() {
+        let mut go = GameObject::new();
+
+        go.apply_represented_gameobject_model_creation_like_cpp(false, true);
+        assert!(!go.has_represented_gameobject_model_like_cpp());
+        assert!(!go.has_represented_gameobject_model_map_object_like_cpp());
+        assert_eq!(go.data().flags & GO_FLAG_MAP_OBJECT, 0);
+
+        go.apply_represented_gameobject_model_creation_like_cpp(true, true);
+        assert!(go.has_represented_gameobject_model_like_cpp());
+        assert!(go.has_represented_gameobject_model_map_object_like_cpp());
+        assert_eq!(go.data().flags & GO_FLAG_MAP_OBJECT, GO_FLAG_MAP_OBJECT);
+
+        go.apply_represented_gameobject_model_creation_like_cpp(true, false);
+        assert!(go.has_represented_gameobject_model_like_cpp());
+        assert!(!go.has_represented_gameobject_model_map_object_like_cpp());
+        assert_eq!(go.data().flags & GO_FLAG_MAP_OBJECT, 0);
+    }
+
+    #[test]
+    fn gameobject_model_disable_clears_map_object_flag_and_collision_evidence_like_cpp() {
+        let mut go = GameObject::new();
+        go.apply_represented_gameobject_model_creation_like_cpp(true, true);
+        let enabled = go.enable_represented_gameobject_collision_like_cpp(true);
+        assert_eq!(enabled.new_collision_enabled, Some(true));
+        assert_eq!(go.data().flags & GO_FLAG_MAP_OBJECT, GO_FLAG_MAP_OBJECT);
+
+        go.set_represented_gameobject_model_like_cpp(false);
+
+        assert!(!go.has_represented_gameobject_model_like_cpp());
+        assert!(!go.has_represented_gameobject_model_map_object_like_cpp());
+        assert_eq!(
+            go.represented_gameobject_model_collision_enabled_like_cpp(),
+            None
+        );
+        assert_eq!(go.data().flags & GO_FLAG_MAP_OBJECT, 0);
+    }
+
+    #[test]
+    fn gameobject_model_collision_no_model_is_noop_like_cpp() {
+        let mut go = GameObject::new();
+
+        let outcome = go.enable_represented_gameobject_collision_like_cpp(true);
+
+        assert_eq!(
+            outcome,
+            GameObjectCollisionOutcomeLikeCpp {
+                requested_enable: true,
+                represented_model_present: false,
+                previous_collision_enabled: None,
+                new_collision_enabled: None,
+            }
+        );
+        assert_eq!(
+            go.represented_gameobject_model_collision_enabled_like_cpp(),
+            None
+        );
+    }
+
+    #[test]
+    fn gameobject_model_collision_with_model_stores_true_and_false_like_cpp() {
+        let mut go = GameObject::new();
+        go.set_represented_gameobject_model_like_cpp(true);
+
+        let enabled = go.enable_represented_gameobject_collision_like_cpp(true);
+        assert_eq!(enabled.previous_collision_enabled, None);
+        assert_eq!(enabled.new_collision_enabled, Some(true));
+        assert_eq!(
+            go.represented_gameobject_model_collision_enabled_like_cpp(),
+            Some(true)
+        );
+
+        let disabled = go.enable_represented_gameobject_collision_like_cpp(false);
+        assert_eq!(disabled.previous_collision_enabled, Some(true));
+        assert_eq!(disabled.new_collision_enabled, Some(false));
+        assert_eq!(
+            go.represented_gameobject_model_collision_enabled_like_cpp(),
+            Some(false)
+        );
     }
 
     fn lifecycle_template() -> GameObjectTemplateLifecycleRecord {

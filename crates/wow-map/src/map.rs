@@ -36,9 +36,9 @@ use wow_core::{ObjectGuid, ObjectGuidGenerator, Position, guid::HighGuid};
 use wow_entities::{
     AccessorObjectKind, AreaTrigger, CombatBeginContextLikeCpp, CombatSubsystem, Conversation,
     Corpse, Creature, CreatureRuntimePlan, CreatureRuntimeUpdateContext, DynamicObject,
-    DynamicObjectType, GameObject,
+    DynamicObjectType, GAMEOBJECT_TYPE_CHEST, GameObject,
     GameObjectUpdateOutcomeLikeCpp as EntityGameObjectUpdateOutcomeLikeCpp,
-    GameObjectUpdateStatusLikeCpp as EntityGameObjectUpdateStatusLikeCpp, INVALID_HEIGHT,
+    GameObjectUpdateStatusLikeCpp as EntityGameObjectUpdateStatusLikeCpp, GoState, INVALID_HEIGHT,
     LineOfSightQuery, LootState, MAX_VISIBILITY_DISTANCE, MapBindingError, MapObjectRecord,
     ObjectAccessorError, ObjectAccessorMapSource, ObjectNotifyFlags, Player, SceneObject,
     TransportUpdateLikeCpp, Unit, UnitSharedVisionSetWorldObjectRequestLikeCpp, WorldObject,
@@ -5959,6 +5959,7 @@ where
                 grid_loaded: false,
                 inserted_into_cell: false,
                 gameobject_model_insert: None,
+                gameobject_collision_enable: None,
             });
         }
 
@@ -6006,18 +6007,44 @@ where
             object.object_mut().set_is_new_object(false);
         }
 
-        let gameobject_model_insert = (kind == AccessorObjectKind::GameObject)
-            .then(|| {
-                record
-                    .game_object()
+        let (gameobject_model_insert, gameobject_collision_enable) =
+            if kind == AccessorObjectKind::GameObject {
+                if let Some(game_object) = record
+                    .game_object_mut()
                     .filter(|game_object| game_object.has_represented_gameobject_model_like_cpp())
-                    .map(|_| {
-                        self.insert_gameobject_model_like_cpp(
-                            RepresentedGameObjectModelKeyLikeCpp { owner_guid: guid },
-                        )
-                    })
-            })
-            .flatten();
+                {
+                    let gameobject_model_insert = self.insert_gameobject_model_like_cpp(
+                        RepresentedGameObjectModelKeyLikeCpp { owner_guid: guid },
+                    );
+                    // C++ `GameObject::AddToWorld()` computes toggledState before
+                    // `EnableCollision(toggledState)`: chests use `getLootState() == GO_READY`,
+                    // exact non-Transport GameObjects use `GetGoState() == GO_STATE_READY`.
+                    // `MapObjectRecord::Transport` is handled above by the kind gate and remains
+                    // a delayed-add runtime gap for this represented seam.
+                    let toggled_state =
+                        if game_object.data().type_id as u32 == GAMEOBJECT_TYPE_CHEST {
+                            game_object.loot_state() == LootState::Ready
+                        } else {
+                            game_object.data().state == GoState::Ready as i8
+                        };
+                    let collision =
+                        game_object.enable_represented_gameobject_collision_like_cpp(toggled_state);
+                    let gameobject_collision_enable = GameObjectCollisionEnableOutcomeLikeCpp {
+                        requested_enable: collision.requested_enable,
+                        represented_model_present: collision.represented_model_present,
+                        previous_collision_enabled: collision.previous_collision_enabled,
+                        new_collision_enabled: collision.new_collision_enabled,
+                    };
+                    (
+                        Some(gameobject_model_insert),
+                        Some(gameobject_collision_enable),
+                    )
+                } else {
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            };
 
         let previous = self.insert_map_object_record(record)?;
         Ok(AddToMapOutcome {
@@ -6030,6 +6057,7 @@ where
             grid_loaded,
             inserted_into_cell: true,
             gameobject_model_insert,
+            gameobject_collision_enable,
         })
     }
 
@@ -7949,6 +7977,14 @@ impl From<ObjectAccessorError> for MapObjectStoreError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameObjectCollisionEnableOutcomeLikeCpp {
+    pub requested_enable: bool,
+    pub represented_model_present: bool,
+    pub previous_collision_enabled: Option<bool>,
+    pub new_collision_enabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AddToMapOutcome {
     pub guid: ObjectGuid,
     pub cell: CellCoord,
@@ -7959,6 +7995,7 @@ pub struct AddToMapOutcome {
     pub grid_loaded: bool,
     pub inserted_into_cell: bool,
     pub gameobject_model_insert: Option<DynamicMapTreeModelMutationOutcomeLikeCpp>,
+    pub gameobject_collision_enable: Option<GameObjectCollisionEnableOutcomeLikeCpp>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -9330,6 +9367,13 @@ mod tests {
         assert_eq!(insert.model_count_after, 1);
         assert_eq!(insert.unbalanced_before, 0);
         assert_eq!(insert.unbalanced_after, 1);
+        let collision = outcome
+            .gameobject_collision_enable
+            .expect("represented model should record EnableCollision evidence");
+        assert!(collision.represented_model_present);
+        assert_eq!(collision.requested_enable, false);
+        assert_eq!(collision.previous_collision_enabled, None);
+        assert_eq!(collision.new_collision_enabled, Some(false));
         assert!(map.contains_gameobject_model_like_cpp(key));
     }
 
@@ -9348,6 +9392,7 @@ mod tests {
             .unwrap();
 
         assert!(outcome.gameobject_model_insert.is_none());
+        assert!(outcome.gameobject_collision_enable.is_none());
         assert!(!map.contains_gameobject_model_like_cpp(key));
         let summary = map.update_dynamic_tree_like_cpp(250);
         assert!(summary.empty);
@@ -9370,7 +9415,90 @@ mod tests {
 
         assert!(outcome.already_in_world);
         assert!(outcome.gameobject_model_insert.is_none());
+        assert!(outcome.gameobject_collision_enable.is_none());
         assert!(!map.contains_gameobject_model_like_cpp(key));
+    }
+
+    #[test]
+    fn dynamic_tree_gameobject_add_chest_ready_enables_collision_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = test_gameobject_for_spawn(45201, 4520101);
+        gameobject.world_mut().object_mut().remove_from_world();
+        gameobject.set_represented_gameobject_model_like_cpp(true);
+        gameobject.set_go_type(GAMEOBJECT_TYPE_CHEST as u8);
+        gameobject.set_loot_state(LootState::Ready, None);
+
+        let outcome = map
+            .add_map_object_record_to_map_like_cpp(
+                MapObjectRecord::new_game_object(gameobject).unwrap(),
+            )
+            .unwrap();
+
+        let collision = outcome.gameobject_collision_enable.unwrap();
+        assert!(outcome.gameobject_model_insert.is_some());
+        assert_eq!(collision.requested_enable, true);
+        assert_eq!(collision.new_collision_enabled, Some(true));
+    }
+
+    #[test]
+    fn dynamic_tree_gameobject_add_chest_non_ready_disables_collision_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = test_gameobject_for_spawn(45202, 4520201);
+        gameobject.world_mut().object_mut().remove_from_world();
+        gameobject.set_represented_gameobject_model_like_cpp(true);
+        gameobject.set_go_type(GAMEOBJECT_TYPE_CHEST as u8);
+        gameobject.set_loot_state(LootState::Activated, None);
+
+        let outcome = map
+            .add_map_object_record_to_map_like_cpp(
+                MapObjectRecord::new_game_object(gameobject).unwrap(),
+            )
+            .unwrap();
+
+        let collision = outcome.gameobject_collision_enable.unwrap();
+        assert!(outcome.gameobject_model_insert.is_some());
+        assert_eq!(collision.requested_enable, false);
+        assert_eq!(collision.new_collision_enabled, Some(false));
+    }
+
+    #[test]
+    fn dynamic_tree_gameobject_add_non_chest_ready_state_enables_collision_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = test_gameobject_for_spawn(45203, 4520301);
+        gameobject.world_mut().object_mut().remove_from_world();
+        gameobject.set_represented_gameobject_model_like_cpp(true);
+        gameobject.set_go_state(GoState::Ready);
+
+        let outcome = map
+            .add_map_object_record_to_map_like_cpp(
+                MapObjectRecord::new_game_object(gameobject).unwrap(),
+            )
+            .unwrap();
+
+        let collision = outcome.gameobject_collision_enable.unwrap();
+        assert!(outcome.gameobject_model_insert.is_some());
+        assert_eq!(collision.requested_enable, true);
+        assert_eq!(collision.new_collision_enabled, Some(true));
+    }
+
+    #[test]
+    fn dynamic_tree_gameobject_add_non_chest_active_state_disables_collision_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = test_gameobject_for_spawn(45204, 4520401);
+        gameobject.world_mut().object_mut().remove_from_world();
+        gameobject.set_represented_gameobject_model_like_cpp(true);
+        gameobject.set_go_state(GoState::Active);
+
+        let outcome = map
+            .add_map_object_record_to_map_like_cpp(
+                MapObjectRecord::new_game_object(gameobject).unwrap(),
+            )
+            .unwrap();
+
+        let collision = outcome.gameobject_collision_enable.unwrap();
+        assert!(outcome.gameobject_model_insert.is_some());
+        assert_eq!(collision.requested_enable, false);
+        assert_eq!(collision.new_collision_enabled, Some(false));
     }
 
     #[test]
@@ -9442,6 +9570,7 @@ mod tests {
 
         assert!(!outcome.already_in_world);
         assert!(outcome.gameobject_model_insert.is_none());
+        assert!(outcome.gameobject_collision_enable.is_none());
         assert!(!map.contains_gameobject_model_like_cpp(key));
     }
 
