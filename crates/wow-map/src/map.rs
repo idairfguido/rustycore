@@ -771,6 +771,12 @@ pub struct GameObjectUpdateOutcomeLikeCpp {
     pub goober_users_cleared: bool,
     pub goober_state_reset: bool,
     pub goober_nodespawn_return: bool,
+    pub non_consumed_chest_or_goober_return: bool,
+    pub non_consumed_restock_armed: bool,
+    pub non_consumed_set_ready: bool,
+    pub non_consumed_update_visibility_represented: bool,
+    pub non_consumed_update_dynamic_flags_represented: bool,
+    pub non_consumed_source_missing: bool,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -787,6 +793,12 @@ pub struct GameObjectsUpdateSummaryLikeCpp {
     pub goober_users_cleared: usize,
     pub goober_state_reset: usize,
     pub goober_nodespawn_returns: usize,
+    pub non_consumed_chest_or_goober_returns: usize,
+    pub non_consumed_restock_armed: usize,
+    pub non_consumed_set_ready: usize,
+    pub non_consumed_update_visibility_represented: usize,
+    pub non_consumed_update_dynamic_flags_represented: usize,
+    pub non_consumed_source_missing: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4389,6 +4401,7 @@ where
         &mut self,
         game_object_guid: ObjectGuid,
         diff_ms: u32,
+        game_time_secs: i64,
     ) -> GameObjectUpdateOutcomeLikeCpp {
         let Some(record) = self.map_object_record(game_object_guid) else {
             return GameObjectUpdateOutcomeLikeCpp {
@@ -4413,6 +4426,12 @@ where
                 goober_users_cleared: false,
                 goober_state_reset: false,
                 goober_nodespawn_return: false,
+                non_consumed_chest_or_goober_return: false,
+                non_consumed_restock_armed: false,
+                non_consumed_set_ready: false,
+                non_consumed_update_visibility_represented: false,
+                non_consumed_update_dynamic_flags_represented: false,
+                non_consumed_source_missing: false,
             };
         };
 
@@ -4439,6 +4458,12 @@ where
                 goober_users_cleared: false,
                 goober_state_reset: false,
                 goober_nodespawn_return: false,
+                non_consumed_chest_or_goober_return: false,
+                non_consumed_restock_armed: false,
+                non_consumed_set_ready: false,
+                non_consumed_update_visibility_represented: false,
+                non_consumed_update_dynamic_flags_represented: false,
+                non_consumed_source_missing: false,
             };
         }
 
@@ -4465,6 +4490,12 @@ where
                 goober_users_cleared: false,
                 goober_state_reset: false,
                 goober_nodespawn_return: false,
+                non_consumed_chest_or_goober_return: false,
+                non_consumed_restock_armed: false,
+                non_consumed_set_ready: false,
+                non_consumed_update_visibility_represented: false,
+                non_consumed_update_dynamic_flags_represented: false,
+                non_consumed_source_missing: false,
             };
         };
 
@@ -4493,6 +4524,12 @@ where
                 goober_users_cleared: false,
                 goober_state_reset: false,
                 goober_nodespawn_return: false,
+                non_consumed_chest_or_goober_return: false,
+                non_consumed_restock_armed: false,
+                non_consumed_set_ready: false,
+                non_consumed_update_visibility_represented: false,
+                non_consumed_update_dynamic_flags_represented: false,
+                non_consumed_source_missing: false,
             };
         }
 
@@ -4520,6 +4557,12 @@ where
                     goober_users_cleared: false,
                     goober_state_reset: false,
                     goober_nodespawn_return: false,
+                    non_consumed_chest_or_goober_return: false,
+                    non_consumed_restock_armed: false,
+                    non_consumed_set_ready: false,
+                    non_consumed_update_visibility_represented: false,
+                    non_consumed_update_dynamic_flags_represented: false,
+                    non_consumed_source_missing: false,
                 };
             };
             let Some(game_object) = record.game_object_mut() else {
@@ -4545,6 +4588,12 @@ where
                     goober_users_cleared: false,
                     goober_state_reset: false,
                     goober_nodespawn_return: false,
+                    non_consumed_chest_or_goober_return: false,
+                    non_consumed_restock_armed: false,
+                    non_consumed_set_ready: false,
+                    non_consumed_update_visibility_represented: false,
+                    non_consumed_update_dynamic_flags_represented: false,
+                    non_consumed_source_missing: false,
                 };
             };
             game_object.update_like_cpp(diff_ms)
@@ -4588,6 +4637,12 @@ where
         let mut goober_users_cleared = false;
         let mut goober_state_reset = false;
         let mut goober_nodespawn_return = false;
+        let mut non_consumed_chest_or_goober_return = false;
+        let mut non_consumed_restock_armed = false;
+        let mut non_consumed_set_ready = false;
+        let mut non_consumed_update_visibility_represented = false;
+        let mut non_consumed_update_dynamic_flags_represented = false;
+        let mut non_consumed_source_missing = false;
 
         if entity_update.status != EntityGameObjectUpdateStatusLikeCpp::DespawnRequested {
             if let Some(game_object) = self
@@ -4633,6 +4688,67 @@ where
             false
         };
 
+        if loot_cleared {
+            if let Some(game_object) = self
+                .map_objects
+                .get_mut(&game_object_guid)
+                .and_then(MapObjectRecord::game_object_mut)
+            {
+                let go_type = game_object.data().type_id as u32;
+                let despawn_at_action = match go_type {
+                    GAMEOBJECT_TYPE_CHEST => game_object
+                        .represented_chest_loot_source_like_cpp()
+                        .map(|source| source.chest_consumable),
+                    GAMEOBJECT_TYPE_GOOBER => game_object
+                        .represented_goober_use_source_like_cpp()
+                        .map(|source| source.consumable),
+                    _ => None,
+                };
+
+                if matches!(go_type, GAMEOBJECT_TYPE_CHEST | GAMEOBJECT_TYPE_GOOBER) {
+                    // C++ anchor: GameObject.cpp:1609-1623. This represented seam
+                    // deliberately does not call the broader SetLootState facade from
+                    // GameObject.cpp:3683-3709 because line 1617 only writes
+                    // GO_NOT_READY after arming the fully-looted chest restock timer;
+                    // Activated-specific restock/collision semantics are not part of
+                    // this branch. `GetOwner()` is not represented yet, so the
+                    // summoned/expired guard only proves the current Rust source:
+                    // `GetSpellId() && m_respawnTime == 0`.
+                    if let Some(despawn_at_action) = despawn_at_action {
+                        let is_summoned_and_expired =
+                            game_object.spell_id() != 0 && game_object.respawn_time() == 0;
+                        if !despawn_at_action && !is_summoned_and_expired {
+                            if go_type == GAMEOBJECT_TYPE_CHEST {
+                                if let Some(source) =
+                                    game_object.represented_chest_loot_source_like_cpp()
+                                {
+                                    if source.chest_restock_time_secs > 0 {
+                                        let restock_time = game_time_secs.saturating_add(
+                                            i64::from(source.chest_restock_time_secs),
+                                        );
+                                        game_object.set_restock_time_like_cpp(restock_time);
+                                        game_object.set_loot_state(LootState::NotReady, None);
+                                        non_consumed_restock_armed = true;
+                                        non_consumed_update_dynamic_flags_represented = true;
+                                    } else {
+                                        game_object.set_loot_state(LootState::Ready, None);
+                                        non_consumed_set_ready = true;
+                                    }
+                                }
+                            } else {
+                                game_object.set_loot_state(LootState::Ready, None);
+                                non_consumed_set_ready = true;
+                            }
+                            non_consumed_chest_or_goober_return = true;
+                            non_consumed_update_visibility_represented = true;
+                        }
+                    } else {
+                        non_consumed_source_missing = true;
+                    }
+                }
+            }
+        }
+
         if entity_update.status == EntityGameObjectUpdateStatusLikeCpp::DespawnRequested {
             if let Some(record) = self.map_objects.get_mut(&game_object_guid) {
                 if let Some(game_object) = record.game_object_mut() {
@@ -4663,6 +4779,12 @@ where
                 goober_users_cleared: false,
                 goober_state_reset: false,
                 goober_nodespawn_return: false,
+                non_consumed_chest_or_goober_return: false,
+                non_consumed_restock_armed: false,
+                non_consumed_set_ready: false,
+                non_consumed_update_visibility_represented: false,
+                non_consumed_update_dynamic_flags_represented: false,
+                non_consumed_source_missing: false,
             }
         } else {
             GameObjectUpdateOutcomeLikeCpp {
@@ -4688,6 +4810,12 @@ where
                 goober_users_cleared,
                 goober_state_reset,
                 goober_nodespawn_return,
+                non_consumed_chest_or_goober_return,
+                non_consumed_restock_armed,
+                non_consumed_set_ready,
+                non_consumed_update_visibility_represented,
+                non_consumed_update_dynamic_flags_represented,
+                non_consumed_source_missing,
             }
         }
     }
@@ -4702,6 +4830,7 @@ where
     pub fn update_game_objects_like_cpp(
         &mut self,
         diff_ms: u32,
+        game_time_secs: i64,
     ) -> GameObjectsUpdateSummaryLikeCpp {
         let game_object_guids = self
             .map_objects
@@ -4715,7 +4844,7 @@ where
         let mut summary = GameObjectsUpdateSummaryLikeCpp::default();
         for guid in game_object_guids {
             summary.visited += 1;
-            let outcome = self.update_game_object_like_cpp(guid, diff_ms);
+            let outcome = self.update_game_object_like_cpp(guid, diff_ms, game_time_secs);
             if outcome.linked_trap_removed {
                 summary.linked_traps_removed += 1;
             }
@@ -4731,6 +4860,24 @@ where
             }
             if outcome.goober_nodespawn_return {
                 summary.goober_nodespawn_returns += 1;
+            }
+            if outcome.non_consumed_chest_or_goober_return {
+                summary.non_consumed_chest_or_goober_returns += 1;
+            }
+            if outcome.non_consumed_restock_armed {
+                summary.non_consumed_restock_armed += 1;
+            }
+            if outcome.non_consumed_set_ready {
+                summary.non_consumed_set_ready += 1;
+            }
+            if outcome.non_consumed_update_visibility_represented {
+                summary.non_consumed_update_visibility_represented += 1;
+            }
+            if outcome.non_consumed_update_dynamic_flags_represented {
+                summary.non_consumed_update_dynamic_flags_represented += 1;
+            }
+            if outcome.non_consumed_source_missing {
+                summary.non_consumed_source_missing += 1;
             }
             match outcome.status {
                 GameObjectUpdateStatusLikeCpp::Updated => summary.updated += 1,
@@ -9787,8 +9934,8 @@ mod tests {
     use wow_constants::{DeathState, TypeId, TypeMask};
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
     use wow_entities::{
-        AccessorObjectRef, Creature, GameObject, GameObjectOwnedLoot, GooberUseSource,
-        ObjectAccessor, ObjectNotifyFlags, Player, Transport,
+        AccessorObjectRef, Creature, GameObject, GameObjectLootSource, GameObjectOwnedLoot,
+        GooberUseSource, ObjectAccessor, ObjectNotifyFlags, Player, Transport,
     };
 
     const GO_FLAG_MAP_OBJECT: u32 = 0x0010_0000;
@@ -18971,7 +19118,7 @@ mod tests {
         map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(owner).unwrap())
             .unwrap();
 
-        let outcome = map.update_game_object_like_cpp(owner_guid, 1);
+        let outcome = map.update_game_object_like_cpp(owner_guid, 1, 1_000);
 
         assert_eq!(outcome.status, GameObjectUpdateStatusLikeCpp::Updated);
         assert_eq!(outcome.linked_trap_guid, Some(trap_guid));
@@ -19004,7 +19151,7 @@ mod tests {
         )
         .unwrap();
 
-        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1);
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 1_000);
         let canonical = map
             .map_object_record(gameobject_guid)
             .and_then(MapObjectRecord::game_object)
@@ -19044,7 +19191,7 @@ mod tests {
         )
         .unwrap();
 
-        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1);
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 1_000);
         let canonical = map
             .map_object_record(gameobject_guid)
             .and_then(MapObjectRecord::game_object)
@@ -19057,7 +19204,9 @@ mod tests {
         assert!(!outcome.goober_state_reset);
         assert!(!outcome.goober_nodespawn_return);
         assert!(outcome.loot_cleared);
-        assert_eq!(canonical.loot_state(), LootState::JustDeactivated);
+        assert!(outcome.non_consumed_chest_or_goober_return);
+        assert!(outcome.non_consumed_set_ready);
+        assert_eq!(canonical.loot_state(), LootState::Ready);
         assert!(canonical.shared_loot_like_cpp().is_none());
         assert_eq!(canonical.personal_loot_count_like_cpp(), 0);
         assert_eq!(canonical.unique_user_count_like_cpp(), 0);
@@ -19083,7 +19232,7 @@ mod tests {
         )
         .unwrap();
 
-        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1);
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 1_000);
         let canonical = map
             .map_object_record(gameobject_guid)
             .and_then(MapObjectRecord::game_object)
@@ -19119,7 +19268,7 @@ mod tests {
         )
         .unwrap();
 
-        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1);
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 1_000);
         let canonical = map
             .map_object_record(gameobject_guid)
             .and_then(MapObjectRecord::game_object)
@@ -19164,7 +19313,7 @@ mod tests {
         )
         .unwrap();
 
-        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1);
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 1_000);
         let canonical = map
             .map_object_record(gameobject_guid)
             .and_then(MapObjectRecord::game_object)
@@ -19202,7 +19351,7 @@ mod tests {
         )
         .unwrap();
 
-        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1);
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 1_000);
         let canonical = map
             .map_object_record(gameobject_guid)
             .and_then(MapObjectRecord::game_object)
@@ -19218,6 +19367,208 @@ mod tests {
         assert!(canonical.shared_loot_like_cpp().is_none());
         assert_eq!(canonical.unique_user_count_like_cpp(), 0);
         assert_eq!(canonical.use_times(), 0);
+    }
+
+    #[test]
+    fn gameobject_update_non_consumed_chest_restock_returns_after_clearloot_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = game_object_with_counter(4610101, 571, 7, false);
+        let gameobject_guid = gameobject.world().guid();
+        gameobject.set_go_type(GAMEOBJECT_TYPE_CHEST as u8);
+        gameobject.set_represented_chest_loot_source_like_cpp(Some(GameObjectLootSource {
+            chest_restock_time_secs: 45,
+            chest_consumable: false,
+            ..GameObjectLootSource::default()
+        }));
+        gameobject.set_loot_state(LootState::JustDeactivated, None);
+        gameobject.set_shared_loot_like_cpp(GameObjectOwnedLoot::new(41, 2));
+
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 1_000);
+        let canonical = map
+            .map_object_record(gameobject_guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+
+        assert_eq!(outcome.status, GameObjectUpdateStatusLikeCpp::Updated);
+        assert!(outcome.loot_cleared);
+        assert!(outcome.non_consumed_chest_or_goober_return);
+        assert!(outcome.non_consumed_restock_armed);
+        assert!(!outcome.non_consumed_set_ready);
+        assert!(outcome.non_consumed_update_visibility_represented);
+        assert!(outcome.non_consumed_update_dynamic_flags_represented);
+        assert!(!outcome.non_consumed_source_missing);
+        assert_eq!(canonical.restock_time(), 1_045);
+        assert_eq!(canonical.loot_state(), LootState::NotReady);
+        assert!(canonical.shared_loot_like_cpp().is_none());
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+    }
+
+    #[test]
+    fn gameobject_update_non_consumed_chest_without_restock_sets_ready_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = game_object_with_counter(4610201, 571, 7, false);
+        let gameobject_guid = gameobject.world().guid();
+        gameobject.set_go_type(GAMEOBJECT_TYPE_CHEST as u8);
+        gameobject.set_represented_chest_loot_source_like_cpp(Some(GameObjectLootSource {
+            chest_restock_time_secs: 0,
+            chest_consumable: false,
+            ..GameObjectLootSource::default()
+        }));
+        gameobject.set_loot_state(LootState::JustDeactivated, None);
+        gameobject.set_shared_loot_like_cpp(GameObjectOwnedLoot::new(43, 1));
+
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 1_000);
+        let canonical = map
+            .map_object_record(gameobject_guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+
+        assert!(outcome.loot_cleared);
+        assert!(outcome.non_consumed_chest_or_goober_return);
+        assert!(!outcome.non_consumed_restock_armed);
+        assert!(outcome.non_consumed_set_ready);
+        assert!(outcome.non_consumed_update_visibility_represented);
+        assert!(!outcome.non_consumed_update_dynamic_flags_represented);
+        assert_eq!(canonical.restock_time(), 0);
+        assert_eq!(canonical.loot_state(), LootState::Ready);
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+    }
+
+    #[test]
+    fn gameobject_update_non_consumed_goober_sets_ready_after_prebranch_and_clearloot_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = game_object_with_counter(4610301, 571, 7, false);
+        let gameobject_guid = gameobject.world().guid();
+        gameobject.set_go_type(GAMEOBJECT_TYPE_GOOBER as u8);
+        gameobject.set_represented_goober_use_source_like_cpp(Some(GooberUseSource {
+            consumable: false,
+            lock_id: 88,
+            ..GooberUseSource::default()
+        }));
+        gameobject.set_go_state(GoState::Active);
+        gameobject.set_loot_state(LootState::JustDeactivated, None);
+        gameobject.set_shared_loot_like_cpp(GameObjectOwnedLoot::new(47, 1));
+
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 1_000);
+        let canonical = map
+            .map_object_record(gameobject_guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+
+        assert!(outcome.goober_state_reset);
+        assert!(outcome.loot_cleared);
+        assert!(outcome.non_consumed_chest_or_goober_return);
+        assert!(outcome.non_consumed_set_ready);
+        assert_eq!(canonical.loot_state(), LootState::Ready);
+        assert!(canonical.shared_loot_like_cpp().is_none());
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+    }
+
+    #[test]
+    fn gameobject_update_consumable_chest_or_goober_does_not_take_non_consumed_return_like_cpp() {
+        let mut map = test_map();
+        let mut chest = game_object_with_counter(4610401, 571, 7, false);
+        let mut goober = game_object_with_counter(4610402, 571, 7, false);
+        let chest_guid = chest.world().guid();
+        let goober_guid = goober.world().guid();
+        chest.set_go_type(GAMEOBJECT_TYPE_CHEST as u8);
+        chest.set_represented_chest_loot_source_like_cpp(Some(GameObjectLootSource {
+            chest_restock_time_secs: 90,
+            chest_consumable: true,
+            ..GameObjectLootSource::default()
+        }));
+        chest.set_loot_state(LootState::JustDeactivated, None);
+        goober.set_go_type(GAMEOBJECT_TYPE_GOOBER as u8);
+        goober.set_represented_goober_use_source_like_cpp(Some(GooberUseSource {
+            consumable: true,
+            ..GooberUseSource::default()
+        }));
+        goober.set_loot_state(LootState::JustDeactivated, None);
+
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(chest).unwrap())
+            .unwrap();
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(goober).unwrap(),
+        )
+        .unwrap();
+
+        let chest_outcome = map.update_game_object_like_cpp(chest_guid, 1, 1_000);
+        let goober_outcome = map.update_game_object_like_cpp(goober_guid, 1, 1_000);
+
+        assert!(!chest_outcome.non_consumed_chest_or_goober_return);
+        assert!(!chest_outcome.non_consumed_restock_armed);
+        assert!(!chest_outcome.non_consumed_set_ready);
+        assert!(!goober_outcome.non_consumed_chest_or_goober_return);
+        assert!(!goober_outcome.non_consumed_set_ready);
+    }
+
+    #[test]
+    fn gameobject_update_spell_created_expired_does_not_take_non_consumed_return_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = game_object_with_counter(4610501, 571, 7, false);
+        let gameobject_guid = gameobject.world().guid();
+        gameobject.set_go_type(GAMEOBJECT_TYPE_CHEST as u8);
+        gameobject.set_represented_chest_loot_source_like_cpp(Some(GameObjectLootSource {
+            chest_restock_time_secs: 30,
+            chest_consumable: false,
+            ..GameObjectLootSource::default()
+        }));
+        // Represents only the Rust-proven half of C++ `isSummonedAndExpired`:
+        // `GetSpellId() && m_respawnTime == 0`; owner GUID support remains a gap.
+        gameobject.set_spell_id(123);
+        gameobject.set_respawn_time(0);
+        gameobject.set_loot_state(LootState::JustDeactivated, None);
+
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 1_000);
+
+        assert!(outcome.loot_cleared);
+        assert!(!outcome.non_consumed_chest_or_goober_return);
+        assert!(!outcome.non_consumed_restock_armed);
+        assert!(!outcome.non_consumed_set_ready);
+        assert!(!outcome.non_consumed_update_visibility_represented);
+    }
+
+    #[test]
+    fn gameobject_update_missing_template_source_does_not_assume_non_consumed_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = game_object_with_counter(4610601, 571, 7, false);
+        let gameobject_guid = gameobject.world().guid();
+        gameobject.set_go_type(GAMEOBJECT_TYPE_CHEST as u8);
+        gameobject.set_represented_chest_loot_source_like_cpp(None);
+        gameobject.set_loot_state(LootState::JustDeactivated, None);
+
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 1_000);
+
+        assert!(outcome.loot_cleared);
+        assert!(!outcome.non_consumed_chest_or_goober_return);
+        assert!(!outcome.non_consumed_set_ready);
+        assert!(!outcome.non_consumed_restock_armed);
+        assert!(outcome.non_consumed_source_missing);
     }
 
     #[test]
@@ -19243,7 +19594,7 @@ mod tests {
         map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(owner).unwrap())
             .unwrap();
 
-        let outcome = map.update_game_object_like_cpp(owner_guid, 1);
+        let outcome = map.update_game_object_like_cpp(owner_guid, 1, 1_000);
 
         assert_eq!(
             outcome.status,
@@ -19287,7 +19638,7 @@ mod tests {
         map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(owner).unwrap())
             .unwrap();
 
-        let outcome = map.update_game_object_like_cpp(owner_guid, 1);
+        let outcome = map.update_game_object_like_cpp(owner_guid, 1, 1_000);
 
         assert_eq!(outcome.status, GameObjectUpdateStatusLikeCpp::Updated);
         assert_eq!(outcome.linked_trap_guid, None);
@@ -19323,7 +19674,7 @@ mod tests {
         map.insert_map_object_record(MapObjectRecord::new_game_object(gameobject).unwrap())
             .unwrap();
 
-        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1);
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 1_000);
         let canonical = map
             .map_object_record(gameobject_guid)
             .and_then(MapObjectRecord::game_object)
@@ -19371,9 +19722,9 @@ mod tests {
         )
         .unwrap();
 
-        let empty_outcome = map.update_game_object_like_cpp(empty_guid, 1);
-        let self_outcome = map.update_game_object_like_cpp(self_guid, 1);
-        let missing_outcome = map.update_game_object_like_cpp(missing_guid, 1);
+        let empty_outcome = map.update_game_object_like_cpp(empty_guid, 1, 1_000);
+        let self_outcome = map.update_game_object_like_cpp(self_guid, 1, 1_000);
+        let missing_outcome = map.update_game_object_like_cpp(missing_guid, 1, 1_000);
 
         assert_eq!(empty_outcome.linked_trap_guid, None);
         assert!(!empty_outcome.linked_trap_removed);
@@ -19405,7 +19756,7 @@ mod tests {
         map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(owner).unwrap())
             .unwrap();
 
-        let summary = map.update_game_objects_like_cpp(1);
+        let summary = map.update_game_objects_like_cpp(1, 1_000);
 
         assert_eq!(summary.linked_traps_removed, 1);
         assert_eq!(summary.loot_cleared, 1);

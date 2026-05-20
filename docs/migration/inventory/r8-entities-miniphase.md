@@ -4,9 +4,15 @@
 > Rule: every Entities claim is contrasted against `/home/server/woltk-trinity-legacy/src/server/game/Entities/`.
 
 ## Pending Review Tasks
-- None. Latest #460 slice has reviewer `APROBADO` and CI `CI_OK`; it is commit-ready locally.
+- None. Latest #461 slice has reviewer `APROBADO`, CI `CI_OK`, validation OK, and is committed locally; no dirty review slice is pending.
 
 ## Closed Tasks
+- [x] **#NEXT.R8.ENTITIES.461** Map-owned `GameObject::Update` non-consumed chest/goober post-`ClearLoot()` early return.
+  Status: represented-complete for this bounded post-`ClearLoot()` early-return seam; review `APROBADO`; CI `CI_OK`; validation OK; committed locally at `current #461 HEAD`; no push/install/restart.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:1575-1607`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:1609-1623`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:1740-1764`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:3683-3709`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObjectData.h:843-849`.
+  Rust targets: `crates/wow-entities/src/game_object.rs`, `crates/wow-map/src/map.rs`, `crates/wow-map/src/manager.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: after represented `ClearLoot()` in the canonical exact typed `Map::map_objects` GameObject update path, CHEST/GOOBER objects consume only explicit represented template source evidence for C++ `IsDespawnAtAction()`. Missing source reports `non_consumed_source_missing` and never assumes non-consumable. Consumable/despawn-at-action objects and the represented spell-created expired case (`spell_id != 0 && respawn_time == 0`) skip the branch. Non-consumed CHEST with positive restock writes `restock_time = game_time_secs + chest_restock_time_secs`, sets `LootState::NotReady`, records represented dynamic-flags evidence, and returns without remove-list; non-restock CHEST and GOOBER set `LootState::Ready` and record represented visibility evidence. Remaining gaps stay explicit: owner-guid half of `isSummonedAndExpired`, owner `NEW_FLAG_DROP`, generic `GO_NOT_READY` visual despawn/respawn/SaveRespawnTime/PoolMgr, DB writes, scripts/AI, packets/fanout/ObjectAccessor, remove-list drain, install/restart/push, and full GameObject runtime parity.
+
 - [x] **#NEXT.R8.ENTITIES.460** Map-owned `GameObject::Update` GOOBER pre-`ClearLoot()` represented branch / `GO_FLAG_NODESPAWN` early return.
   Status: represented-complete for this bounded GOOBER ordering seam; review `APROBADO`; CI `CI_OK`; validation OK; committed locally at `current #460 HEAD`; no push/install/restart.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:1581-1607`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:3711-3721`, `/home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/SharedDefines.h:2902`.

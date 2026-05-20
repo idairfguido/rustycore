@@ -420,7 +420,8 @@ impl ManagedMap {
         // map-owned GameObject records. C++ real order is TypeContainerVisitor
         // nearby-cell/active-object traversal; this Rust insertion only adds the
         // missing family and leaves AI/go-type/per-player/packet/DB gaps open.
-        self.last_game_objects_update_summary = self.map.update_game_objects_like_cpp(diff_ms);
+        self.last_game_objects_update_summary =
+            self.map.update_game_objects_like_cpp(diff_ms, now_secs);
         // Partial C++ transport seam: after the represented GameObject/ObjectUpdater
         // family and before later represented families, visit typed canonical
         // Transports. This does not reproduce exact C++ cell visitor ordering nor
@@ -1817,6 +1818,7 @@ mod tests {
                 goober_users_cleared: 0,
                 goober_state_reset: 0,
                 goober_nodespawn_returns: 0,
+                ..GameObjectsUpdateSummaryLikeCpp::default()
             }
         );
         let game_object = managed_map
@@ -1863,6 +1865,7 @@ mod tests {
                 goober_users_cleared: 0,
                 goober_state_reset: 0,
                 goober_nodespawn_returns: 0,
+                ..GameObjectsUpdateSummaryLikeCpp::default()
             }
         );
         assert!(
@@ -1898,6 +1901,7 @@ mod tests {
                 goober_users_cleared: 0,
                 goober_state_reset: 0,
                 goober_nodespawn_returns: 0,
+                ..GameObjectsUpdateSummaryLikeCpp::default()
             }
         );
         let game_object = managed_map
@@ -1934,6 +1938,7 @@ mod tests {
                 goober_users_cleared: 0,
                 goober_state_reset: 0,
                 goober_nodespawn_returns: 0,
+                ..GameObjectsUpdateSummaryLikeCpp::default()
             }
         );
         assert!(

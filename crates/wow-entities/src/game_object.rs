@@ -981,6 +981,12 @@ pub struct GameObject {
     lifecycle_string_id: String,
     linked_trap_guid: ObjectGuid,
     stationary_position: Position,
+    /// Resolved C++ `GetGOInfo()->chest` source carried only when this entity was
+    /// constructed or explicitly seeded with a CHEST template source.
+    ///
+    /// This is represented template evidence for bounded `GameObject::Update`
+    /// branches only; it is not a full live `GameObjectTemplate`/ObjectMgr owner.
+    chest_loot_source_like_cpp: Option<GameObjectLootSource>,
     /// Resolved C++ `GetGOInfo()->goober` source carried only when this entity was
     /// constructed or explicitly seeded with a GOOBER template source.
     ///
@@ -1053,6 +1059,7 @@ impl GameObject {
             lifecycle_string_id: String::new(),
             linked_trap_guid: ObjectGuid::EMPTY,
             stationary_position: Position::new(0.0, 0.0, 0.0, 0.0),
+            chest_loot_source_like_cpp: None,
             goober_use_source_like_cpp: None,
             represented_gameobject_model_like_cpp: false,
             represented_gameobject_model_is_map_object_like_cpp: false,
@@ -1116,12 +1123,12 @@ impl GameObject {
         self.set_custom_param(template.custom_param);
 
         // C++ keeps template `data` through `m_goInfo`; Rust carries only the
-        // bounded GOOBER source needed by represented update branches here. The
+        // bounded CHEST/GOOBER source needed by represented update branches here. The
         // remaining type-specific implementations, model creation, zone scripts,
         // DB phasing and AddToMap stay external/unrepresented in this entity constructor.
-        self.goober_use_source_like_cpp =
-            GameObjectTemplateData::new(template.go_type, template.data)
-                .goober_use_source_like_cpp();
+        let template_data = GameObjectTemplateData::new(template.go_type, template.data);
+        self.chest_loot_source_like_cpp = template_data.chest_loot_source_like_cpp();
+        self.goober_use_source_like_cpp = template_data.goober_use_source_like_cpp();
         match template.go_type {
             GAMEOBJECT_TYPE_FISHING_HOLE | GAMEOBJECT_TYPE_TRANSPORT => {
                 // Represented C++ branches call SetGoAnimProgress(animProgress); no Rust field yet.
@@ -1475,6 +1482,17 @@ impl GameObject {
     pub fn clear_unique_users_and_reset_use_times_like_cpp(&mut self) {
         self.unique_users.clear();
         self.use_times = 0;
+    }
+
+    pub fn represented_chest_loot_source_like_cpp(&self) -> Option<GameObjectLootSource> {
+        self.chest_loot_source_like_cpp
+    }
+
+    pub fn set_represented_chest_loot_source_like_cpp(
+        &mut self,
+        source: Option<GameObjectLootSource>,
+    ) {
+        self.chest_loot_source_like_cpp = source;
     }
 
     pub fn represented_goober_use_source_like_cpp(&self) -> Option<GooberUseSource> {
