@@ -4,7 +4,7 @@
 //! - `game/Maps/Map.h`
 //! - `game/Maps/Map.cpp`
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
@@ -342,6 +342,36 @@ pub struct SendObjectUpdatesSummaryLikeCpp {
     /// Evidence that C++ `UpdateDataMapType` player fanout/packet send is still
     /// intentionally not represented by this seam.
     pub fanout_not_represented: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RepresentedScriptScheduleActionLikeCpp {
+    pub source_guid: ObjectGuid,
+    pub target_guid: ObjectGuid,
+    pub owner_guid: ObjectGuid,
+    /// Opaque represented command/script identifier only. This is not a real
+    /// `ScriptInfo` pointer and must not trigger command side effects.
+    pub command_id: u32,
+    pub due_time_secs: i64,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ScriptScheduleProcessSummaryLikeCpp {
+    pub queued_before: usize,
+    pub processed: usize,
+    pub remaining: usize,
+    pub represented_decrease_count: usize,
+    pub lock_entered: bool,
+    pub empty_noop: bool,
+    pub processed_actions: Vec<RepresentedScriptScheduleActionLikeCpp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptScheduleStartOutcomeLikeCpp {
+    pub scheduled: RepresentedScriptScheduleActionLikeCpp,
+    pub represented_increase_count: usize,
+    pub remaining_after_schedule: usize,
+    pub immediate_process: Option<ScriptScheduleProcessSummaryLikeCpp>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1269,6 +1299,18 @@ pub struct Map<Terrain = NoopTerrainGridLoader, Lifecycle = NoopGridLifecycle> {
     gameobject_move_lock: bool,
     dynamic_object_move_lock: bool,
     area_trigger_move_lock: bool,
+    /// Map-owned represented script schedule matching C++ `m_scriptSchedule`
+    /// plus `i_scriptLock` (`Map.cpp:777-795`, `MapScripts.cpp:33-98,311-321`).
+    ///
+    /// Source-of-truth is this `Map` instance. Entries are keyed by absolute game
+    /// time seconds so the due prefix drains deterministically and future entries
+    /// remain queued. Values preserve multiple actions with the same due time.
+    /// Due processing records represented execution evidence only; it does not
+    /// run ScriptInfo commands, look up objects/items/sessions, send packets,
+    /// mutate movement/quests/chat/weather, or call a real script manager.
+    script_schedule_like_cpp: BTreeMap<i64, Vec<RepresentedScriptScheduleActionLikeCpp>>,
+    script_schedule_lock_like_cpp: bool,
+    represented_executed_script_actions_like_cpp: Vec<RepresentedScriptScheduleActionLikeCpp>,
     /// C++ `Map::_guidGenerators` (`Map.h:789-791`), lazy initialized by
     /// `Map::GetGuidSequenceGenerator` (`Map.cpp:2505-2511`). This stores only
     /// map-owned sequence counters; callers must compose full ObjectGuids with
@@ -1352,6 +1394,9 @@ where
             gameobject_move_lock: false,
             dynamic_object_move_lock: false,
             area_trigger_move_lock: false,
+            script_schedule_like_cpp: BTreeMap::new(),
+            script_schedule_lock_like_cpp: false,
+            represented_executed_script_actions_like_cpp: Vec::new(),
             guid_generators: HashMap::new(),
             creature_level_rng_like_cpp: StdRng::from_entropy(),
         }
@@ -2536,6 +2581,140 @@ where
         }
 
         summary
+    }
+
+    pub fn represented_script_schedule_count_like_cpp(&self) -> usize {
+        self.script_schedule_like_cpp.values().map(Vec::len).sum()
+    }
+
+    pub fn represented_executed_script_actions_like_cpp(
+        &self,
+    ) -> &[RepresentedScriptScheduleActionLikeCpp] {
+        &self.represented_executed_script_actions_like_cpp
+    }
+
+    pub const fn is_script_schedule_locked_like_cpp(&self) -> bool {
+        self.script_schedule_lock_like_cpp
+    }
+
+    /// Bounded represented seam for C++ `Map::ScriptCommandStart` scheduling.
+    ///
+    /// C++ anchors:
+    /// - `MapScripts.cpp:72-98` schedules one action at
+    ///   `GameTime::GetGameTime() + delay`, increments the global scheduled count,
+    ///   and immediately processes zero-delay actions when `!i_scriptLock`.
+    /// - `MapScripts.cpp:386-893` real commands are intentionally not executed by
+    ///   this Rust seam; due actions are only recorded as represented evidence.
+    pub fn schedule_represented_script_action_like_cpp(
+        &mut self,
+        now_secs: i64,
+        delay_secs: u32,
+        source_guid: ObjectGuid,
+        target_guid: ObjectGuid,
+        owner_guid: ObjectGuid,
+        command_id: u32,
+    ) -> ScriptScheduleStartOutcomeLikeCpp {
+        let due_time_secs = now_secs.saturating_add(i64::from(delay_secs));
+        let scheduled = RepresentedScriptScheduleActionLikeCpp {
+            source_guid,
+            target_guid,
+            owner_guid,
+            command_id,
+            due_time_secs,
+        };
+        self.script_schedule_like_cpp
+            .entry(due_time_secs)
+            .or_default()
+            .push(scheduled);
+
+        let immediate_process = if delay_secs == 0 && !self.script_schedule_lock_like_cpp {
+            Some(self.process_script_schedule_update_order_like_cpp(now_secs))
+        } else {
+            None
+        };
+
+        ScriptScheduleStartOutcomeLikeCpp {
+            scheduled,
+            represented_increase_count: 1,
+            remaining_after_schedule: self.represented_script_schedule_count_like_cpp(),
+            immediate_process,
+        }
+    }
+
+    /// Bounded represented C++ `Map::ScriptsProcess()` drain.
+    ///
+    /// Empty schedules are no-ops. Otherwise only sorted entries whose due time is
+    /// `<= GameTime::GetGameTime()` are erased and recorded as represented-executed
+    /// evidence; future entries remain queued and stop the drain. This does not
+    /// execute talk/emote/move/teleport/quest/gossip/item/weather/script-manager
+    /// commands or any DB/session/ObjectAccessor side effects.
+    pub fn process_due_script_schedule_like_cpp(
+        &mut self,
+        now_secs: i64,
+    ) -> ScriptScheduleProcessSummaryLikeCpp {
+        let queued_before = self.represented_script_schedule_count_like_cpp();
+        if queued_before == 0 {
+            return ScriptScheduleProcessSummaryLikeCpp {
+                queued_before,
+                remaining: 0,
+                empty_noop: true,
+                ..Default::default()
+            };
+        }
+
+        let mut processed_actions = Vec::new();
+        loop {
+            let Some((&due_time_secs, _)) = self.script_schedule_like_cpp.first_key_value() else {
+                break;
+            };
+            if due_time_secs > now_secs {
+                break;
+            }
+            if let Some(mut actions) = self.script_schedule_like_cpp.remove(&due_time_secs) {
+                processed_actions.append(&mut actions);
+            }
+        }
+
+        self.represented_executed_script_actions_like_cpp
+            .extend(processed_actions.iter().copied());
+        let remaining = self.represented_script_schedule_count_like_cpp();
+        ScriptScheduleProcessSummaryLikeCpp {
+            queued_before,
+            processed: processed_actions.len(),
+            remaining,
+            represented_decrease_count: processed_actions.len(),
+            lock_entered: false,
+            empty_noop: false,
+            processed_actions,
+        }
+    }
+
+    /// C++ `Map::Update` order helper for the script seam.
+    ///
+    /// Mirrors `if (!m_scriptSchedule.empty()) { i_scriptLock = true;
+    /// ScriptsProcess(); i_scriptLock = false; }` between `SendObjectUpdates()`
+    /// and weather/personal phase (`Map.cpp:777-798`).
+    pub fn process_script_schedule_update_order_like_cpp(
+        &mut self,
+        now_secs: i64,
+    ) -> ScriptScheduleProcessSummaryLikeCpp {
+        if self.script_schedule_like_cpp.is_empty() {
+            return ScriptScheduleProcessSummaryLikeCpp {
+                empty_noop: true,
+                ..Default::default()
+            };
+        }
+
+        self.script_schedule_lock_like_cpp = true;
+        let mut summary = self.process_due_script_schedule_like_cpp(now_secs);
+        self.script_schedule_lock_like_cpp = false;
+        summary.lock_entered = true;
+        summary
+    }
+
+    #[cfg(test)]
+    fn set_script_schedule_lock_for_test(&mut self, locked: bool) {
+        self.script_schedule_lock_like_cpp = locked;
     }
 
     /// C++ `GetMultiPersonalPhaseTracker().Update(this, t_diff)` represented on `Map`.
@@ -8438,6 +8617,137 @@ mod tests {
         ) -> f32 {
             INVALID_HEIGHT
         }
+    }
+
+    fn script_guid(counter: i64) -> ObjectGuid {
+        ObjectGuid::create_player(1, counter)
+    }
+
+    #[test]
+    fn script_schedule_due_prefix_drains_sorted_and_keeps_future_like_cpp() {
+        let mut map = Map::new(1, 0, 0, 60_000);
+        let delayed = map.schedule_represented_script_action_like_cpp(
+            100,
+            10,
+            script_guid(1),
+            script_guid(2),
+            script_guid(3),
+            1001,
+        );
+        let due_a = map.schedule_represented_script_action_like_cpp(
+            100,
+            5,
+            script_guid(4),
+            script_guid(5),
+            script_guid(6),
+            1002,
+        );
+        let due_b = map.schedule_represented_script_action_like_cpp(
+            100,
+            5,
+            script_guid(7),
+            script_guid(8),
+            script_guid(9),
+            1003,
+        );
+
+        assert_eq!(delayed.represented_increase_count, 1);
+        assert_eq!(due_a.represented_increase_count, 1);
+        assert_eq!(due_b.represented_increase_count, 1);
+        assert_eq!(map.represented_script_schedule_count_like_cpp(), 3);
+
+        let summary = map.process_due_script_schedule_like_cpp(105);
+
+        assert_eq!(summary.queued_before, 3);
+        assert_eq!(summary.processed, 2);
+        assert_eq!(summary.represented_decrease_count, 2);
+        assert_eq!(summary.remaining, 1);
+        assert!(!summary.empty_noop);
+        assert_eq!(
+            summary
+                .processed_actions
+                .iter()
+                .map(|action| action.command_id)
+                .collect::<Vec<_>>(),
+            vec![1002, 1003]
+        );
+        assert_eq!(map.represented_script_schedule_count_like_cpp(), 1);
+        assert_eq!(
+            map.represented_executed_script_actions_like_cpp()
+                .iter()
+                .map(|action| action.command_id)
+                .collect::<Vec<_>>(),
+            vec![1002, 1003]
+        );
+
+        let delayed_summary = map.process_script_schedule_update_order_like_cpp(110);
+        assert_eq!(delayed_summary.processed_actions, vec![delayed.scheduled]);
+        assert_eq!(delayed_summary.remaining, 0);
+        assert!(delayed_summary.lock_entered);
+    }
+
+    #[test]
+    fn script_schedule_empty_update_order_is_noop_without_lock_like_cpp() {
+        let mut map = Map::new(1, 0, 0, 60_000);
+
+        let summary = map.process_script_schedule_update_order_like_cpp(100);
+
+        assert!(summary.empty_noop);
+        assert_eq!(summary.queued_before, 0);
+        assert_eq!(summary.processed, 0);
+        assert_eq!(summary.remaining, 0);
+        assert!(!summary.lock_entered);
+        assert!(!map.is_script_schedule_locked_like_cpp());
+    }
+
+    #[test]
+    fn script_schedule_zero_delay_processes_immediately_when_unlocked_like_cpp() {
+        let mut map = Map::new(1, 0, 0, 60_000);
+
+        let outcome = map.schedule_represented_script_action_like_cpp(
+            200,
+            0,
+            script_guid(11),
+            script_guid(12),
+            script_guid(13),
+            2001,
+        );
+
+        let immediate = outcome
+            .immediate_process
+            .expect("zero-delay represented schedule should process while unlocked");
+        assert_eq!(immediate.queued_before, 1);
+        assert_eq!(immediate.processed, 1);
+        assert_eq!(immediate.remaining, 0);
+        assert!(immediate.lock_entered);
+        assert_eq!(immediate.processed_actions, vec![outcome.scheduled]);
+        assert_eq!(outcome.remaining_after_schedule, 0);
+        assert_eq!(map.represented_script_schedule_count_like_cpp(), 0);
+    }
+
+    #[test]
+    fn script_schedule_zero_delay_remains_queued_when_locked_like_cpp() {
+        let mut map = Map::new(1, 0, 0, 60_000);
+        map.set_script_schedule_lock_for_test(true);
+
+        let outcome = map.schedule_represented_script_action_like_cpp(
+            300,
+            0,
+            script_guid(21),
+            script_guid(22),
+            script_guid(23),
+            3001,
+        );
+
+        assert!(outcome.immediate_process.is_none());
+        assert_eq!(outcome.remaining_after_schedule, 1);
+        assert_eq!(map.represented_script_schedule_count_like_cpp(), 1);
+        assert!(map.is_script_schedule_locked_like_cpp());
+        map.set_script_schedule_lock_for_test(false);
+
+        let summary = map.process_script_schedule_update_order_like_cpp(300);
+        assert_eq!(summary.processed_actions, vec![outcome.scheduled]);
+        assert_eq!(summary.remaining, 0);
     }
 
     #[derive(Debug, Clone, Copy, PartialEq)]

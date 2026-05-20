@@ -17,8 +17,8 @@ use crate::map::{
     GameObjectsUpdateSummaryLikeCpp, Map, MoveListDrainSummaryLikeCpp, NoopGridLifecycle,
     NoopTerrainGridLoader, PersonalPhaseTrackerUpdateSummaryLikeCpp,
     ProcessRelocationNotifiesOutcome, SceneObjectUpdateContextLikeCpp,
-    SceneObjectsUpdateSummaryLikeCpp, SendObjectUpdatesSummaryLikeCpp,
-    TransportsUpdateSummaryLikeCpp,
+    SceneObjectsUpdateSummaryLikeCpp, ScriptScheduleProcessSummaryLikeCpp,
+    SendObjectUpdatesSummaryLikeCpp, TransportsUpdateSummaryLikeCpp,
 };
 use crate::spawn::Difficulty;
 use wow_core::GameTime;
@@ -166,6 +166,7 @@ pub struct ManagedMap {
     last_conversations_update_summary: ConversationsUpdateSummaryLikeCpp,
     last_scene_objects_update_summary: SceneObjectsUpdateSummaryLikeCpp,
     last_send_object_updates_summary_like_cpp: SendObjectUpdatesSummaryLikeCpp,
+    last_script_schedule_process_summary_like_cpp: ScriptScheduleProcessSummaryLikeCpp,
     last_personal_phase_tracker_update_summary: PersonalPhaseTrackerUpdateSummaryLikeCpp,
     last_live_move_list_drain_summary: LiveMoveListDrainSummaryLikeCpp,
     last_process_relocation_notifies_outcome_like_cpp: ProcessRelocationNotifiesOutcome,
@@ -211,6 +212,8 @@ impl ManagedMap {
             last_conversations_update_summary: ConversationsUpdateSummaryLikeCpp::default(),
             last_scene_objects_update_summary: SceneObjectsUpdateSummaryLikeCpp::default(),
             last_send_object_updates_summary_like_cpp: SendObjectUpdatesSummaryLikeCpp::default(),
+            last_script_schedule_process_summary_like_cpp:
+                ScriptScheduleProcessSummaryLikeCpp::default(),
             last_personal_phase_tracker_update_summary:
                 PersonalPhaseTrackerUpdateSummaryLikeCpp::default(),
             last_live_move_list_drain_summary: LiveMoveListDrainSummaryLikeCpp::default(),
@@ -308,6 +311,12 @@ impl ManagedMap {
         self.last_send_object_updates_summary_like_cpp
     }
 
+    pub fn last_script_schedule_process_summary_like_cpp(
+        &self,
+    ) -> ScriptScheduleProcessSummaryLikeCpp {
+        self.last_script_schedule_process_summary_like_cpp.clone()
+    }
+
     pub fn last_live_move_list_drain_summary_like_cpp(&self) -> LiveMoveListDrainSummaryLikeCpp {
         self.last_live_move_list_drain_summary.clone()
     }
@@ -385,6 +394,13 @@ impl ManagedMap {
         // `m_objectUpdated`/changed-mask state here; no `UpdateDataMapType`,
         // session packets, visible-player iteration, or direct fanout is built.
         self.last_send_object_updates_summary_like_cpp = self.map.send_object_updates_like_cpp();
+        // C++ then drains `m_scriptSchedule` under `i_scriptLock` before weather
+        // and personal phase (`Map.cpp:777-798`, `MapScripts.cpp:311-321`).
+        // Rust records due represented actions only; no script commands,
+        // ObjectAccessor/session/fanout/DB/weather side effects are executed.
+        self.last_script_schedule_process_summary_like_cpp = self
+            .map
+            .process_script_schedule_update_order_like_cpp(now_secs);
         // C++ calls `GetMultiPersonalPhaseTracker().Update(this, t_diff)` after
         // SendObjectUpdates/scripts/weather and before later move/remove drains.
         // Rust consumes the existing map-owned tracker here as a represented seam
@@ -1431,6 +1447,80 @@ mod tests {
         );
         assert_eq!(managed_map.map().objects_to_remove_count_like_cpp(), 0);
         assert!(managed_map.map().map_object_record(creature_guid).is_none());
+    }
+
+    #[test]
+    fn map_manager_update_processes_script_schedule_between_send_updates_and_personal_phase_like_cpp()
+     {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let creature_guid = insert_creature_for_update(&mut manager, 4460101, true);
+        let owner = ObjectGuid::create_player(1, 44601);
+        {
+            let map = manager.find_map_mut(1, 0).unwrap().map_mut();
+            let schedule = map.schedule_represented_script_action_like_cpp(
+                0,
+                1,
+                ObjectGuid::create_player(1, 44602),
+                creature_guid,
+                owner,
+                446,
+            );
+            assert!(schedule.immediate_process.is_none());
+            assert_eq!(map.represented_script_schedule_count_like_cpp(), 1);
+            map.register_personal_phase_object_for_test(446, owner, creature_guid);
+            map.mark_personal_phases_for_deletion_for_test(owner);
+        }
+
+        assert_eq!(manager.update(60_000), Some(60_000));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        let script_summary = managed_map.last_script_schedule_process_summary_like_cpp();
+        assert_eq!(script_summary.queued_before, 1);
+        assert_eq!(script_summary.processed, 1);
+        assert_eq!(script_summary.remaining, 0);
+        assert!(script_summary.lock_entered);
+        assert_eq!(script_summary.processed_actions[0].command_id, 446);
+        assert_eq!(
+            managed_map
+                .map()
+                .represented_script_schedule_count_like_cpp(),
+            0
+        );
+        assert_eq!(
+            managed_map.last_personal_phase_tracker_update_summary(),
+            PersonalPhaseTrackerUpdateSummaryLikeCpp {
+                expired_objects: 1,
+                remove_queued: 1,
+                missing_or_stale: 0,
+                unsupported_kinds: 0,
+                duplicate_queued: 0,
+            }
+        );
+        assert_eq!(
+            managed_map
+                .last_live_move_list_drain_summary_like_cpp()
+                .creature
+                .processed,
+            0
+        );
+        assert!(managed_map.map().map_object_record(creature_guid).is_none());
+    }
+
+    #[test]
+    fn map_manager_update_empty_script_schedule_reports_noop_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        let summary = managed_map.last_script_schedule_process_summary_like_cpp();
+        assert!(summary.empty_noop);
+        assert_eq!(summary.queued_before, 0);
+        assert_eq!(summary.processed, 0);
+        assert_eq!(summary.remaining, 0);
+        assert!(!summary.lock_entered);
     }
 
     #[test]
