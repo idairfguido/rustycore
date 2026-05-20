@@ -323,6 +323,27 @@ pub struct PersonalPhaseTrackerUpdateSummaryLikeCpp {
     pub duplicate_queued: usize,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct SendObjectUpdatesSummaryLikeCpp {
+    /// Objects in canonical `Map::map_objects` with represented
+    /// `Object::m_objectUpdated` set at snapshot time. Rust does not yet own the
+    /// exact C++ `_updateObjects` pointer set, so this is a represented snapshot.
+    pub queued_before: usize,
+    /// In-world updated objects consumed through the represented BuildUpdate seam.
+    pub processed: usize,
+    /// Objects whose update masks were cleared via `ClearUpdateMask(false)`.
+    pub cleared_update_masks: usize,
+    /// Defense for impossible/stale Rust state where the represented update queue
+    /// contains a not-in-world object. C++ asserts in `Map::SendObjectUpdates`.
+    pub skipped_not_in_world: usize,
+    /// Snapshot GUIDs that disappeared before mutable consumption; this should
+    /// not happen in the current single-threaded map owner but stays non-panicking.
+    pub missing_or_stale: usize,
+    /// Evidence that C++ `UpdateDataMapType` player fanout/packet send is still
+    /// intentionally not represented by this seam.
+    pub fanout_not_represented: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddObjectToSwitchListStatusLikeCpp {
     Queued,
@@ -2453,6 +2474,68 @@ where
                 .then_some(kind),
             cleanup_before_delete_count,
         }
+    }
+
+    /// Bounded represented consumption seam for C++ `Map::SendObjectUpdates()`.
+    ///
+    /// C++ anchors:
+    /// - `Map.cpp:777` calls `SendObjectUpdates()` after ObjectUpdater/Transport
+    ///   visitation during `Map::Update`.
+    /// - `Map.cpp:1929-1948` drains `_updateObjects`, asserts each object is
+    ///   in-world, calls `obj->BuildUpdate(update_players)`, then builds/sends
+    ///   per-player packets from `UpdateDataMapType`.
+    /// - `Object.cpp:797-806` clears changed values and resets
+    ///   `m_objectUpdated` in `ClearUpdateMask(false)`.
+    /// - `Object.cpp:3722-3728` `WorldObject::BuildUpdate` visits visible players
+    ///   then calls `ClearUpdateMask(false)`.
+    ///
+    /// Rust ownership: `map_objects` is the canonical source of objects and update
+    /// flags. Because RustyCore does not yet have a map-owned `_updateObjects` set,
+    /// this snapshots GUIDs from `map_objects` whose `object().is_object_updated()`
+    /// is true. The seam represents only the consumption/clear side effect; it
+    /// does not create `UpdateDataMapType`, iterate visible players, build packets,
+    /// access sessions/ObjectAccessor, or send `SendDirectMessage` fanout.
+    pub fn send_object_updates_like_cpp(&mut self) -> SendObjectUpdatesSummaryLikeCpp {
+        let updated_guids = self
+            .map_objects
+            .iter()
+            .filter_map(|(guid, record)| {
+                record
+                    .object()
+                    .object()
+                    .is_object_updated()
+                    .then_some(*guid)
+            })
+            .collect::<Vec<_>>();
+
+        let mut summary = SendObjectUpdatesSummaryLikeCpp {
+            queued_before: updated_guids.len(),
+            ..Default::default()
+        };
+
+        for guid in updated_guids {
+            let Some(record) = self.map_objects.get_mut(&guid) else {
+                summary.missing_or_stale += 1;
+                continue;
+            };
+
+            if !record.object().object().is_in_world() {
+                summary.skipped_not_in_world += 1;
+                continue;
+            }
+
+            // Represents `obj->BuildUpdate(update_players)` only up to its durable
+            // map-owned side effect: `WorldObject::BuildUpdate` eventually calls
+            // `ClearUpdateMask(false)`. Visible player iteration,
+            // `UpdateDataMapType`, packet construction, and direct sends remain
+            // open fanout gaps.
+            record.object_mut().object_mut().clear_update_mask(false);
+            summary.processed += 1;
+            summary.cleared_update_masks += 1;
+            summary.fanout_not_represented += 1;
+        }
+
+        summary
     }
 
     /// C++ `GetMultiPersonalPhaseTracker().Update(this, t_diff)` represented on `Map`.
@@ -14451,6 +14534,97 @@ mod tests {
         assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
         assert!(map.map_object_record(missing_guid).is_none());
         assert!(map.map_object_record(creature_guid).is_some());
+    }
+
+    #[test]
+    fn send_object_updates_clears_in_world_changed_object_like_cpp() {
+        let mut map = test_map();
+        let game_object = test_gameobject_for_spawn(4450101, 4450101);
+        let game_object_guid = game_object.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_game_object(game_object).unwrap())
+            .unwrap();
+        map.map_objects
+            .get_mut(&game_object_guid)
+            .unwrap()
+            .object_mut()
+            .object_mut()
+            .set_scale(2.0);
+
+        let before = map.map_object(game_object_guid).unwrap().object();
+        assert!(before.is_object_updated());
+        assert!(!before.changed_fields().is_empty());
+
+        let summary = map.send_object_updates_like_cpp();
+
+        assert_eq!(
+            summary,
+            SendObjectUpdatesSummaryLikeCpp {
+                queued_before: 1,
+                processed: 1,
+                cleared_update_masks: 1,
+                skipped_not_in_world: 0,
+                missing_or_stale: 0,
+                fanout_not_represented: 1,
+            }
+        );
+        let after = map.map_object(game_object_guid).unwrap().object();
+        assert!(!after.is_object_updated());
+        assert!(after.changed_fields().is_empty());
+    }
+
+    #[test]
+    fn send_object_updates_skips_unchanged_objects_like_cpp() {
+        let mut map = test_map();
+        let game_object = test_gameobject_for_spawn(4450201, 4450201);
+        let game_object_guid = game_object.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_game_object(game_object).unwrap())
+            .unwrap();
+
+        let before = map.map_object(game_object_guid).unwrap().object();
+        assert!(!before.is_object_updated());
+        assert!(before.changed_fields().is_empty());
+
+        let summary = map.send_object_updates_like_cpp();
+
+        assert_eq!(summary, SendObjectUpdatesSummaryLikeCpp::default());
+        let after = map.map_object(game_object_guid).unwrap().object();
+        assert!(!after.is_object_updated());
+        assert!(after.changed_fields().is_empty());
+    }
+
+    #[test]
+    fn send_object_updates_not_in_world_updated_state_is_not_publicly_constructible() {
+        // C++ `_updateObjects` should never contain not-in-world objects:
+        // `Object::AddToObjectUpdateIfNeeded` only sets `m_objectUpdated` when
+        // `m_inWorld`, and `Object::remove_from_world`/`ClearUpdateMask(true)`
+        // clears the flag. Rust mirrors that public invariant in
+        // `EntityObject`, whose `object_updated`/`in_world` fields are private to
+        // `wow-entities`, so wow-map tests cannot construct the defensive
+        // `skipped_not_in_world` branch without unsafe/private-field hacks.
+        let mut map = test_map();
+        let mut game_object = test_gameobject_for_spawn(4450301, 4450301);
+        game_object.world_mut().object_mut().set_scale(2.0);
+        game_object.world_mut().object_mut().remove_from_world();
+        let game_object_guid = game_object.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_game_object(game_object).unwrap())
+            .unwrap();
+
+        assert!(
+            !map.map_object(game_object_guid)
+                .unwrap()
+                .object()
+                .is_in_world()
+        );
+        assert!(
+            !map.map_object(game_object_guid)
+                .unwrap()
+                .object()
+                .is_object_updated()
+        );
+        assert_eq!(
+            map.send_object_updates_like_cpp(),
+            SendObjectUpdatesSummaryLikeCpp::default()
+        );
     }
 
     fn test_conversation_for_update(

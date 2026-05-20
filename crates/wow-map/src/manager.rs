@@ -17,7 +17,8 @@ use crate::map::{
     GameObjectsUpdateSummaryLikeCpp, Map, MoveListDrainSummaryLikeCpp, NoopGridLifecycle,
     NoopTerrainGridLoader, PersonalPhaseTrackerUpdateSummaryLikeCpp,
     ProcessRelocationNotifiesOutcome, SceneObjectUpdateContextLikeCpp,
-    SceneObjectsUpdateSummaryLikeCpp, TransportsUpdateSummaryLikeCpp,
+    SceneObjectsUpdateSummaryLikeCpp, SendObjectUpdatesSummaryLikeCpp,
+    TransportsUpdateSummaryLikeCpp,
 };
 use crate::spawn::Difficulty;
 use wow_core::GameTime;
@@ -164,6 +165,7 @@ pub struct ManagedMap {
     last_area_triggers_update_summary: AreaTriggersUpdateSummaryLikeCpp,
     last_conversations_update_summary: ConversationsUpdateSummaryLikeCpp,
     last_scene_objects_update_summary: SceneObjectsUpdateSummaryLikeCpp,
+    last_send_object_updates_summary_like_cpp: SendObjectUpdatesSummaryLikeCpp,
     last_personal_phase_tracker_update_summary: PersonalPhaseTrackerUpdateSummaryLikeCpp,
     last_live_move_list_drain_summary: LiveMoveListDrainSummaryLikeCpp,
     last_process_relocation_notifies_outcome_like_cpp: ProcessRelocationNotifiesOutcome,
@@ -208,6 +210,7 @@ impl ManagedMap {
             last_area_triggers_update_summary: AreaTriggersUpdateSummaryLikeCpp::default(),
             last_conversations_update_summary: ConversationsUpdateSummaryLikeCpp::default(),
             last_scene_objects_update_summary: SceneObjectsUpdateSummaryLikeCpp::default(),
+            last_send_object_updates_summary_like_cpp: SendObjectUpdatesSummaryLikeCpp::default(),
             last_personal_phase_tracker_update_summary:
                 PersonalPhaseTrackerUpdateSummaryLikeCpp::default(),
             last_live_move_list_drain_summary: LiveMoveListDrainSummaryLikeCpp::default(),
@@ -299,6 +302,12 @@ impl ManagedMap {
         self.last_personal_phase_tracker_update_summary
     }
 
+    pub const fn last_send_object_updates_summary_like_cpp(
+        &self,
+    ) -> SendObjectUpdatesSummaryLikeCpp {
+        self.last_send_object_updates_summary_like_cpp
+    }
+
     pub fn last_live_move_list_drain_summary_like_cpp(&self) -> LiveMoveListDrainSummaryLikeCpp {
         self.last_live_move_list_drain_summary.clone()
     }
@@ -370,6 +379,12 @@ impl ManagedMap {
                 .update_scene_objects_like_cpp(diff_ms, |_guid, scene_object| {
                     SceneObjectUpdateContextLikeCpp::represented_default_for(scene_object)
                 });
+        // C++ calls `Map::SendObjectUpdates()` after ObjectUpdater/Transport/
+        // SceneObject-style visitation and before scripts/weather/personal phase
+        // (`Map.cpp:777-798`). Rust consumes only represented map-owned
+        // `m_objectUpdated`/changed-mask state here; no `UpdateDataMapType`,
+        // session packets, visible-player iteration, or direct fanout is built.
+        self.last_send_object_updates_summary_like_cpp = self.map.send_object_updates_like_cpp();
         // C++ calls `GetMultiPersonalPhaseTracker().Update(this, t_diff)` after
         // SendObjectUpdates/scripts/weather and before later move/remove drains.
         // Rust consumes the existing map-owned tracker here as a represented seam
@@ -1729,6 +1744,55 @@ mod tests {
                 .duration_ms(),
             9
         );
+    }
+
+    #[test]
+    fn map_manager_update_consumes_send_object_updates_before_personal_phase_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let game_object_guid = guid(HighGuid::GameObject, 4450401, 1, 0);
+        {
+            let managed_map = manager.find_map_mut(1, 0).unwrap();
+            let mut game_object = GameObject::new();
+            game_object
+                .world_mut()
+                .object_mut()
+                .create(game_object_guid);
+            game_object.world_mut().set_map(1, 0).unwrap();
+            game_object
+                .world_mut()
+                .relocate(Position::xyz(13.0, 23.0, 33.0));
+            game_object.world_mut().object_mut().add_to_world();
+            game_object.world_mut().object_mut().set_scale(2.0);
+            managed_map
+                .map_mut()
+                .add_map_object_record_to_map_like_cpp(
+                    MapObjectRecord::new_game_object(game_object).unwrap(),
+                )
+                .unwrap();
+        }
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        assert_eq!(
+            managed_map.last_send_object_updates_summary_like_cpp(),
+            SendObjectUpdatesSummaryLikeCpp {
+                queued_before: 1,
+                processed: 1,
+                cleared_update_masks: 1,
+                skipped_not_in_world: 0,
+                missing_or_stale: 0,
+                fanout_not_represented: 1,
+            }
+        );
+        let object = managed_map
+            .map()
+            .map_object(game_object_guid)
+            .unwrap()
+            .object();
+        assert!(!object.is_object_updated());
+        assert!(object.changed_fields().is_empty());
     }
 
     #[test]
