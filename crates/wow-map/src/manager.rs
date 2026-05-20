@@ -13,9 +13,10 @@ use crate::MapKey;
 use crate::map::{
     AreaTriggersUpdateSummaryLikeCpp, ConversationsUpdateSummaryLikeCpp,
     CreatureUpdateSummaryLikeCpp, DynamicObjectsUpdateSummaryLikeCpp,
-    GameObjectsUpdateSummaryLikeCpp, Map, NoopGridLifecycle, NoopTerrainGridLoader,
-    PersonalPhaseTrackerUpdateSummaryLikeCpp, SceneObjectUpdateContextLikeCpp,
-    SceneObjectsUpdateSummaryLikeCpp, TransportsUpdateSummaryLikeCpp,
+    GameObjectsUpdateSummaryLikeCpp, Map, MoveListDrainSummaryLikeCpp, NoopGridLifecycle,
+    NoopTerrainGridLoader, PersonalPhaseTrackerUpdateSummaryLikeCpp,
+    SceneObjectUpdateContextLikeCpp, SceneObjectsUpdateSummaryLikeCpp,
+    TransportsUpdateSummaryLikeCpp,
 };
 use crate::spawn::Difficulty;
 use wow_core::GameTime;
@@ -139,6 +140,13 @@ pub struct ExistingInstanceMapContext {
     pub instance_lock_token: Option<u64>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LiveMoveListDrainSummaryLikeCpp {
+    pub creature: MoveListDrainSummaryLikeCpp,
+    pub game_object: MoveListDrainSummaryLikeCpp,
+    pub area_trigger: MoveListDrainSummaryLikeCpp,
+}
+
 #[derive(Debug)]
 pub struct ManagedMap {
     map: Map<NoopTerrainGridLoader, NoopGridLifecycle>,
@@ -156,6 +164,7 @@ pub struct ManagedMap {
     last_conversations_update_summary: ConversationsUpdateSummaryLikeCpp,
     last_scene_objects_update_summary: SceneObjectsUpdateSummaryLikeCpp,
     last_personal_phase_tracker_update_summary: PersonalPhaseTrackerUpdateSummaryLikeCpp,
+    last_live_move_list_drain_summary: LiveMoveListDrainSummaryLikeCpp,
     unload_all_calls: u32,
 }
 
@@ -199,6 +208,7 @@ impl ManagedMap {
             last_scene_objects_update_summary: SceneObjectsUpdateSummaryLikeCpp::default(),
             last_personal_phase_tracker_update_summary:
                 PersonalPhaseTrackerUpdateSummaryLikeCpp::default(),
+            last_live_move_list_drain_summary: LiveMoveListDrainSummaryLikeCpp::default(),
             unload_all_calls: 0,
         }
     }
@@ -285,6 +295,10 @@ impl ManagedMap {
         self.last_personal_phase_tracker_update_summary
     }
 
+    pub fn last_live_move_list_drain_summary_like_cpp(&self) -> LiveMoveListDrainSummaryLikeCpp {
+        self.last_live_move_list_drain_summary.clone()
+    }
+
     pub const fn unload_all_calls(&self) -> u32 {
         self.unload_all_calls
     }
@@ -352,6 +366,18 @@ impl ManagedMap {
         // update ordering, visibility fanout, DB, scripts, or dynamic-tree parity.
         self.last_personal_phase_tracker_update_summary =
             self.map.update_personal_phase_tracker_like_cpp(diff_ms);
+        // C++ `Map::Update` immediately drains Creature, GameObject, and
+        // AreaTrigger move-lists after personal-phase tracker update and before
+        // `ProcessRelocationNotifies(t_diff)` (`Map.cpp:797-805`). Rust keeps
+        // `Map` as the sole owner of canonical object and queue state here; the
+        // live manager only orchestrates order and stores summaries. DynamicObject
+        // is intentionally not drained by this live path because C++ `Map::Update`
+        // does not call a DynamicObject move-list drain.
+        self.last_live_move_list_drain_summary = LiveMoveListDrainSummaryLikeCpp {
+            creature: self.map.move_all_creatures_in_move_list_like_cpp(),
+            game_object: self.map.move_all_game_objects_in_move_list_like_cpp(),
+            area_trigger: self.map.move_all_area_triggers_in_move_list_like_cpp(),
+        };
     }
 
     fn delayed_update(&mut self, diff_ms: u32) {
@@ -1063,6 +1089,7 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use crate::map::MapObjectMoveListFamilyLikeCpp;
     use crate::spawn::{SpawnGroupFlags, SpawnGroupTemplateData};
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
     use wow_entities::{
@@ -2155,6 +2182,143 @@ mod tests {
 
         manager.map_updater_mut().deactivate();
         assert!(!manager.map_updater().activated());
+    }
+
+    #[test]
+    fn map_manager_update_drains_live_creature_gameobject_area_trigger_move_lists_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let creature_guid = insert_creature_for_update(&mut manager, 4420101, true);
+        let game_object_guid = insert_game_object_for_update(&mut manager, 4420102, 0, true);
+        let area_trigger_guid = insert_area_trigger_for_update(&mut manager, 4420103, 100, true);
+        let creature_position = Position::xyz(10.5, 20.5, 30.5);
+        let game_object_position = Position::xyz(13.5, 23.5, 33.5);
+        let area_trigger_position = Position::xyz(12.5, 22.5, 32.5);
+
+        {
+            let map = manager.find_map_mut(1, 0).unwrap().map_mut();
+            assert_eq!(
+                map.add_creature_to_move_list_like_cpp(creature_guid, creature_position),
+                crate::map::AddObjectToMoveListOutcomeLikeCpp::Queued
+            );
+            assert_eq!(
+                map.add_game_object_to_move_list_like_cpp(game_object_guid, game_object_position),
+                crate::map::AddObjectToMoveListOutcomeLikeCpp::Queued
+            );
+            assert_eq!(
+                map.add_area_trigger_to_move_list_like_cpp(
+                    area_trigger_guid,
+                    area_trigger_position
+                ),
+                crate::map::AddObjectToMoveListOutcomeLikeCpp::Queued
+            );
+        }
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        let map = managed_map.map();
+        assert_eq!(
+            map.move_list_len_like_cpp(MapObjectMoveListFamilyLikeCpp::Creature),
+            0
+        );
+        assert_eq!(
+            map.move_list_len_like_cpp(MapObjectMoveListFamilyLikeCpp::GameObject),
+            0
+        );
+        assert_eq!(
+            map.move_list_len_like_cpp(MapObjectMoveListFamilyLikeCpp::AreaTrigger),
+            0
+        );
+        assert_eq!(
+            map.map_object(creature_guid).unwrap().position(),
+            creature_position
+        );
+        assert_eq!(
+            map.map_object(game_object_guid).unwrap().position(),
+            game_object_position
+        );
+        assert_eq!(
+            map.map_object(area_trigger_guid).unwrap().position(),
+            area_trigger_position
+        );
+        assert_eq!(
+            managed_map.last_live_move_list_drain_summary_like_cpp(),
+            LiveMoveListDrainSummaryLikeCpp {
+                creature: MoveListDrainSummaryLikeCpp {
+                    family: Some(MapObjectMoveListFamilyLikeCpp::Creature),
+                    processed: 1,
+                    relocated: 1,
+                    ..Default::default()
+                },
+                game_object: MoveListDrainSummaryLikeCpp {
+                    family: Some(MapObjectMoveListFamilyLikeCpp::GameObject),
+                    processed: 1,
+                    relocated: 1,
+                    ..Default::default()
+                },
+                area_trigger: MoveListDrainSummaryLikeCpp {
+                    family: Some(MapObjectMoveListFamilyLikeCpp::AreaTrigger),
+                    processed: 1,
+                    relocated: 1,
+                    ..Default::default()
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn map_manager_update_leaves_dynamic_object_move_list_queued_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let dynamic_object_guid =
+            insert_dynamic_object_for_update(&mut manager, 4420201, 100, true);
+        let original_position = manager
+            .find_map(1, 0)
+            .unwrap()
+            .map()
+            .map_object(dynamic_object_guid)
+            .unwrap()
+            .position();
+        let queued_position = Position::xyz(11.5, 21.5, 31.5);
+
+        {
+            let map = manager.find_map_mut(1, 0).unwrap().map_mut();
+            assert_eq!(
+                map.add_dynamic_object_to_move_list_like_cpp(dynamic_object_guid, queued_position),
+                crate::map::AddObjectToMoveListOutcomeLikeCpp::Queued
+            );
+        }
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        let map = managed_map.map();
+        assert_eq!(
+            map.move_list_len_like_cpp(MapObjectMoveListFamilyLikeCpp::DynamicObject),
+            1
+        );
+        assert_eq!(
+            map.map_object(dynamic_object_guid).unwrap().position(),
+            original_position
+        );
+        assert_eq!(
+            managed_map.last_live_move_list_drain_summary_like_cpp(),
+            LiveMoveListDrainSummaryLikeCpp {
+                creature: MoveListDrainSummaryLikeCpp {
+                    family: Some(MapObjectMoveListFamilyLikeCpp::Creature),
+                    ..Default::default()
+                },
+                game_object: MoveListDrainSummaryLikeCpp {
+                    family: Some(MapObjectMoveListFamilyLikeCpp::GameObject),
+                    ..Default::default()
+                },
+                area_trigger: MoveListDrainSummaryLikeCpp {
+                    family: Some(MapObjectMoveListFamilyLikeCpp::AreaTrigger),
+                    ..Default::default()
+                },
+            }
+        );
     }
 
     fn guid(high: HighGuid, counter: i64, map_id: u32, instance_id: u32) -> ObjectGuid {
