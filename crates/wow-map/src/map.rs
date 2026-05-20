@@ -152,13 +152,50 @@ pub struct MapUpdateMetricsSummaryLikeCpp {
     pub instance_id: u32,
 }
 
+/// Represented key for the map-owned C++ `_dynamicTree` model-registration seam.
+///
+/// C++ `DynamicMapTree` stores `GameObjectModel` object references/pointers. Rust does
+/// not model real `GameObjectModel` or collision geometry in this bounded slice, so
+/// the deterministic stand-in key is the owning object GUID. Duplicate insertion is
+/// guarded as a no-op to avoid count drift; this is intentionally safer than raw
+/// pointer duplicate behavior and is not a claim of exact model object identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RepresentedGameObjectModelKeyLikeCpp {
+    pub owner_guid: ObjectGuid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DynamicMapTreeModelMutationStatusLikeCpp {
+    Inserted,
+    AlreadyPresent,
+    Removed,
+    Missing,
+}
+
+/// Represented result for C++ `DynamicMapTree::{insert,remove}` via Map facades.
+///
+/// Anchors: `DynamicTree.cpp:72-82,115-127`, `Map.h:457-460`.
+/// Real `GameObjectModel`, RegularGrid/BIH, LOS/intersection/height,
+/// AddToWorld/RemoveFromWorld wiring, transport delayed-add, `GO_FLAG_MAP_OBJECT`,
+/// collision enable/disable, ObjectAccessor/session/fanout/scripts/AI/DB remain out
+/// of scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DynamicMapTreeModelMutationOutcomeLikeCpp {
+    pub key: RepresentedGameObjectModelKeyLikeCpp,
+    pub status: DynamicMapTreeModelMutationStatusLikeCpp,
+    pub model_count_before: usize,
+    pub model_count_after: usize,
+    pub unbalanced_before: u32,
+    pub unbalanced_after: u32,
+}
+
 /// Represented result for C++ `DynamicMapTree::update(t_diff)`.
 ///
 /// Anchors: `Map.cpp:666-668`, `DynamicTree.cpp:34-38,66-101,115-138`.
-/// This exposes only the map-owned timer/unbalanced seam. It does not claim
-/// real `GameObjectModel`, RegularGrid/BIH balance, LOS/intersection/height,
-/// AddToWorld/RemoveFromWorld registration, ObjectAccessor/session/fanout, DB,
-/// scripts, AI, or collision runtime parity.
+/// This exposes only the map-owned model-key registration, timer and unbalanced
+/// seam. It does not claim real `GameObjectModel`, RegularGrid/BIH balance,
+/// LOS/intersection/height, AddToWorld/RemoveFromWorld registration,
+/// ObjectAccessor/session/fanout, DB, scripts, AI, or collision runtime parity.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DynamicMapTreeUpdateSummaryLikeCpp {
     pub diff_ms: u32,
@@ -1367,17 +1404,19 @@ pub struct Map<Terrain = NoopTerrainGridLoader, Lifecycle = NoopGridLifecycle> {
     gameobjects_by_spawn_id: HashMap<SpawnId, HashSet<ObjectGuid>>,
     area_triggers_by_spawn_id: HashMap<SpawnId, HashSet<ObjectGuid>>,
     map_objects: HashMap<ObjectGuid, MapObjectRecord>,
-    /// Map-owned represented C++ `_dynamicTree` update seam.
+    /// Map-owned represented C++ `_dynamicTree` model-key registration/update seam.
     ///
-    /// Source-of-truth is this `Map` instance. These fields mirror only the
-    /// observable state needed by `DynamicTree.cpp:66-101`: represented model
-    /// count for `empty()`, a TimeTracker-like remaining rebalance timer
-    /// initialized to `CHECK_TREE_PERIOD` (200ms), and `unbalanced_times`.
-    /// Insert/remove helpers are test/control evidence only; no real
-    /// GameObjectModel, RegularGrid/BIH, collision, LOS/intersection/height,
-    /// AddToWorld/RemoveFromWorld registration, ObjectAccessor/session/fanout,
-    /// scripts, AI, DB or model ownership is represented here.
-    dynamic_tree_model_count_like_cpp: u32,
+    /// Source-of-truth is this `Map` instance. The represented key set is a
+    /// deterministic stand-in for C++ `GameObjectModel` object identity and
+    /// drives `empty()`/count; insert/remove mutate the set and increment
+    /// `unbalanced_times` only on actual add/remove, matching
+    /// `DynamicTree.cpp:72-82`. Duplicate insert/missing remove are guarded no-ops
+    /// to avoid key-count drift. No real GameObjectModel, RegularGrid/BIH,
+    /// collision, LOS/intersection/height, AddToWorld/RemoveFromWorld wiring,
+    /// transport delayed-add, GO_FLAG_MAP_OBJECT, EnableCollision,
+    /// ObjectAccessor/session/fanout, scripts, AI, DB or model ownership is
+    /// represented here.
+    dynamic_tree_model_keys_like_cpp: HashSet<RepresentedGameObjectModelKeyLikeCpp>,
     dynamic_tree_rebalance_timer_remaining_ms_like_cpp: u32,
     dynamic_tree_unbalanced_times_like_cpp: u32,
     /// Map-owned deferred physical removal queue matching C++
@@ -1514,7 +1553,7 @@ where
             gameobjects_by_spawn_id: HashMap::new(),
             area_triggers_by_spawn_id: HashMap::new(),
             map_objects: HashMap::new(),
-            dynamic_tree_model_count_like_cpp: 0,
+            dynamic_tree_model_keys_like_cpp: HashSet::new(),
             dynamic_tree_rebalance_timer_remaining_ms_like_cpp:
                 DYNAMIC_MAP_TREE_CHECK_PERIOD_MS_LIKE_CPP,
             dynamic_tree_unbalanced_times_like_cpp: 0,
@@ -1578,22 +1617,95 @@ where
         self.creature_level_rng_like_cpp = StdRng::seed_from_u64(seed);
     }
 
+    pub fn contains_gameobject_model_like_cpp(
+        &self,
+        key: RepresentedGameObjectModelKeyLikeCpp,
+    ) -> bool {
+        self.dynamic_tree_model_keys_like_cpp.contains(&key)
+    }
+
+    /// Represents C++ `Map::InsertGameObjectModel` -> `DynamicMapTree::insert`.
+    ///
+    /// The real C++ tree receives a `GameObjectModel const&`; this represented
+    /// seam stores a deterministic owner-GUID key only. A duplicate key is a
+    /// guarded no-op, so represented count/unbalanced state cannot drift from
+    /// repeated calls with the same owner GUID.
+    pub fn insert_gameobject_model_like_cpp(
+        &mut self,
+        key: RepresentedGameObjectModelKeyLikeCpp,
+    ) -> DynamicMapTreeModelMutationOutcomeLikeCpp {
+        let model_count_before = self.dynamic_tree_model_keys_like_cpp.len();
+        let unbalanced_before = self.dynamic_tree_unbalanced_times_like_cpp;
+        let inserted = self.dynamic_tree_model_keys_like_cpp.insert(key);
+
+        if inserted {
+            self.dynamic_tree_unbalanced_times_like_cpp = self
+                .dynamic_tree_unbalanced_times_like_cpp
+                .saturating_add(1);
+        }
+
+        DynamicMapTreeModelMutationOutcomeLikeCpp {
+            key,
+            status: if inserted {
+                DynamicMapTreeModelMutationStatusLikeCpp::Inserted
+            } else {
+                DynamicMapTreeModelMutationStatusLikeCpp::AlreadyPresent
+            },
+            model_count_before,
+            model_count_after: self.dynamic_tree_model_keys_like_cpp.len(),
+            unbalanced_before,
+            unbalanced_after: self.dynamic_tree_unbalanced_times_like_cpp,
+        }
+    }
+
+    /// Represents C++ `Map::RemoveGameObjectModel` -> `DynamicMapTree::remove`.
+    ///
+    /// C++ GameObject callers check containment before removal. Rust exposes a
+    /// safe missing-key no-op at the facade so represented count cannot underflow.
+    pub fn remove_gameobject_model_like_cpp(
+        &mut self,
+        key: RepresentedGameObjectModelKeyLikeCpp,
+    ) -> DynamicMapTreeModelMutationOutcomeLikeCpp {
+        let model_count_before = self.dynamic_tree_model_keys_like_cpp.len();
+        let unbalanced_before = self.dynamic_tree_unbalanced_times_like_cpp;
+        let removed = self.dynamic_tree_model_keys_like_cpp.remove(&key);
+
+        if removed {
+            self.dynamic_tree_unbalanced_times_like_cpp = self
+                .dynamic_tree_unbalanced_times_like_cpp
+                .saturating_add(1);
+        }
+
+        DynamicMapTreeModelMutationOutcomeLikeCpp {
+            key,
+            status: if removed {
+                DynamicMapTreeModelMutationStatusLikeCpp::Removed
+            } else {
+                DynamicMapTreeModelMutationStatusLikeCpp::Missing
+            },
+            model_count_before,
+            model_count_after: self.dynamic_tree_model_keys_like_cpp.len(),
+            unbalanced_before,
+            unbalanced_after: self.dynamic_tree_unbalanced_times_like_cpp,
+        }
+    }
+
     /// Represents the first statement in C++ `Map::Update(uint32 t_diff)`:
     /// `_dynamicTree.update(t_diff)` (`Map.cpp:666-668`).
     ///
     /// This is C++-shaped map-owned state only. It mirrors
     /// `DynTreeImpl::update` (`DynamicTree.cpp:90-101`): return early when the
-    /// represented tree is empty; otherwise consume a TimeTracker-like remaining
-    /// timer; when passed, reset to `CHECK_TREE_PERIOD` (200ms) and clear
-    /// `unbalanced_times` only if it was positive, representing `balance()`.
-    /// No real BIH/collision/model registration runtime is claimed.
+    /// represented model-key set is empty; otherwise consume a TimeTracker-like
+    /// remaining timer; when passed, reset to `CHECK_TREE_PERIOD` (200ms) and
+    /// clear `unbalanced_times` only if it was positive, representing `balance()`.
+    /// No real BIH/collision/geometry runtime is claimed.
     pub fn update_dynamic_tree_like_cpp(
         &mut self,
         diff_ms: u32,
     ) -> DynamicMapTreeUpdateSummaryLikeCpp {
         let timer_before_ms = self.dynamic_tree_rebalance_timer_remaining_ms_like_cpp;
         let unbalanced_before = self.dynamic_tree_unbalanced_times_like_cpp;
-        let empty = self.dynamic_tree_model_count_like_cpp == 0;
+        let empty = self.dynamic_tree_model_keys_like_cpp.is_empty();
 
         if empty {
             return DynamicMapTreeUpdateSummaryLikeCpp {
@@ -1642,7 +1754,13 @@ where
 
     #[cfg(test)]
     pub(crate) fn set_dynamic_tree_model_count_for_tests_like_cpp(&mut self, model_count: u32) {
-        self.dynamic_tree_model_count_like_cpp = model_count;
+        self.dynamic_tree_model_keys_like_cpp.clear();
+        for counter in 0..model_count {
+            self.dynamic_tree_model_keys_like_cpp
+                .insert(RepresentedGameObjectModelKeyLikeCpp {
+                    owner_guid: ObjectGuid::create_player(1, i64::from(counter) + 1),
+                });
+        }
     }
 
     #[cfg(test)]
@@ -8971,6 +9089,12 @@ mod tests {
         ObjectGuid::create_player(1, counter)
     }
 
+    fn dynamic_model_key(counter: i64) -> RepresentedGameObjectModelKeyLikeCpp {
+        RepresentedGameObjectModelKeyLikeCpp {
+            owner_guid: guid(HighGuid::GameObject, counter),
+        }
+    }
+
     #[test]
     fn dynamic_tree_update_empty_tree_returns_before_timer_or_balance_like_cpp() {
         let mut map = Map::new(1, 0, 0, 60_000);
@@ -8997,7 +9121,8 @@ mod tests {
     fn dynamic_tree_update_non_empty_clean_tree_consumes_timer_and_resets_without_balance_like_cpp()
     {
         let mut map = Map::new(1, 0, 0, 60_000);
-        map.set_dynamic_tree_model_count_for_tests_like_cpp(1);
+        map.insert_gameobject_model_like_cpp(dynamic_model_key(1));
+        map.mark_dynamic_tree_unbalanced_for_tests_like_cpp(0);
 
         let first = map.update_dynamic_tree_like_cpp(50);
         assert!(!first.empty);
@@ -9022,23 +9147,23 @@ mod tests {
     #[test]
     fn dynamic_tree_update_non_empty_unbalanced_tree_balances_when_timer_passes_like_cpp() {
         let mut map = Map::new(1, 0, 0, 60_000);
-        map.set_dynamic_tree_model_count_for_tests_like_cpp(2);
-        map.mark_dynamic_tree_unbalanced_for_tests_like_cpp(4);
+        map.insert_gameobject_model_like_cpp(dynamic_model_key(1));
+        map.insert_gameobject_model_like_cpp(dynamic_model_key(2));
 
         let first = map.update_dynamic_tree_like_cpp(199);
         assert_eq!(first.timer_before_ms, 200);
         assert_eq!(first.timer_after_ms, 1);
         assert!(!first.timer_passed);
-        assert_eq!(first.unbalanced_before, 4);
+        assert_eq!(first.unbalanced_before, 2);
         assert!(!first.balanced);
-        assert_eq!(first.unbalanced_after, 4);
+        assert_eq!(first.unbalanced_after, 2);
 
         let second = map.update_dynamic_tree_like_cpp(1);
         assert_eq!(second.timer_before_ms, 1);
         assert_eq!(second.timer_after_ms, 200);
         assert!(second.timer_passed);
         assert_eq!(second.timer_reset_to_ms, Some(200));
-        assert_eq!(second.unbalanced_before, 4);
+        assert_eq!(second.unbalanced_before, 2);
         assert!(second.balanced);
         assert_eq!(second.unbalanced_after, 0);
 
@@ -9046,6 +9171,108 @@ mod tests {
         assert_eq!(third.unbalanced_before, 0);
         assert!(!third.balanced);
         assert_eq!(third.unbalanced_after, 0);
+    }
+
+    #[test]
+    fn dynamic_tree_insert_first_model_makes_tree_non_empty_and_update_consumes_timer_like_cpp() {
+        let mut map = Map::new(1, 0, 0, 60_000);
+        let key = dynamic_model_key(45001);
+
+        let inserted = map.insert_gameobject_model_like_cpp(key);
+        assert_eq!(
+            inserted.status,
+            DynamicMapTreeModelMutationStatusLikeCpp::Inserted
+        );
+        assert_eq!(inserted.model_count_before, 0);
+        assert_eq!(inserted.model_count_after, 1);
+        assert_eq!(inserted.unbalanced_before, 0);
+        assert_eq!(inserted.unbalanced_after, 1);
+        assert!(map.contains_gameobject_model_like_cpp(key));
+
+        let summary = map.update_dynamic_tree_like_cpp(50);
+        assert!(!summary.empty);
+        assert_eq!(summary.timer_before_ms, 200);
+        assert_eq!(summary.timer_after_ms, 150);
+        assert!(!summary.timer_passed);
+        assert_eq!(summary.unbalanced_before, 1);
+        assert_eq!(summary.unbalanced_after, 1);
+    }
+
+    #[test]
+    fn dynamic_tree_duplicate_insert_does_not_double_count_or_increment_like_cpp() {
+        let mut map = Map::new(1, 0, 0, 60_000);
+        let key = dynamic_model_key(45002);
+
+        let first = map.insert_gameobject_model_like_cpp(key);
+        let duplicate = map.insert_gameobject_model_like_cpp(key);
+
+        assert_eq!(
+            first.status,
+            DynamicMapTreeModelMutationStatusLikeCpp::Inserted
+        );
+        assert_eq!(
+            duplicate.status,
+            DynamicMapTreeModelMutationStatusLikeCpp::AlreadyPresent
+        );
+        assert_eq!(duplicate.model_count_before, 1);
+        assert_eq!(duplicate.model_count_after, 1);
+        assert_eq!(duplicate.unbalanced_before, 1);
+        assert_eq!(duplicate.unbalanced_after, 1);
+    }
+
+    #[test]
+    fn dynamic_tree_remove_contained_model_empties_tree_and_next_update_early_returns_like_cpp() {
+        let mut map = Map::new(1, 0, 0, 60_000);
+        let key = dynamic_model_key(45003);
+        map.insert_gameobject_model_like_cpp(key);
+
+        let removed = map.remove_gameobject_model_like_cpp(key);
+        assert_eq!(
+            removed.status,
+            DynamicMapTreeModelMutationStatusLikeCpp::Removed
+        );
+        assert_eq!(removed.model_count_before, 1);
+        assert_eq!(removed.model_count_after, 0);
+        assert_eq!(removed.unbalanced_before, 1);
+        assert_eq!(removed.unbalanced_after, 2);
+        assert!(!map.contains_gameobject_model_like_cpp(key));
+
+        let summary = map.update_dynamic_tree_like_cpp(250);
+        assert!(summary.empty);
+        assert_eq!(summary.timer_before_ms, 200);
+        assert_eq!(summary.timer_after_ms, 200);
+        assert!(!summary.timer_passed);
+        assert_eq!(summary.unbalanced_before, 2);
+        assert_eq!(summary.unbalanced_after, 2);
+    }
+
+    #[test]
+    fn dynamic_tree_missing_remove_is_noop_like_cpp() {
+        let mut map = Map::new(1, 0, 0, 60_000);
+        let key = dynamic_model_key(45004);
+
+        let missing = map.remove_gameobject_model_like_cpp(key);
+
+        assert_eq!(
+            missing.status,
+            DynamicMapTreeModelMutationStatusLikeCpp::Missing
+        );
+        assert_eq!(missing.model_count_before, 0);
+        assert_eq!(missing.model_count_after, 0);
+        assert_eq!(missing.unbalanced_before, 0);
+        assert_eq!(missing.unbalanced_after, 0);
+    }
+
+    #[test]
+    fn dynamic_tree_contains_reflects_insert_and_remove_like_cpp() {
+        let mut map = Map::new(1, 0, 0, 60_000);
+        let key = dynamic_model_key(45005);
+
+        assert!(!map.contains_gameobject_model_like_cpp(key));
+        map.insert_gameobject_model_like_cpp(key);
+        assert!(map.contains_gameobject_model_like_cpp(key));
+        map.remove_gameobject_model_like_cpp(key);
+        assert!(!map.contains_gameobject_model_like_cpp(key));
     }
 
     #[test]
