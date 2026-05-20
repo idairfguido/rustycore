@@ -7365,6 +7365,53 @@ where
         group.insert(current_guid);
     }
 
+    fn remove_creature_from_formation_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+    ) -> Option<CreatureRemoveFormationOutcomeLikeCpp> {
+        let (spawn_id, leader_spawn_id) = self
+            .map_object_record(guid)
+            .filter(|record| record.kind() == AccessorObjectKind::Creature)
+            .and_then(MapObjectRecord::creature)
+            .filter(|creature| creature.unit().world().object().is_in_world())
+            .and_then(|creature| {
+                let leader_spawn_id = creature.formation_info_like_cpp()?.leader_spawn_id;
+                Some((creature.spawn_id(), leader_spawn_id))
+            })?;
+
+        let Some(group) = self
+            .creature_group_holder_like_cpp
+            .get_mut(&leader_spawn_id)
+        else {
+            return Some(CreatureRemoveFormationOutcomeLikeCpp {
+                guid,
+                spawn_id,
+                leader_spawn_id: Some(leader_spawn_id),
+                had_group: false,
+                removed_member: false,
+                removed_group: false,
+                remaining_members: 0,
+            });
+        };
+
+        let removed_member = group.remove(&guid);
+        let remaining_members = group.len();
+        let removed_group = remaining_members == 0;
+        if removed_group {
+            self.creature_group_holder_like_cpp.remove(&leader_spawn_id);
+        }
+
+        Some(CreatureRemoveFormationOutcomeLikeCpp {
+            guid,
+            spawn_id,
+            leader_spawn_id: Some(leader_spawn_id),
+            had_group: true,
+            removed_member,
+            removed_group,
+            remaining_members,
+        })
+    }
+
     pub fn add_to_map_like_cpp(
         &mut self,
         kind: AccessorObjectKind,
@@ -7614,6 +7661,7 @@ where
                     .remove_vehicle_kit_like_cpp(true);
                 remove.had_kit.then_some(remove)
             });
+        let creature_remove_formation = self.remove_creature_from_formation_like_cpp(guid);
         let record = self
             .remove_map_object(guid)
             .ok_or(RemoveFromMapError::ObjectNotFound { guid })?;
@@ -7670,6 +7718,7 @@ where
             dynamic_object_remove_cleanup,
             gameobject_model_remove,
             creature_vehicle_remove,
+            creature_remove_formation,
             object: if delete_from_world {
                 None
             } else {
@@ -9524,7 +9573,19 @@ pub struct RemoveFromMapOutcome {
     pub dynamic_object_remove_cleanup: Option<DynamicObjectRemoveCleanupOutcomeLikeCpp>,
     pub gameobject_model_remove: Option<DynamicMapTreeModelMutationOutcomeLikeCpp>,
     pub creature_vehicle_remove: Option<VehicleKitRemoveOutcomeLikeCpp>,
+    pub creature_remove_formation: Option<CreatureRemoveFormationOutcomeLikeCpp>,
     pub object: Option<WorldObject>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CreatureRemoveFormationOutcomeLikeCpp {
+    pub guid: ObjectGuid,
+    pub spawn_id: SpawnId,
+    pub leader_spawn_id: Option<SpawnId>,
+    pub had_group: bool,
+    pub removed_member: bool,
+    pub removed_group: bool,
+    pub remaining_members: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16485,6 +16546,216 @@ mod tests {
         assert!(!outcome.already_in_world);
         assert!(outcome.creature_search_formation.is_none());
         assert_eq!(map.creature_group_holder_member_count_like_cpp(900473), 0);
+    }
+
+    #[test]
+    fn creature_search_formation_remove_from_map_removes_last_member_and_holder_like_cpp() {
+        let mut map = test_map();
+        let mut creature = test_creature_for_spawn(474, 47401, true);
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        creature.set_formation_info_like_cpp(Some(creature_formation_info_like_cpp(900474)));
+        let guid = creature.guid();
+
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+        assert!(map.creature_group_holder_contains_like_cpp(900474, guid));
+
+        let removed = map.remove_from_map_like_cpp(guid, true).unwrap();
+        let formation = removed.creature_remove_formation.unwrap();
+
+        assert_eq!(formation.guid, guid);
+        assert_eq!(formation.spawn_id, 474);
+        assert_eq!(formation.leader_spawn_id, Some(900474));
+        assert!(formation.had_group);
+        assert!(formation.removed_member);
+        assert!(formation.removed_group);
+        assert_eq!(formation.remaining_members, 0);
+        assert_eq!(map.creature_group_holder_member_count_like_cpp(900474), 0);
+    }
+
+    #[test]
+    fn creature_search_formation_remove_from_map_keeps_group_with_other_member_like_cpp() {
+        let mut map = test_map();
+        let mut first = test_creature_for_spawn(475, 47501, true);
+        first
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        first.set_formation_info_like_cpp(Some(creature_formation_info_like_cpp(900475)));
+        let first_guid = first.guid();
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(first).unwrap())
+            .unwrap();
+
+        let mut second = test_creature_for_spawn(476, 47601, true);
+        second
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        second.set_formation_info_like_cpp(Some(creature_formation_info_like_cpp(900475)));
+        let second_guid = second.guid();
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(second).unwrap())
+            .unwrap();
+        assert_eq!(map.creature_group_holder_member_count_like_cpp(900475), 2);
+
+        let removed = map.remove_from_map_like_cpp(first_guid, true).unwrap();
+        let formation = removed.creature_remove_formation.unwrap();
+
+        assert!(formation.had_group);
+        assert!(formation.removed_member);
+        assert!(!formation.removed_group);
+        assert_eq!(formation.remaining_members, 1);
+        assert!(!map.creature_group_holder_contains_like_cpp(900475, first_guid));
+        assert!(map.creature_group_holder_contains_like_cpp(900475, second_guid));
+    }
+
+    #[test]
+    fn creature_search_formation_remove_from_map_existing_holder_non_member_keeps_holder_like_cpp()
+    {
+        let mut map = test_map();
+        let mut member = test_creature_for_spawn(483, 48301, true);
+        member
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        member.set_formation_info_like_cpp(Some(creature_formation_info_like_cpp(900483)));
+        let member_guid = member.guid();
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(member).unwrap())
+            .unwrap();
+        let member_count_before = map.creature_group_holder_member_count_like_cpp(900483);
+        assert_eq!(member_count_before, 1);
+        assert!(map.creature_group_holder_contains_like_cpp(900483, member_guid));
+
+        let mut non_member = test_creature_for_spawn(484, 48401, true);
+        non_member.set_formation_info_like_cpp(Some(creature_formation_info_like_cpp(900483)));
+        let non_member_guid = non_member.guid();
+        let add_outcome = map
+            .add_map_object_record_to_map_like_cpp(
+                MapObjectRecord::new_creature(non_member).unwrap(),
+            )
+            .unwrap();
+        assert!(add_outcome.already_in_world);
+        assert!(!map.creature_group_holder_contains_like_cpp(900483, non_member_guid));
+
+        let removed = map.remove_from_map_like_cpp(non_member_guid, true).unwrap();
+        let formation = removed.creature_remove_formation.unwrap();
+
+        assert!(formation.had_group);
+        assert!(!formation.removed_member);
+        assert!(!formation.removed_group);
+        assert_eq!(formation.remaining_members, member_count_before);
+        assert!(map.creature_group_holder_contains_like_cpp(900483, member_guid));
+        assert!(!map.creature_group_holder_contains_like_cpp(900483, non_member_guid));
+    }
+
+    #[test]
+    fn creature_search_formation_remove_from_map_no_formation_or_not_in_world_noops_like_cpp() {
+        let mut map = test_map();
+        let mut holder_creature = test_creature_for_spawn(477, 47701, true);
+        holder_creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        holder_creature.set_formation_info_like_cpp(Some(creature_formation_info_like_cpp(900477)));
+        let holder_guid = holder_creature.guid();
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_creature(holder_creature).unwrap(),
+        )
+        .unwrap();
+
+        let mut no_formation = test_creature_for_spawn(478, 47801, true);
+        no_formation
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        let no_formation_guid = no_formation.guid();
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_creature(no_formation).unwrap(),
+        )
+        .unwrap();
+        let removed = map
+            .remove_from_map_like_cpp(no_formation_guid, true)
+            .unwrap();
+        assert!(removed.creature_remove_formation.is_none());
+        assert!(map.creature_group_holder_contains_like_cpp(900477, holder_guid));
+
+        let mut missing_holder = test_creature_for_spawn(479, 47901, true);
+        missing_holder.set_formation_info_like_cpp(Some(creature_formation_info_like_cpp(900479)));
+        let missing_holder_guid = missing_holder.guid();
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_creature(missing_holder).unwrap(),
+        )
+        .unwrap();
+        let removed = map
+            .remove_from_map_like_cpp(missing_holder_guid, true)
+            .unwrap();
+        let formation = removed.creature_remove_formation.unwrap();
+        assert_eq!(formation.leader_spawn_id, Some(900479));
+        assert!(!formation.had_group);
+        assert!(!formation.removed_member);
+        assert!(!formation.removed_group);
+        assert_eq!(formation.remaining_members, 0);
+        assert_eq!(map.creature_group_holder_member_count_like_cpp(900479), 0);
+        assert!(map.creature_group_holder_contains_like_cpp(900477, holder_guid));
+
+        let mut not_in_world = test_creature_for_spawn(482, 48201, true);
+        not_in_world.set_formation_info_like_cpp(Some(creature_formation_info_like_cpp(900477)));
+        let not_in_world_guid = not_in_world.guid();
+
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_creature(not_in_world).unwrap(),
+        )
+        .unwrap();
+        map.map_objects
+            .get_mut(&not_in_world_guid)
+            .and_then(MapObjectRecord::creature_mut)
+            .unwrap()
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        let removed = map
+            .remove_from_map_like_cpp(not_in_world_guid, true)
+            .unwrap();
+        assert!(removed.creature_remove_formation.is_none());
+        assert!(map.creature_group_holder_contains_like_cpp(900477, holder_guid));
+    }
+
+    #[test]
+    fn creature_search_formation_remove_from_map_non_creature_path_is_unchanged_like_cpp() {
+        let mut map = test_map();
+        let mut creature = test_creature_for_spawn(480, 48001, true);
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        creature.set_formation_info_like_cpp(Some(creature_formation_info_like_cpp(900480)));
+        let creature_guid = creature.guid();
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+
+        let mut gameobject = test_gameobject_for_spawn(481, 48101);
+        gameobject.world_mut().object_mut().remove_from_world();
+        let gameobject_guid = gameobject.world().guid();
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+
+        let removed = map.remove_from_map_like_cpp(gameobject_guid, true).unwrap();
+
+        assert!(removed.creature_remove_formation.is_none());
+        assert!(map.creature_group_holder_contains_like_cpp(900480, creature_guid));
+        assert_eq!(map.creature_group_holder_member_count_like_cpp(900480), 1);
     }
 
     fn creature_add_to_world_vehicle_reset_context(
