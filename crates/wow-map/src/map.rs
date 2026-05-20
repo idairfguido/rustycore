@@ -762,6 +762,9 @@ pub struct GameObjectUpdateOutcomeLikeCpp {
     pub despawn_or_unsummon_requested: bool,
     pub entity_update: Option<EntityGameObjectUpdateOutcomeLikeCpp>,
     pub remove_list: Option<AddObjectToRemoveListOutcomeLikeCpp>,
+    pub linked_trap_guid: Option<ObjectGuid>,
+    pub linked_trap_removed: bool,
+    pub linked_trap_missing_or_self: bool,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -772,6 +775,7 @@ pub struct GameObjectsUpdateSummaryLikeCpp {
     pub missing_or_stale: usize,
     pub not_game_object: usize,
     pub not_in_world: usize,
+    pub linked_traps_removed: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4358,6 +4362,9 @@ where
     /// - `GameObject.cpp:1215-1233` is represented through the entity-level
     ///   `m_despawnDelay` countdown; expiry represents `DespawnOrUnsummon(0ms,
     ///   m_despawnRespawnTime)`.
+    /// - `GameObject.cpp:1575-1580` `GO_JUST_DEACTIVATED` despawns an
+    ///   already-linked trap via `GetLinkedTrap()->DespawnOrUnsummon()` before
+    ///   later goober/chest/generic cleanup.
     /// - `GameObject.cpp:1740-1764` `Delete()` is represented only as
     ///   `SetLootState(GO_NOT_READY)` plus `AddObjectToRemoveList()`.
     ///
@@ -4386,6 +4393,9 @@ where
                 despawn_or_unsummon_requested: false,
                 entity_update: None,
                 remove_list: None,
+                linked_trap_guid: None,
+                linked_trap_removed: false,
+                linked_trap_missing_or_self: false,
             };
         };
 
@@ -4403,6 +4413,9 @@ where
                 despawn_or_unsummon_requested: false,
                 entity_update: None,
                 remove_list: None,
+                linked_trap_guid: None,
+                linked_trap_removed: false,
+                linked_trap_missing_or_self: false,
             };
         }
 
@@ -4420,6 +4433,9 @@ where
                 despawn_or_unsummon_requested: false,
                 entity_update: None,
                 remove_list: None,
+                linked_trap_guid: None,
+                linked_trap_removed: false,
+                linked_trap_missing_or_self: false,
             };
         };
 
@@ -4439,6 +4455,9 @@ where
                 despawn_or_unsummon_requested: false,
                 entity_update: None,
                 remove_list: None,
+                linked_trap_guid: None,
+                linked_trap_removed: false,
+                linked_trap_missing_or_self: false,
             };
         }
 
@@ -4457,6 +4476,9 @@ where
                     despawn_or_unsummon_requested: false,
                     entity_update: None,
                     remove_list: None,
+                    linked_trap_guid: None,
+                    linked_trap_removed: false,
+                    linked_trap_missing_or_self: false,
                 };
             };
             let Some(game_object) = record.game_object_mut() else {
@@ -4473,10 +4495,46 @@ where
                     despawn_or_unsummon_requested: false,
                     entity_update: None,
                     remove_list: None,
+                    linked_trap_guid: None,
+                    linked_trap_removed: false,
+                    linked_trap_missing_or_self: false,
                 };
             };
             game_object.update_like_cpp(diff_ms)
         };
+
+        let (linked_trap_guid, linked_trap_removed, linked_trap_missing_or_self) =
+            if entity_update.status == EntityGameObjectUpdateStatusLikeCpp::DespawnRequested {
+                (None, false, false)
+            } else {
+                self.map_object_record(game_object_guid)
+                    .and_then(MapObjectRecord::game_object)
+                    .filter(|game_object| game_object.loot_state() == LootState::JustDeactivated)
+                    .map(|game_object| game_object.linked_trap_guid_like_cpp())
+                    .map_or((None, false, false), |linked_guid| {
+                        if linked_guid.is_empty() || linked_guid == game_object_guid {
+                            return (
+                                (!linked_guid.is_empty()).then_some(linked_guid),
+                                false,
+                                true,
+                            );
+                        }
+
+                        let linked_trap_exists = self
+                            .map_object_record(linked_guid)
+                            .filter(|record| record.kind() == AccessorObjectKind::GameObject)
+                            .and_then(MapObjectRecord::game_object)
+                            .is_some();
+                        if !linked_trap_exists {
+                            return (Some(linked_guid), false, true);
+                        }
+
+                        match self.remove_from_map_like_cpp(linked_guid, true) {
+                            Ok(_) => (Some(linked_guid), true, false),
+                            Err(_) => (Some(linked_guid), false, true),
+                        }
+                    })
+            };
 
         if entity_update.status == EntityGameObjectUpdateStatusLikeCpp::DespawnRequested {
             if let Some(record) = self.map_objects.get_mut(&game_object_guid) {
@@ -4499,6 +4557,9 @@ where
                 despawn_or_unsummon_requested: entity_update.despawn_or_unsummon_requested,
                 entity_update: Some(entity_update),
                 remove_list: Some(remove_list),
+                linked_trap_guid,
+                linked_trap_removed,
+                linked_trap_missing_or_self,
             }
         } else {
             GameObjectUpdateOutcomeLikeCpp {
@@ -4515,6 +4576,9 @@ where
                 despawn_or_unsummon_requested: entity_update.despawn_or_unsummon_requested,
                 entity_update: Some(entity_update),
                 remove_list: None,
+                linked_trap_guid,
+                linked_trap_removed,
+                linked_trap_missing_or_self,
             }
         }
     }
@@ -4543,6 +4607,9 @@ where
         for guid in game_object_guids {
             summary.visited += 1;
             let outcome = self.update_game_object_like_cpp(guid, diff_ms);
+            if outcome.linked_trap_removed {
+                summary.linked_traps_removed += 1;
+            }
             match outcome.status {
                 GameObjectUpdateStatusLikeCpp::Updated => summary.updated += 1,
                 GameObjectUpdateStatusLikeCpp::DespawnRemoveQueued => {
@@ -18765,6 +18832,167 @@ mod tests {
         assert_eq!(drain.removed, 1);
         assert!(map.map_object_record(guid).is_none());
         assert_eq!(map.creature_spawn_id_store_count_like_cpp(spawn_id), 0);
+    }
+
+    #[test]
+    fn gameobject_update_just_deactivated_removes_linked_trap_like_cpp() {
+        let mut map = test_map();
+        let mut owner = game_object_with_counter(4580101, 571, 7, false);
+        let trap = game_object_with_counter(4580102, 571, 7, false);
+        let owner_guid = owner.world().guid();
+        let trap_guid = trap.world().guid();
+        owner.set_loot_state(LootState::JustDeactivated, None);
+        owner.set_linked_trap_like_cpp(trap_guid);
+
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(trap).unwrap())
+            .unwrap();
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(owner).unwrap())
+            .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(owner_guid, 1);
+
+        assert_eq!(outcome.status, GameObjectUpdateStatusLikeCpp::Updated);
+        assert_eq!(outcome.linked_trap_guid, Some(trap_guid));
+        assert!(outcome.linked_trap_removed);
+        assert!(!outcome.linked_trap_missing_or_self);
+        assert!(map.map_object_record(owner_guid).is_some());
+        assert!(map.map_object_record(trap_guid).is_none());
+    }
+
+    #[test]
+    fn gameobject_update_despawn_requested_does_not_consume_just_deactivated_linked_trap_like_cpp()
+    {
+        let mut map = test_map();
+        let mut owner = game_object_with_counter(4580501, 571, 7, false);
+        let trap = game_object_with_counter(4580502, 571, 7, false);
+        let owner_guid = owner.world().guid();
+        let trap_guid = trap.world().guid();
+        owner.set_loot_state(LootState::JustDeactivated, None);
+        owner.set_linked_trap_like_cpp(trap_guid);
+        assert!(owner.schedule_despawn_or_unsummon_like_cpp(1, 0));
+
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(trap).unwrap())
+            .unwrap();
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(owner).unwrap())
+            .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(owner_guid, 1);
+
+        assert_eq!(
+            outcome.status,
+            GameObjectUpdateStatusLikeCpp::DespawnRemoveQueued
+        );
+        assert_eq!(outcome.linked_trap_guid, None);
+        assert!(!outcome.linked_trap_removed);
+        assert!(!outcome.linked_trap_missing_or_self);
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 1);
+        assert_eq!(
+            map.map_object_record(owner_guid)
+                .and_then(MapObjectRecord::game_object)
+                .map(GameObject::loot_state),
+            Some(LootState::NotReady)
+        );
+        assert!(map.map_object_record(trap_guid).is_some());
+    }
+
+    #[test]
+    fn gameobject_update_non_just_deactivated_keeps_linked_trap_like_cpp() {
+        let mut map = test_map();
+        let mut owner = game_object_with_counter(4580201, 571, 7, false);
+        let trap = game_object_with_counter(4580202, 571, 7, false);
+        let owner_guid = owner.world().guid();
+        let trap_guid = trap.world().guid();
+        owner.set_loot_state(LootState::Ready, None);
+        owner.set_linked_trap_like_cpp(trap_guid);
+
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(trap).unwrap())
+            .unwrap();
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(owner).unwrap())
+            .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(owner_guid, 1);
+
+        assert_eq!(outcome.status, GameObjectUpdateStatusLikeCpp::Updated);
+        assert_eq!(outcome.linked_trap_guid, None);
+        assert!(!outcome.linked_trap_removed);
+        assert!(!outcome.linked_trap_missing_or_self);
+        assert!(map.map_object_record(owner_guid).is_some());
+        assert!(map.map_object_record(trap_guid).is_some());
+    }
+
+    #[test]
+    fn gameobject_update_just_deactivated_empty_self_missing_trap_is_noop_like_cpp() {
+        let mut map = test_map();
+        let mut empty = game_object_with_counter(4580301, 571, 7, false);
+        let mut self_linked = game_object_with_counter(4580302, 571, 7, false);
+        let mut missing = game_object_with_counter(4580303, 571, 7, false);
+        let unrelated = game_object_with_counter(4580304, 571, 7, false);
+        let empty_guid = empty.world().guid();
+        let self_guid = self_linked.world().guid();
+        let missing_guid = missing.world().guid();
+        let missing_trap_guid = guid(HighGuid::GameObject, 4580399);
+        let unrelated_guid = unrelated.world().guid();
+        empty.set_loot_state(LootState::JustDeactivated, None);
+        self_linked.set_loot_state(LootState::JustDeactivated, None);
+        self_linked.set_linked_trap_like_cpp(self_guid);
+        missing.set_loot_state(LootState::JustDeactivated, None);
+        missing.set_linked_trap_like_cpp(missing_trap_guid);
+
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(empty).unwrap())
+            .unwrap();
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(self_linked).unwrap(),
+        )
+        .unwrap();
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(missing).unwrap(),
+        )
+        .unwrap();
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(unrelated).unwrap(),
+        )
+        .unwrap();
+
+        let empty_outcome = map.update_game_object_like_cpp(empty_guid, 1);
+        let self_outcome = map.update_game_object_like_cpp(self_guid, 1);
+        let missing_outcome = map.update_game_object_like_cpp(missing_guid, 1);
+
+        assert_eq!(empty_outcome.linked_trap_guid, None);
+        assert!(!empty_outcome.linked_trap_removed);
+        assert!(empty_outcome.linked_trap_missing_or_self);
+        assert_eq!(self_outcome.linked_trap_guid, Some(self_guid));
+        assert!(!self_outcome.linked_trap_removed);
+        assert!(self_outcome.linked_trap_missing_or_self);
+        assert_eq!(missing_outcome.linked_trap_guid, Some(missing_trap_guid));
+        assert!(!missing_outcome.linked_trap_removed);
+        assert!(missing_outcome.linked_trap_missing_or_self);
+        assert!(map.map_object_record(empty_guid).is_some());
+        assert!(map.map_object_record(self_guid).is_some());
+        assert!(map.map_object_record(missing_guid).is_some());
+        assert!(map.map_object_record(unrelated_guid).is_some());
+    }
+
+    #[test]
+    fn gameobject_update_summary_counts_linked_trap_removal_like_cpp() {
+        let mut map = test_map();
+        let mut owner = game_object_with_counter(4580401, 571, 7, false);
+        let trap = game_object_with_counter(4580402, 571, 7, false);
+        let owner_guid = owner.world().guid();
+        let trap_guid = trap.world().guid();
+        owner.set_loot_state(LootState::JustDeactivated, None);
+        owner.set_linked_trap_like_cpp(trap_guid);
+
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(trap).unwrap())
+            .unwrap();
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(owner).unwrap())
+            .unwrap();
+
+        let summary = map.update_game_objects_like_cpp(1);
+
+        assert_eq!(summary.linked_traps_removed, 1);
+        assert!(summary.visited >= 1);
+        assert!(map.map_object_record(owner_guid).is_some());
+        assert!(map.map_object_record(trap_guid).is_none());
     }
 
     #[test]

@@ -6,6 +6,11 @@
 ## Pending Review Tasks
 
 ## Closed Tasks
+- [x] **#NEXT.R8.ENTITIES.458** Map-owned `GameObject::Update` linked-trap cleanup for `GO_JUST_DEACTIVATED`.
+  Status: represented-complete for this bounded linked-trap update seam; review `APROBADO` after one bounded correction; CI `CI_OK`; validation OK; committed locally at `current #458 HEAD`; no push/install/restart.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:1575-1580`.
+  Rust targets: `crates/wow-map/src/map.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: `Map::update_game_object_like_cpp` now consumes only the first C++ `GO_JUST_DEACTIVATED` side effect after canonical exact typed GameObject validation and entity-level update: it snapshots canonical `linked_trap_guid_like_cpp()`, removes an existing non-empty/non-self exact typed linked trap through `remove_from_map_like_cpp`, reports linked-trap GUID/removal/empty-self-missing evidence, and skips that branch when the same tick's `m_despawnDelay` outcome already represents `DespawnOrUnsummon -> Delete -> GO_NOT_READY`. `Map::update_game_objects_like_cpp` summarizes linked trap removals. Remaining gaps: no `ClearLoot()`, no goober spell/unique-user cleanup, no chest restock/delete/respawn branches, no DB/PoolMgr/scripts/AI/ObjectAccessor/dynamic-tree/session fanout/packets, install/restart/push, or full `GO_JUST_DEACTIVATED` runtime parity.
 - [x] **#NEXT.R8.ENTITIES.457** live GameObject loot-release caller consumes canonical `SetLootState` seam.
   Status: represented-complete for this bounded caller-consumption seam; review `APROBADO`; CI `CI_OK`; validation OK; committed locally at `current #457 HEAD`; no push/install/restart.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/LootHandler.cpp:262-320`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:3683-3709`.

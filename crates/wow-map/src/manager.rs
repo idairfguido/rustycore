@@ -1811,6 +1811,7 @@ mod tests {
                 missing_or_stale: 0,
                 not_game_object: 0,
                 not_in_world: 0,
+                linked_traps_removed: 0,
             }
         );
         let game_object = managed_map
@@ -1851,6 +1852,7 @@ mod tests {
                 missing_or_stale: 0,
                 not_game_object: 0,
                 not_in_world: 0,
+                linked_traps_removed: 0,
             }
         );
         assert!(
@@ -1880,6 +1882,7 @@ mod tests {
                 missing_or_stale: 0,
                 not_game_object: 0,
                 not_in_world: 1,
+                linked_traps_removed: 0,
             }
         );
         let game_object = managed_map
@@ -1910,6 +1913,7 @@ mod tests {
                 missing_or_stale: 0,
                 not_game_object: 0,
                 not_in_world: 0,
+                linked_traps_removed: 0,
             }
         );
         assert!(
