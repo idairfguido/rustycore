@@ -36,7 +36,7 @@ use wow_core::{ObjectGuid, ObjectGuidGenerator, Position, guid::HighGuid};
 use wow_entities::{
     AccessorObjectKind, AreaTrigger, CombatBeginContextLikeCpp, CombatSubsystem, Conversation,
     Corpse, Creature, CreatureRuntimePlan, CreatureRuntimeUpdateContext, DynamicObject,
-    DynamicObjectType, GAMEOBJECT_TYPE_CHEST, GAMEOBJECT_TYPE_DOOR,
+    DynamicObjectType, GAMEOBJECT_TYPE_CHEST, GAMEOBJECT_TYPE_DOOR, GAMEOBJECT_TYPE_GOOBER,
     GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT, GAMEOBJECT_TYPE_TRANSPORT, GameObject,
     GameObjectUpdateOutcomeLikeCpp as EntityGameObjectUpdateOutcomeLikeCpp,
     GameObjectUpdateStatusLikeCpp as EntityGameObjectUpdateStatusLikeCpp, GoState, INVALID_HEIGHT,
@@ -765,6 +765,7 @@ pub struct GameObjectUpdateOutcomeLikeCpp {
     pub linked_trap_guid: Option<ObjectGuid>,
     pub linked_trap_removed: bool,
     pub linked_trap_missing_or_self: bool,
+    pub loot_cleared: bool,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -776,6 +777,7 @@ pub struct GameObjectsUpdateSummaryLikeCpp {
     pub not_game_object: usize,
     pub not_in_world: usize,
     pub linked_traps_removed: usize,
+    pub loot_cleared: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4396,6 +4398,7 @@ where
                 linked_trap_guid: None,
                 linked_trap_removed: false,
                 linked_trap_missing_or_self: false,
+                loot_cleared: false,
             };
         };
 
@@ -4416,6 +4419,7 @@ where
                 linked_trap_guid: None,
                 linked_trap_removed: false,
                 linked_trap_missing_or_self: false,
+                loot_cleared: false,
             };
         }
 
@@ -4436,6 +4440,7 @@ where
                 linked_trap_guid: None,
                 linked_trap_removed: false,
                 linked_trap_missing_or_self: false,
+                loot_cleared: false,
             };
         };
 
@@ -4458,6 +4463,7 @@ where
                 linked_trap_guid: None,
                 linked_trap_removed: false,
                 linked_trap_missing_or_self: false,
+                loot_cleared: false,
             };
         }
 
@@ -4479,6 +4485,7 @@ where
                     linked_trap_guid: None,
                     linked_trap_removed: false,
                     linked_trap_missing_or_self: false,
+                    loot_cleared: false,
                 };
             };
             let Some(game_object) = record.game_object_mut() else {
@@ -4498,6 +4505,7 @@ where
                     linked_trap_guid: None,
                     linked_trap_removed: false,
                     linked_trap_missing_or_self: false,
+                    loot_cleared: false,
                 };
             };
             game_object.update_like_cpp(diff_ms)
@@ -4536,6 +4544,22 @@ where
                     })
             };
 
+        let loot_cleared =
+            if entity_update.status == EntityGameObjectUpdateStatusLikeCpp::DespawnRequested {
+                false
+            } else if let Some(game_object) = self
+                .map_objects
+                .get_mut(&game_object_guid)
+                .and_then(MapObjectRecord::game_object_mut)
+                .filter(|game_object| game_object.loot_state() == LootState::JustDeactivated)
+                .filter(|game_object| game_object.data().type_id != GAMEOBJECT_TYPE_GOOBER as i8)
+            {
+                game_object.clear_loot_like_cpp();
+                true
+            } else {
+                false
+            };
+
         if entity_update.status == EntityGameObjectUpdateStatusLikeCpp::DespawnRequested {
             if let Some(record) = self.map_objects.get_mut(&game_object_guid) {
                 if let Some(game_object) = record.game_object_mut() {
@@ -4560,6 +4584,7 @@ where
                 linked_trap_guid,
                 linked_trap_removed,
                 linked_trap_missing_or_self,
+                loot_cleared: false,
             }
         } else {
             GameObjectUpdateOutcomeLikeCpp {
@@ -4579,6 +4604,7 @@ where
                 linked_trap_guid,
                 linked_trap_removed,
                 linked_trap_missing_or_self,
+                loot_cleared,
             }
         }
     }
@@ -4609,6 +4635,9 @@ where
             let outcome = self.update_game_object_like_cpp(guid, diff_ms);
             if outcome.linked_trap_removed {
                 summary.linked_traps_removed += 1;
+            }
+            if outcome.loot_cleared {
+                summary.loot_cleared += 1;
             }
             match outcome.status {
                 GameObjectUpdateStatusLikeCpp::Updated => summary.updated += 1,
@@ -9665,8 +9694,8 @@ mod tests {
     use wow_constants::{DeathState, TypeId, TypeMask};
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
     use wow_entities::{
-        AccessorObjectRef, Creature, GameObject, ObjectAccessor, ObjectNotifyFlags, Player,
-        Transport,
+        AccessorObjectRef, Creature, GameObject, GameObjectOwnedLoot, ObjectAccessor,
+        ObjectNotifyFlags, Player, Transport,
     };
 
     const GO_FLAG_MAP_OBJECT: u32 = 0x0010_0000;
@@ -18856,7 +18885,82 @@ mod tests {
         assert!(outcome.linked_trap_removed);
         assert!(!outcome.linked_trap_missing_or_self);
         assert!(map.map_object_record(owner_guid).is_some());
+        assert!(outcome.loot_cleared);
         assert!(map.map_object_record(trap_guid).is_none());
+    }
+
+    #[test]
+    fn gameobject_update_just_deactivated_clears_owned_loot_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = game_object_with_counter(4590101, 571, 7, false);
+        let gameobject_guid = gameobject.world().guid();
+        let personal_guid = guid(HighGuid::Player, 4590191);
+        let unique_guid = guid(HighGuid::Player, 4590192);
+        gameobject.set_loot_state(LootState::JustDeactivated, None);
+        gameobject.set_shared_loot_like_cpp(GameObjectOwnedLoot::new(7, 2));
+        gameobject.set_personal_loot_like_cpp(personal_guid, GameObjectOwnedLoot::new(11, 3));
+        assert!(gameobject.add_unique_use_like_cpp(unique_guid));
+        gameobject.add_use_like_cpp();
+        assert!(gameobject.shared_loot_like_cpp().is_some());
+        assert_eq!(gameobject.personal_loot_count_like_cpp(), 1);
+        assert_eq!(gameobject.unique_user_count_like_cpp(), 1);
+        assert_eq!(gameobject.use_times(), 2);
+
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1);
+        let canonical = map
+            .map_object_record(gameobject_guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+
+        assert_eq!(outcome.status, GameObjectUpdateStatusLikeCpp::Updated);
+        assert!(outcome.loot_cleared);
+        assert_eq!(canonical.loot_state(), LootState::JustDeactivated);
+        assert!(canonical.shared_loot_like_cpp().is_none());
+        assert_eq!(canonical.personal_loot_count_like_cpp(), 0);
+        assert_eq!(canonical.unique_user_count_like_cpp(), 0);
+        assert_eq!(canonical.use_times(), 0);
+    }
+
+    #[test]
+    fn gameobject_update_just_deactivated_goober_preserves_pre_clearloot_state_like_cpp_gap() {
+        let mut map = test_map();
+        let mut gameobject = game_object_with_counter(4590111, 571, 7, false);
+        let gameobject_guid = gameobject.world().guid();
+        let personal_guid = guid(HighGuid::Player, 4590193);
+        let unique_guid = guid(HighGuid::Player, 4590194);
+        gameobject.set_go_type(GAMEOBJECT_TYPE_GOOBER as u8);
+        gameobject.set_loot_state(LootState::JustDeactivated, None);
+        gameobject.set_shared_loot_like_cpp(GameObjectOwnedLoot::new(17, 4));
+        gameobject.set_personal_loot_like_cpp(personal_guid, GameObjectOwnedLoot::new(19, 5));
+        assert!(gameobject.add_unique_use_like_cpp(unique_guid));
+        gameobject.add_use_like_cpp();
+
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1);
+        let canonical = map
+            .map_object_record(gameobject_guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+
+        assert_eq!(outcome.status, GameObjectUpdateStatusLikeCpp::Updated);
+        // C++ GameObject.cpp:1581-1605 runs the goober spell/user/state/NODESPAWN
+        // branch before ClearLoot(); this branch remains an explicit later gap, so
+        // this slice must not mutate loot/users/use-times or report loot_cleared.
+        assert!(!outcome.loot_cleared);
+        assert_eq!(canonical.loot_state(), LootState::JustDeactivated);
+        assert!(canonical.shared_loot_like_cpp().is_some());
+        assert_eq!(canonical.personal_loot_count_like_cpp(), 1);
+        assert_eq!(canonical.unique_user_count_like_cpp(), 1);
+        assert_eq!(canonical.use_times(), 2);
     }
 
     #[test]
@@ -18869,6 +18973,12 @@ mod tests {
         let trap_guid = trap.world().guid();
         owner.set_loot_state(LootState::JustDeactivated, None);
         owner.set_linked_trap_like_cpp(trap_guid);
+        owner.set_shared_loot_like_cpp(GameObjectOwnedLoot::new(5, 1));
+        owner.set_personal_loot_like_cpp(
+            guid(HighGuid::Player, 4590291),
+            GameObjectOwnedLoot::new(6, 1),
+        );
+        assert!(owner.add_unique_use_like_cpp(guid(HighGuid::Player, 4590292)));
         assert!(owner.schedule_despawn_or_unsummon_like_cpp(1, 0));
 
         map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(trap).unwrap())
@@ -18885,13 +18995,17 @@ mod tests {
         assert_eq!(outcome.linked_trap_guid, None);
         assert!(!outcome.linked_trap_removed);
         assert!(!outcome.linked_trap_missing_or_self);
+        assert!(!outcome.loot_cleared);
         assert_eq!(map.objects_to_remove_count_like_cpp(), 1);
-        assert_eq!(
-            map.map_object_record(owner_guid)
-                .and_then(MapObjectRecord::game_object)
-                .map(GameObject::loot_state),
-            Some(LootState::NotReady)
-        );
+        let owner_after = map
+            .map_object_record(owner_guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+        assert_eq!(owner_after.loot_state(), LootState::NotReady);
+        assert!(owner_after.shared_loot_like_cpp().is_some());
+        assert_eq!(owner_after.personal_loot_count_like_cpp(), 1);
+        assert_eq!(owner_after.unique_user_count_like_cpp(), 1);
+        assert_eq!(owner_after.use_times(), 1);
         assert!(map.map_object_record(trap_guid).is_some());
     }
 
@@ -18904,6 +19018,12 @@ mod tests {
         let trap_guid = trap.world().guid();
         owner.set_loot_state(LootState::Ready, None);
         owner.set_linked_trap_like_cpp(trap_guid);
+        owner.set_shared_loot_like_cpp(GameObjectOwnedLoot::new(9, 1));
+        owner.set_personal_loot_like_cpp(
+            guid(HighGuid::Player, 4590391),
+            GameObjectOwnedLoot::new(10, 1),
+        );
+        assert!(owner.add_unique_use_like_cpp(guid(HighGuid::Player, 4590392)));
 
         map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(trap).unwrap())
             .unwrap();
@@ -18916,8 +19036,49 @@ mod tests {
         assert_eq!(outcome.linked_trap_guid, None);
         assert!(!outcome.linked_trap_removed);
         assert!(!outcome.linked_trap_missing_or_self);
+        assert!(!outcome.loot_cleared);
+        let owner_after = map
+            .map_object_record(owner_guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+        assert_eq!(owner_after.loot_state(), LootState::Ready);
+        assert!(owner_after.shared_loot_like_cpp().is_some());
+        assert_eq!(owner_after.personal_loot_count_like_cpp(), 1);
+        assert_eq!(owner_after.unique_user_count_like_cpp(), 1);
+        assert_eq!(owner_after.use_times(), 1);
         assert!(map.map_object_record(owner_guid).is_some());
         assert!(map.map_object_record(trap_guid).is_some());
+    }
+
+    #[test]
+    fn gameobject_update_not_in_world_does_not_clear_owned_loot_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = game_object_with_counter(4590401, 571, 7, false);
+        let gameobject_guid = gameobject.world().guid();
+        gameobject.set_loot_state(LootState::JustDeactivated, None);
+        gameobject.set_shared_loot_like_cpp(GameObjectOwnedLoot::new(12, 1));
+        gameobject.set_personal_loot_like_cpp(
+            guid(HighGuid::Player, 4590491),
+            GameObjectOwnedLoot::new(13, 1),
+        );
+        assert!(gameobject.add_unique_use_like_cpp(guid(HighGuid::Player, 4590492)));
+
+        map.insert_map_object_record(MapObjectRecord::new_game_object(gameobject).unwrap())
+            .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1);
+        let canonical = map
+            .map_object_record(gameobject_guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+
+        assert_eq!(outcome.status, GameObjectUpdateStatusLikeCpp::NotInWorld);
+        assert!(!outcome.loot_cleared);
+        assert_eq!(canonical.loot_state(), LootState::JustDeactivated);
+        assert!(canonical.shared_loot_like_cpp().is_some());
+        assert_eq!(canonical.personal_loot_count_like_cpp(), 1);
+        assert_eq!(canonical.unique_user_count_like_cpp(), 1);
+        assert_eq!(canonical.use_times(), 1);
     }
 
     #[test]
@@ -18990,6 +19151,7 @@ mod tests {
         let summary = map.update_game_objects_like_cpp(1);
 
         assert_eq!(summary.linked_traps_removed, 1);
+        assert_eq!(summary.loot_cleared, 1);
         assert!(summary.visited >= 1);
         assert!(map.map_object_record(owner_guid).is_some());
         assert!(map.map_object_record(trap_guid).is_none());
