@@ -48,6 +48,8 @@ use wow_entities::{
 };
 
 const GRID_SLOT_COUNT: usize = (MAX_NUMBER_OF_GRIDS * MAX_NUMBER_OF_GRIDS) as usize;
+#[cfg(test)]
+const GAMEOBJECT_TYPE_GENERIC_LIKE_CPP: u32 = 5;
 /// C++ `DynamicTree.cpp:34-38` `CHECK_TREE_PERIOD = 200`.
 const DYNAMIC_MAP_TREE_CHECK_PERIOD_MS_LIKE_CPP: u32 = 200;
 const WEATHER_UPDATE_INTERVAL_MS_LIKE_CPP: u32 = 1_000;
@@ -786,6 +788,11 @@ pub struct GameObjectUpdateOutcomeLikeCpp {
     pub new_flag_drop_owner_missing_or_empty: bool,
     pub new_flag_drop_owner_wrong_kind: bool,
     pub new_flag_drop_owner_not_new_flag: bool,
+    pub generic_not_ready: bool,
+    pub generic_visual_despawn_represented: bool,
+    pub generic_flags_restored_represented: bool,
+    pub generic_zero_respawn_delay_return: bool,
+    pub generic_despawn_at_action_source_missing: bool,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -816,6 +823,11 @@ pub struct GameObjectsUpdateSummaryLikeCpp {
     pub new_flag_drop_owner_missing_or_empty: usize,
     pub new_flag_drop_owner_wrong_kind: usize,
     pub new_flag_drop_owner_not_new_flag: usize,
+    pub generic_not_ready: usize,
+    pub generic_visual_despawn_represented: usize,
+    pub generic_flags_restored_represented: usize,
+    pub generic_zero_respawn_delay_returns: usize,
+    pub generic_despawn_at_action_source_missing: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4457,6 +4469,11 @@ where
                 new_flag_drop_owner_missing_or_empty: false,
                 new_flag_drop_owner_wrong_kind: false,
                 new_flag_drop_owner_not_new_flag: false,
+                generic_not_ready: false,
+                generic_visual_despawn_represented: false,
+                generic_flags_restored_represented: false,
+                generic_zero_respawn_delay_return: false,
+                generic_despawn_at_action_source_missing: false,
             };
         };
 
@@ -4497,6 +4514,11 @@ where
                 new_flag_drop_owner_missing_or_empty: false,
                 new_flag_drop_owner_wrong_kind: false,
                 new_flag_drop_owner_not_new_flag: false,
+                generic_not_ready: false,
+                generic_visual_despawn_represented: false,
+                generic_flags_restored_represented: false,
+                generic_zero_respawn_delay_return: false,
+                generic_despawn_at_action_source_missing: false,
             };
         }
 
@@ -4537,6 +4559,11 @@ where
                 new_flag_drop_owner_missing_or_empty: false,
                 new_flag_drop_owner_wrong_kind: false,
                 new_flag_drop_owner_not_new_flag: false,
+                generic_not_ready: false,
+                generic_visual_despawn_represented: false,
+                generic_flags_restored_represented: false,
+                generic_zero_respawn_delay_return: false,
+                generic_despawn_at_action_source_missing: false,
             };
         };
 
@@ -4579,6 +4606,11 @@ where
                 new_flag_drop_owner_missing_or_empty: false,
                 new_flag_drop_owner_wrong_kind: false,
                 new_flag_drop_owner_not_new_flag: false,
+                generic_not_ready: false,
+                generic_visual_despawn_represented: false,
+                generic_flags_restored_represented: false,
+                generic_zero_respawn_delay_return: false,
+                generic_despawn_at_action_source_missing: false,
             };
         }
 
@@ -4620,6 +4652,11 @@ where
                     new_flag_drop_owner_missing_or_empty: false,
                     new_flag_drop_owner_wrong_kind: false,
                     new_flag_drop_owner_not_new_flag: false,
+                    generic_not_ready: false,
+                    generic_visual_despawn_represented: false,
+                    generic_flags_restored_represented: false,
+                    generic_zero_respawn_delay_return: false,
+                    generic_despawn_at_action_source_missing: false,
                 };
             };
             let Some(game_object) = record.game_object_mut() else {
@@ -4659,6 +4696,11 @@ where
                     new_flag_drop_owner_missing_or_empty: false,
                     new_flag_drop_owner_wrong_kind: false,
                     new_flag_drop_owner_not_new_flag: false,
+                    generic_not_ready: false,
+                    generic_visual_despawn_represented: false,
+                    generic_flags_restored_represented: false,
+                    generic_zero_respawn_delay_return: false,
+                    generic_despawn_at_action_source_missing: false,
                 };
             };
             game_object.update_like_cpp(diff_ms)
@@ -4716,6 +4758,11 @@ where
         let mut new_flag_drop_owner_missing_or_empty = false;
         let mut new_flag_drop_owner_wrong_kind = false;
         let mut new_flag_drop_owner_not_new_flag = false;
+        let mut generic_not_ready = false;
+        let mut generic_visual_despawn_represented = false;
+        let mut generic_flags_restored_represented = false;
+        let mut generic_zero_respawn_delay_return = false;
+        let mut generic_despawn_at_action_source_missing = false;
 
         if entity_update.status != EntityGameObjectUpdateStatusLikeCpp::DespawnRequested {
             if let Some(game_object) = self
@@ -4899,6 +4946,41 @@ where
             }
         }
 
+        if loot_cleared && !non_consumed_chest_or_goober_return && !summoned_expired_delete {
+            if let Some(game_object) = self
+                .map_objects
+                .get_mut(&game_object_guid)
+                .and_then(MapObjectRecord::game_object_mut)
+                .filter(|game_object| game_object.loot_state() == LootState::JustDeactivated)
+            {
+                // C++ anchor: GameObject.cpp:1639-1651. This represented seam
+                // stops at `if (!m_respawnDelayTime) return;`; spawnedByDefault,
+                // SaveRespawnTime, PoolMgr, ZoneScript and DB scheduling remain gaps.
+                game_object.set_loot_state(LootState::NotReady, None);
+                generic_not_ready = true;
+
+                let go_type = game_object.data().type_id as u32;
+                let despawn_at_action = match go_type {
+                    GAMEOBJECT_TYPE_CHEST => game_object
+                        .represented_chest_loot_source_like_cpp()
+                        .map(|source| source.chest_consumable),
+                    GAMEOBJECT_TYPE_GOOBER => game_object
+                        .represented_goober_use_source_like_cpp()
+                        .map(|source| source.consumable),
+                    _ => Some(false),
+                };
+                generic_despawn_at_action_source_missing = despawn_at_action.is_none();
+                let visual_despawn = despawn_at_action.unwrap_or(false)
+                    || game_object.go_anim_progress_like_cpp() > 0;
+                if visual_despawn {
+                    generic_visual_despawn_represented = true;
+                    generic_flags_restored_represented =
+                        game_object.restore_represented_baseline_flags_like_cpp();
+                }
+                generic_zero_respawn_delay_return = game_object.respawn_delay_time() == 0;
+            }
+        }
+
         if summoned_expired_delete {
             let remove_list = self.add_object_to_remove_list_like_cpp(game_object_guid);
             GameObjectUpdateOutcomeLikeCpp {
@@ -4938,6 +5020,11 @@ where
                 new_flag_drop_owner_missing_or_empty,
                 new_flag_drop_owner_wrong_kind,
                 new_flag_drop_owner_not_new_flag,
+                generic_not_ready,
+                generic_visual_despawn_represented,
+                generic_flags_restored_represented,
+                generic_zero_respawn_delay_return,
+                generic_despawn_at_action_source_missing,
             }
         } else if entity_update.status == EntityGameObjectUpdateStatusLikeCpp::DespawnRequested {
             if let Some(record) = self.map_objects.get_mut(&game_object_guid) {
@@ -4983,6 +5070,11 @@ where
                 new_flag_drop_owner_missing_or_empty: false,
                 new_flag_drop_owner_wrong_kind: false,
                 new_flag_drop_owner_not_new_flag: false,
+                generic_not_ready: false,
+                generic_visual_despawn_represented: false,
+                generic_flags_restored_represented: false,
+                generic_zero_respawn_delay_return: false,
+                generic_despawn_at_action_source_missing: false,
             }
         } else {
             GameObjectUpdateOutcomeLikeCpp {
@@ -5022,6 +5114,11 @@ where
                 new_flag_drop_owner_missing_or_empty,
                 new_flag_drop_owner_wrong_kind,
                 new_flag_drop_owner_not_new_flag,
+                generic_not_ready,
+                generic_visual_despawn_represented,
+                generic_flags_restored_represented,
+                generic_zero_respawn_delay_return,
+                generic_despawn_at_action_source_missing,
             }
         }
     }
@@ -5108,6 +5205,21 @@ where
             }
             if outcome.new_flag_drop_owner_not_new_flag {
                 summary.new_flag_drop_owner_not_new_flag += 1;
+            }
+            if outcome.generic_not_ready {
+                summary.generic_not_ready += 1;
+            }
+            if outcome.generic_visual_despawn_represented {
+                summary.generic_visual_despawn_represented += 1;
+            }
+            if outcome.generic_flags_restored_represented {
+                summary.generic_flags_restored_represented += 1;
+            }
+            if outcome.generic_zero_respawn_delay_return {
+                summary.generic_zero_respawn_delay_returns += 1;
+            }
+            if outcome.generic_despawn_at_action_source_missing {
+                summary.generic_despawn_at_action_source_missing += 1;
             }
             match outcome.status {
                 GameObjectUpdateStatusLikeCpp::Updated => summary.updated += 1,
@@ -19389,7 +19501,8 @@ mod tests {
 
         assert_eq!(outcome.status, GameObjectUpdateStatusLikeCpp::Updated);
         assert!(outcome.loot_cleared);
-        assert_eq!(canonical.loot_state(), LootState::JustDeactivated);
+        assert!(outcome.generic_not_ready);
+        assert_eq!(canonical.loot_state(), LootState::NotReady);
         assert!(canonical.shared_loot_like_cpp().is_none());
         assert_eq!(canonical.personal_loot_count_like_cpp(), 0);
         assert_eq!(canonical.unique_user_count_like_cpp(), 0);
@@ -19970,9 +20083,161 @@ mod tests {
         assert!(outcome.loot_cleared);
         assert!(!outcome.summoned_expired_delete);
         assert!(!outcome.non_consumed_chest_or_goober_return);
+        assert!(outcome.generic_not_ready);
+        assert!(outcome.generic_visual_despawn_represented);
         assert_eq!(canonical.respawn_time(), 60);
-        assert_eq!(canonical.loot_state(), LootState::JustDeactivated);
+        assert_eq!(canonical.loot_state(), LootState::NotReady);
         assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+    }
+
+    #[test]
+    fn gameobject_update_generic_zero_respawn_sets_not_ready_without_remove_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = game_object_with_counter(4630101, 571, 7, false);
+        let gameobject_guid = gameobject.world().guid();
+        gameobject.set_go_type(GAMEOBJECT_TYPE_GENERIC_LIKE_CPP as u8);
+        gameobject.set_respawn_delay_time(0);
+        gameobject.set_loot_state(LootState::JustDeactivated, None);
+
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 1_000);
+        let canonical = map
+            .map_object_record(gameobject_guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+
+        assert_eq!(outcome.status, GameObjectUpdateStatusLikeCpp::Updated);
+        assert!(outcome.loot_cleared);
+        assert!(outcome.generic_not_ready);
+        assert!(outcome.generic_zero_respawn_delay_return);
+        assert!(!outcome.generic_visual_despawn_represented);
+        assert!(!outcome.generic_flags_restored_represented);
+        assert_eq!(canonical.loot_state(), LootState::NotReady);
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+    }
+
+    #[test]
+    fn gameobject_update_generic_chest_consumable_visual_despawn_restores_flags_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = game_object_with_counter(4630201, 571, 7, false);
+        let gameobject_guid = gameobject.world().guid();
+        gameobject.set_go_type(GAMEOBJECT_TYPE_CHEST as u8);
+        gameobject.set_represented_chest_loot_source_like_cpp(Some(GameObjectLootSource {
+            chest_consumable: true,
+            ..GameObjectLootSource::default()
+        }));
+        gameobject.set_represented_baseline_flags_like_cpp(Some(0x10));
+        gameobject.set_flags(0x90);
+        gameobject.set_respawn_delay_time(0);
+        gameobject.set_loot_state(LootState::JustDeactivated, None);
+
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 1_000);
+        let canonical = map
+            .map_object_record(gameobject_guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+
+        assert!(outcome.generic_not_ready);
+        assert!(outcome.generic_visual_despawn_represented);
+        assert!(outcome.generic_flags_restored_represented);
+        assert!(!outcome.generic_despawn_at_action_source_missing);
+        assert_eq!(canonical.data().flags, 0x10);
+        assert_eq!(canonical.loot_state(), LootState::NotReady);
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+    }
+
+    #[test]
+    fn gameobject_update_generic_anim_progress_visual_despawn_without_despawn_source_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = game_object_with_counter(4630301, 571, 7, false);
+        let gameobject_guid = gameobject.world().guid();
+        gameobject.set_go_type(GAMEOBJECT_TYPE_GENERIC_LIKE_CPP as u8);
+        gameobject.set_go_anim_progress_like_cpp(1);
+        gameobject.set_represented_baseline_flags_like_cpp(Some(0x04));
+        gameobject.set_flags(0x84);
+        gameobject.set_respawn_delay_time(0);
+        gameobject.set_loot_state(LootState::JustDeactivated, None);
+
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 1_000);
+        let canonical = map
+            .map_object_record(gameobject_guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+
+        assert!(outcome.generic_not_ready);
+        assert!(outcome.generic_visual_despawn_represented);
+        assert!(outcome.generic_flags_restored_represented);
+        assert!(!outcome.generic_despawn_at_action_source_missing);
+        assert_eq!(canonical.data().flags, 0x04);
+        assert_eq!(canonical.loot_state(), LootState::NotReady);
+    }
+
+    #[test]
+    fn gameobject_update_generic_chest_missing_source_does_not_assume_despawn_at_action_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = game_object_with_counter(4630401, 571, 7, false);
+        let gameobject_guid = gameobject.world().guid();
+        gameobject.set_go_type(GAMEOBJECT_TYPE_CHEST as u8);
+        gameobject.set_represented_chest_loot_source_like_cpp(None);
+        gameobject.set_respawn_delay_time(0);
+        gameobject.set_loot_state(LootState::JustDeactivated, None);
+
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 1_000);
+        let canonical = map
+            .map_object_record(gameobject_guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+
+        assert!(outcome.non_consumed_source_missing);
+        assert!(outcome.generic_not_ready);
+        assert!(outcome.generic_despawn_at_action_source_missing);
+        assert!(!outcome.generic_visual_despawn_represented);
+        assert!(!outcome.generic_flags_restored_represented);
+        assert_eq!(canonical.loot_state(), LootState::NotReady);
+    }
+
+    #[test]
+    fn gameobject_update_summary_counts_generic_branch_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = game_object_with_counter(4630501, 571, 7, false);
+        gameobject.set_go_type(GAMEOBJECT_TYPE_GENERIC_LIKE_CPP as u8);
+        gameobject.set_go_anim_progress_like_cpp(3);
+        gameobject.set_represented_baseline_flags_like_cpp(Some(0x08));
+        gameobject.set_flags(0x88);
+        gameobject.set_respawn_delay_time(0);
+        gameobject.set_loot_state(LootState::JustDeactivated, None);
+
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+
+        let summary = map.update_game_objects_like_cpp(1, 1_000);
+
+        assert_eq!(summary.generic_not_ready, 1);
+        assert_eq!(summary.generic_visual_despawn_represented, 1);
+        assert_eq!(summary.generic_flags_restored_represented, 1);
+        assert_eq!(summary.generic_zero_respawn_delay_returns, 1);
+        assert_eq!(summary.despawn_remove_queued, 0);
     }
 
     #[test]

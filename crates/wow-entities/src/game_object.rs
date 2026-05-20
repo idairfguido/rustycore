@@ -981,6 +981,8 @@ pub struct GameObject {
     lifecycle_string_id: String,
     linked_trap_guid: ObjectGuid,
     stationary_position: Position,
+    go_anim_progress_like_cpp: u8,
+    represented_baseline_flags_like_cpp: Option<u32>,
     /// Resolved C++ `GetGOInfo()->chest` source carried only when this entity was
     /// constructed or explicitly seeded with a CHEST template source.
     ///
@@ -1059,6 +1061,8 @@ impl GameObject {
             lifecycle_string_id: String::new(),
             linked_trap_guid: ObjectGuid::EMPTY,
             stationary_position: Position::new(0.0, 0.0, 0.0, 0.0),
+            go_anim_progress_like_cpp: 0,
+            represented_baseline_flags_like_cpp: None,
             chest_loot_source_like_cpp: None,
             goober_use_source_like_cpp: None,
             represented_gameobject_model_like_cpp: false,
@@ -1114,6 +1118,7 @@ impl GameObject {
         self.set_display_id(template.display_id);
         self.set_faction(template.faction);
         self.set_flags(template.flags);
+        self.represented_baseline_flags_like_cpp = Some(template.flags);
         self.set_go_type(template.go_type as u8);
         self.prev_go_state = record.go_state;
         self.set_go_state(record.go_state);
@@ -1131,15 +1136,17 @@ impl GameObject {
         self.goober_use_source_like_cpp = template_data.goober_use_source_like_cpp();
         match template.go_type {
             GAMEOBJECT_TYPE_FISHING_HOLE | GAMEOBJECT_TYPE_TRANSPORT => {
-                // Represented C++ branches call SetGoAnimProgress(animProgress); no Rust field yet.
-                let _ = record.anim_progress;
+                self.set_go_anim_progress_like_cpp(record.anim_progress);
             }
             GAMEOBJECT_TYPE_FISHING_NODE => {
                 self.set_level(0);
-                let _ = record.anim_progress;
+                self.set_go_anim_progress_like_cpp(u8::MAX);
+            }
+            GAMEOBJECT_TYPE_DESTRUCTIBLE_BUILDING => {
+                self.set_go_anim_progress_like_cpp(u8::MAX);
             }
             _ => {
-                let _ = record.anim_progress;
+                self.set_go_anim_progress_like_cpp(record.anim_progress);
             }
         }
 
@@ -1691,6 +1698,44 @@ impl GameObject {
 
     pub fn set_linked_trap_like_cpp(&mut self, linked_trap_guid: ObjectGuid) {
         self.linked_trap_guid = linked_trap_guid;
+    }
+
+    /// Represented `GAMEOBJECT_BYTES_1` animation progress used by
+    /// `GameObject::GetGoAnimProgress()` in bounded map-owned update seams.
+    ///
+    /// C++ anchor: `GameObject.cpp:951-1132` passes `GameObjectData::animprogress`
+    /// through `GameObject::Create(..., animProgress, ...)` and calls
+    /// `SetGoAnimProgress(...)` for the represented create branches here.
+    pub const fn go_anim_progress_like_cpp(&self) -> u8 {
+        self.go_anim_progress_like_cpp
+    }
+
+    pub fn set_go_anim_progress_like_cpp(&mut self, progress: u8) {
+        self.go_anim_progress_like_cpp = progress;
+    }
+
+    /// Explicit represented baseline for the flags restored by
+    /// `GameObject::Update` after `SendGameObjectDespawn()`.
+    ///
+    /// This is not a full `GameObjectOverride` runtime. It is populated from the
+    /// lifecycle/template flags when available or by tests/callers with explicit
+    /// source evidence; absent source means no represented restore should clobber
+    /// current runtime flags.
+    pub const fn represented_baseline_flags_like_cpp(&self) -> Option<u32> {
+        self.represented_baseline_flags_like_cpp
+    }
+
+    pub fn set_represented_baseline_flags_like_cpp(&mut self, flags: Option<u32>) {
+        self.represented_baseline_flags_like_cpp = flags;
+    }
+
+    pub fn restore_represented_baseline_flags_like_cpp(&mut self) -> bool {
+        if let Some(flags) = self.represented_baseline_flags_like_cpp {
+            self.set_flags(flags);
+            true
+        } else {
+            false
+        }
     }
 
     pub const fn owner_guid(&self) -> ObjectGuid {
