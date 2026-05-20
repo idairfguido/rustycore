@@ -5879,12 +5879,23 @@ where
             process_plan.delayed_relocation_cells.iter().copied(),
             invalid_non_self_viewpoints,
         );
+        // C++ runs DelayedUnitRelocation's CreatureRelocationNotifier and
+        // PlayerRelocationNotifier while NOTIFY_VISIBILITY_CHANGED is still set,
+        // before ResetNotifier clears the cell. Rust exposes only represented
+        // visibility/AI evidence here: no packets, sessions, ObjectAccessor fanout,
+        // real UpdateObjectVisibility, or SendObjectUpdates are executed.
+        let visibility_plans = self.delayed_unit_relocation_visibility_plans_like_cpp(
+            &delayed_plan,
+            self.delayed_player_relocation_contexts_from_plan_like_cpp(&delayed_plan),
+            self.delayed_creature_relocation_contexts_from_plan_like_cpp(&delayed_plan),
+        );
         let reset_outcome = self
             .reset_notify_flags_for_cells_like_cpp(process_plan.reset_notify_cells.iter().copied());
 
         ProcessRelocationNotifiesOutcome {
             process_plan,
             delayed_plan,
+            visibility_plans,
             reset_outcome,
         }
     }
@@ -5951,19 +5962,33 @@ where
                 .chain(nearby.grid.creatures.iter())
                 .copied()
                 .filter(|guid| self.object_needs_notify_visibility(*guid));
-            let player_viewpoints_needing_notify = nearby
-                .world
-                .players
-                .iter()
-                .copied()
-                .filter(|guid| self.object_needs_notify_visibility(*guid));
-
-            let plan = DelayedUnitRelocationPlan::from_nearby_like_cpp(
+            let mut plan = DelayedUnitRelocationPlan::from_nearby_like_cpp(
                 &nearby,
                 creatures_needing_notify,
-                player_viewpoints_needing_notify,
-                invalid_non_self_viewpoints.iter().copied(),
+                std::iter::empty::<ObjectGuid>(),
+                std::iter::empty::<ObjectGuid>(),
             );
+            let mut players: Vec<_> = nearby.world.players.iter().copied().collect();
+            players.sort();
+            for player_guid in players {
+                let Some(viewpoint_guid) = self.player_viewpoint_guid_like_cpp(player_guid) else {
+                    continue;
+                };
+                if !self.object_needs_notify_visibility(viewpoint_guid) {
+                    continue;
+                }
+                if player_guid != viewpoint_guid
+                    && (invalid_non_self_viewpoints.contains(&player_guid)
+                        || invalid_non_self_viewpoints.contains(&viewpoint_guid)
+                        || self.viewpoint_has_invalid_position_like_cpp(viewpoint_guid))
+                {
+                    plan.skipped_invalid_viewpoints.push(player_guid);
+                    continue;
+                }
+                plan.player_relocations.push(player_guid);
+            }
+            sort_dedup(&mut plan.player_relocations);
+            sort_dedup(&mut plan.skipped_invalid_viewpoints);
             if !plan.creature_relocations.is_empty()
                 || !plan.player_relocations.is_empty()
                 || !plan.skipped_invalid_viewpoints.is_empty()
@@ -6017,7 +6042,7 @@ where
                     .players
                     .iter()
                     .copied()
-                    .filter(|guid| self.object_needs_notify_visibility(*guid));
+                    .filter(|guid| self.player_seer_needs_notify_visibility_like_cpp(*guid));
                 let creatures_needing_notify = nearby
                     .world
                     .creatures
@@ -6025,9 +6050,11 @@ where
                     .chain(nearby.grid.creatures.iter())
                     .copied()
                     .filter(|guid| self.object_needs_notify_visibility(*guid));
-                let source_creature_alive = creature_contexts
-                    .get(creature_guid)
-                    .is_none_or(|context| context.source_creature_alive);
+                let Some(creature_context) = creature_contexts.get(creature_guid) else {
+                    skipped_missing_sources.push(*creature_guid);
+                    continue;
+                };
+                let source_creature_alive = creature_context.source_creature_alive;
                 let visibility_plan = CreatureRelocationVisibilityPlan::from_nearby_like_cpp(
                     *creature_guid,
                     source_creature_alive,
@@ -6063,11 +6090,26 @@ where
                     position.y,
                     MAX_VISIBILITY_DISTANCE + viewpoint.combat_reach(),
                 );
+                let player_seers_needing_notify = nearby
+                    .world
+                    .players
+                    .iter()
+                    .copied()
+                    .filter(|guid| self.player_seer_needs_notify_visibility_like_cpp(*guid));
+                let creatures_needing_notify = nearby
+                    .world
+                    .creatures
+                    .iter()
+                    .chain(nearby.grid.creatures.iter())
+                    .copied()
+                    .filter(|guid| self.object_needs_notify_visibility(*guid));
                 let visibility_plan = PlayerRelocationVisibilityPlan::from_nearby_like_cpp(
                     *player_guid,
                     context.previous_client_guids.iter().copied(),
                     &nearby,
                     context.relocated_for_ai,
+                    player_seers_needing_notify,
+                    creatures_needing_notify,
                 );
                 player_plans.push(PlayerDelayedRelocationVisibilityPlan {
                     player_guid: *player_guid,
@@ -6090,6 +6132,85 @@ where
             skipped_invalid_source_positions,
             missing_player_contexts,
         }
+    }
+
+    fn player_viewpoint_guid_like_cpp(&self, player_guid: ObjectGuid) -> Option<ObjectGuid> {
+        let record = self.map_object_record(player_guid)?;
+        if record.kind() != AccessorObjectKind::Player {
+            return None;
+        }
+        let Some(player) = record.player() else {
+            return Some(player_guid);
+        };
+        let farsight = player.active_data().farsight_object;
+        Some(if farsight.is_empty() {
+            player_guid
+        } else {
+            farsight
+        })
+    }
+
+    fn player_seer_needs_notify_visibility_like_cpp(&self, player_guid: ObjectGuid) -> bool {
+        self.player_viewpoint_guid_like_cpp(player_guid)
+            .is_some_and(|viewpoint_guid| self.object_needs_notify_visibility(viewpoint_guid))
+    }
+
+    fn viewpoint_has_invalid_position_like_cpp(&self, viewpoint_guid: ObjectGuid) -> bool {
+        self.map_object(viewpoint_guid).is_none_or(|viewpoint| {
+            let position = viewpoint.position();
+            !is_valid_map_coord_2d(position.x, position.y)
+        })
+    }
+
+    fn delayed_player_relocation_contexts_from_plan_like_cpp(
+        &self,
+        delayed_plan: &DelayedUnitRelocationForCellsPlan,
+    ) -> Vec<DelayedPlayerRelocationContext> {
+        let mut player_guids: Vec<_> = delayed_plan
+            .cell_plans
+            .iter()
+            .flat_map(|cell_plan| cell_plan.plan.player_relocations.iter().copied())
+            .collect();
+        sort_dedup(&mut player_guids);
+
+        player_guids
+            .into_iter()
+            .filter_map(|player_guid| {
+                let viewpoint_guid = self.player_viewpoint_guid_like_cpp(player_guid)?;
+                Some(DelayedPlayerRelocationContext {
+                    player_guid,
+                    viewpoint_guid,
+                    // Map-owned live relocation currently has no canonical client
+                    // object-list source; keep this empty as an explicit visibility
+                    // fanout gap rather than inventing session state.
+                    previous_client_guids: Vec::new(),
+                    relocated_for_ai: viewpoint_guid == player_guid,
+                })
+            })
+            .collect()
+    }
+
+    fn delayed_creature_relocation_contexts_from_plan_like_cpp(
+        &self,
+        delayed_plan: &DelayedUnitRelocationForCellsPlan,
+    ) -> Vec<DelayedCreatureRelocationContext> {
+        let mut creature_guids: Vec<_> = delayed_plan
+            .cell_plans
+            .iter()
+            .flat_map(|cell_plan| cell_plan.plan.creature_relocations.iter().copied())
+            .collect();
+        sort_dedup(&mut creature_guids);
+
+        creature_guids
+            .into_iter()
+            .filter_map(|creature_guid| {
+                let creature = self.get_typed_creature(creature_guid)?;
+                Some(DelayedCreatureRelocationContext {
+                    creature_guid,
+                    source_creature_alive: creature.is_alive(),
+                })
+            })
+            .collect()
     }
 
     pub fn process_map_object_move_list_like_cpp(
@@ -7152,6 +7273,25 @@ pub struct NearbyCellGuids {
     pub visited_cells: usize,
 }
 
+impl PartialEq for NearbyCellGuids {
+    fn eq(&self, other: &Self) -> bool {
+        self.visited_cells == other.visited_cells
+            && self.world.players == other.world.players
+            && self.world.creatures == other.world.creatures
+            && self.world.corpses == other.world.corpses
+            && self.world.dynamic_objects == other.world.dynamic_objects
+            && self.grid.gameobjects == other.grid.gameobjects
+            && self.grid.creatures == other.grid.creatures
+            && self.grid.dynamic_objects == other.grid.dynamic_objects
+            && self.grid.corpses == other.grid.corpses
+            && self.grid.area_triggers == other.grid.area_triggers
+            && self.grid.scene_objects == other.grid.scene_objects
+            && self.grid.conversations == other.grid.conversations
+    }
+}
+
+impl Eq for NearbyCellGuids {}
+
 impl NearbyCellGuids {
     pub fn is_empty(&self) -> bool {
         self.world.is_empty() && self.grid.is_empty()
@@ -7235,28 +7375,42 @@ impl PlayerRelocationVisibilityPlan {
         previous_client_guids: impl IntoIterator<Item = ObjectGuid>,
         nearby: &NearbyCellGuids,
         relocated_for_ai: bool,
+        player_seers_needing_notify: impl IntoIterator<Item = ObjectGuid>,
+        creatures_needing_notify: impl IntoIterator<Item = ObjectGuid>,
     ) -> Self {
+        let player_seers_needing_notify: HashSet<_> =
+            player_seers_needing_notify.into_iter().collect();
+        let creatures_needing_notify: HashSet<_> = creatures_needing_notify.into_iter().collect();
         let visible_guids = nearby.all_guids();
         let mut out_of_range_guids: HashSet<_> = previous_client_guids.into_iter().collect();
         out_of_range_guids.remove(&player_guid);
 
-        let mut reciprocal_player_updates = HashSet::new();
-        let mut ai_relocation_checks = Vec::new();
         for guid in &visible_guids {
             out_of_range_guids.remove(guid);
+        }
 
-            if guid.is_player() && *guid != player_guid {
+        let mut reciprocal_player_updates = HashSet::new();
+        for guid in &nearby.world.players {
+            if *guid != player_guid && !player_seers_needing_notify.contains(guid) {
                 reciprocal_player_updates.insert(*guid);
-            } else if relocated_for_ai && guid.is_any_type_creature() {
-                ai_relocation_checks.push((*guid, player_guid));
             }
         }
 
         for guid in &out_of_range_guids {
-            if guid.is_player() {
+            if guid.is_player() && !player_seers_needing_notify.contains(guid) {
                 reciprocal_player_updates.insert(*guid);
             }
         }
+
+        let ai_relocation_checks = if relocated_for_ai {
+            nearby_creature_guids_excluding(nearby, player_guid)
+                .into_iter()
+                .filter(|guid| !creatures_needing_notify.contains(guid))
+                .map(|guid| (guid, player_guid))
+                .collect()
+        } else {
+            Vec::new()
+        };
 
         Self {
             visible_guids,
@@ -7390,7 +7544,7 @@ pub struct DelayedCreatureRelocationContext {
     pub source_creature_alive: bool,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DelayedUnitRelocationVisibilityPlans {
     pub creature_plans: Vec<CreatureDelayedRelocationVisibilityPlan>,
     pub player_plans: Vec<PlayerDelayedRelocationVisibilityPlan>,
@@ -7399,7 +7553,7 @@ pub struct DelayedUnitRelocationVisibilityPlans {
     pub missing_player_contexts: Vec<ObjectGuid>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreatureDelayedRelocationVisibilityPlan {
     pub creature_guid: ObjectGuid,
     pub cell_coord: CellCoord,
@@ -7407,7 +7561,7 @@ pub struct CreatureDelayedRelocationVisibilityPlan {
     pub visibility_plan: CreatureRelocationVisibilityPlan,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlayerDelayedRelocationVisibilityPlan {
     pub player_guid: ObjectGuid,
     pub viewpoint_guid: ObjectGuid,
@@ -7484,6 +7638,7 @@ pub struct RelocationNotifyProcessPlan {
 pub struct ProcessRelocationNotifiesOutcome {
     pub process_plan: RelocationNotifyProcessPlan,
     pub delayed_plan: DelayedUnitRelocationForCellsPlan,
+    pub visibility_plans: DelayedUnitRelocationVisibilityPlans,
     pub reset_outcome: ResetNotifyFlagsOutcome,
 }
 
@@ -16198,6 +16353,8 @@ mod tests {
             [other_player, old_player, old_creature],
             &nearby,
             true,
+            [],
+            [],
         );
 
         assert!(plan.visible_guids.contains(&player));
@@ -16227,10 +16384,55 @@ mod tests {
             [creature],
             &nearby,
             false,
+            [],
+            [],
         );
 
         assert!(plan.out_of_range_guids.is_empty());
         assert!(plan.ai_relocation_checks.is_empty());
+    }
+
+    #[test]
+    fn player_relocation_visibility_plan_filters_targets_needing_cpp_notify() {
+        let player = guid(HighGuid::Player, 4440201);
+        let player_target_needs_notify = guid(HighGuid::Player, 4440202);
+        let player_target_clear = guid(HighGuid::Player, 4440203);
+        let old_player_needs_notify = guid(HighGuid::Player, 4440204);
+        let old_player_clear = guid(HighGuid::Player, 4440205);
+        let creature_needs_notify = guid(HighGuid::Creature, 4440206);
+        let creature_clear = guid(HighGuid::Creature, 4440207);
+        let mut nearby = NearbyCellGuids::default();
+        nearby.world.players.insert(player);
+        nearby.world.players.insert(player_target_needs_notify);
+        nearby.world.players.insert(player_target_clear);
+        nearby.grid.creatures.insert(creature_needs_notify);
+        nearby.grid.creatures.insert(creature_clear);
+
+        let plan = PlayerRelocationVisibilityPlan::from_nearby_like_cpp(
+            player,
+            [old_player_needs_notify, old_player_clear],
+            &nearby,
+            true,
+            [player_target_needs_notify, old_player_needs_notify],
+            [creature_needs_notify],
+        );
+
+        assert!(
+            !plan
+                .reciprocal_player_updates
+                .contains(&player_target_needs_notify)
+        );
+        assert!(
+            plan.reciprocal_player_updates
+                .contains(&player_target_clear)
+        );
+        assert!(
+            !plan
+                .reciprocal_player_updates
+                .contains(&old_player_needs_notify)
+        );
+        assert!(plan.reciprocal_player_updates.contains(&old_player_clear));
+        assert_eq!(plan.ai_relocation_checks, vec![(creature_clear, player)]);
     }
 
     #[test]
@@ -16392,11 +16594,160 @@ mod tests {
         );
         assert_eq!(
             plan.cell_plans[0].plan.player_relocations,
-            vec![player_notify_guid]
+            vec![player_notify_guid, player_invalid_guid]
         );
+        assert!(
+            plan.cell_plans[0]
+                .plan
+                .skipped_invalid_viewpoints
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn delayed_unit_relocation_for_cells_uses_player_seer_notify_like_cpp() {
+        let mut map = test_map();
+        let mut player = test_player_for_viewpoint(4440101);
+        let player_guid = player.guid();
+        let viewpoint = world_object_with_counter(HighGuid::Creature, 4440102, 571, 7, false);
+        let viewpoint_guid = viewpoint.guid();
+        player.set_farsight_object_like_cpp(viewpoint_guid);
+
+        let cell = map
+            .add_to_map_like_cpp(
+                AccessorObjectKind::Player,
+                world_object_with_counter(HighGuid::Player, 4440101, 571, 7, false),
+            )
+            .unwrap()
+            .cell;
+        map.insert_map_object_record(MapObjectRecord::new_player(player).unwrap())
+            .unwrap();
+        map.add_to_map_like_cpp(AccessorObjectKind::Creature, viewpoint)
+            .unwrap();
+        map.map_objects
+            .get_mut(&viewpoint_guid)
+            .unwrap()
+            .object_mut()
+            .object_mut()
+            .add_to_notify(ObjectNotifyFlags::VISIBILITY_CHANGED);
+
+        let plan = map.delayed_unit_relocation_for_cells_like_cpp([cell], []);
+        assert_eq!(plan.cell_plans.len(), 1);
         assert_eq!(
-            plan.cell_plans[0].plan.skipped_invalid_viewpoints,
-            vec![player_invalid_guid]
+            plan.cell_plans[0].plan.player_relocations,
+            vec![player_guid]
+        );
+        assert!(
+            plan.cell_plans[0]
+                .plan
+                .skipped_invalid_viewpoints
+                .is_empty()
+        );
+
+        let visibility_plans = map.delayed_unit_relocation_visibility_plans_like_cpp(
+            &plan,
+            map.delayed_player_relocation_contexts_from_plan_like_cpp(&plan),
+            [DelayedCreatureRelocationContext {
+                creature_guid: viewpoint_guid,
+                source_creature_alive: true,
+            }],
+        );
+        assert_eq!(visibility_plans.player_plans.len(), 1);
+        assert_eq!(visibility_plans.player_plans[0].player_guid, player_guid);
+        assert_eq!(
+            visibility_plans.player_plans[0].viewpoint_guid,
+            viewpoint_guid
+        );
+        assert!(
+            visibility_plans.player_plans[0]
+                .visibility_plan
+                .ai_relocation_checks
+                .is_empty()
+        );
+        let creature_plan = visibility_plans
+            .creature_plans
+            .iter()
+            .find(|plan| plan.creature_guid == viewpoint_guid)
+            .unwrap();
+        assert!(
+            !creature_plan
+                .visibility_plan
+                .player_visibility_updates
+                .contains(&player_guid),
+            "CreatureRelocationNotifier must test player->m_seer notify, not the Player notify flag"
+        );
+
+        map.map_objects
+            .get_mut(&viewpoint_guid)
+            .unwrap()
+            .object_mut()
+            .relocate(Position::xyz(1.0e9, 1.0e9, 0.0));
+        map.map_objects
+            .get_mut(&viewpoint_guid)
+            .unwrap()
+            .object_mut()
+            .object_mut()
+            .add_to_notify(ObjectNotifyFlags::VISIBILITY_CHANGED);
+
+        let skipped = map.delayed_unit_relocation_for_cells_like_cpp([cell], []);
+        assert_eq!(skipped.cell_plans.len(), 1);
+        assert!(skipped.cell_plans[0].plan.player_relocations.is_empty());
+        assert_eq!(
+            skipped.cell_plans[0].plan.skipped_invalid_viewpoints,
+            vec![player_guid]
+        );
+    }
+
+    #[test]
+    fn delayed_unit_relocation_visibility_plans_filter_player_seers_like_cpp() {
+        let mut map = test_map();
+        let source_player = world_object_with_counter(HighGuid::Player, 4440301, 571, 7, false);
+        let source_player_guid = source_player.guid();
+        let target_needs_notify =
+            world_object_with_counter(HighGuid::Player, 4440302, 571, 7, false);
+        let target_needs_notify_guid = target_needs_notify.guid();
+        let target_clear = world_object_with_counter(HighGuid::Player, 4440303, 571, 7, false);
+        let target_clear_guid = target_clear.guid();
+        let cell = map
+            .add_to_map_like_cpp(AccessorObjectKind::Player, source_player)
+            .unwrap()
+            .cell;
+        map.add_to_map_like_cpp(AccessorObjectKind::Player, target_needs_notify)
+            .unwrap();
+        map.add_to_map_like_cpp(AccessorObjectKind::Player, target_clear)
+            .unwrap();
+        for guid in [source_player_guid, target_needs_notify_guid] {
+            map.map_objects
+                .get_mut(&guid)
+                .unwrap()
+                .object_mut()
+                .object_mut()
+                .add_to_notify(ObjectNotifyFlags::VISIBILITY_CHANGED);
+        }
+
+        let delayed_plan = map.delayed_unit_relocation_for_cells_like_cpp([cell], []);
+        let visibility_plans = map.delayed_unit_relocation_visibility_plans_like_cpp(
+            &delayed_plan,
+            map.delayed_player_relocation_contexts_from_plan_like_cpp(&delayed_plan),
+            std::iter::empty::<DelayedCreatureRelocationContext>(),
+        );
+        let source_plan = visibility_plans
+            .player_plans
+            .iter()
+            .find(|plan| plan.player_guid == source_player_guid)
+            .unwrap();
+
+        assert!(
+            !source_plan
+                .visibility_plan
+                .reciprocal_player_updates
+                .contains(&target_needs_notify_guid)
+        );
+        assert!(
+            source_plan
+                .visibility_plan
+                .reciprocal_player_updates
+                .contains(&target_clear_guid)
         );
     }
 
@@ -16515,10 +16866,16 @@ mod tests {
                 previous_client_guids: vec![old_player, old_creature],
                 relocated_for_ai: true,
             }],
-            [DelayedCreatureRelocationContext {
-                creature_guid: source_creature_guid,
-                source_creature_alive: true,
-            }],
+            [
+                DelayedCreatureRelocationContext {
+                    creature_guid: source_creature_guid,
+                    source_creature_alive: true,
+                },
+                DelayedCreatureRelocationContext {
+                    creature_guid: notified_creature_guid,
+                    source_creature_alive: true,
+                },
+            ],
         );
 
         assert_eq!(plans.creature_plans.len(), 2);
@@ -16576,10 +16933,22 @@ mod tests {
                 .contains(&old_creature)
         );
         assert!(
-            player_plan
+            !player_plan
                 .visibility_plan
                 .ai_relocation_checks
                 .contains(&(source_creature_guid, player_notify_guid))
+        );
+        assert!(
+            player_plan
+                .visibility_plan
+                .ai_relocation_checks
+                .contains(&(other_creature_guid, player_notify_guid))
+        );
+        assert!(
+            !player_plan
+                .visibility_plan
+                .ai_relocation_checks
+                .contains(&(notified_creature_guid, player_notify_guid))
         );
     }
 

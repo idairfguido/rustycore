@@ -1114,6 +1114,7 @@ mod tests {
 
     use crate::map::MapObjectMoveListFamilyLikeCpp;
     use crate::spawn::{SpawnGroupFlags, SpawnGroupTemplateData};
+    use wow_constants::DeathState;
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
     use wow_entities::{
         AreaTrigger, Conversation, Creature, DynamicObject, GameObject, LootState, MapObjectRecord,
@@ -2357,6 +2358,17 @@ mod tests {
             &mut manager,
             4430102,
             Position::xyz(10.5, 20.5, 30.5),
+            true,
+        );
+        let player_normal_guid = insert_player_for_relocation_notify(
+            &mut manager,
+            4440103,
+            Position::xyz(11.0, 21.0, 31.0),
+        );
+        let other_creature_guid = insert_creature_at_for_relocation_notify(
+            &mut manager,
+            4440104,
+            Position::xyz(11.5, 21.5, 31.5),
             false,
         );
 
@@ -2409,6 +2421,43 @@ mod tests {
                 .cell_plans
                 .iter()
                 .any(|cell| cell.plan.creature_relocations.contains(&creature_guid))
+        );
+        let creature_visibility_plan = outcome
+            .visibility_plans
+            .creature_plans
+            .iter()
+            .find(|plan| plan.creature_guid == creature_guid)
+            .expect("live DelayedUnitRelocation creature visibility plan");
+        assert!(
+            creature_visibility_plan
+                .visibility_plan
+                .player_visibility_updates
+                .contains(&player_normal_guid)
+        );
+        assert!(
+            creature_visibility_plan
+                .visibility_plan
+                .ai_relocation_checks
+                .contains(&(creature_guid, player_guid))
+        );
+        assert!(
+            creature_visibility_plan
+                .visibility_plan
+                .ai_relocation_checks
+                .contains(&(creature_guid, other_creature_guid))
+        );
+        assert!(
+            creature_visibility_plan
+                .visibility_plan
+                .ai_relocation_checks
+                .contains(&(other_creature_guid, creature_guid))
+        );
+        assert!(
+            outcome
+                .visibility_plans
+                .player_plans
+                .iter()
+                .any(|plan| plan.player_guid == player_guid && plan.viewpoint_guid == player_guid)
         );
         assert!(
             outcome
@@ -2596,6 +2645,9 @@ mod tests {
         creature.unit_mut().world_mut().set_map(1, 0).unwrap();
         creature.unit_mut().world_mut().relocate(position);
         creature.unit_mut().world_mut().set_active(active);
+        creature.unit_mut().set_death_state(DeathState::Alive);
+        creature.unit_mut().set_max_health(100);
+        creature.unit_mut().set_health(100);
         let record = MapObjectRecord::new_creature(creature).unwrap();
         manager
             .find_map_mut(1, 0)

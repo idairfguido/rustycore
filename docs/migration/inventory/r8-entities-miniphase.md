@@ -6,6 +6,11 @@
 ## Pending Review Tasks
 
 ## Closed Tasks
+- [x] **#NEXT.R8.ENTITIES.444** represented `DelayedUnitRelocation` visibility-plan consumption.
+  Status: represented-complete only for map-owned consumption/exposure of `DelayedUnitRelocation` visibility/AI plans before notify reset; review `APROBADO` after one bounded correction; CI `CI_OK`; validation OK; committed locally at `current #444 HEAD`; no push/install/restart.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:830-905`, `/home/server/woltk-trinity-legacy/src/server/game/Grids/Notifiers/GridNotifiers.cpp:137-168`, `/home/server/woltk-trinity-legacy/src/server/game/Grids/Notifiers/GridNotifiers.cpp:171-196`, `/home/server/woltk-trinity-legacy/src/server/game/Grids/Notifiers/GridNotifiers.cpp:199-232`.
+  Rust targets: `crates/wow-map/src/map.rs`, `crates/wow-map/src/manager.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: `ProcessRelocationNotifiesOutcome` includes represented `visibility_plans` built after delayed relocation selection and before reset, live contexts come only from canonical `Map::map_objects`, Player delayed relocation selection uses typed `farsight_object`/self as C++ `player->m_seer`, non-self invalid viewpoints are skipped with evidence, typed Creature `is_alive()` drives represented creature AI checks, and `previous_client_guids` stays empty as a documented fanout gap. No real visibility mutation, packet send, session fanout, ObjectAccessor bridge, dynamic-tree, script, or DB side effect is claimed.
 - [x] **#NEXT.R8.ENTITIES.443** live `ProcessRelocationNotifies` consumption seam.
   Status: represented-complete only for live `ManagedMap::update -> Map::ProcessRelocationNotifies` source-gating/marked-cell/timer/reset consumption; review `APROBADO`; CI `CI_OK`; validation OK; committed locally at `current #443 HEAD`; no push/install/restart.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:692-717`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:758-768`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:797-805`, `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:830-905`.
