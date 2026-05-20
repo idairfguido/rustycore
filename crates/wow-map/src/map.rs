@@ -5958,6 +5958,7 @@ where
                 grid_created: false,
                 grid_loaded: false,
                 inserted_into_cell: false,
+                gameobject_model_insert: None,
             });
         }
 
@@ -6005,6 +6006,19 @@ where
             object.object_mut().set_is_new_object(false);
         }
 
+        let gameobject_model_insert = (kind == AccessorObjectKind::GameObject)
+            .then(|| {
+                record
+                    .game_object()
+                    .filter(|game_object| game_object.has_represented_gameobject_model_like_cpp())
+                    .map(|_| {
+                        self.insert_gameobject_model_like_cpp(
+                            RepresentedGameObjectModelKeyLikeCpp { owner_guid: guid },
+                        )
+                    })
+            })
+            .flatten();
+
         let previous = self.insert_map_object_record(record)?;
         Ok(AddToMapOutcome {
             guid,
@@ -6015,6 +6029,7 @@ where
             grid_created,
             grid_loaded,
             inserted_into_cell: true,
+            gameobject_model_insert,
         })
     }
 
@@ -6063,6 +6078,17 @@ where
                     unbound_caster,
                 })
             });
+        let gameobject_model_key = self
+            .map_object_record(guid)
+            .filter(|record| record.kind() == AccessorObjectKind::GameObject)
+            .and_then(MapObjectRecord::game_object)
+            .filter(|game_object| game_object.world().object().is_in_world())
+            .filter(|game_object| game_object.has_represented_gameobject_model_like_cpp())
+            .map(|_| RepresentedGameObjectModelKeyLikeCpp { owner_guid: guid });
+        let gameobject_model_remove = gameobject_model_key.and_then(|key| {
+            self.contains_gameobject_model_like_cpp(key)
+                .then(|| self.remove_gameobject_model_like_cpp(key))
+        });
         let record = self
             .remove_map_object(guid)
             .ok_or(RemoveFromMapError::ObjectNotFound { guid })?;
@@ -6117,6 +6143,7 @@ where
             delete_from_world,
             dynamic_object_caster_viewpoint,
             dynamic_object_remove_cleanup,
+            gameobject_model_remove,
             object: if delete_from_world {
                 None
             } else {
@@ -7931,6 +7958,7 @@ pub struct AddToMapOutcome {
     pub grid_created: bool,
     pub grid_loaded: bool,
     pub inserted_into_cell: bool,
+    pub gameobject_model_insert: Option<DynamicMapTreeModelMutationOutcomeLikeCpp>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -7956,6 +7984,7 @@ pub struct RemoveFromMapOutcome {
     pub delete_from_world: bool,
     pub dynamic_object_caster_viewpoint: Option<DynamicObjectCasterViewpointOutcomeLikeCpp>,
     pub dynamic_object_remove_cleanup: Option<DynamicObjectRemoveCleanupOutcomeLikeCpp>,
+    pub gameobject_model_remove: Option<DynamicMapTreeModelMutationOutcomeLikeCpp>,
     pub object: Option<WorldObject>,
 }
 
@@ -9272,6 +9301,147 @@ mod tests {
         map.insert_gameobject_model_like_cpp(key);
         assert!(map.contains_gameobject_model_like_cpp(key));
         map.remove_gameobject_model_like_cpp(key);
+        assert!(!map.contains_gameobject_model_like_cpp(key));
+    }
+
+    #[test]
+    fn dynamic_tree_gameobject_add_consumes_explicit_model_evidence_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = test_gameobject_for_spawn(45101, 4510101);
+        let guid = gameobject.world().guid();
+        let key = RepresentedGameObjectModelKeyLikeCpp { owner_guid: guid };
+        gameobject.world_mut().object_mut().remove_from_world();
+        gameobject.set_represented_gameobject_model_like_cpp(true);
+
+        let outcome = map
+            .add_map_object_record_to_map_like_cpp(
+                MapObjectRecord::new_game_object(gameobject).unwrap(),
+            )
+            .unwrap();
+
+        let insert = outcome
+            .gameobject_model_insert
+            .expect("explicit represented model should insert dynamic-tree key");
+        assert_eq!(
+            insert.status,
+            DynamicMapTreeModelMutationStatusLikeCpp::Inserted
+        );
+        assert_eq!(insert.model_count_before, 0);
+        assert_eq!(insert.model_count_after, 1);
+        assert_eq!(insert.unbalanced_before, 0);
+        assert_eq!(insert.unbalanced_after, 1);
+        assert!(map.contains_gameobject_model_like_cpp(key));
+    }
+
+    #[test]
+    fn dynamic_tree_gameobject_add_without_model_evidence_leaves_tree_empty_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = test_gameobject_for_spawn(45102, 4510201);
+        let guid = gameobject.world().guid();
+        let key = RepresentedGameObjectModelKeyLikeCpp { owner_guid: guid };
+        gameobject.world_mut().object_mut().remove_from_world();
+
+        let outcome = map
+            .add_map_object_record_to_map_like_cpp(
+                MapObjectRecord::new_game_object(gameobject).unwrap(),
+            )
+            .unwrap();
+
+        assert!(outcome.gameobject_model_insert.is_none());
+        assert!(!map.contains_gameobject_model_like_cpp(key));
+        let summary = map.update_dynamic_tree_like_cpp(250);
+        assert!(summary.empty);
+        assert_eq!(summary.unbalanced_after, 0);
+    }
+
+    #[test]
+    fn dynamic_tree_gameobject_already_in_world_add_does_not_insert_model_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = test_gameobject_for_spawn(45103, 4510301);
+        let guid = gameobject.world().guid();
+        let key = RepresentedGameObjectModelKeyLikeCpp { owner_guid: guid };
+        gameobject.set_represented_gameobject_model_like_cpp(true);
+
+        let outcome = map
+            .add_map_object_record_to_map_like_cpp(
+                MapObjectRecord::new_game_object(gameobject).unwrap(),
+            )
+            .unwrap();
+
+        assert!(outcome.already_in_world);
+        assert!(outcome.gameobject_model_insert.is_none());
+        assert!(!map.contains_gameobject_model_like_cpp(key));
+    }
+
+    #[test]
+    fn dynamic_tree_gameobject_remove_consumes_contained_model_evidence_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = test_gameobject_for_spawn(45104, 4510401);
+        let guid = gameobject.world().guid();
+        let key = RepresentedGameObjectModelKeyLikeCpp { owner_guid: guid };
+        gameobject.world_mut().object_mut().remove_from_world();
+        gameobject.set_represented_gameobject_model_like_cpp(true);
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+        assert!(map.contains_gameobject_model_like_cpp(key));
+
+        let outcome = map.remove_from_map_like_cpp(guid, true).unwrap();
+
+        let remove = outcome
+            .gameobject_model_remove
+            .expect("contained represented model should be removed before final map removal");
+        assert_eq!(
+            remove.status,
+            DynamicMapTreeModelMutationStatusLikeCpp::Removed
+        );
+        assert_eq!(remove.model_count_before, 1);
+        assert_eq!(remove.model_count_after, 0);
+        assert_eq!(remove.unbalanced_before, 1);
+        assert_eq!(remove.unbalanced_after, 2);
+        assert!(!map.contains_gameobject_model_like_cpp(key));
+    }
+
+    #[test]
+    fn dynamic_tree_gameobject_remove_missing_key_is_guarded_noop_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = test_gameobject_for_spawn(45105, 4510501);
+        let guid = gameobject.world().guid();
+        let key = RepresentedGameObjectModelKeyLikeCpp { owner_guid: guid };
+        gameobject.set_represented_gameobject_model_like_cpp(true);
+        map.insert_map_object_record(MapObjectRecord::new_game_object(gameobject).unwrap())
+            .unwrap();
+        map.mark_dynamic_tree_unbalanced_for_tests_like_cpp(5);
+
+        let outcome = map.remove_from_map_like_cpp(guid, true).unwrap();
+
+        assert!(outcome.gameobject_model_remove.is_none());
+        assert!(!map.contains_gameobject_model_like_cpp(key));
+        let summary = map.update_dynamic_tree_like_cpp(250);
+        assert!(summary.empty);
+        assert_eq!(summary.unbalanced_before, 5);
+        assert_eq!(summary.unbalanced_after, 5);
+    }
+
+    #[test]
+    fn dynamic_tree_transport_add_excludes_immediate_gameobject_model_insert_like_cpp() {
+        let mut map = test_map();
+        let mut transport = test_transport_for_update(4510601, false);
+        let guid = transport.world().guid();
+        let key = RepresentedGameObjectModelKeyLikeCpp { owner_guid: guid };
+        transport
+            .game_object_mut()
+            .set_represented_gameobject_model_like_cpp(true);
+
+        let outcome = map
+            .add_map_object_record_to_map_like_cpp(
+                MapObjectRecord::new_transport(transport).unwrap(),
+            )
+            .unwrap();
+
+        assert!(!outcome.already_in_world);
+        assert!(outcome.gameobject_model_insert.is_none());
         assert!(!map.contains_gameobject_model_like_cpp(key));
     }
 

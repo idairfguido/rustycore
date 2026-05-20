@@ -965,6 +965,15 @@ pub struct GameObject {
     lifecycle_string_id: String,
     linked_trap_guid: ObjectGuid,
     stationary_position: Position,
+    /// Explicit represented evidence for TrinityCore `GameObject::m_model != nullptr`.
+    ///
+    /// This flag exists only so map-owned AddToWorld/RemoveFromWorld seams can decide whether
+    /// to register a represented `GameObjectModel` key in `Map`'s represented DynamicMapTree.
+    /// It is not a real `GameObjectModel`, not model geometry, not `GO_FLAG_MAP_OBJECT`, not
+    /// `EnableCollision`, and not DB/model-store hydration. Callers/tests must set it explicitly;
+    /// Rust must not infer it from display id, template, or gameobject type until real
+    /// `GameObjectModel::Create`/DB2 model runtime exists.
+    represented_gameobject_model_like_cpp: bool,
     grid_unload_cleanup_before_delete_count: u32,
     grid_unload_delete_requested: bool,
     grid_unload_respawn_relocation_requested: bool,
@@ -1010,6 +1019,7 @@ impl GameObject {
             lifecycle_string_id: String::new(),
             linked_trap_guid: ObjectGuid::EMPTY,
             stationary_position: Position::new(0.0, 0.0, 0.0, 0.0),
+            represented_gameobject_model_like_cpp: false,
             grid_unload_cleanup_before_delete_count: 0,
             grid_unload_delete_requested: false,
             grid_unload_respawn_relocation_requested: false,
@@ -1152,6 +1162,25 @@ impl GameObject {
 
     pub fn game_object_data_changes_mask(&self) -> &UpdateMask {
         &self.game_object_data_changes
+    }
+
+    /// Returns explicit represented evidence for TrinityCore `GameObject::m_model != nullptr`.
+    ///
+    /// This is only model-existence evidence for map-owned represented DynamicMapTree
+    /// registration. It is not a real `GameObjectModel`, model geometry, `GO_FLAG_MAP_OBJECT`,
+    /// `EnableCollision`, or DB/model-store hydration, and it is never inferred from display id,
+    /// template, or type.
+    pub const fn has_represented_gameobject_model_like_cpp(&self) -> bool {
+        self.represented_gameobject_model_like_cpp
+    }
+
+    /// Sets explicit represented evidence for TrinityCore `GameObject::m_model != nullptr`.
+    ///
+    /// Callers must set this only when they have external evidence that the C++ object would have
+    /// a model. The flag is consumed only by map-owned add/remove seams and does not create real
+    /// model geometry, collision, `GO_FLAG_MAP_OBJECT`, or DB/model-store state.
+    pub fn set_represented_gameobject_model_like_cpp(&mut self, has_model: bool) {
+        self.represented_gameobject_model_like_cpp = has_model;
     }
 
     pub fn clear_game_object_data_changes(&mut self) {
@@ -1712,7 +1741,19 @@ mod tests {
         assert_eq!(go.cleanup_before_delete_count(), 0);
         assert!(!go.grid_unload_delete_requested());
         assert!(!go.grid_unload_respawn_relocation_requested());
+        assert!(!go.has_represented_gameobject_model_like_cpp());
         assert!(!go.game_object_data_changes_mask().is_any_set());
+    }
+
+    #[test]
+    fn gameobject_model_existence_evidence_defaults_false_and_setter_round_trips_like_cpp() {
+        let mut go = GameObject::new();
+
+        assert!(!go.has_represented_gameobject_model_like_cpp());
+        go.set_represented_gameobject_model_like_cpp(true);
+        assert!(go.has_represented_gameobject_model_like_cpp());
+        go.set_represented_gameobject_model_like_cpp(false);
+        assert!(!go.has_represented_gameobject_model_like_cpp());
     }
 
     fn lifecycle_template() -> GameObjectTemplateLifecycleRecord {
