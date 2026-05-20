@@ -6,7 +6,8 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::MapKey;
 use crate::map::{
@@ -14,6 +15,7 @@ use crate::map::{
     CreatureUpdateSummaryLikeCpp, DynamicObjectsUpdateSummaryLikeCpp,
     GameObjectsUpdateSummaryLikeCpp, Map, NoopGridLifecycle, NoopTerrainGridLoader,
     SceneObjectUpdateContextLikeCpp, SceneObjectsUpdateSummaryLikeCpp,
+    TransportsUpdateSummaryLikeCpp,
 };
 use crate::spawn::Difficulty;
 use wow_core::GameTime;
@@ -149,6 +151,7 @@ pub struct ManagedMap {
     last_dynamic_objects_update_summary: DynamicObjectsUpdateSummaryLikeCpp,
     last_creatures_update_summary: CreatureUpdateSummaryLikeCpp,
     last_game_objects_update_summary: GameObjectsUpdateSummaryLikeCpp,
+    last_transports_update_summary: TransportsUpdateSummaryLikeCpp,
     last_area_triggers_update_summary: AreaTriggersUpdateSummaryLikeCpp,
     last_conversations_update_summary: ConversationsUpdateSummaryLikeCpp,
     last_scene_objects_update_summary: SceneObjectsUpdateSummaryLikeCpp,
@@ -158,6 +161,16 @@ pub struct ManagedMap {
 fn game_time_now_secs_i64() -> i64 {
     let now_secs = GameTime::now().as_secs();
     now_secs.min(i64::MAX as u64) as i64
+}
+
+fn game_time_now_ms_u64() -> u64 {
+    static PROCESS_START: OnceLock<Instant> = OnceLock::new();
+    game_time_elapsed_ms_u64(PROCESS_START.get_or_init(Instant::now).elapsed())
+}
+
+fn game_time_elapsed_ms_u64(elapsed: Duration) -> u64 {
+    let elapsed_ms = elapsed.as_millis();
+    elapsed_ms.min(u128::from(u64::MAX)) as u64
 }
 
 impl ManagedMap {
@@ -179,6 +192,7 @@ impl ManagedMap {
             last_dynamic_objects_update_summary: DynamicObjectsUpdateSummaryLikeCpp::default(),
             last_creatures_update_summary: CreatureUpdateSummaryLikeCpp::default(),
             last_game_objects_update_summary: GameObjectsUpdateSummaryLikeCpp::default(),
+            last_transports_update_summary: TransportsUpdateSummaryLikeCpp::default(),
             last_area_triggers_update_summary: AreaTriggersUpdateSummaryLikeCpp::default(),
             last_conversations_update_summary: ConversationsUpdateSummaryLikeCpp::default(),
             last_scene_objects_update_summary: SceneObjectsUpdateSummaryLikeCpp::default(),
@@ -246,6 +260,10 @@ impl ManagedMap {
         self.last_game_objects_update_summary
     }
 
+    pub const fn last_transports_update_summary(&self) -> TransportsUpdateSummaryLikeCpp {
+        self.last_transports_update_summary
+    }
+
     pub const fn last_area_triggers_update_summary(&self) -> AreaTriggersUpdateSummaryLikeCpp {
         self.last_area_triggers_update_summary
     }
@@ -292,7 +310,13 @@ impl ManagedMap {
         // nearby-cell/active-object traversal; this Rust insertion only adds the
         // missing family and leaves AI/go-type/per-player/packet/DB gaps open.
         self.last_game_objects_update_summary = self.map.update_game_objects_like_cpp(diff_ms);
-        // Partial C++ ObjectUpdater seam: after GameObject, visit only the
+        // Partial C++ transport seam: after the represented GameObject/ObjectUpdater
+        // family and before later represented families, visit typed canonical
+        // Transports. This does not reproduce exact C++ cell visitor ordering nor
+        // full `_transports` runtime (AI/scripts/spline/teleport/fanout/passengers).
+        let now_ms = game_time_now_ms_u64();
+        self.last_transports_update_summary = self.map.update_transports_like_cpp(diff_ms, now_ms);
+        // Partial C++ ObjectUpdater seam: after Transport, visit only the
         // represented map-owned AreaTrigger family in this slice. Other families,
         // nearby-cell traversal, player/session updates, fanout and scripts stay
         // explicit remaining gaps.
@@ -1027,8 +1051,21 @@ mod tests {
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
     use wow_entities::{
         AreaTrigger, Conversation, Creature, DynamicObject, GameObject, LootState, MapObjectRecord,
-        SceneObject,
+        SceneObject, Transport, TransportPathLeg, TransportTemplate,
     };
+
+    #[test]
+    fn game_time_now_ms_uses_runtime_monotonic_subsecond_counter() {
+        assert_eq!(game_time_elapsed_ms_u64(Duration::from_millis(999)), 999);
+        assert_eq!(
+            game_time_elapsed_ms_u64(Duration::from_millis(1_001)),
+            1_001
+        );
+
+        let first = game_time_now_ms_u64();
+        let second = game_time_now_ms_u64();
+        assert!(second >= first);
+    }
 
     #[test]
     fn delays_are_clamped_like_map_manager_h() {
@@ -1455,6 +1492,68 @@ mod tests {
                 .map_object_record(area_trigger_guid)
                 .is_some()
         );
+    }
+
+    #[test]
+    fn map_manager_transport_update_visits_live_transport_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let transport_guid = insert_transport_for_update(&mut manager, 4390101, true, 1);
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        assert_eq!(managed_map.update_calls(), &[1]);
+        assert_eq!(managed_map.delayed_update_calls(), &[1]);
+        assert_eq!(
+            managed_map.last_transports_update_summary(),
+            TransportsUpdateSummaryLikeCpp {
+                visited: 1,
+                updated: 1,
+                unsupported_no_period: 0,
+                missing_or_stale: 0,
+                not_transport: 0,
+                not_in_world: 0,
+                position_updates_represented: 1,
+                just_stopped: 0,
+            }
+        );
+        let transport = managed_map
+            .map()
+            .map_object_record(transport_guid)
+            .and_then(MapObjectRecord::transport)
+            .unwrap();
+        assert_eq!(transport.path_progress_ms(), 101);
+    }
+
+    #[test]
+    fn map_manager_transport_update_visits_not_in_world_transport_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let transport_guid = insert_transport_for_update(&mut manager, 4390201, false, 2);
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        assert_eq!(
+            managed_map.last_transports_update_summary(),
+            TransportsUpdateSummaryLikeCpp {
+                visited: 1,
+                updated: 1,
+                unsupported_no_period: 0,
+                missing_or_stale: 0,
+                not_transport: 0,
+                not_in_world: 0,
+                position_updates_represented: 0,
+                just_stopped: 0,
+            }
+        );
+        let transport = managed_map
+            .map()
+            .map_object_record(transport_guid)
+            .and_then(MapObjectRecord::transport)
+            .unwrap();
+        assert_eq!(transport.path_progress_ms(), 101);
     }
 
     #[test]
@@ -2111,6 +2210,43 @@ mod tests {
             map.insert_map_object_record(record).unwrap();
         }
         game_object_guid
+    }
+
+    fn insert_transport_for_update(
+        manager: &mut MapManager,
+        counter: i64,
+        in_world: bool,
+        expected_map_id: u32,
+    ) -> ObjectGuid {
+        let transport_guid = guid(HighGuid::Transport, counter, 1, 0);
+        let template = TransportTemplate {
+            total_path_time_ms: 1_000,
+            path_legs: vec![TransportPathLeg {
+                map_id: expected_map_id,
+                start_timestamp_ms: 0,
+                duration_ms: 1_000,
+                segments: vec![],
+            }],
+            ..TransportTemplate::default()
+        };
+        let mut transport = Transport::with_template(template);
+        transport.world_mut().object_mut().create(transport_guid);
+        transport.world_mut().set_map(1, 0).unwrap();
+        transport
+            .world_mut()
+            .relocate(Position::xyz(15.0, 25.0, 35.0));
+        transport.set_path_progress_ms(100);
+        if in_world {
+            transport.world_mut().object_mut().add_to_world();
+        }
+        let record = MapObjectRecord::new_transport(transport).unwrap();
+        let map = manager.find_map_mut(1, 0).unwrap().map_mut();
+        if in_world {
+            map.add_map_object_record_to_map_like_cpp(record).unwrap();
+        } else {
+            map.insert_map_object_record(record).unwrap();
+        }
+        transport_guid
     }
 
     fn insert_area_trigger_for_update(

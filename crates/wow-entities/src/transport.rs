@@ -9,6 +9,7 @@ use crate::{
 
 pub const GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT: u8 = 15;
 pub const GO_DYNFLAG_LO_STOPPED: u32 = 0x0040;
+pub const TRANSPORT_POSITION_UPDATE_DELAY_MS: u32 = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -77,11 +78,44 @@ pub struct TransportCreateInfo {
     pub allow_stopping: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TransportUpdateLikeCpp {
+    pub diff_ms: u32,
+    pub now_ms: u64,
+    pub old_path_progress_ms: u32,
+    pub new_path_progress_ms: u32,
+    pub timer_ms: Option<u32>,
+    pub period_ms: u32,
+    pub allow_stopping: bool,
+    pub old_cycle_id: Option<u32>,
+    pub new_cycle_id: Option<u32>,
+    pub cycle_reset: bool,
+    pub path_progress_for_client_updated: bool,
+    pub position_update_timer_before_ms: u32,
+    pub position_update_timer_after_ms: u32,
+    pub position_update_timer_passed: bool,
+    pub movement_state_before: TransportMovementState,
+    pub movement_state_after: TransportMovementState,
+    pub just_stopped: bool,
+    pub stopped_dynflag_represented: bool,
+    pub expected_map_id: Option<u32>,
+    pub current_map_id: u32,
+    pub expected_map_matches_current_map: bool,
+    pub position_update_due: bool,
+    pub position_update_represented: bool,
+    pub compute_position_not_represented: bool,
+    pub ai_update_not_represented: bool,
+    pub script_update_not_represented: bool,
+    pub events_trigger_not_represented: bool,
+    pub unsupported_no_period: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Transport {
     game_object: GameObject,
     template: Option<TransportTemplate>,
     movement_state: TransportMovementState,
+    allow_stopping: bool,
     events_to_trigger: Vec<bool>,
     current_path_leg: usize,
     request_stop_timestamp_ms: Option<u32>,
@@ -105,6 +139,9 @@ impl Transport {
             game_object,
             template: None,
             movement_state: TransportMovementState::Moving,
+            // Conservative default for template-less tests/scaffolds: allow stop requests
+            // to be represented unless DB-backed create info says otherwise.
+            allow_stopping: true,
             events_to_trigger: Vec::new(),
             current_path_leg: 0,
             request_stop_timestamp_ms: None,
@@ -150,6 +187,14 @@ impl Transport {
 
     pub fn set_movement_state(&mut self, movement_state: TransportMovementState) {
         self.movement_state = movement_state;
+    }
+
+    pub const fn allow_stopping(&self) -> bool {
+        self.allow_stopping
+    }
+
+    pub fn set_allow_stopping(&mut self, allow_stopping: bool) {
+        self.allow_stopping = allow_stopping;
     }
 
     pub const fn current_path_leg(&self) -> usize {
@@ -228,6 +273,7 @@ impl Transport {
             .object_mut()
             .set_entry(info.entry);
         self.game_object.set_display_id(info.display_id);
+        self.allow_stopping = info.allow_stopping;
         self.game_object.set_go_state(if info.allow_stopping {
             GoState::Active
         } else {
@@ -317,6 +363,140 @@ impl Transport {
             .map(|leg| leg.map_id)
     }
 
+    /// Bounded local-state representation of TrinityCore `Transport::Update(uint32 diff)`.
+    ///
+    /// This deliberately does not run AI/scripts, `GameEvents`, real
+    /// `TransportInfo::ComputePosition`, `TeleportTransport`, static passenger DB
+    /// spawning/removal, passenger relocation, packet fanout, or grid/model movement.
+    pub fn update_like_cpp(
+        &mut self,
+        diff_ms: u32,
+        now_ms: u64,
+        current_map_id: u32,
+    ) -> TransportUpdateLikeCpp {
+        let period_ms = self.get_transport_period();
+        let old_path_progress_ms = self.path_progress_ms;
+        let movement_state_before = self.movement_state;
+        let position_update_timer_before_ms = self.position_change_timer_ms;
+        let expected_map_id = self.get_expected_map_id();
+        let expected_map_matches_current_map = expected_map_id == Some(current_map_id);
+
+        if period_ms == 0 {
+            return TransportUpdateLikeCpp {
+                diff_ms,
+                now_ms,
+                old_path_progress_ms,
+                new_path_progress_ms: old_path_progress_ms,
+                timer_ms: None,
+                period_ms,
+                allow_stopping: self.allow_stopping,
+                old_cycle_id: None,
+                new_cycle_id: None,
+                cycle_reset: false,
+                path_progress_for_client_updated: false,
+                position_update_timer_before_ms,
+                position_update_timer_after_ms: position_update_timer_before_ms,
+                position_update_timer_passed: false,
+                movement_state_before,
+                movement_state_after: self.movement_state,
+                just_stopped: false,
+                stopped_dynflag_represented: false,
+                expected_map_id,
+                current_map_id,
+                expected_map_matches_current_map,
+                position_update_due: false,
+                position_update_represented: false,
+                compute_position_not_represented: false,
+                ai_update_not_represented: true,
+                script_update_not_represented: true,
+                events_trigger_not_represented: false,
+                unsupported_no_period: true,
+            };
+        }
+
+        let position_timer_after_update_ms = self.position_change_timer_ms.saturating_sub(diff_ms);
+        let position_update_timer_passed = position_timer_after_update_ms == 0;
+        self.position_change_timer_ms = position_timer_after_update_ms;
+
+        let old_cycle_id = old_path_progress_ms / period_ms;
+        let stop_request_within_tick = self.allow_stopping
+            && self
+                .request_stop_timestamp_ms
+                .is_some_and(|request| request <= old_path_progress_ms.saturating_add(diff_ms));
+
+        let new_path_progress_ms = if !self.allow_stopping {
+            now_ms.min(u64::from(u32::MAX)) as u32
+        } else if let Some(request_stop_timestamp_ms) = self.request_stop_timestamp_ms {
+            if request_stop_timestamp_ms > old_path_progress_ms.saturating_add(diff_ms) {
+                old_path_progress_ms.saturating_add(diff_ms)
+            } else {
+                request_stop_timestamp_ms
+            }
+        } else {
+            old_path_progress_ms.saturating_add(diff_ms)
+        };
+
+        self.set_path_progress_ms(new_path_progress_ms);
+        let new_cycle_id = new_path_progress_ms / period_ms;
+        let cycle_reset = old_cycle_id != new_cycle_id;
+        if cycle_reset {
+            self.events_to_trigger.fill(true);
+        }
+
+        let just_stopped = movement_state_before == TransportMovementState::Moving
+            && stop_request_within_tick
+            && self.request_stop_timestamp_ms == Some(new_path_progress_ms);
+        let stopped_dynflag_represented = just_stopped;
+        if just_stopped {
+            self.movement_state = TransportMovementState::WaitingOnPauseWaypoint;
+            self.game_object.set_go_state(GoState::Ready);
+            self.game_object
+                .world_mut()
+                .object_mut()
+                .set_dynamic_flag(GO_DYNFLAG_LO_STOPPED);
+        }
+
+        let moving_or_just_stopped =
+            self.movement_state == TransportMovementState::Moving || just_stopped;
+        let position_update_timer_reset =
+            position_update_timer_passed && expected_map_matches_current_map;
+        if position_update_timer_reset {
+            self.position_change_timer_ms = TRANSPORT_POSITION_UPDATE_DELAY_MS;
+        }
+        let position_update_due = position_update_timer_reset && moving_or_just_stopped;
+
+        TransportUpdateLikeCpp {
+            diff_ms,
+            now_ms,
+            old_path_progress_ms,
+            new_path_progress_ms,
+            timer_ms: Some(new_path_progress_ms % period_ms),
+            period_ms,
+            allow_stopping: self.allow_stopping,
+            old_cycle_id: Some(old_cycle_id),
+            new_cycle_id: Some(new_cycle_id),
+            cycle_reset,
+            path_progress_for_client_updated: true,
+            position_update_timer_before_ms,
+            position_update_timer_after_ms: self.position_change_timer_ms,
+            position_update_timer_passed,
+            movement_state_before,
+            movement_state_after: self.movement_state,
+            just_stopped,
+            stopped_dynflag_represented,
+            expected_map_id,
+            current_map_id,
+            expected_map_matches_current_map,
+            position_update_due,
+            position_update_represented: position_update_due,
+            compute_position_not_represented: position_update_due,
+            ai_update_not_represented: true,
+            script_update_not_represented: true,
+            events_trigger_not_represented: cycle_reset,
+            unsupported_no_period: false,
+        }
+    }
+
     pub fn calculate_passenger_position(&self, offset: Position) -> Position {
         calculate_passenger_position(offset, self.world().position())
     }
@@ -344,6 +524,19 @@ mod tests {
 
     fn passenger_guid(counter: i64) -> ObjectGuid {
         ObjectGuid::create_global(HighGuid::Player, 0, counter)
+    }
+
+    fn transport_template_for_map(map_id: u32, period_ms: u32) -> TransportTemplate {
+        TransportTemplate {
+            total_path_time_ms: period_ms,
+            path_legs: vec![TransportPathLeg {
+                map_id,
+                start_timestamp_ms: 0,
+                duration_ms: period_ms,
+                segments: vec![],
+            }],
+            ..TransportTemplate::default()
+        }
     }
 
     #[test]
@@ -383,6 +576,7 @@ mod tests {
         assert_eq!(transport.path_progress_ms(), 0);
         assert_eq!(transport.get_timer(), 0);
         assert_eq!(transport.position_change_timer_ms(), 0);
+        assert!(transport.allow_stopping());
         assert!(transport.passengers().is_empty());
         assert!(transport.static_passengers().is_empty());
         assert!(!transport.delayed_add_model());
@@ -410,6 +604,7 @@ mod tests {
         assert_eq!(transport.game_object().data().type_id, 15);
         assert_eq!(transport.game_object().data().level, 120_000);
         assert_eq!(transport.game_object().data().state, GoState::Ready as i8);
+        assert!(!transport.allow_stopping());
         assert_eq!(transport.world().name(), "Deeprun Tram");
         assert_eq!(transport.path_progress_ms(), 30_000);
         assert_eq!(
@@ -501,6 +696,111 @@ mod tests {
                 .object()
                 .has_dynamic_flag(GO_DYNFLAG_LO_STOPPED)
         );
+    }
+
+    #[test]
+    fn transport_update_initial_expired_position_timer_runs_first_tick_like_cpp() {
+        let mut transport = Transport::with_template(transport_template_for_map(571, 1_000));
+        transport.set_path_progress_ms(100);
+
+        let first_update = transport.update_like_cpp(1, 10_000, 571);
+
+        assert_eq!(first_update.old_path_progress_ms, 100);
+        assert_eq!(first_update.new_path_progress_ms, 101);
+        assert_eq!(first_update.timer_ms, Some(101));
+        assert_eq!(first_update.position_update_timer_before_ms, 0);
+        assert!(first_update.position_update_timer_passed);
+        assert_eq!(first_update.position_update_timer_after_ms, 200);
+        assert!(first_update.position_update_due);
+        assert!(first_update.position_update_represented);
+        assert_eq!(transport.position_change_timer_ms(), 200);
+
+        let second_update = transport.update_like_cpp(1, 10_001, 571);
+
+        assert_eq!(second_update.new_path_progress_ms, 102);
+        assert_eq!(second_update.position_update_timer_before_ms, 200);
+        assert!(!second_update.position_update_timer_passed);
+        assert_eq!(second_update.position_update_timer_after_ms, 199);
+        assert!(!second_update.position_update_due);
+        assert_eq!(transport.position_change_timer_ms(), 199);
+    }
+
+    #[test]
+    fn transport_update_allow_stopping_counts_down_timer_like_cpp() {
+        let mut transport = Transport::new();
+        transport.set_period(1_000);
+        transport.set_path_progress_ms(100);
+        transport.set_position_change_timer_ms(150);
+
+        let update = transport.update_like_cpp(75, 10_000, 571);
+
+        assert_eq!(update.old_path_progress_ms, 100);
+        assert_eq!(update.new_path_progress_ms, 175);
+        assert_eq!(update.timer_ms, Some(175));
+        assert_eq!(transport.path_progress_ms(), 175);
+        assert_eq!(update.position_update_timer_before_ms, 150);
+        assert!(!update.position_update_timer_passed);
+        assert_eq!(update.position_update_timer_after_ms, 75);
+        assert_eq!(transport.position_change_timer_ms(), 75);
+        assert!(!update.position_update_due);
+        assert!(!update.unsupported_no_period);
+    }
+
+    #[test]
+    fn transport_update_stop_request_inside_tick_marks_just_stopped_like_cpp() {
+        let mut transport = Transport::new();
+        transport.set_period(1_000);
+        transport.set_path_progress_ms(900);
+        transport.request_stop_at_next_pause(950);
+
+        let update = transport.update_like_cpp(100, 10_000, 571);
+
+        assert_eq!(update.new_path_progress_ms, 950);
+        assert!(update.just_stopped);
+        assert!(update.stopped_dynflag_represented);
+        assert_eq!(
+            update.movement_state_after,
+            TransportMovementState::WaitingOnPauseWaypoint
+        );
+        assert_eq!(transport.game_object().data().state, GoState::Ready as i8);
+        assert!(
+            transport
+                .world()
+                .object()
+                .has_dynamic_flag(GO_DYNFLAG_LO_STOPPED)
+        );
+    }
+
+    #[test]
+    fn transport_update_non_allow_stopping_uses_now_ms_like_cpp() {
+        let mut transport = Transport::new();
+        transport.set_period(1_000);
+        transport.set_path_progress_ms(200);
+        transport.set_allow_stopping(false);
+
+        let update = transport.update_like_cpp(50, 12_345, 571);
+
+        assert_eq!(update.new_path_progress_ms, 12_345);
+        assert_eq!(update.timer_ms, Some(345));
+        assert!(!update.allow_stopping);
+        assert_eq!(transport.path_progress_ms(), 12_345);
+    }
+
+    #[test]
+    fn transport_update_period_zero_is_safe_noop_like_cpp_unsupported() {
+        let mut transport = Transport::new();
+        transport.set_period(0);
+        transport.set_path_progress_ms(200);
+        transport.set_position_change_timer_ms(150);
+
+        let update = transport.update_like_cpp(100, 12_345, 571);
+
+        assert!(update.unsupported_no_period);
+        assert_eq!(update.new_path_progress_ms, 200);
+        assert_eq!(update.timer_ms, None);
+        assert_eq!(transport.path_progress_ms(), 200);
+        assert_eq!(transport.position_change_timer_ms(), 150);
+        assert!(!update.path_progress_for_client_updated);
     }
 
     #[test]

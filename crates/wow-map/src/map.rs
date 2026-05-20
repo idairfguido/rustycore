@@ -40,9 +40,9 @@ use wow_entities::{
     GameObjectUpdateOutcomeLikeCpp as EntityGameObjectUpdateOutcomeLikeCpp,
     GameObjectUpdateStatusLikeCpp as EntityGameObjectUpdateStatusLikeCpp, INVALID_HEIGHT,
     LineOfSightQuery, LootState, MAX_VISIBILITY_DISTANCE, MapBindingError, MapObjectRecord,
-    ObjectAccessorError, ObjectAccessorMapSource, ObjectNotifyFlags, Player, SceneObject, Unit,
-    UnitSharedVisionSetWorldObjectRequestLikeCpp, WorldObject, WorldObjectEnvironment,
-    WorldObjectHeightQuery,
+    ObjectAccessorError, ObjectAccessorMapSource, ObjectNotifyFlags, Player, SceneObject,
+    TransportUpdateLikeCpp, Unit, UnitSharedVisionSetWorldObjectRequestLikeCpp, WorldObject,
+    WorldObjectEnvironment, WorldObjectHeightQuery,
 };
 
 const GRID_SLOT_COUNT: usize = (MAX_NUMBER_OF_GRIDS * MAX_NUMBER_OF_GRIDS) as usize;
@@ -451,6 +451,45 @@ pub struct GameObjectsUpdateSummaryLikeCpp {
     pub missing_or_stale: usize,
     pub not_game_object: usize,
     pub not_in_world: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransportUpdateStatusLikeCpp {
+    Updated,
+    UnsupportedNoPeriod,
+    MissingTransport,
+    NotTransport,
+    NotInWorld,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TransportUpdateOutcomeLikeCpp {
+    pub transport_guid: ObjectGuid,
+    pub diff_ms: u32,
+    pub now_ms: u64,
+    pub current_map_id: u32,
+    pub status: TransportUpdateStatusLikeCpp,
+    pub period_ms: Option<u32>,
+    pub path_progress_before_ms: Option<u32>,
+    pub path_progress_after_ms: Option<u32>,
+    pub timer_ms: Option<u32>,
+    pub expected_map_matches_current_map: bool,
+    pub position_update_due: bool,
+    pub position_update_represented: bool,
+    pub just_stopped: bool,
+    pub entity_update: Option<TransportUpdateLikeCpp>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct TransportsUpdateSummaryLikeCpp {
+    pub visited: usize,
+    pub updated: usize,
+    pub unsupported_no_period: usize,
+    pub missing_or_stale: usize,
+    pub not_transport: usize,
+    pub not_in_world: usize,
+    pub position_updates_represented: usize,
+    pub just_stopped: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3221,6 +3260,195 @@ where
                 GameObjectUpdateStatusLikeCpp::MissingGameObject => summary.missing_or_stale += 1,
                 GameObjectUpdateStatusLikeCpp::NotGameObject => summary.not_game_object += 1,
                 GameObjectUpdateStatusLikeCpp::NotInWorld => summary.not_in_world += 1,
+            }
+        }
+
+        summary
+    }
+
+    /// Map-owned seam for C++ `Transport::Update(uint32 diff)` under `Map::Update`.
+    ///
+    /// C++ anchors:
+    /// - `Map.cpp:666-785` updates object families, transport collection, then later
+    ///   `SendObjectUpdates`; exact TypeContainerVisitor and `_transports` ordering is
+    ///   not fully reproduced here.
+    /// - `Transport.cpp:179-251` is represented only for local timers/path progress,
+    ///   stop request evidence, client path-progress field, expected-map gated
+    ///   200ms position-update due evidence, and stopped state/dynflag.
+    ///
+    /// Ownership: source-of-truth is canonical `Map::map_objects`. Missing,
+    /// non-Transport and untyped Transport-kind outcomes do not mutate state.
+    /// Unlike `ObjectUpdater::Visit<T>`, the C++ `_transports` loop does not gate
+    /// canonical transports on `IsInWorld`, so typed Transport records are delegated
+    /// even when their embedded WorldObject is not in-world. This helper never
+    /// creates fallback records, reads session/ObjectAccessor mirrors, runs
+    /// scripts/AI/GameEvents, computes real spline position, teleports,
+    /// spawns/removes static passengers, relocates passengers, fans out packets, or
+    /// drains queues.
+    pub fn update_transport_like_cpp(
+        &mut self,
+        transport_guid: ObjectGuid,
+        diff_ms: u32,
+        now_ms: u64,
+    ) -> TransportUpdateOutcomeLikeCpp {
+        let current_map_id = self.map_id;
+        let Some(record) = self.map_object_record(transport_guid) else {
+            return TransportUpdateOutcomeLikeCpp {
+                transport_guid,
+                diff_ms,
+                now_ms,
+                current_map_id,
+                status: TransportUpdateStatusLikeCpp::MissingTransport,
+                period_ms: None,
+                path_progress_before_ms: None,
+                path_progress_after_ms: None,
+                timer_ms: None,
+                expected_map_matches_current_map: false,
+                position_update_due: false,
+                position_update_represented: false,
+                just_stopped: false,
+                entity_update: None,
+            };
+        };
+
+        if record.kind() != AccessorObjectKind::Transport {
+            return TransportUpdateOutcomeLikeCpp {
+                transport_guid,
+                diff_ms,
+                now_ms,
+                current_map_id,
+                status: TransportUpdateStatusLikeCpp::NotTransport,
+                period_ms: None,
+                path_progress_before_ms: None,
+                path_progress_after_ms: None,
+                timer_ms: None,
+                expected_map_matches_current_map: false,
+                position_update_due: false,
+                position_update_represented: false,
+                just_stopped: false,
+                entity_update: None,
+            };
+        }
+
+        let Some(transport) = record.transport() else {
+            return TransportUpdateOutcomeLikeCpp {
+                transport_guid,
+                diff_ms,
+                now_ms,
+                current_map_id,
+                status: TransportUpdateStatusLikeCpp::NotTransport,
+                period_ms: None,
+                path_progress_before_ms: None,
+                path_progress_after_ms: None,
+                timer_ms: None,
+                expected_map_matches_current_map: false,
+                position_update_due: false,
+                position_update_represented: false,
+                just_stopped: false,
+                entity_update: None,
+            };
+        };
+
+        let period_ms = transport.get_transport_period();
+        let path_progress_before_ms = transport.path_progress_ms();
+
+        let Some(record) = self.map_objects.get_mut(&transport_guid) else {
+            return TransportUpdateOutcomeLikeCpp {
+                transport_guid,
+                diff_ms,
+                now_ms,
+                current_map_id,
+                status: TransportUpdateStatusLikeCpp::MissingTransport,
+                period_ms: Some(period_ms),
+                path_progress_before_ms: Some(path_progress_before_ms),
+                path_progress_after_ms: Some(path_progress_before_ms),
+                timer_ms: None,
+                expected_map_matches_current_map: false,
+                position_update_due: false,
+                position_update_represented: false,
+                just_stopped: false,
+                entity_update: None,
+            };
+        };
+        let Some(transport) = record.transport_mut() else {
+            return TransportUpdateOutcomeLikeCpp {
+                transport_guid,
+                diff_ms,
+                now_ms,
+                current_map_id,
+                status: TransportUpdateStatusLikeCpp::NotTransport,
+                period_ms: Some(period_ms),
+                path_progress_before_ms: Some(path_progress_before_ms),
+                path_progress_after_ms: Some(path_progress_before_ms),
+                timer_ms: None,
+                expected_map_matches_current_map: false,
+                position_update_due: false,
+                position_update_represented: false,
+                just_stopped: false,
+                entity_update: None,
+            };
+        };
+
+        let entity_update = transport.update_like_cpp(diff_ms, now_ms, current_map_id);
+        let status = if entity_update.unsupported_no_period {
+            TransportUpdateStatusLikeCpp::UnsupportedNoPeriod
+        } else {
+            TransportUpdateStatusLikeCpp::Updated
+        };
+        TransportUpdateOutcomeLikeCpp {
+            transport_guid,
+            diff_ms,
+            now_ms,
+            current_map_id,
+            status,
+            period_ms: Some(entity_update.period_ms),
+            path_progress_before_ms: Some(entity_update.old_path_progress_ms),
+            path_progress_after_ms: Some(entity_update.new_path_progress_ms),
+            timer_ms: entity_update.timer_ms,
+            expected_map_matches_current_map: entity_update.expected_map_matches_current_map,
+            position_update_due: entity_update.position_update_due,
+            position_update_represented: entity_update.position_update_represented,
+            just_stopped: entity_update.just_stopped,
+            entity_update: Some(entity_update),
+        }
+    }
+
+    /// Bounded map-owned live visitation seam for C++ `Map::Update` consuming
+    /// typed canonical Transport records only. This snapshots `MapObjectRecord`
+    /// GUIDs before mutation and deliberately excludes generic `WorldObject`
+    /// fallback records even when their kind is Transport.
+    pub fn update_transports_like_cpp(
+        &mut self,
+        diff_ms: u32,
+        now_ms: u64,
+    ) -> TransportsUpdateSummaryLikeCpp {
+        let transport_guids = self
+            .map_objects
+            .iter()
+            .filter_map(|(guid, record)| {
+                (record.kind() == AccessorObjectKind::Transport && record.transport().is_some())
+                    .then_some(*guid)
+            })
+            .collect::<Vec<_>>();
+
+        let mut summary = TransportsUpdateSummaryLikeCpp::default();
+        for guid in transport_guids {
+            summary.visited += 1;
+            let outcome = self.update_transport_like_cpp(guid, diff_ms, now_ms);
+            match outcome.status {
+                TransportUpdateStatusLikeCpp::Updated => summary.updated += 1,
+                TransportUpdateStatusLikeCpp::UnsupportedNoPeriod => {
+                    summary.unsupported_no_period += 1;
+                }
+                TransportUpdateStatusLikeCpp::MissingTransport => summary.missing_or_stale += 1,
+                TransportUpdateStatusLikeCpp::NotTransport => summary.not_transport += 1,
+                TransportUpdateStatusLikeCpp::NotInWorld => summary.not_in_world += 1,
+            }
+            if outcome.position_update_represented {
+                summary.position_updates_represented += 1;
+            }
+            if outcome.just_stopped {
+                summary.just_stopped += 1;
             }
         }
 
@@ -7296,6 +7524,7 @@ mod tests {
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
     use wow_entities::{
         AccessorObjectRef, Creature, GameObject, ObjectAccessor, ObjectNotifyFlags, Player,
+        Transport,
     };
 
     #[derive(Debug, Default)]
@@ -13035,6 +13264,159 @@ mod tests {
         }
         conversation.set_duration_ms(duration_ms);
         conversation
+    }
+
+    fn test_transport_for_update(counter: i64, in_world: bool) -> Transport {
+        let template = wow_entities::TransportTemplate {
+            total_path_time_ms: 1_000,
+            path_legs: vec![wow_entities::TransportPathLeg {
+                map_id: 571,
+                start_timestamp_ms: 0,
+                duration_ms: 1_000,
+                segments: vec![],
+            }],
+            ..wow_entities::TransportTemplate::default()
+        };
+        let mut transport = Transport::with_template(template);
+        transport
+            .world_mut()
+            .object_mut()
+            .create(guid(HighGuid::Transport, counter));
+        transport.world_mut().set_map(571, 7).unwrap();
+        transport.world_mut().relocate(Position::xyz(1.0, 2.0, 3.0));
+        transport.set_path_progress_ms(100);
+        if in_world {
+            transport.world_mut().object_mut().add_to_world();
+        }
+        transport
+    }
+
+    #[test]
+    fn transport_update_mutates_typed_canonical_record_like_cpp() {
+        let mut map = test_map();
+        let transport = test_transport_for_update(4390101, true);
+        let transport_guid = transport.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_transport(transport).unwrap())
+            .unwrap();
+
+        let outcome = map.update_transport_like_cpp(transport_guid, 50, 10_000);
+
+        assert_eq!(outcome.status, TransportUpdateStatusLikeCpp::Updated);
+        assert_eq!(outcome.path_progress_before_ms, Some(100));
+        assert_eq!(outcome.path_progress_after_ms, Some(150));
+        assert_eq!(outcome.timer_ms, Some(150));
+        assert!(outcome.position_update_represented);
+        let transport = map
+            .map_object_record(transport_guid)
+            .and_then(MapObjectRecord::transport)
+            .unwrap();
+        assert_eq!(transport.path_progress_ms(), 150);
+    }
+
+    #[test]
+    fn transport_update_wrong_kind_missing_untyped_skip_but_not_in_world_updates_like_cpp() {
+        let mut map = test_map();
+        let missing_guid = guid(HighGuid::Transport, 4390201);
+        let creature = test_creature_for_spawn(43902, 4390202, true);
+        let creature_guid = creature.guid();
+        map.insert_map_object_record(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+        let not_in_world = test_transport_for_update(4390203, false);
+        let not_in_world_guid = not_in_world.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_transport(not_in_world).unwrap())
+            .unwrap();
+        let untyped_transport =
+            world_object_with_counter(HighGuid::Transport, 4390204, 571, 7, true);
+        let untyped_guid = untyped_transport.guid();
+        map.insert_map_object(AccessorObjectKind::Transport, untyped_transport)
+            .unwrap();
+
+        let missing = map.update_transport_like_cpp(missing_guid, 50, 10_000);
+        let wrong_kind = map.update_transport_like_cpp(creature_guid, 50, 10_000);
+        let not_in_world = map.update_transport_like_cpp(not_in_world_guid, 50, 10_000);
+        let untyped = map.update_transport_like_cpp(untyped_guid, 50, 10_000);
+
+        assert_eq!(
+            missing.status,
+            TransportUpdateStatusLikeCpp::MissingTransport
+        );
+        assert_eq!(
+            wrong_kind.status,
+            TransportUpdateStatusLikeCpp::NotTransport
+        );
+        assert_eq!(not_in_world.status, TransportUpdateStatusLikeCpp::Updated);
+        assert_eq!(not_in_world.path_progress_before_ms, Some(100));
+        assert_eq!(not_in_world.path_progress_after_ms, Some(150));
+        assert_eq!(untyped.status, TransportUpdateStatusLikeCpp::NotTransport);
+        assert_eq!(map.map_object_count(), 3);
+        let transport = map
+            .map_object_record(not_in_world_guid)
+            .and_then(MapObjectRecord::transport)
+            .unwrap();
+        assert_eq!(transport.path_progress_ms(), 150);
+    }
+
+    #[test]
+    fn transports_update_summary_snapshots_only_typed_transports_like_cpp() {
+        let mut map = test_map();
+        let typed_transport = test_transport_for_update(4390301, true);
+        let typed_guid = typed_transport.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_transport(typed_transport).unwrap())
+            .unwrap();
+        let untyped_transport =
+            world_object_with_counter(HighGuid::Transport, 4390302, 571, 7, true);
+        map.insert_map_object(AccessorObjectKind::Transport, untyped_transport)
+            .unwrap();
+        let creature = test_creature_for_spawn(43903, 4390303, true);
+        map.insert_map_object_record(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+
+        let summary = map.update_transports_like_cpp(250, 10_000);
+
+        assert_eq!(
+            summary,
+            TransportsUpdateSummaryLikeCpp {
+                visited: 1,
+                updated: 1,
+                unsupported_no_period: 0,
+                missing_or_stale: 0,
+                not_transport: 0,
+                not_in_world: 0,
+                position_updates_represented: 1,
+                just_stopped: 0,
+            }
+        );
+        let transport = map
+            .map_object_record(typed_guid)
+            .and_then(MapObjectRecord::transport)
+            .unwrap();
+        assert_eq!(transport.path_progress_ms(), 350);
+    }
+
+    #[test]
+    fn transport_update_period_zero_reports_unsupported_without_mutation_like_cpp() {
+        let mut map = test_map();
+        let mut transport = test_transport_for_update(4390401, true);
+        let transport_guid = transport.world().guid();
+        transport.set_period(0);
+        transport.set_path_progress_ms(333);
+        map.insert_map_object_record(MapObjectRecord::new_transport(transport).unwrap())
+            .unwrap();
+
+        let outcome = map.update_transport_like_cpp(transport_guid, 50, 10_000);
+
+        assert_eq!(
+            outcome.status,
+            TransportUpdateStatusLikeCpp::UnsupportedNoPeriod
+        );
+        assert_eq!(outcome.path_progress_before_ms, Some(333));
+        assert_eq!(outcome.path_progress_after_ms, Some(333));
+        assert_eq!(outcome.timer_ms, None);
+        let transport = map
+            .map_object_record(transport_guid)
+            .and_then(MapObjectRecord::transport)
+            .unwrap();
+        assert_eq!(transport.path_progress_ms(), 333);
     }
 
     fn test_scene_object_for_update(

@@ -232,7 +232,7 @@ pub use totem::{
 pub use transport::{
     GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT, GO_DYNFLAG_LO_STOPPED, Transport, TransportCreateInfo,
     TransportMovementState, TransportPassengerSet, TransportPathEvent, TransportPathLeg,
-    TransportPathSegment, TransportTemplate,
+    TransportPathSegment, TransportTemplate, TransportUpdateLikeCpp,
 };
 pub use unit::{
     AUTO_SHOT_SPELL_ID, BASE_MAXDAMAGE, BASE_MINDAMAGE, BASE_MOVE_SPEED,
