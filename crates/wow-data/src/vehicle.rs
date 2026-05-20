@@ -300,6 +300,10 @@ impl VehicleSeatStore {
             .iter()
             .enumerate()
             .filter_map(|(seat_index, seat_id)| {
+                if *seat_id == 0 {
+                    return None;
+                }
+
                 let seat = self.get(u32::from(*seat_id))?;
                 Some((
                     i8::try_from(seat_index).ok()?,
@@ -577,6 +581,15 @@ mod tests {
         }]);
         let seats = VehicleSeatStore::from_entries([
             VehicleSeatEntry {
+                id: 0,
+                attachment_offset_x: 9.0,
+                attachment_offset_y: 9.0,
+                attachment_offset_z: 9.0,
+                flags: VEHICLE_SEAT_FLAG_CAN_ENTER_OR_EXIT,
+                flags_b: 0,
+                flags_c: 0,
+            },
+            VehicleSeatEntry {
                 id: 100,
                 attachment_offset_x: 1.0,
                 attachment_offset_y: 2.0,
@@ -598,6 +611,7 @@ mod tests {
 
         let defs = seats.seat_defs_for_vehicle_like_cpp(vehicles.get(10).unwrap());
         assert_eq!(defs.len(), 2);
+        assert!(defs.iter().all(|(_, seat, _)| seat.id != 0));
         assert_eq!(defs[0].0, 0);
         assert_eq!(defs[0].1.id, 100);
         assert_eq!(

@@ -1634,6 +1634,8 @@ async fn main() -> Result<()> {
             health_rates: creature_health_rates,
             display_store: Arc::clone(&creature_display_info_store),
             model_store: Arc::clone(&creature_model_data_store),
+            vehicle_store: Arc::clone(&vehicle_store),
+            vehicle_seat_store: Arc::clone(&vehicle_seat_store),
             gameobject_template_store: Arc::clone(&gameobject_template_lifecycle_store),
             gameobject_override_store: Arc::clone(&gameobject_override_lifecycle_store),
         },
@@ -2668,6 +2670,8 @@ struct LoadedGridCreatureRespawnCachesLikeCpp {
     health_rates: wow_data::CreatureClassificationHealthRatesLikeCpp,
     display_store: Arc<wow_data::CreatureDisplayInfoStore>,
     model_store: Arc<wow_data::CreatureModelDataStore>,
+    vehicle_store: Arc<wow_data::VehicleStore>,
+    vehicle_seat_store: Arc<wow_data::VehicleSeatStore>,
     gameobject_template_store: Arc<wow_data::GameObjectTemplateLifecycleStoreLikeCpp>,
     gameobject_override_store: Arc<wow_data::GameObjectOverrideLifecycleStoreLikeCpp>,
 }
@@ -2819,6 +2823,21 @@ fn build_loaded_grid_creature_respawn_record_like_cpp(
             return None;
         }
     };
+    let mut template = template;
+    if let Some(vehicle_id) = template.vehicle_id {
+        template.vehicle_kit_create_input =
+            caches.vehicle_store.get(vehicle_id).map(|vehicle_entry| {
+                wow_entities::VehicleKitCreateInputLikeCpp {
+                    vehicle_id,
+                    creature_entry: template.entry,
+                    loading: true,
+                    seat_defs: caches
+                        .vehicle_seat_store
+                        .seat_defs_for_vehicle_like_cpp(vehicle_entry),
+                }
+            });
+    }
+
     let map_object_high = if template.vehicle_id.is_some() {
         HighGuid::Vehicle
     } else {
@@ -3961,6 +3980,8 @@ mod tests {
             health_rates: wow_data::CreatureClassificationHealthRatesLikeCpp::default(),
             display_store: Arc::new(wow_data::CreatureDisplayInfoStore::from_entries([])),
             model_store: Arc::new(wow_data::CreatureModelDataStore::from_entries([])),
+            vehicle_store: Arc::new(wow_data::VehicleStore::from_entries([])),
+            vehicle_seat_store: Arc::new(wow_data::VehicleSeatStore::from_entries([])),
             gameobject_template_store: Arc::new(
                 wow_data::GameObjectTemplateLifecycleStoreLikeCpp::default(),
             ),
@@ -5269,14 +5290,93 @@ mmap.enablePathFinding = 0
         assert_eq!(creature.guid().entry(), entry);
         assert_eq!(creature.lifecycle_metadata().spawn_id, spawn_id);
         assert_eq!(creature.lifecycle_metadata().vehicle_id, Some(101));
+        let kit = creature
+            .unit()
+            .subsystems()
+            .vehicle
+            .kit
+            .as_ref()
+            .expect("VehicleEntry-backed template should create a local kit");
+        assert_eq!(kit.kit_id(), 101);
+        assert!(kit.active());
+        assert!(!kit.installed());
+        assert_eq!(kit.seat_count(), 2);
+        assert_eq!(kit.usable_seat_num(), 1);
+        let outcome = creature
+            .unit()
+            .subsystems()
+            .vehicle
+            .last_create_outcome
+            .as_ref()
+            .expect("CreateVehicleKit evidence should be recorded");
+        assert!(outcome.created);
+        assert_eq!(outcome.seat_count, 2);
+        assert_eq!(outcome.usable_seat_num, 1);
+        assert!(outcome.update_display_power_represented);
+        assert!(!outcome.send_set_vehicle_rec_id_represented);
+    }
+
+    #[test]
+    fn loaded_grid_creature_respawn_record_vehicle_high_guid_without_kit_when_vehicle_row_missing_like_cpp()
+     {
+        let mut metadata = test_spawn_metadata_with_flags([(67, 571, SpawnGroupFlags::NONE)]);
+        let spawn_id = 1;
+        let entry = 42;
+        metadata = metadata.with_creature_runtime_rows_like_cpp(BTreeMap::from([(
+            spawn_id,
+            super::spawn_store_loader::CreatureSpawnRuntimeRowLikeCpp {
+                spawn_id,
+                model_id: 999,
+                equipment_id: 3,
+                wander_distance: 15.0,
+                curhealth: 0,
+                curmana: 0,
+                movement_type: 1,
+                string_id: "vehicle-template-missing-row".to_string(),
+                spawn_time_secs: 120,
+            },
+        )]));
+        let mut caches =
+            variable_loaded_grid_creature_respawn_caches_with_vehicle_id_like_cpp(entry, 101);
+        caches.vehicle_store = Arc::new(wow_data::VehicleStore::from_entries([]));
+        let mut map = wow_map::Map::new(571, 0, 2, 60_000);
+        map.add_respawn_info_like_cpp(RespawnInfoLikeCpp {
+            object_type: SpawnObjectType::Creature,
+            spawn_id,
+            entry,
+            respawn_time: 0,
+            grid_id: 7,
+        });
+
+        let record = build_loaded_grid_creature_respawn_record_like_cpp(
+            &mut map,
+            SpawnObjectType::Creature,
+            spawn_id,
+            &metadata,
+            &caches,
+        )
+        .expect("vehicle-template loaded-grid Creature builder should still resolve");
+        let creature = record
+            .primary_record
+            .creature()
+            .expect("builder should return a typed Creature MapObjectRecord");
+
         assert_eq!(
-            creature.unit().subsystems().vehicle.kit,
-            Some(wow_entities::VehicleKitState {
-                kit_id: 101,
-                active: true,
-                installed: false,
-            })
+            creature.guid().high_type(),
+            wow_core::guid::HighGuid::Vehicle
         );
+        assert_eq!(creature.lifecycle_metadata().vehicle_id, Some(101));
+        assert!(creature.unit().subsystems().vehicle.kit.is_none());
+        let outcome = creature
+            .unit()
+            .subsystems()
+            .vehicle
+            .last_create_outcome
+            .as_ref()
+            .expect("CreateVehicleKit false evidence should be recorded");
+        assert_eq!(outcome.kit_id, Some(101));
+        assert!(!outcome.created);
+        assert!(!outcome.update_display_power_represented);
     }
 
     fn variable_loaded_grid_creature_respawn_caches_like_cpp(
@@ -5346,6 +5446,8 @@ mmap.enablePathFinding = 0
             health_rates: wow_data::CreatureClassificationHealthRatesLikeCpp::default(),
             display_store: Arc::new(wow_data::CreatureDisplayInfoStore::from_entries([])),
             model_store: Arc::new(wow_data::CreatureModelDataStore::from_entries([])),
+            vehicle_store: Arc::new(vehicle_store_for_loaded_grid_test(vehicle_id)),
+            vehicle_seat_store: Arc::new(vehicle_seat_store_for_loaded_grid_test()),
             gameobject_template_store: Arc::new(
                 wow_data::GameObjectTemplateLifecycleStoreLikeCpp::default(),
             ),
@@ -5353,6 +5455,44 @@ mmap.enablePathFinding = 0
                 wow_data::GameObjectOverrideLifecycleStoreLikeCpp::default(),
             ),
         }
+    }
+
+    fn vehicle_store_for_loaded_grid_test(vehicle_id: u32) -> wow_data::VehicleStore {
+        if vehicle_id == 0 {
+            return wow_data::VehicleStore::from_entries([]);
+        }
+        let mut seat_ids = [0u16; 8];
+        seat_ids[0] = 700;
+        seat_ids[2] = 701;
+        wow_data::VehicleStore::from_entries([wow_data::VehicleEntry {
+            id: vehicle_id,
+            flags: 0,
+            flags_b: 0,
+            seat_ids,
+        }])
+    }
+
+    fn vehicle_seat_store_for_loaded_grid_test() -> wow_data::VehicleSeatStore {
+        wow_data::VehicleSeatStore::from_entries([
+            wow_data::VehicleSeatEntry {
+                id: 700,
+                attachment_offset_x: 0.0,
+                attachment_offset_y: 0.0,
+                attachment_offset_z: 0.0,
+                flags: wow_data::VEHICLE_SEAT_FLAG_CAN_ENTER_OR_EXIT,
+                flags_b: 0,
+                flags_c: 0,
+            },
+            wow_data::VehicleSeatEntry {
+                id: 701,
+                attachment_offset_x: 0.0,
+                attachment_offset_y: 0.0,
+                attachment_offset_z: 0.0,
+                flags: 0,
+                flags_b: 0,
+                flags_c: 0,
+            },
+        ])
     }
 
     fn creature_base_stats_record_like_cpp(

@@ -39,6 +39,7 @@ use wow_entities::{
     Creature, CreatureCreateLifecycleRecord, CreatureLifecycleStats,
     CreatureLoadFromDbLifecycleRecord, CreatureModelDimensions, CreatureSpawnLifecycleRecord,
     CreatureTemplateLifecycleRecord, MapObjectRecord, MovementGeneratorType,
+    VehicleKitCreateInputLikeCpp,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -64,6 +65,7 @@ pub struct ResolvedCreatureTemplateLikeCpp {
     pub equipment_id: u8,
     pub original_equipment_id: i8,
     pub vehicle_id: Option<u32>,
+    pub vehicle_kit_create_input: Option<VehicleKitCreateInputLikeCpp>,
     pub corpse_delay: u32,
     pub ignore_corpse_decay_ratio: bool,
 }
@@ -196,6 +198,7 @@ impl CreatureLoadedGridLifecycleResolverLikeCpp {
                 position: spawn.position,
                 dynamic: false,
                 vehicle_id: template.vehicle_id,
+                vehicle_kit_create_input: template.vehicle_kit_create_input.clone(),
                 template: template_lifecycle_record(template),
                 spawn: Some(spawn_lifecycle_record(spawn)),
                 selected_level: selection.selected_level,
@@ -348,6 +351,7 @@ pub fn build_loaded_grid_creature_inputs_from_db_like_cpp(
         equipment_id,
         original_equipment_id,
         vehicle_id: (template.vehicle_id != 0).then_some(template.vehicle_id),
+        vehicle_kit_create_input: None,
         corpse_delay: 0,
         ignore_corpse_decay_ratio: false,
     };
@@ -546,6 +550,7 @@ mod tests {
             equipment_id: 3,
             original_equipment_id: -2,
             vehicle_id: None,
+            vehicle_kit_create_input: None,
             corpse_delay: 61,
             ignore_corpse_decay_ratio: true,
         }
@@ -554,6 +559,12 @@ mod tests {
     fn vehicle_template(entry: u32, vehicle_id: u32) -> ResolvedCreatureTemplateLikeCpp {
         ResolvedCreatureTemplateLikeCpp {
             vehicle_id: Some(vehicle_id),
+            vehicle_kit_create_input: Some(VehicleKitCreateInputLikeCpp {
+                vehicle_id,
+                creature_entry: entry,
+                loading: true,
+                seat_defs: Vec::new(),
+            }),
             ..template(entry)
         }
     }
@@ -1416,14 +1427,18 @@ mod tests {
         );
         assert_eq!(resolved.creature.guid(), map_object_guid);
         assert_eq!(resolved.creature.lifecycle_metadata().vehicle_id, Some(77));
-        assert_eq!(
-            resolved.creature.unit().subsystems().vehicle.kit,
-            Some(wow_entities::VehicleKitState {
-                kit_id: 77,
-                installed: false,
-                active: true,
-            })
-        );
+        let kit = resolved
+            .creature
+            .unit()
+            .subsystems()
+            .vehicle
+            .kit
+            .as_ref()
+            .unwrap();
+        assert_eq!(kit.kit_id(), 77);
+        assert!(kit.active());
+        assert!(!kit.installed());
+        assert_eq!(kit.seat_count(), 0);
         let recorded = resolved
             .map_object_record
             .as_ref()

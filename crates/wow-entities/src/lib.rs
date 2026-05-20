@@ -70,7 +70,7 @@ pub use creature::{
     CreatureRuntimeState, CreatureRuntimeUpdateContext, CreatureSpawnLifecycleRecord,
     CreatureTemplateLifecycleRecord, DEFAULT_BOUNDARY_CHECK_TIME_MS, DEFAULT_CORPSE_DELAY_SECS,
     DEFAULT_MONSTER_SIGHT_DISTANCE, DEFAULT_RESPAWN_DELAY_SECS, LOOT_MODE_DEFAULT,
-    MAX_CREATURE_SPELLS, MovementGeneratorType, ReactState,
+    MAX_CREATURE_SPELLS, MovementGeneratorType, ReactState, VehicleKitCreateInputLikeCpp,
 };
 pub use dynamic_object::{
     DYNAMIC_OBJECT_DATA_CAST_TIME_BIT, DYNAMIC_OBJECT_DATA_CASTER_BIT,
@@ -285,8 +285,9 @@ pub use unit_subsystems::{
     SUMMON_SLOT_TOTEM_3 as UNIT_SUMMON_SLOT_TOTEM_3,
     SUMMON_SLOT_TOTEM_4 as UNIT_SUMMON_SLOT_TOTEM_4, SeekAssistancePlan, SpellChargeState,
     SpellCooldown, SpellHistory, SpellSubsystem, THREAT_UPDATE_INTERVAL_MS, ThreatOnlineState,
-    ThreatReferenceState, ThreatTauntState, UnitSubsystems, VehicleKitInstallOutcomeLikeCpp,
-    VehicleKitRemoveOutcomeLikeCpp, VehicleKitState, VehicleSubsystem,
+    ThreatReferenceState, ThreatTauntState, UnitSubsystems, VehicleKitCreateOutcomeLikeCpp,
+    VehicleKitInstallOutcomeLikeCpp, VehicleKitRemoveOutcomeLikeCpp, VehicleKitState,
+    VehicleSubsystem,
 };
 pub use update_fields::{
     ACTIVE_PLAYER_DATA_BITS, AREA_TRIGGER_DATA_BITS, CONTAINER_DATA_BITS, CONVERSATION_DATA_BITS,

@@ -3,7 +3,7 @@ use wow_constants::{
 };
 use wow_core::{ObjectGuid, Position};
 
-use crate::{BASE_MAXDAMAGE, BASE_MINDAMAGE, Unit};
+use crate::{BASE_MAXDAMAGE, BASE_MINDAMAGE, Unit, VehicleSeatAddon, VehicleSeatInfo};
 
 pub const CREATURE_REGEN_INTERVAL_MS: u32 = 2_000;
 pub const MAX_CREATURE_SPELLS: usize = 8;
@@ -217,6 +217,14 @@ pub struct CreatureSpawnLifecycleRecord {
     pub respawn_compatibility_mode: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct VehicleKitCreateInputLikeCpp {
+    pub vehicle_id: u32,
+    pub creature_entry: u32,
+    pub loading: bool,
+    pub seat_defs: Vec<(i8, VehicleSeatInfo, VehicleSeatAddon)>,
+}
+
 /// Resolved, testable input for TrinityCore `Creature::Create`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreatureCreateLifecycleRecord {
@@ -227,6 +235,7 @@ pub struct CreatureCreateLifecycleRecord {
     pub position: Position,
     pub dynamic: bool,
     pub vehicle_id: Option<u32>,
+    pub vehicle_kit_create_input: Option<VehicleKitCreateInputLikeCpp>,
     pub template: CreatureTemplateLifecycleRecord,
     pub spawn: Option<CreatureSpawnLifecycleRecord>,
     pub selected_level: u8,
@@ -726,14 +735,31 @@ impl Creature {
         self.spells = template.spells;
         self.equipment_id = equipment_id;
         self.original_equipment_id = original_equipment_id;
-        if let Some(vehicle_id) = record.vehicle_id {
+        if record.vehicle_id.is_some() {
             // C++ `Creature::CreateFromProto` calls `CreateVehicleKit(vehId, entry, true)` here.
-            // This is only the local represented kit seam; real `UpdateDisplayPower()` and
-            // `AddToWorld`/`VehicleKit::Install()` remain outside this lifecycle slice.
+            // The bounded seam creates the local DB2 seat-backed `Vehicle` only when the caller
+            // resolved a real `VehicleEntry`; a missing input preserves identity metadata but
+            // represents `CreateVehicleKit` returning false.
+            let create_input = record.vehicle_kit_create_input;
+            let vehicle_id = create_input
+                .as_ref()
+                .map_or(record.vehicle_id, |input| Some(input.vehicle_id));
+            let loading = create_input.as_ref().map_or(true, |input| input.loading);
+            let creature_entry = create_input
+                .as_ref()
+                .map_or(record.entry, |input| input.creature_entry);
+            let seat_defs = create_input.map(|input| input.seat_defs);
             self.unit
                 .subsystems_mut()
                 .vehicle
-                .set_vehicle_kit(vehicle_id, true);
+                .create_vehicle_kit_like_cpp(
+                    record.guid,
+                    position,
+                    vehicle_id,
+                    creature_entry,
+                    loading,
+                    seat_defs,
+                );
         }
         self.default_movement_type = spawn
             .map(|spawn| spawn.movement_type)
@@ -2459,6 +2485,26 @@ mod tests {
         }
     }
 
+    fn vehicle_seat_def(
+        seat_index: i8,
+        can_enter_or_exit: bool,
+    ) -> (i8, VehicleSeatInfo, VehicleSeatAddon) {
+        (
+            seat_index,
+            VehicleSeatInfo {
+                id: 10_000 + u32::from(seat_index.unsigned_abs()),
+                attachment_offset: Position::ZERO,
+                can_enter_or_exit,
+                usable_by_override: false,
+                can_control: false,
+                disables_gravity: false,
+                passenger_not_selectable: false,
+                keep_pet: false,
+            },
+            VehicleSeatAddon::default(),
+        )
+    }
+
     fn creature_lifecycle_create_record() -> CreatureCreateLifecycleRecord {
         CreatureCreateLifecycleRecord {
             guid: ObjectGuid::new(8, 1001),
@@ -2468,6 +2514,12 @@ mod tests {
             position: Position::new(1.0, 2.0, 3.0, 4.0),
             dynamic: false,
             vehicle_id: Some(101),
+            vehicle_kit_create_input: Some(VehicleKitCreateInputLikeCpp {
+                vehicle_id: 101,
+                creature_entry: 1001,
+                loading: true,
+                seat_defs: vec![vehicle_seat_def(0, true), vehicle_seat_def(2, false)],
+            }),
             template: creature_lifecycle_template(),
             spawn: None,
             selected_level: 71,
@@ -2517,14 +2569,30 @@ mod tests {
         assert_eq!(creature.spells()[3], 116);
         assert_eq!(creature.equipment_id(), 6);
         assert_eq!(creature.original_equipment_id(), -6);
-        assert_eq!(
-            creature.unit().subsystems().vehicle.kit,
-            Some(crate::VehicleKitState {
-                kit_id: 101,
-                active: true,
-                installed: false,
-            })
-        );
+        let kit = creature.unit().subsystems().vehicle.kit.as_ref().unwrap();
+        assert_eq!(kit.kit_id(), 101);
+        assert!(kit.active());
+        assert!(!kit.installed());
+        assert_eq!(kit.seat_count(), 2);
+        assert_eq!(kit.usable_seat_num(), 1);
+        let create_outcome = creature
+            .unit()
+            .subsystems()
+            .vehicle
+            .last_create_outcome
+            .as_ref()
+            .unwrap();
+        assert_eq!(create_outcome.kit_id, Some(101));
+        assert!(create_outcome.created);
+        assert_eq!(create_outcome.seat_count, 2);
+        assert_eq!(create_outcome.usable_seat_num, 1);
+        assert!(create_outcome.unit_update_flag_vehicle_represented);
+        assert!(create_outcome.unit_type_mask_vehicle_represented);
+        assert!(!create_outcome.send_set_vehicle_rec_id_represented);
+        assert!(create_outcome.set_spellclick_or_player_vehicle_npc_flag_represented);
+        assert!(!create_outcome.remove_spellclick_or_player_vehicle_npc_flag_represented);
+        assert!(create_outcome.update_display_power_represented);
+        assert!(create_outcome.init_movement_info_for_base_represented);
         assert_eq!(creature.lifecycle_metadata().vehicle_id, Some(101));
         assert_eq!(creature.unit().data().level, 71);
         assert_eq!(creature.unit().data().max_health, 5_000);
@@ -2558,6 +2626,35 @@ mod tests {
         record.spawn = None;
         let dynamic_creature = Creature::create_from_lifecycle(record);
         assert!(!dynamic_creature.respawn_compatibility_mode());
+    }
+    #[test]
+    fn creature_lifecycle_vehicle_entry_missing_preserves_identity_without_local_kit_like_cpp() {
+        let mut record = creature_lifecycle_create_record();
+        record.vehicle_id = Some(909);
+        record.vehicle_kit_create_input = None;
+
+        let creature = Creature::create_from_lifecycle(record);
+
+        assert_eq!(creature.lifecycle_metadata().vehicle_id, Some(909));
+        assert!(creature.unit().subsystems().vehicle.kit.is_none());
+        let outcome = creature
+            .unit()
+            .subsystems()
+            .vehicle
+            .last_create_outcome
+            .as_ref()
+            .unwrap();
+        assert_eq!(outcome.kit_id, Some(909));
+        assert!(!outcome.created);
+        assert_eq!(outcome.seat_count, 0);
+        assert_eq!(outcome.usable_seat_num, 0);
+        assert!(!outcome.unit_update_flag_vehicle_represented);
+        assert!(!outcome.unit_type_mask_vehicle_represented);
+        assert!(!outcome.send_set_vehicle_rec_id_represented);
+        assert!(!outcome.set_spellclick_or_player_vehicle_npc_flag_represented);
+        assert!(!outcome.remove_spellclick_or_player_vehicle_npc_flag_represented);
+        assert!(!outcome.update_display_power_represented);
+        assert!(!outcome.init_movement_info_for_base_represented);
     }
 
     #[test]
