@@ -11,7 +11,7 @@ use rand::{Rng, SeedableRng, rngs::StdRng};
 use crate::cell::{Cell, GridObjectGuids, WorldObjectGuids, calculate_cell_area_like_cpp};
 use crate::coords::{
     CellCoord, GridCoord, MAX_NUMBER_OF_CELLS, MAX_NUMBER_OF_GRIDS, SIZE_OF_GRID_CELL,
-    TOTAL_NUMBER_OF_CELLS_PER_MAP, compute_cell_coord, is_valid_map_coord_2d,
+    TOTAL_NUMBER_OF_CELLS_PER_MAP, compute_cell_coord, compute_grid_coord, is_valid_map_coord_2d,
 };
 use crate::grid::{GridStateKind, MapGridHost, NGrid, update_grid_state};
 use crate::grid_unload::{
@@ -793,6 +793,14 @@ pub struct GameObjectUpdateOutcomeLikeCpp {
     pub generic_flags_restored_represented: bool,
     pub generic_zero_respawn_delay_return: bool,
     pub generic_despawn_at_action_source_missing: bool,
+    pub generic_respawn_scheduled_time: Option<i64>,
+    pub generic_spawned_by_default_branch: bool,
+    pub generic_temporary_respawn_zeroed: bool,
+    pub generic_respawn_timer_add: Option<AddRespawnInfoOutcomeLikeCpp>,
+    pub generic_respawn_save_missing_spawn_id: bool,
+    pub generic_respawn_save_missing_gameobject_data: bool,
+    pub generic_respawn_compatibility_db_only_represented: bool,
+    pub generic_visibility_on_destroy_represented: bool,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -828,6 +836,14 @@ pub struct GameObjectsUpdateSummaryLikeCpp {
     pub generic_flags_restored_represented: usize,
     pub generic_zero_respawn_delay_returns: usize,
     pub generic_despawn_at_action_source_missing: usize,
+    pub generic_respawn_scheduled: usize,
+    pub generic_spawned_by_default_branches: usize,
+    pub generic_temporary_respawn_zeroed: usize,
+    pub generic_respawn_timer_added: usize,
+    pub generic_respawn_save_missing_spawn_id: usize,
+    pub generic_respawn_save_missing_gameobject_data: usize,
+    pub generic_respawn_compatibility_db_only_represented: usize,
+    pub generic_visibility_on_destroy_represented: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4474,6 +4490,14 @@ where
                 generic_flags_restored_represented: false,
                 generic_zero_respawn_delay_return: false,
                 generic_despawn_at_action_source_missing: false,
+                generic_respawn_scheduled_time: None,
+                generic_spawned_by_default_branch: false,
+                generic_temporary_respawn_zeroed: false,
+                generic_respawn_timer_add: None,
+                generic_respawn_save_missing_spawn_id: false,
+                generic_respawn_save_missing_gameobject_data: false,
+                generic_respawn_compatibility_db_only_represented: false,
+                generic_visibility_on_destroy_represented: false,
             };
         };
 
@@ -4519,6 +4543,14 @@ where
                 generic_flags_restored_represented: false,
                 generic_zero_respawn_delay_return: false,
                 generic_despawn_at_action_source_missing: false,
+                generic_respawn_scheduled_time: None,
+                generic_spawned_by_default_branch: false,
+                generic_temporary_respawn_zeroed: false,
+                generic_respawn_timer_add: None,
+                generic_respawn_save_missing_spawn_id: false,
+                generic_respawn_save_missing_gameobject_data: false,
+                generic_respawn_compatibility_db_only_represented: false,
+                generic_visibility_on_destroy_represented: false,
             };
         }
 
@@ -4564,6 +4596,14 @@ where
                 generic_flags_restored_represented: false,
                 generic_zero_respawn_delay_return: false,
                 generic_despawn_at_action_source_missing: false,
+                generic_respawn_scheduled_time: None,
+                generic_spawned_by_default_branch: false,
+                generic_temporary_respawn_zeroed: false,
+                generic_respawn_timer_add: None,
+                generic_respawn_save_missing_spawn_id: false,
+                generic_respawn_save_missing_gameobject_data: false,
+                generic_respawn_compatibility_db_only_represented: false,
+                generic_visibility_on_destroy_represented: false,
             };
         };
 
@@ -4611,6 +4651,14 @@ where
                 generic_flags_restored_represented: false,
                 generic_zero_respawn_delay_return: false,
                 generic_despawn_at_action_source_missing: false,
+                generic_respawn_scheduled_time: None,
+                generic_spawned_by_default_branch: false,
+                generic_temporary_respawn_zeroed: false,
+                generic_respawn_timer_add: None,
+                generic_respawn_save_missing_spawn_id: false,
+                generic_respawn_save_missing_gameobject_data: false,
+                generic_respawn_compatibility_db_only_represented: false,
+                generic_visibility_on_destroy_represented: false,
             };
         }
 
@@ -4657,6 +4705,14 @@ where
                     generic_flags_restored_represented: false,
                     generic_zero_respawn_delay_return: false,
                     generic_despawn_at_action_source_missing: false,
+                    generic_respawn_scheduled_time: None,
+                    generic_spawned_by_default_branch: false,
+                    generic_temporary_respawn_zeroed: false,
+                    generic_respawn_timer_add: None,
+                    generic_respawn_save_missing_spawn_id: false,
+                    generic_respawn_save_missing_gameobject_data: false,
+                    generic_respawn_compatibility_db_only_represented: false,
+                    generic_visibility_on_destroy_represented: false,
                 };
             };
             let Some(game_object) = record.game_object_mut() else {
@@ -4701,6 +4757,14 @@ where
                     generic_flags_restored_represented: false,
                     generic_zero_respawn_delay_return: false,
                     generic_despawn_at_action_source_missing: false,
+                    generic_respawn_scheduled_time: None,
+                    generic_spawned_by_default_branch: false,
+                    generic_temporary_respawn_zeroed: false,
+                    generic_respawn_timer_add: None,
+                    generic_respawn_save_missing_spawn_id: false,
+                    generic_respawn_save_missing_gameobject_data: false,
+                    generic_respawn_compatibility_db_only_represented: false,
+                    generic_visibility_on_destroy_represented: false,
                 };
             };
             game_object.update_like_cpp(diff_ms)
@@ -4763,6 +4827,14 @@ where
         let mut generic_flags_restored_represented = false;
         let mut generic_zero_respawn_delay_return = false;
         let mut generic_despawn_at_action_source_missing = false;
+        let mut generic_respawn_scheduled_time = None;
+        let mut generic_spawned_by_default_branch = false;
+        let mut generic_temporary_respawn_zeroed = false;
+        let mut generic_respawn_timer_add = None;
+        let mut generic_respawn_save_missing_spawn_id = false;
+        let mut generic_respawn_save_missing_gameobject_data = false;
+        let mut generic_respawn_compatibility_db_only_represented = false;
+        let mut generic_visibility_on_destroy_represented = false;
 
         if entity_update.status != EntityGameObjectUpdateStatusLikeCpp::DespawnRequested {
             if let Some(game_object) = self
@@ -4954,8 +5026,9 @@ where
                 .filter(|game_object| game_object.loot_state() == LootState::JustDeactivated)
             {
                 // C++ anchor: GameObject.cpp:1639-1651. This represented seam
-                // stops at `if (!m_respawnDelayTime) return;`; spawnedByDefault,
-                // SaveRespawnTime, PoolMgr, ZoneScript and DB scheduling remain gaps.
+                // preserves the `if (!m_respawnDelayTime) return;` early return;
+                // the positive-delay scheduling/SaveRespawnTime tail is consumed
+                // immediately below after releasing the typed GameObject borrow.
                 game_object.set_loot_state(LootState::NotReady, None);
                 generic_not_ready = true;
 
@@ -4981,7 +5054,94 @@ where
             }
         }
 
-        if summoned_expired_delete {
+        if generic_not_ready && !generic_zero_respawn_delay_return {
+            let generic_respawn_snapshot = self
+                .map_object_record(game_object_guid)
+                .and_then(MapObjectRecord::game_object)
+                .map(|game_object| {
+                    (
+                        game_object.spawned_by_default(),
+                        game_object.respawn_compatibility_mode(),
+                        game_object.respawn_delay_time(),
+                        game_object.spawn_id(),
+                        game_object.has_represented_gameobject_data_like_cpp(),
+                        game_object.world().object().entry(),
+                        game_object.world().position(),
+                    )
+                });
+
+            if let Some((
+                spawned_by_default,
+                respawn_compatibility_mode,
+                respawn_delay_time,
+                spawn_id,
+                represented_gameobject_data_present,
+                entry,
+                position,
+            )) = generic_respawn_snapshot
+            {
+                if spawned_by_default {
+                    let scheduled_respawn_time =
+                        game_time_secs.saturating_add(i64::from(respawn_delay_time));
+                    if let Some(game_object) = self
+                        .map_objects
+                        .get_mut(&game_object_guid)
+                        .and_then(MapObjectRecord::game_object_mut)
+                    {
+                        game_object.set_respawn_time(scheduled_respawn_time);
+                    }
+                    generic_respawn_scheduled_time = Some(scheduled_respawn_time);
+                    generic_spawned_by_default_branch = true;
+
+                    if !represented_gameobject_data_present {
+                        // C++ `GameObject::SaveRespawnTime` is guarded by `m_goData`.
+                        // A nonzero spawn id is not enough evidence for map-owned
+                        // respawn persistence in this represented seam.
+                        generic_respawn_save_missing_gameobject_data = true;
+                    } else if spawn_id == 0 {
+                        generic_respawn_save_missing_spawn_id = true;
+                    } else if scheduled_respawn_time > game_time_secs {
+                        if respawn_compatibility_mode {
+                            // C++ `SaveRespawnTime` compatibility mode calls
+                            // `SaveRespawnInfoDB` only. `wow-map` owns no async DB
+                            // writes, so record DB-only evidence without mutating the
+                            // map-owned respawn store.
+                            generic_respawn_compatibility_db_only_represented = true;
+                        } else {
+                            let grid = compute_grid_coord(position.x, position.y);
+                            let add_outcome = self.add_respawn_info_like_cpp(RespawnInfoLikeCpp {
+                                object_type: SpawnObjectType::GameObject,
+                                spawn_id,
+                                entry,
+                                respawn_time: scheduled_respawn_time,
+                                grid_id: grid.get_id(),
+                            });
+                            generic_respawn_timer_add = Some(add_outcome);
+                        }
+                    }
+
+                    if respawn_compatibility_mode {
+                        generic_visibility_on_destroy_represented = true;
+                    }
+                } else {
+                    if let Some(game_object) = self
+                        .map_objects
+                        .get_mut(&game_object_guid)
+                        .and_then(MapObjectRecord::game_object_mut)
+                    {
+                        game_object.set_respawn_time(0);
+                    }
+                    generic_temporary_respawn_zeroed = true;
+                    generic_visibility_on_destroy_represented = spawn_id != 0;
+                }
+            }
+        }
+
+        if summoned_expired_delete
+            || (generic_not_ready
+                && !generic_zero_respawn_delay_return
+                && !generic_visibility_on_destroy_represented)
+        {
             let remove_list = self.add_object_to_remove_list_like_cpp(game_object_guid);
             GameObjectUpdateOutcomeLikeCpp {
                 game_object_guid,
@@ -5025,6 +5185,14 @@ where
                 generic_flags_restored_represented,
                 generic_zero_respawn_delay_return,
                 generic_despawn_at_action_source_missing,
+                generic_respawn_scheduled_time,
+                generic_spawned_by_default_branch,
+                generic_temporary_respawn_zeroed,
+                generic_respawn_timer_add,
+                generic_respawn_save_missing_spawn_id,
+                generic_respawn_save_missing_gameobject_data,
+                generic_respawn_compatibility_db_only_represented,
+                generic_visibility_on_destroy_represented,
             }
         } else if entity_update.status == EntityGameObjectUpdateStatusLikeCpp::DespawnRequested {
             if let Some(record) = self.map_objects.get_mut(&game_object_guid) {
@@ -5075,6 +5243,14 @@ where
                 generic_flags_restored_represented: false,
                 generic_zero_respawn_delay_return: false,
                 generic_despawn_at_action_source_missing: false,
+                generic_respawn_scheduled_time: None,
+                generic_spawned_by_default_branch: false,
+                generic_temporary_respawn_zeroed: false,
+                generic_respawn_timer_add: None,
+                generic_respawn_save_missing_spawn_id: false,
+                generic_respawn_save_missing_gameobject_data: false,
+                generic_respawn_compatibility_db_only_represented: false,
+                generic_visibility_on_destroy_represented: false,
             }
         } else {
             GameObjectUpdateOutcomeLikeCpp {
@@ -5119,6 +5295,14 @@ where
                 generic_flags_restored_represented,
                 generic_zero_respawn_delay_return,
                 generic_despawn_at_action_source_missing,
+                generic_respawn_scheduled_time,
+                generic_spawned_by_default_branch,
+                generic_temporary_respawn_zeroed,
+                generic_respawn_timer_add,
+                generic_respawn_save_missing_spawn_id,
+                generic_respawn_save_missing_gameobject_data,
+                generic_respawn_compatibility_db_only_represented,
+                generic_visibility_on_destroy_represented,
             }
         }
     }
@@ -5220,6 +5404,36 @@ where
             }
             if outcome.generic_despawn_at_action_source_missing {
                 summary.generic_despawn_at_action_source_missing += 1;
+            }
+            if outcome.generic_respawn_scheduled_time.is_some() {
+                summary.generic_respawn_scheduled += 1;
+            }
+            if outcome.generic_spawned_by_default_branch {
+                summary.generic_spawned_by_default_branches += 1;
+            }
+            if outcome.generic_temporary_respawn_zeroed {
+                summary.generic_temporary_respawn_zeroed += 1;
+            }
+            if matches!(
+                outcome.generic_respawn_timer_add,
+                Some(
+                    AddRespawnInfoOutcomeLikeCpp::Inserted
+                        | AddRespawnInfoOutcomeLikeCpp::ReplacedExisting
+                )
+            ) {
+                summary.generic_respawn_timer_added += 1;
+            }
+            if outcome.generic_respawn_save_missing_spawn_id {
+                summary.generic_respawn_save_missing_spawn_id += 1;
+            }
+            if outcome.generic_respawn_save_missing_gameobject_data {
+                summary.generic_respawn_save_missing_gameobject_data += 1;
+            }
+            if outcome.generic_respawn_compatibility_db_only_represented {
+                summary.generic_respawn_compatibility_db_only_represented += 1;
+            }
+            if outcome.generic_visibility_on_destroy_represented {
+                summary.generic_visibility_on_destroy_represented += 1;
             }
             match outcome.status {
                 GameObjectUpdateStatusLikeCpp::Updated => summary.updated += 1,
@@ -19453,6 +19667,7 @@ mod tests {
         let owner_guid = owner.world().guid();
         let trap_guid = trap.world().guid();
         owner.set_loot_state(LootState::JustDeactivated, None);
+        owner.set_respawn_delay_time(0);
         owner.set_linked_trap_like_cpp(trap_guid);
 
         map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(trap).unwrap())
@@ -19479,6 +19694,7 @@ mod tests {
         let personal_guid = guid(HighGuid::Player, 4590191);
         let unique_guid = guid(HighGuid::Player, 4590192);
         gameobject.set_loot_state(LootState::JustDeactivated, None);
+        gameobject.set_respawn_delay_time(0);
         gameobject.set_shared_loot_like_cpp(GameObjectOwnedLoot::new(7, 2));
         gameobject.set_personal_loot_like_cpp(personal_guid, GameObjectOwnedLoot::new(11, 3));
         assert!(gameobject.add_unique_use_like_cpp(unique_guid));
@@ -20066,6 +20282,7 @@ mod tests {
         gameobject.set_created_by(guid(HighGuid::Player, 4620691));
         gameobject.set_spell_id(456);
         gameobject.set_respawn_time(60);
+        gameobject.set_respawn_delay_time(0);
         gameobject.set_loot_state(LootState::JustDeactivated, None);
 
         map.add_map_object_record_to_map_like_cpp(
@@ -20088,6 +20305,221 @@ mod tests {
         assert_eq!(canonical.respawn_time(), 60);
         assert_eq!(canonical.loot_state(), LootState::NotReady);
         assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+    }
+
+    #[test]
+    fn gameobject_update_generic_spawned_default_noncompat_schedules_respawn_and_remove_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = game_object_with_counter(4640101, 571, 7, false);
+        let gameobject_guid = gameobject.world().guid();
+        gameobject.set_go_type(GAMEOBJECT_TYPE_GENERIC_LIKE_CPP as u8);
+        gameobject.world_mut().object_mut().set_entry(190001);
+        gameobject.set_spawn_id(4640101);
+        gameobject.set_spawned_by_default(true);
+        gameobject.set_represented_gameobject_data_present_like_cpp(true);
+        gameobject.set_respawn_compatibility_mode(false);
+        gameobject.set_respawn_delay_time(45);
+        gameobject.set_loot_state(LootState::JustDeactivated, None);
+
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 1_000);
+        let canonical = map
+            .map_object_record(gameobject_guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+        let respawn_info = map
+            .get_respawn_info_like_cpp(SpawnObjectType::GameObject, 4640101)
+            .unwrap();
+
+        assert_eq!(
+            outcome.status,
+            GameObjectUpdateStatusLikeCpp::DespawnRemoveQueued
+        );
+        assert!(outcome.generic_not_ready);
+        assert_eq!(outcome.generic_respawn_scheduled_time, Some(1_045));
+        assert!(outcome.generic_spawned_by_default_branch);
+        assert_eq!(
+            outcome.generic_respawn_timer_add,
+            Some(AddRespawnInfoOutcomeLikeCpp::Inserted)
+        );
+        assert!(!outcome.generic_respawn_compatibility_db_only_represented);
+        assert!(!outcome.generic_visibility_on_destroy_represented);
+        assert!(outcome.remove_list.is_some());
+        assert_eq!(canonical.respawn_time(), 1_045);
+        assert_eq!(canonical.loot_state(), LootState::NotReady);
+        assert_eq!(respawn_info.object_type, SpawnObjectType::GameObject);
+        assert_eq!(respawn_info.spawn_id, 4640101);
+        assert_eq!(respawn_info.entry, 190001);
+        assert_eq!(respawn_info.respawn_time, 1_045);
+        assert_eq!(respawn_info.grid_id, compute_grid_coord(1.0, 2.0).get_id());
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 1);
+    }
+
+    #[test]
+    fn gameobject_update_generic_spawned_default_compat_saves_db_only_and_visibility_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = game_object_with_counter(4640201, 571, 7, false);
+        let gameobject_guid = gameobject.world().guid();
+        gameobject.set_go_type(GAMEOBJECT_TYPE_GENERIC_LIKE_CPP as u8);
+        gameobject.world_mut().object_mut().set_entry(190002);
+        gameobject.set_spawn_id(4640201);
+        gameobject.set_spawned_by_default(true);
+        gameobject.set_represented_gameobject_data_present_like_cpp(true);
+        gameobject.set_respawn_compatibility_mode(true);
+        gameobject.set_respawn_delay_time(30);
+        gameobject.set_loot_state(LootState::JustDeactivated, None);
+
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 2_000);
+        let canonical = map
+            .map_object_record(gameobject_guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+
+        assert_eq!(outcome.status, GameObjectUpdateStatusLikeCpp::Updated);
+        assert!(outcome.generic_not_ready);
+        assert_eq!(outcome.generic_respawn_scheduled_time, Some(2_030));
+        assert!(outcome.generic_spawned_by_default_branch);
+        assert_eq!(outcome.generic_respawn_timer_add, None);
+        assert!(outcome.generic_respawn_compatibility_db_only_represented);
+        assert!(outcome.generic_visibility_on_destroy_represented);
+        assert!(outcome.remove_list.is_none());
+        assert_eq!(canonical.respawn_time(), 2_030);
+        assert!(
+            map.get_respawn_info_like_cpp(SpawnObjectType::GameObject, 4640201)
+                .is_none()
+        );
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+    }
+
+    #[test]
+    fn gameobject_update_generic_spawned_default_noncompat_missing_godata_does_not_insert_respawn_like_cpp()
+     {
+        let mut map = test_map();
+        let mut gameobject = game_object_with_counter(4640251, 571, 7, false);
+        let gameobject_guid = gameobject.world().guid();
+        gameobject.set_go_type(GAMEOBJECT_TYPE_GENERIC_LIKE_CPP as u8);
+        gameobject.world_mut().object_mut().set_entry(190003);
+        gameobject.set_spawn_id(4640251);
+        gameobject.set_spawned_by_default(true);
+        gameobject.set_respawn_compatibility_mode(false);
+        gameobject.set_respawn_delay_time(25);
+        gameobject.set_loot_state(LootState::JustDeactivated, None);
+
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 2_500);
+        let canonical = map
+            .map_object_record(gameobject_guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+
+        assert_eq!(
+            outcome.status,
+            GameObjectUpdateStatusLikeCpp::DespawnRemoveQueued
+        );
+        assert!(outcome.generic_not_ready);
+        assert_eq!(outcome.generic_respawn_scheduled_time, Some(2_525));
+        assert!(outcome.generic_spawned_by_default_branch);
+        assert_eq!(outcome.generic_respawn_timer_add, None);
+        assert!(outcome.generic_respawn_save_missing_gameobject_data);
+        assert!(!outcome.generic_respawn_save_missing_spawn_id);
+        assert!(!outcome.generic_respawn_compatibility_db_only_represented);
+        assert!(!outcome.generic_visibility_on_destroy_represented);
+        assert!(outcome.remove_list.is_some());
+        assert_eq!(canonical.respawn_time(), 2_525);
+        assert!(
+            map.get_respawn_info_like_cpp(SpawnObjectType::GameObject, 4640251)
+                .is_none()
+        );
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 1);
+    }
+
+    #[test]
+    fn gameobject_update_generic_temporary_noncompat_spawn_id_visibility_no_remove_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = game_object_with_counter(4640301, 571, 7, false);
+        let gameobject_guid = gameobject.world().guid();
+        gameobject.set_go_type(GAMEOBJECT_TYPE_GENERIC_LIKE_CPP as u8);
+        gameobject.set_spawn_id(4640301);
+        gameobject.set_spawned_by_default(false);
+        gameobject.set_respawn_compatibility_mode(false);
+        gameobject.set_respawn_delay_time(60);
+        gameobject.set_respawn_time(999);
+        gameobject.set_loot_state(LootState::JustDeactivated, None);
+
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 3_000);
+        let canonical = map
+            .map_object_record(gameobject_guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+
+        assert_eq!(outcome.status, GameObjectUpdateStatusLikeCpp::Updated);
+        assert!(outcome.generic_not_ready);
+        assert_eq!(outcome.generic_respawn_scheduled_time, None);
+        assert!(!outcome.generic_spawned_by_default_branch);
+        assert!(outcome.generic_temporary_respawn_zeroed);
+        assert_eq!(outcome.generic_respawn_timer_add, None);
+        assert!(outcome.generic_visibility_on_destroy_represented);
+        assert!(outcome.remove_list.is_none());
+        assert_eq!(canonical.respawn_time(), 0);
+        assert!(
+            map.get_respawn_info_like_cpp(SpawnObjectType::GameObject, 4640301)
+                .is_none()
+        );
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+    }
+
+    #[test]
+    fn gameobject_update_generic_temporary_zero_spawn_id_deletes_remove_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = game_object_with_counter(4640351, 571, 7, false);
+        let gameobject_guid = gameobject.world().guid();
+        gameobject.set_go_type(GAMEOBJECT_TYPE_GENERIC_LIKE_CPP as u8);
+        gameobject.set_spawn_id(0);
+        gameobject.set_spawned_by_default(false);
+        gameobject.set_respawn_compatibility_mode(false);
+        gameobject.set_respawn_delay_time(60);
+        gameobject.set_respawn_time(999);
+        gameobject.set_loot_state(LootState::JustDeactivated, None);
+
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = map.update_game_object_like_cpp(gameobject_guid, 1, 3_100);
+        let canonical = map
+            .map_object_record(gameobject_guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+
+        assert_eq!(
+            outcome.status,
+            GameObjectUpdateStatusLikeCpp::DespawnRemoveQueued
+        );
+        assert!(outcome.generic_not_ready);
+        assert!(outcome.generic_temporary_respawn_zeroed);
+        assert!(!outcome.generic_visibility_on_destroy_represented);
+        assert!(outcome.remove_list.is_some());
+        assert_eq!(canonical.respawn_time(), 0);
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 1);
     }
 
     #[test]

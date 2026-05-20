@@ -1016,6 +1016,11 @@ pub struct GameObject {
     /// represented model evidence. This is not real collision, BIH, LOS, intersection or height
     /// runtime.
     represented_gameobject_model_collision_enabled_like_cpp: Option<bool>,
+    /// Explicit represented evidence for TrinityCore `GameObject::m_goData != nullptr`.
+    ///
+    /// This is only the bounded `GameObjectData` presence needed by `SaveRespawnTime()`; it is not
+    /// full ObjectMgr/DB metadata and must not be inferred from `spawn_id` alone.
+    represented_gameobject_data_present_like_cpp: bool,
     grid_unload_cleanup_before_delete_count: u32,
     grid_unload_delete_requested: bool,
     grid_unload_respawn_relocation_requested: bool,
@@ -1068,6 +1073,7 @@ impl GameObject {
             represented_gameobject_model_like_cpp: false,
             represented_gameobject_model_is_map_object_like_cpp: false,
             represented_gameobject_model_collision_enabled_like_cpp: None,
+            represented_gameobject_data_present_like_cpp: false,
             grid_unload_cleanup_before_delete_count: 0,
             grid_unload_delete_requested: false,
             grid_unload_respawn_relocation_requested: false,
@@ -1200,6 +1206,7 @@ impl GameObject {
         self.set_respawn_delay_time(respawn_delay_time);
         self.set_respawn_time(respawn_time);
         self.lifecycle_string_id = record.string_id;
+        self.set_represented_gameobject_data_present_like_cpp(true);
     }
 
     pub const fn world(&self) -> &WorldObject {
@@ -1234,6 +1241,18 @@ impl GameObject {
 
     pub const fn represented_gameobject_model_collision_enabled_like_cpp(&self) -> Option<bool> {
         self.represented_gameobject_model_collision_enabled_like_cpp
+    }
+
+    /// Returns explicit represented evidence for TrinityCore `GameObject::m_goData != nullptr`.
+    ///
+    /// This only gates `GameObject::SaveRespawnTime()` parity; it does not imply full
+    /// ObjectMgr/DB metadata ownership.
+    pub const fn has_represented_gameobject_data_like_cpp(&self) -> bool {
+        self.represented_gameobject_data_present_like_cpp
+    }
+
+    pub fn set_represented_gameobject_data_present_like_cpp(&mut self, present: bool) {
+        self.represented_gameobject_data_present_like_cpp = present;
     }
 
     /// Sets explicit represented evidence for TrinityCore `GameObject::m_model != nullptr`.
@@ -1949,7 +1968,19 @@ mod tests {
             go.represented_gameobject_model_collision_enabled_like_cpp(),
             None
         );
+        assert!(!go.has_represented_gameobject_data_like_cpp());
         assert!(!go.game_object_data_changes_mask().is_any_set());
+    }
+
+    #[test]
+    fn gameobject_data_presence_evidence_defaults_false_and_setter_round_trips_like_cpp() {
+        let mut go = GameObject::new();
+
+        assert!(!go.has_represented_gameobject_data_like_cpp());
+        go.set_represented_gameobject_data_present_like_cpp(true);
+        assert!(go.has_represented_gameobject_data_like_cpp());
+        go.set_represented_gameobject_data_present_like_cpp(false);
+        assert!(!go.has_represented_gameobject_data_like_cpp());
     }
 
     #[test]
