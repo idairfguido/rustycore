@@ -5658,6 +5658,78 @@ where
         }
     }
 
+    /// Live represented C++ `Map::Update` source selection for
+    /// `ProcessRelocationNotifies(t_diff)` (`Map.cpp:692-717,797-805,830-905`).
+    ///
+    /// Source of truth stays map-owned canonical `map_objects`: typed in-world
+    /// Players become player sources, typed in-world active non-Players become
+    /// active object sources, and the existing visit/relocation helpers consume
+    /// marked cells and reset notify flags. Unsupported far combat/aura/summon
+    /// source ownership remains a gap and is represented by empty source lists;
+    /// no session, ObjectAccessor, packet, AI, dynamic-tree, or fanout side
+    /// effects are claimed here.
+    pub fn process_live_relocation_notifies_like_cpp(
+        &mut self,
+        diff_ms: u32,
+        visibility_notify_period_ms: i64,
+    ) -> ProcessRelocationNotifiesOutcome {
+        let mut player_sources = Vec::new();
+        let mut active_non_player_guids = Vec::new();
+
+        for (guid, record) in &self.map_objects {
+            let object = record.object();
+            if !object.object().is_in_world() {
+                continue;
+            }
+
+            if record.kind() == AccessorObjectKind::Player {
+                let viewpoint_guid = record.player().and_then(|player| {
+                    let farsight = player.active_data().farsight_object;
+                    (!farsight.is_empty()).then_some(farsight)
+                });
+                player_sources.push(MapUpdatePlayerSources {
+                    player_guid: *guid,
+                    viewpoint_guid,
+                    far_combat_unit_guids: Vec::new(),
+                    far_aura_caster_guids: Vec::new(),
+                    far_summon_guids: Vec::new(),
+                });
+            } else if is_active_object_like_cpp(record.kind(), object) {
+                active_non_player_guids.push(*guid);
+            }
+        }
+
+        player_sources.sort_by_key(|source| source.player_guid);
+        player_sources.dedup_by_key(|source| source.player_guid);
+        sort_dedup(&mut active_non_player_guids);
+
+        let visit_plan = self.map_update_visit_plan_like_cpp(
+            player_sources,
+            active_non_player_guids,
+            std::iter::empty(),
+            diff_ms,
+        );
+        if !visit_plan.process_relocation_notifies {
+            return ProcessRelocationNotifiesOutcome::default();
+        }
+
+        let centers =
+            visit_plan
+                .nearby_visit_centers
+                .into_iter()
+                .map(|guid| NearbyCellVisitCenter {
+                    guid,
+                    activation_radius: MAX_VISIBILITY_DISTANCE,
+                });
+        let nearby_plan = self.visit_nearby_cells_of_like_cpp(centers);
+        self.process_relocation_notifies_like_cpp(
+            nearby_plan.marked_cells,
+            diff_ms,
+            visibility_notify_period_ms,
+            std::iter::empty(),
+        )
+    }
+
     pub fn map_update_visit_plan_like_cpp(
         &self,
         sources: impl IntoIterator<Item = MapUpdatePlayerSources>,

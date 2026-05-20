@@ -9,14 +9,15 @@ use std::fmt;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
+use crate::DEFAULT_VISIBILITY_NOTIFY_PERIOD;
 use crate::MapKey;
 use crate::map::{
     AreaTriggersUpdateSummaryLikeCpp, ConversationsUpdateSummaryLikeCpp,
     CreatureUpdateSummaryLikeCpp, DynamicObjectsUpdateSummaryLikeCpp,
     GameObjectsUpdateSummaryLikeCpp, Map, MoveListDrainSummaryLikeCpp, NoopGridLifecycle,
     NoopTerrainGridLoader, PersonalPhaseTrackerUpdateSummaryLikeCpp,
-    SceneObjectUpdateContextLikeCpp, SceneObjectsUpdateSummaryLikeCpp,
-    TransportsUpdateSummaryLikeCpp,
+    ProcessRelocationNotifiesOutcome, SceneObjectUpdateContextLikeCpp,
+    SceneObjectsUpdateSummaryLikeCpp, TransportsUpdateSummaryLikeCpp,
 };
 use crate::spawn::Difficulty;
 use wow_core::GameTime;
@@ -165,6 +166,7 @@ pub struct ManagedMap {
     last_scene_objects_update_summary: SceneObjectsUpdateSummaryLikeCpp,
     last_personal_phase_tracker_update_summary: PersonalPhaseTrackerUpdateSummaryLikeCpp,
     last_live_move_list_drain_summary: LiveMoveListDrainSummaryLikeCpp,
+    last_process_relocation_notifies_outcome_like_cpp: ProcessRelocationNotifiesOutcome,
     unload_all_calls: u32,
 }
 
@@ -209,6 +211,8 @@ impl ManagedMap {
             last_personal_phase_tracker_update_summary:
                 PersonalPhaseTrackerUpdateSummaryLikeCpp::default(),
             last_live_move_list_drain_summary: LiveMoveListDrainSummaryLikeCpp::default(),
+            last_process_relocation_notifies_outcome_like_cpp:
+                ProcessRelocationNotifiesOutcome::default(),
             unload_all_calls: 0,
         }
     }
@@ -299,6 +303,13 @@ impl ManagedMap {
         self.last_live_move_list_drain_summary.clone()
     }
 
+    pub fn last_process_relocation_notifies_outcome_like_cpp(
+        &self,
+    ) -> ProcessRelocationNotifiesOutcome {
+        self.last_process_relocation_notifies_outcome_like_cpp
+            .clone()
+    }
+
     pub const fn unload_all_calls(&self) -> u32 {
         self.unload_all_calls
     }
@@ -378,6 +389,18 @@ impl ManagedMap {
             game_object: self.map.move_all_game_objects_in_move_list_like_cpp(),
             area_trigger: self.map.move_all_area_triggers_in_move_list_like_cpp(),
         };
+        // C++ `Map::Update` calls `ProcessRelocationNotifies(t_diff)`
+        // immediately after the live Creature/GameObject/AreaTrigger move-list
+        // drains and only when player/active-non-player sources exist
+        // (`Map.cpp:797-805`). Rust consumes only the existing map-owned
+        // represented helper here: marked-cell selection, relocation timer
+        // selection/reset, delayed relocation plan selection, and notify flag
+        // reset over canonical map state. It does not claim real notifier side
+        // effects, packets, ObjectAccessor/session fanout, AI, dynamic tree, or
+        // exact full visitor parity.
+        self.last_process_relocation_notifies_outcome_like_cpp = self
+            .map
+            .process_live_relocation_notifies_like_cpp(diff_ms, DEFAULT_VISIBILITY_NOTIFY_PERIOD);
     }
 
     fn delayed_update(&mut self, diff_ms: u32) {
@@ -1094,7 +1117,7 @@ mod tests {
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
     use wow_entities::{
         AreaTrigger, Conversation, Creature, DynamicObject, GameObject, LootState, MapObjectRecord,
-        SceneObject, Transport, TransportPathLeg, TransportTemplate,
+        ObjectNotifyFlags, Player, SceneObject, Transport, TransportPathLeg, TransportTemplate,
     };
 
     #[test]
@@ -2321,6 +2344,197 @@ mod tests {
         );
     }
 
+    #[test]
+    fn map_manager_update_processes_live_relocation_notifies_for_player_source_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let player_guid = insert_player_for_relocation_notify(
+            &mut manager,
+            4430101,
+            Position::xyz(10.0, 20.0, 30.0),
+        );
+        let creature_guid = insert_creature_at_for_relocation_notify(
+            &mut manager,
+            4430102,
+            Position::xyz(10.5, 20.5, 30.5),
+            false,
+        );
+
+        {
+            let map = manager.find_map_mut(1, 0).unwrap().map_mut();
+            map.get_typed_player_mut(player_guid)
+                .unwrap()
+                .unit_mut()
+                .world_mut()
+                .object_mut()
+                .add_to_notify(ObjectNotifyFlags::VISIBILITY_CHANGED);
+            map.get_typed_creature_mut(creature_guid)
+                .unwrap()
+                .unit_mut()
+                .world_mut()
+                .object_mut()
+                .add_to_notify(ObjectNotifyFlags::VISIBILITY_CHANGED);
+            assert!(
+                map.map_object(player_guid)
+                    .unwrap()
+                    .object()
+                    .is_need_notify(ObjectNotifyFlags::VISIBILITY_CHANGED)
+            );
+            assert!(test_object_needs_notify_visibility(map, creature_guid));
+        }
+
+        assert_eq!(
+            manager.update(DEFAULT_VISIBILITY_NOTIFY_PERIOD as u32),
+            Some(DEFAULT_VISIBILITY_NOTIFY_PERIOD as u32)
+        );
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        let outcome = managed_map.last_process_relocation_notifies_outcome_like_cpp();
+        assert_eq!(
+            outcome.process_plan.diff_ms,
+            DEFAULT_VISIBILITY_NOTIFY_PERIOD as u32
+        );
+        assert!(!outcome.process_plan.delayed_relocation_cells.is_empty());
+        assert!(!outcome.process_plan.reset_timer_grids.is_empty());
+        assert!(
+            outcome
+                .delayed_plan
+                .cell_plans
+                .iter()
+                .any(|cell| cell.plan.player_relocations.contains(&player_guid))
+        );
+        assert!(
+            outcome
+                .delayed_plan
+                .cell_plans
+                .iter()
+                .any(|cell| cell.plan.creature_relocations.contains(&creature_guid))
+        );
+        assert!(
+            outcome
+                .reset_outcome
+                .reset_player_guids
+                .contains(&player_guid)
+        );
+        assert!(
+            outcome
+                .reset_outcome
+                .reset_creature_guids
+                .contains(&creature_guid)
+        );
+        assert!(!test_object_needs_notify_visibility(
+            managed_map.map(),
+            player_guid
+        ));
+        assert!(!test_object_needs_notify_visibility(
+            managed_map.map(),
+            creature_guid
+        ));
+    }
+
+    #[test]
+    fn map_manager_update_skips_process_relocation_notifies_without_sources_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let creature_guid = insert_creature_at_for_relocation_notify(
+            &mut manager,
+            4430201,
+            Position::xyz(10.5, 20.5, 30.5),
+            false,
+        );
+
+        {
+            let map = manager.find_map_mut(1, 0).unwrap().map_mut();
+            map.get_typed_creature_mut(creature_guid)
+                .unwrap()
+                .unit_mut()
+                .world_mut()
+                .object_mut()
+                .add_to_notify(ObjectNotifyFlags::VISIBILITY_CHANGED);
+        }
+
+        assert_eq!(
+            manager.update(DEFAULT_VISIBILITY_NOTIFY_PERIOD as u32),
+            Some(DEFAULT_VISIBILITY_NOTIFY_PERIOD as u32)
+        );
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        assert_eq!(
+            managed_map.last_process_relocation_notifies_outcome_like_cpp(),
+            ProcessRelocationNotifiesOutcome::default()
+        );
+        assert!(test_object_needs_notify_visibility(
+            managed_map.map(),
+            creature_guid
+        ));
+    }
+
+    #[test]
+    fn map_manager_update_process_relocation_notifies_uses_post_drain_position_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let moving_active_guid = insert_creature_at_for_relocation_notify(
+            &mut manager,
+            4430301,
+            Position::xyz(10.0, 20.0, 30.0),
+            true,
+        );
+        let notify_guid = insert_creature_at_for_relocation_notify(
+            &mut manager,
+            4430302,
+            Position::xyz(1500.0, 1500.0, 30.0),
+            false,
+        );
+        let post_drain_position = Position::xyz(1500.5, 1500.5, 30.5);
+
+        {
+            let map = manager.find_map_mut(1, 0).unwrap().map_mut();
+            map.get_typed_creature_mut(notify_guid)
+                .unwrap()
+                .unit_mut()
+                .world_mut()
+                .object_mut()
+                .add_to_notify(ObjectNotifyFlags::VISIBILITY_CHANGED);
+            assert_eq!(
+                map.add_creature_to_move_list_like_cpp(moving_active_guid, post_drain_position),
+                crate::map::AddObjectToMoveListOutcomeLikeCpp::Queued
+            );
+        }
+
+        assert_eq!(
+            manager.update(DEFAULT_VISIBILITY_NOTIFY_PERIOD as u32),
+            Some(DEFAULT_VISIBILITY_NOTIFY_PERIOD as u32)
+        );
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        assert_eq!(
+            managed_map
+                .map()
+                .map_object(moving_active_guid)
+                .unwrap()
+                .position(),
+            post_drain_position
+        );
+        assert_eq!(
+            managed_map
+                .last_live_move_list_drain_summary_like_cpp()
+                .creature
+                .relocated,
+            1
+        );
+        let outcome = managed_map.last_process_relocation_notifies_outcome_like_cpp();
+        assert!(
+            outcome
+                .reset_outcome
+                .reset_creature_guids
+                .contains(&notify_guid)
+        );
+        assert!(!test_object_needs_notify_visibility(
+            managed_map.map(),
+            notify_guid
+        ));
+    }
+
     fn guid(high: HighGuid, counter: i64, map_id: u32, instance_id: u32) -> ObjectGuid {
         if high == HighGuid::Player {
             ObjectGuid::create_global(high, 0, counter)
@@ -2329,6 +2543,67 @@ mod tests {
         } else {
             ObjectGuid::create_world_object(high, 0, 1, map_id as u16, instance_id, 100, counter)
         }
+    }
+
+    fn test_object_needs_notify_visibility(
+        map: &Map<NoopTerrainGridLoader, NoopGridLifecycle>,
+        guid: ObjectGuid,
+    ) -> bool {
+        map.map_object(guid).is_some_and(|object| {
+            object
+                .object()
+                .is_need_notify(ObjectNotifyFlags::VISIBILITY_CHANGED)
+        })
+    }
+
+    fn insert_player_for_relocation_notify(
+        manager: &mut MapManager,
+        counter: i64,
+        position: Position,
+    ) -> ObjectGuid {
+        let player_guid = guid(HighGuid::Player, counter, 1, 0);
+        let mut player = Player::new(None, false);
+        player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(player_guid);
+        player.unit_mut().world_mut().set_map(1, 0).unwrap();
+        player.unit_mut().world_mut().relocate(position);
+        let record = MapObjectRecord::new_player(player).unwrap();
+        manager
+            .find_map_mut(1, 0)
+            .unwrap()
+            .map_mut()
+            .add_map_object_record_to_map_like_cpp(record)
+            .unwrap();
+        player_guid
+    }
+
+    fn insert_creature_at_for_relocation_notify(
+        manager: &mut MapManager,
+        counter: i64,
+        position: Position,
+        active: bool,
+    ) -> ObjectGuid {
+        let creature_guid = guid(HighGuid::Creature, counter, 1, 0);
+        let mut creature = Creature::new(false);
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(creature_guid);
+        creature.unit_mut().world_mut().set_map(1, 0).unwrap();
+        creature.unit_mut().world_mut().relocate(position);
+        creature.unit_mut().world_mut().set_active(active);
+        let record = MapObjectRecord::new_creature(creature).unwrap();
+        manager
+            .find_map_mut(1, 0)
+            .unwrap()
+            .map_mut()
+            .add_map_object_record_to_map_like_cpp(record)
+            .unwrap();
+        creature_guid
     }
 
     fn insert_creature_for_update(
