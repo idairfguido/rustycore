@@ -228,6 +228,24 @@ pub struct VehicleKitCreateInputLikeCpp {
     pub seat_defs: Vec<(i8, VehicleSeatInfo, VehicleSeatAddon)>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CreatureFormationInfoLikeCpp {
+    pub leader_spawn_id: u64,
+    pub follow_dist: f32,
+    pub follow_angle_radians: f32,
+    pub group_ai: u32,
+    pub leader_waypoint_ids: [u32; 2],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CreatureSearchFormationOutcomeLikeCpp {
+    pub spawn_id: u64,
+    pub is_summon: bool,
+    pub formation_info_found: bool,
+    pub leader_spawn_id: Option<u64>,
+    pub add_to_group_requested: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreatureAddToWorldVehicleResetContextLikeCpp {
     pub is_mechanical_creature: bool,
@@ -299,6 +317,8 @@ pub struct CreatureLifecycleMetadata {
     pub add_to_map_requested: bool,
     pub map_insertion_requested: bool,
     pub dynamic_spawn: bool,
+    pub is_summon_like_cpp: bool,
+    pub formation_info: Option<CreatureFormationInfoLikeCpp>,
     pub vehicle_id: Option<u32>,
     pub add_to_world_vehicle_reset_context: Option<CreatureAddToWorldVehicleResetContextLikeCpp>,
     pub equipment_id: u8,
@@ -340,6 +360,8 @@ impl Default for CreatureLifecycleMetadata {
             add_to_map_requested: false,
             map_insertion_requested: false,
             dynamic_spawn: false,
+            is_summon_like_cpp: false,
+            formation_info: None,
             vehicle_id: None,
             add_to_world_vehicle_reset_context: None,
             equipment_id: 0,
@@ -853,6 +875,8 @@ impl Creature {
             add_to_map_requested: spawn.map(|spawn| spawn.add_to_map).unwrap_or(false),
             map_insertion_requested: spawn.map(|spawn| spawn.add_to_map).unwrap_or(false),
             dynamic_spawn: record.dynamic,
+            is_summon_like_cpp: false,
+            formation_info: None,
             vehicle_id: record.vehicle_id,
             add_to_world_vehicle_reset_context: record.add_to_world_vehicle_reset_context,
             equipment_id,
@@ -931,6 +955,69 @@ impl Creature {
         context: Option<CreatureAddToWorldVehicleResetContextLikeCpp>,
     ) {
         self.lifecycle_metadata.add_to_world_vehicle_reset_context = context;
+    }
+
+    pub const fn is_summon_like_cpp(&self) -> bool {
+        self.lifecycle_metadata.is_summon_like_cpp
+    }
+
+    pub fn set_summon_like_cpp(&mut self, is_summon: bool) {
+        self.lifecycle_metadata.is_summon_like_cpp = is_summon;
+    }
+
+    pub const fn formation_info_like_cpp(&self) -> Option<&CreatureFormationInfoLikeCpp> {
+        self.lifecycle_metadata.formation_info.as_ref()
+    }
+
+    pub fn set_formation_info_like_cpp(&mut self, info: Option<CreatureFormationInfoLikeCpp>) {
+        self.lifecycle_metadata.formation_info = info;
+    }
+
+    /// Represented C++ `Creature::SearchFormation()` branch.
+    ///
+    /// C++ anchor: `Creature.cpp:379-389`. This only consumes explicit
+    /// caller-provided `FormationInfo` evidence already stored on the creature.
+    /// It does not query DB, scan spawn groups, or own a real `FormationMgr`.
+    pub fn search_formation_like_cpp(&self) -> CreatureSearchFormationOutcomeLikeCpp {
+        let spawn_id = self.spawn_id();
+        let is_summon = self.is_summon_like_cpp();
+        if is_summon {
+            return CreatureSearchFormationOutcomeLikeCpp {
+                spawn_id,
+                is_summon,
+                formation_info_found: self.lifecycle_metadata.formation_info.is_some(),
+                leader_spawn_id: None,
+                add_to_group_requested: false,
+            };
+        }
+
+        if spawn_id == 0 {
+            return CreatureSearchFormationOutcomeLikeCpp {
+                spawn_id,
+                is_summon,
+                formation_info_found: self.lifecycle_metadata.formation_info.is_some(),
+                leader_spawn_id: None,
+                add_to_group_requested: false,
+            };
+        }
+
+        let Some(formation_info) = self.lifecycle_metadata.formation_info else {
+            return CreatureSearchFormationOutcomeLikeCpp {
+                spawn_id,
+                is_summon,
+                formation_info_found: false,
+                leader_spawn_id: None,
+                add_to_group_requested: false,
+            };
+        };
+
+        CreatureSearchFormationOutcomeLikeCpp {
+            spawn_id,
+            is_summon,
+            formation_info_found: true,
+            leader_spawn_id: Some(formation_info.leader_spawn_id),
+            add_to_group_requested: true,
+        }
     }
 
     pub fn clear_data_changes(&mut self) {
@@ -1317,6 +1404,7 @@ impl Creature {
 
     pub fn set_spawn_id(&mut self, spawn_id: u64) {
         self.spawn_id = spawn_id;
+        self.lifecycle_metadata.spawn_id = spawn_id;
     }
 
     pub const fn equipment_id(&self) -> u8 {
@@ -2084,6 +2172,69 @@ fn power_type_from_u8(power: u8) -> PowerType {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn formation_info_like_cpp(leader_spawn_id: u64) -> CreatureFormationInfoLikeCpp {
+        CreatureFormationInfoLikeCpp {
+            leader_spawn_id,
+            follow_dist: 7.0,
+            follow_angle_radians: 1.25,
+            group_ai: 3,
+            leader_waypoint_ids: [11, 12],
+        }
+    }
+
+    #[test]
+    fn creature_search_formation_like_cpp_requests_only_with_spawn_and_info() {
+        let mut creature = Creature::new(false);
+        creature.set_spawn_id(1234);
+        creature.set_formation_info_like_cpp(Some(formation_info_like_cpp(77)));
+
+        let outcome = creature.search_formation_like_cpp();
+
+        assert_eq!(outcome.spawn_id, 1234);
+        assert!(!outcome.is_summon);
+        assert!(outcome.formation_info_found);
+        assert_eq!(outcome.leader_spawn_id, Some(77));
+        assert!(outcome.add_to_group_requested);
+    }
+
+    #[test]
+    fn creature_search_formation_like_cpp_skips_summon_and_zero_spawn() {
+        let mut summon = Creature::new(false);
+        summon.set_spawn_id(1234);
+        summon.set_summon_like_cpp(true);
+        summon.set_formation_info_like_cpp(Some(formation_info_like_cpp(77)));
+
+        let summon_outcome = summon.search_formation_like_cpp();
+        assert!(summon_outcome.is_summon);
+        assert!(summon_outcome.formation_info_found);
+        assert_eq!(summon_outcome.leader_spawn_id, None);
+        assert!(!summon_outcome.add_to_group_requested);
+
+        let mut zero_spawn = Creature::new(false);
+        zero_spawn.set_formation_info_like_cpp(Some(formation_info_like_cpp(77)));
+
+        let zero_spawn_outcome = zero_spawn.search_formation_like_cpp();
+        assert_eq!(zero_spawn_outcome.spawn_id, 0);
+        assert!(!zero_spawn_outcome.is_summon);
+        assert!(zero_spawn_outcome.formation_info_found);
+        assert_eq!(zero_spawn_outcome.leader_spawn_id, None);
+        assert!(!zero_spawn_outcome.add_to_group_requested);
+    }
+
+    #[test]
+    fn creature_search_formation_like_cpp_skips_missing_formation_info() {
+        let mut creature = Creature::new(false);
+        creature.set_spawn_id(1234);
+
+        let outcome = creature.search_formation_like_cpp();
+
+        assert_eq!(outcome.spawn_id, 1234);
+        assert!(!outcome.is_summon);
+        assert!(!outcome.formation_info_found);
+        assert_eq!(outcome.leader_spawn_id, None);
+        assert!(!outcome.add_to_group_requested);
+    }
 
     #[test]
     fn creature_constructor_matches_cpp_base_state() {

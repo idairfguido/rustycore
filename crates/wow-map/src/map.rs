@@ -35,10 +35,11 @@ use crate::spawn::{
 use wow_core::{ObjectGuid, ObjectGuidGenerator, Position, guid::HighGuid};
 use wow_entities::{
     AccessorObjectKind, AreaTrigger, CombatBeginContextLikeCpp, CombatSubsystem, Conversation,
-    Corpse, Creature, CreatureRuntimePlan, CreatureRuntimeUpdateContext, DynamicObject,
-    DynamicObjectType, GAMEOBJECT_TYPE_CHEST, GAMEOBJECT_TYPE_DOOR, GAMEOBJECT_TYPE_GOOBER,
-    GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT, GAMEOBJECT_TYPE_NEW_FLAG, GAMEOBJECT_TYPE_NEW_FLAG_DROP,
-    GAMEOBJECT_TYPE_TRANSPORT, GO_FLAG_NODESPAWN, GameObject,
+    Corpse, Creature, CreatureRuntimePlan, CreatureRuntimeUpdateContext,
+    CreatureSearchFormationOutcomeLikeCpp, DynamicObject, DynamicObjectType, GAMEOBJECT_TYPE_CHEST,
+    GAMEOBJECT_TYPE_DOOR, GAMEOBJECT_TYPE_GOOBER, GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT,
+    GAMEOBJECT_TYPE_NEW_FLAG, GAMEOBJECT_TYPE_NEW_FLAG_DROP, GAMEOBJECT_TYPE_TRANSPORT,
+    GO_FLAG_NODESPAWN, GameObject,
     GameObjectUpdateOutcomeLikeCpp as EntityGameObjectUpdateOutcomeLikeCpp,
     GameObjectUpdateStatusLikeCpp as EntityGameObjectUpdateStatusLikeCpp, GoState, INVALID_HEIGHT,
     LineOfSightQuery, LootState, MAX_VISIBILITY_DISTANCE, MapBindingError, MapObjectRecord,
@@ -1593,6 +1594,13 @@ pub struct Map<Terrain = NoopTerrainGridLoader, Lifecycle = NoopGridLifecycle> {
     gameobjects_by_spawn_id: HashMap<SpawnId, HashSet<ObjectGuid>>,
     area_triggers_by_spawn_id: HashMap<SpawnId, HashSet<ObjectGuid>>,
     map_objects: HashMap<ObjectGuid, MapObjectRecord>,
+    /// Map-owned represented C++ `CreatureGroupHolder`, keyed by leader spawn id.
+    ///
+    /// Source-of-truth remains `map_objects` and the typed spawn-id index. This
+    /// holder stores only represented formation membership GUIDs produced by
+    /// explicit `Creature::SearchFormation()` input; it does not own movement,
+    /// AI, DB `FormationMgr`, waypoint, combat-assist, or session fanout runtime.
+    creature_group_holder_like_cpp: HashMap<SpawnId, HashSet<ObjectGuid>>,
     /// Map-owned represented C++ `_dynamicTree` model-key registration/update seam.
     ///
     /// Source-of-truth is this `Map` instance. The represented key set is a
@@ -1742,6 +1750,7 @@ where
             gameobjects_by_spawn_id: HashMap::new(),
             area_triggers_by_spawn_id: HashMap::new(),
             map_objects: HashMap::new(),
+            creature_group_holder_like_cpp: HashMap::new(),
             dynamic_tree_model_keys_like_cpp: HashSet::new(),
             dynamic_tree_rebalance_timer_remaining_ms_like_cpp:
                 DYNAMIC_MAP_TREE_CHECK_PERIOD_MS_LIKE_CPP,
@@ -7085,6 +7094,22 @@ where
             .map_or(0, HashSet::len)
     }
 
+    pub fn creature_group_holder_member_count_like_cpp(&self, leader_spawn_id: SpawnId) -> usize {
+        self.creature_group_holder_like_cpp
+            .get(&leader_spawn_id)
+            .map_or(0, HashSet::len)
+    }
+
+    pub fn creature_group_holder_contains_like_cpp(
+        &self,
+        leader_spawn_id: SpawnId,
+        member_guid: ObjectGuid,
+    ) -> bool {
+        self.creature_group_holder_like_cpp
+            .get(&leader_spawn_id)
+            .is_some_and(|members| members.contains(&member_guid))
+    }
+
     pub fn gameobject_spawn_id_store_count_like_cpp(&self, spawn_id: SpawnId) -> usize {
         self.gameobjects_by_spawn_id
             .get(&spawn_id)
@@ -7314,6 +7339,32 @@ where
         }
     }
 
+    fn apply_creature_search_formation_like_cpp(
+        &mut self,
+        current_guid: ObjectGuid,
+        outcome: CreatureSearchFormationOutcomeLikeCpp,
+    ) {
+        if !outcome.add_to_group_requested {
+            return;
+        }
+
+        let Some(leader_spawn_id) = outcome.leader_spawn_id else {
+            return;
+        };
+
+        let stale_member_guids = self.creature_spawn_id_store_guids_like_cpp(outcome.spawn_id);
+        let group = self
+            .creature_group_holder_like_cpp
+            .entry(leader_spawn_id)
+            .or_default();
+        for stale_guid in stale_member_guids {
+            if stale_guid != current_guid {
+                group.remove(&stale_guid);
+            }
+        }
+        group.insert(current_guid);
+    }
+
     pub fn add_to_map_like_cpp(
         &mut self,
         kind: AccessorObjectKind,
@@ -7346,6 +7397,7 @@ where
                 inserted_into_cell: false,
                 gameobject_model_insert: None,
                 gameobject_collision_enable: None,
+                creature_search_formation: None,
                 creature_vehicle_reset: None,
                 creature_vehicle_install: None,
             });
@@ -7393,6 +7445,15 @@ where
             // Rust does not emit visibility here yet; keep the flag lifecycle identical to
             // C++ `Map::AddToMap` after `UpdateObjectVisibilityOnCreate()` returns.
             object.object_mut().set_is_new_object(false);
+        }
+
+        let creature_search_formation = if kind == AccessorObjectKind::Creature {
+            record.creature().map(Creature::search_formation_like_cpp)
+        } else {
+            None
+        };
+        if let Some(outcome) = creature_search_formation {
+            self.apply_creature_search_formation_like_cpp(guid, outcome);
         }
 
         let creature_vehicle_reset = if kind == AccessorObjectKind::Creature {
@@ -7475,6 +7536,7 @@ where
             inserted_into_cell: true,
             gameobject_model_insert,
             gameobject_collision_enable,
+            creature_search_formation,
             creature_vehicle_reset,
             creature_vehicle_install,
         })
@@ -9432,6 +9494,7 @@ pub struct AddToMapOutcome {
     pub inserted_into_cell: bool,
     pub gameobject_model_insert: Option<DynamicMapTreeModelMutationOutcomeLikeCpp>,
     pub gameobject_collision_enable: Option<GameObjectCollisionEnableOutcomeLikeCpp>,
+    pub creature_search_formation: Option<CreatureSearchFormationOutcomeLikeCpp>,
     pub creature_vehicle_reset: Option<VehicleKitAddToWorldResetOutcomeLikeCpp>,
     pub creature_vehicle_install: Option<VehicleKitInstallOutcomeLikeCpp>,
 }
@@ -10544,10 +10607,10 @@ mod tests {
     use wow_constants::{DeathState, TypeId, TypeMask};
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
     use wow_entities::{
-        AccessorObjectRef, Creature, CreatureAddToWorldVehicleResetContextLikeCpp, GameObject,
-        GameObjectLootSource, GameObjectOwnedLoot, GooberUseSource, ObjectAccessor,
-        ObjectNotifyFlags, Player, Transport, VehicleAccessory, VehicleSeatAddon, VehicleSeatInfo,
-        VehicleSpellImmunity, VehicleSpellImmunityKind,
+        AccessorObjectRef, Creature, CreatureAddToWorldVehicleResetContextLikeCpp,
+        CreatureFormationInfoLikeCpp, GameObject, GameObjectLootSource, GameObjectOwnedLoot,
+        GooberUseSource, ObjectAccessor, ObjectNotifyFlags, Player, Transport, VehicleAccessory,
+        VehicleSeatAddon, VehicleSeatInfo, VehicleSpellImmunity, VehicleSpellImmunityKind,
     };
 
     const GO_FLAG_MAP_OBJECT: u32 = 0x0010_0000;
@@ -16304,6 +16367,124 @@ mod tests {
             .unwrap();
         assert!(cell.grid_objects.creatures.contains(&guid));
         assert!(!cell.world_objects.creatures.contains(&guid));
+    }
+
+    fn creature_formation_info_like_cpp(leader_spawn_id: SpawnId) -> CreatureFormationInfoLikeCpp {
+        CreatureFormationInfoLikeCpp {
+            leader_spawn_id,
+            follow_dist: 8.0,
+            follow_angle_radians: 0.75,
+            group_ai: 4,
+            leader_waypoint_ids: [21, 22],
+        }
+    }
+
+    #[test]
+    fn creature_search_formation_add_to_map_inserts_group_holder_and_coexists_with_vehicle_like_cpp()
+     {
+        let mut map = test_map();
+        let mut creature = test_creature_for_spawn(470, 47001, true);
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        creature.set_formation_info_like_cpp(Some(creature_formation_info_like_cpp(900470)));
+        creature.set_add_to_world_vehicle_reset_context_like_cpp(Some(
+            creature_add_to_world_vehicle_reset_context(false, false),
+        ));
+        create_loaded_creature_vehicle_kit_like_cpp(&mut creature, 9470);
+        let guid = creature.guid();
+
+        let outcome = map
+            .add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+
+        let search = outcome.creature_search_formation.unwrap();
+        assert_eq!(search.spawn_id, 470);
+        assert_eq!(search.leader_spawn_id, Some(900470));
+        assert!(search.add_to_group_requested);
+        assert!(map.creature_group_holder_contains_like_cpp(900470, guid));
+        assert_eq!(map.creature_group_holder_member_count_like_cpp(900470), 1);
+        assert!(outcome.creature_vehicle_reset.is_some());
+        assert!(outcome.creature_vehicle_install.is_some());
+    }
+
+    #[test]
+    fn creature_search_formation_add_to_map_removes_stale_same_spawn_member_like_cpp() {
+        let mut map = test_map();
+        let mut old_creature = test_creature_for_spawn(471, 47101, true);
+        old_creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        old_creature.set_formation_info_like_cpp(Some(creature_formation_info_like_cpp(900471)));
+        let old_guid = old_creature.guid();
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_creature(old_creature).unwrap(),
+        )
+        .unwrap();
+        assert!(map.creature_group_holder_contains_like_cpp(900471, old_guid));
+
+        let mut new_creature = test_creature_for_spawn(471, 47102, true);
+        new_creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        new_creature.set_formation_info_like_cpp(Some(creature_formation_info_like_cpp(900471)));
+        let new_guid = new_creature.guid();
+
+        let outcome = map
+            .add_map_object_record_to_map_like_cpp(
+                MapObjectRecord::new_creature(new_creature).unwrap(),
+            )
+            .unwrap();
+
+        assert!(
+            outcome
+                .creature_search_formation
+                .as_ref()
+                .is_some_and(|search| search.add_to_group_requested)
+        );
+        assert!(!map.creature_group_holder_contains_like_cpp(900471, old_guid));
+        assert!(map.creature_group_holder_contains_like_cpp(900471, new_guid));
+        assert_eq!(map.creature_group_holder_member_count_like_cpp(900471), 1);
+        assert_eq!(map.creature_spawn_id_store_count_like_cpp(471), 2);
+    }
+
+    #[test]
+    fn creature_search_formation_add_to_map_already_in_world_is_not_consumed_like_cpp() {
+        let mut map = test_map();
+        let mut creature = test_creature_for_spawn(472, 47201, true);
+        creature.set_formation_info_like_cpp(Some(creature_formation_info_like_cpp(900472)));
+        let guid = creature.guid();
+
+        let outcome = map
+            .add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+
+        assert!(outcome.already_in_world);
+        assert!(outcome.creature_search_formation.is_none());
+        assert!(!map.creature_group_holder_contains_like_cpp(900472, guid));
+    }
+
+    #[test]
+    fn creature_search_formation_add_to_map_non_creature_path_is_unchanged_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = test_gameobject_for_spawn(473, 47301);
+        gameobject.world_mut().object_mut().remove_from_world();
+
+        let outcome = map
+            .add_map_object_record_to_map_like_cpp(
+                MapObjectRecord::new_game_object(gameobject).unwrap(),
+            )
+            .unwrap();
+
+        assert!(!outcome.already_in_world);
+        assert!(outcome.creature_search_formation.is_none());
+        assert_eq!(map.creature_group_holder_member_count_like_cpp(900473), 0);
     }
 
     fn creature_add_to_world_vehicle_reset_context(
