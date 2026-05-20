@@ -6,6 +6,12 @@
 ## Pending Review Tasks
 
 ## Closed Tasks
+- [x] **#NEXT.R8.ENTITIES.449** represented DynamicMapTree update seam at `Map::Update` head.
+  Status: represented-complete; review `APROBADO`; CI `CI_OK`; validation OK; committed locally at `current #449 HEAD`; no push/install/restart.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:666-668`, `/home/server/woltk-trinity-legacy/src/common/Collision/DynamicTree.cpp:34-38`, `/home/server/woltk-trinity-legacy/src/common/Collision/DynamicTree.cpp:66-101`, `/home/server/woltk-trinity-legacy/src/common/Time/Timer.h:121-143`.
+  Rust targets: `crates/wow-map/src/map.rs`, `crates/wow-map/src/manager.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: `Map` owns a narrow represented `_dynamicTree` seam: model-count emptiness, TimeTracker-like 200ms rebalance remaining timer, and `unbalanced_times`; `update_dynamic_tree_like_cpp(diff_ms)` returns before timer/unbalanced mutation when empty, consumes/resets timer when non-empty, and clears unbalanced count only when timer passes with pending unbalance. `ManagedMap::update(diff_ms)` stores the summary before `update_calls` instrumentation and all later represented phases. No real `DynamicMapTree::insert/remove`, `GameObjectModel`, RegularGrid/BIH balance, LOS/intersections/heights, AddToWorld/RemoveFromWorld registration, ObjectAccessor/session/fanout/scripts/AI/DB side effects, install/restart/push, or broader collision runtime is claimed.
+
 - [x] **#NEXT.R8.ENTITIES.448** represented `Map::Update` tail `OnMapUpdate`/metrics seam.
   Status: represented-complete only for the C++ `Map::Update` tail boundary after `ProcessRelocationNotifies(t_diff)`; review `APROBADO`; CI `CI_OK`; validation OK; committed locally at `current #448 HEAD`; no push/install/restart.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:804-815`, `/home/server/woltk-trinity-legacy/src/server/game/Scripting/ScriptMgr.cpp:1598-1613`, `/home/server/woltk-trinity-legacy/src/server/game/Scripting/ScriptMgr.cpp:1509-1524`.

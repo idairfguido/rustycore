@@ -46,6 +46,8 @@ use wow_entities::{
 };
 
 const GRID_SLOT_COUNT: usize = (MAX_NUMBER_OF_GRIDS * MAX_NUMBER_OF_GRIDS) as usize;
+/// C++ `DynamicTree.cpp:34-38` `CHECK_TREE_PERIOD = 200`.
+const DYNAMIC_MAP_TREE_CHECK_PERIOD_MS_LIKE_CPP: u32 = 200;
 const WEATHER_UPDATE_INTERVAL_MS_LIKE_CPP: u32 = 1_000;
 
 #[derive(Clone, Copy)]
@@ -148,6 +150,26 @@ pub struct MapUpdateMetricsSummaryLikeCpp {
     pub gameobject_count: usize,
     pub map_id: u32,
     pub instance_id: u32,
+}
+
+/// Represented result for C++ `DynamicMapTree::update(t_diff)`.
+///
+/// Anchors: `Map.cpp:666-668`, `DynamicTree.cpp:34-38,66-101,115-138`.
+/// This exposes only the map-owned timer/unbalanced seam. It does not claim
+/// real `GameObjectModel`, RegularGrid/BIH balance, LOS/intersection/height,
+/// AddToWorld/RemoveFromWorld registration, ObjectAccessor/session/fanout, DB,
+/// scripts, AI, or collision runtime parity.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DynamicMapTreeUpdateSummaryLikeCpp {
+    pub diff_ms: u32,
+    pub empty: bool,
+    pub timer_before_ms: u32,
+    pub timer_after_ms: u32,
+    pub timer_passed: bool,
+    pub timer_reset_to_ms: Option<u32>,
+    pub unbalanced_before: u32,
+    pub balanced: bool,
+    pub unbalanced_after: u32,
 }
 
 impl SpawnedPoolDataLikeCpp {
@@ -1345,6 +1367,19 @@ pub struct Map<Terrain = NoopTerrainGridLoader, Lifecycle = NoopGridLifecycle> {
     gameobjects_by_spawn_id: HashMap<SpawnId, HashSet<ObjectGuid>>,
     area_triggers_by_spawn_id: HashMap<SpawnId, HashSet<ObjectGuid>>,
     map_objects: HashMap<ObjectGuid, MapObjectRecord>,
+    /// Map-owned represented C++ `_dynamicTree` update seam.
+    ///
+    /// Source-of-truth is this `Map` instance. These fields mirror only the
+    /// observable state needed by `DynamicTree.cpp:66-101`: represented model
+    /// count for `empty()`, a TimeTracker-like remaining rebalance timer
+    /// initialized to `CHECK_TREE_PERIOD` (200ms), and `unbalanced_times`.
+    /// Insert/remove helpers are test/control evidence only; no real
+    /// GameObjectModel, RegularGrid/BIH, collision, LOS/intersection/height,
+    /// AddToWorld/RemoveFromWorld registration, ObjectAccessor/session/fanout,
+    /// scripts, AI, DB or model ownership is represented here.
+    dynamic_tree_model_count_like_cpp: u32,
+    dynamic_tree_rebalance_timer_remaining_ms_like_cpp: u32,
+    dynamic_tree_unbalanced_times_like_cpp: u32,
     /// Map-owned deferred physical removal queue matching C++
     /// `Map::i_objectsToRemove` (`Map.cpp:2547-2555`, `2574-2646`).
     ///
@@ -1479,6 +1514,10 @@ where
             gameobjects_by_spawn_id: HashMap::new(),
             area_triggers_by_spawn_id: HashMap::new(),
             map_objects: HashMap::new(),
+            dynamic_tree_model_count_like_cpp: 0,
+            dynamic_tree_rebalance_timer_remaining_ms_like_cpp:
+                DYNAMIC_MAP_TREE_CHECK_PERIOD_MS_LIKE_CPP,
+            dynamic_tree_unbalanced_times_like_cpp: 0,
             objects_to_remove: HashSet::new(),
             objects_to_switch: HashMap::new(),
             creatures_to_move: Vec::new(),
@@ -1537,6 +1576,78 @@ where
     #[cfg(test)]
     fn seed_creature_level_rng_for_tests_like_cpp(&mut self, seed: u64) {
         self.creature_level_rng_like_cpp = StdRng::seed_from_u64(seed);
+    }
+
+    /// Represents the first statement in C++ `Map::Update(uint32 t_diff)`:
+    /// `_dynamicTree.update(t_diff)` (`Map.cpp:666-668`).
+    ///
+    /// This is C++-shaped map-owned state only. It mirrors
+    /// `DynTreeImpl::update` (`DynamicTree.cpp:90-101`): return early when the
+    /// represented tree is empty; otherwise consume a TimeTracker-like remaining
+    /// timer; when passed, reset to `CHECK_TREE_PERIOD` (200ms) and clear
+    /// `unbalanced_times` only if it was positive, representing `balance()`.
+    /// No real BIH/collision/model registration runtime is claimed.
+    pub fn update_dynamic_tree_like_cpp(
+        &mut self,
+        diff_ms: u32,
+    ) -> DynamicMapTreeUpdateSummaryLikeCpp {
+        let timer_before_ms = self.dynamic_tree_rebalance_timer_remaining_ms_like_cpp;
+        let unbalanced_before = self.dynamic_tree_unbalanced_times_like_cpp;
+        let empty = self.dynamic_tree_model_count_like_cpp == 0;
+
+        if empty {
+            return DynamicMapTreeUpdateSummaryLikeCpp {
+                diff_ms,
+                empty,
+                timer_before_ms,
+                timer_after_ms: timer_before_ms,
+                timer_passed: false,
+                timer_reset_to_ms: None,
+                unbalanced_before,
+                balanced: false,
+                unbalanced_after: unbalanced_before,
+            };
+        }
+
+        let timer_passed = diff_ms >= timer_before_ms;
+        let mut timer_after_ms = timer_before_ms.saturating_sub(diff_ms);
+        let mut balanced = false;
+        let mut unbalanced_after = unbalanced_before;
+        let timer_reset_to_ms = if timer_passed {
+            timer_after_ms = DYNAMIC_MAP_TREE_CHECK_PERIOD_MS_LIKE_CPP;
+            if unbalanced_before > 0 {
+                self.dynamic_tree_unbalanced_times_like_cpp = 0;
+                unbalanced_after = 0;
+                balanced = true;
+            }
+            Some(DYNAMIC_MAP_TREE_CHECK_PERIOD_MS_LIKE_CPP)
+        } else {
+            None
+        };
+
+        self.dynamic_tree_rebalance_timer_remaining_ms_like_cpp = timer_after_ms;
+
+        DynamicMapTreeUpdateSummaryLikeCpp {
+            diff_ms,
+            empty,
+            timer_before_ms,
+            timer_after_ms,
+            timer_passed,
+            timer_reset_to_ms,
+            unbalanced_before,
+            balanced,
+            unbalanced_after,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_dynamic_tree_model_count_for_tests_like_cpp(&mut self, model_count: u32) {
+        self.dynamic_tree_model_count_like_cpp = model_count;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mark_dynamic_tree_unbalanced_for_tests_like_cpp(&mut self, times: u32) {
+        self.dynamic_tree_unbalanced_times_like_cpp = times;
     }
 
     pub fn generate_low_guid_like_cpp(
@@ -8858,6 +8969,83 @@ mod tests {
 
     fn script_guid(counter: i64) -> ObjectGuid {
         ObjectGuid::create_player(1, counter)
+    }
+
+    #[test]
+    fn dynamic_tree_update_empty_tree_returns_before_timer_or_balance_like_cpp() {
+        let mut map = Map::new(1, 0, 0, 60_000);
+        map.mark_dynamic_tree_unbalanced_for_tests_like_cpp(3);
+
+        let summary = map.update_dynamic_tree_like_cpp(250);
+
+        assert_eq!(summary.diff_ms, 250);
+        assert!(summary.empty);
+        assert_eq!(summary.timer_before_ms, 200);
+        assert_eq!(summary.timer_after_ms, 200);
+        assert!(!summary.timer_passed);
+        assert_eq!(summary.timer_reset_to_ms, None);
+        assert_eq!(summary.unbalanced_before, 3);
+        assert!(!summary.balanced);
+        assert_eq!(summary.unbalanced_after, 3);
+
+        let next = map.update_dynamic_tree_like_cpp(50);
+        assert_eq!(next.timer_before_ms, 200);
+        assert_eq!(next.unbalanced_before, 3);
+    }
+
+    #[test]
+    fn dynamic_tree_update_non_empty_clean_tree_consumes_timer_and_resets_without_balance_like_cpp()
+    {
+        let mut map = Map::new(1, 0, 0, 60_000);
+        map.set_dynamic_tree_model_count_for_tests_like_cpp(1);
+
+        let first = map.update_dynamic_tree_like_cpp(50);
+        assert!(!first.empty);
+        assert_eq!(first.timer_before_ms, 200);
+        assert_eq!(first.timer_after_ms, 150);
+        assert!(!first.timer_passed);
+        assert_eq!(first.timer_reset_to_ms, None);
+        assert_eq!(first.unbalanced_before, 0);
+        assert!(!first.balanced);
+        assert_eq!(first.unbalanced_after, 0);
+
+        let second = map.update_dynamic_tree_like_cpp(150);
+        assert_eq!(second.timer_before_ms, 150);
+        assert_eq!(second.timer_after_ms, 200);
+        assert!(second.timer_passed);
+        assert_eq!(second.timer_reset_to_ms, Some(200));
+        assert_eq!(second.unbalanced_before, 0);
+        assert!(!second.balanced);
+        assert_eq!(second.unbalanced_after, 0);
+    }
+
+    #[test]
+    fn dynamic_tree_update_non_empty_unbalanced_tree_balances_when_timer_passes_like_cpp() {
+        let mut map = Map::new(1, 0, 0, 60_000);
+        map.set_dynamic_tree_model_count_for_tests_like_cpp(2);
+        map.mark_dynamic_tree_unbalanced_for_tests_like_cpp(4);
+
+        let first = map.update_dynamic_tree_like_cpp(199);
+        assert_eq!(first.timer_before_ms, 200);
+        assert_eq!(first.timer_after_ms, 1);
+        assert!(!first.timer_passed);
+        assert_eq!(first.unbalanced_before, 4);
+        assert!(!first.balanced);
+        assert_eq!(first.unbalanced_after, 4);
+
+        let second = map.update_dynamic_tree_like_cpp(1);
+        assert_eq!(second.timer_before_ms, 1);
+        assert_eq!(second.timer_after_ms, 200);
+        assert!(second.timer_passed);
+        assert_eq!(second.timer_reset_to_ms, Some(200));
+        assert_eq!(second.unbalanced_before, 4);
+        assert!(second.balanced);
+        assert_eq!(second.unbalanced_after, 0);
+
+        let third = map.update_dynamic_tree_like_cpp(200);
+        assert_eq!(third.unbalanced_before, 0);
+        assert!(!third.balanced);
+        assert_eq!(third.unbalanced_after, 0);
     }
 
     #[test]

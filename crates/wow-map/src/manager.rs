@@ -13,13 +13,13 @@ use crate::DEFAULT_VISIBILITY_NOTIFY_PERIOD;
 use crate::MapKey;
 use crate::map::{
     AreaTriggersUpdateSummaryLikeCpp, ConversationsUpdateSummaryLikeCpp,
-    CreatureUpdateSummaryLikeCpp, DynamicObjectsUpdateSummaryLikeCpp,
-    GameObjectsUpdateSummaryLikeCpp, Map, MapUpdateMetricsSummaryLikeCpp,
-    MoveListDrainSummaryLikeCpp, NoopGridLifecycle, NoopTerrainGridLoader,
-    PersonalPhaseTrackerUpdateSummaryLikeCpp, ProcessRelocationNotifiesOutcome,
-    SceneObjectUpdateContextLikeCpp, SceneObjectsUpdateSummaryLikeCpp,
-    ScriptScheduleProcessSummaryLikeCpp, SendObjectUpdatesSummaryLikeCpp,
-    TransportsUpdateSummaryLikeCpp, WeatherUpdateSummaryLikeCpp,
+    CreatureUpdateSummaryLikeCpp, DynamicMapTreeUpdateSummaryLikeCpp,
+    DynamicObjectsUpdateSummaryLikeCpp, GameObjectsUpdateSummaryLikeCpp, Map,
+    MapUpdateMetricsSummaryLikeCpp, MoveListDrainSummaryLikeCpp, NoopGridLifecycle,
+    NoopTerrainGridLoader, PersonalPhaseTrackerUpdateSummaryLikeCpp,
+    ProcessRelocationNotifiesOutcome, SceneObjectUpdateContextLikeCpp,
+    SceneObjectsUpdateSummaryLikeCpp, ScriptScheduleProcessSummaryLikeCpp,
+    SendObjectUpdatesSummaryLikeCpp, TransportsUpdateSummaryLikeCpp, WeatherUpdateSummaryLikeCpp,
 };
 use crate::spawn::Difficulty;
 use wow_core::GameTime;
@@ -188,6 +188,7 @@ pub struct ManagedMap {
     instance_lock_token: Option<u64>,
     update_calls: Vec<u32>,
     delayed_update_calls: Vec<u32>,
+    last_dynamic_tree_update_summary_like_cpp: DynamicMapTreeUpdateSummaryLikeCpp,
     last_dynamic_objects_update_summary: DynamicObjectsUpdateSummaryLikeCpp,
     last_creatures_update_summary: CreatureUpdateSummaryLikeCpp,
     last_game_objects_update_summary: GameObjectsUpdateSummaryLikeCpp,
@@ -236,6 +237,8 @@ impl ManagedMap {
             instance_lock_token: None,
             update_calls: Vec::new(),
             delayed_update_calls: Vec::new(),
+            last_dynamic_tree_update_summary_like_cpp: DynamicMapTreeUpdateSummaryLikeCpp::default(
+            ),
             last_dynamic_objects_update_summary: DynamicObjectsUpdateSummaryLikeCpp::default(),
             last_creatures_update_summary: CreatureUpdateSummaryLikeCpp::default(),
             last_game_objects_update_summary: GameObjectsUpdateSummaryLikeCpp::default(),
@@ -303,6 +306,12 @@ impl ManagedMap {
 
     pub fn delayed_update_calls(&self) -> &[u32] {
         &self.delayed_update_calls
+    }
+
+    pub const fn last_dynamic_tree_update_summary_like_cpp(
+        &self,
+    ) -> DynamicMapTreeUpdateSummaryLikeCpp {
+        self.last_dynamic_tree_update_summary_like_cpp
     }
 
     pub const fn last_dynamic_objects_update_summary(&self) -> DynamicObjectsUpdateSummaryLikeCpp {
@@ -387,6 +396,14 @@ impl ManagedMap {
     }
 
     fn update(&mut self, diff_ms: u32) {
+        // C++ `Map::Update` starts with `_dynamicTree.update(t_diff)` before
+        // world sessions, respawns, ObjectUpdater families, SendObjectUpdates,
+        // scripts, weather, personal phase, move lists, relocation notifies, and
+        // tail ScriptMgr/metrics (`Map.cpp:666-668`). Rust exposes only the
+        // represented map-owned timer/unbalanced seam here; `update_calls` below
+        // remains manager instrumentation, not a C++ phase.
+        self.last_dynamic_tree_update_summary_like_cpp =
+            self.map.update_dynamic_tree_like_cpp(diff_ms);
         self.update_calls.push(diff_ms);
         self.last_dynamic_objects_update_summary =
             self.map.update_dynamic_objects_like_cpp(diff_ms);
@@ -1229,6 +1246,42 @@ mod tests {
         let first = game_time_now_ms_u64();
         let second = game_time_now_ms_u64();
         assert!(second >= first);
+    }
+
+    #[test]
+    fn map_manager_update_consumes_dynamic_tree_before_instrumented_tail_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let map = manager.find_map_mut(1, 0).unwrap();
+        map.map_mut()
+            .set_dynamic_tree_model_count_for_tests_like_cpp(1);
+        map.map_mut()
+            .mark_dynamic_tree_unbalanced_for_tests_like_cpp(2);
+
+        manager.update(199);
+        let map = manager.find_map(1, 0).unwrap();
+        let first = map.last_dynamic_tree_update_summary_like_cpp();
+        assert_eq!(first.diff_ms, 199);
+        assert!(!first.empty);
+        assert_eq!(first.timer_before_ms, 200);
+        assert_eq!(first.timer_after_ms, 1);
+        assert!(!first.timer_passed);
+        assert_eq!(first.unbalanced_before, 2);
+        assert_eq!(first.unbalanced_after, 2);
+        assert_eq!(map.update_calls(), &[199]);
+
+        manager.update(1);
+        let map = manager.find_map(1, 0).unwrap();
+        let second = map.last_dynamic_tree_update_summary_like_cpp();
+        assert_eq!(second.diff_ms, 1);
+        assert_eq!(second.timer_before_ms, 1);
+        assert_eq!(second.timer_after_ms, 200);
+        assert!(second.timer_passed);
+        assert_eq!(second.timer_reset_to_ms, Some(200));
+        assert_eq!(second.unbalanced_before, 2);
+        assert!(second.balanced);
+        assert_eq!(second.unbalanced_after, 0);
+        assert_eq!(map.update_calls(), &[199, 1]);
     }
 
     #[test]
