@@ -309,6 +309,8 @@ pub struct AddObjectToRemoveListOutcomeLikeCpp {
     pub cleanup_before_delete_count: usize,
 }
 
+pub type RemoveListOutcomeLikeCpp = AddObjectToRemoveListOutcomeLikeCpp;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddObjectToSwitchListStatusLikeCpp {
     Queued,
@@ -503,6 +505,64 @@ pub struct ConversationsUpdateSummaryLikeCpp {
     pub expired_remove_queued: usize,
     pub missing_or_stale: usize,
     pub not_conversation: usize,
+    pub not_in_world: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SceneObjectUpdateContextLikeCpp {
+    pub creator_exists: bool,
+    pub linked_aura_exists: bool,
+}
+
+impl Default for SceneObjectUpdateContextLikeCpp {
+    fn default() -> Self {
+        Self {
+            creator_exists: true,
+            linked_aura_exists: true,
+        }
+    }
+}
+
+impl SceneObjectUpdateContextLikeCpp {
+    /// Conservative represented default for live `ManagedMap::update`: until real
+    /// `ObjectAccessor::GetUnit` and Aura lookup by spell/cast id exist, do not
+    /// delete map-owned SceneObjects merely because that runtime is absent.
+    pub fn represented_default_for(scene_object: &SceneObject) -> Self {
+        let _has_spell_cast = !scene_object.created_by_spell_cast().is_empty();
+        Self::default()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SceneObjectUpdateStatusLikeCpp {
+    Updated,
+    RemoveQueued,
+    MissingSceneObject,
+    NotSceneObject,
+    NotInWorld,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SceneObjectUpdateOutcomeLikeCpp {
+    pub scene_object_guid: ObjectGuid,
+    pub elapsed_ms: u32,
+    pub status: SceneObjectUpdateStatusLikeCpp,
+    pub owner_guid: Option<ObjectGuid>,
+    pub created_by_spell_cast: Option<ObjectGuid>,
+    pub creator_exists: bool,
+    pub linked_aura_exists: bool,
+    pub world_update_would_run: bool,
+    pub should_be_removed: bool,
+    pub remove_list: Option<RemoveListOutcomeLikeCpp>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct SceneObjectsUpdateSummaryLikeCpp {
+    pub visited: usize,
+    pub updated: usize,
+    pub remove_queued: usize,
+    pub missing_or_stale: usize,
+    pub not_scene_object: usize,
     pub not_in_world: usize,
 }
 
@@ -3453,6 +3513,187 @@ where
                 }
                 ConversationUpdateStatusLikeCpp::NotConversation => summary.not_conversation += 1,
                 ConversationUpdateStatusLikeCpp::NotInWorld => summary.not_in_world += 1,
+            }
+        }
+
+        summary
+    }
+
+    /// Map-owned seam for C++ `SceneObject::Update` under `ObjectUpdater`.
+    ///
+    /// C++ anchors:
+    /// - `SceneObject.cpp:58-71` runs `WorldObject::Update(diff)` and removes the
+    ///   SceneObject when `ShouldBeRemoved()` is true.
+    /// - `SceneObject.cpp:73-90` makes `Remove()` enqueue through
+    ///   `AddObjectToRemoveList()` only when in world, and `ShouldBeRemoved()`
+    ///   depends on `ObjectAccessor::GetUnit(owner)` plus optional Aura lookup by
+    ///   spell/cast id.
+    /// - `GridNotifiers.cpp:258-264,296-301` calls `Update(i_timeDiff)` only for
+    ///   in-world objects and explicitly instantiates `SceneObjectMapType`.
+    ///
+    /// Ownership: source-of-truth is canonical `Map::map_objects`. ObjectAccessor
+    /// Unit resolution and Aura lookup are represented by explicit caller-supplied
+    /// booleans; this helper does not scan maps, create fallback records, fan out,
+    /// send packets, write session/ObjectAccessor mirrors, or drain remove-list.
+    pub fn update_scene_object_like_cpp(
+        &mut self,
+        scene_object_guid: ObjectGuid,
+        elapsed_ms: u32,
+        context: SceneObjectUpdateContextLikeCpp,
+    ) -> SceneObjectUpdateOutcomeLikeCpp {
+        let Some(record) = self.map_object_record(scene_object_guid) else {
+            return SceneObjectUpdateOutcomeLikeCpp {
+                scene_object_guid,
+                elapsed_ms,
+                status: SceneObjectUpdateStatusLikeCpp::MissingSceneObject,
+                owner_guid: None,
+                created_by_spell_cast: None,
+                creator_exists: context.creator_exists,
+                linked_aura_exists: context.linked_aura_exists,
+                world_update_would_run: false,
+                should_be_removed: false,
+                remove_list: None,
+            };
+        };
+
+        if record.kind() != AccessorObjectKind::SceneObject {
+            return SceneObjectUpdateOutcomeLikeCpp {
+                scene_object_guid,
+                elapsed_ms,
+                status: SceneObjectUpdateStatusLikeCpp::NotSceneObject,
+                owner_guid: None,
+                created_by_spell_cast: None,
+                creator_exists: context.creator_exists,
+                linked_aura_exists: context.linked_aura_exists,
+                world_update_would_run: false,
+                should_be_removed: false,
+                remove_list: None,
+            };
+        }
+
+        let Some(scene_object) = record.scene_object() else {
+            return SceneObjectUpdateOutcomeLikeCpp {
+                scene_object_guid,
+                elapsed_ms,
+                status: SceneObjectUpdateStatusLikeCpp::NotSceneObject,
+                owner_guid: None,
+                created_by_spell_cast: None,
+                creator_exists: context.creator_exists,
+                linked_aura_exists: context.linked_aura_exists,
+                world_update_would_run: false,
+                should_be_removed: false,
+                remove_list: None,
+            };
+        };
+
+        let owner_guid = scene_object.owner_guid();
+        let created_by_spell_cast = scene_object.created_by_spell_cast();
+        if !scene_object.world().object().is_in_world() {
+            return SceneObjectUpdateOutcomeLikeCpp {
+                scene_object_guid,
+                elapsed_ms,
+                status: SceneObjectUpdateStatusLikeCpp::NotInWorld,
+                owner_guid: Some(owner_guid),
+                created_by_spell_cast: Some(created_by_spell_cast),
+                creator_exists: context.creator_exists,
+                linked_aura_exists: context.linked_aura_exists,
+                world_update_would_run: false,
+                should_be_removed: false,
+                remove_list: None,
+            };
+        }
+
+        let should_be_removed =
+            scene_object.should_be_removed(context.creator_exists, context.linked_aura_exists);
+
+        if should_be_removed {
+            let remove_list = self.add_object_to_remove_list_like_cpp(scene_object_guid);
+            SceneObjectUpdateOutcomeLikeCpp {
+                scene_object_guid,
+                elapsed_ms,
+                status: SceneObjectUpdateStatusLikeCpp::RemoveQueued,
+                owner_guid: Some(owner_guid),
+                created_by_spell_cast: Some(created_by_spell_cast),
+                creator_exists: context.creator_exists,
+                linked_aura_exists: context.linked_aura_exists,
+                world_update_would_run: true,
+                should_be_removed,
+                remove_list: Some(remove_list),
+            }
+        } else {
+            SceneObjectUpdateOutcomeLikeCpp {
+                scene_object_guid,
+                elapsed_ms,
+                status: SceneObjectUpdateStatusLikeCpp::Updated,
+                owner_guid: Some(owner_guid),
+                created_by_spell_cast: Some(created_by_spell_cast),
+                creator_exists: context.creator_exists,
+                linked_aura_exists: context.linked_aura_exists,
+                world_update_would_run: true,
+                should_be_removed,
+                remove_list: None,
+            }
+        }
+    }
+
+    /// Bounded map-owned live visitation seam for C++ `Map::Update` consuming
+    /// `Trinity::ObjectUpdater` for `SceneObject` records only.
+    ///
+    /// This snapshots canonical typed SceneObject GUIDs from `Map::map_objects`,
+    /// resolves the explicit represented ObjectAccessor/Aura context before the
+    /// per-object helper, and never visits generic/untyped SceneObject records.
+    pub fn update_scene_objects_like_cpp<F>(
+        &mut self,
+        elapsed_ms: u32,
+        mut context_resolver: F,
+    ) -> SceneObjectsUpdateSummaryLikeCpp
+    where
+        F: FnMut(ObjectGuid, &SceneObject) -> SceneObjectUpdateContextLikeCpp,
+    {
+        let scene_object_guids = self
+            .map_objects
+            .iter()
+            .filter_map(|(guid, record)| {
+                (record.kind() == AccessorObjectKind::SceneObject
+                    && record.scene_object().is_some())
+                .then_some(*guid)
+            })
+            .collect::<Vec<_>>();
+
+        let mut summary = SceneObjectsUpdateSummaryLikeCpp::default();
+        for guid in scene_object_guids {
+            summary.visited += 1;
+            let Some(context) = self
+                .map_object_record(guid)
+                .and_then(MapObjectRecord::scene_object)
+                .map(|scene_object| context_resolver(guid, scene_object))
+            else {
+                let outcome = self.update_scene_object_like_cpp(
+                    guid,
+                    elapsed_ms,
+                    SceneObjectUpdateContextLikeCpp::default(),
+                );
+                match outcome.status {
+                    SceneObjectUpdateStatusLikeCpp::MissingSceneObject => {
+                        summary.missing_or_stale += 1;
+                    }
+                    SceneObjectUpdateStatusLikeCpp::NotSceneObject => summary.not_scene_object += 1,
+                    SceneObjectUpdateStatusLikeCpp::NotInWorld => summary.not_in_world += 1,
+                    SceneObjectUpdateStatusLikeCpp::Updated => summary.updated += 1,
+                    SceneObjectUpdateStatusLikeCpp::RemoveQueued => summary.remove_queued += 1,
+                }
+                continue;
+            };
+
+            let outcome = self.update_scene_object_like_cpp(guid, elapsed_ms, context);
+            match outcome.status {
+                SceneObjectUpdateStatusLikeCpp::Updated => summary.updated += 1,
+                SceneObjectUpdateStatusLikeCpp::RemoveQueued => summary.remove_queued += 1,
+                SceneObjectUpdateStatusLikeCpp::MissingSceneObject => {
+                    summary.missing_or_stale += 1;
+                }
+                SceneObjectUpdateStatusLikeCpp::NotSceneObject => summary.not_scene_object += 1,
+                SceneObjectUpdateStatusLikeCpp::NotInWorld => summary.not_in_world += 1,
             }
         }
 
@@ -12547,6 +12788,216 @@ mod tests {
         }
         conversation.set_duration_ms(duration_ms);
         conversation
+    }
+
+    fn test_scene_object_for_update(
+        counter: i64,
+        in_world: bool,
+        created_by_spell_cast: ObjectGuid,
+    ) -> SceneObject {
+        let mut scene_object = SceneObject::new();
+        scene_object
+            .world_mut()
+            .object_mut()
+            .create(guid(HighGuid::SceneObject, counter));
+        scene_object.world_mut().object_mut().set_entry(42);
+        scene_object.world_mut().set_map(571, 7).unwrap();
+        scene_object
+            .world_mut()
+            .relocate(Position::xyz(1.0, 2.0, 3.0));
+        scene_object.set_created_by(guid(HighGuid::Player, counter + 1_000));
+        scene_object.set_created_by_spell_cast(created_by_spell_cast);
+        if in_world {
+            scene_object.world_mut().object_mut().add_to_world();
+        }
+        scene_object
+    }
+
+    #[test]
+    fn scene_object_update_with_creator_and_aura_updates_without_queue_like_cpp() {
+        let mut map = test_map();
+        let scene_object =
+            test_scene_object_for_update(4370101, true, guid(HighGuid::Cast, 4370102));
+        let scene_object_guid = scene_object.world().guid();
+        let owner_guid = scene_object.owner_guid();
+        let cast_guid = scene_object.created_by_spell_cast();
+        map.insert_map_object_record(MapObjectRecord::new_scene_object(scene_object).unwrap())
+            .unwrap();
+
+        let outcome = map.update_scene_object_like_cpp(
+            scene_object_guid,
+            250,
+            SceneObjectUpdateContextLikeCpp {
+                creator_exists: true,
+                linked_aura_exists: true,
+            },
+        );
+
+        assert_eq!(outcome.status, SceneObjectUpdateStatusLikeCpp::Updated);
+        assert_eq!(outcome.owner_guid, Some(owner_guid));
+        assert_eq!(outcome.created_by_spell_cast, Some(cast_guid));
+        assert!(outcome.creator_exists);
+        assert!(outcome.linked_aura_exists);
+        assert!(outcome.world_update_would_run);
+        assert!(!outcome.should_be_removed);
+        assert!(outcome.remove_list.is_none());
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+        assert!(map.map_object_record(scene_object_guid).is_some());
+    }
+
+    #[test]
+    fn scene_object_update_missing_creator_queues_remove_and_preserves_record_like_cpp() {
+        let mut map = test_map();
+        let scene_object = test_scene_object_for_update(4370201, true, ObjectGuid::EMPTY);
+        let scene_object_guid = scene_object.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_scene_object(scene_object).unwrap())
+            .unwrap();
+
+        let outcome = map.update_scene_object_like_cpp(
+            scene_object_guid,
+            250,
+            SceneObjectUpdateContextLikeCpp {
+                creator_exists: false,
+                linked_aura_exists: true,
+            },
+        );
+
+        assert_eq!(outcome.status, SceneObjectUpdateStatusLikeCpp::RemoveQueued);
+        assert!(outcome.world_update_would_run);
+        assert!(outcome.should_be_removed);
+        assert_eq!(outcome.remove_list.unwrap().queued, true);
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 1);
+        assert!(map.map_object_record(scene_object_guid).is_some());
+    }
+
+    #[test]
+    fn scene_object_update_missing_linked_aura_queues_remove_like_cpp() {
+        let mut map = test_map();
+        let scene_object =
+            test_scene_object_for_update(4370301, true, guid(HighGuid::Cast, 4370302));
+        let scene_object_guid = scene_object.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_scene_object(scene_object).unwrap())
+            .unwrap();
+
+        let outcome = map.update_scene_object_like_cpp(
+            scene_object_guid,
+            250,
+            SceneObjectUpdateContextLikeCpp {
+                creator_exists: true,
+                linked_aura_exists: false,
+            },
+        );
+
+        assert_eq!(outcome.status, SceneObjectUpdateStatusLikeCpp::RemoveQueued);
+        assert!(outcome.world_update_would_run);
+        assert!(outcome.should_be_removed);
+        assert_eq!(outcome.remove_list.unwrap().queued, true);
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 1);
+    }
+
+    #[test]
+    fn scene_object_update_not_in_world_returns_no_mutation_or_queue_like_cpp() {
+        let mut map = test_map();
+        let scene_object =
+            test_scene_object_for_update(4370401, false, guid(HighGuid::Cast, 4370402));
+        let scene_object_guid = scene_object.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_scene_object(scene_object).unwrap())
+            .unwrap();
+
+        let outcome = map.update_scene_object_like_cpp(
+            scene_object_guid,
+            250,
+            SceneObjectUpdateContextLikeCpp {
+                creator_exists: false,
+                linked_aura_exists: false,
+            },
+        );
+
+        assert_eq!(outcome.status, SceneObjectUpdateStatusLikeCpp::NotInWorld);
+        assert!(!outcome.world_update_would_run);
+        assert!(!outcome.should_be_removed);
+        assert!(outcome.remove_list.is_none());
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+        assert!(map.map_object_record(scene_object_guid).is_some());
+    }
+
+    #[test]
+    fn scene_object_update_missing_non_scene_or_untyped_creates_no_dummy_or_queue_like_cpp() {
+        let mut map = test_map();
+        let missing_guid = guid(HighGuid::SceneObject, 4370501);
+        let creature = test_creature_for_spawn(43705, 4370502, true);
+        let creature_guid = creature.guid();
+        map.insert_map_object_record(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+        let untyped_scene = world_object_with_counter(HighGuid::SceneObject, 4370503, 571, 7, true);
+        let untyped_scene_guid = untyped_scene.guid();
+        map.insert_map_object(AccessorObjectKind::SceneObject, untyped_scene)
+            .unwrap();
+
+        let context = SceneObjectUpdateContextLikeCpp {
+            creator_exists: false,
+            linked_aura_exists: false,
+        };
+        let missing = map.update_scene_object_like_cpp(missing_guid, 250, context);
+        let non_scene = map.update_scene_object_like_cpp(creature_guid, 250, context);
+        let untyped = map.update_scene_object_like_cpp(untyped_scene_guid, 250, context);
+
+        assert_eq!(
+            missing.status,
+            SceneObjectUpdateStatusLikeCpp::MissingSceneObject
+        );
+        assert_eq!(
+            non_scene.status,
+            SceneObjectUpdateStatusLikeCpp::NotSceneObject
+        );
+        assert_eq!(
+            untyped.status,
+            SceneObjectUpdateStatusLikeCpp::NotSceneObject
+        );
+        assert_eq!(missing.remove_list, None);
+        assert_eq!(non_scene.remove_list, None);
+        assert_eq!(untyped.remove_list, None);
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+        assert_eq!(map.map_object_count(), 2);
+        assert!(map.map_object_record(missing_guid).is_none());
+        assert!(map.map_object_record(creature_guid).is_some());
+        assert!(map.map_object_record(untyped_scene_guid).is_some());
+    }
+
+    #[test]
+    fn scene_objects_update_summary_snapshots_only_typed_scene_objects_like_cpp() {
+        let mut map = test_map();
+        let typed_scene = test_scene_object_for_update(4370601, true, ObjectGuid::EMPTY);
+        let typed_scene_guid = typed_scene.world().guid();
+        map.insert_map_object_record(MapObjectRecord::new_scene_object(typed_scene).unwrap())
+            .unwrap();
+        let untyped_scene = world_object_with_counter(HighGuid::SceneObject, 4370602, 571, 7, true);
+        map.insert_map_object(AccessorObjectKind::SceneObject, untyped_scene)
+            .unwrap();
+        let creature = test_creature_for_spawn(43706, 4370603, true);
+        map.insert_map_object_record(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+
+        let summary = map.update_scene_objects_like_cpp(250, |_guid, scene_object| {
+            assert_eq!(scene_object.world().guid(), typed_scene_guid);
+            SceneObjectUpdateContextLikeCpp {
+                creator_exists: true,
+                linked_aura_exists: true,
+            }
+        });
+
+        assert_eq!(
+            summary,
+            SceneObjectsUpdateSummaryLikeCpp {
+                visited: 1,
+                updated: 1,
+                remove_queued: 0,
+                missing_or_stale: 0,
+                not_scene_object: 0,
+                not_in_world: 0,
+            }
+        );
+        assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
     }
 
     #[test]

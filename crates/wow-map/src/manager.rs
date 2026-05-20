@@ -12,7 +12,7 @@ use crate::MapKey;
 use crate::map::{
     AreaTriggersUpdateSummaryLikeCpp, ConversationsUpdateSummaryLikeCpp,
     CreatureUpdateSummaryLikeCpp, DynamicObjectsUpdateSummaryLikeCpp, Map, NoopGridLifecycle,
-    NoopTerrainGridLoader,
+    NoopTerrainGridLoader, SceneObjectUpdateContextLikeCpp, SceneObjectsUpdateSummaryLikeCpp,
 };
 use crate::spawn::Difficulty;
 use wow_core::GameTime;
@@ -149,6 +149,7 @@ pub struct ManagedMap {
     last_creatures_update_summary: CreatureUpdateSummaryLikeCpp,
     last_area_triggers_update_summary: AreaTriggersUpdateSummaryLikeCpp,
     last_conversations_update_summary: ConversationsUpdateSummaryLikeCpp,
+    last_scene_objects_update_summary: SceneObjectsUpdateSummaryLikeCpp,
     unload_all_calls: u32,
 }
 
@@ -177,6 +178,7 @@ impl ManagedMap {
             last_creatures_update_summary: CreatureUpdateSummaryLikeCpp::default(),
             last_area_triggers_update_summary: AreaTriggersUpdateSummaryLikeCpp::default(),
             last_conversations_update_summary: ConversationsUpdateSummaryLikeCpp::default(),
+            last_scene_objects_update_summary: SceneObjectsUpdateSummaryLikeCpp::default(),
             unload_all_calls: 0,
         }
     }
@@ -245,6 +247,10 @@ impl ManagedMap {
         self.last_conversations_update_summary
     }
 
+    pub const fn last_scene_objects_update_summary(&self) -> SceneObjectsUpdateSummaryLikeCpp {
+        self.last_scene_objects_update_summary
+    }
+
     pub const fn unload_all_calls(&self) -> u32 {
         self.unload_all_calls
     }
@@ -284,6 +290,16 @@ impl ManagedMap {
         // TypeContainerVisitor ordering/cell traversal, real scripts,
         // SendObjectUpdates and fanout remain explicit gaps.
         self.last_conversations_update_summary = self.map.update_conversations_like_cpp(diff_ms);
+        // Partial C++ ObjectUpdater seam: visit represented map-owned
+        // SceneObject records after Conversation for this Rust slice. Real
+        // ObjectAccessor::GetUnit and Aura lookup by spell/cast id are not present
+        // yet, so the live manager default is conservative and does not remove
+        // SceneObjects merely because that runtime is absent.
+        self.last_scene_objects_update_summary =
+            self.map
+                .update_scene_objects_like_cpp(diff_ms, |_guid, scene_object| {
+                    SceneObjectUpdateContextLikeCpp::represented_default_for(scene_object)
+                });
     }
 
     fn delayed_update(&mut self, diff_ms: u32) {
@@ -999,6 +1015,7 @@ mod tests {
     use wow_core::{ObjectGuid, Position, guid::HighGuid};
     use wow_entities::{
         AreaTrigger, Conversation, Creature, DynamicObject, GameObject, MapObjectRecord,
+        SceneObject,
     };
 
     #[test]
@@ -1671,6 +1688,84 @@ mod tests {
     }
 
     #[test]
+    fn map_manager_update_visits_live_scene_object_without_removal_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let scene_object_guid = insert_scene_object_for_update(
+            &mut manager,
+            4370101,
+            true,
+            Some(guid(HighGuid::Cast, 4370102, 1, 0)),
+        );
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        assert_eq!(managed_map.update_calls(), &[1]);
+        assert_eq!(managed_map.delayed_update_calls(), &[1]);
+        assert_eq!(managed_map.map().objects_to_remove_count_like_cpp(), 0);
+        assert_eq!(
+            managed_map.last_scene_objects_update_summary(),
+            SceneObjectsUpdateSummaryLikeCpp {
+                visited: 1,
+                updated: 1,
+                remove_queued: 0,
+                missing_or_stale: 0,
+                not_scene_object: 0,
+                not_in_world: 0,
+            }
+        );
+        assert!(
+            managed_map
+                .map()
+                .map_object_record(scene_object_guid)
+                .unwrap()
+                .scene_object()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn map_manager_update_queues_scene_object_removal_then_delayed_update_drains_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let scene_object_guid =
+            insert_scene_object_for_update(&mut manager, 4370201, true, ObjectGuid::EMPTY.into());
+        {
+            let managed_map = manager.find_map_mut(1, 0).unwrap();
+            let summary =
+                managed_map
+                    .map_mut()
+                    .update_scene_objects_like_cpp(1, |_guid, _scene| {
+                        SceneObjectUpdateContextLikeCpp {
+                            creator_exists: false,
+                            linked_aura_exists: true,
+                        }
+                    });
+            assert_eq!(summary.visited, 1);
+            assert_eq!(summary.remove_queued, 1);
+            assert_eq!(managed_map.map().objects_to_remove_count_like_cpp(), 1);
+            assert!(
+                managed_map
+                    .map()
+                    .map_object_record(scene_object_guid)
+                    .is_some()
+            );
+        }
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        assert_eq!(managed_map.map().objects_to_remove_count_like_cpp(), 0);
+        assert!(
+            managed_map
+                .map()
+                .map_object_record(scene_object_guid)
+                .is_none()
+        );
+    }
+
+    #[test]
     fn update_destroys_unloadable_maps_before_delayed_update() {
         let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
         manager.create_map_entry(
@@ -1889,6 +1984,39 @@ mod tests {
             map.insert_map_object_record(record).unwrap();
         }
         conversation_guid
+    }
+
+    fn insert_scene_object_for_update(
+        manager: &mut MapManager,
+        counter: i64,
+        in_world: bool,
+        created_by_spell_cast: Option<ObjectGuid>,
+    ) -> ObjectGuid {
+        let scene_object_guid = guid(HighGuid::SceneObject, counter, 1, 0);
+        let mut scene_object = SceneObject::new();
+        scene_object
+            .world_mut()
+            .object_mut()
+            .create(scene_object_guid);
+        scene_object.world_mut().set_map(1, 0).unwrap();
+        scene_object
+            .world_mut()
+            .relocate(Position::xyz(14.0, 24.0, 34.0));
+        scene_object.set_created_by(guid(HighGuid::Player, counter + 1000, 1, 0));
+        if let Some(cast_guid) = created_by_spell_cast {
+            scene_object.set_created_by_spell_cast(cast_guid);
+        }
+        if in_world {
+            scene_object.world_mut().object_mut().add_to_world();
+        }
+        let record = MapObjectRecord::new_scene_object(scene_object).unwrap();
+        let map = manager.find_map_mut(1, 0).unwrap().map_mut();
+        if in_world {
+            map.add_map_object_record_to_map_like_cpp(record).unwrap();
+        } else {
+            map.insert_map_object_record(record).unwrap();
+        }
+        scene_object_guid
     }
 
     fn world_entry(map_id: u32) -> CreateMapEntryContext {
