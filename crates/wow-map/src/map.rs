@@ -36,7 +36,8 @@ use wow_core::{ObjectGuid, ObjectGuidGenerator, Position, guid::HighGuid};
 use wow_entities::{
     AccessorObjectKind, AreaTrigger, CombatBeginContextLikeCpp, CombatSubsystem, Conversation,
     Corpse, Creature, CreatureRuntimePlan, CreatureRuntimeUpdateContext, DynamicObject,
-    DynamicObjectType, GAMEOBJECT_TYPE_CHEST, GameObject,
+    DynamicObjectType, GAMEOBJECT_TYPE_CHEST, GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT,
+    GAMEOBJECT_TYPE_TRANSPORT, GameObject,
     GameObjectUpdateOutcomeLikeCpp as EntityGameObjectUpdateOutcomeLikeCpp,
     GameObjectUpdateStatusLikeCpp as EntityGameObjectUpdateStatusLikeCpp, GoState, INVALID_HEIGHT,
     LineOfSightQuery, LootState, MAX_VISIBILITY_DISTANCE, MapBindingError, MapObjectRecord,
@@ -238,6 +239,37 @@ pub struct GameObjectSetDisplayIdOutcomeLikeCpp {
     pub previous_display_id: Option<i32>,
     pub new_display_id: Option<i32>,
     pub update_model: Option<GameObjectUpdateModelOutcomeLikeCpp>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameObjectSetGoStateStatusLikeCpp {
+    Updated,
+    MissingGameObject,
+    WrongKind,
+}
+
+/// Represented map-owned result for C++ `GameObject::SetGoState(GOState)`.
+///
+/// C++ anchor: `GameObject.cpp:3771-3793`. This preserves statement order over
+/// canonical exact typed `Map::map_objects` GameObject records: capture old state,
+/// write `GameObjectData::State`, then run only the represented `m_model &&
+/// !IsTransport() && IsInWorld()` collision branch. AI/type implementation hooks,
+/// real `GameObjectModel`, BIH/LOS, ObjectAccessor/session fanout, scripts and DB
+/// inference remain out of scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameObjectSetGoStateOutcomeLikeCpp {
+    pub guid: ObjectGuid,
+    pub status: GameObjectSetGoStateStatusLikeCpp,
+    pub previous_state: Option<i8>,
+    pub new_state: Option<i8>,
+    pub represented_model_present: bool,
+    pub transport_type: bool,
+    pub in_world_for_collision_branch: Option<bool>,
+    pub collision_enable: Option<GameObjectCollisionEnableOutcomeLikeCpp>,
+}
+
+fn gameobject_type_is_transport_like_cpp(type_id: i8) -> bool {
+    type_id == GAMEOBJECT_TYPE_TRANSPORT as i8 || type_id == GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT as i8
 }
 
 /// Represented result for C++ `DynamicMapTree::update(t_diff)`.
@@ -1801,6 +1833,101 @@ where
             previous_display_id: Some(previous_display_id),
             new_display_id: Some(new_display_id),
             update_model: Some(update_model),
+        }
+    }
+
+    /// Represents C++ `GameObject::SetGoState(GOState)` over canonical map-owned state.
+    ///
+    /// C++ anchor: `GameObject.cpp:3771-3793`. Source-of-truth is
+    /// `Map::map_objects`; this mutates only exact typed
+    /// `MapObjectRecord::GameObject` records. The state write occurs before the
+    /// represented `m_model && !IsTransport()` not-in-world early return, matching
+    /// C++ statement order. Collision is never inferred from display/template/DB.
+    pub fn set_gameobject_go_state_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        state: GoState,
+    ) -> GameObjectSetGoStateOutcomeLikeCpp {
+        let Some(record) = self.map_objects.get(&guid) else {
+            return GameObjectSetGoStateOutcomeLikeCpp {
+                guid,
+                status: GameObjectSetGoStateStatusLikeCpp::MissingGameObject,
+                previous_state: None,
+                new_state: None,
+                represented_model_present: false,
+                transport_type: false,
+                in_world_for_collision_branch: None,
+                collision_enable: None,
+            };
+        };
+
+        if record.kind() != AccessorObjectKind::GameObject || record.game_object().is_none() {
+            return GameObjectSetGoStateOutcomeLikeCpp {
+                guid,
+                status: GameObjectSetGoStateStatusLikeCpp::WrongKind,
+                previous_state: None,
+                new_state: None,
+                represented_model_present: false,
+                transport_type: false,
+                in_world_for_collision_branch: None,
+                collision_enable: None,
+            };
+        }
+
+        let Some(game_object) = self
+            .map_objects
+            .get_mut(&guid)
+            .and_then(MapObjectRecord::game_object_mut)
+        else {
+            return GameObjectSetGoStateOutcomeLikeCpp {
+                guid,
+                status: GameObjectSetGoStateStatusLikeCpp::WrongKind,
+                previous_state: None,
+                new_state: None,
+                represented_model_present: false,
+                transport_type: false,
+                in_world_for_collision_branch: None,
+                collision_enable: None,
+            };
+        };
+
+        let previous_state = game_object.data().state;
+        let represented_model_present = game_object.has_represented_gameobject_model_like_cpp();
+        let transport_type = gameobject_type_is_transport_like_cpp(game_object.data().type_id);
+        game_object.set_go_state(state);
+        let new_state = game_object.data().state;
+
+        let (in_world_for_collision_branch, collision_enable) =
+            if represented_model_present && !transport_type {
+                let in_world = game_object.world().object().is_in_world();
+                if in_world {
+                    let collision = game_object
+                        .enable_represented_gameobject_collision_like_cpp(state == GoState::Ready);
+                    (
+                        Some(true),
+                        Some(GameObjectCollisionEnableOutcomeLikeCpp {
+                            requested_enable: collision.requested_enable,
+                            represented_model_present: collision.represented_model_present,
+                            previous_collision_enabled: collision.previous_collision_enabled,
+                            new_collision_enabled: collision.new_collision_enabled,
+                        }),
+                    )
+                } else {
+                    (Some(false), None)
+                }
+            } else {
+                (None, None)
+            };
+
+        GameObjectSetGoStateOutcomeLikeCpp {
+            guid,
+            status: GameObjectSetGoStateStatusLikeCpp::Updated,
+            previous_state: Some(previous_state),
+            new_state: Some(new_state),
+            represented_model_present,
+            transport_type,
+            in_world_for_collision_branch,
+            collision_enable,
         }
     }
 
@@ -10100,6 +10227,202 @@ mod tests {
         assert_eq!(gameobject.data().display_id, 999);
         assert!(!gameobject.has_represented_gameobject_model_like_cpp());
         assert_eq!(gameobject.data().flags & GO_FLAG_MAP_OBJECT, 0);
+    }
+
+    #[test]
+    fn gameobject_set_go_state_ready_enables_collision_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = test_gameobject_for_spawn(45501, 4550101);
+        let guid = gameobject.world().guid();
+        gameobject.apply_represented_gameobject_model_creation_like_cpp(true, true);
+        map.insert_map_object_record(MapObjectRecord::new_game_object(gameobject).unwrap())
+            .unwrap();
+
+        let outcome = map.set_gameobject_go_state_like_cpp(guid, GoState::Ready);
+
+        assert_eq!(outcome.status, GameObjectSetGoStateStatusLikeCpp::Updated);
+        assert_eq!(outcome.previous_state, Some(GoState::Active as i8));
+        assert_eq!(outcome.new_state, Some(GoState::Ready as i8));
+        assert!(outcome.represented_model_present);
+        assert!(!outcome.transport_type);
+        assert_eq!(outcome.in_world_for_collision_branch, Some(true));
+        let collision = outcome.collision_enable.unwrap();
+        assert_eq!(collision.requested_enable, true);
+        assert_eq!(collision.previous_collision_enabled, None);
+        assert_eq!(collision.new_collision_enabled, Some(true));
+        let gameobject = map
+            .map_object_record(guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+        assert_eq!(gameobject.data().state, GoState::Ready as i8);
+        assert_eq!(
+            gameobject.represented_gameobject_model_collision_enabled_like_cpp(),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn gameobject_set_go_state_active_disables_collision_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = test_gameobject_for_spawn(45502, 4550201);
+        let guid = gameobject.world().guid();
+        gameobject.set_go_state(GoState::Ready);
+        gameobject.apply_represented_gameobject_model_creation_like_cpp(true, true);
+        gameobject.enable_represented_gameobject_collision_like_cpp(true);
+        map.insert_map_object_record(MapObjectRecord::new_game_object(gameobject).unwrap())
+            .unwrap();
+
+        let outcome = map.set_gameobject_go_state_like_cpp(guid, GoState::Active);
+
+        assert_eq!(outcome.status, GameObjectSetGoStateStatusLikeCpp::Updated);
+        assert_eq!(outcome.previous_state, Some(GoState::Ready as i8));
+        assert_eq!(outcome.new_state, Some(GoState::Active as i8));
+        assert_eq!(outcome.in_world_for_collision_branch, Some(true));
+        let collision = outcome.collision_enable.unwrap();
+        assert_eq!(collision.requested_enable, false);
+        assert_eq!(collision.previous_collision_enabled, Some(true));
+        assert_eq!(collision.new_collision_enabled, Some(false));
+        let gameobject = map
+            .map_object_record(guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+        assert_eq!(gameobject.data().state, GoState::Active as i8);
+        assert_eq!(
+            gameobject.represented_gameobject_model_collision_enabled_like_cpp(),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn gameobject_set_go_state_not_in_world_writes_state_without_collision_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = test_gameobject_for_spawn(45503, 4550301);
+        let guid = gameobject.world().guid();
+        gameobject.apply_represented_gameobject_model_creation_like_cpp(true, true);
+        gameobject.enable_represented_gameobject_collision_like_cpp(true);
+        gameobject.world_mut().object_mut().remove_from_world();
+        map.insert_map_object_record(MapObjectRecord::new_game_object(gameobject).unwrap())
+            .unwrap();
+
+        let outcome = map.set_gameobject_go_state_like_cpp(guid, GoState::Ready);
+
+        assert_eq!(outcome.status, GameObjectSetGoStateStatusLikeCpp::Updated);
+        assert_eq!(outcome.previous_state, Some(GoState::Active as i8));
+        assert_eq!(outcome.new_state, Some(GoState::Ready as i8));
+        assert!(outcome.represented_model_present);
+        assert!(!outcome.transport_type);
+        assert_eq!(outcome.in_world_for_collision_branch, Some(false));
+        assert!(outcome.collision_enable.is_none());
+        let gameobject = map
+            .map_object_record(guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+        assert_eq!(gameobject.data().state, GoState::Ready as i8);
+        assert_eq!(
+            gameobject.represented_gameobject_model_collision_enabled_like_cpp(),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn gameobject_set_go_state_transport_type_writes_state_without_collision_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = test_gameobject_for_spawn(45504, 4550401);
+        let guid = gameobject.world().guid();
+        gameobject.set_go_type(GAMEOBJECT_TYPE_TRANSPORT as u8);
+        gameobject.apply_represented_gameobject_model_creation_like_cpp(true, true);
+        gameobject.enable_represented_gameobject_collision_like_cpp(false);
+        map.insert_map_object_record(MapObjectRecord::new_game_object(gameobject).unwrap())
+            .unwrap();
+
+        let outcome = map.set_gameobject_go_state_like_cpp(guid, GoState::Ready);
+
+        assert_eq!(outcome.status, GameObjectSetGoStateStatusLikeCpp::Updated);
+        assert_eq!(outcome.previous_state, Some(GoState::Active as i8));
+        assert_eq!(outcome.new_state, Some(GoState::Ready as i8));
+        assert!(outcome.represented_model_present);
+        assert!(outcome.transport_type);
+        assert_eq!(outcome.in_world_for_collision_branch, None);
+        assert!(outcome.collision_enable.is_none());
+        let gameobject = map
+            .map_object_record(guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+        assert_eq!(gameobject.data().state, GoState::Ready as i8);
+        assert_eq!(
+            gameobject.represented_gameobject_model_collision_enabled_like_cpp(),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn gameobject_set_go_state_map_obj_transport_writes_state_without_collision_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = test_gameobject_for_spawn(45506, 4550601);
+        let guid = gameobject.world().guid();
+        gameobject.set_go_type(GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT);
+        gameobject.apply_represented_gameobject_model_creation_like_cpp(true, true);
+        gameobject.enable_represented_gameobject_collision_like_cpp(true);
+        map.insert_map_object_record(MapObjectRecord::new_game_object(gameobject).unwrap())
+            .unwrap();
+
+        let outcome = map.set_gameobject_go_state_like_cpp(guid, GoState::Ready);
+
+        assert_eq!(outcome.status, GameObjectSetGoStateStatusLikeCpp::Updated);
+        assert_eq!(outcome.previous_state, Some(GoState::Active as i8));
+        assert_eq!(outcome.new_state, Some(GoState::Ready as i8));
+        assert!(outcome.represented_model_present);
+        assert!(outcome.transport_type);
+        assert_eq!(outcome.in_world_for_collision_branch, None);
+        assert!(outcome.collision_enable.is_none());
+        let gameobject = map
+            .map_object_record(guid)
+            .and_then(MapObjectRecord::game_object)
+            .unwrap();
+        assert_eq!(gameobject.data().state, GoState::Ready as i8);
+        assert_eq!(
+            gameobject.data().type_id,
+            GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT as i8
+        );
+        assert_eq!(
+            gameobject.represented_gameobject_model_collision_enabled_like_cpp(),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn gameobject_set_go_state_missing_wrong_kind_and_untyped_are_no_mutation_like_cpp() {
+        let mut map = test_map();
+        let missing_guid = guid(HighGuid::GameObject, 4550501);
+        let creature = test_creature_for_spawn(45505, 4550502, true);
+        let creature_guid = creature.guid();
+        map.insert_map_object_record(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+        let untyped = world_object_with_counter(HighGuid::GameObject, 4550503, 571, 7, true);
+        let untyped_guid = untyped.guid();
+        map.insert_map_object(AccessorObjectKind::GameObject, untyped)
+            .unwrap();
+
+        let missing = map.set_gameobject_go_state_like_cpp(missing_guid, GoState::Ready);
+        let wrong_kind = map.set_gameobject_go_state_like_cpp(creature_guid, GoState::Ready);
+        let untyped = map.set_gameobject_go_state_like_cpp(untyped_guid, GoState::Ready);
+
+        assert_eq!(
+            missing.status,
+            GameObjectSetGoStateStatusLikeCpp::MissingGameObject
+        );
+        assert_eq!(
+            wrong_kind.status,
+            GameObjectSetGoStateStatusLikeCpp::WrongKind
+        );
+        assert_eq!(untyped.status, GameObjectSetGoStateStatusLikeCpp::WrongKind);
+        assert_eq!(missing.previous_state, None);
+        assert_eq!(wrong_kind.previous_state, None);
+        assert_eq!(untyped.previous_state, None);
+        assert!(missing.collision_enable.is_none());
+        assert!(wrong_kind.collision_enable.is_none());
+        assert!(untyped.collision_enable.is_none());
+        assert_eq!(map.update_dynamic_tree_like_cpp(250).unbalanced_after, 0);
     }
 
     #[test]

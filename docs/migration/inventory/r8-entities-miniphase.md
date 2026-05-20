@@ -6,6 +6,11 @@
 ## Pending Review Tasks
 
 ## Closed Tasks
+- [x] **#NEXT.R8.ENTITIES.455** represented `GameObject::SetGoState` -> `EnableCollision` map-owned caller seam.
+  Status: represented-complete; review `APROBADO` after one bounded correction; CI `CI_OK`; validation OK; committed locally at `current #455 HEAD`; no push/install/restart.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:3771-3793`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:2065-2072`.
+  Rust targets: `crates/wow-map/src/map.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: `Map::set_gameobject_go_state_like_cpp` consumes only canonical exact typed `MapObjectRecord::GameObject` records, writes represented `GameObjectData::State` through `GameObject::set_go_state` before C++ early-return points, and records represented `EnableCollision(state == GO_STATE_READY)` evidence only when explicit model evidence exists, the object is in-world, and C++ `IsTransport()` is false (`GAMEOBJECT_TYPE_TRANSPORT` and `GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT` both skip collision). Missing, wrong-kind, and generic/untyped GameObject records are explicit no-mutation outcomes; not-in-world typed records still receive the State write while preserving prior collision evidence. Remaining gaps: no AI `OnStateChanged`, no `m_goTypeImpl` hooks, no real `GameObjectModel`, geometry/model-store hydration, collision/BIH/LOS/intersection/height queries, live callers outside this map-owned seam, Transport delayed-add runtime, ObjectAccessor/session/fanout/scripts/AI/zone hooks, install/restart/push, or full runtime state-change parity.
 - [x] **#NEXT.R8.ENTITIES.454** represented `GameObject::SetDisplayId` -> `UpdateModel` map-owned caller seam.
   Status: represented-complete; review `APROBADO`; CI `CI_OK`; validation OK; committed locally at `current #454 HEAD`; no push/install/restart.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:3817-3820`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:3867-3880`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:4394-4399`.
