@@ -289,7 +289,7 @@ pub use spell_db2::{
     SpellTargetRestrictionsStore, SpellTotemsEntry, SpellTotemsStore, SpellVisualEffectNameEntry,
     SpellVisualEffectNameStore, SpellVisualEntry, SpellVisualKitEntry, SpellVisualKitStore,
     SpellVisualMissileEntry, SpellVisualMissileStore, SpellVisualStore, SpellXSpellVisualEntry,
-    SpellXSpellVisualStore,
+    SpellXSpellVisualStore, spell_duration_ms_like_cpp, spell_effect_radius_like_cpp,
 };
 pub use spell_item_enchantment::{SpellItemEnchantmentEntry, SpellItemEnchantmentStore};
 pub use terrain_swap::{TerrainSwapInfo, TerrainSwapStore, load_terrain_swaps};

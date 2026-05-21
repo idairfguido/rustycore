@@ -93,6 +93,8 @@ pub struct SessionResources {
     pub skill_line_store: Option<Arc<wow_data::SkillLineStore>>,
     pub spell_store: Option<Arc<wow_data::SpellStore>>,
     pub spell_misc_store: Option<Arc<wow_data::SpellMiscStore>>,
+    pub spell_duration_store: Option<Arc<wow_data::SpellDurationStore>>,
+    pub spell_radius_store: Option<Arc<wow_data::SpellRadiusStore>>,
     pub spell_range_store: Option<Arc<wow_data::SpellRangeStore>>,
     pub area_table_store: Option<Arc<wow_data::AreaTableStore>>,
     pub fishing_base_skill_store: Option<Arc<wow_data::FishingBaseSkillStoreLikeCpp>>,

@@ -26,6 +26,7 @@ pub mod spell_effect_types {
     pub const SPELL_EFFECT_HEAL: u32 = 6;
     pub const SPELL_EFFECT_PERSISTENT_AREA_AURA: u32 = 27;
     pub const SPELL_EFFECT_APPLY_AURA: u32 = 35;
+    pub const SPELL_EFFECT_ADD_FARSIGHT: u32 = 72;
     pub const SPELL_EFFECT_APPLY_AREA_AURA_PARTY: u32 = 35;
     pub const SPELL_EFFECT_APPLY_AREA_AURA_RAID: u32 = 65;
     pub const SPELL_EFFECT_APPLY_AREA_AURA_PET: u32 = 119;
@@ -82,6 +83,8 @@ pub struct SpellEffectInfo {
     pub effect_base_points: i32,
     pub effect_misc_value_1: i32,
     pub effect_misc_value_2: i32,
+    /// C++ `SpellEffectEntry::EffectRadiusIndex[0]` / TargetA radius index.
+    pub effect_radius_index_1: u32,
     pub chain_targets: i32,
     pub implicit_target_1: u32,
     pub implicit_target_2: u32,
@@ -250,6 +253,7 @@ SELECT
     CAST(COALESCE(se.EffectAura, 0) AS SIGNED) as effect_aura,
     CAST(COALESCE(se.EffectMiscValue1, 0) AS SIGNED) as effect_misc_value_1,
     CAST(COALESCE(se.EffectMiscValue2, 0) AS SIGNED) as effect_misc_value_2,
+    CAST(COALESCE(se.EffectRadiusIndex1, 0) AS UNSIGNED) as effect_radius_index_1,
     CAST(COALESCE(se.EffectIndex, 0) AS UNSIGNED) as effect_index,
     CAST(COALESCE(se.EffectChainTargets, 0) AS SIGNED) as effect_chain_targets,
     CAST(COALESCE(se.ImplicitTarget1, 0) AS UNSIGNED) as implicit_target_1,
@@ -274,10 +278,11 @@ ORDER BY sm.ID, se.EffectIndex
                 let aura_type: Option<i32> = result.try_read(7);
                 let effect_misc_value_1: i32 = result.try_read(8).unwrap_or(0);
                 let effect_misc_value_2: i32 = result.try_read(9).unwrap_or(0);
-                let effect_index: u32 = result.try_read(10).unwrap_or(0);
-                let effect_chain_targets: i32 = result.try_read(11).unwrap_or(0);
-                let implicit_target_1: u32 = result.try_read(12).unwrap_or(0);
-                let implicit_target_2: u32 = result.try_read(13).unwrap_or(0);
+                let effect_radius_index_1: u32 = result.try_read(10).unwrap_or(0);
+                let effect_index: u32 = result.try_read(11).unwrap_or(0);
+                let effect_chain_targets: i32 = result.try_read(12).unwrap_or(0);
+                let implicit_target_1: u32 = result.try_read(13).unwrap_or(0);
+                let implicit_target_2: u32 = result.try_read(14).unwrap_or(0);
 
                 let spell_info = store.spells.entry(spell_id).or_insert_with(|| SpellInfo {
                     spell_id,
@@ -300,6 +305,7 @@ ORDER BY sm.ID, se.EffectIndex
                         effect_base_points,
                         effect_misc_value_1,
                         effect_misc_value_2,
+                        effect_radius_index_1,
                         chain_targets: effect_chain_targets,
                         implicit_target_1,
                         implicit_target_2,

@@ -8084,6 +8084,11 @@ mod tests {
         session.active_spell_cast = Some(SpellCastState {
             spell_id: 133,
             target_guid: player_guid,
+            target_data: wow_packet::packets::spell::SpellTargetData {
+                flags: 0x2,
+                unit: player_guid,
+                ..Default::default()
+            },
             cast_id: ObjectGuid::create_world_object(HighGuid::Cast, 0, 1, 0, 0, 1, 7),
             cast_start_time: std::time::Instant::now(),
             cast_time_ms: 30_000,
@@ -9509,6 +9514,7 @@ mod tests {
                     effect_base_points: 75,
                     effect_misc_value_1: 333,
                     effect_misc_value_2: 0,
+                    effect_radius_index_1: 0,
                     chain_targets: 0,
                     implicit_target_1: 0,
                     implicit_target_2: 0,

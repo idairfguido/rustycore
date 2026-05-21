@@ -48,10 +48,12 @@ use wow_data::{
     PlayerConditionCountLikeCpp, PlayerConditionPartyStatusLikeCpp,
     PlayerConditionQuestKillLikeCpp, PlayerConditionReputationLikeCpp, PlayerConditionSkillLikeCpp,
     PlayerConditionStore, PlayerStatsStore, RandPropPointsStore, SkillLineStore, SkillStore,
-    SpellItemEnchantmentStore, SpellMiscStore, SpellRangeStore, SpellStore, SummonPropertiesEntry,
-    VEHICLE_SEAT_FLAG_CAN_ATTACK, VehicleAccessoryStoreLikeCpp, VehicleSeatStore, VehicleStore,
-    VehicleTemplateStoreLikeCpp, is_player_meeting_condition_like_cpp,
+    SpellDurationStore, SpellItemEnchantmentStore, SpellMiscStore, SpellRadiusStore,
+    SpellRangeStore, SpellStore, SummonPropertiesEntry, VEHICLE_SEAT_FLAG_CAN_ATTACK,
+    VehicleAccessoryStoreLikeCpp, VehicleSeatStore, VehicleStore, VehicleTemplateStoreLikeCpp,
+    is_player_meeting_condition_like_cpp,
     progression_rewards::{ContentTuningStore, FactionStore, FactionTemplateStore},
+    spell_duration_ms_like_cpp, spell_effect_radius_like_cpp,
 };
 use wow_database::{
     CharStatements, CharacterDatabase, LoginDatabase, PreparedStatement, SqlTransaction,
@@ -82,6 +84,7 @@ use wow_packet::packets::item::{
     ItemPushResult, ItemPushResultDisplayType, ItemTimeUpdate,
 };
 use wow_packet::packets::misc::{AccountMount, AccountMountUpdate, BuyFailed, SellResponse};
+use wow_packet::packets::spell::SpellTargetData;
 use wow_recastdetour::PathQueryFilterContext;
 
 const PLAYER_FLAGS_UBER_LIKE_CPP: u32 = 0x0008_0000;
@@ -1227,6 +1230,8 @@ pub struct SpellCastState {
     pub spell_id: i32,
     /// Target GUID for the spell.
     pub target_guid: ObjectGuid,
+    /// Full target data from SpellCastTargets; preserves DstLocation for delayed completion.
+    pub target_data: SpellTargetData,
     /// Client's cast ID (for SMSG_SPELL_GO echo).
     pub cast_id: ObjectGuid,
     /// When the cast started (Instant::now()).
@@ -1732,6 +1737,8 @@ pub struct WorldSession {
     /// Spell store (metadata for all known spells: cast time, cooldown, effects, etc.)
     pub spell_store: Option<Arc<SpellStore>>,
     spell_misc_store: Option<Arc<SpellMiscStore>>,
+    spell_duration_store: Option<Arc<SpellDurationStore>>,
+    spell_radius_store: Option<Arc<SpellRadiusStore>>,
     spell_range_store: Option<Arc<SpellRangeStore>>,
     /// Currently active spell cast (if any). Set when a cast starts, cleared when it completes.
     pub(crate) active_spell_cast: Option<SpellCastState>,
@@ -2408,6 +2415,8 @@ impl WorldSession {
             visible_auras: HashMap::new(),
             spell_store: None,
             spell_misc_store: None,
+            spell_duration_store: None,
+            spell_radius_store: None,
             spell_range_store: None,
             quest_store: None,
             quest_xp_store: None,
@@ -6404,6 +6413,14 @@ impl WorldSession {
 
     pub fn set_spell_misc_store(&mut self, store: Arc<SpellMiscStore>) {
         self.spell_misc_store = Some(store);
+    }
+
+    pub fn set_spell_duration_store(&mut self, store: Arc<SpellDurationStore>) {
+        self.spell_duration_store = Some(store);
+    }
+
+    pub fn set_spell_radius_store(&mut self, store: Arc<SpellRadiusStore>) {
+        self.spell_radius_store = Some(store);
     }
 
     pub(crate) fn spell_misc_store(&self) -> Option<&Arc<SpellMiscStore>> {
@@ -14777,6 +14794,7 @@ impl WorldSession {
         if elapsed_ms >= cast_state.cast_time_ms {
             let spell_id = cast_state.spell_id;
             let target = cast_state.target_guid;
+            let target_data = cast_state.target_data.clone();
             let cast_id = cast_state.cast_id;
             let spell_visual = cast_state.spell_visual.clone();
 
@@ -14785,7 +14803,13 @@ impl WorldSession {
 
             // ← AQUÍ: Ejecutar spell
             if let Err(e) = self
-                .execute_spell_with_visual(spell_id, target, cast_id, spell_visual)
+                .execute_spell_with_visual_and_target_data(
+                    spell_id,
+                    target,
+                    cast_id,
+                    spell_visual,
+                    target_data,
+                )
                 .await
             {
                 warn!(account = self.account_id, "Spell execution failed: {}", e);
@@ -15416,6 +15440,27 @@ impl WorldSession {
         .await
     }
 
+    pub async fn execute_spell_with_target_data(
+        &mut self,
+        spell_id: i32,
+        target_guid: ObjectGuid,
+        target_data: SpellTargetData,
+    ) -> Result<(), &'static str> {
+        use wow_packet::packets::spell::SpellCastVisual;
+
+        self.execute_spell_with_visual_and_target_data(
+            spell_id,
+            target_guid,
+            ObjectGuid::EMPTY,
+            SpellCastVisual {
+                spell_visual_id: 0,
+                script_visual_id: 0,
+            },
+            target_data,
+        )
+        .await
+    }
+
     /// Execute a spell with full visual/cast info — apply effects, set cooldown, send SMSG_SPELL_GO.
     ///
     /// Called after cast time completes or for instant-cast spells.
@@ -15427,12 +15472,36 @@ impl WorldSession {
         cast_id: ObjectGuid,
         spell_visual: wow_packet::packets::spell::SpellCastVisual,
     ) -> Result<(), &'static str> {
+        self.execute_spell_with_visual_and_target_data(
+            spell_id,
+            target_guid,
+            cast_id,
+            spell_visual,
+            SpellTargetData {
+                flags: 0x2,
+                unit: target_guid,
+                item: ObjectGuid::EMPTY,
+                ..SpellTargetData::default()
+            },
+        )
+        .await
+    }
+
+    pub async fn execute_spell_with_visual_and_target_data(
+        &mut self,
+        spell_id: i32,
+        target_guid: ObjectGuid,
+        cast_id: ObjectGuid,
+        spell_visual: wow_packet::packets::spell::SpellCastVisual,
+        target_data: SpellTargetData,
+    ) -> Result<(), &'static str> {
         let player_guid = self.player_guid().ok_or("No player GUID")?;
 
         // Obtener SpellInfo
         let spell_info = self
             .spell_store()
             .and_then(|store| store.get(spell_id))
+            .cloned()
             .ok_or("Spell not found")?;
         let mounted_aura_effect = spell_info
             .effects()
@@ -15452,22 +15521,30 @@ impl WorldSession {
 
         // Send SMSG_SPELL_GO
         use wow_packet::ServerPacket;
-        use wow_packet::packets::spell::{SpellGoPkt, SpellTargetData};
+        use wow_packet::packets::spell::SpellGoPkt;
 
+        let spell_visual_id = spell_visual.spell_visual_id;
         let go_pkt = SpellGoPkt {
             caster: player_guid,
             cast_id,
             spell_id,
             visual: spell_visual,
-            target: SpellTargetData {
-                flags: 0x2, // SpellCastTargetFlags::Unit
-                unit: target_guid,
-                item: ObjectGuid::EMPTY,
-                ..SpellTargetData::default()
-            },
+            target: target_data.clone(),
             hit_targets: vec![target_guid],
         };
         self.send_packet(&go_pkt);
+
+        for effect in spell_info.effects() {
+            if effect.effect == wow_data::spell::spell_effect_types::SPELL_EFFECT_ADD_FARSIGHT {
+                let _ = self.apply_effect_add_farsight_like_cpp(
+                    spell_id,
+                    effect,
+                    &target_data,
+                    spell_visual_id,
+                    spell_info.cast_time_ms,
+                );
+            }
+        }
 
         // Aplicar efecto según type
         match effect_type {
@@ -15509,6 +15586,62 @@ impl WorldSession {
         });
 
         Ok(())
+    }
+
+    /// Live bounded C++ `Spell::EffectAddFarsight` consumer.
+    ///
+    /// Source-of-truth: canonical `wow_map::Map::map_objects`; this helper never
+    /// creates fallback/session mirror objects. C++ anchors:
+    /// `SpellEffects.cpp:2237-2261`, `SpellInfo.cpp:653-692`,
+    /// `SpellInfo.cpp:3894-3910`, `Spell.cpp:133-205`.
+    pub(crate) fn apply_effect_add_farsight_like_cpp(
+        &mut self,
+        spell_id: i32,
+        effect: &wow_data::SpellEffectInfo,
+        target_data: &SpellTargetData,
+        spell_visual_id: u32,
+        cast_time_ms: u32,
+    ) -> Option<wow_map::map::FarsightDynamicObjectCreateOutcomeLikeCpp> {
+        if effect.effect != wow_data::spell::spell_effect_types::SPELL_EFFECT_ADD_FARSIGHT {
+            return None;
+        }
+        let dest = target_data.dst_location?.position;
+        let player_guid = self.player_guid()?;
+        let spell_id_u32 = u32::try_from(spell_id).ok()?;
+        let spell_visual_id_i32 = i32::try_from(spell_visual_id).ok()?;
+        let duration_index = self
+            .spell_misc_store
+            .as_deref()
+            .and_then(|store| store.get_by_spell_id(spell_id_u32))
+            .map(|entry| u32::from(entry.duration_index))
+            .unwrap_or(0);
+        let duration_ms =
+            spell_duration_ms_like_cpp(duration_index, self.spell_duration_store.as_deref());
+        let radius = spell_effect_radius_like_cpp(
+            effect.effect_radius_index_1,
+            self.spell_radius_store.as_deref(),
+        );
+        let manager = Arc::clone(self.canonical_map_manager.as_ref()?);
+        let mut manager = manager.lock().ok()?;
+        let map_id = u32::from(self.player_map_id_like_cpp());
+        let mut instance_id = None;
+        manager.do_for_all_maps_with_map_id(map_id, |managed| {
+            if instance_id.is_none() && managed.map().get_typed_player(player_guid).is_some() {
+                instance_id = Some(managed.instance_id());
+            }
+        });
+        let managed = manager.find_map_mut(map_id, instance_id.unwrap_or(0))?;
+        Some(managed.map_mut().create_farsight_dynamic_object_like_cpp(
+            player_guid,
+            spell_id_u32,
+            spell_visual_id_i32,
+            dest,
+            radius,
+            duration_ms,
+            u64::from(cast_time_ms),
+            self.realm_id,
+            player_guid.server_id(),
+        ))
     }
 
     /// Helper: apply heal to target (self or creature).
@@ -16973,6 +17106,136 @@ mod tests {
                 wow_entities::MapObjectRecord::new_game_object(gameobject).unwrap(),
             )
             .unwrap();
+    }
+
+    #[test]
+    fn add_farsight_session_caller_preserves_destination_radius_duration_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 90);
+        let spell_id = 12_345;
+        let destination = Position::new(100.0, 200.0, 30.0, 1.5);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Farseer".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        session.set_spell_misc_store(Arc::new(wow_data::SpellMiscStore::from_entries([
+            wow_data::SpellMiscEntry {
+                id: 1,
+                attributes: [0; 15],
+                difficulty_id: 0,
+                casting_time_index: 0,
+                duration_index: 7,
+                range_index: 0,
+                school_mask: 0,
+                speed: 0.0,
+                launch_delay: 0.0,
+                min_duration: 0.0,
+                spell_icon_file_data_id: 0,
+                active_icon_file_data_id: 0,
+                content_tuning_id: 0,
+                show_future_spell_player_condition_id: 0,
+                spell_id: spell_id as u32,
+            },
+        ])));
+        session.set_spell_duration_store(Arc::new(wow_data::SpellDurationStore::from_entries([
+            wow_data::SpellDurationEntry {
+                id: 7,
+                duration: -5000,
+                duration_per_level: 0,
+                max_duration: 0,
+            },
+        ])));
+        session.set_spell_radius_store(Arc::new(wow_data::SpellRadiusStore::from_entries([
+            wow_data::SpellRadiusEntry {
+                id: 11,
+                radius: 0.0,
+                radius_per_level: 0.0,
+                radius_min: 0.0,
+                radius_max: 25.0,
+            },
+        ])));
+
+        let effect = wow_data::SpellEffectInfo {
+            effect: wow_data::spell::spell_effect_types::SPELL_EFFECT_ADD_FARSIGHT,
+            effect_radius_index_1: 11,
+            ..Default::default()
+        };
+        let target_data = SpellTargetData {
+            flags: 0x40,
+            dst_location: Some(wow_packet::packets::spell::TargetLocation {
+                transport: ObjectGuid::EMPTY,
+                position: destination,
+            }),
+            ..Default::default()
+        };
+
+        let outcome = session
+            .apply_effect_add_farsight_like_cpp(spell_id, &effect, &target_data, 678, 1500)
+            .expect("canonical map/player/destination should create farsight object");
+
+        assert_eq!(
+            outcome.status,
+            wow_map::map::FarsightDynamicObjectCreateStatusLikeCpp::Created
+        );
+        let dynamic_guid = outcome
+            .dynamic_object_guid
+            .expect("created farsight outcome should carry dynamic object guid");
+        let guard = canonical.lock().unwrap();
+        let dynamic_object = guard
+            .find_map(571, 0)
+            .unwrap()
+            .map()
+            .map_object_record(dynamic_guid)
+            .and_then(wow_entities::MapObjectRecord::dynamic_object)
+            .expect("created farsight dynamic object should be canonical map-owned");
+        assert_eq!(dynamic_object.world().position(), destination);
+        assert_eq!(dynamic_object.radius(), 25.0);
+        assert_eq!(dynamic_object.duration_ms(), 5000);
+        assert_eq!(dynamic_object.caster_guid(), player_guid);
+        assert_eq!(dynamic_object.spell_id(), spell_id);
+        assert_eq!(dynamic_object.data().spell_visual_id, 678);
+        assert_eq!(dynamic_object.data().cast_time_ms, 1500);
+    }
+
+    #[test]
+    fn add_farsight_session_caller_requires_destination_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let effect = wow_data::SpellEffectInfo {
+            effect: wow_data::spell::spell_effect_types::SPELL_EFFECT_ADD_FARSIGHT,
+            effect_radius_index_1: 11,
+            ..Default::default()
+        };
+
+        assert!(
+            session
+                .apply_effect_add_farsight_like_cpp(
+                    12_345,
+                    &effect,
+                    &SpellTargetData::default(),
+                    678,
+                    1500,
+                )
+                .is_none()
+        );
     }
 
     #[test]

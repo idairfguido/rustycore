@@ -46,7 +46,7 @@ use wow_packet::packets::loot::{
     CreatureLoot, LOOT_TYPE_ITEM_LIKE_CPP, LootEntry, LootEntryFlags, LootItemData, LootResponse,
 };
 use wow_packet::packets::spell::{
-    CastFailed, CastSpellRequest, OpenItem, SpellCastVisual, SpellStartPkt, SpellTargetData,
+    CastFailed, CastSpellRequest, OpenItem, SpellCastVisual, SpellStartPkt,
 };
 
 use crate::session::WorldSession;
@@ -264,18 +264,13 @@ impl WorldSession {
             }
         }
 
-        // ── Build target ────────────────────────────────────────────────
-        let (target_flags, target_guid) = if !req.target.unit.is_empty() {
-            (0x2u32, req.target.unit) // SpellCastTargetFlags::Unit
+        let mut spell_target = req.target.clone();
+        let target_guid = if !spell_target.unit.is_empty() {
+            spell_target.unit
         } else {
-            (0x2u32, player_guid) // self-target
-        };
-
-        let spell_target = SpellTargetData {
-            flags: target_flags,
-            unit: target_guid,
-            item: wow_core::ObjectGuid::EMPTY,
-            ..SpellTargetData::default()
+            spell_target.flags |= 0x2; // SpellCastTargetFlags::Unit
+            spell_target.unit = player_guid;
+            player_guid
         };
 
         // ── Initiate cast or execute immediately ─────────────────────────
@@ -296,7 +291,7 @@ impl WorldSession {
                     spell_visual_id: req.visual.spell_visual_id,
                     script_visual_id: 0,
                 },
-                target: spell_target,
+                target: spell_target.clone(),
                 cast_time_ms: spell_info.cast_time_ms,
             };
             self.send_packet(&start_pkt);
@@ -305,6 +300,7 @@ impl WorldSession {
             self.active_spell_cast = Some(crate::session::SpellCastState {
                 spell_id,
                 target_guid,
+                target_data: spell_target.clone(),
                 cast_id,
                 cast_start_time: std::time::Instant::now(),
                 cast_time_ms: spell_info.cast_time_ms,
@@ -327,7 +323,10 @@ impl WorldSession {
                 spell_id = spell_id,
                 "Instant cast, executing immediately"
             );
-            if let Err(e) = self.execute_spell(spell_id, target_guid).await {
+            if let Err(e) = self
+                .execute_spell_with_target_data(spell_id, target_guid, spell_target)
+                .await
+            {
                 warn!(
                     account = self.account_id,
                     "Instant spell execution failed: {}", e

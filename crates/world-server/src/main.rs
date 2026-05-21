@@ -1155,6 +1155,16 @@ async fn main() -> Result<()> {
             .context("Failed to load SpellMisc.db2")?,
     );
     info!("Loaded {} spell misc rows", spell_misc_store.len());
+    let spell_duration_store = Arc::new(
+        wow_data::SpellDurationStore::load(&data_dir, &locale)
+            .context("Failed to load SpellDuration.db2")?,
+    );
+    info!("Loaded {} spell duration rows", spell_duration_store.len());
+    let spell_radius_store = Arc::new(
+        wow_data::SpellRadiusStore::load(&data_dir, &locale)
+            .context("Failed to load SpellRadius.db2")?,
+    );
+    info!("Loaded {} spell radius rows", spell_radius_store.len());
     let spell_range_store = Arc::new(
         wow_data::SpellRangeStore::load(&data_dir, &locale)
             .context("Failed to load SpellRange.db2")?,
@@ -1499,6 +1509,8 @@ async fn main() -> Result<()> {
         skill_line_store: Some(Arc::clone(&skill_line_store)),
         spell_store: Some(Arc::clone(&spell_store)),
         spell_misc_store: Some(Arc::clone(&spell_misc_store)),
+        spell_duration_store: Some(Arc::clone(&spell_duration_store)),
+        spell_radius_store: Some(Arc::clone(&spell_radius_store)),
         spell_range_store: Some(Arc::clone(&spell_range_store)),
         area_table_store: Some(Arc::clone(&area_table_store)),
         fishing_base_skill_store: Some(Arc::clone(&fishing_base_skill_store)),
@@ -3673,6 +3685,12 @@ async fn create_session(
     }
     if let Some(ref store) = resources.spell_misc_store {
         session.set_spell_misc_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.spell_duration_store {
+        session.set_spell_duration_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.spell_radius_store {
+        session.set_spell_radius_store(Arc::clone(store));
     }
     if let Some(ref store) = resources.spell_range_store {
         session.set_spell_range_store(Arc::clone(store));

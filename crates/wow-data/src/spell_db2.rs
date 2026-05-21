@@ -987,6 +987,12 @@ impl SpellLevelsStore {
 }
 
 impl SpellMiscStore {
+    pub fn get_by_spell_id(&self, spell_id: u32) -> Option<&SpellMiscEntry> {
+        self.entries
+            .values()
+            .find(|entry| entry.spell_id == spell_id)
+    }
+
     pub fn load(data_dir: &str, locale: &str) -> Result<Self> {
         load_store(data_dir, locale, "SpellMisc.db2", |id, idx, r| {
             SpellMiscEntry {
@@ -1304,6 +1310,52 @@ impl_from_entries!(SpellVisualKitStore, SpellVisualKitEntry);
 impl_from_entries!(SpellVisualMissileStore, SpellVisualMissileEntry);
 impl_from_entries!(SpellXSpellVisualStore, SpellXSpellVisualEntry);
 
+/// C++ `SpellInfo::CalcDuration` boundary represented from DB2 duration rows.
+///
+/// Anchor: `SpellInfo.cpp:3894-3910`; player spell mods and passive `-1` fallback
+/// are intentionally outside this helper because their runtime metadata is not
+/// represented here. Missing entry/index returns `0`; `Duration == -1` remains
+/// `-1`; otherwise Rust mirrors C++ `abs(Duration)`.
+pub fn spell_duration_ms_like_cpp(
+    duration_index: u32,
+    duration_store: Option<&SpellDurationStore>,
+) -> i32 {
+    if duration_index == 0 {
+        return 0;
+    }
+    let Some(entry) = duration_store.and_then(|store| store.get(duration_index)) else {
+        return 0;
+    };
+    if entry.duration == -1 {
+        -1
+    } else {
+        entry.duration.saturating_abs()
+    }
+}
+
+/// C++ `SpellEffectInfo::CalcRadius` boundary represented from DB2 radius rows.
+///
+/// Anchor: `SpellInfo.cpp:653-692`; this models the no-caster overload used by
+/// `Spell::EffectAddFarsight`: missing entry/index returns `0.0`; radius min is
+/// used unless it is zero, in which case radius max is used. Random radius and
+/// caster radius mods are intentionally outside this represented slice.
+pub fn spell_effect_radius_like_cpp(
+    radius_index: u32,
+    radius_store: Option<&SpellRadiusStore>,
+) -> f32 {
+    if radius_index == 0 {
+        return 0.0;
+    }
+    let Some(entry) = radius_store.and_then(|store| store.get(radius_index)) else {
+        return 0.0;
+    };
+    if entry.radius_min == 0.0 {
+        entry.radius_max
+    } else {
+        entry.radius_min
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1324,6 +1376,51 @@ mod tests {
         }]);
 
         assert_eq!(store.get(1).unwrap().spell_id, 10);
+    }
+
+    #[test]
+    fn duration_and_radius_helpers_match_cpp_fallbacks() {
+        let duration_store = SpellDurationStore::from_entries([SpellDurationEntry {
+            id: 7,
+            duration: -5000,
+            duration_per_level: 0,
+            max_duration: 0,
+        }]);
+        assert_eq!(spell_duration_ms_like_cpp(0, Some(&duration_store)), 0);
+        assert_eq!(spell_duration_ms_like_cpp(99, Some(&duration_store)), 0);
+        assert_eq!(spell_duration_ms_like_cpp(7, Some(&duration_store)), 5000);
+
+        let infinite_duration_store = SpellDurationStore::from_entries([SpellDurationEntry {
+            id: 8,
+            duration: -1,
+            duration_per_level: 0,
+            max_duration: 0,
+        }]);
+        assert_eq!(
+            spell_duration_ms_like_cpp(8, Some(&infinite_duration_store)),
+            -1
+        );
+
+        let radius_store = SpellRadiusStore::from_entries([
+            SpellRadiusEntry {
+                id: 11,
+                radius: 0.0,
+                radius_per_level: 0.0,
+                radius_min: 0.0,
+                radius_max: 25.0,
+            },
+            SpellRadiusEntry {
+                id: 12,
+                radius: 0.0,
+                radius_per_level: 0.0,
+                radius_min: 10.0,
+                radius_max: 25.0,
+            },
+        ]);
+        assert_eq!(spell_effect_radius_like_cpp(0, Some(&radius_store)), 0.0);
+        assert_eq!(spell_effect_radius_like_cpp(99, Some(&radius_store)), 0.0);
+        assert_eq!(spell_effect_radius_like_cpp(11, Some(&radius_store)), 25.0);
+        assert_eq!(spell_effect_radius_like_cpp(12, Some(&radius_store)), 10.0);
     }
 
     #[test]
