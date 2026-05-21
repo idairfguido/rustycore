@@ -15572,16 +15572,23 @@ impl WorldSession {
         };
         self.send_packet(&go_pkt);
 
+        let mut force_visibility_after_add_farsight = false;
         for effect in spell_info.effects() {
             if effect.effect == wow_data::spell::spell_effect_types::SPELL_EFFECT_ADD_FARSIGHT {
-                let _ = self.apply_effect_add_farsight_like_cpp(
+                if let Some(outcome) = self.apply_effect_add_farsight_like_cpp(
                     spell_id,
                     effect,
                     &target_data,
                     spell_visual_id,
                     spell_info.cast_time_ms,
-                );
+                ) {
+                    force_visibility_after_add_farsight |=
+                        self.consume_add_farsight_set_seer_outcome_like_cpp(&outcome);
+                }
             }
+        }
+        if force_visibility_after_add_farsight {
+            self.force_update_visibility_like_cpp().await;
         }
 
         // Aplicar efecto según type
@@ -15680,6 +15687,44 @@ impl WorldSession {
             self.realm_id,
             player_guid.server_id(),
         ))
+    }
+
+    /// Consume represented C++ `DynamicObject::SetCasterViewpoint()` ->
+    /// `Player::SetViewpoint(..., true)` evidence into this live session's
+    /// represented `Player::m_seer` seam after the canonical map mutation has
+    /// returned and no map lock is held by this caller.
+    ///
+    /// C++ anchors: `SpellEffects.cpp:2237-2261`, `DynamicObject.cpp:209-225`,
+    /// `Player.cpp:25344-25387`, `Player.h:2432,2438`, and
+    /// `Player.cpp:23343-23349`. Ownership remains canonical `Map::map_objects`;
+    /// sync direction is map outcome -> session represented `m_seer` only.
+    fn consume_add_farsight_set_seer_outcome_like_cpp(
+        &mut self,
+        outcome: &wow_map::map::FarsightDynamicObjectCreateOutcomeLikeCpp,
+    ) -> bool {
+        if outcome.status != wow_map::map::FarsightDynamicObjectCreateStatusLikeCpp::Created {
+            return false;
+        }
+        let Some(dynamic_object_guid) = outcome.dynamic_object_guid else {
+            return false;
+        };
+        let Some(caster_viewpoint) = outcome.caster_viewpoint.as_ref() else {
+            return false;
+        };
+        if !caster_viewpoint.apply || caster_viewpoint.dynamic_object_guid != dynamic_object_guid {
+            return false;
+        }
+        let player_set_viewpoint = &caster_viewpoint.player_set_viewpoint;
+        if !player_set_viewpoint.apply
+            || player_set_viewpoint.target_guid != dynamic_object_guid
+            || !player_set_viewpoint.set_seer_requested
+            || player_set_viewpoint.status != wow_map::map::PlayerSetViewpointStatusLikeCpp::Applied
+        {
+            return false;
+        }
+
+        self.represented_seer_guid_like_cpp = Some(dynamic_object_guid);
+        player_set_viewpoint.update_visibility_requested
     }
 
     /// Helper: apply heal to target (self or creature).
@@ -17161,6 +17206,103 @@ mod tests {
             .unwrap();
     }
 
+    fn configure_add_farsight_live_session_like_cpp(
+        session: &mut WorldSession,
+        canonical: &Arc<std::sync::Mutex<wow_map::MapManager>>,
+        player_guid: ObjectGuid,
+        spell_id: i32,
+    ) {
+        session.set_canonical_map_manager(Arc::clone(canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Farseer".to_string(),
+            Position::new(10.0, 20.0, 30.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        let _ = session.ensure_canonical_world_map_for_current_player_like_cpp();
+        let mut spell_store = wow_data::SpellStore::new();
+        spell_store.insert(
+            spell_id,
+            wow_data::SpellInfo {
+                spell_id,
+                cast_time_ms: 1500,
+                cooldown_ms: 0,
+                recovery_time_ms: 0,
+                effect_type: 0,
+                effect_base_points: 0,
+                effect_bonus_coefficient: 0.0,
+                aura_type: None,
+                display_flags: 0,
+                effects: vec![wow_data::SpellEffectInfo {
+                    effect: wow_data::spell::spell_effect_types::SPELL_EFFECT_ADD_FARSIGHT,
+                    effect_radius_index_1: 11,
+                    ..Default::default()
+                }],
+            },
+        );
+        session.set_spell_store(Arc::new(spell_store));
+        session.set_spell_misc_store(Arc::new(wow_data::SpellMiscStore::from_entries([
+            wow_data::SpellMiscEntry {
+                id: 1,
+                attributes: [0; 15],
+                difficulty_id: 0,
+                casting_time_index: 0,
+                duration_index: 7,
+                range_index: 0,
+                school_mask: 0,
+                speed: 0.0,
+                launch_delay: 0.0,
+                min_duration: 0.0,
+                spell_icon_file_data_id: 0,
+                active_icon_file_data_id: 0,
+                content_tuning_id: 0,
+                show_future_spell_player_condition_id: 0,
+                spell_id: spell_id as u32,
+            },
+        ])));
+        session.set_spell_duration_store(Arc::new(wow_data::SpellDurationStore::from_entries([
+            wow_data::SpellDurationEntry {
+                id: 7,
+                duration: -5000,
+                duration_per_level: 0,
+                max_duration: 0,
+            },
+        ])));
+        session.set_spell_radius_store(Arc::new(wow_data::SpellRadiusStore::from_entries([
+            wow_data::SpellRadiusEntry {
+                id: 11,
+                radius: 0.0,
+                radius_per_level: 0.0,
+                radius_min: 0.0,
+                radius_max: 25.0,
+            },
+        ])));
+    }
+
+    fn add_farsight_target_data(destination: Option<Position>) -> SpellTargetData {
+        SpellTargetData {
+            flags: if destination.is_some() { 0x40 } else { 0 },
+            dst_location: destination.map(|position| wow_packet::packets::spell::TargetLocation {
+                transport: ObjectGuid::EMPTY,
+                position,
+            }),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn add_farsight_session_caller_preserves_destination_radius_duration_like_cpp() {
         let (mut session, _pkt_tx, _send_rx) = make_session();
@@ -17289,6 +17431,142 @@ mod tests {
                 )
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn add_farsight_live_spell_sets_session_seer_to_created_dynamic_object_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 4940);
+        let spell_id = 49_400;
+        let destination = Position::new(100.0, 200.0, 30.0, 1.5);
+
+        configure_add_farsight_live_session_like_cpp(
+            &mut session,
+            &canonical,
+            player_guid,
+            spell_id,
+        );
+        assert_eq!(session.represented_seer_guid_like_cpp(), Some(player_guid));
+
+        session
+            .execute_spell_with_visual_and_target_data(
+                spell_id,
+                player_guid,
+                ObjectGuid::EMPTY,
+                wow_packet::packets::spell::SpellCastVisual {
+                    spell_visual_id: 678,
+                    script_visual_id: 0,
+                },
+                add_farsight_target_data(Some(destination)),
+            )
+            .await
+            .expect("live AddFarsight spell should execute");
+
+        let seer_guid = session
+            .represented_seer_guid_like_cpp()
+            .expect("C++ SetSeer(target) evidence should update represented session seer");
+        assert_ne!(seer_guid, player_guid);
+        let guard = canonical.lock().unwrap();
+        let dynamic_object = guard
+            .find_map(571, 0)
+            .unwrap()
+            .map()
+            .map_object_record(seer_guid)
+            .and_then(wow_entities::MapObjectRecord::dynamic_object)
+            .expect("represented session seer should be the created map-owned DynamicObject");
+        assert_eq!(dynamic_object.world().position(), destination);
+        assert_eq!(dynamic_object.caster_guid(), player_guid);
+        assert_eq!(dynamic_object.spell_id(), spell_id);
+        assert_eq!(dynamic_object.data().spell_visual_id, 678);
+    }
+
+    #[tokio::test]
+    async fn add_farsight_live_spell_without_destination_keeps_session_seer_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 4941);
+        let spell_id = 49_401;
+
+        configure_add_farsight_live_session_like_cpp(
+            &mut session,
+            &canonical,
+            player_guid,
+            spell_id,
+        );
+
+        session
+            .execute_spell_with_visual_and_target_data(
+                spell_id,
+                player_guid,
+                ObjectGuid::EMPTY,
+                wow_packet::packets::spell::SpellCastVisual {
+                    spell_visual_id: 679,
+                    script_visual_id: 0,
+                },
+                add_farsight_target_data(None),
+            )
+            .await
+            .expect("missing AddFarsight destination is a no-op effect, not a spell failure");
+
+        assert_eq!(session.represented_seer_guid_like_cpp(), Some(player_guid));
+        assert_eq!(
+            canonical
+                .lock()
+                .unwrap()
+                .find_map(571, 0)
+                .unwrap()
+                .map()
+                .map_object_count(),
+            1,
+            "only the canonical player should remain map-owned"
+        );
+    }
+
+    #[tokio::test]
+    async fn add_farsight_live_spell_already_has_viewpoint_keeps_session_seer_like_cpp() {
+        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 4942);
+        let spell_id = 49_402;
+        let existing_viewpoint =
+            ObjectGuid::create_world_object(HighGuid::DynamicObject, 0, 1, 571, 0, 12_000, 494_200);
+
+        configure_add_farsight_live_session_like_cpp(
+            &mut session,
+            &canonical,
+            player_guid,
+            spell_id,
+        );
+        session
+            .mutate_canonical_player_like_cpp(|player| {
+                player.set_farsight_object_like_cpp(existing_viewpoint);
+            })
+            .expect("canonical player should exist");
+
+        session
+            .execute_spell_with_visual_and_target_data(
+                spell_id,
+                player_guid,
+                ObjectGuid::EMPTY,
+                wow_packet::packets::spell::SpellCastVisual {
+                    spell_visual_id: 680,
+                    script_visual_id: 0,
+                },
+                add_farsight_target_data(Some(Position::new(150.0, 250.0, 35.0, 1.0))),
+            )
+            .await
+            .expect("AlreadyHasViewpoint is represented as no-op SetSeer consumption");
+
+        assert_eq!(session.represented_seer_guid_like_cpp(), Some(player_guid));
+        let guard = canonical.lock().unwrap();
+        let player = guard
+            .find_map(571, 0)
+            .unwrap()
+            .map()
+            .get_typed_player(player_guid)
+            .unwrap();
+        assert_eq!(player.active_data().farsight_object, existing_viewpoint);
     }
 
     #[test]
