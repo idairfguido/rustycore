@@ -8012,167 +8012,233 @@ where
         })
     }
 
+    /// Bounded map-owned representation of C++ `GameObject::RemoveFromWorld()`
+    /// linked-trap cleanup.
+    ///
+    /// C++ anchors:
+    /// - `GameObject.cpp:926-948`: after ZoneScript remove, `RemoveFromOwner`,
+    ///   and represented model removal, `GetLinkedTrap()->DespawnOrUnsummon()`
+    ///   runs before `WorldObject::RemoveFromWorld()` and before ObjectsStore
+    ///   removal.
+    /// - `Map.cpp:933-951`: `Map::RemoveFromMap<T>` calls
+    ///   `obj->RemoveFromWorld()` before active/grid/reset/delete tail.
+    fn gameobject_remove_linked_trap_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+        remove_from_map_in_progress: &mut HashSet<ObjectGuid>,
+    ) -> Option<GameObjectRemoveLinkedTrapOutcomeLikeCpp> {
+        let linked_trap_guid = self
+            .map_object_record(guid)
+            .filter(|record| record.kind() == AccessorObjectKind::GameObject)
+            .and_then(MapObjectRecord::game_object)
+            .filter(|game_object| game_object.world().object().is_in_world())
+            .map(GameObject::linked_trap_guid_like_cpp)?;
+
+        let owner_present_before_linked_trap_remove = self.map_object_record(guid).is_some();
+        let linked_trap_guid = (!linked_trap_guid.is_empty()).then_some(linked_trap_guid);
+        let linked_trap_cycle_guarded = linked_trap_guid.is_some_and(|linked_guid| {
+            linked_guid != guid && remove_from_map_in_progress.contains(&linked_guid)
+        });
+        let linked_trap_missing_or_self = linked_trap_guid.is_none_or(|linked_guid| {
+            linked_guid == guid
+                || (!linked_trap_cycle_guarded && self.map_object_record(linked_guid).is_none())
+        });
+        let linked_trap_removed = if let Some(linked_guid) = linked_trap_guid {
+            if linked_guid == guid
+                || linked_trap_cycle_guarded
+                || self.map_object_record(linked_guid).is_none()
+            {
+                false
+            } else {
+                self.remove_from_map_like_cpp_inner(linked_guid, true, remove_from_map_in_progress)
+                    .is_ok()
+            }
+        } else {
+            false
+        };
+
+        Some(GameObjectRemoveLinkedTrapOutcomeLikeCpp {
+            guid,
+            linked_trap_guid,
+            owner_present_before_linked_trap_remove,
+            linked_trap_removed,
+            linked_trap_missing_or_self,
+            linked_trap_cycle_guarded,
+            despawn_or_unsummon_scheduler_represented: false,
+            object_accessor_fanout_represented: false,
+        })
+    }
+
     pub fn remove_from_map_like_cpp(
         &mut self,
         guid: ObjectGuid,
         delete_from_world: bool,
     ) -> Result<RemoveFromMapOutcome, RemoveFromMapError> {
-        let should_cleanup_dynamic_object_caster_viewpoint = self
-            .map_object_record(guid)
-            .and_then(MapObjectRecord::dynamic_object)
-            .is_some_and(|dynamic_object| {
-                dynamic_object.world().object().is_in_world()
-                    && dynamic_object.is_caster_viewpoint()
-            });
-        let dynamic_object_caster_viewpoint = should_cleanup_dynamic_object_caster_viewpoint
-            .then(|| self.apply_dynamic_object_caster_viewpoint_like_cpp(guid, false));
-        let dynamic_object_remove_cleanup = self
-            .map_objects
-            .get_mut(&guid)
-            .and_then(MapObjectRecord::dynamic_object_mut)
-            .and_then(|dynamic_object| {
-                if !dynamic_object.world().object().is_in_world() {
-                    return None;
-                }
-
-                let had_aura = dynamic_object.has_aura();
-                if had_aura {
-                    dynamic_object.remove_aura();
-                }
-
-                let unbound_caster = dynamic_object.bound_caster();
-                if unbound_caster.is_some() {
-                    dynamic_object.unbind_from_caster();
-                }
-
-                Some(DynamicObjectRemoveCleanupOutcomeLikeCpp {
-                    had_aura,
-                    removed_aura_pending_delete: dynamic_object.has_removed_aura_pending_delete(),
-                    unbound_caster,
-                })
-            });
-        let gameobject_model_key = self
-            .map_object_record(guid)
-            .filter(|record| record.kind() == AccessorObjectKind::GameObject)
-            .and_then(MapObjectRecord::game_object)
-            .filter(|game_object| game_object.world().object().is_in_world())
-            .filter(|game_object| game_object.has_represented_gameobject_model_like_cpp())
-            .map(|_| RepresentedGameObjectModelKeyLikeCpp { owner_guid: guid });
-        let gameobject_model_remove_pending_before_callback =
-            gameobject_model_key.is_some_and(|key| self.contains_gameobject_model_like_cpp(key));
-        let gameobject_zone_script_remove = self
-            .map_object_record(guid)
-            .filter(|record| record.kind() == AccessorObjectKind::GameObject)
-            .and_then(MapObjectRecord::game_object)
-            .filter(|game_object| game_object.world().object().is_in_world())
-            .map(|game_object| {
-                let spawn_id = game_object.spawn_id();
-                GameObjectZoneScriptRemoveOutcomeLikeCpp {
-                    guid,
-                    represented_callback_boundary: true,
-                    script_dispatch_represented: false,
-                    model_remove_pending_before_callback:
-                        gameobject_model_remove_pending_before_callback,
-                    spawn_index_present_before_callback: spawn_id != 0
-                        && self
-                            .gameobject_spawn_id_store_guids_like_cpp(spawn_id)
-                            .contains(&guid),
-                }
-            });
-        let gameobject_remove_from_owner = self.gameobject_remove_from_owner_like_cpp(guid);
-        let gameobject_model_remove = gameobject_model_key.and_then(|key| {
-            self.contains_gameobject_model_like_cpp(key)
-                .then(|| self.remove_gameobject_model_like_cpp(key))
-        });
-        let remove_from_map_was_in_world = self
-            .map_object_record(guid)
-            .is_some_and(|record| record.object().object().is_in_world());
-        let creature_zone_script_remove = self
-            .map_object_record(guid)
-            .filter(|record| record.kind() == AccessorObjectKind::Creature)
-            .and_then(MapObjectRecord::creature)
-            .filter(|creature| creature.unit().world().object().is_in_world())
-            .map(|_| CreatureZoneScriptRemoveOutcomeLikeCpp {
-                guid,
-                represented_callback: true,
-                script_dispatch_represented: false,
-            });
-        let creature_remove_formation = self.remove_creature_from_formation_like_cpp(guid);
-        let creature_unit_remove_from_world = self
-            .map_objects
-            .get_mut(&guid)
-            .and_then(MapObjectRecord::creature_mut)
-            .and_then(|creature| creature.unit_mut().remove_from_world_like_cpp());
-        let creature_vehicle_remove = creature_unit_remove_from_world
-            .as_ref()
-            .and_then(|outcome| outcome.vehicle_remove);
-        let record = self
-            .remove_map_object(guid)
-            .ok_or(RemoveFromMapError::ObjectNotFound { guid })?;
-        let linked_trap_guid = record
-            .game_object()
-            .map(GameObject::linked_trap_guid_like_cpp)
-            .filter(|linked_guid| !linked_guid.is_empty() && *linked_guid != guid);
-        let kind = record.kind();
-        let was_world_object_like_cpp = map_record_is_world_object_like_cpp(&record);
-        let mut object = record.into_object();
-        let was_in_world = remove_from_map_was_in_world;
-        let was_active = is_active_object_like_cpp(kind, &object);
-        let cell = Cell::from_world(object.position().x, object.position().y);
-        let grid = GridCoord::new(cell.grid_x(), cell.grid_y());
-
-        if let Some(linked_trap_guid) = linked_trap_guid {
-            // C++ `GameObject::RemoveFromWorld` despawns `m_linkedTrap` before
-            // `WorldObject::RemoveFromWorld` (`GameObject.cpp:939-943`), and
-            // `Map::RemoveFromMap` calls `obj->RemoveFromWorld()` before grid
-            // removal (`Map.cpp:933-951`). This bounded seam represents that
-            // ordering map-locally with no scheduler/fanout, avoids
-            // self-recursion, and tolerates traps already removed by another
-            // path.
-            if self.map_object_record(linked_trap_guid).is_some() {
-                let _ = self.remove_from_map_like_cpp(linked_trap_guid, true);
-            }
-        }
-
-        object.object_mut().remove_from_world();
-        let removed_from_cell = remove_object_guid_from_cell_like_cpp(
-            self,
-            grid,
-            &cell,
-            kind,
-            was_world_object_like_cpp,
+        let mut remove_from_map_in_progress = HashSet::new();
+        self.remove_from_map_like_cpp_inner(
             guid,
-        );
-        if was_active {
-            self.unmark_active_cell(cell.cell_coord());
-        }
-
-        object.clear_current_cell();
-        object.reset_map().map_err(RemoveFromMapError::ResetMap)?;
-
-        Ok(RemoveFromMapOutcome {
-            guid,
-            cell: cell.cell_coord(),
-            grid,
-            was_in_world,
-            was_active,
-            removed_from_cell,
             delete_from_world,
-            dynamic_object_caster_viewpoint,
-            dynamic_object_remove_cleanup,
-            gameobject_zone_script_remove,
-            gameobject_remove_from_owner,
-            gameobject_model_remove,
-            creature_zone_script_remove,
-            creature_vehicle_remove,
-            creature_unit_remove_from_world,
-            creature_remove_formation,
-            object: if delete_from_world {
-                None
-            } else {
-                Some(object)
-            },
-        })
+            &mut remove_from_map_in_progress,
+        )
+    }
+
+    fn remove_from_map_like_cpp_inner(
+        &mut self,
+        guid: ObjectGuid,
+        delete_from_world: bool,
+        remove_from_map_in_progress: &mut HashSet<ObjectGuid>,
+    ) -> Result<RemoveFromMapOutcome, RemoveFromMapError> {
+        if !remove_from_map_in_progress.insert(guid) {
+            return Err(RemoveFromMapError::ObjectNotFound { guid });
+        }
+
+        let outcome = (|| {
+            let should_cleanup_dynamic_object_caster_viewpoint = self
+                .map_object_record(guid)
+                .and_then(MapObjectRecord::dynamic_object)
+                .is_some_and(|dynamic_object| {
+                    dynamic_object.world().object().is_in_world()
+                        && dynamic_object.is_caster_viewpoint()
+                });
+            let dynamic_object_caster_viewpoint = should_cleanup_dynamic_object_caster_viewpoint
+                .then(|| self.apply_dynamic_object_caster_viewpoint_like_cpp(guid, false));
+            let dynamic_object_remove_cleanup = self
+                .map_objects
+                .get_mut(&guid)
+                .and_then(MapObjectRecord::dynamic_object_mut)
+                .and_then(|dynamic_object| {
+                    if !dynamic_object.world().object().is_in_world() {
+                        return None;
+                    }
+
+                    let had_aura = dynamic_object.has_aura();
+                    if had_aura {
+                        dynamic_object.remove_aura();
+                    }
+
+                    let unbound_caster = dynamic_object.bound_caster();
+                    if unbound_caster.is_some() {
+                        dynamic_object.unbind_from_caster();
+                    }
+
+                    Some(DynamicObjectRemoveCleanupOutcomeLikeCpp {
+                        had_aura,
+                        removed_aura_pending_delete: dynamic_object
+                            .has_removed_aura_pending_delete(),
+                        unbound_caster,
+                    })
+                });
+            let gameobject_model_key = self
+                .map_object_record(guid)
+                .filter(|record| record.kind() == AccessorObjectKind::GameObject)
+                .and_then(MapObjectRecord::game_object)
+                .filter(|game_object| game_object.world().object().is_in_world())
+                .filter(|game_object| game_object.has_represented_gameobject_model_like_cpp())
+                .map(|_| RepresentedGameObjectModelKeyLikeCpp { owner_guid: guid });
+            let gameobject_model_remove_pending_before_callback = gameobject_model_key
+                .is_some_and(|key| self.contains_gameobject_model_like_cpp(key));
+            let gameobject_zone_script_remove = self
+                .map_object_record(guid)
+                .filter(|record| record.kind() == AccessorObjectKind::GameObject)
+                .and_then(MapObjectRecord::game_object)
+                .filter(|game_object| game_object.world().object().is_in_world())
+                .map(|game_object| {
+                    let spawn_id = game_object.spawn_id();
+                    GameObjectZoneScriptRemoveOutcomeLikeCpp {
+                        guid,
+                        represented_callback_boundary: true,
+                        script_dispatch_represented: false,
+                        model_remove_pending_before_callback:
+                            gameobject_model_remove_pending_before_callback,
+                        spawn_index_present_before_callback: spawn_id != 0
+                            && self
+                                .gameobject_spawn_id_store_guids_like_cpp(spawn_id)
+                                .contains(&guid),
+                    }
+                });
+            let gameobject_remove_from_owner = self.gameobject_remove_from_owner_like_cpp(guid);
+            let gameobject_model_remove = gameobject_model_key.and_then(|key| {
+                self.contains_gameobject_model_like_cpp(key)
+                    .then(|| self.remove_gameobject_model_like_cpp(key))
+            });
+            let gameobject_linked_trap_remove =
+                self.gameobject_remove_linked_trap_like_cpp(guid, remove_from_map_in_progress);
+            let remove_from_map_was_in_world = self
+                .map_object_record(guid)
+                .is_some_and(|record| record.object().object().is_in_world());
+            let creature_zone_script_remove = self
+                .map_object_record(guid)
+                .filter(|record| record.kind() == AccessorObjectKind::Creature)
+                .and_then(MapObjectRecord::creature)
+                .filter(|creature| creature.unit().world().object().is_in_world())
+                .map(|_| CreatureZoneScriptRemoveOutcomeLikeCpp {
+                    guid,
+                    represented_callback: true,
+                    script_dispatch_represented: false,
+                });
+            let creature_remove_formation = self.remove_creature_from_formation_like_cpp(guid);
+            let creature_unit_remove_from_world = self
+                .map_objects
+                .get_mut(&guid)
+                .and_then(MapObjectRecord::creature_mut)
+                .and_then(|creature| creature.unit_mut().remove_from_world_like_cpp());
+            let creature_vehicle_remove = creature_unit_remove_from_world
+                .as_ref()
+                .and_then(|outcome| outcome.vehicle_remove);
+            let record = self
+                .remove_map_object(guid)
+                .ok_or(RemoveFromMapError::ObjectNotFound { guid })?;
+            let kind = record.kind();
+            let was_world_object_like_cpp = map_record_is_world_object_like_cpp(&record);
+            let mut object = record.into_object();
+            let was_in_world = remove_from_map_was_in_world;
+            let was_active = is_active_object_like_cpp(kind, &object);
+            let cell = Cell::from_world(object.position().x, object.position().y);
+            let grid = GridCoord::new(cell.grid_x(), cell.grid_y());
+
+            object.object_mut().remove_from_world();
+            let removed_from_cell = remove_object_guid_from_cell_like_cpp(
+                self,
+                grid,
+                &cell,
+                kind,
+                was_world_object_like_cpp,
+                guid,
+            );
+            if was_active {
+                self.unmark_active_cell(cell.cell_coord());
+            }
+
+            object.clear_current_cell();
+            object.reset_map().map_err(RemoveFromMapError::ResetMap)?;
+
+            Ok(RemoveFromMapOutcome {
+                guid,
+                cell: cell.cell_coord(),
+                grid,
+                was_in_world,
+                was_active,
+                removed_from_cell,
+                delete_from_world,
+                dynamic_object_caster_viewpoint,
+                dynamic_object_remove_cleanup,
+                gameobject_zone_script_remove,
+                gameobject_remove_from_owner,
+                gameobject_model_remove,
+                gameobject_linked_trap_remove,
+                creature_zone_script_remove,
+                creature_vehicle_remove,
+                creature_unit_remove_from_world,
+                creature_remove_formation,
+                object: if delete_from_world {
+                    None
+                } else {
+                    Some(object)
+                },
+            })
+        })();
+        remove_from_map_in_progress.remove(&guid);
+        outcome
     }
 
     pub fn relocate_map_object_like_cpp(
@@ -10021,6 +10087,18 @@ pub struct GameObjectRemoveFromOwnerOutcomeLikeCpp {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameObjectRemoveLinkedTrapOutcomeLikeCpp {
+    pub guid: ObjectGuid,
+    pub linked_trap_guid: Option<ObjectGuid>,
+    pub owner_present_before_linked_trap_remove: bool,
+    pub linked_trap_removed: bool,
+    pub linked_trap_missing_or_self: bool,
+    pub linked_trap_cycle_guarded: bool,
+    pub despawn_or_unsummon_scheduler_represented: bool,
+    pub object_accessor_fanout_represented: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CreatureZoneScriptRemoveOutcomeLikeCpp {
     pub guid: ObjectGuid,
     pub represented_callback: bool,
@@ -10093,6 +10171,7 @@ pub struct RemoveFromMapOutcome {
     pub gameobject_zone_script_remove: Option<GameObjectZoneScriptRemoveOutcomeLikeCpp>,
     pub gameobject_remove_from_owner: Option<GameObjectRemoveFromOwnerOutcomeLikeCpp>,
     pub gameobject_model_remove: Option<DynamicMapTreeModelMutationOutcomeLikeCpp>,
+    pub gameobject_linked_trap_remove: Option<GameObjectRemoveLinkedTrapOutcomeLikeCpp>,
     pub creature_zone_script_remove: Option<CreatureZoneScriptRemoveOutcomeLikeCpp>,
     pub creature_vehicle_remove: Option<VehicleKitRemoveOutcomeLikeCpp>,
     pub creature_unit_remove_from_world: Option<UnitRemoveFromWorldOutcomeLikeCpp>,
@@ -11833,6 +11912,171 @@ mod tests {
             .remove_from_map_like_cpp(not_in_world_guid, true)
             .unwrap();
         assert!(not_in_world_removed.gameobject_remove_from_owner.is_none());
+    }
+
+    #[test]
+    fn gameobject_linked_trap_remove_runs_before_owner_store_extraction_like_cpp() {
+        let mut map = test_map();
+        let mut trap = test_gameobject_for_spawn(48301, 4830101);
+        let trap_guid = trap.world().guid();
+        trap.set_represented_gameobject_model_like_cpp(true);
+        map.insert_map_object_record(MapObjectRecord::new_game_object(trap).unwrap())
+            .unwrap();
+
+        let mut owner = test_gameobject_for_spawn(48302, 4830102);
+        let owner_guid = owner.world().guid();
+        owner.set_linked_trap_like_cpp(trap_guid);
+        owner.set_represented_gameobject_model_like_cpp(true);
+        let owner_model_key = RepresentedGameObjectModelKeyLikeCpp { owner_guid };
+        map.insert_gameobject_model_like_cpp(owner_model_key);
+        map.insert_map_object_record(MapObjectRecord::new_game_object(owner).unwrap())
+            .unwrap();
+
+        let outcome = map.remove_from_map_like_cpp(owner_guid, true).unwrap();
+        let linked_trap = outcome.gameobject_linked_trap_remove.expect(
+            "exact typed in-world GameObject should expose linked-trap RemoveFromWorld evidence",
+        );
+
+        assert_eq!(linked_trap.guid, owner_guid);
+        assert_eq!(linked_trap.linked_trap_guid, Some(trap_guid));
+        assert!(linked_trap.owner_present_before_linked_trap_remove);
+        assert!(linked_trap.linked_trap_removed);
+        assert!(!linked_trap.linked_trap_missing_or_self);
+        assert!(!linked_trap.linked_trap_cycle_guarded);
+        assert!(!linked_trap.despawn_or_unsummon_scheduler_represented);
+        assert!(!linked_trap.object_accessor_fanout_represented);
+        assert!(outcome.gameobject_model_remove.is_some());
+        assert!(map.map_object_record(owner_guid).is_none());
+        assert!(map.map_object_record(trap_guid).is_none());
+        assert!(!map.contains_gameobject_model_like_cpp(owner_model_key));
+    }
+
+    #[test]
+    fn gameobject_linked_trap_remove_cycle_guard_allows_single_nested_remove_like_cpp() {
+        let mut map = test_map();
+        let mut owner = test_gameobject_for_spawn(48307, 4830401);
+        let owner_guid = owner.world().guid();
+        let mut trap = test_gameobject_for_spawn(48308, 4830402);
+        let trap_guid = trap.world().guid();
+
+        owner.set_linked_trap_like_cpp(trap_guid);
+        trap.set_linked_trap_like_cpp(owner_guid);
+        map.insert_map_object_record(MapObjectRecord::new_game_object(owner).unwrap())
+            .unwrap();
+        map.insert_map_object_record(MapObjectRecord::new_game_object(trap).unwrap())
+            .unwrap();
+
+        let outcome = map.remove_from_map_like_cpp(owner_guid, true).unwrap();
+        let linked_trap = outcome.gameobject_linked_trap_remove.expect(
+            "exact typed in-world GameObject should expose linked-trap RemoveFromWorld evidence",
+        );
+
+        assert_eq!(linked_trap.guid, owner_guid);
+        assert_eq!(linked_trap.linked_trap_guid, Some(trap_guid));
+        assert!(linked_trap.owner_present_before_linked_trap_remove);
+        assert!(linked_trap.linked_trap_removed);
+        assert!(!linked_trap.linked_trap_missing_or_self);
+        assert!(!linked_trap.linked_trap_cycle_guarded);
+        assert!(map.map_object_record(owner_guid).is_none());
+        assert!(map.map_object_record(trap_guid).is_none());
+    }
+
+    #[test]
+    fn gameobject_linked_trap_remove_noops_missing_self_and_empty_like_cpp() {
+        let mut missing_map = test_map();
+        let missing_trap_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 7, 0, 4830201);
+        let mut missing_owner = test_gameobject_for_spawn(48303, 4830202);
+        let missing_owner_guid = missing_owner.world().guid();
+        missing_owner.set_linked_trap_like_cpp(missing_trap_guid);
+        missing_map
+            .insert_map_object_record(MapObjectRecord::new_game_object(missing_owner).unwrap())
+            .unwrap();
+
+        let missing_outcome = missing_map
+            .remove_from_map_like_cpp(missing_owner_guid, true)
+            .unwrap();
+        let missing = missing_outcome.gameobject_linked_trap_remove.unwrap();
+        assert_eq!(missing.linked_trap_guid, Some(missing_trap_guid));
+        assert!(!missing.linked_trap_removed);
+        assert!(missing.linked_trap_missing_or_self);
+        assert!(!missing.linked_trap_cycle_guarded);
+        assert!(missing_map.map_object_record(missing_owner_guid).is_none());
+
+        let mut self_map = test_map();
+        let mut self_owner = test_gameobject_for_spawn(48304, 4830203);
+        let self_guid = self_owner.world().guid();
+        self_owner.set_linked_trap_like_cpp(self_guid);
+        self_map
+            .insert_map_object_record(MapObjectRecord::new_game_object(self_owner).unwrap())
+            .unwrap();
+
+        let self_outcome = self_map.remove_from_map_like_cpp(self_guid, true).unwrap();
+        let self_linked = self_outcome.gameobject_linked_trap_remove.unwrap();
+        assert_eq!(self_linked.linked_trap_guid, Some(self_guid));
+        assert!(!self_linked.linked_trap_removed);
+        assert!(self_linked.linked_trap_missing_or_self);
+        assert!(!self_linked.linked_trap_cycle_guarded);
+        assert!(self_map.map_object_record(self_guid).is_none());
+
+        let mut empty_map = test_map();
+        let empty_owner = test_gameobject_for_spawn(48305, 4830204);
+        let empty_guid = empty_owner.world().guid();
+        empty_map
+            .insert_map_object_record(MapObjectRecord::new_game_object(empty_owner).unwrap())
+            .unwrap();
+
+        let empty_outcome = empty_map
+            .remove_from_map_like_cpp(empty_guid, true)
+            .unwrap();
+        let empty = empty_outcome.gameobject_linked_trap_remove.unwrap();
+        assert_eq!(empty.linked_trap_guid, None);
+        assert!(!empty.linked_trap_removed);
+        assert!(empty.linked_trap_missing_or_self);
+        assert!(empty_map.map_object_record(empty_guid).is_none());
+    }
+
+    #[test]
+    fn gameobject_linked_trap_remove_skips_not_in_world_and_generic_paths_like_cpp() {
+        let mut not_in_world_map = test_map();
+        let mut not_in_world_gameobject = test_gameobject_for_spawn(48306, 4830301);
+        let not_in_world_guid = not_in_world_gameobject.world().guid();
+        not_in_world_gameobject.set_linked_trap_like_cpp(ObjectGuid::create_world_object(
+            HighGuid::GameObject,
+            0,
+            1,
+            571,
+            7,
+            0,
+            4830302,
+        ));
+        not_in_world_gameobject
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        not_in_world_map
+            .insert_map_object_record(
+                MapObjectRecord::new_game_object(not_in_world_gameobject).unwrap(),
+            )
+            .unwrap();
+
+        let not_in_world_removed = not_in_world_map
+            .remove_from_map_like_cpp(not_in_world_guid, true)
+            .unwrap();
+        assert!(not_in_world_removed.gameobject_linked_trap_remove.is_none());
+
+        let mut generic_map = test_map();
+        let generic_object =
+            world_object_with_counter(HighGuid::GameObject, 4830303, 571, 7, false);
+        let generic_guid = generic_object.guid();
+        generic_map
+            .add_to_map_like_cpp(AccessorObjectKind::GameObject, generic_object)
+            .unwrap();
+
+        let generic_removed = generic_map
+            .remove_from_map_like_cpp(generic_guid, true)
+            .unwrap();
+        assert!(generic_removed.gameobject_linked_trap_remove.is_none());
     }
 
     #[test]
