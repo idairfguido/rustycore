@@ -1427,6 +1427,8 @@ pub struct PlayerCreateData {
     /// Slots 0-18 = equipped, 19-22 = bag containers, rest = backpack/bank.
     /// Each entry is an Item ObjectGuid (or EMPTY).
     pub inv_slots: [ObjectGuid; 141],
+    /// ActivePlayerData::FarsightObject written after InvSlots in WriteCreate.
+    pub farsight_object: ObjectGuid,
     /// Character's learned skills for the SkillInfo array (up to 256).
     /// Each entry: (skill_id, step, rank, starting_rank, max_rank, temp_bonus, perm_bonus).
     pub skill_info: Vec<(u16, u16, u16, u16, u16, i16, u16)>,
@@ -1885,7 +1887,7 @@ impl PlayerCreateData {
         }
 
         // FarsightObject, SummonedBattlePetGUID
-        write_empty_guid(buf);
+        buf.write_packed_guid(&self.farsight_object);
         write_empty_guid(buf);
 
         // KnownTitles.Size
@@ -2850,6 +2852,7 @@ impl UpdateObject {
             spell_crit_pct: combat.spell_crit_pct,
             visible_items,
             inv_slots,
+            farsight_object: ObjectGuid::EMPTY,
             skill_info,
             coinage,
             quest_log,
@@ -8708,6 +8711,96 @@ mod tests {
         assert!(stable_bytes.windows(4).any(|window| window == [1, 0, 0, 0]));
         assert!(stable_bytes.windows(4).any(|window| window == [5, 0, 0, 0]));
         assert!(stable_bytes.windows(3).any(|window| window == b"Pet"));
+    }
+
+    fn test_player_create_data_with_farsight(farsight_object: ObjectGuid) -> PlayerCreateData {
+        PlayerCreateData {
+            guid: ObjectGuid::create_player(1, 42),
+            race: 1,
+            class: 1,
+            sex: 0,
+            level: 1,
+            display_id: 49,
+            native_display_id: 49,
+            health: 100,
+            max_health: 100,
+            faction_template: PlayerCreateData::faction_for_race(1),
+            zone_id: 12,
+            stats: [0; 5],
+            base_armor: 0,
+            max_mana: 0,
+            attack_power: 0,
+            ranged_attack_power: 0,
+            min_damage: 1.0,
+            max_damage: 2.0,
+            min_ranged_damage: 0.0,
+            max_ranged_damage: 0.0,
+            dodge_pct: 0.0,
+            parry_pct: 0.0,
+            crit_pct: 5.0,
+            ranged_crit_pct: 5.0,
+            spell_crit_pct: 0.0,
+            visible_items: [(0, 0, 0); 19],
+            inv_slots: [ObjectGuid::EMPTY; 141],
+            farsight_object,
+            skill_info: Vec::new(),
+            quest_log: Vec::new(),
+            coinage: 0,
+        }
+    }
+
+    #[test]
+    fn active_player_create_writes_farsight_after_inventory_slots() {
+        let farsight_object = ObjectGuid::new(0x0102_0304_0506_0708, 0x1112_1314_1516_1718);
+        let create = test_player_create_data_with_farsight(farsight_object);
+        let mut packet = WorldPacket::new_empty();
+        create.write_active_player_data(&mut packet);
+        let data = packet.data();
+
+        let mut expected_guid = WorldPacket::new_empty();
+        expected_guid.write_packed_guid(&farsight_object);
+        let expected_guid = expected_guid.into_data();
+        let farsight_offset = 141 * 2;
+        let summoned_battle_pet_offset = farsight_offset + expected_guid.len();
+
+        assert_ne!(expected_guid, [0, 0]);
+        assert_eq!(
+            &data[farsight_offset..summoned_battle_pet_offset],
+            expected_guid.as_slice()
+        );
+        assert_eq!(
+            &data[summoned_battle_pet_offset..summoned_battle_pet_offset + 2],
+            [0, 0]
+        );
+    }
+
+    #[test]
+    fn create_player_defaults_farsight_object_empty() {
+        let guid = ObjectGuid::create_player(1, 42);
+        let pos = Position::new(0.0, 0.0, 0.0, 0.0);
+        let packet = UpdateObject::create_player(
+            guid,
+            1,
+            1,
+            0,
+            1,
+            49,
+            &pos,
+            0,
+            12,
+            true,
+            [(0, 0, 0); 19],
+            [ObjectGuid::EMPTY; 141],
+            PlayerCombatStats::default(),
+            Vec::new(),
+            0,
+            Vec::new(),
+        );
+
+        let UpdateBlock::CreateObject { create_data, .. } = &packet.blocks[0] else {
+            panic!("create_player should emit one CreateObject block");
+        };
+        assert_eq!(create_data.farsight_object, ObjectGuid::EMPTY);
     }
 
     #[test]

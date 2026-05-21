@@ -5,6 +5,12 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.488** ActivePlayerData::FarsightObject create-packet serialization seam.
+  Status: represented-complete bounded packet serialization seam; review `APROBADO`; CI `CI_OK`; validation OK; committed locally at current #488 HEAD; no push/install/restart. Packet-create seam complete only for `PlayerCreateData::write_active_player_data` carrying a non-empty `ActivePlayerData::FarsightObject` immediately after `InvSlots[141]`, while `UpdateObject::create_player(...)` remains compatibility-defaulted to `ObjectGuid::EMPTY`.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Updates/UpdateFields.h:643-646`; `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Updates/UpdateFields.cpp:2869-2877`, `:3554-3560`; `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp:25344-25387`.
+  Rust targets: `crates/wow-packet/src/packets/update.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: `PlayerCreateData` now exposes `farsight_object`, the ActivePlayerData create path serializes it with packed GUID encoding immediately after the 141 inventory slots, and focused wow-packet tests cover non-empty direct create serialization plus empty `UpdateObject::create_player(...)` fallback. Checks: `cargo fmt --check`; `cargo test -p wow-packet farsight --lib -- --nocapture` (2 passed); `PROTOC=/home/cdmonio/.local/protoc/bin/protoc cargo check -p world-server`; `git diff --check`; TSV 9-column/no-duplicate check. Boundaries: no full `Player::SetViewpoint`, `CMSG_FAR_SIGHT`, `SetSeer`, ObjectAccessor/session fanout, dynamic-object/aura runtime, visibility packet parity, or new map/session sync is claimed.
+
 - [x] **#NEXT.R8.ENTITIES.487** live `Map::DelayedUpdate` far-spell callback drain seam.
   Status: represented-complete bounded slice; review `APROBADO`; CI `CI_OK`; validation OK; committed locally at current #487 HEAD; no push/install/restart. Runtime-seam complete only for the C++ `Map::DelayedUpdate` first block ordering: drain map-owned represented far-spell callback actions before remove-list and grid-state update.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2514-2517`, `:2519-2530`, `:2532-2544`.
