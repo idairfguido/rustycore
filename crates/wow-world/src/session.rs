@@ -14356,55 +14356,62 @@ impl WorldSession {
         self.represented_seer_guid_like_cpp
     }
 
-    fn current_canonical_farsight_object_like_cpp(&self) -> Option<ObjectGuid> {
+    fn current_canonical_player_map_key_like_cpp(&self) -> Option<wow_map::MapKey> {
         let guid = self.player_guid()?;
         let map_id = u32::from(self.player_map_id_like_cpp());
         let manager = self.canonical_map_manager.as_ref()?;
         let manager = manager.lock().ok()?;
-        let mut farsight_object = None;
+        let mut key = None;
         manager.do_for_all_maps_with_map_id(map_id, |managed| {
-            if farsight_object.is_none()
-                && let Some(player) = managed.map().get_typed_player(guid)
-            {
-                let value = player.active_data().farsight_object;
-                if !value.is_empty() {
-                    farsight_object = Some(value);
-                }
+            if key.is_none() && managed.map().get_typed_player(guid).is_some() {
+                key = Some(wow_map::MapKey::new(
+                    managed.map_id(),
+                    managed.instance_id(),
+                ));
             }
         });
-        farsight_object
+        key
+    }
+
+    fn current_canonical_farsight_object_like_cpp(&self) -> Option<ObjectGuid> {
+        let guid = self.player_guid()?;
+        let key = self.current_canonical_player_map_key_like_cpp()?;
+        let manager = self.canonical_map_manager.as_ref()?;
+        let manager = manager.lock().ok()?;
+        let value = manager
+            .find_map(key.map_id, key.instance_id)?
+            .map()
+            .get_typed_player(guid)?
+            .active_data()
+            .farsight_object;
+        (!value.is_empty()).then_some(value)
     }
 
     fn canonical_map_has_seer_like_object_like_cpp(&self, target: ObjectGuid) -> bool {
         if target.is_empty() {
             return false;
         }
-        let map_id = u32::from(self.player_map_id_like_cpp());
+        let Some(key) = self.current_canonical_player_map_key_like_cpp() else {
+            return false;
+        };
         let Some(manager) = self.canonical_map_manager.as_ref() else {
             return false;
         };
         let Ok(manager) = manager.lock() else {
             return false;
         };
-        let mut found = false;
-        manager.do_for_all_maps_with_map_id(map_id, |managed| {
-            if found {
-                return;
-            }
-            found = managed
-                .map()
-                .map_object_record(target)
-                .is_some_and(|record| {
-                    matches!(
-                        record.kind(),
-                        AccessorObjectKind::Player
-                            | AccessorObjectKind::Creature
-                            | AccessorObjectKind::Pet
-                            | AccessorObjectKind::DynamicObject
-                    )
-                });
-        });
-        found
+        manager
+            .find_map(key.map_id, key.instance_id)
+            .and_then(|managed| managed.map().map_object_record(target))
+            .is_some_and(|record| {
+                matches!(
+                    record.kind(),
+                    AccessorObjectKind::Player
+                        | AccessorObjectKind::Creature
+                        | AccessorObjectKind::Pet
+                        | AccessorObjectKind::DynamicObject
+                )
+            })
     }
 
     pub(crate) fn apply_far_sight_like_cpp(&mut self, enable: bool) {
@@ -17055,6 +17062,18 @@ mod tests {
         position: Position,
         npc_flags: u32,
     ) {
+        add_canonical_test_creature_on_map(canonical, guid, entry, position, npc_flags, 571, 0);
+    }
+
+    fn add_canonical_test_creature_on_map(
+        canonical: &SharedCanonicalMapManager,
+        guid: ObjectGuid,
+        entry: u32,
+        position: Position,
+        npc_flags: u32,
+        map_id: u32,
+        instance_id: u32,
+    ) {
         let mut creature = wow_entities::Creature::new(false);
         creature.unit_mut().world_mut().object_mut().create(guid);
         creature
@@ -17062,7 +17081,11 @@ mod tests {
             .world_mut()
             .object_mut()
             .set_entry(entry);
-        creature.unit_mut().world_mut().set_map(571, 0).unwrap();
+        creature
+            .unit_mut()
+            .world_mut()
+            .set_map(map_id, instance_id)
+            .unwrap();
         creature.unit_mut().world_mut().relocate(position);
         creature.unit_mut().world_mut().set_combat_reach(1.0);
         creature.unit_mut().set_level(80);
@@ -17074,8 +17097,7 @@ mod tests {
         canonical
             .lock()
             .unwrap()
-            .find_map_mut(571, 0)
-            .unwrap()
+            .create_world_map(map_id, instance_id)
             .map_mut()
             .insert_map_object_record(
                 wow_entities::MapObjectRecord::new_creature(creature).unwrap(),
@@ -25389,7 +25411,25 @@ mod tests {
         map_id: u32,
         instance_id: u32,
     ) {
-        let player = session.canonical_player_entity_snapshot_like_cpp().unwrap();
+        let player_guid = session.player_guid().unwrap();
+        let position = session.player_position_like_cpp().unwrap();
+        let mut player = Player::new(Some(u64::from(session.account_id)), false);
+        player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(player_guid);
+        player
+            .unit_mut()
+            .world_mut()
+            .set_name(session.player_name_like_cpp().unwrap());
+        player
+            .unit_mut()
+            .world_mut()
+            .set_map(map_id, instance_id)
+            .unwrap();
+        player.unit_mut().world_mut().relocate(position);
+        player.unit_mut().world_mut().object_mut().add_to_world();
         let mut manager = canonical.lock().unwrap();
         let managed = manager.create_world_map(map_id, instance_id);
         session.sync_canonical_player_entity_like_cpp(managed, player);
@@ -25400,10 +25440,26 @@ mod tests {
         player_guid: ObjectGuid,
         farsight_object: ObjectGuid,
     ) {
+        set_canonical_player_farsight_object_on_map_like_cpp(
+            canonical,
+            player_guid,
+            farsight_object,
+            571,
+            0,
+        );
+    }
+
+    fn set_canonical_player_farsight_object_on_map_like_cpp(
+        canonical: &SharedCanonicalMapManager,
+        player_guid: ObjectGuid,
+        farsight_object: ObjectGuid,
+        map_id: u32,
+        instance_id: u32,
+    ) {
         canonical
             .lock()
             .unwrap()
-            .find_map_mut(571, 0)
+            .find_map_mut(map_id, instance_id)
             .unwrap()
             .map_mut()
             .get_typed_player_mut(player_guid)
@@ -25463,6 +25519,91 @@ mod tests {
                 .farsight_object,
             target_guid
         );
+    }
+
+    #[test]
+    fn far_sight_enable_rejects_cross_instance_target_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 4260);
+        let target_guid = test_creature_guid(4261);
+        let previous_seer = test_creature_guid(4262);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_player_guid(Some(player_guid));
+        session.player_name = Some("FarSightCrossInstance".into());
+        session.player_position = Some(Position::new(10.0, 10.0, 0.0, 0.0));
+        session.current_map_id = 571;
+        session.represented_seer_guid_like_cpp = Some(previous_seer);
+        insert_session_player_into_canonical_map_like_cpp(&session, &canonical, 571, 11);
+        set_canonical_player_farsight_object_on_map_like_cpp(
+            &canonical,
+            player_guid,
+            target_guid,
+            571,
+            11,
+        );
+        add_canonical_test_creature_on_map(
+            &canonical,
+            target_guid,
+            9003,
+            Position::new(12.0, 10.0, 0.0, 0.0),
+            0,
+            571,
+            12,
+        );
+
+        session.apply_far_sight_like_cpp(true);
+
+        assert_eq!(
+            session.represented_seer_guid_like_cpp(),
+            Some(previous_seer)
+        );
+        assert!(
+            canonical
+                .lock()
+                .unwrap()
+                .find_map(571, 11)
+                .unwrap()
+                .map()
+                .map_object_record(target_guid)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn far_sight_enable_same_nonzero_instance_sets_seer_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 4263);
+        let target_guid = test_creature_guid(4264);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_player_guid(Some(player_guid));
+        session.player_name = Some("FarSightSameInstance".into());
+        session.player_position = Some(Position::new(10.0, 10.0, 0.0, 0.0));
+        session.current_map_id = 571;
+        insert_session_player_into_canonical_map_like_cpp(&session, &canonical, 571, 13);
+        add_canonical_test_creature_on_map(
+            &canonical,
+            target_guid,
+            9004,
+            Position::new(12.0, 10.0, 0.0, 0.0),
+            0,
+            571,
+            13,
+        );
+        set_canonical_player_farsight_object_on_map_like_cpp(
+            &canonical,
+            player_guid,
+            target_guid,
+            571,
+            13,
+        );
+
+        session.apply_far_sight_like_cpp(true);
+
+        assert_eq!(session.represented_seer_guid_like_cpp(), Some(target_guid));
     }
 
     #[test]
