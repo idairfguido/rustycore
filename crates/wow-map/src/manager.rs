@@ -14,12 +14,13 @@ use crate::MapKey;
 use crate::map::{
     AreaTriggersUpdateSummaryLikeCpp, ConversationsUpdateSummaryLikeCpp,
     CreatureUpdateSummaryLikeCpp, DynamicMapTreeUpdateSummaryLikeCpp,
-    DynamicObjectsUpdateSummaryLikeCpp, GameObjectsUpdateSummaryLikeCpp, Map,
-    MapUpdateMetricsSummaryLikeCpp, MoveListDrainSummaryLikeCpp, NoopGridLifecycle,
-    NoopTerrainGridLoader, PersonalPhaseTrackerUpdateSummaryLikeCpp,
-    ProcessRelocationNotifiesOutcome, SceneObjectUpdateContextLikeCpp,
-    SceneObjectsUpdateSummaryLikeCpp, ScriptScheduleProcessSummaryLikeCpp,
-    SendObjectUpdatesSummaryLikeCpp, TransportsUpdateSummaryLikeCpp, WeatherUpdateSummaryLikeCpp,
+    DynamicObjectsUpdateSummaryLikeCpp, GameObjectsUpdateSummaryLikeCpp,
+    GridStatesUpdateSummaryLikeCpp, Map, MapUpdateMetricsSummaryLikeCpp,
+    MoveListDrainSummaryLikeCpp, NoopGridLifecycle, NoopTerrainGridLoader,
+    PersonalPhaseTrackerUpdateSummaryLikeCpp, ProcessRelocationNotifiesOutcome,
+    SceneObjectUpdateContextLikeCpp, SceneObjectsUpdateSummaryLikeCpp,
+    ScriptScheduleProcessSummaryLikeCpp, SendObjectUpdatesSummaryLikeCpp,
+    TransportsUpdateSummaryLikeCpp, WeatherUpdateSummaryLikeCpp,
 };
 use crate::spawn::Difficulty;
 use wow_core::GameTime;
@@ -201,6 +202,7 @@ pub struct ManagedMap {
     last_weather_update_summary_like_cpp: WeatherUpdateSummaryLikeCpp,
     last_personal_phase_tracker_update_summary: PersonalPhaseTrackerUpdateSummaryLikeCpp,
     last_live_move_list_drain_summary: LiveMoveListDrainSummaryLikeCpp,
+    last_grid_states_update_summary_like_cpp: GridStatesUpdateSummaryLikeCpp,
     last_process_relocation_notifies_outcome_like_cpp: ProcessRelocationNotifiesOutcome,
     last_map_update_tail_summary_like_cpp: MapUpdateTailSummaryLikeCpp,
     unload_all_calls: u32,
@@ -253,6 +255,7 @@ impl ManagedMap {
             last_personal_phase_tracker_update_summary:
                 PersonalPhaseTrackerUpdateSummaryLikeCpp::default(),
             last_live_move_list_drain_summary: LiveMoveListDrainSummaryLikeCpp::default(),
+            last_grid_states_update_summary_like_cpp: GridStatesUpdateSummaryLikeCpp::default(),
             last_process_relocation_notifies_outcome_like_cpp:
                 ProcessRelocationNotifiesOutcome::default(),
             last_map_update_tail_summary_like_cpp: MapUpdateTailSummaryLikeCpp::default(),
@@ -366,6 +369,10 @@ impl ManagedMap {
 
     pub fn last_live_move_list_drain_summary_like_cpp(&self) -> LiveMoveListDrainSummaryLikeCpp {
         self.last_live_move_list_drain_summary.clone()
+    }
+
+    pub const fn last_grid_states_update_summary_like_cpp(&self) -> GridStatesUpdateSummaryLikeCpp {
+        self.last_grid_states_update_summary_like_cpp
     }
 
     pub fn last_process_relocation_notifies_outcome_like_cpp(
@@ -520,6 +527,15 @@ impl ManagedMap {
     fn delayed_update(&mut self, diff_ms: u32) {
         self.delayed_update_calls.push(diff_ms);
         self.map.remove_all_objects_in_remove_list_like_cpp();
+        self.last_grid_states_update_summary_like_cpp = if self.kind.is_battleground_or_arena() {
+            GridStatesUpdateSummaryLikeCpp {
+                diff_ms,
+                skipped_battleground_or_arena: true,
+                ..GridStatesUpdateSummaryLikeCpp::default()
+            }
+        } else {
+            self.map.update_loaded_grid_states_like_cpp(diff_ms)
+        };
     }
 
     fn unload_all(&mut self) {
@@ -1226,6 +1242,8 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use crate::coords::GridCoord;
+    use crate::grid::GridStateKind;
     use crate::map::MapObjectMoveListFamilyLikeCpp;
     use crate::spawn::{SpawnGroupFlags, SpawnGroupTemplateData};
     use wow_constants::{DeathState, TypeId, TypeMask};
@@ -1425,6 +1443,69 @@ mod tests {
         let map = manager.find_map(1, 0).unwrap();
         assert_eq!(map.update_calls(), &[10]);
         assert_eq!(map.delayed_update_calls(), &[10]);
+    }
+
+    #[test]
+    fn live_delayed_update_consumes_removal_grid_state_after_remove_list_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_world_map(1, 0);
+        let position = Position::xyz(3_000.0, 3_000.0, 0.0);
+        {
+            let managed_map = manager.find_map_mut(1, 0).unwrap();
+            assert!(managed_map.map_mut().load_grid(position.x, position.y));
+            let cell = crate::map::cell_from_world(position.x, position.y);
+            let coord = GridCoord::new(cell.grid_x(), cell.grid_y());
+            let grid = managed_map.map_mut().get_ngrid_mut(coord).unwrap();
+            grid.set_state(GridStateKind::Removal);
+            grid.info_mut().reset_time_tracker(1);
+            assert!(managed_map.map().get_ngrid(coord).is_some());
+        }
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 0).unwrap();
+        let cell = crate::map::cell_from_world(position.x, position.y);
+        let coord = GridCoord::new(cell.grid_x(), cell.grid_y());
+        let summary = managed_map.last_grid_states_update_summary_like_cpp();
+        assert_eq!(managed_map.delayed_update_calls(), &[1]);
+        assert_eq!(summary.diff_ms, 1);
+        assert_eq!(summary.visited, 1);
+        assert_eq!(summary.updated, 1);
+        assert_eq!(summary.unloaded, 1);
+        assert_eq!(summary.removal_unloaded, 1);
+        assert!(!summary.skipped_battleground_or_arena);
+        assert!(managed_map.map().get_ngrid(coord).is_none());
+    }
+
+    #[test]
+    fn battleground_delayed_update_skips_grid_state_update_like_cpp() {
+        let mut manager = MapManager::new(MIN_GRID_DELAY_MS, 1);
+        manager.create_map_entry(1, 33, 0, ManagedMapKind::Battleground);
+        let position = Position::xyz(3_100.0, 3_100.0, 0.0);
+        {
+            let managed_map = manager.find_map_mut(1, 33).unwrap();
+            assert!(managed_map.map_mut().load_grid(position.x, position.y));
+            let cell = crate::map::cell_from_world(position.x, position.y);
+            let coord = GridCoord::new(cell.grid_x(), cell.grid_y());
+            let grid = managed_map.map_mut().get_ngrid_mut(coord).unwrap();
+            grid.set_state(GridStateKind::Removal);
+            grid.info_mut().reset_time_tracker(1);
+        }
+
+        assert_eq!(manager.update(1), Some(1));
+
+        let managed_map = manager.find_map(1, 33).unwrap();
+        let cell = crate::map::cell_from_world(position.x, position.y);
+        let coord = GridCoord::new(cell.grid_x(), cell.grid_y());
+        let summary = managed_map.last_grid_states_update_summary_like_cpp();
+        assert_eq!(summary.diff_ms, 1);
+        assert!(summary.skipped_battleground_or_arena);
+        assert_eq!(summary.visited, 0);
+        assert_eq!(summary.unloaded, 0);
+        assert_eq!(
+            managed_map.map().get_ngrid(coord).unwrap().state(),
+            GridStateKind::Removal
+        );
     }
 
     #[test]

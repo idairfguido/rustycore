@@ -161,6 +161,21 @@ pub struct MapUpdateMetricsSummaryLikeCpp {
     pub instance_id: u32,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GridStatesUpdateSummaryLikeCpp {
+    pub diff_ms: u32,
+    pub visited: usize,
+    pub updated: usize,
+    pub unloaded: usize,
+    pub missing_after_snapshot: usize,
+    pub skipped_invalid: usize,
+    pub active_to_idle: usize,
+    pub idle_to_removal: usize,
+    pub removal_unloaded: usize,
+    pub removal_deferred_or_reset: usize,
+    pub skipped_battleground_or_arena: bool,
+}
+
 /// Represented key for the map-owned C++ `_dynamicTree` model-registration seam.
 ///
 /// C++ `DynamicMapTree` stores `GameObjectModel` object references/pointers. Rust does
@@ -10187,6 +10202,74 @@ where
         true
     }
 
+    pub fn update_loaded_grid_states_like_cpp(
+        &mut self,
+        diff_ms: u32,
+    ) -> GridStatesUpdateSummaryLikeCpp {
+        // C++ `Map::DelayedUpdate` increments the GridRefManager iterator before
+        // invoking the grid-state update because that update may unload/delete
+        // the current grid (`Map.cpp:2536-2542`). Rust snapshots loaded grid
+        // coordinates first and then re-checks each slot, never recreating a
+        // grid that disappeared earlier in the same delayed-update pass.
+        let loaded_grid_coords: Vec<GridCoord> = self
+            .grids
+            .iter()
+            .enumerate()
+            .filter_map(|(index, grid)| {
+                grid.as_ref().map(|_| {
+                    GridCoord::new(
+                        (index as u32) / MAX_NUMBER_OF_GRIDS,
+                        (index as u32) % MAX_NUMBER_OF_GRIDS,
+                    )
+                })
+            })
+            .collect();
+
+        let mut summary = GridStatesUpdateSummaryLikeCpp {
+            diff_ms,
+            visited: loaded_grid_coords.len(),
+            ..GridStatesUpdateSummaryLikeCpp::default()
+        };
+
+        for coord in loaded_grid_coords {
+            let Some(previous_state) = self.get_ngrid(coord).map(NGrid::state) else {
+                summary.missing_after_snapshot += 1;
+                continue;
+            };
+
+            if matches!(previous_state, GridStateKind::Invalid) {
+                summary.skipped_invalid += 1;
+            }
+
+            let unloaded = self.update_grid_state_at(coord, diff_ms);
+            summary.updated += 1;
+
+            if unloaded {
+                summary.unloaded += 1;
+                if matches!(previous_state, GridStateKind::Removal) {
+                    summary.removal_unloaded += 1;
+                }
+                continue;
+            }
+
+            let Some(next_state) = self.get_ngrid(coord).map(NGrid::state) else {
+                summary.missing_after_snapshot += 1;
+                continue;
+            };
+
+            match (previous_state, next_state) {
+                (GridStateKind::Active, GridStateKind::Idle) => summary.active_to_idle += 1,
+                (GridStateKind::Idle, GridStateKind::Removal) => summary.idle_to_removal += 1,
+                (GridStateKind::Removal, GridStateKind::Removal) => {
+                    summary.removal_deferred_or_reset += 1;
+                }
+                _ => {}
+            }
+        }
+
+        summary
+    }
+
     pub fn update_grid_state_at(&mut self, coord: GridCoord, diff_ms: u32) -> bool {
         let index = checked_grid_index(coord);
         let Some(mut grid) = self.grids[index].take() else {
@@ -12131,6 +12214,74 @@ mod tests {
         );
         assert!(plan.process_relocation_notifies);
         assert_eq!(plan.nearby_visit_centers, vec![active_guid]);
+    }
+
+    #[test]
+    fn map_grid_state_delayed_helper_active_expired_moves_to_idle_and_stops_like_cpp() {
+        let mut map = test_map();
+        let position = Position::xyz(3_000.0, 3_000.0, 0.0);
+        assert!(map.load_grid(position.x, position.y));
+        let cell = Cell::from_world(position.x, position.y);
+        let coord = GridCoord::new(cell.grid_x(), cell.grid_y());
+        let grid = map.get_ngrid_mut(coord).unwrap();
+        grid.set_state(GridStateKind::Active);
+        grid.info_mut().reset_time_tracker(1);
+
+        let summary = map.update_loaded_grid_states_like_cpp(1);
+
+        assert_eq!(summary.diff_ms, 1);
+        assert_eq!(summary.visited, 1);
+        assert_eq!(summary.updated, 1);
+        assert_eq!(summary.active_to_idle, 1);
+        assert_eq!(summary.unloaded, 0);
+        assert_eq!(summary.missing_after_snapshot, 0);
+        assert_eq!(map.get_ngrid(coord).unwrap().state(), GridStateKind::Idle);
+        assert_eq!(map.lifecycle().stops, 1);
+    }
+
+    #[test]
+    fn map_grid_state_delayed_helper_removal_lock_and_active_near_defer_unload_like_cpp() {
+        let mut locked_map = test_map();
+        let locked_position = Position::xyz(3_100.0, 3_100.0, 0.0);
+        assert!(locked_map.load_grid(locked_position.x, locked_position.y));
+        let locked_cell = Cell::from_world(locked_position.x, locked_position.y);
+        let locked_coord = GridCoord::new(locked_cell.grid_x(), locked_cell.grid_y());
+        let locked_grid = locked_map.get_ngrid_mut(locked_coord).unwrap();
+        locked_grid.set_state(GridStateKind::Removal);
+        locked_grid.info_mut().reset_time_tracker(1);
+        locked_grid.info_mut().set_unload_explicit_lock(true);
+
+        let locked_summary = locked_map.update_loaded_grid_states_like_cpp(1);
+
+        assert_eq!(locked_summary.visited, 1);
+        assert_eq!(locked_summary.updated, 1);
+        assert_eq!(locked_summary.unloaded, 0);
+        assert_eq!(locked_summary.removal_deferred_or_reset, 1);
+        assert_eq!(
+            locked_map.get_ngrid(locked_coord).unwrap().state(),
+            GridStateKind::Removal
+        );
+
+        let mut active_near_map = test_map();
+        let active_position = Position::xyz(3_200.0, 3_200.0, 0.0);
+        assert!(active_near_map.load_grid(active_position.x, active_position.y));
+        let active_cell = Cell::from_world(active_position.x, active_position.y);
+        let active_coord = GridCoord::new(active_cell.grid_x(), active_cell.grid_y());
+        let active_grid = active_near_map.get_ngrid_mut(active_coord).unwrap();
+        active_grid.set_state(GridStateKind::Removal);
+        active_grid.info_mut().reset_time_tracker(1);
+        active_near_map.mark_active_cell(active_cell.cell_coord());
+
+        let active_summary = active_near_map.update_loaded_grid_states_like_cpp(1);
+
+        assert_eq!(active_summary.visited, 1);
+        assert_eq!(active_summary.updated, 1);
+        assert_eq!(active_summary.unloaded, 0);
+        assert_eq!(active_summary.removal_deferred_or_reset, 1);
+        assert_eq!(
+            active_near_map.get_ngrid(active_coord).unwrap().state(),
+            GridStateKind::Removal
+        );
     }
 
     #[test]
