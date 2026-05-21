@@ -35,11 +35,11 @@ use crate::spawn::{
 use wow_core::{ObjectGuid, ObjectGuidGenerator, Position, guid::HighGuid};
 use wow_entities::{
     AccessorObjectKind, AreaTrigger, CombatBeginContextLikeCpp, CombatSubsystem, Conversation,
-    Corpse, Creature, CreatureRuntimePlan, CreatureRuntimeUpdateContext,
-    CreatureSearchFormationOutcomeLikeCpp, DynamicObject, DynamicObjectType, GAMEOBJECT_TYPE_CHEST,
-    GAMEOBJECT_TYPE_DOOR, GAMEOBJECT_TYPE_GOOBER, GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT,
-    GAMEOBJECT_TYPE_NEW_FLAG, GAMEOBJECT_TYPE_NEW_FLAG_DROP, GAMEOBJECT_TYPE_TRANSPORT,
-    GO_FLAG_NODESPAWN, GameObject,
+    Corpse, Creature, CreatureAimInitializeOutcomeLikeCpp, CreatureRuntimePlan,
+    CreatureRuntimeUpdateContext, CreatureSearchFormationOutcomeLikeCpp, DynamicObject,
+    DynamicObjectType, GAMEOBJECT_TYPE_CHEST, GAMEOBJECT_TYPE_DOOR, GAMEOBJECT_TYPE_GOOBER,
+    GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT, GAMEOBJECT_TYPE_NEW_FLAG, GAMEOBJECT_TYPE_NEW_FLAG_DROP,
+    GAMEOBJECT_TYPE_TRANSPORT, GO_FLAG_NODESPAWN, GameObject,
     GameObjectUpdateOutcomeLikeCpp as EntityGameObjectUpdateOutcomeLikeCpp,
     GameObjectUpdateStatusLikeCpp as EntityGameObjectUpdateStatusLikeCpp, GoState, INVALID_HEIGHT,
     LineOfSightQuery, LootState, MAX_VISIBILITY_DISTANCE, MapBindingError, MapObjectRecord,
@@ -7447,6 +7447,7 @@ where
                 gameobject_collision_enable: None,
                 creature_unit_add_to_world: None,
                 creature_search_formation: None,
+                creature_aim_initialize: None,
                 creature_vehicle_reset: None,
                 creature_vehicle_install: None,
                 creature_zone_script_create: None,
@@ -7512,6 +7513,12 @@ where
         if let Some(outcome) = creature_search_formation {
             self.apply_creature_search_formation_like_cpp(guid, outcome);
         }
+
+        let creature_aim_initialize = if kind == AccessorObjectKind::Creature {
+            record.creature().map(Creature::aim_initialize_like_cpp)
+        } else {
+            None
+        };
 
         let creature_vehicle_reset = if kind == AccessorObjectKind::Creature {
             record.creature_mut().and_then(|creature| {
@@ -7607,6 +7614,7 @@ where
             gameobject_collision_enable,
             creature_unit_add_to_world,
             creature_search_formation,
+            creature_aim_initialize,
             creature_vehicle_reset,
             creature_vehicle_install,
             creature_zone_script_create,
@@ -9590,6 +9598,7 @@ pub struct AddToMapOutcome {
     pub gameobject_collision_enable: Option<GameObjectCollisionEnableOutcomeLikeCpp>,
     pub creature_unit_add_to_world: Option<UnitAddToWorldOutcomeLikeCpp>,
     pub creature_search_formation: Option<CreatureSearchFormationOutcomeLikeCpp>,
+    pub creature_aim_initialize: Option<CreatureAimInitializeOutcomeLikeCpp>,
     pub creature_vehicle_reset: Option<VehicleKitAddToWorldResetOutcomeLikeCpp>,
     pub creature_vehicle_install: Option<VehicleKitInstallOutcomeLikeCpp>,
     pub creature_zone_script_create: Option<CreatureZoneScriptCreateOutcomeLikeCpp>,
@@ -16869,6 +16878,7 @@ mod tests {
             .unwrap();
         assert!(generic.creature_unit_add_to_world.is_none());
         assert!(generic.creature_search_formation.is_none());
+        assert!(generic.creature_aim_initialize.is_none());
         assert!(generic.creature_zone_script_create.is_none());
 
         let gameobject = test_gameobject_for_spawn(47503, 47504);
@@ -16878,6 +16888,40 @@ mod tests {
             )
             .unwrap();
         assert!(non_creature.creature_unit_add_to_world.is_none());
+        assert!(non_creature.creature_aim_initialize.is_none());
+    }
+
+    #[test]
+    fn creature_aim_initialize_add_to_map_emits_for_normal_creature_without_vehicle_reset_like_cpp()
+    {
+        let mut map = test_map();
+        let mut creature = test_creature_for_spawn(476, 47601, true);
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        let guid = creature.guid();
+
+        let outcome = map
+            .add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+
+        let aim = outcome.creature_aim_initialize.unwrap();
+        assert_eq!(aim.guid, guid);
+        assert_eq!(aim.spawn_id, 476);
+        assert!(aim.aim_create_represented);
+        assert!(aim.motion_initialize_represented);
+        assert!(!aim.formation_present);
+        assert!(!aim.formation_leader);
+        assert!(!aim.formation_move_idle_represented);
+        assert!(!aim.motion_initialize_requires_formed_state);
+        assert!(aim.motion_master_initialize_represented);
+        assert!(aim.ai_selected_represented);
+        assert!(aim.ai_initialize_represented);
+        assert!(!aim.vehicle_reset_expected);
+        assert!(aim.succeeded);
+        assert!(outcome.creature_vehicle_reset.is_none());
     }
 
     #[test]
@@ -17114,6 +17158,13 @@ mod tests {
 
         let reset = outcome.creature_vehicle_reset.unwrap();
         assert_eq!(reset.kit_id, 9003);
+        let aim = outcome.creature_aim_initialize.unwrap();
+        assert_eq!(aim.guid, guid);
+        assert_eq!(aim.spawn_id, 400);
+        assert!(!aim.motion_initialize_requires_formed_state);
+        assert!(aim.vehicle_reset_expected);
+        assert!(aim.aim_create_represented);
+        assert!(aim.ai_initialize_represented);
         assert!(reset.aim_create_represented);
         assert!(reset.ai_initialize_represented);
         assert!(!reset.reset_evading);

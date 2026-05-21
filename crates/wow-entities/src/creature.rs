@@ -246,6 +246,23 @@ pub struct CreatureSearchFormationOutcomeLikeCpp {
     pub add_to_group_requested: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CreatureAimInitializeOutcomeLikeCpp {
+    pub guid: ObjectGuid,
+    pub spawn_id: u64,
+    pub aim_create_represented: bool,
+    pub motion_initialize_represented: bool,
+    pub formation_present: bool,
+    pub formation_leader: bool,
+    pub formation_move_idle_represented: bool,
+    pub motion_initialize_requires_formed_state: bool,
+    pub motion_master_initialize_represented: bool,
+    pub ai_selected_represented: bool,
+    pub ai_initialize_represented: bool,
+    pub vehicle_reset_expected: bool,
+    pub succeeded: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreatureAddToWorldVehicleResetContextLikeCpp {
     pub is_mechanical_creature: bool,
@@ -1017,6 +1034,40 @@ impl Creature {
             formation_info_found: true,
             leader_spawn_id: Some(formation_info.leader_spawn_id),
             add_to_group_requested: true,
+        }
+    }
+
+    /// Represented C++ `Creature::AIM_Initialize()` / `AIM_Create()` seam.
+    ///
+    /// C++ anchors: `Creature.cpp:1026-1044` (`AIM_Create`, `AIM_Initialize`)
+    /// and `Creature.cpp:1046-1060` (`Motion_Initialize`). This records local
+    /// evidence only: it does not instantiate real AI, run `InitializeAI`, call
+    /// `CreatureGroup::FormationReset`, query `CreatureGroup::IsFormed`, move a
+    /// `MotionMaster`, or reset a vehicle kit. The vehicle reset remains the
+    /// following AddToMap seam representing `if (GetVehicleKit()) Reset()`.
+    pub fn aim_initialize_like_cpp(&self) -> CreatureAimInitializeOutcomeLikeCpp {
+        let spawn_id = self.spawn_id();
+        let formation_info = self.formation_info_like_cpp();
+        let formation_present = formation_info.is_some();
+        let formation_leader = formation_info.is_some_and(|info| info.leader_spawn_id == spawn_id);
+        let motion_initialize_requires_formed_state = formation_present && !formation_leader;
+
+        CreatureAimInitializeOutcomeLikeCpp {
+            guid: self.guid(),
+            spawn_id,
+            aim_create_represented: true,
+            motion_initialize_represented: true,
+            formation_present,
+            formation_leader,
+            // C++ non-leader formed groups call MoveIdle() and return, but this
+            // represented seam has no real CreatureGroup::IsFormed() state yet.
+            formation_move_idle_represented: false,
+            motion_initialize_requires_formed_state,
+            motion_master_initialize_represented: !motion_initialize_requires_formed_state,
+            ai_selected_represented: true,
+            ai_initialize_represented: true,
+            vehicle_reset_expected: self.unit().subsystems().vehicle.kit.is_some(),
+            succeeded: true,
         }
     }
 
@@ -2812,6 +2863,81 @@ mod tests {
         let dynamic_creature = Creature::create_from_lifecycle(record);
         assert!(!dynamic_creature.respawn_compatibility_mode());
     }
+
+    #[test]
+    fn aim_initialize_like_cpp_represents_normal_creature_without_formation_or_vehicle() {
+        let mut create = creature_lifecycle_create_record();
+        create.vehicle_id = None;
+        create.vehicle_kit_create_input = None;
+        let creature = Creature::load_from_db_lifecycle(CreatureLoadFromDbLifecycleRecord {
+            create,
+            spawn: creature_lifecycle_spawn(),
+        });
+
+        let outcome = creature.aim_initialize_like_cpp();
+
+        assert_eq!(outcome.guid, creature.guid());
+        assert_eq!(outcome.spawn_id, 44_000);
+        assert!(outcome.aim_create_represented);
+        assert!(outcome.motion_initialize_represented);
+        assert!(!outcome.formation_present);
+        assert!(!outcome.formation_leader);
+        assert!(!outcome.formation_move_idle_represented);
+        assert!(!outcome.motion_initialize_requires_formed_state);
+        assert!(outcome.motion_master_initialize_represented);
+        assert!(outcome.ai_selected_represented);
+        assert!(outcome.ai_initialize_represented);
+        assert!(!outcome.vehicle_reset_expected);
+        assert!(outcome.succeeded);
+    }
+
+    #[test]
+    fn aim_initialize_like_cpp_reports_formation_leader_and_non_leader_without_move_idle() {
+        let mut create = creature_lifecycle_create_record();
+        create.vehicle_id = None;
+        create.vehicle_kit_create_input = None;
+        let spawn = creature_lifecycle_spawn();
+        let mut leader = Creature::load_from_db_lifecycle(CreatureLoadFromDbLifecycleRecord {
+            create: create.clone(),
+            spawn: spawn.clone(),
+        });
+        leader.set_formation_info_like_cpp(Some(CreatureFormationInfoLikeCpp {
+            leader_spawn_id: spawn.spawn_id,
+            follow_dist: 8.0,
+            follow_angle_radians: 0.75,
+            group_ai: 4,
+            leader_waypoint_ids: [21, 22],
+        }));
+
+        let leader_outcome = leader.aim_initialize_like_cpp();
+        assert!(leader_outcome.formation_present);
+        assert!(leader_outcome.formation_leader);
+        assert!(!leader_outcome.formation_move_idle_represented);
+        assert!(!leader_outcome.motion_initialize_requires_formed_state);
+        assert!(leader_outcome.motion_master_initialize_represented);
+
+        let mut non_leader_spawn = spawn;
+        non_leader_spawn.spawn_id = 44_001;
+        let mut non_leader = Creature::load_from_db_lifecycle(CreatureLoadFromDbLifecycleRecord {
+            create,
+            spawn: non_leader_spawn,
+        });
+        non_leader.set_formation_info_like_cpp(Some(CreatureFormationInfoLikeCpp {
+            leader_spawn_id: 44_000,
+            follow_dist: 8.0,
+            follow_angle_radians: 0.75,
+            group_ai: 4,
+            leader_waypoint_ids: [21, 22],
+        }));
+
+        let non_leader_outcome = non_leader.aim_initialize_like_cpp();
+        assert!(non_leader_outcome.formation_present);
+        assert!(!non_leader_outcome.formation_leader);
+        assert!(!non_leader_outcome.formation_move_idle_represented);
+        assert!(non_leader_outcome.motion_initialize_requires_formed_state);
+        assert!(!non_leader_outcome.motion_master_initialize_represented);
+    }
+
     #[test]
     fn creature_lifecycle_vehicle_entry_missing_preserves_identity_without_local_kit_like_cpp() {
         let mut record = creature_lifecycle_create_record();
