@@ -14465,18 +14465,60 @@ impl WorldSession {
         key
     }
 
-    fn current_canonical_farsight_object_like_cpp(&self) -> Option<ObjectGuid> {
+    fn current_canonical_player_farsight_object_value_like_cpp(&self) -> Option<ObjectGuid> {
         let guid = self.player_guid()?;
         let key = self.current_canonical_player_map_key_like_cpp()?;
         let manager = self.canonical_map_manager.as_ref()?;
         let manager = manager.lock().ok()?;
-        let value = manager
-            .find_map(key.map_id, key.instance_id)?
-            .map()
-            .get_typed_player(guid)?
-            .active_data()
-            .farsight_object;
+        Some(
+            manager
+                .find_map(key.map_id, key.instance_id)?
+                .map()
+                .get_typed_player(guid)?
+                .active_data()
+                .farsight_object,
+        )
+    }
+
+    fn current_canonical_farsight_object_like_cpp(&self) -> Option<ObjectGuid> {
+        let value = self.current_canonical_player_farsight_object_value_like_cpp()?;
         (!value.is_empty()).then_some(value)
+    }
+
+    /// Consume the represented `Player::SetViewpoint(target, false)`/`SetSeer(this)`
+    /// side effect after canonical DynamicObject viewpoint removal has already
+    /// cleared the map-owned Player `ActivePlayerData::FarsightObject`.
+    ///
+    /// Ownership remains one-way: canonical map Player state is the source of
+    /// truth; this helper only mirrors canonical empty farsight into the
+    /// session-local represented `m_seer` and represented VALUES packet.
+    pub(crate) fn sync_represented_farsight_clear_from_canonical_like_cpp(&mut self) -> bool {
+        let Some(player_guid) = self.player_guid() else {
+            return false;
+        };
+        let Some(seer_guid) = self.represented_seer_guid_like_cpp else {
+            return false;
+        };
+        if seer_guid.is_empty() || seer_guid == player_guid {
+            return false;
+        }
+
+        let Some(canonical_farsight_object) =
+            self.current_canonical_player_farsight_object_value_like_cpp()
+        else {
+            return false;
+        };
+        if !canonical_farsight_object.is_empty() {
+            return false;
+        }
+
+        self.represented_seer_guid_like_cpp = Some(player_guid);
+        self.send_active_player_farsight_object_values_update_like_cpp(
+            player_guid,
+            ObjectGuid::EMPTY,
+        );
+        self.last_visibility_pos = None;
+        true
     }
 
     fn canonical_map_has_seer_like_object_like_cpp(&self, target: ObjectGuid) -> bool {
@@ -18255,6 +18297,7 @@ mod tests {
             [0.0, 0.0, 0.0, 1.0],
         );
 
+        set_canonical_player_farsight_object_like_cpp(&canonical, player_guid, seer_guid);
         session.represented_seer_guid_like_cpp = Some(seer_guid);
 
         assert_eq!(
@@ -18277,6 +18320,142 @@ mod tests {
             "canonical GO visibility should use represented m_seer position"
         );
         assert_eq!(session.last_visibility_pos, Some(seer_position));
+    }
+
+    #[tokio::test]
+    async fn far_sight_update_visibility_canonical_clear_resets_session_seer_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 49_800);
+        let stale_dynamic_object_guid = test_dynamic_object_guid(49_801, 49_801);
+        let player_position = Position::new(10.0, 10.0, 0.0, 0.0);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "FarsightClear".to_string(),
+            player_position,
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        add_canonical_test_player_on_map(&canonical, player_guid, player_position, 571, 0);
+        session.represented_seer_guid_like_cpp = Some(stale_dynamic_object_guid);
+        session.last_visibility_pos = Some(player_position);
+
+        session.update_visibility().await;
+
+        assert_eq!(session.represented_seer_guid_like_cpp(), Some(player_guid));
+        assert_eq!(session.last_visibility_pos, Some(player_position));
+        let expected_farsight_clear = expected_active_player_farsight_object_values_update_like_cpp(
+            player_guid,
+            session.player_map_id_like_cpp(),
+            ObjectGuid::EMPTY,
+        );
+        let packets = drain_server_packet_bytes(&send_rx);
+        assert_eq!(
+            packets
+                .iter()
+                .filter(|bytes| *bytes == &expected_farsight_clear)
+                .count(),
+            1,
+            "canonical empty FarsightObject should emit exactly one represented VALUES-empty update"
+        );
+        assert_eq!(
+            update_object_packet_count_like_cpp(&packets),
+            1,
+            "no unrelated visibility packet should be needed for the empty canonical map"
+        );
+    }
+
+    #[tokio::test]
+    async fn far_sight_update_visibility_non_empty_canonical_keeps_session_seer_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 49_802);
+        let dynamic_object_guid = test_dynamic_object_guid(49_803, 49_803);
+        let player_position = Position::new(10.0, 10.0, 0.0, 0.0);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "FarsightKeep".to_string(),
+            player_position,
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        add_canonical_test_player_on_map(&canonical, player_guid, player_position, 571, 0);
+        set_canonical_player_farsight_object_like_cpp(&canonical, player_guid, dynamic_object_guid);
+        session.represented_seer_guid_like_cpp = Some(dynamic_object_guid);
+        session.last_visibility_pos = Some(player_position);
+
+        session.update_visibility().await;
+
+        assert_eq!(
+            session.represented_seer_guid_like_cpp(),
+            Some(dynamic_object_guid)
+        );
+        let expected_farsight_clear = expected_active_player_farsight_object_values_update_like_cpp(
+            player_guid,
+            session.player_map_id_like_cpp(),
+            ObjectGuid::EMPTY,
+        );
+        let packets = drain_server_packet_bytes(&send_rx);
+        assert!(
+            !packets
+                .iter()
+                .any(|bytes| bytes == &expected_farsight_clear),
+            "non-empty canonical FarsightObject must not emit represented VALUES-empty update"
+        );
+    }
+
+    #[tokio::test]
+    async fn far_sight_update_visibility_missing_canonical_player_keeps_session_seer_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 49_804);
+        let stale_dynamic_object_guid = test_dynamic_object_guid(49_805, 49_805);
+        let player_position = Position::new(10.0, 10.0, 0.0, 0.0);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "FarsightMissingCanonical".to_string(),
+            player_position,
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        canonical.lock().unwrap().create_world_map(571, 0);
+        session.represented_seer_guid_like_cpp = Some(stale_dynamic_object_guid);
+        session.last_visibility_pos = Some(player_position);
+
+        session.update_visibility().await;
+
+        assert_eq!(
+            session.represented_seer_guid_like_cpp(),
+            Some(stale_dynamic_object_guid),
+            "missing canonical Player is not proof of canonical farsight clear"
+        );
+        let expected_farsight_clear = expected_active_player_farsight_object_values_update_like_cpp(
+            player_guid,
+            session.player_map_id_like_cpp(),
+            ObjectGuid::EMPTY,
+        );
+        let packets = drain_server_packet_bytes(&send_rx);
+        assert!(
+            !packets
+                .iter()
+                .any(|bytes| bytes == &expected_farsight_clear),
+            "missing canonical Player must not emit represented VALUES-empty update"
+        );
     }
 
     #[tokio::test]
@@ -18348,6 +18527,11 @@ mod tests {
             ),
         );
 
+        set_canonical_player_farsight_object_like_cpp(
+            &canonical,
+            player_guid,
+            gameobject_seer_guid,
+        );
         session.represented_seer_guid_like_cpp = Some(gameobject_seer_guid);
 
         assert_eq!(

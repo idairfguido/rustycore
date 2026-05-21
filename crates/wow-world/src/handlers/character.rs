@@ -3287,6 +3287,7 @@ impl WorldSession {
         use std::collections::HashSet;
 
         // ── Position & threshold check ──────────────────────────────────
+        self.sync_represented_farsight_clear_from_canonical_like_cpp();
         let pos = match self.represented_visibility_source_position_like_cpp() {
             Some(p) => p,
             None => return,
