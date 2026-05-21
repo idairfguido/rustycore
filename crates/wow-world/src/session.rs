@@ -14576,11 +14576,13 @@ impl WorldSession {
     ///
     /// C++ source-of-truth: `GameObject::Update` calls
     /// `UpdateObjectVisibilityOnDestroy()`, which delegates to
-    /// `WorldObject::DestroyForNearbyPlayers`; that checks `HaveAtClient`, sends
-    /// destroy for the player, then erases the object's GUID from
-    /// `Player::m_clientGUIDs`. This represented seam consumes only the exact
-    /// GUIDs snapshotted in the canonical `ManagedMap` update summary and never
-    /// mutates canonical map objects.
+    /// `WorldObject::DestroyForNearbyPlayers`; that visits only Players inside
+    /// `GetVisibilityRange()`, checks `HaveAtClient`, sends destroy for the
+    /// player, then erases the object's GUID from `Player::m_clientGUIDs`. This
+    /// represented seam consumes only the exact GUIDs snapshotted in the
+    /// canonical `ManagedMap` update summary, gates by same-map canonical Player
+    /// position plus typed GameObject in-world state/range, and never mutates
+    /// canonical map objects.
     pub(crate) fn send_represented_gameobject_visibility_on_destroy_from_last_update_like_cpp(
         &mut self,
     ) -> usize {
@@ -14593,27 +14595,51 @@ impl WorldSession {
         let Some(manager) = self.canonical_map_manager.as_ref() else {
             return 0;
         };
-        let guids = {
+        let player_guid = self.player_guid();
+        let destroyable_guids = {
+            let Some(player_guid) = player_guid else {
+                return 0;
+            };
             let Ok(manager) = manager.lock() else {
                 return 0;
             };
-            let Some(map) = manager.find_map(key.map_id, key.instance_id) else {
+            let Some(managed_map) = manager.find_map(key.map_id, key.instance_id) else {
                 return 0;
             };
-            map.last_game_objects_update_summary()
+            let map = managed_map.map();
+            let Some(player_position) = map
+                .get_typed_player(player_guid)
+                .map(|player| player.unit().world().position())
+            else {
+                return 0;
+            };
+            let visibility_range = map.visibility_range();
+
+            managed_map
+                .last_game_objects_update_summary()
                 .generic_visibility_on_destroy_guids
                 .iter()
                 .copied()
+                .filter(|guid| {
+                    guid.is_game_object()
+                        && map.get_typed_game_object(*guid).is_some_and(|gameobject| {
+                            gameobject.world().object().is_in_world()
+                                && gameobject
+                                    .world()
+                                    .position()
+                                    .is_within_dist(&player_position, visibility_range)
+                        })
+                })
                 .collect::<Vec<_>>()
         };
 
         let mut seen = std::collections::HashSet::new();
         let mut sent = 0;
-        for guid in guids {
+        for guid in destroyable_guids {
             if !seen.insert(guid) {
                 continue;
             }
-            if !guid.is_game_object() || !self.client_visible_guids_like_cpp.remove(&guid) {
+            if !self.client_visible_guids_like_cpp.remove(&guid) {
                 continue;
             }
             self.send_packet(&wow_packet::packets::update::UpdateObject::destroy_objects(
@@ -18279,6 +18305,55 @@ mod tests {
             0
         );
         assert_eq!(drain_server_opcodes(&send_rx), Vec::<ServerOpcodes>::new());
+    }
+
+    #[tokio::test]
+    async fn gameobject_visibility_on_destroy_out_of_range_keeps_client_visible_guid_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = Arc::new(std::sync::Mutex::new(wow_map::MapManager::new(60_000, 1)));
+        let player_guid = ObjectGuid::create_player(1, 50_507);
+        let gameobject_guid = test_gameobject_guid(605_051, 50_508);
+
+        configure_dynamic_object_values_snapshot_session_like_cpp(
+            &mut session,
+            &canonical,
+            player_guid,
+            571,
+            7,
+        );
+        add_canonical_visibility_on_destroy_gameobject_like_cpp(
+            &canonical,
+            gameobject_guid,
+            605_051,
+            5_050_508,
+            Position::new(10_000.0, 20_000.0, 30.0, 0.0),
+            571,
+            7,
+        );
+        assert_eq!(canonical.lock().unwrap().update(60_000), Some(60_000));
+        assert_eq!(
+            canonical
+                .lock()
+                .unwrap()
+                .find_map(571, 7)
+                .unwrap()
+                .last_game_objects_update_summary()
+                .generic_visibility_on_destroy_guids
+                .as_slice(),
+            &[gameobject_guid]
+        );
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+
+        session.process_pending().await;
+
+        assert_eq!(drain_server_opcodes(&send_rx), Vec::<ServerOpcodes>::new());
+        assert!(
+            session
+                .client_visible_guids_like_cpp
+                .contains(&gameobject_guid)
+        );
     }
 
     #[tokio::test]
