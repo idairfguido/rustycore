@@ -855,7 +855,26 @@ pub struct GameObjectUpdateOutcomeLikeCpp {
     pub generic_visibility_on_destroy_represented: bool,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct GameObjectVisibilityOnDestroyGuidsLikeCpp {
+    guids: Vec<ObjectGuid>,
+}
+
+impl GameObjectVisibilityOnDestroyGuidsLikeCpp {
+    pub fn push(&mut self, guid: ObjectGuid) {
+        self.guids.push(guid);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &ObjectGuid> {
+        self.guids.iter()
+    }
+
+    pub fn as_slice(&self) -> &[ObjectGuid] {
+        self.guids.as_slice()
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct GameObjectsUpdateSummaryLikeCpp {
     pub visited: usize,
     pub updated: usize,
@@ -896,6 +915,7 @@ pub struct GameObjectsUpdateSummaryLikeCpp {
     pub generic_respawn_save_missing_gameobject_data: usize,
     pub generic_respawn_compatibility_db_only_represented: usize,
     pub generic_visibility_on_destroy_represented: usize,
+    pub generic_visibility_on_destroy_guids: GameObjectVisibilityOnDestroyGuidsLikeCpp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -5626,6 +5646,9 @@ where
             }
             if outcome.generic_visibility_on_destroy_represented {
                 summary.generic_visibility_on_destroy_represented += 1;
+                summary
+                    .generic_visibility_on_destroy_guids
+                    .push(outcome.game_object_guid);
             }
             match outcome.status {
                 GameObjectUpdateStatusLikeCpp::Updated => summary.updated += 1,
@@ -24583,6 +24606,57 @@ mod tests {
                 .is_none()
         );
         assert_eq!(map.objects_to_remove_count_like_cpp(), 0);
+    }
+
+    #[test]
+    fn gameobject_visibility_on_destroy_update_summary_carries_guids_without_truncation_like_cpp() {
+        let mut map = test_map();
+        let mut expected_guids = Vec::new();
+
+        for offset in 0..300 {
+            let counter = 5_050_101_i64 + i64::from(offset);
+            let mut gameobject = game_object_with_counter(counter, 571, 7, false);
+            let gameobject_guid = gameobject.world().guid();
+            gameobject.set_go_type(GAMEOBJECT_TYPE_GENERIC_LIKE_CPP as u8);
+            gameobject.world_mut().object_mut().set_entry(190_505);
+            gameobject.set_spawn_id(u64::try_from(counter).unwrap());
+            gameobject.set_spawned_by_default(true);
+            gameobject.set_represented_gameobject_data_present_like_cpp(true);
+            gameobject.set_respawn_compatibility_mode(true);
+            gameobject.set_respawn_delay_time(30);
+            gameobject.set_loot_state(LootState::JustDeactivated, None);
+
+            expected_guids.push(gameobject_guid);
+            map.add_map_object_record_to_map_like_cpp(
+                MapObjectRecord::new_game_object(gameobject).unwrap(),
+            )
+            .unwrap();
+        }
+
+        let summary = map.update_game_objects_like_cpp(1, 2_000);
+
+        assert_eq!(summary.generic_visibility_on_destroy_represented, 300);
+        let carried_guids = summary.generic_visibility_on_destroy_guids.as_slice();
+        assert_eq!(carried_guids.len(), 300);
+        assert!(carried_guids.contains(&expected_guids[256]));
+        assert!(carried_guids.contains(&expected_guids[299]));
+        let carried_set = carried_guids
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>();
+        let expected_set = expected_guids
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(carried_set, expected_set);
+        assert_eq!(
+            summary.generic_respawn_compatibility_db_only_represented,
+            300
+        );
+        assert_eq!(summary.despawn_remove_queued, 0);
+        for guid in expected_guids {
+            assert!(map.map_object_record(guid).is_some());
+        }
     }
 
     #[test]

@@ -7998,6 +7998,7 @@ impl WorldSession {
         if self.state == SessionState::LoggedIn {
             self.tick_represented_loot_rolls_like_cpp().await;
             self.tick_represented_gameobject_update_like_cpp();
+            self.send_represented_gameobject_visibility_on_destroy_from_last_update_like_cpp();
             self.tick_active_spell_cast().await;
             self.sync_represented_farsight_clear_from_canonical_like_cpp();
             self.send_represented_dynamic_object_values_updates_from_last_map_send_object_updates_like_cpp();
@@ -14570,6 +14571,60 @@ impl WorldSession {
         sent
     }
 
+    /// Consume map-owned represented `GameObject::Update` `UpdateObjectVisibilityOnDestroy`
+    /// evidence into this session's C++-like `HaveAtClient` state.
+    ///
+    /// C++ source-of-truth: `GameObject::Update` calls
+    /// `UpdateObjectVisibilityOnDestroy()`, which delegates to
+    /// `WorldObject::DestroyForNearbyPlayers`; that checks `HaveAtClient`, sends
+    /// destroy for the player, then erases the object's GUID from
+    /// `Player::m_clientGUIDs`. This represented seam consumes only the exact
+    /// GUIDs snapshotted in the canonical `ManagedMap` update summary and never
+    /// mutates canonical map objects.
+    pub(crate) fn send_represented_gameobject_visibility_on_destroy_from_last_update_like_cpp(
+        &mut self,
+    ) -> usize {
+        let Some(key) = self.current_canonical_player_map_key_like_cpp() else {
+            return 0;
+        };
+        let Ok(packet_map_id) = u16::try_from(key.map_id) else {
+            return 0;
+        };
+        let Some(manager) = self.canonical_map_manager.as_ref() else {
+            return 0;
+        };
+        let guids = {
+            let Ok(manager) = manager.lock() else {
+                return 0;
+            };
+            let Some(map) = manager.find_map(key.map_id, key.instance_id) else {
+                return 0;
+            };
+            map.last_game_objects_update_summary()
+                .generic_visibility_on_destroy_guids
+                .iter()
+                .copied()
+                .collect::<Vec<_>>()
+        };
+
+        let mut seen = std::collections::HashSet::new();
+        let mut sent = 0;
+        for guid in guids {
+            if !seen.insert(guid) {
+                continue;
+            }
+            if !guid.is_game_object() || !self.client_visible_guids_like_cpp.remove(&guid) {
+                continue;
+            }
+            self.send_packet(&wow_packet::packets::update::UpdateObject::destroy_objects(
+                vec![guid],
+                packet_map_id,
+            ));
+            sent += 1;
+        }
+        sent
+    }
+
     fn current_canonical_player_farsight_object_value_like_cpp(&self) -> Option<ObjectGuid> {
         let guid = self.player_guid()?;
         let key = self.current_canonical_player_map_key_like_cpp()?;
@@ -17593,6 +17648,41 @@ mod tests {
             .unwrap();
     }
 
+    fn add_canonical_visibility_on_destroy_gameobject_like_cpp(
+        canonical: &SharedCanonicalMapManager,
+        guid: ObjectGuid,
+        entry: u32,
+        spawn_id: u32,
+        position: Position,
+        map_id: u32,
+        instance_id: u32,
+    ) {
+        let mut gameobject = GameObject::new();
+        gameobject.world_mut().object_mut().create(guid);
+        gameobject.world_mut().object_mut().set_entry(entry);
+        gameobject.world_mut().set_map(map_id, instance_id).unwrap();
+        gameobject.world_mut().relocate(position);
+        gameobject.set_go_type(5);
+        gameobject.set_spawn_id(u64::from(spawn_id));
+        gameobject.set_spawned_by_default(true);
+        gameobject.set_represented_gameobject_data_present_like_cpp(true);
+        gameobject.set_respawn_compatibility_mode(true);
+        gameobject.set_respawn_delay_time(30);
+        gameobject.set_loot_state(wow_entities::LootState::JustDeactivated, None);
+
+        let mut guard = canonical.lock().unwrap();
+        let map = guard.create_world_map(map_id, instance_id);
+        let _ = map
+            .map_mut()
+            .add_to_map_like_cpp(AccessorObjectKind::GameObject, gameobject.world().clone());
+        gameobject.world_mut().object_mut().add_to_world();
+        map.map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_game_object(gameobject).unwrap(),
+            )
+            .unwrap();
+    }
+
     fn test_dynamic_object_guid(entry: u32, counter: i64) -> ObjectGuid {
         ObjectGuid::create_world_object(
             wow_core::guid::HighGuid::DynamicObject,
@@ -18128,6 +18218,67 @@ mod tests {
             drain_server_opcodes(&send_rx),
             vec![ServerOpcodes::UpdateObject]
         );
+    }
+
+    #[tokio::test]
+    async fn gameobject_visibility_on_destroy_summary_visible_sends_destroy_once_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = Arc::new(std::sync::Mutex::new(wow_map::MapManager::new(60_000, 1)));
+        let player_guid = ObjectGuid::create_player(1, 50_505);
+        let gameobject_guid = test_gameobject_guid(605_050, 50_506);
+
+        configure_dynamic_object_values_snapshot_session_like_cpp(
+            &mut session,
+            &canonical,
+            player_guid,
+            571,
+            7,
+        );
+        add_canonical_visibility_on_destroy_gameobject_like_cpp(
+            &canonical,
+            gameobject_guid,
+            605_050,
+            5_050_506,
+            Position::new(11.0, 21.0, 31.0, 0.0),
+            571,
+            7,
+        );
+        assert_eq!(canonical.lock().unwrap().update(60_000), Some(60_000));
+        assert_eq!(
+            canonical
+                .lock()
+                .unwrap()
+                .find_map(571, 7)
+                .unwrap()
+                .last_game_objects_update_summary()
+                .generic_visibility_on_destroy_guids
+                .as_slice(),
+            &[gameobject_guid]
+        );
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+
+        session.process_pending().await;
+
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![ServerOpcodes::UpdateObject]
+        );
+        assert!(
+            !session
+                .client_visible_guids_like_cpp
+                .contains(&gameobject_guid)
+        );
+
+        session.process_pending().await;
+
+        assert_eq!(drain_server_opcodes(&send_rx), Vec::<ServerOpcodes>::new());
+        assert_eq!(
+            session.send_represented_gameobject_visibility_on_destroy_from_last_update_like_cpp(),
+            0
+        );
+        assert_eq!(drain_server_opcodes(&send_rx), Vec::<ServerOpcodes>::new());
     }
 
     #[tokio::test]

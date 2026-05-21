@@ -328,8 +328,8 @@ impl ManagedMap {
         self.last_creatures_update_summary
     }
 
-    pub const fn last_game_objects_update_summary(&self) -> GameObjectsUpdateSummaryLikeCpp {
-        self.last_game_objects_update_summary
+    pub fn last_game_objects_update_summary(&self) -> GameObjectsUpdateSummaryLikeCpp {
+        self.last_game_objects_update_summary.clone()
     }
 
     pub const fn last_transports_update_summary(&self) -> TransportsUpdateSummaryLikeCpp {
