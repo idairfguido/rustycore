@@ -120,6 +120,10 @@ impl GridInfo {
         self.unload_active_lock_count > 0 || self.unload_explicit_lock
     }
 
+    pub const fn unload_active_lock_count(&self) -> u16 {
+        self.unload_active_lock_count
+    }
+
     pub fn set_unload_explicit_lock(&mut self, on: bool) {
         self.unload_explicit_lock = on;
     }

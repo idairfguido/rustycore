@@ -1573,6 +1573,13 @@ pub struct Map<Terrain = NoopTerrainGridLoader, Lifecycle = NoopGridLifecycle> {
     terrain: Terrain,
     lifecycle: Lifecycle,
     active_cells: HashSet<CellCoord>,
+    /// Map-owned C++ `Map::m_activeNonPlayers` (`Map.h:617-619`).
+    ///
+    /// Source-of-truth remains `map_objects`; this set stores only non-player active
+    /// object GUID membership produced by `Map::AddToActive`/`RemoveFromActive` seams.
+    /// It is not rebuilt by sessions/ObjectAccessor scans. Rust does not yet model
+    /// C++ `Map::Update`'s mutating iterator adjustment; consumers snapshot/sort GUIDs.
+    active_non_players_like_cpp: HashSet<ObjectGuid>,
     personal_phase_tracker: MultiPersonalPhaseTracker,
     spawn_group_state: SpawnGroupRuntimeState,
     respawn_store: RespawnStoreLikeCpp,
@@ -1744,6 +1751,7 @@ where
             terrain,
             lifecycle,
             active_cells: HashSet::new(),
+            active_non_players_like_cpp: HashSet::new(),
             personal_phase_tracker: MultiPersonalPhaseTracker::default(),
             spawn_group_state: SpawnGroupRuntimeState::new(),
             respawn_store: RespawnStoreLikeCpp::new(),
@@ -7415,6 +7423,193 @@ where
         })
     }
 
+    fn active_respawn_location_like_cpp(
+        &self,
+        guid: ObjectGuid,
+    ) -> Option<ActiveNonPlayerRespawnLocationLikeCpp> {
+        let record = self.map_object_record(guid)?;
+        match record.kind() {
+            AccessorObjectKind::Creature => {
+                let creature = record.creature()?;
+                let spawn_id = creature.spawn_id();
+                (spawn_id != 0).then_some(ActiveNonPlayerRespawnLocationLikeCpp {
+                    spawn_id,
+                    position: creature.ai_home_position(),
+                })
+            }
+            AccessorObjectKind::GameObject => {
+                let game_object = record.game_object()?;
+                let spawn_id = game_object.spawn_id();
+                (spawn_id != 0).then_some(ActiveNonPlayerRespawnLocationLikeCpp {
+                    spawn_id,
+                    position: game_object.stationary_position(),
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn mutate_unload_active_lock_for_respawn_location_like_cpp(
+        &mut self,
+        location: ActiveNonPlayerRespawnLocationLikeCpp,
+        increment: bool,
+    ) -> ActiveNonPlayerUnloadLockOutcomeLikeCpp {
+        if !is_valid_map_coord_2d(location.position.x, location.position.y) {
+            return ActiveNonPlayerUnloadLockOutcomeLikeCpp {
+                spawn_id: location.spawn_id,
+                respawn_grid: None,
+                respawn_grid_missing: true,
+                invalid_respawn_position: true,
+                lock_incremented: false,
+                lock_decremented: false,
+            };
+        }
+
+        let cell = Cell::from_world(location.position.x, location.position.y);
+        let grid = GridCoord::new(cell.grid_x(), cell.grid_y());
+        let Some(ngrid) = self.get_ngrid_mut(grid) else {
+            return ActiveNonPlayerUnloadLockOutcomeLikeCpp {
+                spawn_id: location.spawn_id,
+                respawn_grid: Some(grid),
+                respawn_grid_missing: true,
+                invalid_respawn_position: false,
+                lock_incremented: false,
+                lock_decremented: false,
+            };
+        };
+
+        if increment {
+            ngrid.info_mut().inc_unload_active_lock();
+        } else {
+            ngrid.info_mut().dec_unload_active_lock();
+        }
+
+        ActiveNonPlayerUnloadLockOutcomeLikeCpp {
+            spawn_id: location.spawn_id,
+            respawn_grid: Some(grid),
+            respawn_grid_missing: false,
+            invalid_respawn_position: false,
+            lock_incremented: increment,
+            lock_decremented: !increment,
+        }
+    }
+
+    pub fn add_to_active_like_cpp(&mut self, guid: ObjectGuid) -> AddToActiveOutcomeLikeCpp {
+        let Some(record) = self.map_object_record(guid) else {
+            return AddToActiveOutcomeLikeCpp {
+                guid,
+                status: ActiveNonPlayerMutationStatusLikeCpp::MissingRecord,
+                inserted_in_active_set: false,
+                removed_from_active_set: false,
+                spawn_id_zero_or_unsupported: false,
+                unload_lock: None,
+            };
+        };
+        if record.kind() == AccessorObjectKind::Player {
+            return AddToActiveOutcomeLikeCpp {
+                guid,
+                status: ActiveNonPlayerMutationStatusLikeCpp::PlayerUnsupported,
+                inserted_in_active_set: false,
+                removed_from_active_set: false,
+                spawn_id_zero_or_unsupported: false,
+                unload_lock: None,
+            };
+        }
+        if !is_active_object_like_cpp(record.kind(), record.object()) {
+            return AddToActiveOutcomeLikeCpp {
+                guid,
+                status: ActiveNonPlayerMutationStatusLikeCpp::NotActiveObject,
+                inserted_in_active_set: false,
+                removed_from_active_set: false,
+                spawn_id_zero_or_unsupported: false,
+                unload_lock: None,
+            };
+        }
+
+        let location = self.active_respawn_location_like_cpp(guid);
+        let inserted_in_active_set = self.active_non_players_like_cpp.insert(guid);
+        let unload_lock = location.map(|location| {
+            self.mutate_unload_active_lock_for_respawn_location_like_cpp(location, true)
+        });
+        AddToActiveOutcomeLikeCpp {
+            guid,
+            status: ActiveNonPlayerMutationStatusLikeCpp::Mutated,
+            inserted_in_active_set,
+            removed_from_active_set: false,
+            spawn_id_zero_or_unsupported: unload_lock.is_none(),
+            unload_lock,
+        }
+    }
+
+    pub fn remove_from_active_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+    ) -> RemoveFromActiveOutcomeLikeCpp {
+        let Some(record) = self.map_object_record(guid) else {
+            return RemoveFromActiveOutcomeLikeCpp {
+                guid,
+                status: ActiveNonPlayerMutationStatusLikeCpp::MissingRecord,
+                inserted_in_active_set: false,
+                removed_from_active_set: false,
+                spawn_id_zero_or_unsupported: false,
+                unload_lock: None,
+            };
+        };
+        if record.kind() == AccessorObjectKind::Player {
+            return RemoveFromActiveOutcomeLikeCpp {
+                guid,
+                status: ActiveNonPlayerMutationStatusLikeCpp::PlayerUnsupported,
+                inserted_in_active_set: false,
+                removed_from_active_set: false,
+                spawn_id_zero_or_unsupported: false,
+                unload_lock: None,
+            };
+        }
+        if !is_active_object_like_cpp(record.kind(), record.object()) {
+            return RemoveFromActiveOutcomeLikeCpp {
+                guid,
+                status: ActiveNonPlayerMutationStatusLikeCpp::NotActiveObject,
+                inserted_in_active_set: false,
+                removed_from_active_set: false,
+                spawn_id_zero_or_unsupported: false,
+                unload_lock: None,
+            };
+        }
+
+        let location = self.active_respawn_location_like_cpp(guid);
+        let removed_from_active_set = self.active_non_players_like_cpp.remove(&guid);
+        let unload_lock = location.map(|location| {
+            self.mutate_unload_active_lock_for_respawn_location_like_cpp(location, false)
+        });
+        RemoveFromActiveOutcomeLikeCpp {
+            guid,
+            status: ActiveNonPlayerMutationStatusLikeCpp::Mutated,
+            inserted_in_active_set: false,
+            removed_from_active_set,
+            spawn_id_zero_or_unsupported: unload_lock.is_none(),
+            unload_lock,
+        }
+    }
+
+    pub fn active_non_players_count_like_cpp(&self) -> usize {
+        self.active_non_players_like_cpp.len()
+    }
+
+    pub fn is_active_non_player_like_cpp(&self, guid: ObjectGuid) -> bool {
+        self.active_non_players_like_cpp.contains(&guid)
+    }
+
+    fn represented_active_non_player_sources_like_cpp(&self) -> Vec<ObjectGuid> {
+        let mut guids: Vec<_> = self
+            .active_non_players_like_cpp
+            .iter()
+            .copied()
+            .filter(|guid| self.object_is_in_world(*guid))
+            .collect();
+        sort_dedup(&mut guids);
+        guids
+    }
+
     fn represent_add_to_map_post_add_to_world_tail_like_cpp(
         &mut self,
         kind: AccessorObjectKind,
@@ -7457,6 +7652,8 @@ where
             }
         }
 
+        let add_to_active = active_object.then(|| self.add_to_active_like_cpp(guid));
+
         let mut set_true = false;
         let mut set_false = false;
         let final_is_new_object = if let Some(record) = self.map_objects.get_mut(&guid) {
@@ -7473,8 +7670,9 @@ where
             initialize_object_represented: true,
             pending_move_state_cleared: pending_move_state.is_some(),
             no_pending_move_state: pending_move_state.is_none(),
-            add_to_active_represented: active_object,
-            add_to_active_skipped_runtime_gap: active_object,
+            add_to_active_represented: add_to_active.is_some(),
+            add_to_active_skipped_runtime_gap: false,
+            add_to_active,
             set_is_new_object_true: set_true,
             update_object_visibility_on_create_represented: true,
             update_object_visibility_on_create_runtime_gap: true,
@@ -8187,24 +8385,29 @@ where
             let creature_vehicle_remove = creature_unit_remove_from_world
                 .as_ref()
                 .and_then(|outcome| outcome.vehicle_remove);
+            let (kind, was_active) = self
+                .map_object_record(guid)
+                .map(|record| {
+                    (
+                        record.kind(),
+                        is_active_object_like_cpp(record.kind(), record.object()),
+                    )
+                })
+                .ok_or(RemoveFromMapError::ObjectNotFound { guid })?;
+            let remove_from_active = was_active.then(|| self.remove_from_active_like_cpp(guid));
             let record = self
                 .remove_map_object(guid)
                 .ok_or(RemoveFromMapError::ObjectNotFound { guid })?;
-            let kind = record.kind();
             let was_world_object_like_cpp = map_record_is_world_object_like_cpp(&record);
             let mut object = record.into_object();
             let was_in_world = remove_from_map_was_in_world;
             let cxx_in_world =
                 was_in_world && remove_from_map_in_world_eligible_type_like_cpp(kind);
             let personal_phase_owner = object.phase_shift().personal_guid_like_cpp();
-            let was_active = is_active_object_like_cpp(kind, &object);
             let cell = Cell::from_world(object.position().x, object.position().y);
             let grid = GridCoord::new(cell.grid_x(), cell.grid_y());
 
             object.object_mut().remove_from_world();
-            if was_active {
-                self.unmark_active_cell(cell.cell_coord());
-            }
             let personal_phase_unregister = self
                 .personal_phase_tracker
                 .unregister_tracked_object_for_phase_owner_like_cpp(personal_phase_owner, guid);
@@ -8233,6 +8436,7 @@ where
                 was_in_world,
                 cxx_in_world,
                 was_active,
+                remove_from_active,
                 removed_from_cell,
                 delete_from_world,
                 dynamic_object_caster_viewpoint,
@@ -8503,34 +8707,29 @@ where
         visibility_notify_period_ms: i64,
     ) -> ProcessRelocationNotifiesOutcome {
         let mut player_sources = Vec::new();
-        let mut active_non_player_guids = Vec::new();
 
         for (guid, record) in &self.map_objects {
             let object = record.object();
-            if !object.object().is_in_world() {
+            if !object.object().is_in_world() || record.kind() != AccessorObjectKind::Player {
                 continue;
             }
 
-            if record.kind() == AccessorObjectKind::Player {
-                let viewpoint_guid = record.player().and_then(|player| {
-                    let farsight = player.active_data().farsight_object;
-                    (!farsight.is_empty()).then_some(farsight)
-                });
-                player_sources.push(MapUpdatePlayerSources {
-                    player_guid: *guid,
-                    viewpoint_guid,
-                    far_combat_unit_guids: Vec::new(),
-                    far_aura_caster_guids: Vec::new(),
-                    far_summon_guids: Vec::new(),
-                });
-            } else if is_active_object_like_cpp(record.kind(), object) {
-                active_non_player_guids.push(*guid);
-            }
+            let viewpoint_guid = record.player().and_then(|player| {
+                let farsight = player.active_data().farsight_object;
+                (!farsight.is_empty()).then_some(farsight)
+            });
+            player_sources.push(MapUpdatePlayerSources {
+                player_guid: *guid,
+                viewpoint_guid,
+                far_combat_unit_guids: Vec::new(),
+                far_aura_caster_guids: Vec::new(),
+                far_summon_guids: Vec::new(),
+            });
         }
 
+        let active_non_player_guids = self.represented_active_non_player_sources_like_cpp();
         player_sources.sort_by_key(|source| source.player_guid);
         player_sources.dedup_by_key(|source| source.player_guid);
-        sort_dedup(&mut active_non_player_guids);
 
         let visit_plan = self.map_update_visit_plan_like_cpp(
             player_sources,
@@ -9956,7 +10155,21 @@ where
     }
 
     pub fn active_objects_near_grid(&self, grid: &NGrid) -> bool {
-        active_cells_near_grid(&self.active_cells, self.visible_distance, grid)
+        if active_cells_near_grid(&self.active_cells, self.visible_distance, grid) {
+            return true;
+        }
+
+        let active_non_player_cells: HashSet<_> = self
+            .active_non_players_like_cpp
+            .iter()
+            .filter_map(|guid| {
+                let record = self.map_object_record(*guid)?;
+                record.object().object().is_in_world().then(|| {
+                    compute_cell_coord(record.object().position().x, record.object().position().y)
+                })
+            })
+            .collect();
+        active_cells_near_grid(&active_non_player_cells, self.visible_distance, grid)
     }
 
     pub fn unload_grid_at(&mut self, coord: GridCoord, unload_all: bool) -> bool {
@@ -10122,6 +10335,43 @@ pub struct CreatureZoneScriptRemoveOutcomeLikeCpp {
     pub script_dispatch_represented: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ActiveNonPlayerRespawnLocationLikeCpp {
+    spawn_id: SpawnId,
+    position: Position,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActiveNonPlayerMutationStatusLikeCpp {
+    Mutated,
+    MissingRecord,
+    PlayerUnsupported,
+    NotActiveObject,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActiveNonPlayerUnloadLockOutcomeLikeCpp {
+    pub spawn_id: SpawnId,
+    pub respawn_grid: Option<GridCoord>,
+    pub respawn_grid_missing: bool,
+    pub invalid_respawn_position: bool,
+    pub lock_incremented: bool,
+    pub lock_decremented: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActiveNonPlayerMutationOutcomeLikeCpp {
+    pub guid: ObjectGuid,
+    pub status: ActiveNonPlayerMutationStatusLikeCpp,
+    pub inserted_in_active_set: bool,
+    pub removed_from_active_set: bool,
+    pub spawn_id_zero_or_unsupported: bool,
+    pub unload_lock: Option<ActiveNonPlayerUnloadLockOutcomeLikeCpp>,
+}
+
+pub type AddToActiveOutcomeLikeCpp = ActiveNonPlayerMutationOutcomeLikeCpp;
+pub type RemoveFromActiveOutcomeLikeCpp = ActiveNonPlayerMutationOutcomeLikeCpp;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AddToMapPostAddToWorldOutcomeLikeCpp {
     pub initialize_object_represented: bool,
@@ -10129,6 +10379,7 @@ pub struct AddToMapPostAddToWorldOutcomeLikeCpp {
     pub no_pending_move_state: bool,
     pub add_to_active_represented: bool,
     pub add_to_active_skipped_runtime_gap: bool,
+    pub add_to_active: Option<AddToActiveOutcomeLikeCpp>,
     pub set_is_new_object_true: bool,
     pub update_object_visibility_on_create_represented: bool,
     pub update_object_visibility_on_create_runtime_gap: bool,
@@ -10190,6 +10441,7 @@ pub struct RemoveFromMapOutcome {
     pub was_in_world: bool,
     pub cxx_in_world: bool,
     pub was_active: bool,
+    pub remove_from_active: Option<RemoveFromActiveOutcomeLikeCpp>,
     pub removed_from_cell: bool,
     pub delete_from_world: bool,
     pub dynamic_object_caster_viewpoint: Option<DynamicObjectCasterViewpointOutcomeLikeCpp>,
@@ -11652,6 +11904,233 @@ mod tests {
         assert!(tail.set_is_new_object_true);
         assert!(tail.set_is_new_object_false);
         assert!(!tail.final_is_new_object);
+    }
+
+    #[test]
+    fn active_non_player_add_remove_gameobject_updates_set_and_unload_lock_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = test_gameobject_for_spawn(48501, 4850101);
+        let guid = gameobject.world().guid();
+        let respawn_position = gameobject.stationary_position();
+        let respawn_cell = Cell::from_world(respawn_position.x, respawn_position.y);
+        let respawn_grid = GridCoord::new(respawn_cell.grid_x(), respawn_cell.grid_y());
+        map.ensure_grid_loaded(&cell_from_grid_center(respawn_grid));
+        gameobject.world_mut().set_active(true);
+        gameobject.world_mut().object_mut().remove_from_world();
+
+        let add = map
+            .add_map_object_record_to_map_like_cpp(
+                MapObjectRecord::new_game_object(gameobject).unwrap(),
+            )
+            .unwrap();
+        let add_active = add
+            .add_to_map_tail
+            .unwrap()
+            .add_to_active
+            .expect("active exact typed GameObject should consume AddToActive seam");
+
+        assert_eq!(
+            add_active.status,
+            ActiveNonPlayerMutationStatusLikeCpp::Mutated
+        );
+        assert!(add_active.inserted_in_active_set);
+        assert!(map.is_active_non_player_like_cpp(guid));
+        assert_eq!(map.active_non_players_count_like_cpp(), 1);
+        let add_lock = add_active.unload_lock.unwrap();
+        assert_eq!(add_lock.spawn_id, 48501);
+        assert_eq!(add_lock.respawn_grid, Some(respawn_grid));
+        assert!(add_lock.lock_incremented);
+        assert_eq!(
+            map.get_ngrid(respawn_grid)
+                .unwrap()
+                .info()
+                .unload_active_lock_count(),
+            1
+        );
+
+        let remove = map.remove_from_map_like_cpp(guid, true).unwrap();
+        let remove_active = remove
+            .remove_from_active
+            .expect("active exact typed GameObject should consume RemoveFromActive seam");
+        assert!(remove_active.removed_from_active_set);
+        assert!(!map.is_active_non_player_like_cpp(guid));
+        assert_eq!(map.active_non_players_count_like_cpp(), 0);
+        assert_eq!(
+            map.get_ngrid(respawn_grid)
+                .unwrap()
+                .info()
+                .unload_active_lock_count(),
+            0
+        );
+    }
+
+    #[test]
+    fn active_non_player_add_remove_creature_updates_set_and_unload_lock_like_cpp() {
+        let mut map = test_map();
+        let respawn_position = Position::xyz(1.0, 2.0, 3.0);
+        let respawn_cell = Cell::from_world(respawn_position.x, respawn_position.y);
+        let respawn_grid = GridCoord::new(respawn_cell.grid_x(), respawn_cell.grid_y());
+        map.ensure_grid_loaded(&cell_from_grid_center(respawn_grid));
+        let mut creature = test_creature_for_spawn(48502, 4850201, true);
+        let guid = creature.guid();
+        creature.set_ai_home_position(respawn_position);
+        creature.unit_mut().world_mut().set_active(true);
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+
+        let add = map
+            .add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+        let add_active = add
+            .add_to_map_tail
+            .unwrap()
+            .add_to_active
+            .expect("active exact typed Creature should consume AddToActive seam");
+
+        assert_eq!(
+            add_active.status,
+            ActiveNonPlayerMutationStatusLikeCpp::Mutated
+        );
+        assert!(add_active.inserted_in_active_set);
+        assert_eq!(
+            add_active.unload_lock.unwrap().respawn_grid,
+            Some(respawn_grid)
+        );
+        assert!(map.is_active_non_player_like_cpp(guid));
+        assert_eq!(
+            map.get_ngrid(respawn_grid)
+                .unwrap()
+                .info()
+                .unload_active_lock_count(),
+            1
+        );
+
+        let remove = map.remove_from_map_like_cpp(guid, true).unwrap();
+        let remove_active = remove.remove_from_active.unwrap();
+        assert!(remove_active.removed_from_active_set);
+        assert_eq!(
+            remove_active.unload_lock.unwrap().respawn_grid,
+            Some(respawn_grid)
+        );
+        assert!(!map.is_active_non_player_like_cpp(guid));
+        assert_eq!(
+            map.get_ngrid(respawn_grid)
+                .unwrap()
+                .info()
+                .unload_active_lock_count(),
+            0
+        );
+    }
+
+    #[test]
+    fn active_non_player_zero_spawn_mutates_set_without_unload_lock_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = test_gameobject_for_spawn(0, 4850301);
+        let guid = gameobject.world().guid();
+        gameobject.world_mut().set_active(true);
+        gameobject.world_mut().object_mut().remove_from_world();
+
+        let add = map
+            .add_map_object_record_to_map_like_cpp(
+                MapObjectRecord::new_game_object(gameobject).unwrap(),
+            )
+            .unwrap();
+        let add_active = add.add_to_map_tail.unwrap().add_to_active.unwrap();
+        assert!(add_active.inserted_in_active_set);
+        assert!(add_active.spawn_id_zero_or_unsupported);
+        assert!(add_active.unload_lock.is_none());
+        assert!(map.is_active_non_player_like_cpp(guid));
+
+        let remove = map.remove_from_map_like_cpp(guid, true).unwrap();
+        let remove_active = remove.remove_from_active.unwrap();
+        assert!(remove_active.removed_from_active_set);
+        assert!(remove_active.spawn_id_zero_or_unsupported);
+        assert!(remove_active.unload_lock.is_none());
+        assert!(!map.is_active_non_player_like_cpp(guid));
+    }
+
+    #[test]
+    fn active_non_player_active_objects_near_grid_uses_real_active_set_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = test_gameobject_for_spawn(48504, 4850401);
+        let guid = gameobject.world().guid();
+        gameobject.world_mut().set_active(true);
+        gameobject.world_mut().object_mut().remove_from_world();
+        let object_cell = Cell::from_world(
+            gameobject.world().position().x,
+            gameobject.world().position().y,
+        );
+        let object_grid = GridCoord::new(object_cell.grid_x(), object_cell.grid_y());
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+        map.unmark_active_cell(object_cell.cell_coord());
+        let grid = NGrid::from_coords(
+            object_grid.x_coord as i32,
+            object_grid.y_coord as i32,
+            1000,
+            true,
+        );
+
+        assert!(map.active_objects_near_grid(&grid));
+        let remove = map.remove_from_map_like_cpp(guid, true).unwrap();
+        assert!(remove.remove_from_active.unwrap().removed_from_active_set);
+        assert!(!map.active_objects_near_grid(&grid));
+
+        let mut stale_map = test_map();
+        let mut stale_gameobject = test_gameobject_for_spawn(48504, 4850402);
+        stale_gameobject.world_mut().set_active(true);
+        stale_gameobject
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        let stale_guid = stale_gameobject.world().guid();
+        stale_map
+            .add_map_object_record_to_map_like_cpp(
+                MapObjectRecord::new_game_object(stale_gameobject).unwrap(),
+            )
+            .unwrap();
+        stale_map.unmark_active_cell(object_cell.cell_coord());
+        stale_map.active_non_players_like_cpp.remove(&stale_guid);
+        assert!(!stale_map.active_objects_near_grid(&grid));
+    }
+
+    #[test]
+    fn active_non_player_visit_sources_use_real_set_and_filter_stale_like_cpp() {
+        let mut map = test_map();
+        let mut active = test_gameobject_for_spawn(48505, 4850501);
+        let active_guid = active.world().guid();
+        active.world_mut().set_active(true);
+        active.world_mut().object_mut().remove_from_world();
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(active).unwrap(),
+        )
+        .unwrap();
+
+        let mut stale = test_gameobject_for_spawn(48505, 4850502);
+        let stale_guid = stale.world().guid();
+        stale.world_mut().set_active(true);
+        stale.world_mut().object_mut().remove_from_world();
+        map.add_map_object_record_to_map_like_cpp(MapObjectRecord::new_game_object(stale).unwrap())
+            .unwrap();
+        map.active_non_players_like_cpp.remove(&stale_guid);
+        map.active_non_players_like_cpp
+            .insert(guid(HighGuid::GameObject, 4850503));
+
+        let active_sources = map.represented_active_non_player_sources_like_cpp();
+        assert_eq!(active_sources, vec![active_guid]);
+        let plan = map.map_update_visit_plan_like_cpp(
+            std::iter::empty::<MapUpdatePlayerSources>(),
+            active_sources,
+            std::iter::empty::<ObjectGuid>(),
+            1,
+        );
+        assert!(plan.process_relocation_notifies);
+        assert_eq!(plan.nearby_visit_centers, vec![active_guid]);
     }
 
     #[test]

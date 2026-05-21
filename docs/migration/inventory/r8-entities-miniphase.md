@@ -3,9 +3,13 @@
 > Generated: 2026-05-07
 > Rule: every Entities claim is contrasted against `/home/server/woltk-trinity-legacy/src/server/game/Entities/`.
 
-## Prepared / Pending Review Tasks
+## Closed Tasks
 
-- None.
+- [x] **#NEXT.R8.ENTITIES.485** Map-owned active non-player list + active unload-lock consumption seam.
+  Status: represented-complete bounded slice; review `APROBADO`; CI `CI_OK`; validation OK; committed locally at current #485 HEAD; no push/install/restart. Runtime-seam complete only for the bounded map-owned `m_activeNonPlayers` equivalent and active-unload-lock consumption.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:529-576`, `:933-951`, `:2700-2776`, `:758-767,804-805`, `:2687-2697`; `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.h:617-619,727-745`.
+  Rust targets: `crates/wow-map/src/grid.rs`, `crates/wow-map/src/map.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: `Map` now owns `active_non_players_like_cpp: HashSet<ObjectGuid>` derived only from AddToMap/RemoveFromMap over canonical `map_objects`; `AddToActive`/`RemoveFromActive` insert/remove active non-player GUIDs and inc/dec existing respawn-grid unload active locks for exact typed Creature/GameObject spawn IDs without creating missing grids; spawn-id-zero active objects mutate only the set. `ProcessRelocationNotifies` and `ActiveObjectsNearGrid` consume the active set rather than scanning all `map_objects` to reconstruct active non-player sources. Checks after review/CI: `cargo fmt --check`; `cargo test -p wow-map active_non_player --lib -- --nocapture` (6 passed, 0 failed, 568 filtered); `PROTOC=/home/cdmonio/.local/protoc/bin/protoc cargo check -p world-server` (OK with pre-existing warnings); `git diff --check`; TSV 9-column check (483 lines, bad=0). Boundaries: no `IsAlwaysActive()` BG/arena hook, no C++ `Map::Update` mutating iterator adjustment, no ObjectAccessor/session/packet fanout, no scripts/AI/DB or full active-object update runtime.
 
 ## Closed Tasks
 
