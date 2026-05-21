@@ -7990,6 +7990,27 @@ where
             .filter(|game_object| game_object.world().object().is_in_world())
             .filter(|game_object| game_object.has_represented_gameobject_model_like_cpp())
             .map(|_| RepresentedGameObjectModelKeyLikeCpp { owner_guid: guid });
+        let gameobject_model_remove_pending_before_callback =
+            gameobject_model_key.is_some_and(|key| self.contains_gameobject_model_like_cpp(key));
+        let gameobject_zone_script_remove = self
+            .map_object_record(guid)
+            .filter(|record| record.kind() == AccessorObjectKind::GameObject)
+            .and_then(MapObjectRecord::game_object)
+            .filter(|game_object| game_object.world().object().is_in_world())
+            .map(|game_object| {
+                let spawn_id = game_object.spawn_id();
+                GameObjectZoneScriptRemoveOutcomeLikeCpp {
+                    guid,
+                    represented_callback_boundary: true,
+                    script_dispatch_represented: false,
+                    model_remove_pending_before_callback:
+                        gameobject_model_remove_pending_before_callback,
+                    spawn_index_present_before_callback: spawn_id != 0
+                        && self
+                            .gameobject_spawn_id_store_guids_like_cpp(spawn_id)
+                            .contains(&guid),
+                }
+            });
         let gameobject_model_remove = gameobject_model_key.and_then(|key| {
             self.contains_gameobject_model_like_cpp(key)
                 .then(|| self.remove_gameobject_model_like_cpp(key))
@@ -8070,6 +8091,7 @@ where
             delete_from_world,
             dynamic_object_caster_viewpoint,
             dynamic_object_remove_cleanup,
+            gameobject_zone_script_remove,
             gameobject_model_remove,
             creature_zone_script_remove,
             creature_vehicle_remove,
@@ -9904,6 +9926,15 @@ pub struct GameObjectZoneScriptCreateOutcomeLikeCpp {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameObjectZoneScriptRemoveOutcomeLikeCpp {
+    pub guid: ObjectGuid,
+    pub represented_callback_boundary: bool,
+    pub script_dispatch_represented: bool,
+    pub model_remove_pending_before_callback: bool,
+    pub spawn_index_present_before_callback: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CreatureZoneScriptRemoveOutcomeLikeCpp {
     pub guid: ObjectGuid,
     pub represented_callback: bool,
@@ -9973,6 +10004,7 @@ pub struct RemoveFromMapOutcome {
     pub delete_from_world: bool,
     pub dynamic_object_caster_viewpoint: Option<DynamicObjectCasterViewpointOutcomeLikeCpp>,
     pub dynamic_object_remove_cleanup: Option<DynamicObjectRemoveCleanupOutcomeLikeCpp>,
+    pub gameobject_zone_script_remove: Option<GameObjectZoneScriptRemoveOutcomeLikeCpp>,
     pub gameobject_model_remove: Option<DynamicMapTreeModelMutationOutcomeLikeCpp>,
     pub creature_zone_script_remove: Option<CreatureZoneScriptRemoveOutcomeLikeCpp>,
     pub creature_vehicle_remove: Option<VehicleKitRemoveOutcomeLikeCpp>,
@@ -11527,6 +11559,82 @@ mod tests {
             .add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(creature).unwrap())
             .unwrap();
         assert!(non_gameobject.gameobject_zone_script_create.is_none());
+    }
+
+    #[test]
+    fn gameobject_zone_script_remove_snapshots_before_model_spawn_unindex_like_cpp() {
+        let mut map = test_map();
+        let spawn_id = 48101;
+        let mut gameobject = test_gameobject_for_spawn(spawn_id, 4810101);
+        let guid = gameobject.world().guid();
+        let key = RepresentedGameObjectModelKeyLikeCpp { owner_guid: guid };
+        gameobject.world_mut().object_mut().remove_from_world();
+        gameobject.set_represented_gameobject_model_like_cpp(true);
+
+        map.add_map_object_record_to_map_like_cpp(
+            MapObjectRecord::new_game_object(gameobject).unwrap(),
+        )
+        .unwrap();
+        assert!(map.map_object_record(guid).is_some());
+        assert!(
+            map.gameobject_spawn_id_store_guids_like_cpp(spawn_id)
+                .contains(&guid)
+        );
+        assert!(map.contains_gameobject_model_like_cpp(key));
+
+        let outcome = map.remove_from_map_like_cpp(guid, true).unwrap();
+
+        let zone_script = outcome.gameobject_zone_script_remove.expect(
+            "exact typed in-world GameObject should expose represented ZoneScript remove boundary",
+        );
+        assert_eq!(zone_script.guid, guid);
+        assert!(zone_script.represented_callback_boundary);
+        assert!(!zone_script.script_dispatch_represented);
+        assert!(zone_script.model_remove_pending_before_callback);
+        assert!(zone_script.spawn_index_present_before_callback);
+        assert!(outcome.gameobject_model_remove.is_some());
+        assert!(map.map_object_record(guid).is_none());
+        assert!(
+            map.gameobject_spawn_id_store_guids_like_cpp(spawn_id)
+                .is_empty()
+        );
+        assert!(!map.contains_gameobject_model_like_cpp(key));
+    }
+
+    #[test]
+    fn gameobject_zone_script_remove_skips_generic_and_not_in_world_like_cpp() {
+        let mut generic_map = test_map();
+        let generic_object =
+            world_object_with_counter(HighGuid::GameObject, 4810201, 571, 7, false);
+        let generic_guid = generic_object.guid();
+        generic_map
+            .add_to_map_like_cpp(AccessorObjectKind::GameObject, generic_object)
+            .unwrap();
+
+        let generic_removed = generic_map
+            .remove_from_map_like_cpp(generic_guid, true)
+            .unwrap();
+
+        assert!(generic_removed.gameobject_zone_script_remove.is_none());
+
+        let mut not_in_world_map = test_map();
+        let mut not_in_world_gameobject = test_gameobject_for_spawn(48102, 4810202);
+        let not_in_world_guid = not_in_world_gameobject.world().guid();
+        not_in_world_gameobject
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        not_in_world_map
+            .insert_map_object_record(
+                MapObjectRecord::new_game_object(not_in_world_gameobject).unwrap(),
+            )
+            .unwrap();
+
+        let not_in_world_removed = not_in_world_map
+            .remove_from_map_like_cpp(not_in_world_guid, true)
+            .unwrap();
+
+        assert!(not_in_world_removed.gameobject_zone_script_remove.is_none());
     }
 
     #[test]

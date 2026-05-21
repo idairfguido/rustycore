@@ -9,6 +9,12 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.481** GameObject RemoveFromWorld ZoneScript remove callback evidence seam.
+  Status: represented-complete bounded slice; review `APROBADO`; CI `CI_OK`; validation OK; committed locally at `current #481 HEAD`; no push/install/restart.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:926-948`, plus add-side symmetry/context `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:899-923` and `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:529-576`.
+  Rust targets: `crates/wow-map/src/map.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: exact typed in-world `MapObjectRecord::GameObject` in `Map::remove_from_map_like_cpp` snapshots represented ZoneScript remove callback boundary evidence before represented model removal, linked-trap despawn, represented `WorldObject::RemoveFromWorld`, spawn-id unindex and record extraction. Evidence is map-owned from canonical `Map::map_objects`, includes pre-callback model-remove-pending and spawn-index presence, and keeps `script_dispatch_represented=false`. Missing records, non-GameObject records, generic kind-only GameObject/WorldObject paths, and exact typed GameObject not-in-world emit no GameObject ZoneScript remove evidence. Boundaries: no real ZoneScript object/trait/dispatch, no ObjectAccessor/session fanout, packets, DB writes, real model geometry/collision expansion, linked-trap scheduler/fanout, or full GameObject runtime parity.
+
 - [x] **#NEXT.R8.ENTITIES.480** GameObject AddToWorld ZoneScript create callback ordering evidence seam.
   Status: represented-complete bounded slice; review `APROBADO`; CI `CI_OK`; validation OK; committed locally at `current #480 HEAD`; no push/install/restart.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:529-576`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:899-923`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:926-948` (remove-side context only).
