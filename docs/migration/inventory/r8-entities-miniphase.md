@@ -9,6 +9,12 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.482** GameObject::RemoveFromWorld RemoveFromOwner represented seam.
+  Status: represented-complete bounded slice; review `APROBADO`; CI `CI_OK`; validation OK; committed locally at `current #482 HEAD`; no push/install/restart.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:880-897`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:926-948`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Unit/Unit.cpp:5213-5250`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.h:227-237`.
+  Rust targets: `crates/wow-entities/src/game_object.rs`, `crates/wow-map/src/map.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: exact typed in-world `MapObjectRecord::GameObject` in `Map::remove_from_map_like_cpp` now records a represented `RemoveFromOwner()` outcome immediately after represented ZoneScript remove and before model removal/linked-trap/WorldObject/store removal. `GameObject::set_owner_guid_like_cpp` writes `CreatedBy` and forces `spawned_by_default=false` like C++ `SetOwnerGUID`; non-empty owners are cleared even when no map-local Unit-like record exists, matching the lost-owner fallback. Owner presence is evidence-only from canonical map-local `Player`, `Creature`, or `Pet` records. Generic GameObject-kind-only records and not-in-world typed GameObjects emit no RemoveFromOwner evidence. Boundaries: no full `Unit::RemoveGameObject` side effects (owned-GO list, object slots, auras, cooldown event, Creature AI callback/delete), no real ObjectAccessor/global lookup, no session/fanout/packets, DB writes, real ZoneScript/model/linked-trap runtime or full GameObject runtime parity.
+
 - [x] **#NEXT.R8.ENTITIES.481** GameObject RemoveFromWorld ZoneScript remove callback evidence seam.
   Status: represented-complete bounded slice; review `APROBADO`; CI `CI_OK`; validation OK; committed locally at `current #481 HEAD`; no push/install/restart.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:926-948`, plus add-side symmetry/context `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:899-923` and `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:529-576`.

@@ -1711,6 +1711,21 @@ impl GameObject {
         });
     }
 
+    /// Bounded local representation of TrinityCore `GameObject::SetOwnerGUID`.
+    ///
+    /// C++ anchor: `GameObject.h:227-237` always sets `m_spawnedByDefault = false`
+    /// and writes `GameObjectData::CreatedBy`, including for `ObjectGuid::Empty`.
+    /// This does not run `Unit::RemoveGameObject` side effects, owned object slots,
+    /// auras, cooldown events, Creature AI callbacks, ObjectAccessor, or packets.
+    pub fn set_owner_guid_like_cpp(&mut self, owner_guid: ObjectGuid) {
+        self.spawned_by_default = false;
+        self.set_created_by(owner_guid);
+    }
+
+    pub fn clear_owner_guid_like_cpp(&mut self) {
+        self.set_owner_guid_like_cpp(ObjectGuid::EMPTY);
+    }
+
     pub const fn linked_trap_guid_like_cpp(&self) -> ObjectGuid {
         self.linked_trap_guid
     }
@@ -3467,6 +3482,30 @@ mod tests {
             go.game_object_data_changes_mask()
                 .is_set(GAME_OBJECT_DATA_CUSTOM_PARAM_BIT)
         );
+    }
+
+    #[test]
+    fn gameobject_set_owner_guid_like_cpp_updates_created_by_and_spawned_default() {
+        let mut go = GameObject::new();
+        let owner = ObjectGuid::create_player(1, 48201);
+        go.set_spawned_by_default(true);
+
+        go.set_owner_guid_like_cpp(owner);
+
+        assert_eq!(go.owner_guid(), owner);
+        assert_eq!(go.data().created_by, owner);
+        assert!(!go.spawned_by_default());
+        assert!(
+            go.game_object_data_changes_mask()
+                .is_set(GAME_OBJECT_DATA_CREATED_BY_BIT)
+        );
+
+        go.set_spawned_by_default(true);
+        go.clear_owner_guid_like_cpp();
+
+        assert_eq!(go.owner_guid(), ObjectGuid::EMPTY);
+        assert_eq!(go.data().created_by, ObjectGuid::EMPTY);
+        assert!(!go.spawned_by_default());
     }
 
     #[test]

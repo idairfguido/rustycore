@@ -7944,6 +7944,74 @@ where
         Some(record)
     }
 
+    fn map_record_is_unit_like_owner_for_gameobject_remove_from_owner_like_cpp(
+        record: &MapObjectRecord,
+    ) -> bool {
+        matches!(
+            record.kind(),
+            AccessorObjectKind::Player | AccessorObjectKind::Creature | AccessorObjectKind::Pet
+        ) && (record.player().is_some() || record.creature().is_some() || record.pet().is_some())
+    }
+
+    /// Bounded map-owned representation of C++ `GameObject::RemoveFromOwner()`
+    /// during `GameObject::RemoveFromWorld()`.
+    ///
+    /// C++ anchors:
+    /// - `GameObject.cpp:880-897`: empty owner returns; resolved Unit calls
+    ///   `Unit::RemoveGameObject(this, false)`; missing owner falls back to
+    ///   `SetOwnerGUID(ObjectGuid::Empty)`.
+    /// - `GameObject.cpp:926-948`: this runs after ZoneScript remove and before
+    ///   model removal, linked trap despawn, `WorldObject::RemoveFromWorld`,
+    ///   spawn-id unindex, and map store removal.
+    /// - `Unit.cpp:5213-5250`: real owner-side list/slot/aura/cooldown/AI effects
+    ///   remain explicit gaps here.
+    fn gameobject_remove_from_owner_like_cpp(
+        &mut self,
+        guid: ObjectGuid,
+    ) -> Option<GameObjectRemoveFromOwnerOutcomeLikeCpp> {
+        let (owner_guid_before, spell_id) = self
+            .map_object_record(guid)
+            .filter(|record| record.kind() == AccessorObjectKind::GameObject)
+            .and_then(MapObjectRecord::game_object)
+            .filter(|game_object| game_object.world().object().is_in_world())
+            .map(|game_object| (game_object.owner_guid(), game_object.spell_id()))?;
+
+        let owner_found_as_unit_like = !owner_guid_before.is_empty()
+            && self.map_object_record(owner_guid_before).is_some_and(
+                Self::map_record_is_unit_like_owner_for_gameobject_remove_from_owner_like_cpp,
+            );
+        let cleared_owner = !owner_guid_before.is_empty();
+
+        if cleared_owner {
+            if let Some(game_object) = self
+                .map_objects
+                .get_mut(&guid)
+                .and_then(MapObjectRecord::game_object_mut)
+            {
+                game_object.clear_owner_guid_like_cpp();
+            }
+        }
+
+        Some(GameObjectRemoveFromOwnerOutcomeLikeCpp {
+            guid,
+            owner_guid_before,
+            owner_guid_after: if cleared_owner {
+                ObjectGuid::EMPTY
+            } else {
+                owner_guid_before
+            },
+            owner_found_as_unit_like,
+            cleared_owner,
+            spell_id,
+            unit_side_effects_represented: false,
+            unit_owned_gameobject_list_removed: false,
+            unit_object_slot_cleared: false,
+            aura_cleanup_represented: false,
+            cooldown_event_represented: false,
+            creature_ai_callback_represented: false,
+        })
+    }
+
     pub fn remove_from_map_like_cpp(
         &mut self,
         guid: ObjectGuid,
@@ -8011,6 +8079,7 @@ where
                             .contains(&guid),
                 }
             });
+        let gameobject_remove_from_owner = self.gameobject_remove_from_owner_like_cpp(guid);
         let gameobject_model_remove = gameobject_model_key.and_then(|key| {
             self.contains_gameobject_model_like_cpp(key)
                 .then(|| self.remove_gameobject_model_like_cpp(key))
@@ -8092,6 +8161,7 @@ where
             dynamic_object_caster_viewpoint,
             dynamic_object_remove_cleanup,
             gameobject_zone_script_remove,
+            gameobject_remove_from_owner,
             gameobject_model_remove,
             creature_zone_script_remove,
             creature_vehicle_remove,
@@ -9935,6 +10005,22 @@ pub struct GameObjectZoneScriptRemoveOutcomeLikeCpp {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameObjectRemoveFromOwnerOutcomeLikeCpp {
+    pub guid: ObjectGuid,
+    pub owner_guid_before: ObjectGuid,
+    pub owner_guid_after: ObjectGuid,
+    pub owner_found_as_unit_like: bool,
+    pub cleared_owner: bool,
+    pub spell_id: u32,
+    pub unit_side_effects_represented: bool,
+    pub unit_owned_gameobject_list_removed: bool,
+    pub unit_object_slot_cleared: bool,
+    pub aura_cleanup_represented: bool,
+    pub cooldown_event_represented: bool,
+    pub creature_ai_callback_represented: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CreatureZoneScriptRemoveOutcomeLikeCpp {
     pub guid: ObjectGuid,
     pub represented_callback: bool,
@@ -10005,6 +10091,7 @@ pub struct RemoveFromMapOutcome {
     pub dynamic_object_caster_viewpoint: Option<DynamicObjectCasterViewpointOutcomeLikeCpp>,
     pub dynamic_object_remove_cleanup: Option<DynamicObjectRemoveCleanupOutcomeLikeCpp>,
     pub gameobject_zone_script_remove: Option<GameObjectZoneScriptRemoveOutcomeLikeCpp>,
+    pub gameobject_remove_from_owner: Option<GameObjectRemoveFromOwnerOutcomeLikeCpp>,
     pub gameobject_model_remove: Option<DynamicMapTreeModelMutationOutcomeLikeCpp>,
     pub creature_zone_script_remove: Option<CreatureZoneScriptRemoveOutcomeLikeCpp>,
     pub creature_vehicle_remove: Option<VehicleKitRemoveOutcomeLikeCpp>,
@@ -11635,6 +11722,117 @@ mod tests {
             .unwrap();
 
         assert!(not_in_world_removed.gameobject_zone_script_remove.is_none());
+    }
+
+    #[test]
+    fn gameobject_remove_from_owner_clears_owner_before_model_remove_like_cpp() {
+        let mut map = test_map();
+        let owner = test_player_for_viewpoint(4820101);
+        let owner_guid = owner.guid();
+        map.insert_map_object_record(MapObjectRecord::new_player(owner).unwrap())
+            .unwrap();
+
+        let mut gameobject = test_gameobject_for_spawn(48201, 4820102);
+        let guid = gameobject.world().guid();
+        let key = RepresentedGameObjectModelKeyLikeCpp { owner_guid: guid };
+        gameobject.set_owner_guid_like_cpp(owner_guid);
+        gameobject.set_spell_id(482001);
+        gameobject.set_represented_gameobject_model_like_cpp(true);
+        map.insert_gameobject_model_like_cpp(key);
+        map.insert_map_object_record(MapObjectRecord::new_game_object(gameobject).unwrap())
+            .unwrap();
+
+        let outcome = map.remove_from_map_like_cpp(guid, true).unwrap();
+        let remove_owner = outcome
+            .gameobject_remove_from_owner
+            .expect("exact typed in-world GameObject should expose RemoveFromOwner boundary");
+
+        assert_eq!(remove_owner.guid, guid);
+        assert_eq!(remove_owner.owner_guid_before, owner_guid);
+        assert_eq!(remove_owner.owner_guid_after, ObjectGuid::EMPTY);
+        assert!(remove_owner.owner_found_as_unit_like);
+        assert!(remove_owner.cleared_owner);
+        assert_eq!(remove_owner.spell_id, 482001);
+        assert!(!remove_owner.unit_side_effects_represented);
+        assert!(!remove_owner.unit_owned_gameobject_list_removed);
+        assert!(!remove_owner.unit_object_slot_cleared);
+        assert!(!remove_owner.aura_cleanup_represented);
+        assert!(!remove_owner.cooldown_event_represented);
+        assert!(!remove_owner.creature_ai_callback_represented);
+        assert!(outcome.gameobject_model_remove.is_some());
+        assert!(!map.contains_gameobject_model_like_cpp(key));
+    }
+
+    #[test]
+    fn gameobject_remove_from_owner_clears_lost_owner_fallback_like_cpp() {
+        let mut map = test_map();
+        let missing_owner_guid = ObjectGuid::create_player(1, 4820201);
+        let mut gameobject = test_gameobject_for_spawn(48202, 4820202);
+        let guid = gameobject.world().guid();
+        gameobject.set_owner_guid_like_cpp(missing_owner_guid);
+        map.insert_map_object_record(MapObjectRecord::new_game_object(gameobject).unwrap())
+            .unwrap();
+
+        let outcome = map.remove_from_map_like_cpp(guid, true).unwrap();
+        let remove_owner = outcome.gameobject_remove_from_owner.unwrap();
+
+        assert_eq!(remove_owner.owner_guid_before, missing_owner_guid);
+        assert_eq!(remove_owner.owner_guid_after, ObjectGuid::EMPTY);
+        assert!(!remove_owner.owner_found_as_unit_like);
+        assert!(remove_owner.cleared_owner);
+        assert!(!remove_owner.unit_side_effects_represented);
+    }
+
+    #[test]
+    fn gameobject_remove_from_owner_noops_empty_owner_generic_and_not_in_world_like_cpp() {
+        let mut empty_owner_map = test_map();
+        let empty_owner_gameobject = test_gameobject_for_spawn(48203, 4820301);
+        let empty_owner_guid = empty_owner_gameobject.world().guid();
+        empty_owner_map
+            .insert_map_object_record(
+                MapObjectRecord::new_game_object(empty_owner_gameobject).unwrap(),
+            )
+            .unwrap();
+
+        let empty_owner_removed = empty_owner_map
+            .remove_from_map_like_cpp(empty_owner_guid, true)
+            .unwrap();
+        let empty_owner = empty_owner_removed.gameobject_remove_from_owner.unwrap();
+        assert_eq!(empty_owner.owner_guid_before, ObjectGuid::EMPTY);
+        assert_eq!(empty_owner.owner_guid_after, ObjectGuid::EMPTY);
+        assert!(!empty_owner.owner_found_as_unit_like);
+        assert!(!empty_owner.cleared_owner);
+
+        let mut generic_map = test_map();
+        let generic_object =
+            world_object_with_counter(HighGuid::GameObject, 4820302, 571, 7, false);
+        let generic_guid = generic_object.guid();
+        generic_map
+            .add_to_map_like_cpp(AccessorObjectKind::GameObject, generic_object)
+            .unwrap();
+        let generic_removed = generic_map
+            .remove_from_map_like_cpp(generic_guid, true)
+            .unwrap();
+        assert!(generic_removed.gameobject_remove_from_owner.is_none());
+
+        let mut not_in_world_map = test_map();
+        let mut not_in_world_gameobject = test_gameobject_for_spawn(48203, 4820303);
+        let not_in_world_guid = not_in_world_gameobject.world().guid();
+        not_in_world_gameobject.set_owner_guid_like_cpp(ObjectGuid::create_player(1, 4820304));
+        not_in_world_gameobject
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        not_in_world_map
+            .insert_map_object_record(
+                MapObjectRecord::new_game_object(not_in_world_gameobject).unwrap(),
+            )
+            .unwrap();
+
+        let not_in_world_removed = not_in_world_map
+            .remove_from_map_like_cpp(not_in_world_guid, true)
+            .unwrap();
+        assert!(not_in_world_removed.gameobject_remove_from_owner.is_none());
     }
 
     #[test]
