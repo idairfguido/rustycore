@@ -800,6 +800,7 @@ mod tests {
                 speed_run: 1.14286,
                 scale: 1.25,
                 classification: 4,
+                creature_type: 7,
                 unit_class: 2,
                 vehicle_id: 900,
                 movement_type: 1,
@@ -818,6 +819,7 @@ mod tests {
         assert_eq!(template.speed_run, 1.14286);
         assert_eq!(template.scale, 1.25);
         assert_eq!(template.classification, 4);
+        assert_eq!(template.creature_type, 7);
         assert_eq!(template.unit_class, 2);
         assert_eq!(template.vehicle_id, 900);
         assert_eq!(template.movement_type, 1);
@@ -836,6 +838,7 @@ mod tests {
             speed_run: 0.0,
             scale: 1.0,
             classification: 0,
+            creature_type: 0,
             unit_class: 0,
             vehicle_id: 0,
             movement_type: 0,
@@ -865,6 +868,7 @@ mod tests {
             speed_run: 0.0,
             scale: 1.0,
             classification: 0,
+            creature_type: 0,
             unit_class: 0,
             vehicle_id: 0,
             movement_type: 0,
@@ -913,6 +917,7 @@ mod tests {
             speed_run: 0.0,
             scale: 1.0,
             classification: 0,
+            creature_type: 0,
             unit_class: 0,
             vehicle_id: 0,
             movement_type: 0,

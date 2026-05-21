@@ -5,6 +5,12 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.503** Creature template lifecycle test fixture `creature_type` unblock.
+  Status: test-fixture maintenance; review `APROBADO`; CI `CI_OK`; validation OK; committed locally at current #503 HEAD; no push/install/restart. This does not claim new runtime parity or migration percentage: it only updates `CreatureTemplateLifecycleRecordLikeCpp` unit-test fixtures after the already-landed loader field `creature_type` so broad workspace tests are no longer blocked by stale initializers.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:349-482`; `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:575-620+`.
+  Rust targets: `crates/wow-data/src/creature_template.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: fixture `creature_template_lifecycle_store_preserves_cpp_field_mapping_and_vehicle_id` now uses `creature_type: 7` and asserts the preserved field; the other lifecycle fixtures use `creature_type: 0` where irrelevant. Runtime loader/schema behavior is unchanged.
+
 - [x] **#NEXT.R8.ENTITIES.502** DynamicObject VALUES stable snapshot before represented SendObjectUpdates clear.
   Status: represented-complete; review `APROBADO`; CI `CI_OK`; validation OK; committed locally at `current #502 HEAD`; no push/install/restart. `Map::send_object_updates_like_cpp` now captures `DynamicObject::values_update()` from canonical `Map::map_objects` while the typed mask is still live, stores it as represented summary evidence with the DynamicObject GUID only when data exists, then clears `DynamicObjectData` changes and `Object::m_objectUpdated` in the existing represented `BuildUpdate` clear seam. No session fanout is claimed.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:760-794`; `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:1929-1948`; `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.cpp:3722-3729`; `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.cpp:3731-3740`; `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Updates/UpdateFields.cpp:4475-4512`; `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Updates/UpdateFields.cpp:4514-4522`.
