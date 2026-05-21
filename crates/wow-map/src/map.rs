@@ -7513,6 +7513,7 @@ where
                 inserted_into_cell: false,
                 gameobject_model_insert: None,
                 gameobject_collision_enable: None,
+                gameobject_zone_script_create: None,
                 gameobject_store_inserted_before_add_to_world: None,
                 gameobject_spawn_indexed_before_add_to_world: None,
                 creature_store_inserted_before_add_to_world: None,
@@ -7657,6 +7658,7 @@ where
                 inserted_into_cell: true,
                 gameobject_model_insert: None,
                 gameobject_collision_enable: None,
+                gameobject_zone_script_create: None,
                 gameobject_store_inserted_before_add_to_world: None,
                 gameobject_spawn_indexed_before_add_to_world: None,
                 creature_store_inserted_before_add_to_world: Some(
@@ -7679,6 +7681,24 @@ where
             record
                 .object_mut()
                 .set_current_cell(cell.cell_x(), cell.cell_y());
+            let object_store_present_before_callback = self
+                .map_object_record(guid)
+                .is_some_and(|record| record.game_object().is_some());
+            let spawn_index_present_before_callback =
+                record.game_object().is_some_and(|game_object| {
+                    let spawn_id = game_object.spawn_id();
+                    spawn_id != 0
+                        && self
+                            .gameobject_spawn_id_store_guids_like_cpp(spawn_id)
+                            .contains(&guid)
+                });
+            let gameobject_zone_script_create = Some(GameObjectZoneScriptCreateOutcomeLikeCpp {
+                guid,
+                represented_callback_boundary: true,
+                script_dispatch_represented: false,
+                object_store_present_before_callback,
+                spawn_index_present_before_callback,
+            });
             let previous = self.insert_map_object_record(record)?;
 
             let gameobject_store_inserted_before_add_to_world = self
@@ -7758,6 +7778,7 @@ where
                 inserted_into_cell: true,
                 gameobject_model_insert,
                 gameobject_collision_enable,
+                gameobject_zone_script_create,
                 gameobject_store_inserted_before_add_to_world: Some(
                     gameobject_store_inserted_before_add_to_world,
                 ),
@@ -7902,6 +7923,7 @@ where
             inserted_into_cell: true,
             gameobject_model_insert,
             gameobject_collision_enable,
+            gameobject_zone_script_create: None,
             gameobject_store_inserted_before_add_to_world: None,
             gameobject_spawn_indexed_before_add_to_world: None,
             creature_store_inserted_before_add_to_world: None,
@@ -9873,6 +9895,15 @@ pub struct CreatureZoneScriptCreateOutcomeLikeCpp {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameObjectZoneScriptCreateOutcomeLikeCpp {
+    pub guid: ObjectGuid,
+    pub represented_callback_boundary: bool,
+    pub script_dispatch_represented: bool,
+    pub object_store_present_before_callback: bool,
+    pub spawn_index_present_before_callback: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CreatureZoneScriptRemoveOutcomeLikeCpp {
     pub guid: ObjectGuid,
     pub represented_callback: bool,
@@ -9905,6 +9936,7 @@ pub struct AddToMapOutcome {
     pub inserted_into_cell: bool,
     pub gameobject_model_insert: Option<DynamicMapTreeModelMutationOutcomeLikeCpp>,
     pub gameobject_collision_enable: Option<GameObjectCollisionEnableOutcomeLikeCpp>,
+    pub gameobject_zone_script_create: Option<GameObjectZoneScriptCreateOutcomeLikeCpp>,
     pub gameobject_store_inserted_before_add_to_world: Option<bool>,
     pub gameobject_spawn_indexed_before_add_to_world: Option<bool>,
     pub creature_store_inserted_before_add_to_world: Option<bool>,
@@ -11420,6 +11452,81 @@ mod tests {
             generic_outcome.gameobject_spawn_indexed_before_add_to_world,
             None
         );
+    }
+
+    #[test]
+    fn gameobject_zone_script_create_precedes_store_insert_like_cpp() {
+        let mut map = test_map();
+        let mut gameobject = test_gameobject_for_spawn(48001, 4800101);
+        let guid = gameobject.world().guid();
+        gameobject.world_mut().object_mut().remove_from_world();
+        gameobject.set_represented_gameobject_model_like_cpp(true);
+
+        let outcome = map
+            .add_map_object_record_to_map_like_cpp(
+                MapObjectRecord::new_game_object(gameobject).unwrap(),
+            )
+            .unwrap();
+
+        let zone_script = outcome
+            .gameobject_zone_script_create
+            .expect("exact typed GameObject should expose represented ZoneScript create boundary");
+        assert_eq!(zone_script.guid, guid);
+        assert!(zone_script.represented_callback_boundary);
+        assert!(!zone_script.script_dispatch_represented);
+        assert!(!zone_script.object_store_present_before_callback);
+        assert!(!zone_script.spawn_index_present_before_callback);
+        assert_eq!(
+            outcome.gameobject_store_inserted_before_add_to_world,
+            Some(true)
+        );
+        assert_eq!(
+            outcome.gameobject_spawn_indexed_before_add_to_world,
+            Some(true)
+        );
+        assert!(
+            map.map_object_record(guid)
+                .and_then(MapObjectRecord::game_object)
+                .is_some()
+        );
+        assert!(
+            map.gameobject_spawn_id_store_guids_like_cpp(48001)
+                .contains(&guid)
+        );
+    }
+
+    #[test]
+    fn gameobject_zone_script_create_skips_already_in_world_and_generic_paths_like_cpp() {
+        let mut already_map = test_map();
+        let already_gameobject = test_gameobject_for_spawn(48002, 4800201);
+        let already_outcome = already_map
+            .add_map_object_record_to_map_like_cpp(
+                MapObjectRecord::new_game_object(already_gameobject).unwrap(),
+            )
+            .unwrap();
+        assert!(already_outcome.already_in_world);
+        assert!(already_outcome.gameobject_zone_script_create.is_none());
+
+        let mut generic_map = test_map();
+        let generic_object =
+            world_object_with_counter(HighGuid::GameObject, 4800202, 571, 7, false);
+        let generic_outcome = generic_map
+            .add_to_map_like_cpp(AccessorObjectKind::GameObject, generic_object)
+            .unwrap();
+        assert!(!generic_outcome.already_in_world);
+        assert!(generic_outcome.gameobject_zone_script_create.is_none());
+
+        let mut non_gameobject_map = test_map();
+        let mut creature = test_creature_for_spawn(48003, 4800301, true);
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        let non_gameobject = non_gameobject_map
+            .add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+        assert!(non_gameobject.gameobject_zone_script_create.is_none());
     }
 
     #[test]

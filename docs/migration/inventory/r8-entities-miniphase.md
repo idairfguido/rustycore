@@ -5,9 +5,15 @@
 
 ## Prepared / Pending Review Tasks
 
-- None in this handoff.
+- None.
 
 ## Closed Tasks
+
+- [x] **#NEXT.R8.ENTITIES.480** GameObject AddToWorld ZoneScript create callback ordering evidence seam.
+  Status: represented-complete bounded slice; review `APROBADO`; CI `CI_OK`; validation OK; committed locally at `current #480 HEAD`; no push/install/restart.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:529-576`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:899-923`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:926-948` (remove-side context only).
+  Rust targets: `crates/wow-map/src/map.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: exact typed `MapObjectRecord::GameObject` on the normal not-already-in-world AddToMap path records represented ZoneScript create callback boundary evidence immediately after AddToGrid/current cell and before `insert_map_object_record`, including pre-callback map store and by-spawn-index presence checks. Already-in-world, generic kind-only GameObject and non-GameObject paths emit no GameObject ZoneScript create evidence. This remains represented-only with `script_dispatch_represented=false`; no real ZoneScript object/trait/dispatch, ObjectAccessor/session fanout, packets, DB writes, or full GameObject runtime parity is claimed. Checks: `cargo fmt --check`; `cargo test -p wow-map gameobject_zone_script_create --lib -- --nocapture` (2 passed); `cargo test -p wow-map add_to_map --lib -- --nocapture` (26 passed); `PROTOC=/home/cdmonio/.local/protoc/bin/protoc cargo check -p world-server`; `git diff --check`; TSV 9-column check.
 
 - [x] **#NEXT.R8.ENTITIES.479** GameObject AddToWorld map-owned ObjectsStore/by-spawn pre-WorldObject insertion and canonical model/collision mutation seam.
   Status: represented-complete bounded slice; review `APROBADO` after one bounded correction; CI `CI_OK`; validation OK; committed locally at `current #479 HEAD`; no push/install/restart.
