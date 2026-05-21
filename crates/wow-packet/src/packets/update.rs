@@ -2616,6 +2616,57 @@ impl GameObjectCreateData {
     }
 }
 
+// ── DynamicObjectCreateData ────────────────────────────────────────
+
+/// Data needed to build a DynamicObject create packet for the client.
+///
+/// C++ anchors:
+/// - `DynamicObject::DynamicObject(bool)` sets Stationary create flag.
+/// - `DynamicObject::BuildValuesCreate` writes ObjectData then DynamicObjectData.
+pub struct DynamicObjectCreateData {
+    pub guid: ObjectGuid,
+    pub entry_id: u32,
+    pub dynamic_flags: u32,
+    pub scale: f32,
+    pub position: Position,
+    pub caster: ObjectGuid,
+    pub dynamic_object_type: u8,
+    pub spell_visual_id: i32,
+    pub spell_id: i32,
+    pub radius: f32,
+    pub cast_time_ms: u32,
+}
+
+impl DynamicObjectCreateData {
+    /// Write the create-time values block: `[u32 size][u8 flags][ObjectData][DynamicObjectData]`.
+    ///
+    /// This is a CREATE values section, not an `UpdateType::Values` block; it intentionally
+    /// does not write a packed object GUID or update masks inside the values payload.
+    pub fn write_values_create(&self, pkt: &mut WorldPacket) {
+        let mut buf = WorldPacket::new_empty();
+
+        // UpdateFieldFlag: 0x00 for non-owner.
+        buf.write_uint8(0x00);
+
+        // ObjectData::WriteCreate.
+        buf.write_int32(self.entry_id as i32);
+        buf.write_uint32(self.dynamic_flags);
+        buf.write_float(self.scale);
+
+        // DynamicObjectData::WriteCreate.
+        buf.write_packed_guid(&self.caster);
+        buf.write_uint8(self.dynamic_object_type);
+        buf.write_int32(self.spell_visual_id);
+        buf.write_int32(self.spell_id);
+        buf.write_float(self.radius);
+        buf.write_uint32(self.cast_time_ms);
+
+        let data = buf.into_data();
+        pkt.write_uint32(data.len() as u32);
+        pkt.write_bytes(&data);
+    }
+}
+
 /// A single update block within an UpdateObject packet.
 pub enum UpdateBlock {
     CreateObject {
@@ -2634,6 +2685,10 @@ pub enum UpdateBlock {
     CreateGameObject {
         guid: ObjectGuid,
         create_data: GameObjectCreateData,
+    },
+    CreateDynamicObject {
+        guid: ObjectGuid,
+        create_data: DynamicObjectCreateData,
     },
     CreateItem {
         guid: ObjectGuid,
@@ -2781,7 +2836,15 @@ impl UpdateObject {
         }
     }
 
-    /// Create a batched UpdateObject with mixed blocks (creatures + gameobjects).
+    /// Create a dynamic object spawn block.
+    pub fn create_dynamic_object_block(create_data: DynamicObjectCreateData) -> UpdateBlock {
+        UpdateBlock::CreateDynamicObject {
+            guid: create_data.guid,
+            create_data,
+        }
+    }
+
+    /// Create a batched UpdateObject with mixed world-object create blocks.
     pub fn create_world_objects(blocks: Vec<UpdateBlock>, map_id: u16) -> Self {
         Self {
             map_id,
@@ -3266,6 +3329,9 @@ impl ServerPacket for UpdateObject {
                 UpdateBlock::CreateGameObject { guid, create_data } => {
                     write_gameobject_create_block(&mut blocks_buf, guid, create_data);
                 }
+                UpdateBlock::CreateDynamicObject { guid, create_data } => {
+                    write_dynamic_object_create_block(&mut blocks_buf, guid, create_data);
+                }
                 UpdateBlock::CreateItem { guid, create_data } => {
                     write_item_create_block(&mut blocks_buf, guid, create_data);
                 }
@@ -3637,6 +3703,59 @@ fn write_gameobject_create_block(
     buf.write_int32(0); // WorldEffectID
     buf.write_bit(false); // has extra u32
     buf.flush_bits();
+
+    // ── Values block ─────────────────────────────────────────
+    create_data.write_values_create(buf);
+}
+
+/// Write a single CreateObject block for a dynamic object (TypeId::DynamicObject).
+///
+/// DynamicObjects use Stationary (bit 5), no MovementUpdate, no Unit shared-vision payload.
+fn write_dynamic_object_create_block(
+    buf: &mut WorldPacket,
+    guid: &ObjectGuid,
+    create_data: &DynamicObjectCreateData,
+) {
+    // UpdateType: CreateObject2 — first appearance of this object to the client
+    buf.write_uint8(UpdateType::CreateObject2 as u8);
+
+    // Object GUID
+    buf.write_packed_guid(guid);
+
+    // TypeId = DynamicObject (9)
+    buf.write_uint8(TypeId::DynamicObject as u8);
+
+    // ── 18-bit CreateObjectBits ────────────────────────────
+    buf.write_bit(false); // 0: NoBirthAnim
+    buf.write_bit(false); // 1: EnablePortals
+    buf.write_bit(false); // 2: PlayHoverAnim
+    buf.write_bit(false); // 3: MovementUpdate (false for DynamicObjects)
+    buf.write_bit(false); // 4: MovementTransport
+    buf.write_bit(true); // 5: Stationary (true for DynamicObjects)
+    buf.write_bit(false); // 6: CombatVictim
+    buf.write_bit(false); // 7: ServerTime
+    buf.write_bit(false); // 8: Vehicle
+    buf.write_bit(false); // 9: AnimKit
+    buf.write_bit(false); // 10: Rotation
+    buf.write_bit(false); // 11: AreaTrigger
+    buf.write_bit(false); // 12: GameObject
+    buf.write_bit(false); // 13: SmoothPhasing
+    buf.write_bit(false); // 14: ThisIsYou
+    buf.write_bit(false); // 15: SceneObject
+    buf.write_bit(false); // 16: ActivePlayer
+    buf.write_bit(false); // 17: Conversation
+    buf.flush_bits();
+
+    // No MovementUpdate (bit 3 = false)
+
+    // PauseTimes count (i32) — always 0
+    buf.write_int32(0);
+
+    // ── Stationary block (bit 5 = true) ─────────────────────
+    buf.write_float(create_data.position.x);
+    buf.write_float(create_data.position.y);
+    buf.write_float(create_data.position.z);
+    buf.write_float(create_data.position.orientation);
 
     // ── Values block ─────────────────────────────────────────
     create_data.write_values_create(buf);
@@ -7478,6 +7597,101 @@ mod tests {
             data.windows(4)
                 .any(|window| window == 0x20u32.to_le_bytes())
         );
+    }
+
+    #[test]
+    fn dynamic_object_create_block_serializes_stationary_create_values_like_cpp() {
+        let guid = ObjectGuid::create_world_object(
+            wow_core::guid::HighGuid::DynamicObject,
+            0,
+            1,
+            571,
+            0,
+            7001,
+            9001,
+        );
+        let caster = ObjectGuid::create_player(1, 42);
+        let position = Position::new(11.0, 22.0, 33.0, 1.5);
+        let pkt = UpdateObject::create_world_objects(
+            vec![UpdateObject::create_dynamic_object_block(
+                DynamicObjectCreateData {
+                    guid,
+                    entry_id: 7001,
+                    dynamic_flags: 0,
+                    scale: 1.0,
+                    position,
+                    caster,
+                    dynamic_object_type: 2,
+                    spell_visual_id: 456,
+                    spell_id: 777,
+                    radius: 12.5,
+                    cast_time_ms: 12345,
+                },
+            )],
+            571,
+        );
+
+        let bytes = pkt.to_bytes();
+        assert_eq!(
+            u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]),
+            1
+        );
+        assert!(
+            bytes
+                .windows(1)
+                .any(|window| window == [UpdateType::CreateObject2 as u8])
+        );
+        assert!(
+            bytes
+                .windows(1)
+                .any(|window| window == [TypeId::DynamicObject as u8])
+        );
+        assert!(
+            bytes
+                .windows(4)
+                .any(|window| window == position.x.to_le_bytes())
+        );
+        assert!(
+            bytes
+                .windows(4)
+                .any(|window| window == position.y.to_le_bytes())
+        );
+        assert!(
+            bytes
+                .windows(4)
+                .any(|window| window == position.z.to_le_bytes())
+        );
+        assert!(
+            bytes
+                .windows(4)
+                .any(|window| window == position.orientation.to_le_bytes())
+        );
+        assert!(
+            bytes
+                .windows(4)
+                .any(|window| window == 7001i32.to_le_bytes())
+        );
+        assert!(
+            bytes
+                .windows(4)
+                .any(|window| window == 456i32.to_le_bytes())
+        );
+        assert!(
+            bytes
+                .windows(4)
+                .any(|window| window == 777i32.to_le_bytes())
+        );
+        assert!(
+            bytes
+                .windows(4)
+                .any(|window| window == 12.5f32.to_le_bytes())
+        );
+        assert!(
+            bytes
+                .windows(4)
+                .any(|window| window == 12345u32.to_le_bytes())
+        );
+        assert!(!bytes.windows(1).all(|window| window == [0]));
     }
 
     #[test]

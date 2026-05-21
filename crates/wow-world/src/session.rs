@@ -4560,6 +4560,54 @@ impl WorldSession {
         Some(gameobjects)
     }
 
+    pub(crate) fn visible_dynamic_objects_from_canonical_map_like_cpp(
+        &self,
+        map_id: u16,
+        position: &wow_core::Position,
+        visibility_radius: f32,
+    ) -> Option<Vec<wow_packet::packets::update::DynamicObjectCreateData>> {
+        let manager = self.canonical_map_manager.as_ref()?;
+        let Ok(manager) = manager.lock() else {
+            return None;
+        };
+        let map = manager.find_map(u32::from(map_id), 0)?;
+        let nearby =
+            map.map()
+                .nearby_cell_guids_like_cpp(position.x, position.y, visibility_radius);
+        let mut dynamic_objects = Vec::new();
+
+        for guid in nearby.grid.dynamic_objects {
+            let Some(dynamic_object) = map.map().get_typed_dynamic_object(guid) else {
+                continue;
+            };
+            let object = dynamic_object.world();
+            if object.map_id() != u32::from(map_id)
+                || !object
+                    .position()
+                    .is_within_dist(position, visibility_radius)
+            {
+                continue;
+            }
+            let object_data = object.object().object_data_values();
+            let data = dynamic_object.data();
+            dynamic_objects.push(wow_packet::packets::update::DynamicObjectCreateData {
+                guid,
+                entry_id: u32::try_from(object_data.entry_id).unwrap_or(0),
+                dynamic_flags: object_data.dynamic_flags,
+                scale: object_data.scale,
+                position: object.position(),
+                caster: data.caster,
+                dynamic_object_type: data.dynamic_object_type,
+                spell_visual_id: data.spell_visual_id,
+                spell_id: data.spell_id,
+                radius: data.radius,
+                cast_time_ms: data.cast_time_ms,
+            });
+        }
+
+        Some(dynamic_objects)
+    }
+
     pub fn set_realm_id(&mut self, realm_id: u16) {
         self.realm_id = realm_id;
     }

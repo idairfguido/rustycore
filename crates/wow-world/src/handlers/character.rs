@@ -3311,8 +3311,11 @@ impl WorldSession {
         let map_creatures = self.visible_world_creatures_from_map_like_cpp(map_id, &pos);
         let canonical_gameobjects =
             self.visible_gameobjects_from_canonical_map_like_cpp(map_id, &pos, RANGE);
-        let has_map_visibility_source =
-            self.has_world_map_manager_like_cpp() || canonical_gameobjects.is_some();
+        let canonical_dynamic_objects =
+            self.visible_dynamic_objects_from_canonical_map_like_cpp(map_id, &pos, RANGE);
+        let has_map_visibility_source = self.has_world_map_manager_like_cpp()
+            || canonical_gameobjects.is_some()
+            || canonical_dynamic_objects.is_some();
 
         if has_map_visibility_source {
             let mut new_visible_creatures: HashSet<ObjectGuid> = HashSet::new();
@@ -3400,6 +3403,54 @@ impl WorldSession {
                 }
                 self.client_visible_guids_like_cpp
                     .extend(new_visible_gos.iter().copied());
+            }
+
+            if let Some(dynamic_objects) = canonical_dynamic_objects {
+                let new_visible_dynamic_objects: HashSet<_> = dynamic_objects
+                    .iter()
+                    .map(|dynamic_object| dynamic_object.guid)
+                    .collect();
+                let new_dynamic_object_blocks = dynamic_objects
+                    .into_iter()
+                    .filter(|dynamic_object| {
+                        !self
+                            .client_visible_guids_like_cpp
+                            .contains(&dynamic_object.guid)
+                    })
+                    .map(UpdateObject::create_dynamic_object_block)
+                    .collect::<Vec<_>>();
+                let removed_dynamic_objects: Vec<ObjectGuid> = self
+                    .client_visible_guids_like_cpp
+                    .iter()
+                    .filter(|g| g.is_dynamic_object() && !new_visible_dynamic_objects.contains(g))
+                    .copied()
+                    .collect();
+
+                if !new_dynamic_object_blocks.is_empty() {
+                    debug!(
+                        "Visibility update: {} canonical dynamic objects",
+                        new_dynamic_object_blocks.len()
+                    );
+                    self.send_packet(&UpdateObject::create_world_objects(
+                        new_dynamic_object_blocks,
+                        map_id,
+                    ));
+                }
+                if !removed_dynamic_objects.is_empty() {
+                    debug!(
+                        "Visibility update: {} canonical dynamic objects out of range",
+                        removed_dynamic_objects.len()
+                    );
+                    self.send_packet(&UpdateObject::out_of_range_objects(
+                        removed_dynamic_objects.clone(),
+                        map_id,
+                    ));
+                }
+                for guid in &removed_dynamic_objects {
+                    self.client_visible_guids_like_cpp.remove(guid);
+                }
+                self.client_visible_guids_like_cpp
+                    .extend(new_visible_dynamic_objects.iter().copied());
             }
 
             self.last_visibility_pos = Some(pos);

@@ -2234,3 +2234,18 @@ Files touched: `crates/wow-map/src/map.rs`; `docs/migration/current-session-hand
 Checks expected: `cargo fmt --check`; `cargo test -p wow-map check_respawn_live_object_guard`; `git diff --check`; `git status --short --branch`.
 
 Remaining gaps: integrate this helper into full `CheckRespawn`/`ProcessRespawns`, linked respawn, PoolMgr, DoRespawn/LoadFromDB, DB save/delete, optimized map-local by-spawn indexes, real escort runtime feeding the closure, entity creation/ownership, grid/session fanout, and world-server scheduler wiring beyond the existing safe delete-only seam.
+
+
+### #NEXT.R8.ENTITIES.495 — represented typed DynamicObject create visibility
+
+Status: represented only. Typed canonical DynamicObject records are consumed by live `WorldSession::update_visibility()` for first-appearance create packets and client-visible GUID tracking; this is not full visibility/farsight runtime.
+
+C++ anchors: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp:25344-25364`; `/home/server/woltk-trinity-legacy/src/server/game/Spells/SpellEffects.cpp:2237-2261`; `/home/server/woltk-trinity-legacy/src/server/game/Entities/DynamicObject/DynamicObject.cpp:34-41`; `/home/server/woltk-trinity-legacy/src/server/game/Entities/DynamicObject/DynamicObject.cpp:254-263`; `/home/server/woltk-trinity-legacy/src/server/game/Grids/Notifiers/GridNotifiers.cpp:41-56`.
+
+Implemented Rust slice: `DynamicObjectCreateData` and `UpdateBlock::CreateDynamicObject` serialize C++-shaped DynamicObject create values; session visibility reads typed `MapObjectRecord::DynamicObject` records from canonical `wow_map::Map::map_objects`, filters by represented effective visibility source/map/distance, sends create or OOR packets, and updates `client_visible_guids_like_cpp`.
+
+Files touched: `crates/wow-packet/src/packets/update.rs`; `crates/wow-world/src/session.rs`; `crates/wow-world/src/handlers/character.rs`; `docs/migration/current-session-handoff.md`; `docs/migration/inventory/r8-entities-miniphase.md`; `docs/migration/inventory/r8-entities-miniphase.tsv`.
+
+Review/validation: reviewer `APROBADO`; CI `CI_OK`; `cargo fmt --check` OK; `cargo test -p wow-packet dynamic_object_create_block_serializes_stationary_create_values_like_cpp -- --nocapture` OK (1 passed, 273 filtered out); `cargo test -p wow-world dynamic_object_visibility -- --nocapture` OK as a command but 0 tests executed (not behavioral coverage); `PROTOC=/home/cdmonio/.local/protoc/bin/protoc cargo check -p world-server` OK with existing warnings; `git diff --check` OK.
+
+Remaining gaps: no full `UpdateVisibilityOf`, full `SetSeer`, ObjectAccessor/session fanout, dynamic tree/collision, scripts, aura runtime, exact grid traversal, or manual-test-ready farsight.
