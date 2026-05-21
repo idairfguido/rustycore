@@ -354,10 +354,8 @@ impl ManagedMap {
         self.last_personal_phase_tracker_update_summary
     }
 
-    pub const fn last_send_object_updates_summary_like_cpp(
-        &self,
-    ) -> SendObjectUpdatesSummaryLikeCpp {
-        self.last_send_object_updates_summary_like_cpp
+    pub fn last_send_object_updates_summary_like_cpp(&self) -> SendObjectUpdatesSummaryLikeCpp {
+        self.last_send_object_updates_summary_like_cpp.clone()
     }
 
     pub fn last_script_schedule_process_summary_like_cpp(
@@ -2303,6 +2301,7 @@ mod tests {
                 skipped_not_in_world: 0,
                 missing_or_stale: 0,
                 fanout_not_represented: 1,
+                dynamic_object_values_updates: Vec::new(),
             }
         );
         let object = managed_map

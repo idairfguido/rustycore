@@ -39,9 +39,9 @@ use wow_entities::{
     AccessorObjectKind, AreaTrigger, CombatBeginContextLikeCpp, CombatSubsystem, Conversation,
     Corpse, Creature, CreatureAimInitializeOutcomeLikeCpp, CreatureRuntimePlan,
     CreatureRuntimeUpdateContext, CreatureSearchFormationOutcomeLikeCpp, DynamicObject,
-    DynamicObjectType, GAMEOBJECT_TYPE_CHEST, GAMEOBJECT_TYPE_DOOR, GAMEOBJECT_TYPE_GOOBER,
-    GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT, GAMEOBJECT_TYPE_NEW_FLAG, GAMEOBJECT_TYPE_NEW_FLAG_DROP,
-    GAMEOBJECT_TYPE_TRANSPORT, GO_FLAG_NODESPAWN, GameObject,
+    DynamicObjectType, DynamicObjectValuesUpdate, GAMEOBJECT_TYPE_CHEST, GAMEOBJECT_TYPE_DOOR,
+    GAMEOBJECT_TYPE_GOOBER, GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT, GAMEOBJECT_TYPE_NEW_FLAG,
+    GAMEOBJECT_TYPE_NEW_FLAG_DROP, GAMEOBJECT_TYPE_TRANSPORT, GO_FLAG_NODESPAWN, GameObject,
     GameObjectUpdateOutcomeLikeCpp as EntityGameObjectUpdateOutcomeLikeCpp,
     GameObjectUpdateStatusLikeCpp as EntityGameObjectUpdateStatusLikeCpp, GoState, INVALID_HEIGHT,
     LineOfSightQuery, LootState, MAX_VISIBILITY_DISTANCE, MapBindingError, MapObjectRecord,
@@ -530,7 +530,13 @@ pub struct PersonalPhaseTrackerUpdateSummaryLikeCpp {
     pub duplicate_queued: usize,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepresentedDynamicObjectValuesUpdateLikeCpp {
+    pub guid: ObjectGuid,
+    pub values_update: DynamicObjectValuesUpdate,
+}
+
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct SendObjectUpdatesSummaryLikeCpp {
     /// Objects in canonical `Map::map_objects` with represented
     /// `Object::m_objectUpdated` set at snapshot time. Rust does not yet own the
@@ -549,6 +555,10 @@ pub struct SendObjectUpdatesSummaryLikeCpp {
     /// Evidence that C++ `UpdateDataMapType` player fanout/packet send is still
     /// intentionally not represented by this seam.
     pub fanout_not_represented: usize,
+    /// Stable represented DynamicObject VALUES snapshots captured from canonical
+    /// map-owned objects before the represented `BuildUpdate` clear. This is not
+    /// session fanout and must not be read from live masks after clear.
+    pub dynamic_object_values_updates: Vec<RepresentedDynamicObjectValuesUpdateLikeCpp>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3636,11 +3646,20 @@ where
             }
 
             // Represents `obj->BuildUpdate(update_players)` only up to its durable
-            // map-owned side effect: `WorldObject::BuildUpdate` eventually calls
-            // `ClearUpdateMask(false)`. Visible player iteration,
-            // `UpdateDataMapType`, packet construction, and direct sends remain
-            // open fanout gaps.
+            // map-owned side effect: `WorldObject::BuildUpdate` snapshots VALUES
+            // for visible players before it eventually calls `ClearUpdateMask(false)`.
+            // Visible player iteration, `UpdateDataMapType`, packet construction,
+            // and direct sends remain open fanout gaps.
             if let Some(dynamic_object) = record.dynamic_object_mut() {
+                let values_update = dynamic_object.values_update();
+                if values_update.has_data() {
+                    summary.dynamic_object_values_updates.push(
+                        RepresentedDynamicObjectValuesUpdateLikeCpp {
+                            guid,
+                            values_update,
+                        },
+                    );
+                }
                 dynamic_object.clear_dynamic_object_data_changes();
             }
             record.object_mut().object_mut().clear_update_mask(false);
@@ -20397,6 +20416,8 @@ mod tests {
 
     #[test]
     fn send_object_updates_processes_dynamic_object_data_update_like_cpp() {
+        use wow_entities::{DYNAMIC_OBJECT_DATA_PARENT_BIT, DYNAMIC_OBJECT_DATA_RADIUS_BIT};
+
         let mut map = test_map();
         let dynamic_object = test_dynamic_object_for_viewpoint(501001);
         let dynamic_object_guid = dynamic_object.world().guid();
@@ -20422,6 +20443,26 @@ mod tests {
         assert_eq!(summary.cleared_update_masks, 1);
         assert_eq!(summary.skipped_not_in_world, 0);
         assert_eq!(summary.missing_or_stale, 0);
+        assert_eq!(summary.fanout_not_represented, 1);
+        assert_eq!(summary.dynamic_object_values_updates.len(), 1);
+        let represented_values = &summary.dynamic_object_values_updates[0];
+        assert_eq!(represented_values.guid, dynamic_object_guid);
+        let dynamic_object_data = represented_values
+            .values_update
+            .dynamic_object_data
+            .as_ref()
+            .unwrap();
+        assert!(
+            dynamic_object_data
+                .mask
+                .is_set(DYNAMIC_OBJECT_DATA_PARENT_BIT)
+        );
+        assert!(
+            dynamic_object_data
+                .mask
+                .is_set(DYNAMIC_OBJECT_DATA_RADIUS_BIT)
+        );
+        assert_eq!(dynamic_object_data.values.radius, 12.5);
         assert!(
             !map.map_object_record(dynamic_object_guid)
                 .unwrap()
@@ -20436,6 +20477,14 @@ mod tests {
                 .unwrap()
                 .dynamic_object_data_changes_mask()
                 .is_any_set()
+        );
+        assert!(
+            !map.map_object_record(dynamic_object_guid)
+                .unwrap()
+                .dynamic_object()
+                .unwrap()
+                .values_update()
+                .has_data()
         );
     }
 
@@ -21846,6 +21895,7 @@ mod tests {
                 skipped_not_in_world: 0,
                 missing_or_stale: 0,
                 fanout_not_represented: 1,
+                dynamic_object_values_updates: Vec::new(),
             }
         );
         let after = map.map_object(game_object_guid).unwrap().object();
