@@ -4568,6 +4568,28 @@ impl WorldSession {
         Some(gameobjects)
     }
 
+    fn dynamic_object_create_data_from_canonical_like_cpp(
+        guid: ObjectGuid,
+        dynamic_object: &wow_entities::DynamicObject,
+    ) -> wow_packet::packets::update::DynamicObjectCreateData {
+        let object = dynamic_object.world();
+        let object_data = object.object().object_data_values();
+        let data = dynamic_object.data();
+        wow_packet::packets::update::DynamicObjectCreateData {
+            guid,
+            entry_id: u32::try_from(object_data.entry_id).unwrap_or(0),
+            dynamic_flags: object_data.dynamic_flags,
+            scale: object_data.scale,
+            position: object.position(),
+            caster: data.caster,
+            dynamic_object_type: data.dynamic_object_type,
+            spell_visual_id: data.spell_visual_id,
+            spell_id: data.spell_id,
+            radius: data.radius,
+            cast_time_ms: data.cast_time_ms,
+        }
+    }
+
     pub(crate) fn visible_dynamic_objects_from_canonical_map_like_cpp(
         &self,
         map_id: u16,
@@ -4609,21 +4631,10 @@ impl WorldSession {
             {
                 continue;
             }
-            let object_data = object.object().object_data_values();
-            let data = dynamic_object.data();
-            dynamic_objects.push(wow_packet::packets::update::DynamicObjectCreateData {
+            dynamic_objects.push(Self::dynamic_object_create_data_from_canonical_like_cpp(
                 guid,
-                entry_id: u32::try_from(object_data.entry_id).unwrap_or(0),
-                dynamic_flags: object_data.dynamic_flags,
-                scale: object_data.scale,
-                position: object.position(),
-                caster: data.caster,
-                dynamic_object_type: data.dynamic_object_type,
-                spell_visual_id: data.spell_visual_id,
-                spell_id: data.spell_id,
-                radius: data.radius,
-                cast_time_ms: data.cast_time_ms,
-            });
+                dynamic_object,
+            ));
         }
 
         Some(dynamic_objects)
@@ -15833,6 +15844,58 @@ impl WorldSession {
     /// `Player.cpp:25344-25387`, `Player.h:2432,2438`, and
     /// `Player.cpp:23343-23349`. Ownership remains canonical `Map::map_objects`;
     /// sync direction is map outcome -> session represented `m_seer` only.
+    fn send_set_viewpoint_target_visibility_like_cpp(
+        &mut self,
+        dynamic_object_guid: ObjectGuid,
+    ) -> bool {
+        if self
+            .client_visible_guids_like_cpp
+            .contains(&dynamic_object_guid)
+        {
+            return false;
+        }
+
+        let Some(player_map_key) = self.current_canonical_player_map_key_like_cpp() else {
+            return false;
+        };
+        let Ok(packet_map_id) = u16::try_from(player_map_key.map_id) else {
+            return false;
+        };
+        let Some(manager) = self.canonical_map_manager.as_ref() else {
+            return false;
+        };
+        let Ok(manager) = manager.lock() else {
+            return false;
+        };
+        let Some(map) = manager.find_map(player_map_key.map_id, player_map_key.instance_id) else {
+            return false;
+        };
+        let Some(dynamic_object) = map.map().get_typed_dynamic_object(dynamic_object_guid) else {
+            return false;
+        };
+        if dynamic_object.world().map_id() != player_map_key.map_id {
+            return false;
+        }
+
+        let create_data = Self::dynamic_object_create_data_from_canonical_like_cpp(
+            dynamic_object_guid,
+            dynamic_object,
+        );
+        drop(manager);
+
+        let block =
+            wow_packet::packets::update::UpdateObject::create_dynamic_object_block(create_data);
+        self.send_packet(
+            &wow_packet::packets::update::UpdateObject::create_world_objects(
+                vec![block],
+                packet_map_id,
+            ),
+        );
+        self.client_visible_guids_like_cpp
+            .insert(dynamic_object_guid);
+        true
+    }
+
     fn consume_add_farsight_set_seer_outcome_like_cpp(
         &mut self,
         outcome: &wow_map::map::FarsightDynamicObjectCreateOutcomeLikeCpp,
@@ -15866,6 +15929,11 @@ impl WorldSession {
             player_guid,
             dynamic_object_guid,
         );
+        // C++ `Player::SetViewpoint(target, true)` orders the direct
+        // `UpdateVisibilityOf(target)` after writing `FarsightObject` and before
+        // `SetSeer(target)`, so this represented target-only create is consumed
+        // before updating the session-local represented `m_seer`.
+        self.send_set_viewpoint_target_visibility_like_cpp(dynamic_object_guid);
         self.represented_seer_guid_like_cpp = Some(dynamic_object_guid);
         player_set_viewpoint.update_visibility_requested
     }
@@ -16280,6 +16348,19 @@ mod tests {
         set_active_player_update_bit_like_cpp(&mut data.active_player_data_mask, 26);
         data.farsight_object = farsight_guid;
         UpdateObject::full_active_player_values_update(player_guid, map_id, data).to_bytes()
+    }
+
+    fn expected_dynamic_object_create_packet_like_cpp(
+        map_id: u16,
+        create_data: wow_packet::packets::update::DynamicObjectCreateData,
+    ) -> Vec<u8> {
+        use wow_packet::packets::update::UpdateObject;
+
+        UpdateObject::create_world_objects(
+            vec![UpdateObject::create_dynamic_object_block(create_data)],
+            map_id,
+        )
+        .to_bytes()
     }
 
     fn update_object_packet_count_like_cpp(packets: &[Vec<u8>]) -> usize {
@@ -17915,6 +17996,185 @@ mod tests {
                 .iter()
                 .any(|bytes| bytes == &expected_farsight_update),
             "live AddFarsight SetViewpoint success should send the C++ ActivePlayerData::FarsightObject VALUES update with mask bits 0+26"
+        );
+    }
+
+    #[test]
+    fn add_farsight_set_viewpoint_target_visibility_sends_far_dynamic_object_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 50_000);
+        let dynamic_object_guid = test_dynamic_object_guid(50_000, 50_000);
+        let player_position = Position::new(10.0, 20.0, 30.0, 0.0);
+        let destination = Position::new(10_000.0, 20_000.0, 30.0, 1.5);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Farseer".to_string(),
+            player_position,
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        add_canonical_test_player_on_map(&canonical, player_guid, player_position, 571, 0);
+        add_canonical_test_dynamic_object_on_map(
+            &canonical,
+            dynamic_object_guid,
+            player_guid,
+            50_000,
+            destination,
+            571,
+            0,
+        );
+        assert!(
+            !destination.is_within_dist(&player_position, 200.0),
+            "test target must be outside the normal represented visibility radius"
+        );
+
+        let create_data = {
+            let guard = canonical.lock().unwrap();
+            let dynamic_object = guard
+                .find_map(571, 0)
+                .unwrap()
+                .map()
+                .get_typed_dynamic_object(dynamic_object_guid)
+                .expect("canonical typed DynamicObject should exist");
+            WorldSession::dynamic_object_create_data_from_canonical_like_cpp(
+                dynamic_object_guid,
+                dynamic_object,
+            )
+        };
+        let outcome = wow_map::map::FarsightDynamicObjectCreateOutcomeLikeCpp {
+            status: wow_map::map::FarsightDynamicObjectCreateStatusLikeCpp::Created,
+            caster_player_guid: player_guid,
+            dynamic_object_guid: Some(dynamic_object_guid),
+            low_guid: Some(50_000),
+            add_to_map: None,
+            caster_viewpoint: Some(wow_map::map::DynamicObjectCasterViewpointOutcomeLikeCpp {
+                player_guid,
+                dynamic_object_guid,
+                apply: true,
+                status:
+                    wow_map::map::DynamicObjectCasterViewpointStatusLikeCpp::CasterPlayerResolved,
+                dynamic_object_viewpoint_toggled: true,
+                player_set_viewpoint: wow_map::map::PlayerSetViewpointOutcomeLikeCpp {
+                    player_guid,
+                    target_guid: dynamic_object_guid,
+                    apply: true,
+                    status: wow_map::map::PlayerSetViewpointStatusLikeCpp::Applied,
+                    set_world_object: None,
+                    update_visibility_requested: true,
+                    set_seer_requested: true,
+                },
+            }),
+        };
+
+        assert!(session.consume_add_farsight_set_seer_outcome_like_cpp(&outcome));
+        assert_eq!(
+            session.represented_seer_guid_like_cpp(),
+            Some(dynamic_object_guid)
+        );
+        assert!(
+            session
+                .client_visible_guids_like_cpp
+                .contains(&dynamic_object_guid),
+            "direct C++ UpdateVisibilityOf(target) consumption should mark far DynamicObject visible"
+        );
+        let expected_create = expected_dynamic_object_create_packet_like_cpp(
+            session.player_map_id_like_cpp(),
+            create_data,
+        );
+        let packets = drain_server_packet_bytes(&send_rx);
+        assert!(
+            packets.iter().any(|bytes| bytes == &expected_create),
+            "SetViewpoint(apply=true) should send a target-only DynamicObject create packet"
+        );
+    }
+
+    #[test]
+    fn set_viewpoint_target_visibility_already_visible_sends_no_duplicate_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 50_010);
+        let dynamic_object_guid = test_dynamic_object_guid(50_010, 50_010);
+        let player_position = Position::new(10.0, 20.0, 30.0, 0.0);
+        let dynamic_object_position = Position::new(10_000.0, 20_000.0, 30.0, 1.5);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Farseer".to_string(),
+            player_position,
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        add_canonical_test_player_on_map(&canonical, player_guid, player_position, 571, 0);
+        add_canonical_test_dynamic_object_on_map(
+            &canonical,
+            dynamic_object_guid,
+            player_guid,
+            50_010,
+            dynamic_object_position,
+            571,
+            0,
+        );
+        session
+            .client_visible_guids_like_cpp
+            .insert(dynamic_object_guid);
+
+        assert!(!session.send_set_viewpoint_target_visibility_like_cpp(dynamic_object_guid));
+        assert!(drain_server_packet_bytes(&send_rx).is_empty());
+        assert!(
+            session
+                .client_visible_guids_like_cpp
+                .contains(&dynamic_object_guid)
+        );
+    }
+
+    #[test]
+    fn set_viewpoint_target_visibility_wrong_instance_does_not_fabricate_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 50_020);
+        let dynamic_object_guid = test_dynamic_object_guid(50_020, 50_020);
+        let player_position = Position::new(10.0, 20.0, 30.0, 0.0);
+        let dynamic_object_position = Position::new(10_000.0, 20_000.0, 30.0, 1.5);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "Farseer".to_string(),
+            player_position,
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        add_canonical_test_player_on_map(&canonical, player_guid, player_position, 571, 7);
+        add_canonical_test_dynamic_object_on_map(
+            &canonical,
+            dynamic_object_guid,
+            player_guid,
+            50_020,
+            dynamic_object_position,
+            571,
+            0,
+        );
+
+        assert!(!session.send_set_viewpoint_target_visibility_like_cpp(dynamic_object_guid));
+        assert!(drain_server_packet_bytes(&send_rx).is_empty());
+        assert!(
+            !session
+                .client_visible_guids_like_cpp
+                .contains(&dynamic_object_guid),
+            "wrong-instance/missing canonical target must not insert client visibility"
         );
     }
 
