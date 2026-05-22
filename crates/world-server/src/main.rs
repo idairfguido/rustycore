@@ -1559,7 +1559,15 @@ async fn main() -> Result<()> {
                 side_effect_summary.update_npc_flags_live_creatures_mutated,
             update_npc_flags2_unrepresented_nonzero =
                 side_effect_summary.update_npc_flags2_unrepresented_nonzero,
-            "Represented C++ GameEventMgr::StartSystem: cleared active events, ran first Update with isSystemInit=false, installed WUPDATE_EVENTS delay, and consumed safe represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel and UpdateEventNPCFlags side effects; full ConditionMgr world-event runtime and unsupported ApplyNewEvent/UnApplyEvent side effects remain pending"
+            update_npc_vendor_actions = side_effect_summary.update_npc_vendor_actions,
+            update_npc_vendor_records_seen = side_effect_summary.update_npc_vendor_records_seen,
+            update_npc_vendor_items_added = side_effect_summary.update_npc_vendor_items_added,
+            update_npc_vendor_items_removed = side_effect_summary.update_npc_vendor_items_removed,
+            update_npc_vendor_missing_event_buckets =
+                side_effect_summary.update_npc_vendor_missing_event_buckets,
+            update_npc_vendor_remove_misses = side_effect_summary.update_npc_vendor_remove_misses,
+            update_npc_vendor_no_match = side_effect_summary.update_npc_vendor_no_match,
+            "Represented C++ GameEventMgr::StartSystem: cleared active events, ran first Update with isSystemInit=false, installed WUPDATE_EVENTS delay, and consumed safe represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel, UpdateEventNPCFlags, and UpdateEventNPCVendor cache side effects; full ConditionMgr world-event runtime and unsupported ApplyNewEvent/UnApplyEvent side effects remain pending"
         );
         CanonicalGameEventSchedulerLikeCpp::start_system(
             game_event_outcome.next_update_delay_millis,
@@ -3465,6 +3473,7 @@ enum GameEventLiveUpdateActionLikeCpp {
     Unspawn(i16),
     ChangeEquipOrModel { event_id: u16, activate: bool },
     UpdateNpcFlags { event_id: u16 },
+    UpdateNpcVendor { event_id: u16, activate: bool },
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -3493,6 +3502,13 @@ struct GameEventLiveUpdateSideEffectSummaryLikeCpp {
     update_npc_flags_stale_index_or_wrong_kind: usize,
     update_npc_flags_low_applied: usize,
     update_npc_flags2_unrepresented_nonzero: usize,
+    update_npc_vendor_actions: usize,
+    update_npc_vendor_records_seen: usize,
+    update_npc_vendor_items_added: usize,
+    update_npc_vendor_items_removed: usize,
+    update_npc_vendor_missing_event_buckets: usize,
+    update_npc_vendor_remove_misses: usize,
+    update_npc_vendor_no_match: usize,
 }
 
 fn game_event_signed_id_like_cpp(event_id: u16) -> i16 {
@@ -3519,6 +3535,10 @@ fn game_event_live_update_actions_like_cpp(
                 actions.push(GameEventLiveUpdateActionLikeCpp::UpdateNpcFlags {
                     event_id: summary.event_id,
                 });
+                actions.push(GameEventLiveUpdateActionLikeCpp::UpdateNpcVendor {
+                    event_id: summary.event_id,
+                    activate: true,
+                });
             }
         }
     }
@@ -3534,6 +3554,10 @@ fn game_event_live_update_actions_like_cpp(
                 });
                 actions.push(GameEventLiveUpdateActionLikeCpp::UpdateNpcFlags {
                     event_id: summary.event_id,
+                });
+                actions.push(GameEventLiveUpdateActionLikeCpp::UpdateNpcVendor {
+                    event_id: summary.event_id,
+                    activate: false,
                 });
             }
         }
@@ -3653,6 +3677,25 @@ fn game_event_update_npc_flags_like_cpp(
     summary
 }
 
+fn game_event_update_npc_vendor_like_cpp(
+    canonical_spawn_metadata: &mut spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
+    event_id: u16,
+    activate: bool,
+) -> GameEventLiveUpdateSideEffectSummaryLikeCpp {
+    let vendor_summary =
+        canonical_spawn_metadata.update_game_event_npc_vendor_cache_like_cpp(event_id, activate);
+    let mut summary = GameEventLiveUpdateSideEffectSummaryLikeCpp::default();
+    summary.update_npc_vendor_records_seen = vendor_summary.records_seen;
+    summary.update_npc_vendor_items_added = vendor_summary.items_added;
+    summary.update_npc_vendor_items_removed = vendor_summary.items_removed;
+    summary.update_npc_vendor_remove_misses = vendor_summary.remove_misses;
+    summary.update_npc_vendor_no_match = vendor_summary.no_match;
+    if vendor_summary.missing_event_bucket {
+        summary.update_npc_vendor_missing_event_buckets = 1;
+    }
+    summary
+}
+
 fn consume_game_event_live_update_side_effects_like_cpp(
     manager: &mut wow_map::MapManager,
     canonical_spawn_metadata: &mut spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
@@ -3740,6 +3783,25 @@ fn consume_game_event_live_update_side_effects_like_cpp(
                     npc_flag_summary.update_npc_flags_low_applied;
                 summary.update_npc_flags2_unrepresented_nonzero +=
                     npc_flag_summary.update_npc_flags2_unrepresented_nonzero;
+            }
+            GameEventLiveUpdateActionLikeCpp::UpdateNpcVendor { event_id, activate } => {
+                let npc_vendor_summary = game_event_update_npc_vendor_like_cpp(
+                    canonical_spawn_metadata,
+                    event_id,
+                    activate,
+                );
+                summary.update_npc_vendor_actions += 1;
+                summary.update_npc_vendor_records_seen +=
+                    npc_vendor_summary.update_npc_vendor_records_seen;
+                summary.update_npc_vendor_items_added +=
+                    npc_vendor_summary.update_npc_vendor_items_added;
+                summary.update_npc_vendor_items_removed +=
+                    npc_vendor_summary.update_npc_vendor_items_removed;
+                summary.update_npc_vendor_missing_event_buckets +=
+                    npc_vendor_summary.update_npc_vendor_missing_event_buckets;
+                summary.update_npc_vendor_remove_misses +=
+                    npc_vendor_summary.update_npc_vendor_remove_misses;
+                summary.update_npc_vendor_no_match += npc_vendor_summary.update_npc_vendor_no_match;
             }
         }
     }
@@ -4714,7 +4776,19 @@ fn spawn_canonical_map_update_loop(
                         side_effect_summary.update_npc_flags_live_creatures_mutated,
                     update_npc_flags2_unrepresented_nonzero =
                         side_effect_summary.update_npc_flags2_unrepresented_nonzero,
-                    "C++ WUPDATE_EVENTS represented timer fired; updated canonical GameEvent metadata and consumed represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel and UpdateEventNPCFlags side effects; ConditionMgr world-event rows, DB state writes, announcements, quests/vendors/worldstates/SAI/seasonal reset and ForceGameEventUpdate command caller remain pending"
+                    update_npc_vendor_actions = side_effect_summary.update_npc_vendor_actions,
+                    update_npc_vendor_records_seen =
+                        side_effect_summary.update_npc_vendor_records_seen,
+                    update_npc_vendor_items_added =
+                        side_effect_summary.update_npc_vendor_items_added,
+                    update_npc_vendor_items_removed =
+                        side_effect_summary.update_npc_vendor_items_removed,
+                    update_npc_vendor_missing_event_buckets =
+                        side_effect_summary.update_npc_vendor_missing_event_buckets,
+                    update_npc_vendor_remove_misses =
+                        side_effect_summary.update_npc_vendor_remove_misses,
+                    update_npc_vendor_no_match = side_effect_summary.update_npc_vendor_no_match,
+                    "C++ WUPDATE_EVENTS represented timer fired; updated canonical GameEvent metadata and consumed represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel, UpdateEventNPCFlags, and UpdateEventNPCVendor cache side effects; ConditionMgr world-event rows, DB state writes, announcements, quests/worldstates/SAI/seasonal reset and ForceGameEventUpdate command caller remain pending"
                 );
             }
 
@@ -5312,8 +5386,8 @@ mod tests {
         game_event_unspawn_creatures_and_gameobjects_for_event_like_cpp,
         game_event_unspawn_for_event_like_cpp, game_event_unspawn_pools_for_event_like_cpp,
         game_event_unspawn_pools_like_cpp, game_event_update_npc_flags_like_cpp,
-        install_canonical_spawn_group_initializer_like_cpp, load_world_config_from,
-        loot_drop_rates_like_cpp, mmap_runtime_config_like_cpp,
+        game_event_update_npc_vendor_like_cpp, install_canonical_spawn_group_initializer_like_cpp,
+        load_world_config_from, loot_drop_rates_like_cpp, mmap_runtime_config_like_cpp,
         persisted_respawn_info_from_row_like_cpp, queue_respawn_db_delete_like_cpp,
         queue_respawn_db_save_like_cpp, spawn_store_loader, world_config_bool, world_config_u8,
         world_config_u16,
@@ -7942,6 +8016,10 @@ mmap.enablePathFinding = 0
                     activate: true,
                 },
                 GameEventLiveUpdateActionLikeCpp::UpdateNpcFlags { event_id: 2 },
+                GameEventLiveUpdateActionLikeCpp::UpdateNpcVendor {
+                    event_id: 2,
+                    activate: true,
+                },
                 GameEventLiveUpdateActionLikeCpp::Unspawn(3),
                 GameEventLiveUpdateActionLikeCpp::Spawn(-3),
                 GameEventLiveUpdateActionLikeCpp::ChangeEquipOrModel {
@@ -7949,8 +8027,112 @@ mmap.enablePathFinding = 0
                     activate: false,
                 },
                 GameEventLiveUpdateActionLikeCpp::UpdateNpcFlags { event_id: 3 },
+                GameEventLiveUpdateActionLikeCpp::UpdateNpcVendor {
+                    event_id: 3,
+                    activate: false,
+                },
             ]
         );
+    }
+
+    fn game_event_live_update_npc_vendor_record_like_cpp(
+        spawn_id: wow_map::SpawnId,
+        entry: u32,
+        item: u32,
+        vendor_type: u8,
+    ) -> spawn_store_loader::GameEventNpcVendorRecordLikeCpp {
+        spawn_store_loader::GameEventNpcVendorRecordLikeCpp {
+            spawn_id,
+            guid: spawn_id,
+            entry,
+            item,
+            maxcount: 0,
+            incrtime: 0,
+            extended_cost: 0,
+            vendor_type,
+            item_type: vendor_type,
+            bonus_list_ids: Vec::new(),
+            player_condition_id: 0,
+            ignore_filtering: false,
+            event_npc_flag_low32: 0,
+        }
+    }
+
+    fn game_event_live_update_npc_vendor_metadata_like_cpp(
+        max_event_entry: u32,
+        records: &[(u16, wow_map::SpawnId, u32, u32, u8)],
+    ) -> spawn_store_loader::CanonicalSpawnMetadataLikeCpp {
+        let mut vendors =
+            spawn_store_loader::GameEventNpcVendorsLikeCpp::from_game_event_max_entry_like_cpp(
+                Some(max_event_entry),
+            );
+        for (event_id, spawn_id, entry, item, vendor_type) in records {
+            assert!(vendors.push_record_like_cpp(
+                *event_id,
+                game_event_live_update_npc_vendor_record_like_cpp(
+                    *spawn_id,
+                    *entry,
+                    *item,
+                    *vendor_type,
+                ),
+            ));
+        }
+        spawn_store_loader::CanonicalSpawnMetadataLikeCpp::new(SpawnStore::new(), BTreeMap::new())
+            .with_game_event_npc_vendors_like_cpp(vendors)
+    }
+
+    #[test]
+    fn game_event_live_update_npc_vendor_activation_adds_represented_cache_like_cpp() {
+        let mut metadata = game_event_live_update_npc_vendor_metadata_like_cpp(
+            1,
+            &[(1, 100, 9001, 6000, 2), (1, 101, 9001, 6001, 2)],
+        );
+
+        let summary = game_event_update_npc_vendor_like_cpp(&mut metadata, 1, true);
+
+        assert_eq!(summary.update_npc_vendor_records_seen, 2);
+        assert_eq!(summary.update_npc_vendor_items_added, 2);
+        assert_eq!(summary.update_npc_vendor_items_removed, 0);
+        assert_eq!(
+            metadata
+                .game_event_active_npc_vendor_items_like_cpp(9001)
+                .iter()
+                .map(|record| record.item)
+                .collect::<Vec<_>>(),
+            vec![6000, 6001]
+        );
+    }
+
+    #[test]
+    fn game_event_live_update_npc_vendor_deactivation_removes_represented_cache_like_cpp() {
+        let mut metadata = game_event_live_update_npc_vendor_metadata_like_cpp(
+            2,
+            &[(1, 100, 9001, 6000, 2), (2, 200, 9001, 6000, 2)],
+        );
+        game_event_update_npc_vendor_like_cpp(&mut metadata, 1, true);
+        game_event_update_npc_vendor_like_cpp(&mut metadata, 2, true);
+
+        let summary = game_event_update_npc_vendor_like_cpp(&mut metadata, 2, false);
+
+        assert_eq!(summary.update_npc_vendor_records_seen, 1);
+        assert_eq!(summary.update_npc_vendor_items_removed, 2);
+        assert!(
+            metadata
+                .game_event_active_npc_vendor_items_like_cpp(9001)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn game_event_live_update_npc_vendor_missing_bucket_counted_like_cpp() {
+        let mut metadata =
+            game_event_live_update_npc_vendor_metadata_like_cpp(1, &[(1, 100, 9001, 6000, 2)]);
+
+        let summary = game_event_update_npc_vendor_like_cpp(&mut metadata, 2, true);
+
+        assert_eq!(summary.update_npc_vendor_missing_event_buckets, 1);
+        assert_eq!(summary.update_npc_vendor_records_seen, 0);
+        assert_eq!(summary.update_npc_vendor_actions, 0);
     }
 
     fn live_npc_flags_like_cpp(
