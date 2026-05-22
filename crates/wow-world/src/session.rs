@@ -14677,12 +14677,15 @@ impl WorldSession {
     /// Player/GameObject, GameObject in-world state, same-phase visibility, 2D
     /// visibility range, session-local `HaveAtClient`, and either the C++ direct-
     /// target `target->m_seer == target || target->GetVehicle()` branch for this
-    /// session Player or the bounded represented `PlayerMapType`/`CreatureMapType`
+    /// session Player, the bounded represented `PlayerMapType`/`CreatureMapType`
     /// shared-vision fanout branch (`viewer->m_seer == target`) over canonical
-    /// typed Player/Creature records in the same map. Shared-vision scanning here
-    /// is deterministic and represented; it is not exact C++ cell traversal and
-    /// does not claim the `DynamicObjectMapType` branch, skipped/team receivers,
-    /// ObjectAccessor/global fanout, or full `SendMessageToSet` parity.
+    /// typed Player/Creature records in the same map, or the bounded represented
+    /// `DynamicObjectMapType` branch for this session's caster/viewer when its
+    /// represented `m_seer` is the canonical DynamicObject. Shared-vision and
+    /// DynamicObject scanning here are deterministic and represented; this is not
+    /// exact C++ cell traversal and does not claim skipped/team receivers,
+    /// `GameObjectMapType`, ObjectAccessor/global fanout, or full
+    /// `SendMessageToSet` parity.
     pub(crate) fn send_represented_gameobject_visual_despawn_from_last_update_like_cpp(
         &mut self,
     ) -> usize {
@@ -14743,6 +14746,21 @@ impl WorldSession {
                 })
                 .collect::<Vec<_>>();
             shared_vision_target_guids.sort_by_key(|guid| (guid.high_value(), guid.low_value()));
+            let dynamic_object_target_guid = represented_seer_guid.filter(|seer_guid| {
+                if !seer_guid.is_dynamic_object() {
+                    return false;
+                }
+                let Some(dynamic_object) = map.get_typed_dynamic_object(*seer_guid) else {
+                    return false;
+                };
+                if !dynamic_object.world().object().is_in_world() {
+                    return false;
+                }
+                let caster_guid = dynamic_object
+                    .bound_caster()
+                    .unwrap_or_else(|| dynamic_object.caster_guid());
+                caster_guid == player_guid && caster_guid.is_player()
+            });
             let guids = managed_map
                 .last_game_objects_update_summary()
                 .generic_visual_despawn_guids
@@ -14769,7 +14787,7 @@ impl WorldSession {
                     if direct_target_allows {
                         return true;
                     }
-                    shared_vision_target_guids.iter().any(|target_guid| {
+                    if shared_vision_target_guids.iter().any(|target_guid| {
                         if let Some(target) = map.get_typed_player(*target_guid) {
                             let target_world = target.unit().world();
                             target_world.phase_shift().can_see(gameobject_phase_shift)
@@ -14783,6 +14801,21 @@ impl WorldSession {
                         } else {
                             false
                         }
+                    }) {
+                        return true;
+                    }
+                    dynamic_object_target_guid.is_some_and(|dynamic_object_guid| {
+                        map.get_typed_dynamic_object(dynamic_object_guid)
+                            .is_some_and(|dynamic_object| {
+                                let dynamic_object_world = dynamic_object.world();
+                                dynamic_object_world
+                                    .phase_shift()
+                                    .can_see(gameobject_phase_shift)
+                                    && gameobject_position.is_within_dist_2d(
+                                        &dynamic_object_world.position(),
+                                        visibility_range,
+                                    )
+                            })
                     })
                 })
                 .collect::<Vec<_>>();
@@ -18053,6 +18086,31 @@ mod tests {
             .unwrap();
     }
 
+    fn configure_test_dynamic_object_for_visual_despawn_like_cpp(
+        canonical: &SharedCanonicalMapManager,
+        map_id: u32,
+        instance_id: u32,
+        guid: ObjectGuid,
+        duration_ms: i32,
+        bound_caster: Option<ObjectGuid>,
+        phase_shift: Option<PhaseShift>,
+    ) {
+        let mut guard = canonical.lock().unwrap();
+        let dynamic_object = guard
+            .find_map_mut(map_id, instance_id)
+            .unwrap()
+            .map_mut()
+            .get_typed_dynamic_object_mut(guid)
+            .unwrap();
+        dynamic_object.set_duration(duration_ms);
+        if let Some(bound_caster) = bound_caster {
+            dynamic_object.bind_to_caster(bound_caster);
+        }
+        if let Some(phase_shift) = phase_shift {
+            *dynamic_object.world_mut().phase_shift_mut() = phase_shift;
+        }
+    }
+
     fn configure_add_farsight_live_session_like_cpp(
         session: &mut WorldSession,
         canonical: &Arc<std::sync::Mutex<wow_map::MapManager>>,
@@ -19159,6 +19217,355 @@ mod tests {
             .insert(out_of_range_guid);
         session.client_visible_guids_like_cpp.insert(sendable_guid);
         session.represented_seer_guid_like_cpp = Some(target_guid);
+
+        assert_eq!(
+            session.send_represented_gameobject_visual_despawn_from_last_update_like_cpp(),
+            1
+        );
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![ServerOpcodes::GameObjectDespawn]
+        );
+        assert_eq!(
+            session
+                .represented_gameobject_visual_despawns_delivered_like_cpp
+                .len(),
+            1
+        );
+        assert!(
+            session
+                .client_visible_guids_like_cpp
+                .contains(&incompatible_phase_guid)
+        );
+        assert!(
+            session
+                .client_visible_guids_like_cpp
+                .contains(&out_of_range_guid)
+        );
+        assert!(
+            !session
+                .client_visible_guids_like_cpp
+                .contains(&not_visible_guid)
+        );
+        assert!(
+            session
+                .client_visible_guids_like_cpp
+                .contains(&sendable_guid)
+        );
+    }
+
+    #[tokio::test]
+    async fn gameobject_visual_despawn_dynamic_object_caster_viewer_receives_once_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = Arc::new(std::sync::Mutex::new(wow_map::MapManager::new(60_000, 1)));
+        let viewer_guid = ObjectGuid::create_player(1, 50_610);
+        let dynamic_object_guid = test_dynamic_object_guid(605_110, 50_611);
+        let gameobject_guid = test_gameobject_guid(605_111, 50_612);
+
+        configure_dynamic_object_values_snapshot_session_like_cpp(
+            &mut session,
+            &canonical,
+            viewer_guid,
+            571,
+            7,
+        );
+        add_canonical_test_dynamic_object_on_map(
+            &canonical,
+            dynamic_object_guid,
+            viewer_guid,
+            605_110,
+            Position::new(12.0, 22.0, 32.0, 0.0),
+            571,
+            7,
+        );
+        configure_test_dynamic_object_for_visual_despawn_like_cpp(
+            &canonical,
+            571,
+            7,
+            dynamic_object_guid,
+            120_000,
+            Some(viewer_guid),
+            None,
+        );
+        add_canonical_visual_despawn_gameobject_like_cpp(
+            &canonical,
+            gameobject_guid,
+            605_111,
+            5_050_612,
+            Position::new(11.0, 21.0, 31.0, 0.0),
+            571,
+            7,
+        );
+        assert_eq!(canonical.lock().unwrap().update(60_000), Some(60_000));
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+        session.represented_seer_guid_like_cpp = Some(dynamic_object_guid);
+
+        assert_eq!(
+            session.send_represented_gameobject_visual_despawn_from_last_update_like_cpp(),
+            1
+        );
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![ServerOpcodes::GameObjectDespawn]
+        );
+        assert!(
+            session
+                .client_visible_guids_like_cpp
+                .contains(&gameobject_guid)
+        );
+
+        assert_eq!(
+            session.send_represented_gameobject_visual_despawn_from_last_update_like_cpp(),
+            0
+        );
+        assert_eq!(drain_server_opcodes(&send_rx), Vec::<ServerOpcodes>::new());
+        assert_eq!(
+            session
+                .represented_gameobject_visual_despawns_delivered_like_cpp
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn gameobject_visual_despawn_dynamic_object_requires_session_seer_target_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = Arc::new(std::sync::Mutex::new(wow_map::MapManager::new(60_000, 1)));
+        let viewer_guid = ObjectGuid::create_player(1, 50_613);
+        let dynamic_object_guid = test_dynamic_object_guid(605_112, 50_614);
+        let other_seer_guid = test_dynamic_object_guid(605_113, 50_615);
+        let gameobject_guid = test_gameobject_guid(605_114, 50_616);
+
+        configure_dynamic_object_values_snapshot_session_like_cpp(
+            &mut session,
+            &canonical,
+            viewer_guid,
+            571,
+            7,
+        );
+        add_canonical_test_dynamic_object_on_map(
+            &canonical,
+            dynamic_object_guid,
+            viewer_guid,
+            605_112,
+            Position::new(12.0, 22.0, 32.0, 0.0),
+            571,
+            7,
+        );
+        configure_test_dynamic_object_for_visual_despawn_like_cpp(
+            &canonical,
+            571,
+            7,
+            dynamic_object_guid,
+            120_000,
+            None,
+            None,
+        );
+        add_canonical_visual_despawn_gameobject_like_cpp(
+            &canonical,
+            gameobject_guid,
+            605_114,
+            5_050_616,
+            Position::new(11.0, 21.0, 31.0, 0.0),
+            571,
+            7,
+        );
+        assert_eq!(canonical.lock().unwrap().update(60_000), Some(60_000));
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+        session.represented_seer_guid_like_cpp = Some(other_seer_guid);
+
+        assert_eq!(
+            session.send_represented_gameobject_visual_despawn_from_last_update_like_cpp(),
+            0
+        );
+        assert_eq!(drain_server_opcodes(&send_rx), Vec::<ServerOpcodes>::new());
+        assert!(
+            session
+                .represented_gameobject_visual_despawns_delivered_like_cpp
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn gameobject_visual_despawn_dynamic_object_requires_player_caster_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = Arc::new(std::sync::Mutex::new(wow_map::MapManager::new(60_000, 1)));
+        let viewer_guid = ObjectGuid::create_player(1, 50_617);
+        let dynamic_object_guid = test_dynamic_object_guid(605_115, 50_618);
+        let gameobject_guid = test_gameobject_guid(605_116, 50_619);
+        let creature_caster_guid = test_creature_guid(50_620);
+
+        configure_dynamic_object_values_snapshot_session_like_cpp(
+            &mut session,
+            &canonical,
+            viewer_guid,
+            571,
+            7,
+        );
+        add_canonical_test_dynamic_object_on_map(
+            &canonical,
+            dynamic_object_guid,
+            ObjectGuid::EMPTY,
+            605_115,
+            Position::new(12.0, 22.0, 32.0, 0.0),
+            571,
+            7,
+        );
+        configure_test_dynamic_object_for_visual_despawn_like_cpp(
+            &canonical,
+            571,
+            7,
+            dynamic_object_guid,
+            120_000,
+            None,
+            None,
+        );
+        add_canonical_visual_despawn_gameobject_like_cpp(
+            &canonical,
+            gameobject_guid,
+            605_116,
+            5_050_619,
+            Position::new(11.0, 21.0, 31.0, 0.0),
+            571,
+            7,
+        );
+        assert_eq!(canonical.lock().unwrap().update(60_000), Some(60_000));
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+        session.represented_seer_guid_like_cpp = Some(dynamic_object_guid);
+
+        assert_eq!(
+            session.send_represented_gameobject_visual_despawn_from_last_update_like_cpp(),
+            0
+        );
+        assert_eq!(drain_server_opcodes(&send_rx), Vec::<ServerOpcodes>::new());
+        assert!(
+            session
+                .represented_gameobject_visual_despawns_delivered_like_cpp
+                .is_empty()
+        );
+
+        {
+            let mut guard = canonical.lock().unwrap();
+            guard
+                .find_map_mut(571, 7)
+                .unwrap()
+                .map_mut()
+                .get_typed_dynamic_object_mut(dynamic_object_guid)
+                .unwrap()
+                .set_caster_guid(creature_caster_guid);
+        }
+        assert_eq!(
+            session.send_represented_gameobject_visual_despawn_from_last_update_like_cpp(),
+            0
+        );
+        assert_eq!(drain_server_opcodes(&send_rx), Vec::<ServerOpcodes>::new());
+        assert!(
+            session
+                .represented_gameobject_visual_despawns_delivered_like_cpp
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn gameobject_visual_despawn_dynamic_object_phase_range_and_have_at_client_gates_like_cpp()
+     {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = Arc::new(std::sync::Mutex::new(wow_map::MapManager::new(60_000, 1)));
+        let viewer_guid = ObjectGuid::create_player(1, 50_621);
+        let dynamic_object_guid = test_dynamic_object_guid(605_117, 50_622);
+        let incompatible_phase_guid = test_gameobject_guid(605_118, 50_623);
+        let out_of_range_guid = test_gameobject_guid(605_119, 50_624);
+        let not_visible_guid = test_gameobject_guid(605_120, 50_625);
+        let sendable_guid = test_gameobject_guid(605_121, 50_626);
+
+        configure_dynamic_object_values_snapshot_session_like_cpp(
+            &mut session,
+            &canonical,
+            viewer_guid,
+            571,
+            7,
+        );
+        add_canonical_test_dynamic_object_on_map(
+            &canonical,
+            dynamic_object_guid,
+            viewer_guid,
+            605_117,
+            Position::new(12.0, 22.0, 32.0, 0.0),
+            571,
+            7,
+        );
+        configure_test_dynamic_object_for_visual_despawn_like_cpp(
+            &canonical,
+            571,
+            7,
+            dynamic_object_guid,
+            120_000,
+            Some(viewer_guid),
+            Some(PhaseShift::from_phases([10])),
+        );
+        add_canonical_visual_despawn_gameobject_like_cpp(
+            &canonical,
+            incompatible_phase_guid,
+            605_118,
+            5_050_623,
+            Position::new(11.0, 21.0, 31.0, 0.0),
+            571,
+            7,
+        );
+        add_canonical_visual_despawn_gameobject_like_cpp(
+            &canonical,
+            out_of_range_guid,
+            605_119,
+            5_050_624,
+            Position::new(1_000.0, 1_000.0, 31.0, 0.0),
+            571,
+            7,
+        );
+        add_canonical_visual_despawn_gameobject_like_cpp(
+            &canonical,
+            not_visible_guid,
+            605_120,
+            5_050_625,
+            Position::new(11.0, 21.0, 31.0, 0.0),
+            571,
+            7,
+        );
+        add_canonical_visual_despawn_gameobject_like_cpp(
+            &canonical,
+            sendable_guid,
+            605_121,
+            5_050_626,
+            Position::new(11.0, 21.0, 31.0, 0.0),
+            571,
+            7,
+        );
+        assert_eq!(canonical.lock().unwrap().update(60_000), Some(60_000));
+        session
+            .represented_gameobject_phase_shifts
+            .insert(incompatible_phase_guid, PhaseShift::from_phases([20]));
+        session
+            .represented_gameobject_phase_shifts
+            .insert(out_of_range_guid, PhaseShift::from_phases([10]));
+        session
+            .represented_gameobject_phase_shifts
+            .insert(not_visible_guid, PhaseShift::from_phases([10]));
+        session
+            .represented_gameobject_phase_shifts
+            .insert(sendable_guid, PhaseShift::from_phases([10]));
+        session
+            .client_visible_guids_like_cpp
+            .insert(incompatible_phase_guid);
+        session
+            .client_visible_guids_like_cpp
+            .insert(out_of_range_guid);
+        session.client_visible_guids_like_cpp.insert(sendable_guid);
+        session.represented_seer_guid_like_cpp = Some(dynamic_object_guid);
 
         assert_eq!(
             session.send_represented_gameobject_visual_despawn_from_last_update_like_cpp(),
