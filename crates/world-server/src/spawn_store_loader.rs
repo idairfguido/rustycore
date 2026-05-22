@@ -116,6 +116,7 @@ pub struct CanonicalSpawnStoreLoadReport {
     pub game_event_spawn_guids: GameEventSpawnGuidLoadReportLikeCpp,
     pub game_event_model_equip: GameEventModelEquipLoadReportLikeCpp,
     pub game_event_npc_flags: GameEventNpcFlagLoadReportLikeCpp,
+    pub game_event_npc_vendors: GameEventNpcVendorLoadReportLikeCpp,
     pub creature_formations: CreatureFormationLoadReportLikeCpp,
 }
 
@@ -218,6 +219,15 @@ pub struct GameEventNpcFlagLoadReportLikeCpp {
     pub loaded: usize,
     pub skipped_out_of_range: usize,
     pub events_touched: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GameEventNpcVendorLoadReportLikeCpp {
+    pub rows: usize,
+    pub loaded: usize,
+    pub skipped_out_of_range: usize,
+    pub skipped_missing_creature_spawn_metadata: usize,
+    pub validation_deferred: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -961,6 +971,88 @@ impl GameEventNpcFlagsLikeCpp {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameEventNpcVendorRecordLikeCpp {
+    pub spawn_id: SpawnId,
+    pub guid: SpawnId,
+    pub entry: u32,
+    pub item: u32,
+    pub maxcount: u32,
+    pub incrtime: u32,
+    pub extended_cost: u32,
+    pub vendor_type: u8,
+    pub item_type: u8,
+    pub bonus_list_ids: Vec<i32>,
+    pub player_condition_id: u32,
+    pub ignore_filtering: bool,
+    pub event_npc_flag_low32: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GameEventNpcVendorsLikeCpp {
+    records_by_event_id: Vec<Vec<GameEventNpcVendorRecordLikeCpp>>,
+}
+
+#[allow(dead_code)]
+impl GameEventNpcVendorsLikeCpp {
+    pub fn from_game_event_max_entry_like_cpp(max_event_entry: Option<u32>) -> Self {
+        Self::from_game_event_sizing_like_cpp(
+            GameEventSizingLikeCpp::from_max_event_entry_like_cpp(max_event_entry),
+        )
+    }
+
+    fn from_game_event_sizing_like_cpp(sizing: GameEventSizingLikeCpp) -> Self {
+        Self {
+            records_by_event_id: vec![Vec::new(); sizing.master_slot_count_like_cpp()],
+        }
+    }
+
+    pub fn records_like_cpp(&self, event_id: u16) -> Option<&[GameEventNpcVendorRecordLikeCpp]> {
+        self.records_by_event_id
+            .get(usize::from(event_id))
+            .map(Vec::as_slice)
+    }
+
+    pub fn records_for_entry_like_cpp(
+        &self,
+        event_id: u16,
+        entry: u32,
+    ) -> Option<Vec<&GameEventNpcVendorRecordLikeCpp>> {
+        self.records_like_cpp(event_id).map(|records| {
+            records
+                .iter()
+                .filter(|record| record.entry == entry)
+                .collect()
+        })
+    }
+
+    fn push_record_like_cpp(
+        &mut self,
+        event_id: u16,
+        record: GameEventNpcVendorRecordLikeCpp,
+    ) -> bool {
+        let Some(records) = self.records_by_event_id.get_mut(usize::from(event_id)) else {
+            return false;
+        };
+        records.push(record);
+        true
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GameEventNpcVendorRowLikeCpp {
+    event_id: u8,
+    spawn_id: SpawnId,
+    item: u32,
+    maxcount: u32,
+    incrtime: u32,
+    extended_cost: u32,
+    vendor_type: u8,
+    bonus_list_ids: String,
+    player_condition_id: u32,
+    ignore_filtering: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct GameEventNpcFlagRowLikeCpp {
     spawn_id: SpawnId,
@@ -1018,6 +1110,7 @@ pub struct CanonicalSpawnMetadataLikeCpp {
     game_event_spawn_guids: GameEventSpawnGuidsLikeCpp,
     game_event_model_equip: GameEventModelEquipLikeCpp,
     game_event_npc_flags: GameEventNpcFlagsLikeCpp,
+    game_event_npc_vendors: GameEventNpcVendorsLikeCpp,
     creature_runtime_rows: BTreeMap<SpawnId, CreatureSpawnRuntimeRowLikeCpp>,
     gameobject_runtime_rows: BTreeMap<SpawnId, GameObjectSpawnRuntimeRowLikeCpp>,
     creature_formations: BTreeMap<SpawnId, CreatureFormationInfoLikeCpp>,
@@ -1039,6 +1132,7 @@ impl CanonicalSpawnMetadataLikeCpp {
             game_event_spawn_guids: GameEventSpawnGuidsLikeCpp::default(),
             game_event_model_equip: GameEventModelEquipLikeCpp::default(),
             game_event_npc_flags: GameEventNpcFlagsLikeCpp::default(),
+            game_event_npc_vendors: GameEventNpcVendorsLikeCpp::default(),
             creature_runtime_rows: BTreeMap::new(),
             gameobject_runtime_rows: BTreeMap::new(),
             creature_formations: BTreeMap::new(),
@@ -1100,6 +1194,14 @@ impl CanonicalSpawnMetadataLikeCpp {
         game_event_npc_flags: GameEventNpcFlagsLikeCpp,
     ) -> Self {
         self.game_event_npc_flags = game_event_npc_flags;
+        self
+    }
+
+    pub fn with_game_event_npc_vendors_like_cpp(
+        mut self,
+        game_event_npc_vendors: GameEventNpcVendorsLikeCpp,
+    ) -> Self {
+        self.game_event_npc_vendors = game_event_npc_vendors;
         self
     }
 
@@ -1465,6 +1567,24 @@ impl CanonicalSpawnMetadataLikeCpp {
         event_id: u16,
     ) -> Option<&[GameEventNpcFlagRecordLikeCpp]> {
         self.game_event_npc_flags.records_like_cpp(event_id)
+    }
+
+    #[allow(dead_code)]
+    pub fn game_event_npc_vendors_like_cpp(
+        &self,
+        event_id: u16,
+    ) -> Option<&[GameEventNpcVendorRecordLikeCpp]> {
+        self.game_event_npc_vendors.records_like_cpp(event_id)
+    }
+
+    #[allow(dead_code)]
+    pub fn game_event_npc_vendor_records_for_entry_like_cpp(
+        &self,
+        event_id: u16,
+        entry: u32,
+    ) -> Option<Vec<&GameEventNpcVendorRecordLikeCpp>> {
+        self.game_event_npc_vendors
+            .records_for_entry_like_cpp(event_id, entry)
     }
 
     #[allow(dead_code)]
@@ -1941,6 +2061,17 @@ pub async fn load_canonical_spawn_store_like_cpp(
     // This slice stores only static metadata and pure read-only helpers.
     let game_event_npc_flags =
         load_game_event_npc_flags_like_cpp(db, game_event_sizing, &mut report).await?;
+    // C++ `GameEventMgr::LoadFromDB` loads `game_event_npc_vendor` after
+    // `game_event_npcflag` because vendor validation receives the first matching
+    // NPC flag low32 mask. Rust stores metadata only and defers ObjectMgr validation/mutation.
+    let game_event_npc_vendors = load_game_event_npc_vendors_like_cpp(
+        db,
+        game_event_sizing,
+        &store,
+        &game_event_npc_flags,
+        &mut report,
+    )
+    .await?;
 
     let mut templates = spawn_group_templates_for_spawn_store(spawn_group_store);
     let members = load_spawn_group_members_like_cpp(db).await?;
@@ -1956,6 +2087,7 @@ pub async fn load_canonical_spawn_store_like_cpp(
             .with_game_event_spawn_guids_like_cpp(game_event_spawn_guids)
             .with_game_event_model_equip_like_cpp(game_event_model_equip)
             .with_game_event_npc_flags_like_cpp(game_event_npc_flags)
+            .with_game_event_npc_vendors_like_cpp(game_event_npc_vendors)
             .with_creature_runtime_rows_like_cpp(creature_runtime_rows)
             .with_gameobject_runtime_rows_like_cpp(gameobject_runtime_rows)
             .with_creature_formations_like_cpp(creature_formations),
@@ -2508,6 +2640,111 @@ fn apply_game_event_npc_flag_row_like_cpp(
     ) {
         report.loaded += 1;
     }
+}
+
+async fn load_game_event_npc_vendors_like_cpp(
+    db: &WorldDatabase,
+    game_event_sizing: GameEventSizingLikeCpp,
+    store: &SpawnStore,
+    npc_flags: &GameEventNpcFlagsLikeCpp,
+    report: &mut CanonicalSpawnStoreLoadReport,
+) -> Result<GameEventNpcVendorsLikeCpp> {
+    let mut npc_vendors =
+        GameEventNpcVendorsLikeCpp::from_game_event_sizing_like_cpp(game_event_sizing);
+
+    let stmt = db.prepare(WorldStatements::SEL_GAME_EVENT_NPC_VENDOR);
+    let mut result = db.query(&stmt).await?;
+    if result.is_empty() {
+        return Ok(npc_vendors);
+    }
+
+    loop {
+        let event_id: u8 = result.read(0);
+        let ignore_filtering_raw: u8 = result.read(9);
+        apply_game_event_npc_vendor_row_like_cpp(
+            GameEventNpcVendorRowLikeCpp {
+                event_id,
+                spawn_id: result.read(1),
+                item: result.read(2),
+                maxcount: result.read(3),
+                incrtime: result.read(4),
+                extended_cost: result.read(5),
+                vendor_type: result.read(6),
+                bonus_list_ids: result.read(7),
+                player_condition_id: result.read(8),
+                ignore_filtering: ignore_filtering_raw != 0,
+            },
+            store,
+            npc_flags,
+            &mut npc_vendors,
+            &mut report.game_event_npc_vendors,
+        );
+        if !result.next_row() {
+            break;
+        }
+    }
+
+    Ok(npc_vendors)
+}
+
+fn apply_game_event_npc_vendor_row_like_cpp(
+    row: GameEventNpcVendorRowLikeCpp,
+    store: &SpawnStore,
+    npc_flags: &GameEventNpcFlagsLikeCpp,
+    npc_vendors: &mut GameEventNpcVendorsLikeCpp,
+    report: &mut GameEventNpcVendorLoadReportLikeCpp,
+) {
+    report.rows += 1;
+    let event_id = u16::from(row.event_id);
+    if npc_vendors.records_like_cpp(event_id).is_none() {
+        report.skipped_out_of_range += 1;
+        return;
+    }
+
+    let Some(spawn_data) = store.spawn_data(SpawnObjectType::Creature, row.spawn_id) else {
+        report.skipped_missing_creature_spawn_metadata += 1;
+        return;
+    };
+
+    let event_npc_flag_low32 = npc_flags
+        .records_like_cpp(event_id)
+        .and_then(|records| {
+            records
+                .iter()
+                .find(|record| record.spawn_id == row.spawn_id)
+                .map(|record| record.npcflag as u32)
+        })
+        .unwrap_or(0);
+
+    if npc_vendors.push_record_like_cpp(
+        event_id,
+        GameEventNpcVendorRecordLikeCpp {
+            spawn_id: row.spawn_id,
+            guid: row.spawn_id,
+            entry: spawn_data.id,
+            item: row.item,
+            maxcount: row.maxcount,
+            incrtime: row.incrtime,
+            extended_cost: row.extended_cost,
+            vendor_type: row.vendor_type,
+            item_type: row.vendor_type,
+            bonus_list_ids: parse_game_event_npc_vendor_bonus_list_ids_like_cpp(
+                &row.bonus_list_ids,
+            ),
+            player_condition_id: row.player_condition_id,
+            ignore_filtering: row.ignore_filtering,
+            event_npc_flag_low32,
+        },
+    ) {
+        report.loaded += 1;
+        report.validation_deferred += 1;
+    }
+}
+
+fn parse_game_event_npc_vendor_bonus_list_ids_like_cpp(raw: &str) -> Vec<i32> {
+    raw.split_whitespace()
+        .filter_map(|token| token.parse::<i32>().ok())
+        .collect()
 }
 
 fn apply_pool_template_row_like_cpp(
@@ -5441,6 +5678,243 @@ mod tests {
         assert_eq!(metadata.game_event_npc_flag_mask_like_cpp(100, &[3]), 0x4);
         assert_eq!(metadata.game_event_npc_flag_mask_like_cpp(100, &[]), 0);
         assert_eq!(metadata.game_event_npc_flag_mask_like_cpp(999, &[1, 2]), 0);
+    }
+
+    fn game_event_npc_vendor_store(spawns: &[(SpawnId, u32)]) -> SpawnStore {
+        let maps = map_store(&[1]);
+        let map_difficulties = map_difficulty_store(&[(1, DIFFICULTY_NONE_LIKE_CPP)]);
+        let mut store = SpawnStore::new();
+        for (spawn_id, entry) in spawns {
+            let mut row = creature_row(*spawn_id, 0, "0");
+            row.entry = *entry;
+            let mut report = SpawnKindLoadReport::default();
+            let spawn =
+                creature_row_to_spawn_data_like_cpp(&row, &maps, &map_difficulties, &mut report)
+                    .expect("valid test creature spawn");
+            store.add_object_spawn(&spawn, |_| false);
+        }
+        store
+    }
+
+    fn game_event_npc_vendor_row(
+        event_id: u8,
+        spawn_id: SpawnId,
+        item: u32,
+    ) -> GameEventNpcVendorRowLikeCpp {
+        GameEventNpcVendorRowLikeCpp {
+            event_id,
+            spawn_id,
+            item,
+            maxcount: 7,
+            incrtime: 30,
+            extended_cost: 11,
+            vendor_type: 2,
+            bonus_list_ids: String::new(),
+            player_condition_id: 13,
+            ignore_filtering: true,
+        }
+    }
+
+    fn game_event_npc_vendor_row_from_raw_event_entry_get_uint8_like_cpp(
+        raw_event_entry: u16,
+        spawn_id: SpawnId,
+        item: u32,
+    ) -> GameEventNpcVendorRowLikeCpp {
+        game_event_npc_vendor_row(raw_event_entry as u8, spawn_id, item)
+    }
+
+    #[test]
+    fn game_event_npc_vendor_sizing_records_and_out_of_range_like_cpp() {
+        let store = game_event_npc_vendor_store(&[(100, 9001)]);
+        let npc_flags = GameEventNpcFlagsLikeCpp::from_game_event_max_entry_like_cpp(Some(2));
+        let mut vendors = GameEventNpcVendorsLikeCpp::from_game_event_max_entry_like_cpp(Some(2));
+        let mut report = GameEventNpcVendorLoadReportLikeCpp::default();
+
+        apply_game_event_npc_vendor_row_like_cpp(
+            game_event_npc_vendor_row(2, 100, 6000),
+            &store,
+            &npc_flags,
+            &mut vendors,
+            &mut report,
+        );
+        apply_game_event_npc_vendor_row_like_cpp(
+            game_event_npc_vendor_row(3, 100, 6001),
+            &store,
+            &npc_flags,
+            &mut vendors,
+            &mut report,
+        );
+
+        assert_eq!(vendors.records_like_cpp(0).unwrap(), &[]);
+        assert_eq!(vendors.records_like_cpp(1).unwrap(), &[]);
+        assert_eq!(vendors.records_like_cpp(2).unwrap()[0].item, 6000);
+        assert_eq!(vendors.records_like_cpp(3), None);
+        assert_eq!(report.rows, 2);
+        assert_eq!(report.loaded, 1);
+        assert_eq!(report.skipped_out_of_range, 1);
+        assert_eq!(report.validation_deferred, 1);
+    }
+
+    #[test]
+    fn game_event_npc_vendor_event_entry_uses_get_uint8_truncation_like_cpp() {
+        let store = game_event_npc_vendor_store(&[(100, 9001)]);
+        let npc_flags = GameEventNpcFlagsLikeCpp::from_game_event_max_entry_like_cpp(Some(2));
+        let mut vendors = GameEventNpcVendorsLikeCpp::from_game_event_max_entry_like_cpp(Some(2));
+        let mut report = GameEventNpcVendorLoadReportLikeCpp::default();
+
+        apply_game_event_npc_vendor_row_like_cpp(
+            game_event_npc_vendor_row_from_raw_event_entry_get_uint8_like_cpp(258, 100, 6000),
+            &store,
+            &npc_flags,
+            &mut vendors,
+            &mut report,
+        );
+
+        assert_eq!(vendors.records_like_cpp(2).unwrap()[0].item, 6000);
+        assert_eq!(vendors.records_like_cpp(258), None);
+        assert_eq!(report.rows, 1);
+        assert_eq!(report.loaded, 1);
+        assert_eq!(report.skipped_out_of_range, 0);
+    }
+
+    #[test]
+    fn game_event_npc_vendor_preserves_order_and_lookup_by_entry_like_cpp() {
+        let store = game_event_npc_vendor_store(&[(100, 9001), (101, 9001), (102, 9002)]);
+        let npc_flags = GameEventNpcFlagsLikeCpp::from_game_event_max_entry_like_cpp(Some(1));
+        let mut vendors = GameEventNpcVendorsLikeCpp::from_game_event_max_entry_like_cpp(Some(1));
+        let mut report = GameEventNpcVendorLoadReportLikeCpp::default();
+
+        for row in [
+            game_event_npc_vendor_row(1, 100, 6000),
+            game_event_npc_vendor_row(1, 101, 6001),
+            game_event_npc_vendor_row(1, 102, 6002),
+        ] {
+            apply_game_event_npc_vendor_row_like_cpp(
+                row,
+                &store,
+                &npc_flags,
+                &mut vendors,
+                &mut report,
+            );
+        }
+
+        let records = vendors.records_like_cpp(1).unwrap();
+        assert_eq!(
+            records.iter().map(|record| record.item).collect::<Vec<_>>(),
+            vec![6000, 6001, 6002]
+        );
+        let entry_records = vendors.records_for_entry_like_cpp(1, 9001).unwrap();
+        assert_eq!(entry_records.len(), 2);
+        assert_eq!(entry_records[0].spawn_id, 100);
+        assert_eq!(entry_records[1].spawn_id, 101);
+    }
+
+    #[test]
+    fn game_event_npc_vendor_missing_creature_metadata_skips_no_dummy_like_cpp() {
+        let store = game_event_npc_vendor_store(&[]);
+        let npc_flags = GameEventNpcFlagsLikeCpp::from_game_event_max_entry_like_cpp(Some(1));
+        let mut vendors = GameEventNpcVendorsLikeCpp::from_game_event_max_entry_like_cpp(Some(1));
+        let mut report = GameEventNpcVendorLoadReportLikeCpp::default();
+
+        apply_game_event_npc_vendor_row_like_cpp(
+            game_event_npc_vendor_row(1, 404, 6000),
+            &store,
+            &npc_flags,
+            &mut vendors,
+            &mut report,
+        );
+
+        assert_eq!(vendors.records_like_cpp(1).unwrap(), &[]);
+        assert_eq!(report.loaded, 0);
+        assert_eq!(report.skipped_missing_creature_spawn_metadata, 1);
+        assert_eq!(report.validation_deferred, 0);
+    }
+
+    #[test]
+    fn game_event_npc_vendor_event_npc_flag_first_match_low32_or_zero_like_cpp() {
+        let store = game_event_npc_vendor_store(&[(100, 9001), (101, 9002)]);
+        let mut npc_flags = GameEventNpcFlagsLikeCpp::from_game_event_max_entry_like_cpp(Some(1));
+        assert!(npc_flags.push_record_like_cpp(
+            1,
+            GameEventNpcFlagRecordLikeCpp {
+                spawn_id: 100,
+                npcflag: 0x1_0000_00AA,
+            },
+        ));
+        assert!(npc_flags.push_record_like_cpp(
+            1,
+            GameEventNpcFlagRecordLikeCpp {
+                spawn_id: 100,
+                npcflag: 0xBB,
+            },
+        ));
+        let mut vendors = GameEventNpcVendorsLikeCpp::from_game_event_max_entry_like_cpp(Some(1));
+        let mut report = GameEventNpcVendorLoadReportLikeCpp::default();
+
+        apply_game_event_npc_vendor_row_like_cpp(
+            game_event_npc_vendor_row(1, 100, 6000),
+            &store,
+            &npc_flags,
+            &mut vendors,
+            &mut report,
+        );
+        apply_game_event_npc_vendor_row_like_cpp(
+            game_event_npc_vendor_row(1, 101, 6001),
+            &store,
+            &npc_flags,
+            &mut vendors,
+            &mut report,
+        );
+
+        let records = vendors.records_like_cpp(1).unwrap();
+        assert_eq!(records[0].event_npc_flag_low32, 0xAA);
+        assert_eq!(records[1].event_npc_flag_low32, 0);
+    }
+
+    #[test]
+    fn game_event_npc_vendor_bonus_list_ids_parse_like_cpp() {
+        assert_eq!(
+            parse_game_event_npc_vendor_bonus_list_ids_like_cpp("7 bad -9 7 0x10 12"),
+            vec![7, -9, 7, 12]
+        );
+    }
+
+    #[test]
+    fn game_event_npc_vendor_metadata_accessor_like_cpp() {
+        let mut vendors = GameEventNpcVendorsLikeCpp::from_game_event_max_entry_like_cpp(Some(1));
+        assert!(vendors.push_record_like_cpp(
+            1,
+            GameEventNpcVendorRecordLikeCpp {
+                spawn_id: 100,
+                guid: 100,
+                entry: 9001,
+                item: 6000,
+                maxcount: 7,
+                incrtime: 30,
+                extended_cost: 11,
+                vendor_type: 2,
+                item_type: 2,
+                bonus_list_ids: vec![1, -2],
+                player_condition_id: 13,
+                ignore_filtering: true,
+                event_npc_flag_low32: 0xAA,
+            },
+        ));
+        let metadata = CanonicalSpawnMetadataLikeCpp::new(SpawnStore::new(), BTreeMap::new())
+            .with_game_event_npc_vendors_like_cpp(vendors);
+
+        assert_eq!(
+            metadata.game_event_npc_vendors_like_cpp(1).unwrap().len(),
+            1
+        );
+        assert_eq!(
+            metadata
+                .game_event_npc_vendor_records_for_entry_like_cpp(1, 9001)
+                .unwrap()[0]
+                .item,
+            6000
+        );
+        assert_eq!(metadata.game_event_npc_vendors_like_cpp(2), None);
     }
 
     fn game_event_model_equip_runtime_row_like_cpp(

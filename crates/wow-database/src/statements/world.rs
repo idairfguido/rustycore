@@ -133,6 +133,8 @@ pub enum WorldStatements {
     SEL_GAME_EVENT_MODEL_EQUIP,
     /// C++ GameEventMgr::LoadFromDB game_event_npcflag metadata query.
     SEL_GAME_EVENT_NPC_FLAGS,
+    /// C++ GameEventMgr::LoadFromDB game_event_npc_vendor metadata query.
+    SEL_GAME_EVENT_NPC_VENDOR,
     /// Load C++ instance spawn groups.
     SEL_INSTANCE_SPAWN_GROUPS,
     /// Load gameobject template for query response.
@@ -595,6 +597,11 @@ impl StatementDef for WorldStatements {
             Self::SEL_GAME_EVENT_NPC_FLAGS => {
                 "SELECT guid, eventEntry, npcflag FROM game_event_npcflag"
             }
+            Self::SEL_GAME_EVENT_NPC_VENDOR => concat!(
+                "SELECT eventEntry, guid, item, maxcount, incrtime, ExtendedCost, type, ",
+                "BonusListIDs, PlayerConditionId, IgnoreFiltering FROM game_event_npc_vendor ",
+                "ORDER BY guid, slot ASC",
+            ),
             Self::SEL_INSTANCE_SPAWN_GROUPS => {
                 "SELECT instanceMapId, bossStateId, bossStates, spawnGroupId, flags FROM instance_spawn_groups"
             }
