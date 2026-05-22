@@ -1427,17 +1427,22 @@ pub struct ProcessRespawnsSafeSideEffectsSummaryLikeCpp {
     pub pool_unsupported_action_kind: usize,
     pub blocked_pool_plan_errors: Vec<PoolMgrPlanErrorLikeCpp>,
     pub blocked_missing_spawn_data: usize,
-    /// Loaded-grid non-pooled `DoRespawn` timers whose caller-supplied typed
-    /// `MapObjectRecord` was successfully loaded and inserted through
-    /// `AddToMap`. This is only the map-owned execution seam; DB/template
-    /// resolution stays with the caller-provided loader.
+    /// Loaded-grid `DoRespawn` timers and pooled `Spawn1Object`/`ReSpawn1Object`
+    /// actions whose caller-supplied typed `MapObjectRecord` was successfully
+    /// loaded and inserted through `AddToMap`. This is only the map-owned
+    /// execution seam; DB/template resolution stays with the caller-provided
+    /// loader.
     pub executed_loaded_grid_respawns: usize,
-    /// Loaded-grid non-pooled `DoRespawn` timers that stayed queued because the
-    /// explicit caller loader did not return a typed DB-backed record.
+    /// Loaded-grid `DoRespawn` timers that stay queued, plus pooled
+    /// `Spawn1Object`/`ReSpawn1Object` loaded-grid actions that stay represented
+    /// as blocked load-plan evidence, because the explicit caller loader did not
+    /// return a typed DB-backed record.
     pub blocked_loaded_grid_respawn_loads: usize,
-    /// Loaded-grid non-pooled `DoRespawn` timers whose loader returned a record,
-    /// after which C++ has already popped/erased the timer before `AddToMap`; the
-    /// timer therefore stays removed even when Rust `AddToMap` rejects it.
+    /// Loaded-grid `DoRespawn` timers and pooled `Spawn1Object`/`ReSpawn1Object`
+    /// actions whose loader returned a record, after which C++ has already
+    /// popped/erased the timer or mutated pool state before `AddToMap`; the timer
+    /// therefore stays removed and pool state is not reverted even when Rust
+    /// `AddToMap` rejects it.
     pub blocked_loaded_grid_respawn_add_to_map: usize,
     /// Legacy compatibility counter for the pre-#390 seam where any pooled timer
     /// blocked `ProcessRespawns`. New pooled-timer planner errors are reported in
@@ -2783,43 +2788,72 @@ where
         spawn_store: &SpawnStore,
         summary: &mut ProcessRespawnsSafeSideEffectsSummaryLikeCpp,
     ) {
+        self.apply_pool_typed_spawn_plan_loaded_grid_records_like_cpp::<
+            fn(&mut Self, SpawnObjectType, SpawnId) -> Option<LoadedGridRespawnRecordsLikeCpp>,
+        >(plan, spawn_store, summary, None);
+    }
+
+    fn apply_pool_typed_spawn_plan_loaded_grid_records_like_cpp<L>(
+        &mut self,
+        plan: &PoolTypedSpawnPlanLikeCpp,
+        spawn_store: &SpawnStore,
+        summary: &mut ProcessRespawnsSafeSideEffectsSummaryLikeCpp,
+        mut load_record: Option<&mut L>,
+    ) where
+        L: FnMut(&mut Self, SpawnObjectType, SpawnId) -> Option<LoadedGridRespawnRecordsLikeCpp>,
+    {
         if let Some(object_plan) = plan.object_plan.as_ref() {
-            self.apply_pool_spawn_object_plan_safe_map_actions_like_cpp(
+            self.apply_pool_spawn_object_plan_loaded_grid_records_like_cpp(
                 object_plan,
                 spawn_store,
                 summary,
+                load_record.as_deref_mut(),
             );
         }
     }
 
-    fn apply_pool_spawn_object_plan_safe_map_actions_like_cpp(
+    fn apply_pool_spawn_object_plan_loaded_grid_records_like_cpp<L>(
         &mut self,
         plan: &PoolSpawnObjectPlanLikeCpp,
         spawn_store: &SpawnStore,
         summary: &mut ProcessRespawnsSafeSideEffectsSummaryLikeCpp,
-    ) {
+        mut load_record: Option<&mut L>,
+    ) where
+        L: FnMut(&mut Self, SpawnObjectType, SpawnId) -> Option<LoadedGridRespawnRecordsLikeCpp>,
+    {
         for action in &plan.actions {
-            self.apply_pool_spawn_object_action_safe_map_action_like_cpp(
+            self.apply_pool_spawn_object_action_loaded_grid_records_like_cpp(
                 *action,
                 spawn_store,
                 summary,
+                load_record.as_deref_mut(),
             );
         }
     }
 
-    fn apply_pool_spawn_object_action_safe_map_action_like_cpp(
+    fn apply_pool_spawn_object_action_loaded_grid_records_like_cpp<L>(
         &mut self,
         action: PoolSpawnObjectActionLikeCpp,
         spawn_store: &SpawnStore,
         summary: &mut ProcessRespawnsSafeSideEffectsSummaryLikeCpp,
-    ) {
+        load_record: Option<&mut L>,
+    ) where
+        L: FnMut(&mut Self, SpawnObjectType, SpawnId) -> Option<LoadedGridRespawnRecordsLikeCpp>,
+    {
         match action {
             PoolSpawnObjectActionLikeCpp::DespawnOne { kind, guid } => {
                 self.apply_pool_despawn_one_safe_map_action_like_cpp(kind, guid, summary);
             }
             PoolSpawnObjectActionLikeCpp::RespawnOne { kind, guid } => {
                 self.apply_pool_despawn_one_safe_map_action_like_cpp(kind, guid, summary);
-                self.report_pool_spawn_one_action_like_cpp(kind, guid, true, spawn_store, summary);
+                self.report_pool_spawn_one_action_like_cpp(
+                    kind,
+                    guid,
+                    true,
+                    spawn_store,
+                    summary,
+                    load_record,
+                );
             }
             PoolSpawnObjectActionLikeCpp::RemoveRespawnTime { kind, guid } => {
                 let Some(object_type) = pool_member_kind_to_spawn_object_type_like_cpp(kind) else {
@@ -2836,7 +2870,14 @@ where
                 }
             }
             PoolSpawnObjectActionLikeCpp::SpawnOne { kind, guid } => {
-                self.report_pool_spawn_one_action_like_cpp(kind, guid, false, spawn_store, summary);
+                self.report_pool_spawn_one_action_like_cpp(
+                    kind,
+                    guid,
+                    false,
+                    spawn_store,
+                    summary,
+                    load_record,
+                );
             }
         }
     }
@@ -2866,46 +2907,81 @@ where
                 summary.pool_stale_index_entries += 1;
                 continue;
             }
-            let outcome = self.add_object_to_remove_list_like_cpp(guid);
-            if outcome.missing_or_stale {
-                summary.pool_stale_index_entries += 1;
-            } else if outcome.unsupported_kind.is_some() {
-                summary.pool_unsupported_action_kind += 1;
-            } else if outcome.queued {
-                summary.pool_objects_removed += 1;
+            match self.remove_from_map_like_cpp(guid, true) {
+                Ok(_removed) => {
+                    summary.pool_objects_removed += 1;
+                }
+                Err(RemoveFromMapError::ObjectNotFound { .. }) => {
+                    summary.pool_stale_index_entries += 1;
+                }
+                Err(_error) => {
+                    summary.pool_remove_errors += 1;
+                }
             }
         }
     }
 
-    fn report_pool_spawn_one_action_like_cpp(
-        &self,
+    fn report_pool_spawn_one_action_like_cpp<L>(
+        &mut self,
         kind: PoolMemberKindLikeCpp,
         spawn_id: u64,
         respawn: bool,
         spawn_store: &SpawnStore,
         summary: &mut ProcessRespawnsSafeSideEffectsSummaryLikeCpp,
-    ) {
+        load_record: Option<&mut L>,
+    ) where
+        L: FnMut(&mut Self, SpawnObjectType, SpawnId) -> Option<LoadedGridRespawnRecordsLikeCpp>,
+    {
         let Some(object_type) = pool_member_kind_to_spawn_object_type_like_cpp(kind) else {
             summary.pool_unsupported_action_kind += 1;
             return;
         };
-        let Some(spawn_data) = spawn_store.spawn_data(object_type, spawn_id as SpawnId) else {
+        let spawn_id = spawn_id as SpawnId;
+        let Some(spawn_data) = spawn_store.spawn_data(object_type, spawn_id) else {
             summary.pool_spawn_actions_missing_spawn_data += 1;
             return;
         };
         let cell = cell_from_world(spawn_data.spawn_point.x, spawn_data.spawn_point.y);
         let grid = GridCoord::new(cell.grid_x(), cell.grid_y());
-        if self.is_grid_loaded(grid) {
+        if !self.is_grid_loaded(grid) {
+            summary.pool_spawn_actions_skipped_unloaded_grid += 1;
+            return;
+        }
+
+        let Some(load_record) = load_record else {
             summary.pool_spawn_actions_blocked_loaded_grid += 1;
             summary
                 .pool_spawn_action_load_plans
                 .push(PoolSpawnActionLoadPlanLikeCpp {
                     object_type,
-                    spawn_id: spawn_id as SpawnId,
+                    spawn_id,
                     respawn,
                 });
-        } else {
-            summary.pool_spawn_actions_skipped_unloaded_grid += 1;
+            return;
+        };
+
+        let Some(records) = load_record(self, object_type, spawn_id) else {
+            summary.pool_spawn_actions_blocked_loaded_grid += 1;
+            summary
+                .pool_spawn_action_load_plans
+                .push(PoolSpawnActionLoadPlanLikeCpp {
+                    object_type,
+                    spawn_id,
+                    respawn,
+                });
+            return;
+        };
+
+        for pre_add_record in records.pre_add_records {
+            let _ = self.add_map_object_record_to_map_like_cpp(pre_add_record);
+        }
+        match self.add_map_object_record_to_map_like_cpp(records.primary_record) {
+            Ok(_outcome) => {
+                summary.executed_loaded_grid_respawns += 1;
+            }
+            Err(_error) => {
+                summary.blocked_loaded_grid_respawn_add_to_map += 1;
+            }
         }
     }
 
@@ -2981,10 +3057,11 @@ where
                     &mut choose_equal,
                 ) {
                     Ok(plan) => {
-                        self.apply_pool_typed_spawn_plan_safe_map_actions_like_cpp(
+                        self.apply_pool_typed_spawn_plan_loaded_grid_records_like_cpp(
                             &plan,
                             spawn_store,
                             &mut summary,
+                            Some(&mut load_record),
                         );
                         self.remove_respawn_time_like_cpp(object_type, spawn_id);
                         summary.processed_pool_timers += 1;
@@ -15360,7 +15437,7 @@ mod tests {
         store.add_object_spawn(&spawn_data(SpawnObjectType::Creature, 43, active), |_| {
             false
         });
-        map.ensure_grid_loaded(&cell_from_grid_center(GridCoord::new(7, 0)));
+        map.ensure_grid_loaded(&cell_from_world(0.0, 0.0));
         map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 43, 100));
 
         let summary = map.process_due_respawns_spawn_group_delete_only_like_cpp(100, &store);
@@ -15443,7 +15520,7 @@ mod tests {
             &spawn_data(SpawnObjectType::Creature, 39701, active),
             |_| false,
         );
-        map.ensure_grid_loaded(&cell_from_grid_center(GridCoord::new(7, 0)));
+        map.ensure_grid_loaded(&cell_from_world(0.0, 0.0));
         map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 39701, 100));
         let expected_guid = guid(HighGuid::Creature, 3970101);
         let mut loader_calls = 0;
@@ -15511,7 +15588,7 @@ mod tests {
             &spawn_data(SpawnObjectType::GameObject, 39801, active),
             |_| false,
         );
-        map.ensure_grid_loaded(&cell_from_grid_center(GridCoord::new(7, 0)));
+        map.ensure_grid_loaded(&cell_from_world(0.0, 0.0));
         map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::GameObject, 39801, 100));
         let expected_guid = guid(HighGuid::GameObject, 3980101);
 
@@ -15567,7 +15644,7 @@ mod tests {
             &spawn_data(SpawnObjectType::GameObject, 40901, active),
             |_| false,
         );
-        map.ensure_grid_loaded(&cell_from_grid_center(GridCoord::new(7, 0)));
+        map.ensure_grid_loaded(&cell_from_world(0.0, 0.0));
         map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::GameObject, 40901, 100));
         let owner_guid = guid(HighGuid::GameObject, 4090101);
         let trap_guid = guid(HighGuid::GameObject, 4090102);
@@ -15630,7 +15707,7 @@ mod tests {
             &spawn_data(SpawnObjectType::Creature, 39902, active),
             |_| false,
         );
-        map.ensure_grid_loaded(&cell_from_grid_center(GridCoord::new(7, 0)));
+        map.ensure_grid_loaded(&cell_from_world(0.0, 0.0));
         map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 39901, 90));
         map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 39902, 100));
 
@@ -15705,7 +15782,7 @@ mod tests {
             &spawn_data(SpawnObjectType::Creature, 40101, active),
             |_| false,
         );
-        map.ensure_grid_loaded(&cell_from_grid_center(GridCoord::new(7, 0)));
+        map.ensure_grid_loaded(&cell_from_world(0.0, 0.0));
         map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 40101, 100));
         let expected_guid = guid(HighGuid::Creature, 4010101);
 
@@ -15746,6 +15823,214 @@ mod tests {
         );
         assert!(map.map_object_record(expected_guid).is_none());
         assert_eq!(map.creature_spawn_id_store_count_like_cpp(40101), 0);
+    }
+
+    #[test]
+    fn process_respawns_pool_loaded_grid_spawn_one_loader_adds_record_and_removes_trigger_timer_like_cpp()
+     {
+        let mut map = test_map();
+        let mut store = SpawnStore::new();
+        let active = spawn_group(526, SpawnGroupFlags::NONE);
+        store.add_object_spawn(
+            &spawn_data(SpawnObjectType::Creature, 52601, active.clone()),
+            |_| false,
+        );
+        store.add_object_spawn(
+            &spawn_data(SpawnObjectType::Creature, 52602, active),
+            |_| false,
+        );
+        map.ensure_grid_loaded(&cell_from_world(0.0, 0.0));
+        map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 52601, 100));
+        let mut pool_mgr = PoolMgrLikeCpp::new();
+        pool_mgr.insert_template_like_cpp(526, PoolTemplateDataLikeCpp::new(1, 571));
+        let mut group = PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Creature, 526);
+        group.add_entry_like_cpp(PoolObjectLikeCpp::new(52601, 0.0), 1);
+        group.add_entry_like_cpp(PoolObjectLikeCpp::new(52602, 0.0), 1);
+        pool_mgr
+            .insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Creature, 526, group)
+            .expect("test pool group");
+        pool_mgr
+            .register_spawn_pool_relation_like_cpp(PoolMemberKindLikeCpp::Creature, 52601, 526)
+            .expect("test spawn pool relation");
+        let expected_guid = guid(HighGuid::Creature, 5260201);
+        let mut loader_calls = 0;
+
+        let summary = map.process_due_respawns_composite_loaded_grid_respawns_like_cpp(
+            100,
+            &store,
+            &LinkedRespawnStoreLikeCpp::new(),
+            &pool_mgr,
+            5,
+            false,
+            |_, _| false,
+            |_, _| 0.0,
+            |_candidates, _count| vec![1],
+            |_map, object_type, spawn_id| {
+                loader_calls += 1;
+                assert_eq!(object_type, SpawnObjectType::Creature);
+                assert_eq!(spawn_id, 52602);
+                let mut creature = test_creature_for_spawn(52602, 5260201, true);
+                creature
+                    .unit_mut()
+                    .world_mut()
+                    .object_mut()
+                    .remove_from_world();
+                Some(LoadedGridRespawnRecordsLikeCpp::primary_only(
+                    MapObjectRecord::new_creature(creature).unwrap(),
+                ))
+            },
+        );
+
+        assert_eq!(loader_calls, 1);
+        assert_eq!(summary.processed_pool_timers, 1);
+        assert_eq!(summary.executed_loaded_grid_respawns, 1);
+        assert_eq!(summary.pool_spawn_actions_blocked_loaded_grid, 0);
+        assert_eq!(summary.pool_spawn_action_load_plans, Vec::new());
+        assert_eq!(summary.blocked_loaded_grid_respawn_add_to_map, 0);
+        assert_eq!(
+            map.get_respawn_time_like_cpp(SpawnObjectType::Creature, 52601),
+            0
+        );
+        assert!(map.pool_data_like_cpp().is_spawned_creature_like_cpp(52602));
+        assert_eq!(
+            map.pool_data_like_cpp().get_spawned_objects_like_cpp(526),
+            1
+        );
+        assert!(map.map_object_record(expected_guid).is_some());
+        assert_eq!(map.creature_spawn_id_store_count_like_cpp(52602), 1);
+    }
+
+    #[test]
+    fn process_respawns_pool_loaded_grid_spawn_one_loader_none_keeps_load_plan_evidence_like_cpp() {
+        let mut map = test_map();
+        let mut store = SpawnStore::new();
+        let active = spawn_group(527, SpawnGroupFlags::NONE);
+        store.add_object_spawn(
+            &spawn_data(SpawnObjectType::GameObject, 52701, active.clone()),
+            |_| false,
+        );
+        store.add_object_spawn(
+            &spawn_data(SpawnObjectType::GameObject, 52702, active),
+            |_| false,
+        );
+        map.ensure_grid_loaded(&cell_from_world(0.0, 0.0));
+        map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::GameObject, 52701, 100));
+        let mut pool_mgr = PoolMgrLikeCpp::new();
+        pool_mgr.insert_template_like_cpp(527, PoolTemplateDataLikeCpp::new(1, 571));
+        let mut group = PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::GameObject, 527);
+        group.add_entry_like_cpp(PoolObjectLikeCpp::new(52701, 0.0), 1);
+        group.add_entry_like_cpp(PoolObjectLikeCpp::new(52702, 0.0), 1);
+        pool_mgr
+            .insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::GameObject, 527, group)
+            .expect("test pool group");
+        pool_mgr
+            .register_spawn_pool_relation_like_cpp(PoolMemberKindLikeCpp::GameObject, 52701, 527)
+            .expect("test spawn pool relation");
+
+        let summary = map.process_due_respawns_composite_safe_side_effects_like_cpp(
+            100,
+            &store,
+            &LinkedRespawnStoreLikeCpp::new(),
+            &pool_mgr,
+            5,
+            false,
+            |_, _| false,
+            |_, _| 0.0,
+            |_candidates, _count| vec![1],
+        );
+
+        assert_eq!(summary.processed_pool_timers, 1);
+        assert_eq!(summary.executed_loaded_grid_respawns, 0);
+        assert_eq!(summary.pool_spawn_actions_blocked_loaded_grid, 1);
+        assert_eq!(
+            summary.pool_spawn_action_load_plans,
+            vec![PoolSpawnActionLoadPlanLikeCpp {
+                object_type: SpawnObjectType::GameObject,
+                spawn_id: 52702,
+                respawn: false,
+            }]
+        );
+        assert_eq!(map.map_object_count(), 0);
+        assert_eq!(
+            map.get_respawn_time_like_cpp(SpawnObjectType::GameObject, 52701),
+            0
+        );
+        assert!(
+            map.pool_data_like_cpp()
+                .is_spawned_gameobject_like_cpp(52702)
+        );
+    }
+
+    #[test]
+    fn process_respawns_pool_loaded_grid_add_to_map_failure_counts_and_removes_trigger_timer_like_cpp()
+     {
+        let mut map = test_map();
+        let mut store = SpawnStore::new();
+        let active = spawn_group(528, SpawnGroupFlags::NONE);
+        store.add_object_spawn(
+            &spawn_data(SpawnObjectType::Creature, 52801, active.clone()),
+            |_| false,
+        );
+        store.add_object_spawn(
+            &spawn_data(SpawnObjectType::Creature, 52802, active),
+            |_| false,
+        );
+        map.ensure_grid_loaded(&cell_from_world(0.0, 0.0));
+        map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 52801, 100));
+        let mut pool_mgr = PoolMgrLikeCpp::new();
+        pool_mgr.insert_template_like_cpp(528, PoolTemplateDataLikeCpp::new(1, 571));
+        let mut group = PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Creature, 528);
+        group.add_entry_like_cpp(PoolObjectLikeCpp::new(52801, 0.0), 1);
+        group.add_entry_like_cpp(PoolObjectLikeCpp::new(52802, 0.0), 1);
+        pool_mgr
+            .insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Creature, 528, group)
+            .expect("test pool group");
+        pool_mgr
+            .register_spawn_pool_relation_like_cpp(PoolMemberKindLikeCpp::Creature, 52801, 528)
+            .expect("test spawn pool relation");
+        let expected_guid = guid(HighGuid::Creature, 5280201);
+
+        let summary = map.process_due_respawns_composite_loaded_grid_respawns_like_cpp(
+            100,
+            &store,
+            &LinkedRespawnStoreLikeCpp::new(),
+            &pool_mgr,
+            5,
+            false,
+            |_, _| false,
+            |_, _| 0.0,
+            |_candidates, _count| vec![1],
+            |_map, object_type, spawn_id| {
+                assert_eq!(object_type, SpawnObjectType::Creature);
+                assert_eq!(spawn_id, 52802);
+                let mut creature = test_creature_for_spawn(52802, 5280201, true);
+                creature
+                    .unit_mut()
+                    .world_mut()
+                    .object_mut()
+                    .remove_from_world();
+                creature.unit_mut().world_mut().relocate(Position::xyz(
+                    1_000_000.0,
+                    1_000_000.0,
+                    0.0,
+                ));
+                Some(LoadedGridRespawnRecordsLikeCpp::primary_only(
+                    MapObjectRecord::new_creature(creature).unwrap(),
+                ))
+            },
+        );
+
+        assert_eq!(summary.processed_pool_timers, 1);
+        assert_eq!(summary.executed_loaded_grid_respawns, 0);
+        assert_eq!(summary.blocked_loaded_grid_respawn_add_to_map, 1);
+        assert_eq!(summary.pool_spawn_actions_blocked_loaded_grid, 0);
+        assert_eq!(
+            map.get_respawn_time_like_cpp(SpawnObjectType::Creature, 52801),
+            0
+        );
+        assert!(map.pool_data_like_cpp().is_spawned_creature_like_cpp(52802));
+        assert!(map.map_object_record(expected_guid).is_none());
+        assert_eq!(map.creature_spawn_id_store_count_like_cpp(52802), 0);
     }
 
     #[test]
@@ -16107,7 +16392,7 @@ mod tests {
         store.add_object_spawn(&spawn_data(SpawnObjectType::Creature, 40, manual), |_| {
             false
         });
-        map.ensure_grid_loaded(&cell_from_grid_center(GridCoord::new(7, 0)));
+        map.ensure_grid_loaded(&cell_from_world(0.0, 0.0));
         map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 50, 90));
         map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 40, 100));
 
