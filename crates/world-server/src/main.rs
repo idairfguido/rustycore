@@ -2503,6 +2503,196 @@ fn game_event_unspawn_pools_for_event_like_cpp(
         ),
     }
 }
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct GameEventObjectUnspawnBucketSummaryLikeCpp {
+    guids_seen: usize,
+    skipped_active_in_other_event: usize,
+    missing_spawn_metadata: usize,
+    represented_object_mgr_grid_removals: usize,
+    maps_matched: usize,
+    without_loaded_canonical_maps: usize,
+    respawn_timers_removed: usize,
+    respawn_timers_missing: usize,
+    live_objects_queued: usize,
+    duplicate_queue_attempts: usize,
+    stale_index_entries: usize,
+    remove_errors: usize,
+    unsupported_live_despawn_type: usize,
+}
+
+impl GameEventObjectUnspawnBucketSummaryLikeCpp {
+    fn accumulate_despawn_outcome_like_cpp(
+        &mut self,
+        outcome: wow_map::map::DespawnAllBySpawnIdOutcomeLikeCpp,
+    ) {
+        self.live_objects_queued += outcome.queued;
+        self.duplicate_queue_attempts += outcome.duplicates;
+        self.stale_index_entries += outcome.stale_index_entries;
+        self.remove_errors += outcome.remove_errors;
+        self.unsupported_live_despawn_type += outcome.unsupported_live_despawn_type;
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct GameEventCreatureGameObjectUnspawnSummaryLikeCpp {
+    event_id: i16,
+    missing_event_creature_guids: bool,
+    missing_event_gameobject_guids: bool,
+    creature: GameEventObjectUnspawnBucketSummaryLikeCpp,
+    gameobject: GameEventObjectUnspawnBucketSummaryLikeCpp,
+}
+
+fn game_event_guid_is_active_in_other_event_like_cpp(
+    canonical_spawn_metadata: &spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
+    active_event_ids: &[u16],
+    event_id: i16,
+    object_type: wow_map::SpawnObjectType,
+    spawn_id: wow_map::SpawnId,
+) -> bool {
+    if event_id <= 0 {
+        return false;
+    }
+
+    active_event_ids.iter().copied().any(|active_event_id| {
+        if active_event_id == event_id as u16 {
+            return false;
+        }
+        let Ok(active_event_id) = i16::try_from(active_event_id) else {
+            return false;
+        };
+        let active_guids = match object_type {
+            wow_map::SpawnObjectType::Creature => {
+                canonical_spawn_metadata.game_event_creature_guids_like_cpp(active_event_id)
+            }
+            wow_map::SpawnObjectType::GameObject => {
+                canonical_spawn_metadata.game_event_gameobject_guids_like_cpp(active_event_id)
+            }
+            wow_map::SpawnObjectType::AreaTrigger => None,
+        };
+        active_guids.is_some_and(|guids| guids.contains(&spawn_id))
+    })
+}
+
+fn game_event_unspawn_object_guid_list_for_event_like_cpp(
+    manager: &mut wow_map::MapManager,
+    canonical_spawn_metadata: &spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
+    active_event_ids: &[u16],
+    event_id: i16,
+    object_type: wow_map::SpawnObjectType,
+    spawn_ids: &[wow_map::SpawnId],
+) -> GameEventObjectUnspawnBucketSummaryLikeCpp {
+    let mut summary = GameEventObjectUnspawnBucketSummaryLikeCpp::default();
+
+    for &spawn_id in spawn_ids {
+        summary.guids_seen += 1;
+        if game_event_guid_is_active_in_other_event_like_cpp(
+            canonical_spawn_metadata,
+            active_event_ids,
+            event_id,
+            object_type,
+            spawn_id,
+        ) {
+            summary.skipped_active_in_other_event += 1;
+            continue;
+        }
+
+        let Some(spawn_data) = canonical_spawn_metadata
+            .spawn_store()
+            .spawn_data(object_type, spawn_id)
+        else {
+            summary.missing_spawn_metadata += 1;
+            continue;
+        };
+
+        // C++ anchor: GameEventMgr.cpp:1246-1327 removes ObjectMgr grid metadata
+        // before walking loaded maps. RustyCore has no safe ObjectMgr mutation here,
+        // so this is represented as a count only and SpawnStore remains immutable.
+        summary.represented_object_mgr_grid_removals += 1;
+
+        let mut maps_matched_for_spawn = 0usize;
+        manager.do_for_all_maps_mut(|managed_map| {
+            if managed_map.map_id() != spawn_data.map_id {
+                return;
+            }
+            maps_matched_for_spawn += 1;
+            let map = managed_map.map_mut();
+            if map
+                .remove_respawn_time_like_cpp(object_type, spawn_id)
+                .is_some()
+            {
+                summary.respawn_timers_removed += 1;
+            } else {
+                summary.respawn_timers_missing += 1;
+            }
+            let despawn = map.despawn_all_by_spawn_id_like_cpp(object_type, spawn_id);
+            summary.accumulate_despawn_outcome_like_cpp(despawn);
+        });
+
+        summary.maps_matched += maps_matched_for_spawn;
+        if maps_matched_for_spawn == 0 {
+            summary.without_loaded_canonical_maps += 1;
+        }
+    }
+
+    summary
+}
+
+fn game_event_unspawn_creatures_and_gameobjects_for_event_like_cpp(
+    manager: &mut wow_map::MapManager,
+    canonical_spawn_metadata: &spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
+    active_event_ids: &[u16],
+    event_id: i16,
+) -> GameEventCreatureGameObjectUnspawnSummaryLikeCpp {
+    let Some(creature_guids) =
+        canonical_spawn_metadata.game_event_creature_guids_like_cpp(event_id)
+    else {
+        return GameEventCreatureGameObjectUnspawnSummaryLikeCpp {
+            event_id,
+            missing_event_creature_guids: true,
+            missing_event_gameobject_guids: false,
+            creature: GameEventObjectUnspawnBucketSummaryLikeCpp::default(),
+            gameobject: GameEventObjectUnspawnBucketSummaryLikeCpp::default(),
+        };
+    };
+
+    let creature = game_event_unspawn_object_guid_list_for_event_like_cpp(
+        manager,
+        canonical_spawn_metadata,
+        active_event_ids,
+        event_id,
+        wow_map::SpawnObjectType::Creature,
+        creature_guids,
+    );
+
+    let Some(gameobject_guids) =
+        canonical_spawn_metadata.game_event_gameobject_guids_like_cpp(event_id)
+    else {
+        return GameEventCreatureGameObjectUnspawnSummaryLikeCpp {
+            event_id,
+            missing_event_creature_guids: false,
+            missing_event_gameobject_guids: true,
+            creature,
+            gameobject: GameEventObjectUnspawnBucketSummaryLikeCpp::default(),
+        };
+    };
+
+    let gameobject = game_event_unspawn_object_guid_list_for_event_like_cpp(
+        manager,
+        canonical_spawn_metadata,
+        active_event_ids,
+        event_id,
+        wow_map::SpawnObjectType::GameObject,
+        gameobject_guids,
+    );
+
+    GameEventCreatureGameObjectUnspawnSummaryLikeCpp {
+        event_id,
+        missing_event_creature_guids: false,
+        missing_event_gameobject_guids: false,
+        creature,
+        gameobject,
+    }
+}
 
 #[derive(Debug, Default, Clone, PartialEq)]
 struct GameEventPoolSpawnSummaryLikeCpp {
@@ -4316,9 +4506,11 @@ mod tests {
         build_loaded_grid_creature_spawn_group_spawn_record_like_cpp,
         build_loaded_grid_gameobject_respawn_record_like_cpp,
         canonical_map_update_tick_set_inactive_like_cpp, game_event_spawn_pools_for_event_like_cpp,
-        game_event_spawn_pools_like_cpp, game_event_unspawn_pools_for_event_like_cpp,
-        game_event_unspawn_pools_like_cpp, install_canonical_spawn_group_initializer_like_cpp,
-        load_world_config_from, loot_drop_rates_like_cpp, mmap_runtime_config_like_cpp,
+        game_event_spawn_pools_like_cpp,
+        game_event_unspawn_creatures_and_gameobjects_for_event_like_cpp,
+        game_event_unspawn_pools_for_event_like_cpp, game_event_unspawn_pools_like_cpp,
+        install_canonical_spawn_group_initializer_like_cpp, load_world_config_from,
+        loot_drop_rates_like_cpp, mmap_runtime_config_like_cpp,
         persisted_respawn_info_from_row_like_cpp, queue_respawn_db_delete_like_cpp,
         queue_respawn_db_save_like_cpp, spawn_store_loader, world_config_bool, world_config_u8,
         world_config_u16,
@@ -4330,8 +4522,10 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
     use wow_constants::{ConditionSourceType, ConditionType};
+    use wow_core::{ObjectGuid, Position, guid::HighGuid};
     use wow_data::{Condition, ConditionEntriesByTypeStore};
     use wow_database::{CharStatements, SqlParam, StatementDef};
+    use wow_entities::{Creature, GameObject, MapObjectRecord};
     use wow_map::{
         LinkedRespawnStoreLikeCpp, PoolGroupLikeCpp, PoolMemberKindLikeCpp, PoolMgrLikeCpp,
         PoolObjectLikeCpp, PoolTemplateDataLikeCpp, RespawnInfoLikeCpp, SpawnData, SpawnGroupFlags,
@@ -4478,6 +4672,393 @@ mod tests {
             .insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Creature, pool_id, group)
             .expect("test creature pool group");
         pool_mgr
+    }
+
+    fn spawn_data_like_cpp(
+        object_type: SpawnObjectType,
+        spawn_id: wow_map::SpawnId,
+        map_id: u32,
+    ) -> SpawnData {
+        SpawnData {
+            object_type,
+            spawn_id,
+            map_id,
+            db_data: true,
+            spawn_group: SpawnGroupTemplateData {
+                group_id: 534,
+                name: "game-event-object-guid-unspawn".to_string(),
+                map_id,
+                flags: SpawnGroupFlags::NONE,
+            },
+            id: 99,
+            spawn_point: SpawnPosition::new(1_000.0, 1_000.0, 0.0, 0.0),
+            phase_use_flags: 0,
+            phase_id: 0,
+            phase_group: 0,
+            terrain_swap_map: 0,
+            pool_id: 0,
+            spawn_time_secs: 0,
+            spawn_difficulties: vec![1],
+            script_id: 0,
+            string_id: String::new(),
+        }
+    }
+
+    fn add_spawn_data_like_cpp(
+        store: &mut SpawnStore,
+        object_type: SpawnObjectType,
+        spawn_id: wow_map::SpawnId,
+        map_id: u32,
+    ) {
+        store.add_object_spawn(&spawn_data_like_cpp(object_type, spawn_id, map_id), |_| {
+            false
+        });
+    }
+
+    fn canonical_spawn_metadata_with_store_and_game_event_guids_like_cpp(
+        spawn_store: SpawnStore,
+        game_event_guids: spawn_store_loader::GameEventSpawnGuidsLikeCpp,
+    ) -> spawn_store_loader::CanonicalSpawnMetadataLikeCpp {
+        spawn_store_loader::CanonicalSpawnMetadataLikeCpp::new(spawn_store, BTreeMap::new())
+            .with_game_event_spawn_guids_like_cpp(game_event_guids)
+    }
+
+    fn push_game_event_guid_for_test_like_cpp(
+        mut guids: spawn_store_loader::GameEventSpawnGuidsLikeCpp,
+        object_type: SpawnObjectType,
+        event_id: i16,
+        spawn_id: wow_map::SpawnId,
+    ) -> spawn_store_loader::GameEventSpawnGuidsLikeCpp {
+        assert!(
+            guids.push_guid_like_cpp(object_type, event_id, spawn_id),
+            "test event id/type must fit C++ GameEvent creature/gameobject GUID range"
+        );
+        guids
+    }
+
+    fn test_guid_like_cpp(high: HighGuid, counter: i64, entry: u32) -> ObjectGuid {
+        ObjectGuid::create_world_object(high, 0, 1, 1, 1, entry, counter)
+    }
+
+    fn insert_live_creature_for_spawn_like_cpp(
+        manager: &mut wow_map::MapManager,
+        map_id: u32,
+        spawn_id: wow_map::SpawnId,
+        counter: i64,
+    ) {
+        let mut creature = Creature::new(false);
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(test_guid_like_cpp(HighGuid::Creature, counter, 99));
+        creature.unit_mut().world_mut().set_map(map_id, 0).unwrap();
+        creature
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::xyz(1_000.0, 1_000.0, 0.0));
+        creature.unit_mut().world_mut().object_mut().add_to_world();
+        creature.set_spawn_id(spawn_id);
+        manager
+            .find_map_mut(map_id, 0)
+            .expect("test map")
+            .map_mut()
+            .add_map_object_record_to_map_like_cpp(MapObjectRecord::new_creature(creature).unwrap())
+            .expect("test creature add to map");
+    }
+
+    fn insert_live_gameobject_for_spawn_like_cpp(
+        manager: &mut wow_map::MapManager,
+        map_id: u32,
+        spawn_id: wow_map::SpawnId,
+        counter: i64,
+    ) {
+        let mut gameobject = GameObject::new();
+        gameobject
+            .world_mut()
+            .object_mut()
+            .create(test_guid_like_cpp(HighGuid::GameObject, counter, 99));
+        gameobject.world_mut().set_map(map_id, 0).unwrap();
+        gameobject
+            .world_mut()
+            .relocate(Position::xyz(1_000.0, 1_000.0, 0.0));
+        gameobject.world_mut().object_mut().add_to_world();
+        gameobject.set_spawn_id(spawn_id);
+        manager
+            .find_map_mut(map_id, 0)
+            .expect("test map")
+            .map_mut()
+            .add_map_object_record_to_map_like_cpp(
+                MapObjectRecord::new_game_object(gameobject).unwrap(),
+            )
+            .expect("test gameobject add to map");
+    }
+
+    #[test]
+    fn game_event_unspawn_creature_gameobject_guids_queue_loaded_map_records_like_cpp() {
+        let mut manager = wow_map::MapManager::default();
+        manager.create_world_map(1, 0);
+        manager.create_world_map(2, 0);
+        let event_id = 1;
+        let creature_spawn_id = 534101;
+        let gameobject_spawn_id = 534201;
+        let mut store = SpawnStore::new();
+        add_spawn_data_like_cpp(&mut store, SpawnObjectType::Creature, creature_spawn_id, 1);
+        add_spawn_data_like_cpp(
+            &mut store,
+            SpawnObjectType::GameObject,
+            gameobject_spawn_id,
+            1,
+        );
+        let mut guids =
+            spawn_store_loader::GameEventSpawnGuidsLikeCpp::from_game_event_max_entry_like_cpp(
+                Some(3),
+            );
+        guids = push_game_event_guid_for_test_like_cpp(
+            guids,
+            SpawnObjectType::Creature,
+            event_id,
+            creature_spawn_id,
+        );
+        guids = push_game_event_guid_for_test_like_cpp(
+            guids,
+            SpawnObjectType::GameObject,
+            event_id,
+            gameobject_spawn_id,
+        );
+        let metadata =
+            canonical_spawn_metadata_with_store_and_game_event_guids_like_cpp(store, guids);
+        for object_type in [SpawnObjectType::Creature, SpawnObjectType::GameObject] {
+            manager
+                .find_map_mut(1, 0)
+                .expect("test map 1")
+                .map_mut()
+                .add_respawn_info_like_cpp(respawn_info_like_cpp(
+                    object_type,
+                    if object_type == SpawnObjectType::Creature {
+                        creature_spawn_id
+                    } else {
+                        gameobject_spawn_id
+                    },
+                    534000,
+                ));
+            manager
+                .find_map_mut(2, 0)
+                .expect("test map 2")
+                .map_mut()
+                .add_respawn_info_like_cpp(respawn_info_like_cpp(
+                    object_type,
+                    if object_type == SpawnObjectType::Creature {
+                        creature_spawn_id
+                    } else {
+                        gameobject_spawn_id
+                    },
+                    534000,
+                ));
+        }
+        insert_live_creature_for_spawn_like_cpp(&mut manager, 1, creature_spawn_id, 5341011);
+        insert_live_creature_for_spawn_like_cpp(&mut manager, 1, creature_spawn_id, 5341012);
+        insert_live_gameobject_for_spawn_like_cpp(&mut manager, 1, gameobject_spawn_id, 5342011);
+        insert_live_gameobject_for_spawn_like_cpp(&mut manager, 1, gameobject_spawn_id, 5342012);
+
+        let summary = game_event_unspawn_creatures_and_gameobjects_for_event_like_cpp(
+            &mut manager,
+            &metadata,
+            &[],
+            event_id,
+        );
+
+        assert_eq!(summary.event_id, event_id);
+        assert!(!summary.missing_event_creature_guids);
+        assert!(!summary.missing_event_gameobject_guids);
+        assert_eq!(summary.creature.guids_seen, 1);
+        assert_eq!(summary.creature.maps_matched, 1);
+        assert_eq!(summary.creature.represented_object_mgr_grid_removals, 1);
+        assert_eq!(summary.creature.respawn_timers_removed, 1);
+        assert_eq!(summary.creature.live_objects_queued, 2);
+        assert_eq!(summary.gameobject.guids_seen, 1);
+        assert_eq!(summary.gameobject.maps_matched, 1);
+        assert_eq!(summary.gameobject.represented_object_mgr_grid_removals, 1);
+        assert_eq!(summary.gameobject.respawn_timers_removed, 1);
+        assert_eq!(summary.gameobject.live_objects_queued, 2);
+        assert!(
+            manager
+                .find_map(2, 0)
+                .expect("test map 2")
+                .map()
+                .respawn_timer_keys_like_cpp()
+                .any(|(_, spawn_id)| spawn_id == creature_spawn_id
+                    || spawn_id == gameobject_spawn_id)
+        );
+        let map_1 = manager.find_map_mut(1, 0).expect("test map 1").map_mut();
+        let drained = map_1.remove_all_objects_in_remove_list_like_cpp();
+        assert_eq!(drained.removed, 4);
+    }
+
+    #[test]
+    fn game_event_unspawn_positive_event_skips_guid_active_in_other_event_like_cpp() {
+        let mut manager = wow_map::MapManager::default();
+        manager.create_world_map(1, 0);
+        let event_id = 1;
+        let other_event_id = 2;
+        let spawn_id = 534301;
+        let mut store = SpawnStore::new();
+        add_spawn_data_like_cpp(&mut store, SpawnObjectType::Creature, spawn_id, 1);
+        let mut guids =
+            spawn_store_loader::GameEventSpawnGuidsLikeCpp::from_game_event_max_entry_like_cpp(
+                Some(3),
+            );
+        guids = push_game_event_guid_for_test_like_cpp(
+            guids,
+            SpawnObjectType::Creature,
+            event_id,
+            spawn_id,
+        );
+        guids = push_game_event_guid_for_test_like_cpp(
+            guids,
+            SpawnObjectType::Creature,
+            other_event_id,
+            spawn_id,
+        );
+        let metadata =
+            canonical_spawn_metadata_with_store_and_game_event_guids_like_cpp(store, guids);
+        manager
+            .find_map_mut(1, 0)
+            .expect("test map")
+            .map_mut()
+            .add_respawn_info_like_cpp(respawn_info_like_cpp(
+                SpawnObjectType::Creature,
+                spawn_id,
+                534000,
+            ));
+        insert_live_creature_for_spawn_like_cpp(&mut manager, 1, spawn_id, 5343011);
+
+        let summary = game_event_unspawn_creatures_and_gameobjects_for_event_like_cpp(
+            &mut manager,
+            &metadata,
+            &[other_event_id as u16],
+            event_id,
+        );
+
+        assert_eq!(summary.creature.guids_seen, 1);
+        assert_eq!(summary.creature.skipped_active_in_other_event, 1);
+        assert_eq!(summary.creature.respawn_timers_removed, 0);
+        assert_eq!(summary.creature.live_objects_queued, 0);
+        assert!(
+            manager
+                .find_map(1, 0)
+                .expect("test map")
+                .map()
+                .respawn_timer_keys_like_cpp()
+                .any(|(_, timer_spawn_id)| timer_spawn_id == spawn_id)
+        );
+    }
+
+    #[test]
+    fn game_event_unspawn_negative_event_does_not_apply_active_event_protection_like_cpp() {
+        let mut manager = wow_map::MapManager::default();
+        manager.create_world_map(1, 0);
+        let event_id = -1;
+        let positive_event_id = 1;
+        let spawn_id = 534401;
+        let mut store = SpawnStore::new();
+        add_spawn_data_like_cpp(&mut store, SpawnObjectType::GameObject, spawn_id, 1);
+        let mut guids =
+            spawn_store_loader::GameEventSpawnGuidsLikeCpp::from_game_event_max_entry_like_cpp(
+                Some(3),
+            );
+        guids = push_game_event_guid_for_test_like_cpp(
+            guids,
+            SpawnObjectType::GameObject,
+            event_id,
+            spawn_id,
+        );
+        guids = push_game_event_guid_for_test_like_cpp(
+            guids,
+            SpawnObjectType::GameObject,
+            positive_event_id,
+            spawn_id,
+        );
+        let metadata =
+            canonical_spawn_metadata_with_store_and_game_event_guids_like_cpp(store, guids);
+        manager
+            .find_map_mut(1, 0)
+            .expect("test map")
+            .map_mut()
+            .add_respawn_info_like_cpp(respawn_info_like_cpp(
+                SpawnObjectType::GameObject,
+                spawn_id,
+                534000,
+            ));
+        insert_live_gameobject_for_spawn_like_cpp(&mut manager, 1, spawn_id, 5344011);
+
+        let summary = game_event_unspawn_creatures_and_gameobjects_for_event_like_cpp(
+            &mut manager,
+            &metadata,
+            &[positive_event_id as u16],
+            event_id,
+        );
+
+        assert_eq!(summary.gameobject.guids_seen, 1);
+        assert_eq!(summary.gameobject.skipped_active_in_other_event, 0);
+        assert_eq!(summary.gameobject.respawn_timers_removed, 1);
+        assert_eq!(summary.gameobject.live_objects_queued, 1);
+    }
+
+    #[test]
+    fn game_event_unspawn_missing_creature_guid_list_returns_before_gameobjects_like_cpp() {
+        let mut manager = wow_map::MapManager::default();
+        manager.create_world_map(1, 0);
+        let event_id = 99;
+        let gameobject_spawn_id = 534501;
+        let mut store = SpawnStore::new();
+        add_spawn_data_like_cpp(
+            &mut store,
+            SpawnObjectType::GameObject,
+            gameobject_spawn_id,
+            1,
+        );
+        let mut guids =
+            spawn_store_loader::GameEventSpawnGuidsLikeCpp::from_game_event_max_entry_like_cpp(
+                Some(2),
+            );
+        guids = push_game_event_guid_for_test_like_cpp(
+            guids,
+            SpawnObjectType::GameObject,
+            1,
+            gameobject_spawn_id,
+        );
+        let metadata =
+            canonical_spawn_metadata_with_store_and_game_event_guids_like_cpp(store, guids);
+        manager
+            .find_map_mut(1, 0)
+            .expect("test map")
+            .map_mut()
+            .add_respawn_info_like_cpp(respawn_info_like_cpp(
+                SpawnObjectType::GameObject,
+                gameobject_spawn_id,
+                534000,
+            ));
+
+        let summary = game_event_unspawn_creatures_and_gameobjects_for_event_like_cpp(
+            &mut manager,
+            &metadata,
+            &[],
+            event_id,
+        );
+
+        assert_eq!(summary.event_id, event_id);
+        assert!(summary.missing_event_creature_guids);
+        assert!(!summary.missing_event_gameobject_guids);
+        assert_eq!(summary.gameobject.guids_seen, 0);
+        assert!(
+            manager
+                .find_map(1, 0)
+                .expect("test map")
+                .map()
+                .respawn_timer_keys_like_cpp()
+                .any(|(_, spawn_id)| spawn_id == gameobject_spawn_id)
+        );
     }
 
     #[test]

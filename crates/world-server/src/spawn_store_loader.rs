@@ -267,7 +267,7 @@ impl GameEventSpawnGuidsLikeCpp {
             .map(Vec::as_slice)
     }
 
-    fn push_guid_like_cpp(
+    pub(crate) fn push_guid_like_cpp(
         &mut self,
         object_type: SpawnObjectType,
         event_id: i16,
