@@ -270,6 +270,45 @@ pub enum GameEventHolidayActiveOutcomeLikeCpp {
     MissingActiveEvent { event_id: u16 },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameEventStartOutcomeLikeCpp {
+    Started(GameEventStartSummaryLikeCpp),
+    MissingEvent { event_id: u16 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameEventStartSummaryLikeCpp {
+    pub event_id: u16,
+    pub state_before_raw: u8,
+    pub state_after_raw: u8,
+    pub active_added: bool,
+    pub active_was_present: bool,
+    pub apply_new_event_requested: bool,
+    pub save_world_event_state_requested: bool,
+    pub force_game_event_update_requested: bool,
+    pub completed: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameEventStopOutcomeLikeCpp {
+    Stopped(GameEventStopSummaryLikeCpp),
+    MissingEvent { event_id: u16 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameEventStopSummaryLikeCpp {
+    pub event_id: u16,
+    pub state_before_raw: u8,
+    pub state_after_raw: u8,
+    pub active_removed: bool,
+    pub active_was_present: bool,
+    pub unapply_event_requested: bool,
+    pub serverwide: bool,
+    pub condition_reset_requested: bool,
+    pub delete_world_event_state_requested: bool,
+    pub delete_condition_saves_requested: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GameEventDataLikeCpp {
     pub event_id: u16,
@@ -836,6 +875,124 @@ impl CanonicalSpawnMetadataLikeCpp {
     #[allow(dead_code)]
     pub fn game_event_active_set_mut_like_cpp(&mut self) -> &mut GameEventActiveSetLikeCpp {
         &mut self.game_event_active_set
+    }
+
+    pub fn start_game_event_like_cpp(
+        &mut self,
+        event_id: u16,
+        overwrite: bool,
+        current_time_secs: u64,
+        world_conditions_met: bool,
+    ) -> GameEventStartOutcomeLikeCpp {
+        let Some(event) = self.game_events.event_mut_like_cpp(event_id) else {
+            return GameEventStartOutcomeLikeCpp::MissingEvent { event_id };
+        };
+
+        let state_before_raw = event.state_raw;
+        let normal_or_internal = state_before_raw == GameEventStateLikeCpp::Normal as u8
+            || state_before_raw == GameEventStateLikeCpp::Internal as u8;
+
+        if normal_or_internal {
+            let active_added = self
+                .game_event_active_set
+                .add_active_event_like_cpp(event_id);
+            if overwrite {
+                event.start = current_time_secs;
+                if event.end <= event.start {
+                    event.end = event.start.saturating_add(u64::from(event.length));
+                }
+            }
+            return GameEventStartOutcomeLikeCpp::Started(GameEventStartSummaryLikeCpp {
+                event_id,
+                state_before_raw,
+                state_after_raw: event.state_raw,
+                active_added,
+                active_was_present: !active_added,
+                apply_new_event_requested: true,
+                save_world_event_state_requested: false,
+                force_game_event_update_requested: false,
+                completed: false,
+            });
+        }
+
+        if event.state_raw == GameEventStateLikeCpp::WorldInactive as u8 {
+            event.state_raw = GameEventStateLikeCpp::WorldConditions as u8;
+        }
+
+        let active_added = self
+            .game_event_active_set
+            .add_active_event_like_cpp(event_id);
+        if world_conditions_met {
+            event.state_raw = GameEventStateLikeCpp::WorldNextPhase as u8;
+            if event.next_start == 0 {
+                event.next_start = current_time_secs.saturating_add(
+                    u64::from(event.length).saturating_mul(GAME_EVENT_MINUTE_SECS_LIKE_CPP),
+                );
+            }
+        }
+
+        GameEventStartOutcomeLikeCpp::Started(GameEventStartSummaryLikeCpp {
+            event_id,
+            state_before_raw,
+            state_after_raw: event.state_raw,
+            active_added,
+            active_was_present: !active_added,
+            apply_new_event_requested: true,
+            save_world_event_state_requested: true,
+            force_game_event_update_requested: overwrite && world_conditions_met,
+            completed: world_conditions_met,
+        })
+    }
+
+    pub fn stop_game_event_like_cpp(
+        &mut self,
+        event_id: u16,
+        overwrite: bool,
+        current_time_secs: u64,
+    ) -> GameEventStopOutcomeLikeCpp {
+        let Some(event) = self.game_events.event_mut_like_cpp(event_id) else {
+            return GameEventStopOutcomeLikeCpp::MissingEvent { event_id };
+        };
+
+        let state_before_raw = event.state_raw;
+        let serverwide = state_before_raw != GameEventStateLikeCpp::Normal as u8
+            && state_before_raw != GameEventStateLikeCpp::Internal as u8;
+        let active_removed = self
+            .game_event_active_set
+            .remove_active_event_like_cpp(event_id);
+        let mut condition_reset_requested = false;
+        let mut delete_world_event_state_requested = false;
+        let mut delete_condition_saves_requested = false;
+
+        if overwrite && !serverwide {
+            event.start = current_time_secs.saturating_sub(
+                u64::from(event.length).saturating_mul(GAME_EVENT_MINUTE_SECS_LIKE_CPP),
+            );
+            if event.end <= event.start {
+                event.end = event.start.saturating_add(u64::from(event.length));
+            }
+        } else if serverwide
+            && (overwrite || state_before_raw != GameEventStateLikeCpp::WorldFinished as u8)
+        {
+            event.next_start = 0;
+            event.state_raw = GameEventStateLikeCpp::WorldInactive as u8;
+            condition_reset_requested = true;
+            delete_world_event_state_requested = true;
+            delete_condition_saves_requested = true;
+        }
+
+        GameEventStopOutcomeLikeCpp::Stopped(GameEventStopSummaryLikeCpp {
+            event_id,
+            state_before_raw,
+            state_after_raw: event.state_raw,
+            active_removed,
+            active_was_present: active_removed,
+            unapply_event_requested: true,
+            serverwide,
+            condition_reset_requested,
+            delete_world_event_state_requested,
+            delete_condition_saves_requested,
+        })
     }
 
     #[allow(dead_code)]
@@ -2793,6 +2950,326 @@ mod tests {
             metadata
                 .game_event_active_set_like_cpp()
                 .is_active_event_like_cpp(4)
+        );
+    }
+
+    #[test]
+    fn game_event_start_normal_internal_adds_active_apply_only_like_cpp() {
+        for state in [
+            GameEventStateLikeCpp::Normal,
+            GameEventStateLikeCpp::Internal,
+        ] {
+            let mut metadata =
+                CanonicalSpawnMetadataLikeCpp::new(SpawnStore::default(), BTreeMap::new())
+                    .with_game_events_like_cpp(game_event_store([event(
+                        1, state, 100, 1_000, 10, 2,
+                    )]));
+
+            assert_eq!(
+                metadata.start_game_event_like_cpp(1, false, 500, true),
+                GameEventStartOutcomeLikeCpp::Started(GameEventStartSummaryLikeCpp {
+                    event_id: 1,
+                    state_before_raw: state as u8,
+                    state_after_raw: state as u8,
+                    active_added: true,
+                    active_was_present: false,
+                    apply_new_event_requested: true,
+                    save_world_event_state_requested: false,
+                    force_game_event_update_requested: false,
+                    completed: false,
+                })
+            );
+            assert!(
+                metadata
+                    .game_event_active_set_like_cpp()
+                    .is_active_event_like_cpp(1)
+            );
+            assert_eq!(metadata.game_event_like_cpp(1).unwrap().start, 100);
+        }
+    }
+
+    #[test]
+    fn game_event_start_normal_overwrite_repairs_end_without_minutes_like_cpp() {
+        let mut metadata =
+            CanonicalSpawnMetadataLikeCpp::new(SpawnStore::default(), BTreeMap::new())
+                .with_game_events_like_cpp(game_event_store([event(
+                    1,
+                    GameEventStateLikeCpp::Normal,
+                    100,
+                    400,
+                    10,
+                    7,
+                )]));
+
+        let outcome = metadata.start_game_event_like_cpp(1, true, 500, false);
+
+        assert!(matches!(
+            outcome,
+            GameEventStartOutcomeLikeCpp::Started(GameEventStartSummaryLikeCpp {
+                completed: false,
+                save_world_event_state_requested: false,
+                ..
+            })
+        ));
+        let event = metadata.game_event_like_cpp(1).unwrap();
+        assert_eq!(event.start, 500);
+        assert_eq!(event.end, 507);
+    }
+
+    #[test]
+    fn game_event_start_world_inactive_conditions_false_saves_without_nextphase_like_cpp() {
+        let mut metadata =
+            CanonicalSpawnMetadataLikeCpp::new(SpawnStore::default(), BTreeMap::new())
+                .with_game_events_like_cpp(game_event_store([event(
+                    1,
+                    GameEventStateLikeCpp::WorldInactive,
+                    0,
+                    0,
+                    0,
+                    7,
+                )]));
+
+        assert_eq!(
+            metadata.start_game_event_like_cpp(1, true, 500, false),
+            GameEventStartOutcomeLikeCpp::Started(GameEventStartSummaryLikeCpp {
+                event_id: 1,
+                state_before_raw: GameEventStateLikeCpp::WorldInactive as u8,
+                state_after_raw: GameEventStateLikeCpp::WorldConditions as u8,
+                active_added: true,
+                active_was_present: false,
+                apply_new_event_requested: true,
+                save_world_event_state_requested: true,
+                force_game_event_update_requested: false,
+                completed: false,
+            })
+        );
+        let event = metadata.game_event_like_cpp(1).unwrap();
+        assert_eq!(
+            event.state_raw,
+            GameEventStateLikeCpp::WorldConditions as u8
+        );
+        assert_eq!(event.next_start, 0);
+        assert!(
+            metadata
+                .game_event_active_set_like_cpp()
+                .is_active_event_like_cpp(1)
+        );
+    }
+
+    #[test]
+    fn game_event_start_serverwide_conditions_true_nextphase_and_force_flag_like_cpp() {
+        for overwrite in [false, true] {
+            let mut metadata =
+                CanonicalSpawnMetadataLikeCpp::new(SpawnStore::default(), BTreeMap::new())
+                    .with_game_events_like_cpp(game_event_store([event(
+                        1,
+                        GameEventStateLikeCpp::WorldConditions,
+                        0,
+                        0,
+                        0,
+                        7,
+                    )]));
+
+            assert_eq!(
+                metadata.start_game_event_like_cpp(1, overwrite, 500, true),
+                GameEventStartOutcomeLikeCpp::Started(GameEventStartSummaryLikeCpp {
+                    event_id: 1,
+                    state_before_raw: GameEventStateLikeCpp::WorldConditions as u8,
+                    state_after_raw: GameEventStateLikeCpp::WorldNextPhase as u8,
+                    active_added: true,
+                    active_was_present: false,
+                    apply_new_event_requested: true,
+                    save_world_event_state_requested: true,
+                    force_game_event_update_requested: overwrite,
+                    completed: true,
+                })
+            );
+            let event = metadata.game_event_like_cpp(1).unwrap();
+            assert_eq!(event.state_raw, GameEventStateLikeCpp::WorldNextPhase as u8);
+            assert_eq!(event.next_start, 920);
+        }
+
+        let mut metadata =
+            CanonicalSpawnMetadataLikeCpp::new(SpawnStore::default(), BTreeMap::new())
+                .with_game_events_like_cpp(game_event_store([event_with_next_start(
+                    event(1, GameEventStateLikeCpp::WorldConditions, 0, 0, 0, 7),
+                    777,
+                )]));
+        metadata.start_game_event_like_cpp(1, true, 500, true);
+        assert_eq!(metadata.game_event_like_cpp(1).unwrap().next_start, 777);
+    }
+
+    #[test]
+    fn game_event_start_unknown_raw_state_is_serverwide_no_panic_like_cpp() {
+        let mut metadata =
+            CanonicalSpawnMetadataLikeCpp::new(SpawnStore::default(), BTreeMap::new())
+                .with_game_events_like_cpp(game_event_store([event_with_raw_state(
+                    1, 99, 0, 0, 0, 3,
+                )]));
+
+        assert_eq!(
+            metadata.start_game_event_like_cpp(1, false, 100, true),
+            GameEventStartOutcomeLikeCpp::Started(GameEventStartSummaryLikeCpp {
+                event_id: 1,
+                state_before_raw: 99,
+                state_after_raw: GameEventStateLikeCpp::WorldNextPhase as u8,
+                active_added: true,
+                active_was_present: false,
+                apply_new_event_requested: true,
+                save_world_event_state_requested: true,
+                force_game_event_update_requested: false,
+                completed: true,
+            })
+        );
+        assert_eq!(metadata.game_event_like_cpp(1).unwrap().next_start, 280);
+    }
+
+    #[test]
+    fn game_event_stop_normal_overwrite_removes_active_and_repairs_without_minutes_like_cpp() {
+        let mut metadata =
+            CanonicalSpawnMetadataLikeCpp::new(SpawnStore::default(), BTreeMap::new())
+                .with_game_events_like_cpp(game_event_store([event(
+                    1,
+                    GameEventStateLikeCpp::Normal,
+                    0,
+                    70,
+                    10,
+                    7,
+                )]));
+        metadata
+            .game_event_active_set_mut_like_cpp()
+            .add_active_event_like_cpp(1);
+
+        assert_eq!(
+            metadata.stop_game_event_like_cpp(1, true, 500),
+            GameEventStopOutcomeLikeCpp::Stopped(GameEventStopSummaryLikeCpp {
+                event_id: 1,
+                state_before_raw: GameEventStateLikeCpp::Normal as u8,
+                state_after_raw: GameEventStateLikeCpp::Normal as u8,
+                active_removed: true,
+                active_was_present: true,
+                unapply_event_requested: true,
+                serverwide: false,
+                condition_reset_requested: false,
+                delete_world_event_state_requested: false,
+                delete_condition_saves_requested: false,
+            })
+        );
+        let event = metadata.game_event_like_cpp(1).unwrap();
+        assert_eq!(event.start, 80);
+        assert_eq!(event.end, 87);
+        assert!(
+            !metadata
+                .game_event_active_set_like_cpp()
+                .is_active_event_like_cpp(1)
+        );
+    }
+
+    #[test]
+    fn game_event_stop_serverwide_non_finished_resets_and_reports_deletes_like_cpp() {
+        let mut metadata =
+            CanonicalSpawnMetadataLikeCpp::new(SpawnStore::default(), BTreeMap::new())
+                .with_game_events_like_cpp(game_event_store([event_with_next_start(
+                    event(1, GameEventStateLikeCpp::WorldNextPhase, 0, 0, 0, 7),
+                    777,
+                )]));
+        metadata
+            .game_event_active_set_mut_like_cpp()
+            .add_active_event_like_cpp(1);
+
+        assert_eq!(
+            metadata.stop_game_event_like_cpp(1, false, 500),
+            GameEventStopOutcomeLikeCpp::Stopped(GameEventStopSummaryLikeCpp {
+                event_id: 1,
+                state_before_raw: GameEventStateLikeCpp::WorldNextPhase as u8,
+                state_after_raw: GameEventStateLikeCpp::WorldInactive as u8,
+                active_removed: true,
+                active_was_present: true,
+                unapply_event_requested: true,
+                serverwide: true,
+                condition_reset_requested: true,
+                delete_world_event_state_requested: true,
+                delete_condition_saves_requested: true,
+            })
+        );
+        let event = metadata.game_event_like_cpp(1).unwrap();
+        assert_eq!(event.state_raw, GameEventStateLikeCpp::WorldInactive as u8);
+        assert_eq!(event.next_start, 0);
+    }
+
+    #[test]
+    fn game_event_stop_world_finished_without_overwrite_keeps_state_but_unapplies_like_cpp() {
+        let mut metadata =
+            CanonicalSpawnMetadataLikeCpp::new(SpawnStore::default(), BTreeMap::new())
+                .with_game_events_like_cpp(game_event_store([event_with_next_start(
+                    event(1, GameEventStateLikeCpp::WorldFinished, 0, 0, 0, 7),
+                    777,
+                )]));
+        metadata
+            .game_event_active_set_mut_like_cpp()
+            .add_active_event_like_cpp(1);
+
+        assert_eq!(
+            metadata.stop_game_event_like_cpp(1, false, 500),
+            GameEventStopOutcomeLikeCpp::Stopped(GameEventStopSummaryLikeCpp {
+                event_id: 1,
+                state_before_raw: GameEventStateLikeCpp::WorldFinished as u8,
+                state_after_raw: GameEventStateLikeCpp::WorldFinished as u8,
+                active_removed: true,
+                active_was_present: true,
+                unapply_event_requested: true,
+                serverwide: true,
+                condition_reset_requested: false,
+                delete_world_event_state_requested: false,
+                delete_condition_saves_requested: false,
+            })
+        );
+        let event = metadata.game_event_like_cpp(1).unwrap();
+        assert_eq!(event.state_raw, GameEventStateLikeCpp::WorldFinished as u8);
+        assert_eq!(event.next_start, 777);
+        assert!(
+            !metadata
+                .game_event_active_set_like_cpp()
+                .is_active_event_like_cpp(1)
+        );
+    }
+
+    #[test]
+    fn game_event_start_stop_missing_event_do_not_mutate_active_set_or_events_like_cpp() {
+        let mut metadata =
+            CanonicalSpawnMetadataLikeCpp::new(SpawnStore::default(), BTreeMap::new())
+                .with_game_events_like_cpp(game_event_store([event(
+                    1,
+                    GameEventStateLikeCpp::Normal,
+                    100,
+                    200,
+                    10,
+                    7,
+                )]));
+        metadata
+            .game_event_active_set_mut_like_cpp()
+            .add_active_event_like_cpp(1);
+        let before = metadata.game_event_like_cpp(1).unwrap().clone();
+        let active_before = metadata
+            .game_event_active_set_like_cpp()
+            .active_event_ids_like_cpp()
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            metadata.start_game_event_like_cpp(99, true, 500, true),
+            GameEventStartOutcomeLikeCpp::MissingEvent { event_id: 99 }
+        );
+        assert_eq!(
+            metadata.stop_game_event_like_cpp(99, true, 500),
+            GameEventStopOutcomeLikeCpp::MissingEvent { event_id: 99 }
+        );
+        assert_eq!(metadata.game_event_like_cpp(1).unwrap(), &before);
+        assert_eq!(
+            metadata
+                .game_event_active_set_like_cpp()
+                .active_event_ids_like_cpp()
+                .collect::<Vec<_>>(),
+            active_before
         );
     }
 
