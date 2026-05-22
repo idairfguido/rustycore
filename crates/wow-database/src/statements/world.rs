@@ -131,6 +131,8 @@ pub enum WorldStatements {
     SEL_CREATURE_EQUIP_TEMPLATE_IDS,
     /// C++ GameEventMgr::LoadFromDB game_event_model_equip metadata query.
     SEL_GAME_EVENT_MODEL_EQUIP,
+    /// C++ GameEventMgr::LoadFromDB game_event_npcflag metadata query.
+    SEL_GAME_EVENT_NPC_FLAGS,
     /// Load C++ instance spawn groups.
     SEL_INSTANCE_SPAWN_GROUPS,
     /// Load gameobject template for query response.
@@ -590,6 +592,9 @@ impl StatementDef for WorldStatements {
                 "game_event_model_equip.modelid, game_event_model_equip.equipment_id ",
                 "FROM creature JOIN game_event_model_equip ON creature.guid = game_event_model_equip.guid",
             ),
+            Self::SEL_GAME_EVENT_NPC_FLAGS => {
+                "SELECT guid, eventEntry, npcflag FROM game_event_npcflag"
+            }
             Self::SEL_INSTANCE_SPAWN_GROUPS => {
                 "SELECT instanceMapId, bossStateId, bossStates, spawnGroupId, flags FROM instance_spawn_groups"
             }
