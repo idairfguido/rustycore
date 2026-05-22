@@ -59,6 +59,9 @@ const DEFAULT_RESPAWN_MIN_CHECK_INTERVAL_MS: u32 = 5_000;
 const CREATURE_TYPE_MECHANICAL_LIKE_CPP: u32 = 9;
 const CREATURE_TYPE_FLAG_BOSS_MOB_LIKE_CPP: u32 = 0x0001_0000;
 
+type SharedCanonicalSpawnMetadataLikeCpp =
+    Arc<Mutex<spawn_store_loader::CanonicalSpawnMetadataLikeCpp>>;
+
 // ── Account lookup implementation ────────────────────────────────
 
 /// Looks up account information from the login database using the realm join ticket.
@@ -797,7 +800,6 @@ async fn main() -> Result<()> {
         )
         .await
         .context("Failed to load canonical SpawnStore metadata from world DB")?;
-    let canonical_spawn_metadata = Arc::new(canonical_spawn_metadata);
     info!(
         "Loaded canonical SpawnStore metadata: creatures rows={} indexed={} event-managed={} empty-difficulty={} missing-map={}; formations rows={} loaded={} missing-leader={} missing-member={} duplicate-member={} pruned-missing-leader-self={}; gameobjects rows={} indexed={} event-managed={} empty-difficulty={} missing-map={}; areatriggers rows={} indexed={} empty-difficulty={} missing-map={}; poolmgr templates rows={} loaded={} creature-members loaded={}/{} gameobject-members loaded={}/{} pool-members loaded={}/{} relation-removals={} map-mismatches={} circular={} empty={} missing-map={} autospawn loaded={}/{} skipped-empty={} skipped-broken={} skipped-child={}; spawn-group rows={} assigned={} missing-spawn={} invalid-type={} missing-group={} map-mismatch={} duplicate={}; represented validations skipped: creature={} gameobject={} areatrigger={}",
         canonical_spawn_report.creature.rows,
@@ -862,7 +864,7 @@ async fn main() -> Result<()> {
         canonical_spawn_report.area_trigger.validation_skipped,
     );
     let (persisted_respawn_times, persisted_respawn_report) =
-        load_persisted_respawn_times_like_cpp(&char_db, canonical_spawn_metadata.as_ref())
+        load_persisted_respawn_times_like_cpp(&char_db, &canonical_spawn_metadata)
             .await
             .context("Failed to load persisted respawn times from character database")?;
     let persisted_respawn_times = Arc::new(persisted_respawn_times);
@@ -876,6 +878,8 @@ async fn main() -> Result<()> {
         persisted_respawn_report.unsupported_area_trigger,
         persisted_respawn_report.missing_spawn_metadata,
     );
+    let canonical_spawn_metadata: SharedCanonicalSpawnMetadataLikeCpp =
+        Arc::new(Mutex::new(canonical_spawn_metadata));
 
     let mount_store = Arc::new(
         wow_data::MountStore::load_with_hotfixes(&data_dir, &locale, &hotfix_db)
@@ -1472,6 +1476,78 @@ async fn main() -> Result<()> {
         &registered_instance_ids,
     );
 
+    let loaded_grid_creature_respawn_caches = LoadedGridCreatureRespawnCachesLikeCpp {
+        template_store: Arc::clone(&creature_template_lifecycle_store),
+        difficulty_store: Arc::clone(&creature_difficulty_store),
+        base_stats_store: Arc::clone(&creature_base_stats_store),
+        health_rates: creature_health_rates,
+        display_store: Arc::clone(&creature_display_info_store),
+        model_store: Arc::clone(&creature_model_data_store),
+        vehicle_store: Arc::clone(&vehicle_store),
+        vehicle_seat_store: Arc::clone(&vehicle_seat_store),
+        vehicle_accessory_store: Arc::clone(&vehicle_accessory_store),
+        gameobject_template_store: Arc::clone(&gameobject_template_lifecycle_store),
+        gameobject_override_store: Arc::clone(&gameobject_override_lifecycle_store),
+    };
+
+    let game_event_scheduler = {
+        let current_time_secs = current_unix_time_secs_like_cpp();
+        let (game_event_outcome, active_event_ids) = {
+            let mut canonical_spawn_metadata = canonical_spawn_metadata.lock().map_err(|_| {
+                anyhow::anyhow!(
+                    "CanonicalSpawnMetadataLikeCpp mutex poisoned during GameEvent StartSystem"
+                )
+            })?;
+            canonical_spawn_metadata.clear_active_game_events_like_cpp();
+            let outcome = canonical_spawn_metadata.update_game_events_like_cpp(
+                current_time_secs,
+                false,
+                represented_game_event_world_conditions_met_like_cpp,
+            );
+            let active_event_ids = canonical_spawn_metadata
+                .game_event_active_set_like_cpp()
+                .active_event_ids_like_cpp()
+                .collect::<Vec<_>>();
+            (outcome, active_event_ids)
+        };
+        let side_effect_summary = {
+            let mut manager = canonical_map_manager.lock().map_err(|_| {
+                anyhow::anyhow!("Canonical MapManager mutex poisoned during GameEvent StartSystem")
+            })?;
+            let canonical_spawn_metadata = canonical_spawn_metadata.lock().map_err(|_| {
+                anyhow::anyhow!("CanonicalSpawnMetadataLikeCpp mutex poisoned during GameEvent StartSystem side effects")
+            })?;
+            consume_game_event_live_update_side_effects_like_cpp(
+                &mut manager,
+                &canonical_spawn_metadata,
+                &loaded_grid_creature_respawn_caches,
+                &active_event_ids,
+                &game_event_outcome,
+            )
+        };
+        debug!(
+            scanned_event_ids = game_event_outcome.scanned_event_ids.len(),
+            queued_activation_event_ids = game_event_outcome.queued_activation_event_ids.len(),
+            queued_deactivation_event_ids = game_event_outcome.queued_deactivation_event_ids.len(),
+            start_outcomes = game_event_outcome.start_outcomes.len(),
+            stop_outcomes = game_event_outcome.stop_outcomes.len(),
+            negative_spawn_event_ids = game_event_outcome.negative_spawn_event_ids.len(),
+            world_nextphase_finished = game_event_outcome.world_nextphase_finished.len(),
+            world_conditions_save_requested =
+                game_event_outcome.world_conditions_save_requested.len(),
+            invalid_check_outcomes = game_event_outcome.invalid_check_outcomes.len(),
+            invalid_next_check_outcomes = game_event_outcome.invalid_next_check_outcomes.len(),
+            next_update_delay_millis = game_event_outcome.next_update_delay_millis,
+            side_effect_actions = side_effect_summary.actions.len(),
+            spawn_actions = side_effect_summary.spawn_actions,
+            unspawn_actions = side_effect_summary.unspawn_actions,
+            "Represented C++ GameEventMgr::StartSystem: cleared active events, ran first Update with isSystemInit=false, installed WUPDATE_EVENTS delay, and consumed only safe represented GameEventSpawn/GameEventUnspawn side effects; full ConditionMgr world-event runtime and unsupported ApplyNewEvent/UnApplyEvent side effects remain pending"
+        );
+        CanonicalGameEventSchedulerLikeCpp::start_system(
+            game_event_outcome.next_update_delay_millis,
+        )
+    };
+
     // Build session resources
     let session_resources = Arc::new(SessionResources {
         char_db: Some(Arc::clone(&char_db)),
@@ -1655,19 +1731,8 @@ async fn main() -> Result<()> {
         Arc::clone(&canonical_spawn_metadata),
         Arc::clone(&condition_store),
         Arc::clone(&char_db),
-        LoadedGridCreatureRespawnCachesLikeCpp {
-            template_store: Arc::clone(&creature_template_lifecycle_store),
-            difficulty_store: Arc::clone(&creature_difficulty_store),
-            base_stats_store: Arc::clone(&creature_base_stats_store),
-            health_rates: creature_health_rates,
-            display_store: Arc::clone(&creature_display_info_store),
-            model_store: Arc::clone(&creature_model_data_store),
-            vehicle_store: Arc::clone(&vehicle_store),
-            vehicle_seat_store: Arc::clone(&vehicle_seat_store),
-            vehicle_accessory_store: Arc::clone(&vehicle_accessory_store),
-            gameobject_template_store: Arc::clone(&gameobject_template_lifecycle_store),
-            gameobject_override_store: Arc::clone(&gameobject_override_lifecycle_store),
-        },
+        loaded_grid_creature_respawn_caches.clone(),
+        game_event_scheduler,
     );
 
     set_realm_online(&login_db, realm_id).await?;
@@ -2285,7 +2350,7 @@ fn apply_persisted_respawns_to_managed_map_like_cpp(
 
 fn install_canonical_spawn_group_initializer_like_cpp(
     manager: &mut wow_map::MapManager,
-    canonical_spawn_metadata: Arc<spawn_store_loader::CanonicalSpawnMetadataLikeCpp>,
+    canonical_spawn_metadata: SharedCanonicalSpawnMetadataLikeCpp,
     condition_store: Arc<wow_data::ConditionEntriesByTypeStore>,
     persisted_respawn_times: Arc<PersistedRespawnTimesLikeCpp>,
 ) {
@@ -2293,6 +2358,15 @@ fn install_canonical_spawn_group_initializer_like_cpp(
         let map_id = managed_map.map_id();
         let instance_id = managed_map.instance_id();
         let difficulty_id = u32::from(managed_map.map().spawn_mode());
+        let Ok(canonical_spawn_metadata) = canonical_spawn_metadata.lock() else {
+            warn!(
+                map_id,
+                instance_id,
+                difficulty_id,
+                "CanonicalSpawnMetadataLikeCpp mutex poisoned; skipping InitSpawnGroupState hook"
+            );
+            return;
+        };
 
         let pool_init_report = managed_map.map_mut().init_pools_for_map_like_cpp(
             canonical_spawn_metadata.pool_mgr_like_cpp(),
@@ -3313,6 +3387,143 @@ fn register_loaded_instance_ids(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CanonicalGameEventSchedulerLikeCpp {
+    timer_ms: u32,
+    interval_ms: u32,
+}
+
+impl CanonicalGameEventSchedulerLikeCpp {
+    fn start_system(next_delay_ms: u64) -> Self {
+        let interval_ms = clamp_game_event_delay_ms_like_cpp(next_delay_ms).max(1);
+        Self {
+            timer_ms: interval_ms,
+            interval_ms,
+        }
+    }
+
+    fn update(&mut self, diff_ms: u32) -> bool {
+        if self.timer_ms <= diff_ms {
+            self.timer_ms = self.interval_ms;
+            true
+        } else {
+            self.timer_ms -= diff_ms;
+            false
+        }
+    }
+
+    fn set_interval_and_reset(&mut self, next_delay_ms: u64) {
+        self.interval_ms = clamp_game_event_delay_ms_like_cpp(next_delay_ms).max(1);
+        self.timer_ms = self.interval_ms;
+    }
+
+    #[cfg(test)]
+    const fn timer_ms(&self) -> u32 {
+        self.timer_ms
+    }
+
+    #[cfg(test)]
+    const fn interval_ms(&self) -> u32 {
+        self.interval_ms
+    }
+}
+
+fn clamp_game_event_delay_ms_like_cpp(delay_ms: u64) -> u32 {
+    u32::try_from(delay_ms).unwrap_or(u32::MAX)
+}
+
+fn current_unix_time_secs_like_cpp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
+}
+
+fn represented_game_event_world_conditions_met_like_cpp(_event_id: u16) -> bool {
+    false
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GameEventLiveUpdateActionLikeCpp {
+    Spawn(i16),
+    Unspawn(i16),
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct GameEventLiveUpdateSideEffectSummaryLikeCpp {
+    actions: Vec<GameEventLiveUpdateActionLikeCpp>,
+    spawn_actions: usize,
+    unspawn_actions: usize,
+}
+
+fn game_event_signed_id_like_cpp(event_id: u16) -> i16 {
+    i16::try_from(event_id).unwrap_or(i16::MAX)
+}
+
+fn game_event_live_update_actions_like_cpp(
+    outcome: &spawn_store_loader::GameEventUpdateOutcomeLikeCpp,
+) -> Vec<GameEventLiveUpdateActionLikeCpp> {
+    let mut actions = Vec::new();
+    for &event_id in &outcome.negative_spawn_event_ids {
+        actions.push(GameEventLiveUpdateActionLikeCpp::Spawn(event_id));
+    }
+    for outcome in &outcome.start_outcomes {
+        if let spawn_store_loader::GameEventStartOutcomeLikeCpp::Started(summary) = outcome {
+            if summary.apply_new_event_requested {
+                let event_id = game_event_signed_id_like_cpp(summary.event_id);
+                actions.push(GameEventLiveUpdateActionLikeCpp::Spawn(event_id));
+                actions.push(GameEventLiveUpdateActionLikeCpp::Unspawn(-event_id));
+            }
+        }
+    }
+    for outcome in &outcome.stop_outcomes {
+        if let spawn_store_loader::GameEventStopOutcomeLikeCpp::Stopped(summary) = outcome {
+            if summary.unapply_event_requested {
+                let event_id = game_event_signed_id_like_cpp(summary.event_id);
+                actions.push(GameEventLiveUpdateActionLikeCpp::Unspawn(event_id));
+                actions.push(GameEventLiveUpdateActionLikeCpp::Spawn(-event_id));
+            }
+        }
+    }
+    actions
+}
+
+fn consume_game_event_live_update_side_effects_like_cpp(
+    manager: &mut wow_map::MapManager,
+    canonical_spawn_metadata: &spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
+    loaded_grid_creature_respawn_caches: &LoadedGridCreatureRespawnCachesLikeCpp,
+    active_event_ids: &[u16],
+    outcome: &spawn_store_loader::GameEventUpdateOutcomeLikeCpp,
+) -> GameEventLiveUpdateSideEffectSummaryLikeCpp {
+    let actions = game_event_live_update_actions_like_cpp(outcome);
+    let mut summary = GameEventLiveUpdateSideEffectSummaryLikeCpp {
+        actions,
+        ..GameEventLiveUpdateSideEffectSummaryLikeCpp::default()
+    };
+    for action in summary.actions.iter().copied() {
+        match action {
+            GameEventLiveUpdateActionLikeCpp::Spawn(event_id) => {
+                let _ = game_event_spawn_for_event_like_cpp(
+                    manager,
+                    canonical_spawn_metadata,
+                    loaded_grid_creature_respawn_caches,
+                    event_id,
+                );
+                summary.spawn_actions += 1;
+            }
+            GameEventLiveUpdateActionLikeCpp::Unspawn(event_id) => {
+                let _ = game_event_unspawn_for_event_like_cpp(
+                    manager,
+                    canonical_spawn_metadata,
+                    active_event_ids,
+                    event_id,
+                );
+                summary.unspawn_actions += 1;
+            }
+        }
+    }
+    summary
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CanonicalRespawnConditionSchedulerLikeCpp {
     timer_ms: u32,
     interval_ms: u32,
@@ -4147,10 +4358,11 @@ fn spawn_canonical_map_update_loop(
     map_manager: SharedCanonicalMapManager,
     tick_interval_ms: u32,
     respawn_condition_interval_ms: u32,
-    canonical_spawn_metadata: Arc<spawn_store_loader::CanonicalSpawnMetadataLikeCpp>,
+    canonical_spawn_metadata: SharedCanonicalSpawnMetadataLikeCpp,
     condition_store: Arc<wow_data::ConditionEntriesByTypeStore>,
     character_db: Arc<CharacterDatabase>,
     loaded_grid_creature_respawn_caches: LoadedGridCreatureRespawnCachesLikeCpp,
+    mut game_event_scheduler: CanonicalGameEventSchedulerLikeCpp,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval =
@@ -4181,15 +4393,86 @@ fn spawn_canonical_map_update_loop(
                     );
                     break;
                 };
+                let Ok(canonical_spawn_metadata) = canonical_spawn_metadata.lock() else {
+                    tracing::error!(
+                        "CanonicalSpawnMetadataLikeCpp mutex poisoned; stopping map update loop"
+                    );
+                    break;
+                };
                 canonical_map_update_tick_set_inactive_like_cpp(
                     &mut manager,
                     diff_ms,
                     &mut respawn_condition_scheduler,
-                    canonical_spawn_metadata.as_ref(),
+                    &canonical_spawn_metadata,
                     condition_store.as_ref(),
                     &loaded_grid_creature_respawn_caches,
                 )
             };
+
+            if game_event_scheduler.update(diff_ms) {
+                let current_time_secs = current_unix_time_secs_like_cpp();
+                let (game_event_outcome, active_event_ids) = {
+                    let Ok(mut canonical_spawn_metadata) = canonical_spawn_metadata.lock() else {
+                        tracing::error!(
+                            "CanonicalSpawnMetadataLikeCpp mutex poisoned during GameEvent update; stopping map update loop"
+                        );
+                        break;
+                    };
+                    let outcome = canonical_spawn_metadata.update_game_events_like_cpp(
+                        current_time_secs,
+                        true,
+                        represented_game_event_world_conditions_met_like_cpp,
+                    );
+                    game_event_scheduler.set_interval_and_reset(outcome.next_update_delay_millis);
+                    let active_event_ids = canonical_spawn_metadata
+                        .game_event_active_set_like_cpp()
+                        .active_event_ids_like_cpp()
+                        .collect::<Vec<_>>();
+                    (outcome, active_event_ids)
+                };
+                let side_effect_summary = {
+                    let Ok(mut manager) = map_manager.lock() else {
+                        tracing::error!(
+                            "Canonical MapManager mutex poisoned during GameEvent side effects; stopping map update loop"
+                        );
+                        break;
+                    };
+                    let Ok(canonical_spawn_metadata) = canonical_spawn_metadata.lock() else {
+                        tracing::error!(
+                            "CanonicalSpawnMetadataLikeCpp mutex poisoned during GameEvent side effects; stopping map update loop"
+                        );
+                        break;
+                    };
+                    consume_game_event_live_update_side_effects_like_cpp(
+                        &mut manager,
+                        &canonical_spawn_metadata,
+                        &loaded_grid_creature_respawn_caches,
+                        &active_event_ids,
+                        &game_event_outcome,
+                    )
+                };
+                debug!(
+                    scanned_event_ids = game_event_outcome.scanned_event_ids.len(),
+                    queued_activation_event_ids =
+                        game_event_outcome.queued_activation_event_ids.len(),
+                    queued_deactivation_event_ids =
+                        game_event_outcome.queued_deactivation_event_ids.len(),
+                    start_outcomes = game_event_outcome.start_outcomes.len(),
+                    stop_outcomes = game_event_outcome.stop_outcomes.len(),
+                    negative_spawn_event_ids = game_event_outcome.negative_spawn_event_ids.len(),
+                    world_nextphase_finished = game_event_outcome.world_nextphase_finished.len(),
+                    world_conditions_save_requested =
+                        game_event_outcome.world_conditions_save_requested.len(),
+                    invalid_check_outcomes = game_event_outcome.invalid_check_outcomes.len(),
+                    invalid_next_check_outcomes =
+                        game_event_outcome.invalid_next_check_outcomes.len(),
+                    next_update_delay_millis = game_event_outcome.next_update_delay_millis,
+                    side_effect_actions = side_effect_summary.actions.len(),
+                    spawn_actions = side_effect_summary.spawn_actions,
+                    unspawn_actions = side_effect_summary.unspawn_actions,
+                    "C++ WUPDATE_EVENTS represented timer fired; updated canonical GameEvent metadata and consumed only existing safe GameEventSpawn/GameEventUnspawn map helpers; ConditionMgr world-event rows, DB state writes, announcements, quests/vendors/worldstates/NPC flags/model/equip/SAI/seasonal reset and ForceGameEventUpdate command caller remain pending"
+                );
+            }
 
             if let Some(mut summary) = tick_summary {
                 let db_delete_total = summary.respawn_db_deletes.len();
@@ -4768,7 +5051,8 @@ fn locale_id_to_name(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        CanonicalRespawnConditionSchedulerLikeCpp, LoadedGridCreatureRespawnCachesLikeCpp,
+        CanonicalGameEventSchedulerLikeCpp, CanonicalRespawnConditionSchedulerLikeCpp,
+        GameEventLiveUpdateActionLikeCpp, LoadedGridCreatureRespawnCachesLikeCpp,
         PersistedRespawnLoadReportLikeCpp, PersistedRespawnRowLikeCpp,
         PersistedRespawnTimesLikeCpp, RespawnDbDeleteQueueOutcomeLikeCpp,
         RespawnDbSaveQueueOutcomeLikeCpp,
@@ -4776,7 +5060,7 @@ mod tests {
         build_loaded_grid_creature_respawn_record_like_cpp,
         build_loaded_grid_creature_spawn_group_spawn_record_like_cpp,
         build_loaded_grid_gameobject_respawn_record_like_cpp,
-        canonical_map_update_tick_set_inactive_like_cpp,
+        canonical_map_update_tick_set_inactive_like_cpp, game_event_live_update_actions_like_cpp,
         game_event_spawn_creatures_and_gameobjects_for_event_like_cpp,
         game_event_spawn_for_event_like_cpp, game_event_spawn_pools_for_event_like_cpp,
         game_event_spawn_pools_like_cpp,
@@ -6795,7 +7079,7 @@ mmap.enablePathFinding = 0
 
     #[test]
     fn canonical_spawn_group_initializer_applies_mapid_conditions_on_new_maps() {
-        let metadata = Arc::new(test_spawn_metadata([(10, 571), (11, 530)]));
+        let metadata = Arc::new(Mutex::new(test_spawn_metadata([(10, 571), (11, 530)])));
         let condition_store = Arc::new(ConditionEntriesByTypeStore::from_conditions_like_cpp([
             mapid_condition(10, 571),
             mapid_condition(11, 571),
@@ -6809,31 +7093,37 @@ mmap.enablePathFinding = 0
         );
 
         let group_571 = metadata
+            .lock()
+            .expect("test metadata lock")
             .spawn_group_templates()
             .get(&10)
-            .expect("test group 10");
+            .expect("test group 10")
+            .clone();
         let map_571 = manager.create_world_map(571, 0);
         assert!(
             map_571
                 .map()
-                .is_spawn_group_active_like_cpp(Some(group_571))
+                .is_spawn_group_active_like_cpp(Some(&group_571))
         );
 
         let group_530 = metadata
+            .lock()
+            .expect("test metadata lock")
             .spawn_group_templates()
             .get(&11)
-            .expect("test group 11");
+            .expect("test group 11")
+            .clone();
         let map_530 = manager.create_world_map(530, 0);
         assert!(
             !map_530
                 .map()
-                .is_spawn_group_active_like_cpp(Some(group_530))
+                .is_spawn_group_active_like_cpp(Some(&group_530))
         );
     }
 
     #[test]
     fn canonical_spawn_group_initializer_does_not_reexecute_for_existing_map() {
-        let metadata = Arc::new(test_spawn_metadata([(20, 571)]));
+        let metadata = Arc::new(Mutex::new(test_spawn_metadata([(20, 571)])));
         let condition_store = Arc::new(ConditionEntriesByTypeStore::from_conditions_like_cpp([
             mapid_condition(20, 530),
         ]));
@@ -6846,22 +7136,25 @@ mmap.enablePathFinding = 0
         );
 
         let group = metadata
+            .lock()
+            .expect("test metadata lock")
             .spawn_group_templates()
             .get(&20)
-            .expect("test group 20");
+            .expect("test group 20")
+            .clone();
         let map = manager.create_world_map(571, 0);
-        assert!(!map.map().is_spawn_group_active_like_cpp(Some(group)));
+        assert!(!map.map().is_spawn_group_active_like_cpp(Some(&group)));
         map.map_mut()
-            .set_spawn_group_active_like_cpp(Some(group), true);
-        assert!(map.map().is_spawn_group_active_like_cpp(Some(group)));
+            .set_spawn_group_active_like_cpp(Some(&group), true);
+        assert!(map.map().is_spawn_group_active_like_cpp(Some(&group)));
 
         let existing = manager.create_world_map(571, 0);
-        assert!(existing.map().is_spawn_group_active_like_cpp(Some(group)));
+        assert!(existing.map().is_spawn_group_active_like_cpp(Some(&group)));
     }
 
     #[test]
     fn canonical_spawn_group_initializer_no_groups_is_noop() {
-        let metadata = Arc::new(test_spawn_metadata([]));
+        let metadata = Arc::new(Mutex::new(test_spawn_metadata([])));
         let condition_store = Arc::new(ConditionEntriesByTypeStore::default());
         let mut manager = wow_map::MapManager::new(60_000, 10);
         install_canonical_spawn_group_initializer_like_cpp(
@@ -6892,9 +7185,9 @@ mmap.enablePathFinding = 0
         gameobject.id = 9001;
         gameobject.spawn_point = SpawnPosition::new(-100.0, 200.0, 13.0, 2.0);
         store.add_object_spawn(&gameobject, |_| false);
-        let metadata = Arc::new(
+        let metadata = Arc::new(Mutex::new(
             super::spawn_store_loader::CanonicalSpawnMetadataLikeCpp::new(store, BTreeMap::new()),
-        );
+        ));
         let mut snapshot = PersistedRespawnTimesLikeCpp::default();
         snapshot.push(
             wow_map::MapKey::new(571, 0),
@@ -6969,10 +7262,10 @@ mmap.enablePathFinding = 0
         gameobject.id = 9001;
         gameobject.spawn_point = SpawnPosition::new(-100.0, 200.0, 13.0, 2.0);
         store.add_object_spawn(&gameobject, |_| false);
-        let metadata = Arc::new(
+        let metadata = Arc::new(Mutex::new(
             super::spawn_store_loader::CanonicalSpawnMetadataLikeCpp::new(store, BTreeMap::new())
                 .with_pool_mgr_like_cpp(pool_mgr),
-        );
+        ));
         let mut snapshot = PersistedRespawnTimesLikeCpp::default();
         snapshot.push(
             wow_map::MapKey::new(571, 0),
@@ -7017,7 +7310,7 @@ mmap.enablePathFinding = 0
 
     #[test]
     fn canonical_map_creation_skips_persisted_respawns_for_dungeon_maps() {
-        let metadata = Arc::new(test_spawn_metadata([]));
+        let metadata = Arc::new(Mutex::new(test_spawn_metadata([])));
         let mut snapshot = PersistedRespawnTimesLikeCpp::default();
         snapshot.push(
             wow_map::MapKey::new(571, 1),
@@ -7278,6 +7571,130 @@ mmap.enablePathFinding = 0
         assert_eq!(scheduler.timer_ms(), 100);
         assert!(!scheduler.update(25));
         assert_eq!(scheduler.timer_ms(), 75);
+    }
+
+    #[test]
+    fn game_event_scheduler_like_cpp_waits_fires_resets_and_installs_dynamic_delay() {
+        let mut scheduler = CanonicalGameEventSchedulerLikeCpp::start_system(100);
+
+        assert_eq!(scheduler.interval_ms(), 100);
+        assert!(!scheduler.update(40));
+        assert_eq!(scheduler.timer_ms(), 60);
+        assert!(!scheduler.update(59));
+        assert_eq!(scheduler.timer_ms(), 1);
+        assert!(scheduler.update(1));
+        assert_eq!(scheduler.timer_ms(), 100);
+
+        scheduler.set_interval_and_reset(250);
+        assert_eq!(scheduler.interval_ms(), 250);
+        assert_eq!(scheduler.timer_ms(), 250);
+        assert!(!scheduler.update(249));
+        assert_eq!(scheduler.timer_ms(), 1);
+        assert!(scheduler.update(1));
+        assert_eq!(scheduler.timer_ms(), 250);
+
+        scheduler.set_interval_and_reset(u64::from(u32::MAX) + 1);
+        assert_eq!(scheduler.interval_ms(), u32::MAX);
+        assert_eq!(scheduler.timer_ms(), u32::MAX);
+        scheduler.set_interval_and_reset(0);
+        assert_eq!(scheduler.interval_ms(), 1);
+        assert_eq!(scheduler.timer_ms(), 1);
+    }
+
+    #[test]
+    fn game_event_start_system_first_update_records_negative_spawn_then_init_update_skips_it() {
+        let event = spawn_store_loader::GameEventDataLikeCpp {
+            event_id: 1,
+            start: 100,
+            end: 1_000,
+            occurence: 10,
+            length: 2,
+            ..spawn_store_loader::GameEventDataLikeCpp::default()
+        };
+        let store =
+            spawn_store_loader::GameEventDataStoreLikeCpp::from_game_event_max_entry_like_cpp(
+                Some(1),
+            )
+            .with_event_like_cpp(event);
+        let mut metadata = spawn_store_loader::CanonicalSpawnMetadataLikeCpp::new(
+            SpawnStore::default(),
+            BTreeMap::new(),
+        )
+        .with_game_events_like_cpp(store);
+
+        metadata.clear_active_game_events_like_cpp();
+        let start_outcome = metadata.update_game_events_like_cpp(650, false, |_| false);
+        assert_eq!(start_outcome.negative_spawn_event_ids, vec![-1]);
+        assert_eq!(start_outcome.next_update_delay_millis, 51_000);
+        let mut scheduler = CanonicalGameEventSchedulerLikeCpp::start_system(
+            start_outcome.next_update_delay_millis,
+        );
+        assert_eq!(scheduler.interval_ms(), 51_000);
+
+        assert!(scheduler.update(51_000));
+        let tick_outcome = metadata.update_game_events_like_cpp(650, true, |_| false);
+        scheduler.set_interval_and_reset(tick_outcome.next_update_delay_millis);
+        assert!(tick_outcome.negative_spawn_event_ids.is_empty());
+        assert_eq!(
+            scheduler.interval_ms(),
+            tick_outcome.next_update_delay_millis as u32
+        );
+    }
+
+    #[test]
+    fn game_event_live_update_actions_preserve_apply_unapply_cpp_order() {
+        let outcome = spawn_store_loader::GameEventUpdateOutcomeLikeCpp {
+            scanned_event_ids: vec![],
+            check_outcomes: vec![],
+            next_check_outcomes: vec![],
+            queued_activation_event_ids: vec![2],
+            queued_deactivation_event_ids: vec![3],
+            start_outcomes: vec![spawn_store_loader::GameEventStartOutcomeLikeCpp::Started(
+                spawn_store_loader::GameEventStartSummaryLikeCpp {
+                    event_id: 2,
+                    state_before_raw: 0,
+                    state_after_raw: 0,
+                    active_added: true,
+                    active_was_present: false,
+                    apply_new_event_requested: true,
+                    save_world_event_state_requested: false,
+                    force_game_event_update_requested: false,
+                    completed: false,
+                },
+            )],
+            stop_outcomes: vec![spawn_store_loader::GameEventStopOutcomeLikeCpp::Stopped(
+                spawn_store_loader::GameEventStopSummaryLikeCpp {
+                    event_id: 3,
+                    state_before_raw: 0,
+                    state_after_raw: 0,
+                    active_removed: true,
+                    active_was_present: true,
+                    unapply_event_requested: true,
+                    serverwide: true,
+                    condition_reset_requested: false,
+                    delete_world_event_state_requested: false,
+                    delete_condition_saves_requested: false,
+                },
+            )],
+            negative_spawn_event_ids: vec![-1],
+            world_nextphase_finished: vec![],
+            world_conditions_save_requested: vec![],
+            invalid_check_outcomes: vec![],
+            invalid_next_check_outcomes: vec![],
+            next_event_delay_secs_before_padding: 0,
+            next_update_delay_millis: 1_000,
+        };
+
+        assert_eq!(
+            game_event_live_update_actions_like_cpp(&outcome),
+            vec![
+                GameEventLiveUpdateActionLikeCpp::Spawn(-1),
+                GameEventLiveUpdateActionLikeCpp::Spawn(2),
+                GameEventLiveUpdateActionLikeCpp::Unspawn(-2),
+                GameEventLiveUpdateActionLikeCpp::Unspawn(3),
+                GameEventLiveUpdateActionLikeCpp::Spawn(-3),
+            ]
+        );
     }
 
     #[test]

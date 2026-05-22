@@ -595,7 +595,7 @@ impl GameEventDataStoreLikeCpp {
     }
 
     #[cfg(test)]
-    fn with_event_like_cpp(mut self, event: GameEventDataLikeCpp) -> Self {
+    pub(crate) fn with_event_like_cpp(mut self, event: GameEventDataLikeCpp) -> Self {
         if let Some(slot) = self.event_mut_like_cpp(event.event_id) {
             *slot = event;
         }
@@ -911,6 +911,10 @@ impl CanonicalSpawnMetadataLikeCpp {
     #[allow(dead_code)]
     pub fn game_event_active_set_mut_like_cpp(&mut self) -> &mut GameEventActiveSetLikeCpp {
         &mut self.game_event_active_set
+    }
+
+    pub fn clear_active_game_events_like_cpp(&mut self) {
+        self.game_event_active_set.clear_active_events_like_cpp();
     }
 
     pub fn start_game_event_like_cpp(
