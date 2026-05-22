@@ -115,6 +115,10 @@ pub enum WorldStatements {
     SEL_POOL_MEMBERS_BY_TYPE,
     /// Load C++ PoolMgr default autospawn candidates.
     SEL_POOL_AUTOSPAWN_CANDIDATES,
+    /// C++ GameEventMgr::Initialize max game_event entry sizing query.
+    SEL_MAX_GAME_EVENT_ENTRY,
+    /// C++ GameEventMgr::LoadFromDB game_event_pool metadata query.
+    SEL_GAME_EVENT_POOLS,
     /// Load C++ instance spawn groups.
     SEL_INSTANCE_SPAWN_GROUPS,
     /// Load gameobject template for query response.
@@ -550,6 +554,11 @@ impl StatementDef for WorldStatements {
                 "SELECT DISTINCT pool_template.entry, pool_members.spawnId, pool_members.poolSpawnId FROM pool_template",
                 " LEFT JOIN game_event_pool ON pool_template.entry = game_event_pool.pool_entry",
                 " LEFT JOIN pool_members ON pool_members.type = 2 AND pool_template.entry = pool_members.spawnId WHERE game_event_pool.pool_entry IS NULL",
+            ),
+            Self::SEL_MAX_GAME_EVENT_ENTRY => "SELECT MAX(eventEntry) FROM game_event",
+            Self::SEL_GAME_EVENT_POOLS => concat!(
+                "SELECT pool_template.entry, game_event_pool.eventEntry FROM pool_template",
+                " JOIN game_event_pool ON pool_template.entry = game_event_pool.pool_entry",
             ),
             Self::SEL_INSTANCE_SPAWN_GROUPS => {
                 "SELECT instanceMapId, bossStateId, bossStates, spawnGroupId, flags FROM instance_spawn_groups"

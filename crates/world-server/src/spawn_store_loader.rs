@@ -28,6 +28,10 @@
 //!   `GetSpawnGroupData(groupId)`, skips system groups, checks conditions, and toggles the map.
 //! - `/home/server/woltk-trinity-legacy/src/server/game/Conditions/ConditionMgr.cpp:1142-1145`
 //!   future map-condition consumer entry point; conditions are not evaluated in this loader.
+//! - `/home/server/woltk-trinity-legacy/src/server/game/Events/GameEventMgr.cpp:874-916`
+//!   `game_event_pool` query, signed event-id internal index and `CheckPool` gate.
+//! - `/home/server/woltk-trinity-legacy/src/server/game/Events/GameEventMgr.cpp:937-956`
+//!   `MAX(eventEntry)` sizing for `mGameEventPoolIds`.
 
 use std::collections::BTreeMap;
 
@@ -74,6 +78,7 @@ pub struct CanonicalSpawnStoreLoadReport {
     pub spawn_group_apply: SpawnGroupApplyReport,
     pub linked_respawn: LinkedRespawnLoadReportLikeCpp,
     pub pool_mgr: PoolMgrLoadReportLikeCpp,
+    pub game_event_pools: GameEventPoolLoadReportLikeCpp,
     pub creature_formations: CreatureFormationLoadReportLikeCpp,
 }
 
@@ -117,12 +122,63 @@ pub struct PoolMgrLoadReportLikeCpp {
     pub autospawn_skipped_child: usize,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GameEventPoolLoadReportLikeCpp {
+    pub rows: usize,
+    pub loaded: usize,
+    pub skipped_out_of_range: usize,
+    pub skipped_broken_pool: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GameEventPoolIdsLikeCpp {
+    game_event_size: i32,
+    pool_ids_by_internal_event_id: Vec<Vec<u32>>,
+}
+
+impl GameEventPoolIdsLikeCpp {
+    pub fn from_game_event_max_entry_like_cpp(max_event_entry: Option<u32>) -> Self {
+        let max_event_id = max_event_entry.unwrap_or(0).saturating_add(1);
+        let slot_count = max_event_id.saturating_mul(2).saturating_sub(1) as usize;
+        let game_event_size = i32::try_from(max_event_id).unwrap_or(i32::MAX);
+        Self {
+            game_event_size,
+            pool_ids_by_internal_event_id: vec![Vec::new(); slot_count],
+        }
+    }
+
+    pub fn game_event_size_like_cpp(&self) -> i32 {
+        self.game_event_size
+    }
+
+    pub fn internal_event_id_like_cpp(&self, event_id: i16) -> Option<usize> {
+        let internal_event_id = self.game_event_size + i32::from(event_id) - 1;
+        let index = usize::try_from(internal_event_id).ok()?;
+        (index < self.pool_ids_by_internal_event_id.len()).then_some(index)
+    }
+
+    pub fn pool_ids_like_cpp(&self, event_id: i16) -> Option<&[u32]> {
+        self.internal_event_id_like_cpp(event_id)
+            .and_then(|index| self.pool_ids_by_internal_event_id.get(index))
+            .map(Vec::as_slice)
+    }
+
+    fn push_pool_id_like_cpp(&mut self, event_id: i16, pool_id: u32) -> bool {
+        let Some(index) = self.internal_event_id_like_cpp(event_id) else {
+            return false;
+        };
+        self.pool_ids_by_internal_event_id[index].push(pool_id);
+        true
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CanonicalSpawnMetadataLikeCpp {
     spawn_store: SpawnStore,
     spawn_group_templates: BTreeMap<u32, SpawnGroupTemplateData>,
     linked_respawns: LinkedRespawnStoreLikeCpp,
     pool_mgr: PoolMgrLikeCpp,
+    game_event_pools: GameEventPoolIdsLikeCpp,
     creature_runtime_rows: BTreeMap<SpawnId, CreatureSpawnRuntimeRowLikeCpp>,
     gameobject_runtime_rows: BTreeMap<SpawnId, GameObjectSpawnRuntimeRowLikeCpp>,
     creature_formations: BTreeMap<SpawnId, CreatureFormationInfoLikeCpp>,
@@ -138,6 +194,7 @@ impl CanonicalSpawnMetadataLikeCpp {
             spawn_group_templates,
             linked_respawns: LinkedRespawnStoreLikeCpp::new(),
             pool_mgr: PoolMgrLikeCpp::new(),
+            game_event_pools: GameEventPoolIdsLikeCpp::default(),
             creature_runtime_rows: BTreeMap::new(),
             gameobject_runtime_rows: BTreeMap::new(),
             creature_formations: BTreeMap::new(),
@@ -165,12 +222,24 @@ impl CanonicalSpawnMetadataLikeCpp {
         self
     }
 
+    pub fn with_game_event_pools_like_cpp(
+        mut self,
+        game_event_pools: GameEventPoolIdsLikeCpp,
+    ) -> Self {
+        self.game_event_pools = game_event_pools;
+        self
+    }
+
     pub fn linked_respawns_like_cpp(&self) -> &LinkedRespawnStoreLikeCpp {
         &self.linked_respawns
     }
 
     pub fn pool_mgr_like_cpp(&self) -> &PoolMgrLikeCpp {
         &self.pool_mgr
+    }
+
+    pub fn game_event_pool_ids_like_cpp(&self, event_id: i16) -> Option<&[u32]> {
+        self.game_event_pools.pool_ids_like_cpp(event_id)
     }
 
     pub fn creature_runtime_row_like_cpp(
@@ -373,6 +442,12 @@ struct PoolAutospawnCandidateRowLikeCpp {
     mother_pool_id: u32,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct GameEventPoolRowLikeCpp {
+    pool_entry: u32,
+    event_id: i16,
+}
+
 impl From<LinkedRespawnDbRow> for LinkedRespawnRowLikeCpp {
     fn from(row: LinkedRespawnDbRow) -> Self {
         Self {
@@ -529,6 +604,9 @@ pub async fn load_canonical_spawn_store_like_cpp(
     // C++ `PoolMgr::LoadFromDB` uses ObjectMgr creature/gameobject spawn data as
     // existence/map truth. This builds only PoolMgr metadata/plans; no live spawn.
     let pool_mgr = load_pool_mgr_like_cpp(db, &store, &mut report).await?;
+    // C++ `GameEventMgr` loads `game_event_pool` after PoolMgr validation so
+    // `CheckPool(entry)` can gate each row; this is metadata only.
+    let game_event_pools = load_game_event_pool_ids_like_cpp(db, &pool_mgr, &mut report).await?;
 
     let mut templates = spawn_group_templates_for_spawn_store(spawn_group_store);
     let members = load_spawn_group_members_like_cpp(db).await?;
@@ -539,6 +617,7 @@ pub async fn load_canonical_spawn_store_like_cpp(
         CanonicalSpawnMetadataLikeCpp::new(store, templates)
             .with_linked_respawns_like_cpp(linked_respawns)
             .with_pool_mgr_like_cpp(pool_mgr)
+            .with_game_event_pools_like_cpp(game_event_pools)
             .with_creature_runtime_rows_like_cpp(creature_runtime_rows)
             .with_gameobject_runtime_rows_like_cpp(gameobject_runtime_rows)
             .with_creature_formations_like_cpp(creature_formations),
@@ -655,6 +734,72 @@ async fn load_pool_autospawn_candidates_like_cpp(
     }
 
     Ok(())
+}
+
+async fn load_game_event_pool_ids_like_cpp(
+    db: &WorldDatabase,
+    mgr: &PoolMgrLikeCpp,
+    report: &mut CanonicalSpawnStoreLoadReport,
+) -> Result<GameEventPoolIdsLikeCpp> {
+    let max_event_entry = load_max_game_event_entry_like_cpp(db).await?;
+    let mut game_event_pools =
+        GameEventPoolIdsLikeCpp::from_game_event_max_entry_like_cpp(max_event_entry);
+
+    let stmt = db.prepare(WorldStatements::SEL_GAME_EVENT_POOLS);
+    let mut result = db.query(&stmt).await?;
+    if result.is_empty() {
+        return Ok(game_event_pools);
+    }
+
+    loop {
+        apply_game_event_pool_row_like_cpp(
+            GameEventPoolRowLikeCpp {
+                pool_entry: result.read(0),
+                event_id: result.read(1),
+            },
+            mgr,
+            &mut game_event_pools,
+            &mut report.game_event_pools,
+        );
+        if !result.next_row() {
+            break;
+        }
+    }
+
+    Ok(game_event_pools)
+}
+
+async fn load_max_game_event_entry_like_cpp(db: &WorldDatabase) -> Result<Option<u32>> {
+    let stmt = db.prepare(WorldStatements::SEL_MAX_GAME_EVENT_ENTRY);
+    let result = db.query(&stmt).await?;
+    if result.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(result.try_read(0))
+}
+
+fn apply_game_event_pool_row_like_cpp(
+    row: GameEventPoolRowLikeCpp,
+    mgr: &PoolMgrLikeCpp,
+    game_event_pools: &mut GameEventPoolIdsLikeCpp,
+    report: &mut GameEventPoolLoadReportLikeCpp,
+) {
+    report.rows += 1;
+    if game_event_pools
+        .internal_event_id_like_cpp(row.event_id)
+        .is_none()
+    {
+        report.skipped_out_of_range += 1;
+        return;
+    }
+    if !mgr.templates.contains_key(&row.pool_entry) || !mgr.check_pool_like_cpp(row.pool_entry) {
+        report.skipped_broken_pool += 1;
+        return;
+    }
+    if game_event_pools.push_pool_id_like_cpp(row.event_id, row.pool_entry) {
+        report.loaded += 1;
+    }
 }
 
 fn apply_pool_template_row_like_cpp(
@@ -1825,6 +1970,134 @@ mod tests {
         assert_eq!(report.autospawn_skipped_broken, 1);
         assert_eq!(report.autospawn_skipped_child, 1);
         assert_eq!(mgr.auto_spawn_pools_for_map_like_cpp(0), &[1]);
+    }
+
+    fn game_event_pool_mgr_with_test_pools() -> PoolMgrLikeCpp {
+        let mut mgr = PoolMgrLikeCpp::new();
+        for pool_id in [10, 11, 12, 13, 14] {
+            mgr.insert_template_like_cpp(pool_id, PoolTemplateDataLikeCpp::new(1, 571));
+            let mut group =
+                PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Creature, pool_id);
+            group.add_entry_like_cpp(PoolObjectLikeCpp::new(u64::from(pool_id) * 100, 0.0), 1);
+            mgr.insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Creature, pool_id, group)
+                .unwrap();
+        }
+        mgr.insert_template_like_cpp(99, PoolTemplateDataLikeCpp::new(1, 571));
+        let mut broken = PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Creature, 99);
+        broken.add_entry_like_cpp(PoolObjectLikeCpp::new(9900, 50.0), 1);
+        mgr.insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Creature, 99, broken)
+            .unwrap();
+        mgr
+    }
+
+    #[test]
+    fn game_event_pool_ids_preserve_order_and_signed_internal_index_like_cpp() {
+        let mgr = game_event_pool_mgr_with_test_pools();
+        let mut pools = GameEventPoolIdsLikeCpp::from_game_event_max_entry_like_cpp(Some(3));
+        let mut report = GameEventPoolLoadReportLikeCpp::default();
+
+        for row in [
+            GameEventPoolRowLikeCpp {
+                pool_entry: 10,
+                event_id: 1,
+            },
+            GameEventPoolRowLikeCpp {
+                pool_entry: 11,
+                event_id: -1,
+            },
+            GameEventPoolRowLikeCpp {
+                pool_entry: 12,
+                event_id: 1,
+            },
+            GameEventPoolRowLikeCpp {
+                pool_entry: 13,
+                event_id: -1,
+            },
+        ] {
+            apply_game_event_pool_row_like_cpp(row, &mgr, &mut pools, &mut report);
+        }
+
+        assert_eq!(pools.game_event_size_like_cpp(), 4);
+        assert_eq!(pools.internal_event_id_like_cpp(1), Some(4));
+        assert_eq!(pools.internal_event_id_like_cpp(-1), Some(2));
+        assert_eq!(pools.pool_ids_like_cpp(1), Some([10, 12].as_slice()));
+        assert_eq!(pools.pool_ids_like_cpp(-1), Some([11, 13].as_slice()));
+        assert_eq!(report.rows, 4);
+        assert_eq!(report.loaded, 4);
+    }
+
+    #[test]
+    fn game_event_pool_ids_skip_out_of_range_without_panic_like_cpp() {
+        let mgr = game_event_pool_mgr_with_test_pools();
+        let mut pools = GameEventPoolIdsLikeCpp::from_game_event_max_entry_like_cpp(Some(3));
+        let mut report = GameEventPoolLoadReportLikeCpp::default();
+
+        apply_game_event_pool_row_like_cpp(
+            GameEventPoolRowLikeCpp {
+                pool_entry: 10,
+                event_id: -5,
+            },
+            &mgr,
+            &mut pools,
+            &mut report,
+        );
+        apply_game_event_pool_row_like_cpp(
+            GameEventPoolRowLikeCpp {
+                pool_entry: 11,
+                event_id: 4,
+            },
+            &mgr,
+            &mut pools,
+            &mut report,
+        );
+
+        assert_eq!(pools.pool_ids_like_cpp(-5), None);
+        assert_eq!(pools.pool_ids_like_cpp(4), None);
+        assert_eq!(report.rows, 2);
+        assert_eq!(report.loaded, 0);
+        assert_eq!(report.skipped_out_of_range, 2);
+    }
+
+    #[test]
+    fn game_event_pool_ids_skip_broken_pool_but_keep_pool_mgr_metadata_like_cpp() {
+        let mgr = game_event_pool_mgr_with_test_pools();
+        let mut pools = GameEventPoolIdsLikeCpp::from_game_event_max_entry_like_cpp(Some(3));
+        let mut report = GameEventPoolLoadReportLikeCpp::default();
+
+        apply_game_event_pool_row_like_cpp(
+            GameEventPoolRowLikeCpp {
+                pool_entry: 99,
+                event_id: 1,
+            },
+            &mgr,
+            &mut pools,
+            &mut report,
+        );
+        apply_game_event_pool_row_like_cpp(
+            GameEventPoolRowLikeCpp {
+                pool_entry: 404,
+                event_id: 1,
+            },
+            &mgr,
+            &mut pools,
+            &mut report,
+        );
+        apply_game_event_pool_row_like_cpp(
+            GameEventPoolRowLikeCpp {
+                pool_entry: 10,
+                event_id: 1,
+            },
+            &mgr,
+            &mut pools,
+            &mut report,
+        );
+
+        assert!(mgr.templates.contains_key(&99));
+        assert!(!mgr.check_pool_like_cpp(99));
+        assert_eq!(pools.pool_ids_like_cpp(1), Some([10].as_slice()));
+        assert_eq!(report.rows, 3);
+        assert_eq!(report.loaded, 1);
+        assert_eq!(report.skipped_broken_pool, 2);
     }
 
     #[test]
