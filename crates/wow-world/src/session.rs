@@ -14585,8 +14585,11 @@ impl WorldSession {
     /// `UpdateObjectVisibilityOnDestroy()`, which delegates to
     /// `WorldObject::DestroyForNearbyPlayers`; that visits only Players inside
     /// `GetVisibilityRange()`, checks `HaveAtClient`, sends destroy for the
-    /// player, then erases the object's GUID from `Player::m_clientGUIDs`. This
-    /// represented seam consumes only the exact GUIDs snapshotted in the
+    /// player, then erases the object's GUID from `Player::m_clientGUIDs`.
+    /// `AnyPlayerInObjectRangeCheck(..., false)` intentionally does not filter
+    /// by `Player::IsAlive()`, so dead players remain eligible when phase,
+    /// range, and `HaveAtClient` pass. This represented seam consumes only the
+    /// exact GUIDs snapshotted in the
     /// canonical `ManagedMap` update summary, gates by same-map canonical Player
     /// position plus typed GameObject in-world state/range, and never mutates
     /// canonical map objects.
@@ -18600,6 +18603,71 @@ mod tests {
             0
         );
         assert_eq!(drain_server_opcodes(&send_rx), Vec::<ServerOpcodes>::new());
+    }
+
+    #[tokio::test]
+    async fn gameobject_visibility_on_destroy_includes_dead_player_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = Arc::new(std::sync::Mutex::new(wow_map::MapManager::new(60_000, 1)));
+        let player_guid = ObjectGuid::create_player(1, 50_565);
+        let gameobject_guid = test_gameobject_guid(605_065, 50_566);
+
+        session.player_alive_like_cpp = false;
+        session.player_health_like_cpp = 0;
+        configure_dynamic_object_values_snapshot_session_like_cpp(
+            &mut session,
+            &canonical,
+            player_guid,
+            571,
+            7,
+        );
+        add_canonical_visibility_on_destroy_gameobject_like_cpp(
+            &canonical,
+            gameobject_guid,
+            605_065,
+            5_050_566,
+            Position::new(11.0, 21.0, 31.0, 0.0),
+            571,
+            7,
+        );
+        {
+            let mut guard = canonical.lock().unwrap();
+            guard
+                .find_map_mut(571, 7)
+                .unwrap()
+                .map_mut()
+                .get_typed_player_mut(player_guid)
+                .unwrap()
+                .unit_mut()
+                .set_health(0);
+        }
+        assert_eq!(canonical.lock().unwrap().update(60_000), Some(60_000));
+        assert_eq!(
+            canonical
+                .lock()
+                .unwrap()
+                .find_map(571, 7)
+                .unwrap()
+                .last_game_objects_update_summary()
+                .generic_visibility_on_destroy_guids
+                .as_slice(),
+            &[gameobject_guid]
+        );
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+
+        session.process_pending().await;
+
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![ServerOpcodes::UpdateObject]
+        );
+        assert!(
+            !session
+                .client_visible_guids_like_cpp
+                .contains(&gameobject_guid)
+        );
     }
 
     #[tokio::test]
