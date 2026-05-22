@@ -177,6 +177,17 @@ pub struct GridStatesUpdateSummaryLikeCpp {
     pub skipped_battleground_or_arena: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GameEventChangeEquipOrModelLiveOutcomeLikeCpp {
+    pub spawn_id: SpawnId,
+    pub indexed_guids: usize,
+    pub live_creatures_mutated: usize,
+    pub stale_index_or_wrong_kind: usize,
+    pub equipment_changed: usize,
+    pub display_changed: usize,
+    pub model_validation_unavailable: usize,
+}
+
 /// Represented key for the map-owned C++ `_dynamicTree` model-registration seam.
 ///
 /// C++ `DynamicMapTree` stores `GameObjectModel` object references/pointers. Rust does
@@ -7768,6 +7779,57 @@ where
         alive_guid
             .or(fallback_guid)
             .and_then(|guid| self.map_object_record(guid)?.creature())
+    }
+
+    /// Bounded map-owned consumer for C++ `GameEventMgr::ChangeEquipOrModel` live creature loop.
+    ///
+    /// Mirrors the `GetCreatureBySpawnIdStore().equal_range(spawn_id)` direction over the
+    /// map-owned creature by-spawn index. This only mutates canonical `MapObjectRecord::Creature`
+    /// equipment/display fields; it does not implement full `Creature::LoadEquipment`, DB2
+    /// `GetCreatureModelInfo`, values/session fanout, scripts, AI, or ObjectAccessor side effects.
+    pub fn change_game_event_equip_or_model_by_spawn_id_like_cpp(
+        &mut self,
+        spawn_id: SpawnId,
+        equipment_id: u8,
+        model_id: u32,
+        model_info_available: bool,
+    ) -> GameEventChangeEquipOrModelLiveOutcomeLikeCpp {
+        let guids = self.creature_spawn_id_store_guids_like_cpp(spawn_id);
+        let mut outcome = GameEventChangeEquipOrModelLiveOutcomeLikeCpp {
+            spawn_id,
+            indexed_guids: guids.len(),
+            ..GameEventChangeEquipOrModelLiveOutcomeLikeCpp::default()
+        };
+
+        for guid in guids {
+            let Some(record) = self.map_objects.get_mut(&guid) else {
+                outcome.stale_index_or_wrong_kind += 1;
+                continue;
+            };
+            let Some(creature) = record.creature_mut() else {
+                outcome.stale_index_or_wrong_kind += 1;
+                continue;
+            };
+            if creature.spawn_id() != spawn_id {
+                outcome.stale_index_or_wrong_kind += 1;
+                continue;
+            }
+
+            outcome.live_creatures_mutated += 1;
+            creature.set_equipment_id_like_cpp(equipment_id);
+            outcome.equipment_changed += 1;
+
+            if model_id > 0 && creature.unit().data().display_id as u32 != model_id {
+                if model_info_available {
+                    creature.set_display_id(model_id, true, None);
+                    outcome.display_changed += 1;
+                } else {
+                    outcome.model_validation_unavailable += 1;
+                }
+            }
+        }
+
+        outcome
     }
 
     pub fn get_gameobject_by_spawn_id_like_cpp(&self, spawn_id: SpawnId) -> Option<&GameObject> {
@@ -17183,6 +17245,83 @@ mod tests {
             CheckRespawnLiveObjectGuardOutcomeLikeCpp::AliveCreatureBlocksRespawn
         );
         assert_eq!(info.respawn_time, 0);
+    }
+
+    #[test]
+    fn game_event_change_equip_or_model_two_live_creatures_same_spawn_mutates_equipment_like_cpp() {
+        let mut map = test_map();
+        map.insert_map_object_record(
+            MapObjectRecord::new_creature(test_creature_for_spawn(157, 15701, true)).unwrap(),
+        )
+        .unwrap();
+        map.insert_map_object_record(
+            MapObjectRecord::new_creature(test_creature_for_spawn(157, 15702, true)).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = map.change_game_event_equip_or_model_by_spawn_id_like_cpp(157, 9, 0, false);
+
+        assert_eq!(outcome.indexed_guids, 2);
+        assert_eq!(outcome.live_creatures_mutated, 2);
+        assert_eq!(outcome.equipment_changed, 2);
+        for guid in map.creature_spawn_id_store_guids_like_cpp(157) {
+            let creature = map
+                .map_object_record(guid)
+                .and_then(MapObjectRecord::creature)
+                .unwrap();
+            assert_eq!(creature.equipment_id(), 9);
+        }
+    }
+
+    #[test]
+    fn game_event_change_equip_or_model_missing_spawn_id_does_not_panic_like_cpp() {
+        let mut map = test_map();
+
+        let outcome = map.change_game_event_equip_or_model_by_spawn_id_like_cpp(158, 9, 123, false);
+
+        assert_eq!(outcome.indexed_guids, 0);
+        assert_eq!(outcome.live_creatures_mutated, 0);
+        assert_eq!(outcome.model_validation_unavailable, 0);
+    }
+
+    #[test]
+    fn game_event_change_equip_or_model_model_gate_reports_unavailable_without_display_like_cpp() {
+        let mut map = test_map();
+        map.insert_map_object_record(
+            MapObjectRecord::new_creature(test_creature_for_spawn(159, 15901, true)).unwrap(),
+        )
+        .unwrap();
+
+        let outcome = map.change_game_event_equip_or_model_by_spawn_id_like_cpp(159, 4, 123, false);
+
+        assert_eq!(outcome.indexed_guids, 1);
+        assert_eq!(outcome.live_creatures_mutated, 1);
+        assert_eq!(outcome.equipment_changed, 1);
+        assert_eq!(outcome.display_changed, 0);
+        assert_eq!(outcome.model_validation_unavailable, 1);
+    }
+
+    #[test]
+    fn game_event_change_equip_or_model_wrong_kind_index_entry_does_not_mutate_like_cpp() {
+        let mut map = test_map();
+        map.insert_map_object_record(
+            MapObjectRecord::new_creature(test_creature_for_spawn(160, 16001, true)).unwrap(),
+        )
+        .unwrap();
+        let guid = guid(HighGuid::Creature, 16001);
+        if let Some(creature_index) = map.creatures_by_spawn_id.get_mut(&160) {
+            creature_index.retain(|indexed_guid| *indexed_guid != guid);
+        }
+        map.creatures_by_spawn_id
+            .entry(161)
+            .or_default()
+            .insert(guid);
+
+        let outcome = map.change_game_event_equip_or_model_by_spawn_id_like_cpp(161, 9, 0, false);
+
+        assert_eq!(outcome.indexed_guids, 1);
+        assert_eq!(outcome.live_creatures_mutated, 0);
+        assert_eq!(outcome.stale_index_or_wrong_kind, 1);
     }
 
     #[test]

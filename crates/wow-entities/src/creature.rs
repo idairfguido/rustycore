@@ -1462,6 +1462,16 @@ impl Creature {
         self.equipment_id
     }
 
+    /// Represented bounded seam for TrinityCore `Creature::LoadEquipment(id, true)` callers.
+    ///
+    /// This only records the selected equipment id on the canonical creature state and
+    /// lifecycle metadata. It does not load `creature_equip_template` items, update
+    /// visible item fields, or fan out values updates.
+    pub fn set_equipment_id_like_cpp(&mut self, equipment_id: u8) {
+        self.equipment_id = equipment_id;
+        self.lifecycle_metadata.equipment_id = equipment_id;
+    }
+
     pub const fn original_equipment_id(&self) -> i8 {
         self.original_equipment_id
     }

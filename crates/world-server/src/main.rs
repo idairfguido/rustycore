@@ -1514,12 +1514,12 @@ async fn main() -> Result<()> {
             let mut manager = canonical_map_manager.lock().map_err(|_| {
                 anyhow::anyhow!("Canonical MapManager mutex poisoned during GameEvent StartSystem")
             })?;
-            let canonical_spawn_metadata = canonical_spawn_metadata.lock().map_err(|_| {
+            let mut canonical_spawn_metadata = canonical_spawn_metadata.lock().map_err(|_| {
                 anyhow::anyhow!("CanonicalSpawnMetadataLikeCpp mutex poisoned during GameEvent StartSystem side effects")
             })?;
             consume_game_event_live_update_side_effects_like_cpp(
                 &mut manager,
-                &canonical_spawn_metadata,
+                &mut canonical_spawn_metadata,
                 &loaded_grid_creature_respawn_caches,
                 &active_event_ids,
                 &game_event_outcome,
@@ -1541,7 +1541,18 @@ async fn main() -> Result<()> {
             side_effect_actions = side_effect_summary.actions.len(),
             spawn_actions = side_effect_summary.spawn_actions,
             unspawn_actions = side_effect_summary.unspawn_actions,
-            "Represented C++ GameEventMgr::StartSystem: cleared active events, ran first Update with isSystemInit=false, installed WUPDATE_EVENTS delay, and consumed only safe represented GameEventSpawn/GameEventUnspawn side effects; full ConditionMgr world-event runtime and unsupported ApplyNewEvent/UnApplyEvent side effects remain pending"
+            change_equip_or_model_actions = side_effect_summary.change_equip_or_model_actions,
+            change_equip_or_model_records_seen =
+                side_effect_summary.change_equip_or_model_records_seen,
+            change_equip_or_model_records_applied =
+                side_effect_summary.change_equip_or_model_records_applied,
+            change_equip_or_model_maps_matched =
+                side_effect_summary.change_equip_or_model_maps_matched,
+            change_equip_or_model_live_creatures_mutated =
+                side_effect_summary.change_equip_or_model_live_creatures_mutated,
+            change_equip_or_model_model_validation_unavailable =
+                side_effect_summary.change_equip_or_model_model_validation_unavailable,
+            "Represented C++ GameEventMgr::StartSystem: cleared active events, ran first Update with isSystemInit=false, installed WUPDATE_EVENTS delay, and consumed safe represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel model/equipment metadata side effects; full ConditionMgr world-event runtime and unsupported ApplyNewEvent/UnApplyEvent side effects remain pending"
         );
         CanonicalGameEventSchedulerLikeCpp::start_system(
             game_event_outcome.next_update_delay_millis,
@@ -3445,6 +3456,7 @@ fn represented_game_event_world_conditions_met_like_cpp(_event_id: u16) -> bool 
 enum GameEventLiveUpdateActionLikeCpp {
     Spawn(i16),
     Unspawn(i16),
+    ChangeEquipOrModel { event_id: u16, activate: bool },
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -3452,6 +3464,16 @@ struct GameEventLiveUpdateSideEffectSummaryLikeCpp {
     actions: Vec<GameEventLiveUpdateActionLikeCpp>,
     spawn_actions: usize,
     unspawn_actions: usize,
+    change_equip_or_model_actions: usize,
+    change_equip_or_model_records_seen: usize,
+    change_equip_or_model_records_applied: usize,
+    change_equip_or_model_missing_event_buckets: usize,
+    change_equip_or_model_missing_spawn_metadata: usize,
+    change_equip_or_model_missing_runtime_rows: usize,
+    change_equip_or_model_maps_matched: usize,
+    change_equip_or_model_live_creatures_mutated: usize,
+    change_equip_or_model_stale_index_or_wrong_kind: usize,
+    change_equip_or_model_model_validation_unavailable: usize,
 }
 
 fn game_event_signed_id_like_cpp(event_id: u16) -> i16 {
@@ -3471,6 +3493,10 @@ fn game_event_live_update_actions_like_cpp(
                 let event_id = game_event_signed_id_like_cpp(summary.event_id);
                 actions.push(GameEventLiveUpdateActionLikeCpp::Spawn(event_id));
                 actions.push(GameEventLiveUpdateActionLikeCpp::Unspawn(-event_id));
+                actions.push(GameEventLiveUpdateActionLikeCpp::ChangeEquipOrModel {
+                    event_id: summary.event_id,
+                    activate: true,
+                });
             }
         }
     }
@@ -3480,15 +3506,80 @@ fn game_event_live_update_actions_like_cpp(
                 let event_id = game_event_signed_id_like_cpp(summary.event_id);
                 actions.push(GameEventLiveUpdateActionLikeCpp::Unspawn(event_id));
                 actions.push(GameEventLiveUpdateActionLikeCpp::Spawn(-event_id));
+                actions.push(GameEventLiveUpdateActionLikeCpp::ChangeEquipOrModel {
+                    event_id: summary.event_id,
+                    activate: false,
+                });
             }
         }
     }
     actions
 }
 
+fn game_event_change_equip_or_model_like_cpp(
+    manager: &mut wow_map::MapManager,
+    canonical_spawn_metadata: &mut spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
+    event_id: u16,
+    activate: bool,
+) -> GameEventLiveUpdateSideEffectSummaryLikeCpp {
+    let mut summary = GameEventLiveUpdateSideEffectSummaryLikeCpp::default();
+    let records = canonical_spawn_metadata
+        .game_event_model_equip_like_cpp(event_id)
+        .map_or_else(Vec::new, <[_]>::to_vec);
+
+    for record in &records {
+        let Some(spawn_data) = canonical_spawn_metadata
+            .spawn_store()
+            .spawn_data(wow_map::SpawnObjectType::Creature, record.spawn_id)
+        else {
+            summary.change_equip_or_model_missing_spawn_metadata += 1;
+            continue;
+        };
+
+        let (equipment_id, model_id) = if activate {
+            (record.equipment_id, record.model_id)
+        } else {
+            (record.equipment_id_prev, record.model_id_prev)
+        };
+        let mut maps_matched_for_record = 0usize;
+        manager.do_for_all_maps_mut(|map| {
+            if map.map_id() == spawn_data.map_id {
+                maps_matched_for_record += 1;
+                let outcome = map
+                    .map_mut()
+                    .change_game_event_equip_or_model_by_spawn_id_like_cpp(
+                        record.spawn_id,
+                        equipment_id,
+                        model_id,
+                        false,
+                    );
+                summary.change_equip_or_model_live_creatures_mutated +=
+                    outcome.live_creatures_mutated;
+                summary.change_equip_or_model_stale_index_or_wrong_kind +=
+                    outcome.stale_index_or_wrong_kind;
+                summary.change_equip_or_model_model_validation_unavailable +=
+                    outcome.model_validation_unavailable;
+            }
+        });
+        summary.change_equip_or_model_maps_matched += maps_matched_for_record;
+    }
+
+    let baseline_summary = canonical_spawn_metadata
+        .change_game_event_model_equip_baseline_like_cpp(event_id, activate);
+    summary.change_equip_or_model_records_seen += baseline_summary.records_seen;
+    summary.change_equip_or_model_records_applied += baseline_summary.records_applied;
+    if baseline_summary.missing_event_bucket {
+        summary.change_equip_or_model_missing_event_buckets += 1;
+    }
+    summary.change_equip_or_model_missing_spawn_metadata += baseline_summary.missing_spawn_metadata;
+    summary.change_equip_or_model_missing_runtime_rows +=
+        baseline_summary.missing_creature_runtime_rows;
+    summary
+}
+
 fn consume_game_event_live_update_side_effects_like_cpp(
     manager: &mut wow_map::MapManager,
-    canonical_spawn_metadata: &spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
+    canonical_spawn_metadata: &mut spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
     loaded_grid_creature_respawn_caches: &LoadedGridCreatureRespawnCachesLikeCpp,
     active_event_ids: &[u16],
     outcome: &spawn_store_loader::GameEventUpdateOutcomeLikeCpp,
@@ -3517,6 +3608,33 @@ fn consume_game_event_live_update_side_effects_like_cpp(
                     event_id,
                 );
                 summary.unspawn_actions += 1;
+            }
+            GameEventLiveUpdateActionLikeCpp::ChangeEquipOrModel { event_id, activate } => {
+                let change_summary = game_event_change_equip_or_model_like_cpp(
+                    manager,
+                    canonical_spawn_metadata,
+                    event_id,
+                    activate,
+                );
+                summary.change_equip_or_model_actions += 1;
+                summary.change_equip_or_model_records_seen +=
+                    change_summary.change_equip_or_model_records_seen;
+                summary.change_equip_or_model_records_applied +=
+                    change_summary.change_equip_or_model_records_applied;
+                summary.change_equip_or_model_missing_event_buckets +=
+                    change_summary.change_equip_or_model_missing_event_buckets;
+                summary.change_equip_or_model_missing_spawn_metadata +=
+                    change_summary.change_equip_or_model_missing_spawn_metadata;
+                summary.change_equip_or_model_missing_runtime_rows +=
+                    change_summary.change_equip_or_model_missing_runtime_rows;
+                summary.change_equip_or_model_maps_matched +=
+                    change_summary.change_equip_or_model_maps_matched;
+                summary.change_equip_or_model_live_creatures_mutated +=
+                    change_summary.change_equip_or_model_live_creatures_mutated;
+                summary.change_equip_or_model_stale_index_or_wrong_kind +=
+                    change_summary.change_equip_or_model_stale_index_or_wrong_kind;
+                summary.change_equip_or_model_model_validation_unavailable +=
+                    change_summary.change_equip_or_model_model_validation_unavailable;
             }
         }
     }
@@ -4437,7 +4555,7 @@ fn spawn_canonical_map_update_loop(
                         );
                         break;
                     };
-                    let Ok(canonical_spawn_metadata) = canonical_spawn_metadata.lock() else {
+                    let Ok(mut canonical_spawn_metadata) = canonical_spawn_metadata.lock() else {
                         tracing::error!(
                             "CanonicalSpawnMetadataLikeCpp mutex poisoned during GameEvent side effects; stopping map update loop"
                         );
@@ -4445,7 +4563,7 @@ fn spawn_canonical_map_update_loop(
                     };
                     consume_game_event_live_update_side_effects_like_cpp(
                         &mut manager,
-                        &canonical_spawn_metadata,
+                        &mut canonical_spawn_metadata,
                         &loaded_grid_creature_respawn_caches,
                         &active_event_ids,
                         &game_event_outcome,
@@ -4470,7 +4588,19 @@ fn spawn_canonical_map_update_loop(
                     side_effect_actions = side_effect_summary.actions.len(),
                     spawn_actions = side_effect_summary.spawn_actions,
                     unspawn_actions = side_effect_summary.unspawn_actions,
-                    "C++ WUPDATE_EVENTS represented timer fired; updated canonical GameEvent metadata and consumed only existing safe GameEventSpawn/GameEventUnspawn map helpers; ConditionMgr world-event rows, DB state writes, announcements, quests/vendors/worldstates/NPC flags/model/equip/SAI/seasonal reset and ForceGameEventUpdate command caller remain pending"
+                    change_equip_or_model_actions =
+                        side_effect_summary.change_equip_or_model_actions,
+                    change_equip_or_model_records_seen =
+                        side_effect_summary.change_equip_or_model_records_seen,
+                    change_equip_or_model_records_applied =
+                        side_effect_summary.change_equip_or_model_records_applied,
+                    change_equip_or_model_maps_matched =
+                        side_effect_summary.change_equip_or_model_maps_matched,
+                    change_equip_or_model_live_creatures_mutated =
+                        side_effect_summary.change_equip_or_model_live_creatures_mutated,
+                    change_equip_or_model_model_validation_unavailable =
+                        side_effect_summary.change_equip_or_model_model_validation_unavailable,
+                    "C++ WUPDATE_EVENTS represented timer fired; updated canonical GameEvent metadata and consumed represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel model/equipment side effects; ConditionMgr world-event rows, DB state writes, announcements, quests/vendors/worldstates/NPC flags/SAI/seasonal reset and ForceGameEventUpdate command caller remain pending"
                 );
             }
 
@@ -5060,7 +5190,8 @@ mod tests {
         build_loaded_grid_creature_respawn_record_like_cpp,
         build_loaded_grid_creature_spawn_group_spawn_record_like_cpp,
         build_loaded_grid_gameobject_respawn_record_like_cpp,
-        canonical_map_update_tick_set_inactive_like_cpp, game_event_live_update_actions_like_cpp,
+        canonical_map_update_tick_set_inactive_like_cpp, game_event_change_equip_or_model_like_cpp,
+        game_event_live_update_actions_like_cpp,
         game_event_spawn_creatures_and_gameobjects_for_event_like_cpp,
         game_event_spawn_for_event_like_cpp, game_event_spawn_pools_for_event_like_cpp,
         game_event_spawn_pools_like_cpp,
@@ -7691,10 +7822,34 @@ mmap.enablePathFinding = 0
                 GameEventLiveUpdateActionLikeCpp::Spawn(-1),
                 GameEventLiveUpdateActionLikeCpp::Spawn(2),
                 GameEventLiveUpdateActionLikeCpp::Unspawn(-2),
+                GameEventLiveUpdateActionLikeCpp::ChangeEquipOrModel {
+                    event_id: 2,
+                    activate: true,
+                },
                 GameEventLiveUpdateActionLikeCpp::Unspawn(3),
                 GameEventLiveUpdateActionLikeCpp::Spawn(-3),
+                GameEventLiveUpdateActionLikeCpp::ChangeEquipOrModel {
+                    event_id: 3,
+                    activate: false,
+                },
             ]
         );
+    }
+
+    #[test]
+    fn game_event_change_equip_or_model_missing_bucket_counted_once_like_cpp() {
+        let mut manager = wow_map::MapManager::default();
+        let mut metadata = spawn_store_loader::CanonicalSpawnMetadataLikeCpp::new(
+            SpawnStore::new(),
+            BTreeMap::new(),
+        );
+
+        let summary =
+            game_event_change_equip_or_model_like_cpp(&mut manager, &mut metadata, 7, true);
+
+        assert_eq!(summary.change_equip_or_model_missing_event_buckets, 1);
+        assert_eq!(summary.change_equip_or_model_records_seen, 0);
+        assert_eq!(summary.change_equip_or_model_records_applied, 0);
     }
 
     #[test]
