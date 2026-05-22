@@ -5,6 +5,12 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.508** GameObject `SendGameObjectDespawn` represented session 2D range parity.
+-  Status: represented-complete only for the #507 session-side visual-despawn range correction from 3D to C++ `MessageDistDeliverer` default 2D distance; review `APROBADO`; CI `CI_OK`; no commit/push/install/restart yet.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:1766-1771`; `/home/server/woltk-trinity-legacy/src/server/game/Entities/Object/Object.cpp:1746-1756`; `/home/server/woltk-trinity-legacy/src/server/game/Grids/Notifiers/GridNotifiers.h:156-192`; `/home/server/woltk-trinity-legacy/src/server/game/Grids/Notifiers/GridNotifiersImpl.h:37-60`.
+  Rust targets: `crates/wow-world/src/session.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: `WorldSession::send_represented_gameobject_visual_despawn_from_last_update_like_cpp` keeps the existing same-map typed Player/GameObject, in-world, `client_visible_guids_like_cpp` and duplicate-delivery guards, but gates visual despawn with `Position::is_within_dist_2d` to represent `SendMessageToSetInRange`/`MessageDistDeliverer(required3dDist=false)`. Vertical Z-only separation no longer suppresses represented `GameObjectDespawn`; XY out-of-range remains a no-send path. Checks: `cargo fmt --check`; `cargo test -p wow-world gameobject_visual_despawn --lib -- --nocapture` (3 passed); `PROTOC=/home/cdmonio/.local/protoc/bin/protoc cargo check -p world-server`; `git diff --check`; TSV 9-column check. Boundaries remain no full `SendMessageToSet`, phase filtering, shared-vision/m_seer fanout, exact cell traversal, ObjectAccessor/global fanout, DB/PoolMgr/scripts/AI, or manual-test-ready GameObject runtime.
+
 - [x] **#NEXT.R8.ENTITIES.507** GameObject `SendGameObjectDespawn` represented session consumption.
 -  Status: represented-complete only for session-side consumption of map-owned GameObject visual-despawn GUID evidence; review `APROBADO`; CI `CI_OK`; no full `SendMessageToSet`, exact cell traversal, ObjectAccessor/global fanout, scripts/AI/DB/PoolMgr, respawn/despawn runtime, or manual-test-ready GameObject runtime claim.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:1639-1648`; `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:1766-1771`.

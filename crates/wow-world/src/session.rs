@@ -14665,9 +14665,12 @@ impl WorldSession {
     /// C++ source-of-truth: `GameObject::Update` in `GO_JUST_DEACTIVATED` calls
     /// `SendGameObjectDespawn()` when `IsDespawnAtAction()` or anim progress is
     /// non-zero; `SendGameObjectDespawn()` sends `SMSG_GAMEOBJECT_DESPAWN` to the
-    /// visible set. This represented seam consumes only GUIDs from the canonical
-    /// `ManagedMap` update summary and gates by same-map typed Player/GameObject,
-    /// in-world state, visibility range and session-local `HaveAtClient`.
+    /// visible set. `SendMessageToSetInRange` constructs `MessageDistDeliverer`
+    /// with `required3dDist=false` by default, so this packet's visibility range
+    /// gate is 2D (`GetExactDist2dSq`) rather than 3D. This represented seam
+    /// consumes only GUIDs from the canonical `ManagedMap` update summary and
+    /// gates by same-map typed Player/GameObject, in-world state, 2D visibility
+    /// range and session-local `HaveAtClient`.
     pub(crate) fn send_represented_gameobject_visual_despawn_from_last_update_like_cpp(
         &mut self,
     ) -> usize {
@@ -14707,7 +14710,7 @@ impl WorldSession {
                                 && gameobject
                                     .world()
                                     .position()
-                                    .is_within_dist(&player_position, visibility_range)
+                                    .is_within_dist_2d(&player_position, visibility_range)
                         })
                 })
                 .collect::<Vec<_>>();
@@ -18483,6 +18486,69 @@ mod tests {
             0
         );
         assert_eq!(drain_server_opcodes(&send_rx), Vec::<ServerOpcodes>::new());
+    }
+
+    #[tokio::test]
+    async fn gameobject_visual_despawn_uses_2d_visibility_range_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = Arc::new(std::sync::Mutex::new(wow_map::MapManager::new(60_000, 1)));
+        let player_guid = ObjectGuid::create_player(1, 50_513);
+        let gameobject_guid = test_gameobject_guid(605_054, 50_514);
+        let player_position = Position::new(10.0, 20.0, 30.0, 0.0);
+        let gameobject_position = Position::new(11.0, 21.0, 10_000.0, 0.0);
+
+        configure_dynamic_object_values_snapshot_session_like_cpp(
+            &mut session,
+            &canonical,
+            player_guid,
+            571,
+            7,
+        );
+        let visibility_range = canonical
+            .lock()
+            .unwrap()
+            .find_map(571, 7)
+            .unwrap()
+            .map()
+            .visibility_range();
+        assert!(!gameobject_position.is_within_dist(&player_position, visibility_range));
+        assert!(gameobject_position.is_within_dist_2d(&player_position, visibility_range));
+        add_canonical_visual_despawn_gameobject_like_cpp(
+            &canonical,
+            gameobject_guid,
+            605_054,
+            5_050_514,
+            gameobject_position,
+            571,
+            7,
+        );
+        assert_eq!(canonical.lock().unwrap().update(60_000), Some(60_000));
+        assert_eq!(
+            canonical
+                .lock()
+                .unwrap()
+                .find_map(571, 7)
+                .unwrap()
+                .last_game_objects_update_summary()
+                .generic_visual_despawn_guids
+                .as_slice(),
+            &[gameobject_guid]
+        );
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+
+        session.process_pending().await;
+
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![ServerOpcodes::GameObjectDespawn]
+        );
+        assert!(
+            session
+                .client_visible_guids_like_cpp
+                .contains(&gameobject_guid)
+        );
     }
 
     #[tokio::test]
