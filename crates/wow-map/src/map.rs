@@ -23,9 +23,10 @@ use crate::personal_phase::{
     MultiPersonalPhaseTracker, PersonalPhaseUnregisterTrackedObjectOutcomeLikeCpp, PhaseShift,
 };
 use crate::pool::{
-    PoolInitForMapPlanLikeCpp, PoolMemberKindLikeCpp, PoolMgrLikeCpp, PoolMgrPlanErrorLikeCpp,
-    PoolObjectLikeCpp, PoolSpawnObjectActionLikeCpp, PoolSpawnObjectPlanLikeCpp,
-    PoolTypedSpawnPlanLikeCpp,
+    PoolDespawnObjectPlanLikeCpp, PoolDespawnPoolPlanLikeCpp, PoolInitForMapPlanLikeCpp,
+    PoolMemberKindLikeCpp, PoolMgrLikeCpp, PoolMgrPlanErrorLikeCpp, PoolObjectLikeCpp,
+    PoolSpawnObjectActionLikeCpp, PoolSpawnObjectPlanLikeCpp, PoolSpawnPoolPlanLikeCpp,
+    PoolTypedDespawnPlanLikeCpp, PoolTypedSpawnPlanLikeCpp,
 };
 use crate::spawn::{
     AddRespawnInfoOutcomeLikeCpp, CheckRespawnOutcomeLikeCpp,
@@ -2812,6 +2813,91 @@ where
         }
     }
 
+    fn apply_pool_spawn_pool_plan_loaded_grid_records_like_cpp<L>(
+        &mut self,
+        plan: &PoolSpawnPoolPlanLikeCpp,
+        spawn_store: &SpawnStore,
+        summary: &mut ProcessRespawnsSafeSideEffectsSummaryLikeCpp,
+        mut load_record: Option<&mut L>,
+    ) where
+        L: FnMut(&mut Self, SpawnObjectType, SpawnId) -> Option<LoadedGridRespawnRecordsLikeCpp>,
+    {
+        for subplan in &plan.subplans {
+            self.apply_pool_typed_spawn_plan_loaded_grid_records_like_cpp(
+                subplan,
+                spawn_store,
+                summary,
+                load_record.as_deref_mut(),
+            );
+        }
+    }
+
+    fn apply_pool_despawn_pool_plan_safe_map_actions_like_cpp(
+        &mut self,
+        plan: &PoolDespawnPoolPlanLikeCpp,
+        summary: &mut ProcessRespawnsSafeSideEffectsSummaryLikeCpp,
+    ) {
+        for subplan in &plan.subplans {
+            self.apply_pool_typed_despawn_plan_safe_map_actions_like_cpp(subplan, summary);
+        }
+    }
+
+    fn apply_pool_typed_despawn_plan_safe_map_actions_like_cpp(
+        &mut self,
+        plan: &PoolTypedDespawnPlanLikeCpp,
+        summary: &mut ProcessRespawnsSafeSideEffectsSummaryLikeCpp,
+    ) {
+        if let Some(object_plan) = plan.object_plan.as_ref() {
+            self.apply_pool_despawn_object_plan_safe_map_actions_like_cpp(object_plan, summary);
+        }
+    }
+
+    fn apply_pool_despawn_object_plan_safe_map_actions_like_cpp(
+        &mut self,
+        plan: &PoolDespawnObjectPlanLikeCpp,
+        summary: &mut ProcessRespawnsSafeSideEffectsSummaryLikeCpp,
+    ) {
+        let mut child_pool_plans = plan.child_pool_plans.iter();
+        for action in &plan.actions {
+            match *action {
+                PoolSpawnObjectActionLikeCpp::DespawnOne {
+                    kind: PoolMemberKindLikeCpp::Pool,
+                    ..
+                } => {
+                    if let Some(child_plan) = child_pool_plans.next() {
+                        self.apply_pool_despawn_pool_plan_safe_map_actions_like_cpp(
+                            child_plan, summary,
+                        );
+                    } else {
+                        summary.pool_unsupported_action_kind += 1;
+                    }
+                }
+                other => match other {
+                    PoolSpawnObjectActionLikeCpp::DespawnOne { kind, guid } => {
+                        self.apply_pool_despawn_one_safe_map_action_like_cpp(kind, guid, summary);
+                    }
+                    PoolSpawnObjectActionLikeCpp::RemoveRespawnTime { kind, guid } => {
+                        let Some(object_type) =
+                            pool_member_kind_to_spawn_object_type_like_cpp(kind)
+                        else {
+                            return;
+                        };
+                        if self
+                            .remove_respawn_time_like_cpp(object_type, guid as SpawnId)
+                            .is_some()
+                        {
+                            summary.pool_respawn_timers_removed += 1;
+                        } else {
+                            summary.pool_respawn_timers_missing += 1;
+                        }
+                    }
+                    PoolSpawnObjectActionLikeCpp::SpawnOne { .. }
+                    | PoolSpawnObjectActionLikeCpp::RespawnOne { .. } => {}
+                },
+            }
+        }
+    }
+
     fn apply_pool_spawn_object_plan_loaded_grid_records_like_cpp<L>(
         &mut self,
         plan: &PoolSpawnObjectPlanLikeCpp,
@@ -2821,13 +2907,52 @@ where
     ) where
         L: FnMut(&mut Self, SpawnObjectType, SpawnId) -> Option<LoadedGridRespawnRecordsLikeCpp>,
     {
+        let mut child_spawn_plans = plan.child_pool_spawn_plans.iter();
+        let mut child_despawn_plans = plan.child_pool_despawn_plans.iter();
         for action in &plan.actions {
-            self.apply_pool_spawn_object_action_loaded_grid_records_like_cpp(
-                *action,
-                spawn_store,
-                summary,
-                load_record.as_deref_mut(),
-            );
+            match *action {
+                PoolSpawnObjectActionLikeCpp::SpawnOne {
+                    kind: PoolMemberKindLikeCpp::Pool,
+                    ..
+                } => {
+                    if let Some(child_plan) = child_spawn_plans.next() {
+                        self.apply_pool_spawn_pool_plan_loaded_grid_records_like_cpp(
+                            child_plan,
+                            spawn_store,
+                            summary,
+                            load_record.as_deref_mut(),
+                        );
+                    } else {
+                        summary.pool_unsupported_action_kind += 1;
+                    }
+                }
+                PoolSpawnObjectActionLikeCpp::DespawnOne {
+                    kind: PoolMemberKindLikeCpp::Pool,
+                    ..
+                } => {
+                    if let Some(child_plan) = child_despawn_plans.next() {
+                        self.apply_pool_despawn_pool_plan_safe_map_actions_like_cpp(
+                            child_plan, summary,
+                        );
+                    } else {
+                        summary.pool_unsupported_action_kind += 1;
+                    }
+                }
+                PoolSpawnObjectActionLikeCpp::RespawnOne {
+                    kind: PoolMemberKindLikeCpp::Pool,
+                    ..
+                }
+                | PoolSpawnObjectActionLikeCpp::RemoveRespawnTime {
+                    kind: PoolMemberKindLikeCpp::Pool,
+                    ..
+                } => {}
+                other => self.apply_pool_spawn_object_action_loaded_grid_records_like_cpp(
+                    other,
+                    spawn_store,
+                    summary,
+                    load_record.as_deref_mut(),
+                ),
+            }
         }
     }
 
@@ -2857,7 +2982,6 @@ where
             }
             PoolSpawnObjectActionLikeCpp::RemoveRespawnTime { kind, guid } => {
                 let Some(object_type) = pool_member_kind_to_spawn_object_type_like_cpp(kind) else {
-                    summary.pool_unsupported_action_kind += 1;
                     return;
                 };
                 if self
@@ -16209,6 +16333,7 @@ mod tests {
                 selected: vec![],
                 despawned_trigger: None,
                 respawned_trigger: true,
+                ..PoolSpawnObjectPlanLikeCpp::default()
             }),
             skip_reason: None,
         };
@@ -16259,6 +16384,7 @@ mod tests {
                 selected: vec![],
                 despawned_trigger: None,
                 respawned_trigger: false,
+                ..PoolSpawnObjectPlanLikeCpp::default()
             }),
             skip_reason: None,
         };
@@ -16316,6 +16442,7 @@ mod tests {
                 selected: vec![],
                 despawned_trigger: None,
                 respawned_trigger: false,
+                ..PoolSpawnObjectPlanLikeCpp::default()
             }),
             skip_reason: None,
         };
@@ -16335,6 +16462,80 @@ mod tests {
                 respawn: false,
             }]
         );
+    }
+
+    #[test]
+    fn process_respawns_pool_spawn_one_pool_applies_real_child_spawn_plan_like_cpp() {
+        let mut map = test_map();
+        let mut store = SpawnStore::new();
+        let active = spawn_group(34, SpawnGroupFlags::NONE);
+        store.add_object_spawn(&spawn_data(SpawnObjectType::Creature, 80, active), |_| {
+            false
+        });
+        map.ensure_grid_loaded(&cell_from_world(0.0, 0.0));
+        let plan = PoolTypedSpawnPlanLikeCpp {
+            kind: PoolMemberKindLikeCpp::Pool,
+            pool_id: 180,
+            trigger_from: 0,
+            max_limit: Some(1),
+            object_plan: Some(PoolSpawnObjectPlanLikeCpp {
+                actions: vec![PoolSpawnObjectActionLikeCpp::SpawnOne {
+                    kind: PoolMemberKindLikeCpp::Pool,
+                    guid: 181,
+                }],
+                selected: vec![],
+                despawned_trigger: None,
+                respawned_trigger: false,
+                child_pool_spawn_plans: vec![PoolSpawnPoolPlanLikeCpp {
+                    pool_id: 181,
+                    subplans: vec![PoolTypedSpawnPlanLikeCpp {
+                        kind: PoolMemberKindLikeCpp::Creature,
+                        pool_id: 181,
+                        trigger_from: 0,
+                        max_limit: Some(1),
+                        object_plan: Some(PoolSpawnObjectPlanLikeCpp {
+                            actions: vec![PoolSpawnObjectActionLikeCpp::SpawnOne {
+                                kind: PoolMemberKindLikeCpp::Creature,
+                                guid: 80,
+                            }],
+                            selected: vec![],
+                            despawned_trigger: None,
+                            respawned_trigger: false,
+                            ..PoolSpawnObjectPlanLikeCpp::default()
+                        }),
+                        skip_reason: None,
+                    }],
+                }],
+                child_pool_despawn_plans: vec![],
+            }),
+            skip_reason: None,
+        };
+        let mut summary = ProcessRespawnsSafeSideEffectsSummaryLikeCpp::default();
+
+        map.apply_pool_typed_spawn_plan_loaded_grid_records_like_cpp(
+            &plan,
+            &store,
+            &mut summary,
+            Some(&mut |_, object_type, spawn_id| {
+                assert_eq!(object_type, SpawnObjectType::Creature);
+                assert_eq!(spawn_id, 80);
+                let mut creature = test_creature_for_spawn(spawn_id, 8001, true);
+                creature
+                    .unit_mut()
+                    .world_mut()
+                    .object_mut()
+                    .remove_from_world();
+                Some(LoadedGridRespawnRecordsLikeCpp::primary_only(
+                    MapObjectRecord::new_creature(creature).unwrap(),
+                ))
+            }),
+        );
+
+        assert_eq!(summary.pool_unsupported_action_kind, 0);
+        assert_eq!(summary.executed_loaded_grid_respawns, 1);
+        assert_eq!(summary.pool_spawn_action_load_plans, vec![]);
+        assert_eq!(map.map_object_count(), 1);
+        assert_eq!(map.creature_spawn_id_store_count_like_cpp(80), 1);
     }
 
     #[test]
