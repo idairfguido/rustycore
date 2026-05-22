@@ -14614,9 +14614,9 @@ impl WorldSession {
                 return 0;
             };
             let map = managed_map.map();
-            let Some(player_position) = map
+            let Some(player_world) = map
                 .get_typed_player(player_guid)
-                .map(|player| player.unit().world().position())
+                .map(|player| player.unit().world().clone())
             else {
                 return 0;
             };
@@ -14631,10 +14631,13 @@ impl WorldSession {
                     guid.is_game_object()
                         && map.get_typed_game_object(*guid).is_some_and(|gameobject| {
                             gameobject.world().object().is_in_world()
-                                && gameobject
-                                    .world()
-                                    .position()
-                                    .is_within_dist(&player_position, visibility_range)
+                                && gameobject.world().is_within_dist(
+                                    &player_world,
+                                    visibility_range,
+                                    true,
+                                    true,
+                                    true,
+                                )
                         })
                 })
                 .collect::<Vec<_>>()
@@ -18589,6 +18592,97 @@ mod tests {
             0
         );
         assert_eq!(drain_server_opcodes(&send_rx), Vec::<ServerOpcodes>::new());
+    }
+
+    #[tokio::test]
+    async fn gameobject_visibility_on_destroy_uses_combat_reach_range_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = Arc::new(std::sync::Mutex::new(wow_map::MapManager::new(60_000, 1)));
+        let player_guid = ObjectGuid::create_player(1, 50_559);
+        let gameobject_guid = test_gameobject_guid(605_059, 50_560);
+
+        configure_dynamic_object_values_snapshot_session_like_cpp(
+            &mut session,
+            &canonical,
+            player_guid,
+            571,
+            7,
+        );
+        let visibility_range = canonical
+            .lock()
+            .unwrap()
+            .find_map(571, 7)
+            .unwrap()
+            .map()
+            .visibility_range();
+        add_canonical_visibility_on_destroy_gameobject_like_cpp(
+            &canonical,
+            gameobject_guid,
+            605_059,
+            5_050_560,
+            Position::new(10.0 + visibility_range + 2.0, 20.0, 30.0, 0.0),
+            571,
+            7,
+        );
+        {
+            let mut guard = canonical.lock().unwrap();
+            let map = guard.find_map_mut(571, 7).unwrap().map_mut();
+            map.get_typed_player_mut(player_guid)
+                .unwrap()
+                .unit_mut()
+                .world_mut()
+                .set_combat_reach(2.0);
+            map.get_typed_game_object_mut(gameobject_guid)
+                .unwrap()
+                .world_mut()
+                .set_combat_reach(2.0);
+        }
+        {
+            let guard = canonical.lock().unwrap();
+            let map = guard.find_map(571, 7).unwrap().map();
+            let player_world = map.get_typed_player(player_guid).unwrap().unit().world();
+            let gameobject_world = map.get_typed_game_object(gameobject_guid).unwrap().world();
+
+            assert!(
+                !gameobject_world
+                    .position()
+                    .is_within_dist(&player_world.position(), visibility_range)
+            );
+            assert!(gameobject_world.is_within_dist(
+                player_world,
+                visibility_range,
+                true,
+                true,
+                true
+            ));
+        }
+        assert_eq!(canonical.lock().unwrap().update(60_000), Some(60_000));
+        assert_eq!(
+            canonical
+                .lock()
+                .unwrap()
+                .find_map(571, 7)
+                .unwrap()
+                .last_game_objects_update_summary()
+                .generic_visibility_on_destroy_guids
+                .as_slice(),
+            &[gameobject_guid]
+        );
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+
+        session.process_pending().await;
+
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![ServerOpcodes::UpdateObject]
+        );
+        assert!(
+            !session
+                .client_visible_guids_like_cpp
+                .contains(&gameobject_guid)
+        );
     }
 
     #[tokio::test]
