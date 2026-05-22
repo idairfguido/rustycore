@@ -14667,10 +14667,17 @@ impl WorldSession {
     /// non-zero; `SendGameObjectDespawn()` sends `SMSG_GAMEOBJECT_DESPAWN` to the
     /// visible set. `SendMessageToSetInRange` constructs `MessageDistDeliverer`
     /// with `required3dDist=false` by default, so this packet's visibility range
-    /// gate is 2D (`GetExactDist2dSq`) rather than 3D. This represented seam
-    /// consumes only GUIDs from the canonical `ManagedMap` update summary and
-    /// gates by same-map typed Player/GameObject, in-world state, 2D visibility
-    /// range and session-local `HaveAtClient`.
+    /// gate is 2D (`GetExactDist2dSq`) rather than 3D. `MessageDistDeliverer`
+    /// filters each target by `Player::InSamePhase(src->GetPhaseShift())` before
+    /// range and `HaveAtClient`; this represented seam consumes the canonical
+    /// typed Player phase and canonical typed GameObject phase, with only the
+    /// existing represented GameObject phase map as an explicit legacy DB-spawn
+    /// phase fallback matching create-visibility seams. It consumes only GUIDs
+    /// from the canonical `ManagedMap` update summary and gates by same-map typed
+    /// Player/GameObject, GameObject in-world state, same-phase visibility, 2D
+    /// visibility range and session-local `HaveAtClient`; it does not claim
+    /// shared-vision/m_seer fanout, exact cell traversal or full
+    /// `SendMessageToSet` parity.
     pub(crate) fn send_represented_gameobject_visual_despawn_from_last_update_like_cpp(
         &mut self,
     ) -> usize {
@@ -14691,13 +14698,13 @@ impl WorldSession {
                 return 0;
             };
             let map = managed_map.map();
-            let Some(player_position) = map
-                .get_typed_player(player_guid)
-                .map(|player| player.unit().world().position())
-            else {
+            let Some(player) = map.get_typed_player(player_guid) else {
                 return 0;
             };
+            let player_position = player.unit().world().position();
+            let player_phase_shift = player.unit().world().phase_shift().clone();
             let visibility_range = map.visibility_range();
+            let represented_gameobject_phase_shifts = &self.represented_gameobject_phase_shifts;
             let guids = managed_map
                 .last_game_objects_update_summary()
                 .generic_visual_despawn_guids
@@ -14706,7 +14713,11 @@ impl WorldSession {
                 .filter(|guid| {
                     guid.is_game_object()
                         && map.get_typed_game_object(*guid).is_some_and(|gameobject| {
+                            let gameobject_phase_shift = represented_gameobject_phase_shifts
+                                .get(guid)
+                                .unwrap_or_else(|| gameobject.world().phase_shift());
                             gameobject.world().object().is_in_world()
+                                && player_phase_shift.can_see(gameobject_phase_shift)
                                 && gameobject
                                     .world()
                                     .position()
@@ -18540,6 +18551,87 @@ mod tests {
 
         session.process_pending().await;
 
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![ServerOpcodes::GameObjectDespawn]
+        );
+        assert!(
+            session
+                .client_visible_guids_like_cpp
+                .contains(&gameobject_guid)
+        );
+    }
+
+    #[tokio::test]
+    async fn gameobject_visual_despawn_incompatible_phase_keeps_client_visible_guid_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = Arc::new(std::sync::Mutex::new(wow_map::MapManager::new(60_000, 1)));
+        let player_guid = ObjectGuid::create_player(1, 50_515);
+        let gameobject_guid = test_gameobject_guid(605_055, 50_516);
+
+        configure_dynamic_object_values_snapshot_session_like_cpp(
+            &mut session,
+            &canonical,
+            player_guid,
+            571,
+            7,
+        );
+        add_canonical_visual_despawn_gameobject_like_cpp(
+            &canonical,
+            gameobject_guid,
+            605_055,
+            5_050_516,
+            Position::new(11.0, 21.0, 31.0, 0.0),
+            571,
+            7,
+        );
+        {
+            let mut guard = canonical.lock().unwrap();
+            *guard
+                .find_map_mut(571, 7)
+                .unwrap()
+                .map_mut()
+                .get_typed_player_mut(player_guid)
+                .unwrap()
+                .unit_mut()
+                .world_mut()
+                .phase_shift_mut() = PhaseShift::from_phases([10]);
+        }
+        assert_eq!(canonical.lock().unwrap().update(60_000), Some(60_000));
+        assert_eq!(
+            canonical
+                .lock()
+                .unwrap()
+                .find_map(571, 7)
+                .unwrap()
+                .last_game_objects_update_summary()
+                .generic_visual_despawn_guids
+                .as_slice(),
+            &[gameobject_guid]
+        );
+        session
+            .represented_gameobject_phase_shifts
+            .insert(gameobject_guid, PhaseShift::from_phases([20]));
+        session
+            .client_visible_guids_like_cpp
+            .insert(gameobject_guid);
+
+        session.process_pending().await;
+
+        assert_eq!(drain_server_opcodes(&send_rx), Vec::<ServerOpcodes>::new());
+        assert!(
+            session
+                .client_visible_guids_like_cpp
+                .contains(&gameobject_guid)
+        );
+
+        session
+            .represented_gameobject_phase_shifts
+            .insert(gameobject_guid, PhaseShift::from_phases([10]));
+        assert_eq!(
+            session.send_represented_gameobject_visual_despawn_from_last_update_like_cpp(),
+            1
+        );
         assert_eq!(
             drain_server_opcodes(&send_rx),
             vec![ServerOpcodes::GameObjectDespawn]
