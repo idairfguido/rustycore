@@ -7254,17 +7254,29 @@ where
     /// C++-shaped `Map::UpdateSpawnGroupConditions` bridge over pre-resolved
     /// templates that executes the complete represented `SetSpawnGroupInactive`
     /// branch, the map-local `SpawnGroupDespawn(..., true)` condition-failure
-    /// branch, and the safe map-local `SpawnGroupSpawn` planning branch. Entity
-    /// creation remains blocked/planned by `SpawnGroupSpawnOutcomeLikeCpp`.
-    pub fn apply_update_spawn_group_conditions_represented_like_cpp<'a, I, F>(
+    /// branch, and the safe map-local `SpawnGroupSpawn` loaded-grid branch with
+    /// caller-supplied records.
+    ///
+    /// Ownership remains split like `spawn_group_spawn_loaded_grid_records_like_cpp`:
+    /// this map owns active-state/timer/live/grid/difficulty/AddToMap decisions;
+    /// the caller owns DB/template/runtime composition and may return no record to
+    /// preserve the pre-loader planned/blocked outcome.
+    pub fn apply_update_spawn_group_conditions_loaded_grid_records_like_cpp<'a, I, F, L>(
         &mut self,
         groups: I,
         spawn_store: &SpawnStore,
         meets_conditions: F,
+        mut load_record: L,
     ) -> Vec<SpawnGroupConditionUpdateOutcomeLikeCpp>
     where
         I: IntoIterator<Item = &'a SpawnGroupTemplateData>,
         F: FnMut(&SpawnGroupTemplateData) -> bool,
+        L: FnMut(
+            &mut Self,
+            SpawnObjectType,
+            SpawnId,
+            bool,
+        ) -> Option<LoadedGridRespawnRecordsLikeCpp>,
     {
         let groups = groups.into_iter().collect::<Vec<_>>();
         let planned_actions = self
@@ -7294,11 +7306,12 @@ where
                         ignore_respawn,
                         force,
                     } => {
-                        spawn_outcome = Some(self.spawn_group_spawn_like_cpp(
+                        spawn_outcome = Some(self.spawn_group_spawn_loaded_grid_records_like_cpp(
                             Some(group),
                             ignore_respawn,
                             force,
                             spawn_store,
+                            &mut load_record,
                         ));
                     }
                     SpawnGroupConditionActionLikeCpp::Noop => {}
@@ -7313,6 +7326,27 @@ where
                 }
             })
             .collect()
+    }
+
+    /// Compatibility wrapper preserving the pre-loader `UpdateSpawnGroupConditions`
+    /// seam: loaded-grid Creature/GameObject spawn attempts are planned and counted
+    /// as blocked, but no DB-backed records are fabricated or inserted.
+    pub fn apply_update_spawn_group_conditions_represented_like_cpp<'a, I, F>(
+        &mut self,
+        groups: I,
+        spawn_store: &SpawnStore,
+        meets_conditions: F,
+    ) -> Vec<SpawnGroupConditionUpdateOutcomeLikeCpp>
+    where
+        I: IntoIterator<Item = &'a SpawnGroupTemplateData>,
+        F: FnMut(&SpawnGroupTemplateData) -> bool,
+    {
+        self.apply_update_spawn_group_conditions_loaded_grid_records_like_cpp(
+            groups,
+            spawn_store,
+            meets_conditions,
+            |_map, _object_type, _spawn_id, _force| None,
+        )
     }
 
     /// Legacy wrapper preserving the pre-#391 SetInactive-only seam for focused
@@ -17677,6 +17711,58 @@ mod tests {
             }]
         );
         assert_eq!(map.map_object_count(), 0);
+        assert!(map.is_spawn_group_active_like_cpp(Some(&group)));
+    }
+
+    #[test]
+    fn update_spawn_group_conditions_spawn_group_spawn_loaded_grid_loader_some_inserts_primary_record_like_cpp()
+     {
+        let group = spawn_group(393, SpawnGroupFlags::NONE);
+        let (group, store) = spawn_group_store(
+            group,
+            vec![spawn_data(
+                SpawnObjectType::GameObject,
+                31,
+                SpawnGroupTemplateData::default_group(),
+            )],
+        );
+        let mut map = test_map();
+        map.set_spawn_group_inactive_like_cpp(Some(&group));
+        map.load_grid(0.0, 0.0);
+        let mut calls = Vec::new();
+
+        let outcomes = map.apply_update_spawn_group_conditions_loaded_grid_records_like_cpp(
+            [&group],
+            &store,
+            |_| true,
+            |_map, object_type, spawn_id, force| {
+                calls.push((object_type, spawn_id, force));
+                Some(LoadedGridRespawnRecordsLikeCpp::primary_only(
+                    MapObjectRecord::new_game_object(test_gameobject_for_spawn(spawn_id, 31))
+                        .unwrap(),
+                ))
+            },
+        );
+
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            outcomes[0].action,
+            SpawnGroupConditionActionLikeCpp::spawn_group_spawn_default()
+        );
+        assert_eq!(outcomes[0].applied_change, None);
+        assert_eq!(outcomes[0].despawn_outcome, None);
+        let spawn = outcomes[0].spawn_outcome.as_ref().expect("spawn executed");
+        assert_eq!(calls, vec![(SpawnObjectType::GameObject, 31, false)]);
+        assert_eq!(
+            spawn.applied_active_change,
+            Some(SpawnGroupActiveChange::ClearedToggle)
+        );
+        assert_eq!(spawn.load_plans.len(), 1);
+        assert_eq!(spawn.executed_loaded_grid_spawns, 1);
+        assert_eq!(spawn.blocked_loaded_grid_spawn_loads, 0);
+        assert_eq!(spawn.blocked_loaded_grid_spawn_add_to_map, 0);
+        assert_eq!(map.map_object_count(), 1);
+        assert_eq!(map.gameobject_spawn_id_store_count_like_cpp(31), 1);
         assert!(map.is_spawn_group_active_like_cpp(Some(&group)));
     }
 

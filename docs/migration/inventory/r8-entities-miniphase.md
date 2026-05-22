@@ -5,6 +5,12 @@
 
 ## Closed Tasks
 
+- [x] **#NEXT.R8.ENTITIES.524** `UpdateSpawnGroupConditions` consumes loaded-grid `SpawnGroupSpawn` caller loader.
+  Status: represented-complete only for the bounded live `world-server` condition-update caller path: C++ `Map::UpdateSpawnGroupConditions()` planned `SpawnGroupSpawn(groupId)` now enters the explicit `wow-map` loaded-grid loader seam and may materialize caller-supplied Creature/GameObject `LoadedGridRespawnRecordsLikeCpp` through map-owned `AddToMap`. Review `APROBADO`; CI `CI_OK`; local commit is this slice closeout. Creature condition loads use no-timer/`respawn_time=0` after the map-owned timer filter, while ProcessRespawns DoRespawn still requires the due timer.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2471-2502`; `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2315-2401`.
+  Rust targets: `crates/wow-map/src/map.rs`, `crates/world-server/src/main.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: `wow-map` preserves the compatibility wrapper as loader `None`, adds a public condition-update helper that accepts a caller loader, and `world-server` reuses existing DB-backed Creature/GameObject builders from canonical spawn metadata/caches under the current map lock. Boundaries: no AreaTrigger loader, no ObjectAccessor/session fanout, no scripts/AI/dynamic tree, no DB persistence beyond existing respawn timer diff side effects, no full live SpawnGroup runtime, and no manual-test-ready claim.
+
 - [x] **#NEXT.R8.ENTITIES.523** Map `SpawnGroupSpawn` loaded-grid caller-supplied loader seam.
   Status: represented-complete for the bounded `wow-map` map-owned `SpawnGroupSpawn` loaded-grid Creature/GameObject execution seam; review `APROBADO`; CI `CI_OK`; local commit is this slice closeout. Source-of-truth remains C++ `Map::SpawnGroupSpawn`: group validation/active-state, respawn timer removal before timer check, live/difficulty/grid filters, then Creature/GameObject DB-backed `LoadFromDB` attempts. Rust now preserves the compatibility planner wrapper while adding an explicit caller loader -> map-owned `AddToMap` direction for typed `LoadedGridRespawnRecordsLikeCpp`; loader `None` remains planned/blocked and AreaTrigger remains unsupported.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Maps/Map.cpp:2315-2395`.

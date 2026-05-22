@@ -7,6 +7,7 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 ## Repository State
 
 - Branch: `develop`
+- Latest product/runtime slice is `#NEXT.R8.ENTITIES.524`: bounded `UpdateSpawnGroupConditions` Spawn branch consumption of the explicit loaded-grid `SpawnGroupSpawn` caller loader. Review `APROBADO`; CI `CI_OK`; local commit is this slice closeout. Scope is represented-complete only for condition-triggered SpawnGroupSpawn caller-loader consumption using existing Creature/GameObject DB-backed builders; Creature condition loads use a no-timer/`respawn_time=0` path after the map-owned timer filter while DoRespawn keeps its due-timer requirement. AreaTrigger loader, full live SpawnGroup runtime, ObjectAccessor/session fanout, scripts/AI/dynamic tree, new DB persistence, and manual-test-ready runtime remain gaps.
 - Latest product/runtime slice is `#NEXT.R8.ENTITIES.523`: bounded `wow-map` `Map::SpawnGroupSpawn` loaded-grid caller-supplied loader seam. Review `APROBADO` and CI `CI_OK`; local commit is this slice closeout. Compatibility wrapper remains planned/blocked, the new explicit loader can return typed `LoadedGridRespawnRecordsLikeCpp` for map-owned `AddToMap`, and AreaTrigger stays unsupported; no push/install/restart.
 - Current branch state before #380 finalization: `develop...origin/develop [ahead 34]` with a clean tree.
 - Current branch state after #382 local commit: `develop...origin/develop [ahead 37]`.
