@@ -14544,6 +14544,9 @@ impl WorldSession {
             let Some(player) = map.get_typed_player(player_guid) else {
                 return 0;
             };
+            if !player.unit().world().object().is_in_world() {
+                return 0;
+            }
             let player_world = player.unit().world();
             let player_phase_shift = player_world.phase_shift().clone();
             let player_position = player_world.position();
@@ -18650,6 +18653,57 @@ mod tests {
         assert_eq!(
             drain_server_opcodes(&send_rx),
             vec![ServerOpcodes::UpdateObject]
+        );
+    }
+
+    #[tokio::test]
+    async fn dynamic_object_values_snapshot_not_in_world_player_no_send_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let canonical = Arc::new(std::sync::Mutex::new(wow_map::MapManager::new(60_000, 1)));
+        let player_guid = ObjectGuid::create_player(1, 50_516);
+        let dynamic_guid = test_dynamic_object_guid(601_516, 50_517);
+
+        configure_dynamic_object_values_snapshot_session_like_cpp(
+            &mut session,
+            &canonical,
+            player_guid,
+            571,
+            7,
+        );
+        add_canonical_test_dynamic_object_on_map(
+            &canonical,
+            dynamic_guid,
+            player_guid,
+            601_516,
+            Position::new(11.0, 21.0, 31.0, 0.0),
+            571,
+            7,
+        );
+        prepare_dynamic_object_values_snapshot_like_cpp(&canonical, 571, 7, dynamic_guid, 38.0);
+        canonical
+            .lock()
+            .unwrap()
+            .find_map_mut(571, 7)
+            .unwrap()
+            .map_mut()
+            .get_typed_player_mut(player_guid)
+            .unwrap()
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        session.client_visible_guids_like_cpp.insert(dynamic_guid);
+
+        assert_eq!(
+            session.send_represented_dynamic_object_values_updates_from_last_map_send_object_updates_like_cpp(),
+            0
+        );
+
+        assert_eq!(drain_server_opcodes(&send_rx), Vec::<ServerOpcodes>::new());
+        assert!(
+            session
+                .client_visible_guids_like_cpp
+                .contains(&dynamic_guid)
         );
     }
 
