@@ -3,7 +3,15 @@
 > Generated: 2026-05-07
 > Rule: every Entities claim is contrasted against `/home/server/woltk-trinity-legacy/src/server/game/Entities/`.
 
+## Pending Review Tasks
+
 ## Closed Tasks
+
+- [x] **#NEXT.R8.ENTITIES.528** PoolMgr `DespawnPool` top-level map-owned safe-action facade.
+  Status: represented-complete only for the bounded `wow-map` facade `Map::despawn_pool_safe_map_actions_like_cpp(...)` over map-owned `SpawnedPoolDataLikeCpp`; review `APROBADO`; CI `CI_OK`; local commit is this slice closeout.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:183-218`; `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:220-257`; `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:259-264`; `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:421-422`; `/home/server/woltk-trinity-legacy/src/server/game/Pools/PoolMgr.cpp:813-831`.
+  Rust targets: `crates/wow-map/src/map.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: public `Map` facade delegates direct `PoolMgrLikeCpp::despawn_pool_plan_like_cpp(&mut Map.pool_data, pool_id, always_delete_respawn_time)` then applies existing safe map-local Creature/GameObject removals and represented respawn-timer deletions. Tests cover top-level live Creature/GameObject removal, non-spawned Creature/GameObject timer deletion with Pool no-op, and parent-to-child Pool recursion. Boundaries: no DB/template/live record fabrication, no AreaTrigger creation, no ObjectAccessor/session fanout, no scripts/AI/dynamic-tree/collision, no broader DB save-delete runtime, no push/install/restart, and no manual-test-ready PoolMgr claim.
 
 - [x] **#NEXT.R8.ENTITIES.527** PoolMgr child-pool recursive `Spawn1Object`/`Despawn1Object` consumption seam.
   Status: represented-complete only for bounded `wow-map` recursive child-pool plan/effect consumption inside existing PoolMgr seams. Source-of-truth: C++ `PoolGroup<Pool>::Spawn1Object` recurses to `SpawnPool(child)`, `PoolGroup<Pool>::ReSpawn1Object` is no-op, `PoolGroup<Pool>::Despawn1Object` recurses to `DespawnPool(child, alwaysDeleteRespawnTime)`, and Pool respawn-time DB removal is no-op. Review `APROBADO`; CI `CI_OK`; local commit is this slice closeout.

@@ -3618,6 +3618,30 @@ where
         &mut self.pool_data
     }
 
+    /// Map-owned facade for a direct C++ `PoolMgr::DespawnPool(spawns, pool_id,
+    /// alwaysDeleteRespawnTime)` call.
+    ///
+    /// Ownership stays one-way: `PoolMgrLikeCpp` plans and mutates only this
+    /// map's canonical `SpawnedPoolDataLikeCpp`; `Map` then applies only safe
+    /// map-local Creature/GameObject removal and respawn-timer deletion actions
+    /// already represented by the plan. It does not fabricate live records,
+    /// persist DB state, or fan out packets/scripts/AI.
+    pub fn despawn_pool_safe_map_actions_like_cpp(
+        &mut self,
+        pool_mgr: &PoolMgrLikeCpp,
+        pool_id: u32,
+        always_delete_respawn_time: bool,
+    ) -> Result<ProcessRespawnsSafeSideEffectsSummaryLikeCpp, PoolMgrPlanErrorLikeCpp> {
+        let plan = pool_mgr.despawn_pool_plan_like_cpp(
+            &mut self.pool_data,
+            pool_id,
+            always_delete_respawn_time,
+        )?;
+        let mut summary = ProcessRespawnsSafeSideEffectsSummaryLikeCpp::default();
+        self.apply_pool_despawn_pool_plan_safe_map_actions_like_cpp(&plan, &mut summary);
+        Ok(summary)
+    }
+
     /// C++ `Map` constructor calls `sPoolMgr->InitPoolsForMap(this)` before
     /// startup respawn and spawn-group initialization. This represented seam
     /// applies deterministic autospawn `SpawnPool` plans into the map-owned
@@ -16536,6 +16560,182 @@ mod tests {
         assert_eq!(summary.pool_spawn_action_load_plans, vec![]);
         assert_eq!(map.map_object_count(), 1);
         assert_eq!(map.creature_spawn_id_store_count_like_cpp(80), 1);
+    }
+
+    #[test]
+    fn despawn_pool_facade_removes_live_creature_and_gameobject_from_map_owned_state_like_cpp() {
+        let mut map = test_map();
+        map.insert_map_object_record(
+            MapObjectRecord::new_creature(test_creature_for_spawn(528101, 52810101, true)).unwrap(),
+        )
+        .unwrap();
+        map.insert_map_object_record(
+            MapObjectRecord::new_game_object(test_gameobject_for_spawn(528102, 52810201)).unwrap(),
+        )
+        .unwrap();
+        map.pool_data_mut_like_cpp()
+            .add_spawn_like_cpp(SpawnObjectType::Creature, 528101, 5281)
+            .expect("test creature pool state");
+        map.pool_data_mut_like_cpp()
+            .add_spawn_like_cpp(SpawnObjectType::GameObject, 528102, 5281)
+            .expect("test gameobject pool state");
+        let mut pool_mgr = PoolMgrLikeCpp::new();
+        let mut creature_group =
+            PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Creature, 5281);
+        creature_group.add_entry_like_cpp(PoolObjectLikeCpp::new(528101, 0.0), 1);
+        pool_mgr
+            .insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Creature, 5281, creature_group)
+            .expect("test creature pool group");
+        let mut gameobject_group =
+            PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::GameObject, 5281);
+        gameobject_group.add_entry_like_cpp(PoolObjectLikeCpp::new(528102, 0.0), 1);
+        pool_mgr
+            .insert_or_replace_group_like_cpp(
+                PoolMemberKindLikeCpp::GameObject,
+                5281,
+                gameobject_group,
+            )
+            .expect("test gameobject pool group");
+
+        let summary = map
+            .despawn_pool_safe_map_actions_like_cpp(&pool_mgr, 5281, false)
+            .expect("despawn pool plan");
+
+        assert_eq!(summary.pool_objects_removed, 2);
+        assert_eq!(summary.pool_respawn_timers_removed, 0);
+        assert_eq!(summary.pool_unsupported_action_kind, 0);
+        assert_eq!(map.map_object_count(), 0);
+        assert_eq!(map.creature_spawn_id_store_count_like_cpp(528101), 0);
+        assert_eq!(map.gameobject_spawn_id_store_count_like_cpp(528102), 0);
+        assert!(
+            !map.pool_data_like_cpp()
+                .is_spawned_creature_like_cpp(528101)
+        );
+        assert!(
+            !map.pool_data_like_cpp()
+                .is_spawned_gameobject_like_cpp(528102)
+        );
+        assert_eq!(
+            map.pool_data_like_cpp().get_spawned_objects_like_cpp(5281),
+            0
+        );
+    }
+
+    #[test]
+    fn despawn_pool_facade_always_delete_removes_non_spawned_creature_gameobject_timers_not_pool_like_cpp()
+     {
+        let mut map = test_map();
+        map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::Creature, 528201, 200));
+        map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::GameObject, 528202, 200));
+        let mut pool_mgr = PoolMgrLikeCpp::new();
+        let mut creature_group =
+            PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Creature, 5282);
+        creature_group.add_entry_like_cpp(PoolObjectLikeCpp::new(528201, 0.0), 1);
+        pool_mgr
+            .insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Creature, 5282, creature_group)
+            .expect("test creature pool group");
+        let mut gameobject_group =
+            PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::GameObject, 5282);
+        gameobject_group.add_entry_like_cpp(PoolObjectLikeCpp::new(528202, 0.0), 1);
+        pool_mgr
+            .insert_or_replace_group_like_cpp(
+                PoolMemberKindLikeCpp::GameObject,
+                5282,
+                gameobject_group,
+            )
+            .expect("test gameobject pool group");
+        let mut pool_group = PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Pool, 5282);
+        pool_group.add_entry_like_cpp(PoolObjectLikeCpp::new(5283, 0.0), 1);
+        pool_mgr
+            .insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Pool, 5282, pool_group)
+            .expect("test child-pool relation group");
+
+        let summary = map
+            .despawn_pool_safe_map_actions_like_cpp(&pool_mgr, 5282, true)
+            .expect("despawn pool plan");
+
+        assert_eq!(summary.pool_respawn_timers_removed, 2);
+        assert_eq!(summary.pool_respawn_timers_missing, 0);
+        assert_eq!(summary.pool_objects_removed, 0);
+        assert_eq!(summary.pool_unsupported_action_kind, 0);
+        assert_eq!(
+            map.get_respawn_time_like_cpp(SpawnObjectType::Creature, 528201),
+            0
+        );
+        assert_eq!(
+            map.get_respawn_time_like_cpp(SpawnObjectType::GameObject, 528202),
+            0
+        );
+    }
+
+    #[test]
+    fn despawn_pool_facade_consumes_child_pool_recursion_without_pool_timer_removal_like_cpp() {
+        let mut map = test_map();
+        map.insert_map_object_record(
+            MapObjectRecord::new_creature(test_creature_for_spawn(528401, 52840101, true)).unwrap(),
+        )
+        .unwrap();
+        map.add_respawn_info_like_cpp(respawn_info(SpawnObjectType::GameObject, 528402, 250));
+        map.pool_data_mut_like_cpp()
+            .add_pool_spawn_like_cpp(5284, 5280);
+        map.pool_data_mut_like_cpp()
+            .add_spawn_like_cpp(SpawnObjectType::Creature, 528401, 5284)
+            .expect("test child creature pool state");
+        let mut pool_mgr = PoolMgrLikeCpp::new();
+        let mut parent_pool_group =
+            PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Pool, 5280);
+        parent_pool_group.add_entry_like_cpp(PoolObjectLikeCpp::new(5284, 0.0), 1);
+        pool_mgr
+            .insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Pool, 5280, parent_pool_group)
+            .expect("test parent pool group");
+        let mut child_creature_group =
+            PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::Creature, 5284);
+        child_creature_group.add_entry_like_cpp(PoolObjectLikeCpp::new(528401, 0.0), 1);
+        pool_mgr
+            .insert_or_replace_group_like_cpp(
+                PoolMemberKindLikeCpp::Creature,
+                5284,
+                child_creature_group,
+            )
+            .expect("test child creature group");
+        let mut child_gameobject_group =
+            PoolGroupLikeCpp::with_pool_id(PoolMemberKindLikeCpp::GameObject, 5284);
+        child_gameobject_group.add_entry_like_cpp(PoolObjectLikeCpp::new(528402, 0.0), 1);
+        pool_mgr
+            .insert_or_replace_group_like_cpp(
+                PoolMemberKindLikeCpp::GameObject,
+                5284,
+                child_gameobject_group,
+            )
+            .expect("test child gameobject group");
+
+        let summary = map
+            .despawn_pool_safe_map_actions_like_cpp(&pool_mgr, 5280, true)
+            .expect("despawn parent pool plan");
+
+        assert_eq!(summary.pool_objects_removed, 1);
+        assert_eq!(summary.pool_respawn_timers_removed, 1);
+        assert_eq!(summary.pool_respawn_timers_missing, 0);
+        assert_eq!(summary.pool_unsupported_action_kind, 0);
+        assert_eq!(map.map_object_count(), 0);
+        assert_eq!(map.creature_spawn_id_store_count_like_cpp(528401), 0);
+        assert!(
+            !map.pool_data_like_cpp()
+                .is_spawned_creature_like_cpp(528401)
+        );
+        assert!(!map.pool_data_like_cpp().is_spawned_pool_like_cpp(5284));
+        assert_eq!(
+            map.pool_data_like_cpp().get_spawned_objects_like_cpp(5280),
+            0
+        );
+        assert_eq!(
+            map.pool_data_like_cpp().get_spawned_objects_like_cpp(5284),
+            0
+        );
+        assert_eq!(
+            map.get_respawn_time_like_cpp(SpawnObjectType::GameObject, 528402),
+            0
+        );
     }
 
     #[test]
