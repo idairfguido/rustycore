@@ -285,6 +285,16 @@ impl GameEventSpawnGuidsLikeCpp {
         }
         true
     }
+
+    #[cfg(test)]
+    pub(crate) fn truncate_gameobject_guid_buckets_for_test_like_cpp(
+        mut self,
+        bucket_count: usize,
+    ) -> Self {
+        self.gameobject_guids_by_internal_event_id
+            .truncate(bucket_count);
+        self
+    }
 }
 
 #[derive(Debug, Clone, Default)]
