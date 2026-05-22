@@ -7,7 +7,7 @@ Continuity snapshot for RustyCore C++ -> Rust migration in `/home/server/rustyco
 ## Repository State
 
 - Branch: `develop`
-- Latest product/runtime slice remains `#NEXT.R8.ENTITIES.522`; this handoff has been refreshed by a docs-only post-#522 bookkeeping slice with no product/runtime behavior change and no push/install/restart.
+- Latest product/runtime slice is `#NEXT.R8.ENTITIES.523`: bounded `wow-map` `Map::SpawnGroupSpawn` loaded-grid caller-supplied loader seam. Review `APROBADO` and CI `CI_OK`; local commit is this slice closeout. Compatibility wrapper remains planned/blocked, the new explicit loader can return typed `LoadedGridRespawnRecordsLikeCpp` for map-owned `AddToMap`, and AreaTrigger stays unsupported; no push/install/restart.
 - Current branch state before #380 finalization: `develop...origin/develop [ahead 34]` with a clean tree.
 - Current branch state after #382 local commit: `develop...origin/develop [ahead 37]`.
 - Current branch state after #383 local commit: `develop...origin/develop [ahead 38]`.

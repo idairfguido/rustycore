@@ -1333,6 +1333,18 @@ pub struct SpawnGroupSpawnOutcomeLikeCpp {
     pub skipped_live_object_active: usize,
     pub skipped_difficulty_mismatch: usize,
     pub skipped_unloaded_grid: usize,
+    /// Loaded-grid Creature/GameObject `SpawnGroupSpawn` entries whose explicit
+    /// caller-supplied DB/template loader returned typed records and whose
+    /// primary record was accepted by map-owned `AddToMap`.
+    pub executed_loaded_grid_spawns: usize,
+    /// Loaded-grid Creature/GameObject `SpawnGroupSpawn` entries whose C++
+    /// `LoadFromDB` attempt is represented by a caller loader returning `None`.
+    /// Compatibility wrappers still also increment the legacy type-specific
+    /// blocked counters below.
+    pub blocked_loaded_grid_spawn_loads: usize,
+    /// Loaded-grid Creature/GameObject `SpawnGroupSpawn` entries whose loader
+    /// returned records, but the primary `AddToMap` insertion was rejected.
+    pub blocked_loaded_grid_spawn_add_to_map: usize,
     pub blocked_loaded_grid_creature_loads: usize,
     pub blocked_loaded_grid_gameobject_loads: usize,
     pub unsupported_spawn_types: usize,
@@ -7075,26 +7087,40 @@ where
 
     /// C++ `Map::SpawnGroupSpawn(groupId, ignoreRespawn, force)` represented as a
     /// safe map-local planning/execution seam over map-owned active state,
-    /// respawn timers, and by-spawn live-object indexes.
+    /// respawn timers, by-spawn live-object indexes, and optional caller-supplied
+    /// loaded-grid DB-backed records.
     ///
     /// C++ anchors:
     /// - `Map.cpp:2315-2324` validates existing/non-system group and marks it
     ///   active before iterating metadata.
     /// - `Map.cpp:2326-2353` iterates ObjectMgr spawn metadata, removes respawn
     ///   timers when forced/ignoring, skips active timers and live objects.
-    /// - `Map.cpp:2356-2395` checks difficulty/grid-loaded before calling
-    ///   Creature/GameObject/AreaTrigger `LoadFromDB`.
+    /// - `Map.cpp:2356-2385` checks difficulty/grid-loaded before calling
+    ///   Creature/GameObject `LoadFromDB` and retaining the loaded object.
+    /// - `Map.cpp:2387-2395` also handles AreaTrigger; RustyCore still reports
+    ///   that type unsupported here because there is no live AreaTrigger loader seam.
     ///
-    /// RustyCore deliberately does not create DB-backed entities here. Loaded-grid
-    /// Creature/GameObject work is returned as explicit `load_plans` and counted
-    /// as blocked; AreaTrigger live creation is reported unsupported.
-    pub fn spawn_group_spawn_like_cpp(
+    /// Ownership: `Map` owns active spawn-group state, respawn timers, live indexes,
+    /// and `AddToMap`. The caller owns DB/template/runtime selection and may provide
+    /// typed `LoadedGridRespawnRecordsLikeCpp` records. Synchronization is strictly
+    /// caller loader -> map-owned `AddToMap`; this method never fabricates fallback
+    /// records and never reaches into DB/world-server/session state.
+    pub fn spawn_group_spawn_loaded_grid_records_like_cpp<L>(
         &mut self,
         group: Option<&SpawnGroupTemplateData>,
         ignore_respawn: bool,
         force: bool,
         spawn_store: &SpawnStore,
-    ) -> SpawnGroupSpawnOutcomeLikeCpp {
+        mut load_record: L,
+    ) -> SpawnGroupSpawnOutcomeLikeCpp
+    where
+        L: FnMut(
+            &mut Self,
+            SpawnObjectType,
+            SpawnId,
+            bool,
+        ) -> Option<LoadedGridRespawnRecordsLikeCpp>,
+    {
         let Some(group) = group else {
             return SpawnGroupSpawnOutcomeLikeCpp::blocked_missing_group(0);
         };
@@ -7177,17 +7203,52 @@ where
                     spawn_id: member.spawn_id,
                     force,
                 });
-                match member.object_type {
-                    SpawnObjectType::Creature => outcome.blocked_loaded_grid_creature_loads += 1,
-                    SpawnObjectType::GameObject => {
-                        outcome.blocked_loaded_grid_gameobject_loads += 1
+
+                let Some(records) = load_record(self, member.object_type, member.spawn_id, force)
+                else {
+                    outcome.blocked_loaded_grid_spawn_loads += 1;
+                    match member.object_type {
+                        SpawnObjectType::Creature => {
+                            outcome.blocked_loaded_grid_creature_loads += 1;
+                        }
+                        SpawnObjectType::GameObject => {
+                            outcome.blocked_loaded_grid_gameobject_loads += 1;
+                        }
+                        SpawnObjectType::AreaTrigger => outcome.unsupported_spawn_types += 1,
                     }
-                    SpawnObjectType::AreaTrigger => outcome.unsupported_spawn_types += 1,
+                    continue;
+                };
+
+                for pre_add_record in records.pre_add_records {
+                    let _ = self.add_map_object_record_to_map_like_cpp(pre_add_record);
+                }
+                match self.add_map_object_record_to_map_like_cpp(records.primary_record) {
+                    Ok(_outcome) => outcome.executed_loaded_grid_spawns += 1,
+                    Err(_error) => outcome.blocked_loaded_grid_spawn_add_to_map += 1,
                 }
             }
         }
 
         outcome
+    }
+
+    /// Compatibility wrapper preserving the pre-loader `SpawnGroupSpawn` seam:
+    /// loaded-grid Creature/GameObject attempts are planned and counted as blocked,
+    /// but no DB-backed records are fabricated or inserted.
+    pub fn spawn_group_spawn_like_cpp(
+        &mut self,
+        group: Option<&SpawnGroupTemplateData>,
+        ignore_respawn: bool,
+        force: bool,
+        spawn_store: &SpawnStore,
+    ) -> SpawnGroupSpawnOutcomeLikeCpp {
+        self.spawn_group_spawn_loaded_grid_records_like_cpp(
+            group,
+            ignore_respawn,
+            force,
+            spawn_store,
+            |_map, _object_type, _spawn_id, _force| None,
+        )
     }
 
     /// C++-shaped `Map::UpdateSpawnGroupConditions` bridge over pre-resolved
@@ -17189,6 +17250,9 @@ mod tests {
         );
         assert_eq!(outcome.blocked_loaded_grid_creature_loads, 1);
         assert_eq!(outcome.blocked_loaded_grid_gameobject_loads, 1);
+        assert_eq!(outcome.blocked_loaded_grid_spawn_loads, 2);
+        assert_eq!(outcome.executed_loaded_grid_spawns, 0);
+        assert_eq!(outcome.blocked_loaded_grid_spawn_add_to_map, 0);
         assert_eq!(
             outcome.load_plans,
             vec![
@@ -17353,6 +17417,213 @@ mod tests {
         assert_eq!(outcome.metadata_entries, 1);
         assert_eq!(outcome.unsupported_spawn_types, 1);
         assert!(outcome.load_plans.is_empty());
+    }
+
+    #[test]
+    fn spawn_group_spawn_loaded_grid_loader_some_inserts_gameobject_like_cpp() {
+        let group = spawn_group(3947, SpawnGroupFlags::NONE);
+        let (group, store) = spawn_group_store(
+            group,
+            vec![spawn_data(
+                SpawnObjectType::GameObject,
+                207,
+                SpawnGroupTemplateData::default_group(),
+            )],
+        );
+        let mut map = test_map();
+        map.load_grid(0.0, 0.0);
+
+        let outcome = map.spawn_group_spawn_loaded_grid_records_like_cpp(
+            Some(&group),
+            false,
+            false,
+            &store,
+            |_map, object_type, spawn_id, force| {
+                assert_eq!(object_type, SpawnObjectType::GameObject);
+                assert_eq!(spawn_id, 207);
+                assert!(!force);
+                Some(LoadedGridRespawnRecordsLikeCpp::primary_only(
+                    MapObjectRecord::new_game_object(test_gameobject_for_spawn(spawn_id, 207))
+                        .unwrap(),
+                ))
+            },
+        );
+
+        assert_eq!(outcome.load_plans.len(), 1);
+        assert_eq!(outcome.executed_loaded_grid_spawns, 1);
+        assert_eq!(outcome.blocked_loaded_grid_spawn_loads, 0);
+        assert_eq!(outcome.blocked_loaded_grid_gameobject_loads, 0);
+        assert_eq!(outcome.blocked_loaded_grid_spawn_add_to_map, 0);
+        assert_eq!(map.map_object_count(), 1);
+        assert_eq!(map.gameobject_spawn_id_store_count_like_cpp(207), 1);
+    }
+
+    #[test]
+    fn spawn_group_spawn_loader_none_blocks_and_continues_to_later_member_like_cpp() {
+        let group = spawn_group(3948, SpawnGroupFlags::NONE);
+        let (group, store) = spawn_group_store(
+            group,
+            vec![
+                spawn_data(
+                    SpawnObjectType::Creature,
+                    108,
+                    SpawnGroupTemplateData::default_group(),
+                ),
+                spawn_data(
+                    SpawnObjectType::GameObject,
+                    208,
+                    SpawnGroupTemplateData::default_group(),
+                ),
+            ],
+        );
+        let mut map = test_map();
+        map.load_grid(0.0, 0.0);
+        let mut calls = Vec::new();
+
+        let outcome = map.spawn_group_spawn_loaded_grid_records_like_cpp(
+            Some(&group),
+            false,
+            false,
+            &store,
+            |_map, object_type, spawn_id, force| {
+                calls.push((object_type, spawn_id, force));
+                if object_type == SpawnObjectType::Creature {
+                    None
+                } else {
+                    Some(LoadedGridRespawnRecordsLikeCpp::primary_only(
+                        MapObjectRecord::new_game_object(test_gameobject_for_spawn(spawn_id, 208))
+                            .unwrap(),
+                    ))
+                }
+            },
+        );
+
+        assert_eq!(calls.len(), 2);
+        assert_eq!(outcome.load_plans.len(), 2);
+        assert_eq!(outcome.blocked_loaded_grid_spawn_loads, 1);
+        assert_eq!(outcome.blocked_loaded_grid_creature_loads, 1);
+        assert_eq!(outcome.blocked_loaded_grid_gameobject_loads, 0);
+        assert_eq!(outcome.executed_loaded_grid_spawns, 1);
+        assert_eq!(map.map_object_count(), 1);
+        assert_eq!(map.gameobject_spawn_id_store_count_like_cpp(208), 1);
+    }
+
+    #[test]
+    fn spawn_group_spawn_primary_add_to_map_failure_blocks_without_executed_like_cpp() {
+        let group = spawn_group(3949, SpawnGroupFlags::NONE);
+        let (group, store) = spawn_group_store(
+            group,
+            vec![spawn_data(
+                SpawnObjectType::GameObject,
+                209,
+                SpawnGroupTemplateData::default_group(),
+            )],
+        );
+        let mut map = test_map();
+        map.load_grid(0.0, 0.0);
+
+        let outcome = map.spawn_group_spawn_loaded_grid_records_like_cpp(
+            Some(&group),
+            false,
+            false,
+            &store,
+            |_map, _object_type, spawn_id, _force| {
+                let mut gameobject = GameObject::new();
+                gameobject
+                    .world_mut()
+                    .object_mut()
+                    .create(guid(HighGuid::GameObject, 209));
+                gameobject.world_mut().object_mut().set_entry(42);
+                gameobject.world_mut().set_map(999, 7).unwrap();
+                gameobject
+                    .world_mut()
+                    .relocate(Position::xyz(1.0, 2.0, 3.0));
+                gameobject.set_spawn_id(spawn_id);
+                Some(LoadedGridRespawnRecordsLikeCpp::primary_only(
+                    MapObjectRecord::new_game_object(gameobject).unwrap(),
+                ))
+            },
+        );
+
+        assert_eq!(outcome.load_plans.len(), 1);
+        assert_eq!(outcome.executed_loaded_grid_spawns, 0);
+        assert_eq!(outcome.blocked_loaded_grid_spawn_loads, 0);
+        assert_eq!(outcome.blocked_loaded_grid_gameobject_loads, 0);
+        assert_eq!(outcome.blocked_loaded_grid_spawn_add_to_map, 1);
+        assert_eq!(map.map_object_count(), 0);
+        assert_eq!(map.gameobject_spawn_id_store_count_like_cpp(209), 0);
+    }
+
+    #[test]
+    fn spawn_group_spawn_passes_force_to_loader_after_force_bypasses_live_skip_like_cpp() {
+        let group = spawn_group(3950, SpawnGroupFlags::NONE);
+        let (group, store) = spawn_group_store(
+            group,
+            vec![spawn_data(
+                SpawnObjectType::Creature,
+                110,
+                SpawnGroupTemplateData::default_group(),
+            )],
+        );
+        let mut map = test_map();
+        map.load_grid(0.0, 0.0);
+        map.insert_map_object_record(
+            MapObjectRecord::new_creature(test_creature_for_spawn(110, 110, true)).unwrap(),
+        )
+        .unwrap();
+        let mut captured_force = Vec::new();
+
+        let outcome = map.spawn_group_spawn_loaded_grid_records_like_cpp(
+            Some(&group),
+            false,
+            true,
+            &store,
+            |_map, _object_type, _spawn_id, force| {
+                captured_force.push(force);
+                None
+            },
+        );
+
+        assert_eq!(captured_force, vec![true]);
+        assert_eq!(outcome.skipped_live_object_active, 0);
+        assert_eq!(outcome.load_plans.len(), 1);
+        assert_eq!(outcome.blocked_loaded_grid_spawn_loads, 1);
+        assert_eq!(outcome.blocked_loaded_grid_creature_loads, 1);
+    }
+
+    #[test]
+    fn spawn_group_spawn_loaded_grid_loader_some_inserts_creature_like_cpp() {
+        let group = spawn_group(3951, SpawnGroupFlags::NONE);
+        let (group, store) = spawn_group_store(
+            group,
+            vec![spawn_data(
+                SpawnObjectType::Creature,
+                111,
+                SpawnGroupTemplateData::default_group(),
+            )],
+        );
+        let mut map = test_map();
+        map.load_grid(0.0, 0.0);
+
+        let outcome = map.spawn_group_spawn_loaded_grid_records_like_cpp(
+            Some(&group),
+            false,
+            false,
+            &store,
+            |_map, _object_type, spawn_id, _force| {
+                Some(LoadedGridRespawnRecordsLikeCpp::primary_only(
+                    MapObjectRecord::new_creature(test_creature_for_spawn(spawn_id, 111, true))
+                        .unwrap(),
+                ))
+            },
+        );
+
+        assert_eq!(outcome.load_plans.len(), 1);
+        assert_eq!(outcome.executed_loaded_grid_spawns, 1);
+        assert_eq!(outcome.blocked_loaded_grid_spawn_loads, 0);
+        assert_eq!(outcome.blocked_loaded_grid_creature_loads, 0);
+        assert_eq!(map.map_object_count(), 1);
+        assert_eq!(map.creature_spawn_id_store_count_like_cpp(111), 1);
     }
 
     #[test]
