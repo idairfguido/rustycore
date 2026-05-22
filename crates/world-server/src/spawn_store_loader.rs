@@ -31,7 +31,9 @@
 //! - `/home/server/woltk-trinity-legacy/src/server/game/Events/GameEventMgr.cpp:874-916`
 //!   `game_event_pool` query, signed event-id internal index and `CheckPool` gate.
 //! - `/home/server/woltk-trinity-legacy/src/server/game/Events/GameEventMgr.cpp:937-956`
-//!   `MAX(eventEntry)` sizing for `mGameEventPoolIds`.
+//!   `MAX(eventEntry)` sizing for `mGameEventCreatureGuids`, `mGameEventGameobjectGuids`, and `mGameEventPoolIds`.
+//! - `/home/server/woltk-trinity-legacy/src/server/game/Events/GameEventMgr.cpp:379-475`
+//!   `game_event_creature` / `game_event_gameobject` GUID metadata loading.
 
 use std::collections::BTreeMap;
 
@@ -79,6 +81,7 @@ pub struct CanonicalSpawnStoreLoadReport {
     pub linked_respawn: LinkedRespawnLoadReportLikeCpp,
     pub pool_mgr: PoolMgrLoadReportLikeCpp,
     pub game_event_pools: GameEventPoolLoadReportLikeCpp,
+    pub game_event_spawn_guids: GameEventSpawnGuidLoadReportLikeCpp,
     pub creature_formations: CreatureFormationLoadReportLikeCpp,
 }
 
@@ -131,6 +134,39 @@ pub struct GameEventPoolLoadReportLikeCpp {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GameEventObjectGuidLoadReportLikeCpp {
+    pub rows: usize,
+    pub loaded: usize,
+    pub skipped_missing_spawn_metadata: usize,
+    pub skipped_out_of_range: usize,
+    pub pooled_still_loaded: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GameEventSpawnGuidLoadReportLikeCpp {
+    pub creature: GameEventObjectGuidLoadReportLikeCpp,
+    pub gameobject: GameEventObjectGuidLoadReportLikeCpp,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct GameEventSizingLikeCpp {
+    game_event_size: i32,
+    slot_count: usize,
+}
+
+impl GameEventSizingLikeCpp {
+    fn from_max_event_entry_like_cpp(max_event_entry: Option<u32>) -> Self {
+        let max_event_id = max_event_entry.unwrap_or(0).saturating_add(1);
+        let slot_count = max_event_id.saturating_mul(2).saturating_sub(1) as usize;
+        let game_event_size = i32::try_from(max_event_id).unwrap_or(i32::MAX);
+        Self {
+            game_event_size,
+            slot_count,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GameEventPoolIdsLikeCpp {
     game_event_size: i32,
     pool_ids_by_internal_event_id: Vec<Vec<u32>>,
@@ -138,12 +174,15 @@ pub struct GameEventPoolIdsLikeCpp {
 
 impl GameEventPoolIdsLikeCpp {
     pub fn from_game_event_max_entry_like_cpp(max_event_entry: Option<u32>) -> Self {
-        let max_event_id = max_event_entry.unwrap_or(0).saturating_add(1);
-        let slot_count = max_event_id.saturating_mul(2).saturating_sub(1) as usize;
-        let game_event_size = i32::try_from(max_event_id).unwrap_or(i32::MAX);
+        Self::from_game_event_sizing_like_cpp(
+            GameEventSizingLikeCpp::from_max_event_entry_like_cpp(max_event_entry),
+        )
+    }
+
+    fn from_game_event_sizing_like_cpp(sizing: GameEventSizingLikeCpp) -> Self {
         Self {
-            game_event_size,
-            pool_ids_by_internal_event_id: vec![Vec::new(); slot_count],
+            game_event_size: sizing.game_event_size,
+            pool_ids_by_internal_event_id: vec![Vec::new(); sizing.slot_count],
         }
     }
 
@@ -184,6 +223,70 @@ impl GameEventPoolIdsLikeCpp {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GameEventSpawnGuidsLikeCpp {
+    game_event_size: i32,
+    creature_guids_by_internal_event_id: Vec<Vec<SpawnId>>,
+    gameobject_guids_by_internal_event_id: Vec<Vec<SpawnId>>,
+}
+
+impl GameEventSpawnGuidsLikeCpp {
+    pub fn from_game_event_max_entry_like_cpp(max_event_entry: Option<u32>) -> Self {
+        Self::from_game_event_sizing_like_cpp(
+            GameEventSizingLikeCpp::from_max_event_entry_like_cpp(max_event_entry),
+        )
+    }
+
+    fn from_game_event_sizing_like_cpp(sizing: GameEventSizingLikeCpp) -> Self {
+        Self {
+            game_event_size: sizing.game_event_size,
+            creature_guids_by_internal_event_id: vec![Vec::new(); sizing.slot_count],
+            gameobject_guids_by_internal_event_id: vec![Vec::new(); sizing.slot_count],
+        }
+    }
+
+    pub fn game_event_size_like_cpp(&self) -> i32 {
+        self.game_event_size
+    }
+
+    pub fn internal_event_id_like_cpp(&self, event_id: i16) -> Option<usize> {
+        let internal_event_id = self.game_event_size + i32::from(event_id) - 1;
+        let index = usize::try_from(internal_event_id).ok()?;
+        (index < self.creature_guids_by_internal_event_id.len()).then_some(index)
+    }
+
+    pub fn creature_guids_like_cpp(&self, event_id: i16) -> Option<&[SpawnId]> {
+        self.internal_event_id_like_cpp(event_id)
+            .and_then(|index| self.creature_guids_by_internal_event_id.get(index))
+            .map(Vec::as_slice)
+    }
+
+    pub fn gameobject_guids_like_cpp(&self, event_id: i16) -> Option<&[SpawnId]> {
+        self.internal_event_id_like_cpp(event_id)
+            .and_then(|index| self.gameobject_guids_by_internal_event_id.get(index))
+            .map(Vec::as_slice)
+    }
+
+    fn push_guid_like_cpp(
+        &mut self,
+        object_type: SpawnObjectType,
+        event_id: i16,
+        guid: SpawnId,
+    ) -> bool {
+        let Some(index) = self.internal_event_id_like_cpp(event_id) else {
+            return false;
+        };
+        match object_type {
+            SpawnObjectType::Creature => self.creature_guids_by_internal_event_id[index].push(guid),
+            SpawnObjectType::GameObject => {
+                self.gameobject_guids_by_internal_event_id[index].push(guid);
+            }
+            SpawnObjectType::AreaTrigger => return false,
+        }
+        true
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CanonicalSpawnMetadataLikeCpp {
     spawn_store: SpawnStore,
@@ -191,6 +294,7 @@ pub struct CanonicalSpawnMetadataLikeCpp {
     linked_respawns: LinkedRespawnStoreLikeCpp,
     pool_mgr: PoolMgrLikeCpp,
     game_event_pools: GameEventPoolIdsLikeCpp,
+    game_event_spawn_guids: GameEventSpawnGuidsLikeCpp,
     creature_runtime_rows: BTreeMap<SpawnId, CreatureSpawnRuntimeRowLikeCpp>,
     gameobject_runtime_rows: BTreeMap<SpawnId, GameObjectSpawnRuntimeRowLikeCpp>,
     creature_formations: BTreeMap<SpawnId, CreatureFormationInfoLikeCpp>,
@@ -207,6 +311,7 @@ impl CanonicalSpawnMetadataLikeCpp {
             linked_respawns: LinkedRespawnStoreLikeCpp::new(),
             pool_mgr: PoolMgrLikeCpp::new(),
             game_event_pools: GameEventPoolIdsLikeCpp::default(),
+            game_event_spawn_guids: GameEventSpawnGuidsLikeCpp::default(),
             creature_runtime_rows: BTreeMap::new(),
             gameobject_runtime_rows: BTreeMap::new(),
             creature_formations: BTreeMap::new(),
@@ -242,6 +347,14 @@ impl CanonicalSpawnMetadataLikeCpp {
         self
     }
 
+    pub fn with_game_event_spawn_guids_like_cpp(
+        mut self,
+        game_event_spawn_guids: GameEventSpawnGuidsLikeCpp,
+    ) -> Self {
+        self.game_event_spawn_guids = game_event_spawn_guids;
+        self
+    }
+
     pub fn linked_respawns_like_cpp(&self) -> &LinkedRespawnStoreLikeCpp {
         &self.linked_respawns
     }
@@ -252,6 +365,16 @@ impl CanonicalSpawnMetadataLikeCpp {
 
     pub fn game_event_pool_ids_like_cpp(&self, event_id: i16) -> Option<&[u32]> {
         self.game_event_pools.pool_ids_like_cpp(event_id)
+    }
+
+    pub fn game_event_creature_guids_like_cpp(&self, event_id: i16) -> Option<&[SpawnId]> {
+        self.game_event_spawn_guids
+            .creature_guids_like_cpp(event_id)
+    }
+
+    pub fn game_event_gameobject_guids_like_cpp(&self, event_id: i16) -> Option<&[SpawnId]> {
+        self.game_event_spawn_guids
+            .gameobject_guids_like_cpp(event_id)
     }
 
     pub fn creature_runtime_row_like_cpp(
@@ -460,6 +583,12 @@ struct GameEventPoolRowLikeCpp {
     event_id: i16,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct GameEventObjectGuidRowLikeCpp {
+    guid: SpawnId,
+    event_id: i16,
+}
+
 impl From<LinkedRespawnDbRow> for LinkedRespawnRowLikeCpp {
     fn from(row: LinkedRespawnDbRow) -> Self {
         Self {
@@ -616,9 +745,17 @@ pub async fn load_canonical_spawn_store_like_cpp(
     // C++ `PoolMgr::LoadFromDB` uses ObjectMgr creature/gameobject spawn data as
     // existence/map truth. This builds only PoolMgr metadata/plans; no live spawn.
     let pool_mgr = load_pool_mgr_like_cpp(db, &store, &mut report).await?;
+    let game_event_sizing = GameEventSizingLikeCpp::from_max_event_entry_like_cpp(
+        load_max_game_event_entry_like_cpp(db).await?,
+    );
     // C++ `GameEventMgr` loads `game_event_pool` after PoolMgr validation so
     // `CheckPool(entry)` can gate each row; this is metadata only.
-    let game_event_pools = load_game_event_pool_ids_like_cpp(db, &pool_mgr, &mut report).await?;
+    let game_event_pools =
+        load_game_event_pool_ids_like_cpp(db, game_event_sizing, &pool_mgr, &mut report).await?;
+    // C++ `GameEventMgr` also loads creature/gameobject GUID lists after ObjectMgr
+    // spawn metadata exists. This stores only future caller input; no live grid mutation.
+    let game_event_spawn_guids =
+        load_game_event_spawn_guids_like_cpp(db, game_event_sizing, &store, &mut report).await?;
 
     let mut templates = spawn_group_templates_for_spawn_store(spawn_group_store);
     let members = load_spawn_group_members_like_cpp(db).await?;
@@ -630,6 +767,7 @@ pub async fn load_canonical_spawn_store_like_cpp(
             .with_linked_respawns_like_cpp(linked_respawns)
             .with_pool_mgr_like_cpp(pool_mgr)
             .with_game_event_pools_like_cpp(game_event_pools)
+            .with_game_event_spawn_guids_like_cpp(game_event_spawn_guids)
             .with_creature_runtime_rows_like_cpp(creature_runtime_rows)
             .with_gameobject_runtime_rows_like_cpp(gameobject_runtime_rows)
             .with_creature_formations_like_cpp(creature_formations),
@@ -750,12 +888,12 @@ async fn load_pool_autospawn_candidates_like_cpp(
 
 async fn load_game_event_pool_ids_like_cpp(
     db: &WorldDatabase,
+    game_event_sizing: GameEventSizingLikeCpp,
     mgr: &PoolMgrLikeCpp,
     report: &mut CanonicalSpawnStoreLoadReport,
 ) -> Result<GameEventPoolIdsLikeCpp> {
-    let max_event_entry = load_max_game_event_entry_like_cpp(db).await?;
     let mut game_event_pools =
-        GameEventPoolIdsLikeCpp::from_game_event_max_entry_like_cpp(max_event_entry);
+        GameEventPoolIdsLikeCpp::from_game_event_sizing_like_cpp(game_event_sizing);
 
     let stmt = db.prepare(WorldStatements::SEL_GAME_EVENT_POOLS);
     let mut result = db.query(&stmt).await?;
@@ -810,6 +948,97 @@ fn apply_game_event_pool_row_like_cpp(
         return;
     }
     if game_event_pools.push_pool_id_like_cpp(row.event_id, row.pool_entry) {
+        report.loaded += 1;
+    }
+}
+
+async fn load_game_event_spawn_guids_like_cpp(
+    db: &WorldDatabase,
+    game_event_sizing: GameEventSizingLikeCpp,
+    store: &SpawnStore,
+    report: &mut CanonicalSpawnStoreLoadReport,
+) -> Result<GameEventSpawnGuidsLikeCpp> {
+    let mut game_event_spawn_guids =
+        GameEventSpawnGuidsLikeCpp::from_game_event_sizing_like_cpp(game_event_sizing);
+
+    load_game_event_object_guids_like_cpp(
+        db,
+        WorldStatements::SEL_GAME_EVENT_CREATURES,
+        SpawnObjectType::Creature,
+        store,
+        &mut game_event_spawn_guids,
+        &mut report.game_event_spawn_guids.creature,
+    )
+    .await?;
+    load_game_event_object_guids_like_cpp(
+        db,
+        WorldStatements::SEL_GAME_EVENT_GAMEOBJECTS,
+        SpawnObjectType::GameObject,
+        store,
+        &mut game_event_spawn_guids,
+        &mut report.game_event_spawn_guids.gameobject,
+    )
+    .await?;
+
+    Ok(game_event_spawn_guids)
+}
+
+async fn load_game_event_object_guids_like_cpp(
+    db: &WorldDatabase,
+    statement: WorldStatements,
+    object_type: SpawnObjectType,
+    store: &SpawnStore,
+    game_event_spawn_guids: &mut GameEventSpawnGuidsLikeCpp,
+    report: &mut GameEventObjectGuidLoadReportLikeCpp,
+) -> Result<()> {
+    let stmt = db.prepare(statement);
+    let mut result = db.query(&stmt).await?;
+    if result.is_empty() {
+        return Ok(());
+    }
+
+    loop {
+        apply_game_event_object_guid_row_like_cpp(
+            GameEventObjectGuidRowLikeCpp {
+                guid: result.read(0),
+                event_id: result.read(1),
+            },
+            object_type,
+            store,
+            game_event_spawn_guids,
+            report,
+        );
+        if !result.next_row() {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+fn apply_game_event_object_guid_row_like_cpp(
+    row: GameEventObjectGuidRowLikeCpp,
+    object_type: SpawnObjectType,
+    store: &SpawnStore,
+    game_event_spawn_guids: &mut GameEventSpawnGuidsLikeCpp,
+    report: &mut GameEventObjectGuidLoadReportLikeCpp,
+) {
+    report.rows += 1;
+    let Some(spawn_data) = store.spawn_data(object_type, row.guid) else {
+        report.skipped_missing_spawn_metadata += 1;
+        return;
+    };
+    if game_event_spawn_guids
+        .internal_event_id_like_cpp(row.event_id)
+        .is_none()
+    {
+        report.skipped_out_of_range += 1;
+        return;
+    }
+    if spawn_data.pool_id != 0 {
+        report.pooled_still_loaded += 1;
+    }
+    if game_event_spawn_guids.push_guid_like_cpp(object_type, row.event_id, row.guid) {
         report.loaded += 1;
     }
 }
@@ -2110,6 +2339,234 @@ mod tests {
         assert_eq!(report.rows, 3);
         assert_eq!(report.loaded, 1);
         assert_eq!(report.skipped_broken_pool, 2);
+    }
+
+    fn game_event_guid_test_spawn(
+        object_type: SpawnObjectType,
+        spawn_id: SpawnId,
+        pool_id: u32,
+    ) -> SpawnData {
+        SpawnData {
+            object_type,
+            spawn_id,
+            map_id: 571,
+            db_data: true,
+            spawn_group: SpawnGroupTemplateData::legacy_group(),
+            id: u32::try_from(spawn_id).unwrap_or(u32::MAX),
+            spawn_point: SpawnPosition::new(1.0, 2.0, 3.0, 0.0),
+            phase_use_flags: 0,
+            phase_id: 0,
+            phase_group: 0,
+            terrain_swap_map: -1,
+            pool_id,
+            spawn_time_secs: 120,
+            spawn_difficulties: vec![0],
+            script_id: 0,
+            string_id: String::new(),
+        }
+    }
+
+    fn game_event_guid_test_store() -> SpawnStore {
+        let mut store = SpawnStore::new();
+        for spawn in [
+            game_event_guid_test_spawn(SpawnObjectType::Creature, 100, 0),
+            game_event_guid_test_spawn(SpawnObjectType::Creature, 101, 88),
+            game_event_guid_test_spawn(SpawnObjectType::Creature, 102, 0),
+            game_event_guid_test_spawn(SpawnObjectType::GameObject, 200, 0),
+            game_event_guid_test_spawn(SpawnObjectType::GameObject, 201, 89),
+            game_event_guid_test_spawn(SpawnObjectType::GameObject, 202, 0),
+        ] {
+            store.insert_spawn_metadata_like_cpp(&spawn);
+        }
+        store
+    }
+
+    #[test]
+    fn game_event_spawn_guids_signed_internal_mapping_and_empty_valid_slice_like_cpp() {
+        let guids = GameEventSpawnGuidsLikeCpp::from_game_event_max_entry_like_cpp(Some(3));
+
+        assert_eq!(guids.game_event_size_like_cpp(), 4);
+        assert_eq!(guids.internal_event_id_like_cpp(1), Some(4));
+        assert_eq!(guids.internal_event_id_like_cpp(-1), Some(2));
+        assert_eq!(guids.internal_event_id_like_cpp(-5), None);
+        assert_eq!(guids.internal_event_id_like_cpp(4), None);
+        assert_eq!(guids.creature_guids_like_cpp(2), Some([].as_slice()));
+        assert_eq!(guids.gameobject_guids_like_cpp(-2), Some([].as_slice()));
+        assert_eq!(guids.creature_guids_like_cpp(4), None);
+    }
+
+    #[test]
+    fn game_event_spawn_guids_preserve_creature_and_gameobject_order_like_cpp() {
+        let store = game_event_guid_test_store();
+        let mut guids = GameEventSpawnGuidsLikeCpp::from_game_event_max_entry_like_cpp(Some(3));
+        let mut creature_report = GameEventObjectGuidLoadReportLikeCpp::default();
+        let mut gameobject_report = GameEventObjectGuidLoadReportLikeCpp::default();
+
+        for row in [
+            GameEventObjectGuidRowLikeCpp {
+                guid: 100,
+                event_id: 1,
+            },
+            GameEventObjectGuidRowLikeCpp {
+                guid: 102,
+                event_id: 1,
+            },
+        ] {
+            apply_game_event_object_guid_row_like_cpp(
+                row,
+                SpawnObjectType::Creature,
+                &store,
+                &mut guids,
+                &mut creature_report,
+            );
+        }
+        for row in [
+            GameEventObjectGuidRowLikeCpp {
+                guid: 200,
+                event_id: -1,
+            },
+            GameEventObjectGuidRowLikeCpp {
+                guid: 202,
+                event_id: -1,
+            },
+        ] {
+            apply_game_event_object_guid_row_like_cpp(
+                row,
+                SpawnObjectType::GameObject,
+                &store,
+                &mut guids,
+                &mut gameobject_report,
+            );
+        }
+
+        assert_eq!(
+            guids.creature_guids_like_cpp(1),
+            Some([100, 102].as_slice())
+        );
+        assert_eq!(
+            guids.gameobject_guids_like_cpp(-1),
+            Some([200, 202].as_slice())
+        );
+        assert_eq!(creature_report.rows, 2);
+        assert_eq!(creature_report.loaded, 2);
+        assert_eq!(gameobject_report.rows, 2);
+        assert_eq!(gameobject_report.loaded, 2);
+    }
+
+    #[test]
+    fn game_event_spawn_guids_skip_missing_spawn_metadata_like_cpp() {
+        let store = game_event_guid_test_store();
+        let mut guids = GameEventSpawnGuidsLikeCpp::from_game_event_max_entry_like_cpp(Some(3));
+        let mut report = GameEventObjectGuidLoadReportLikeCpp::default();
+
+        apply_game_event_object_guid_row_like_cpp(
+            GameEventObjectGuidRowLikeCpp {
+                guid: 404,
+                event_id: 1,
+            },
+            SpawnObjectType::Creature,
+            &store,
+            &mut guids,
+            &mut report,
+        );
+
+        assert_eq!(guids.creature_guids_like_cpp(1), Some([].as_slice()));
+        assert_eq!(report.rows, 1);
+        assert_eq!(report.loaded, 0);
+        assert_eq!(report.skipped_missing_spawn_metadata, 1);
+    }
+
+    #[test]
+    fn game_event_spawn_guids_count_pooled_but_still_load_like_cpp() {
+        let store = game_event_guid_test_store();
+        let mut guids = GameEventSpawnGuidsLikeCpp::from_game_event_max_entry_like_cpp(Some(3));
+        let mut creature_report = GameEventObjectGuidLoadReportLikeCpp::default();
+        let mut gameobject_report = GameEventObjectGuidLoadReportLikeCpp::default();
+
+        apply_game_event_object_guid_row_like_cpp(
+            GameEventObjectGuidRowLikeCpp {
+                guid: 101,
+                event_id: 1,
+            },
+            SpawnObjectType::Creature,
+            &store,
+            &mut guids,
+            &mut creature_report,
+        );
+        apply_game_event_object_guid_row_like_cpp(
+            GameEventObjectGuidRowLikeCpp {
+                guid: 201,
+                event_id: -1,
+            },
+            SpawnObjectType::GameObject,
+            &store,
+            &mut guids,
+            &mut gameobject_report,
+        );
+
+        assert_eq!(guids.creature_guids_like_cpp(1), Some([101].as_slice()));
+        assert_eq!(guids.gameobject_guids_like_cpp(-1), Some([201].as_slice()));
+        assert_eq!(creature_report.loaded, 1);
+        assert_eq!(creature_report.pooled_still_loaded, 1);
+        assert_eq!(gameobject_report.loaded, 1);
+        assert_eq!(gameobject_report.pooled_still_loaded, 1);
+    }
+
+    #[test]
+    fn game_event_spawn_guids_skip_out_of_range_like_cpp() {
+        let store = game_event_guid_test_store();
+        let mut guids = GameEventSpawnGuidsLikeCpp::from_game_event_max_entry_like_cpp(Some(3));
+        let mut report = GameEventObjectGuidLoadReportLikeCpp::default();
+
+        apply_game_event_object_guid_row_like_cpp(
+            GameEventObjectGuidRowLikeCpp {
+                guid: 100,
+                event_id: -5,
+            },
+            SpawnObjectType::Creature,
+            &store,
+            &mut guids,
+            &mut report,
+        );
+        apply_game_event_object_guid_row_like_cpp(
+            GameEventObjectGuidRowLikeCpp {
+                guid: 102,
+                event_id: 4,
+            },
+            SpawnObjectType::Creature,
+            &store,
+            &mut guids,
+            &mut report,
+        );
+
+        assert_eq!(guids.creature_guids_like_cpp(-5), None);
+        assert_eq!(guids.creature_guids_like_cpp(4), None);
+        assert_eq!(report.rows, 2);
+        assert_eq!(report.loaded, 0);
+        assert_eq!(report.skipped_out_of_range, 2);
+    }
+
+    #[test]
+    fn canonical_metadata_exposes_game_event_spawn_guid_slices_like_cpp() {
+        let mut guids = GameEventSpawnGuidsLikeCpp::from_game_event_max_entry_like_cpp(Some(3));
+        assert!(guids.push_guid_like_cpp(SpawnObjectType::Creature, 1, 100));
+        assert!(guids.push_guid_like_cpp(SpawnObjectType::GameObject, -1, 200));
+        let metadata = CanonicalSpawnMetadataLikeCpp::new(SpawnStore::new(), BTreeMap::new())
+            .with_game_event_spawn_guids_like_cpp(guids);
+
+        assert_eq!(
+            metadata.game_event_creature_guids_like_cpp(1),
+            Some([100].as_slice())
+        );
+        assert_eq!(
+            metadata.game_event_gameobject_guids_like_cpp(-1),
+            Some([200].as_slice())
+        );
+        assert_eq!(
+            metadata.game_event_creature_guids_like_cpp(2),
+            Some([].as_slice())
+        );
+        assert_eq!(metadata.game_event_gameobject_guids_like_cpp(4), None);
     }
 
     #[test]

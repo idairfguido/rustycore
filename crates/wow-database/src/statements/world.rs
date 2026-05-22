@@ -119,6 +119,10 @@ pub enum WorldStatements {
     SEL_MAX_GAME_EVENT_ENTRY,
     /// C++ GameEventMgr::LoadFromDB game_event_pool metadata query.
     SEL_GAME_EVENT_POOLS,
+    /// C++ GameEventMgr::LoadFromDB game_event_creature metadata query.
+    SEL_GAME_EVENT_CREATURES,
+    /// C++ GameEventMgr::LoadFromDB game_event_gameobject metadata query.
+    SEL_GAME_EVENT_GAMEOBJECTS,
     /// Load C++ instance spawn groups.
     SEL_INSTANCE_SPAWN_GROUPS,
     /// Load gameobject template for query response.
@@ -560,6 +564,10 @@ impl StatementDef for WorldStatements {
                 "SELECT pool_template.entry, game_event_pool.eventEntry FROM pool_template",
                 " JOIN game_event_pool ON pool_template.entry = game_event_pool.pool_entry",
             ),
+            Self::SEL_GAME_EVENT_CREATURES => "SELECT guid, eventEntry FROM game_event_creature",
+            Self::SEL_GAME_EVENT_GAMEOBJECTS => {
+                "SELECT guid, eventEntry FROM game_event_gameobject"
+            }
             Self::SEL_INSTANCE_SPAWN_GROUPS => {
                 "SELECT instanceMapId, bossStateId, bossStates, spawnGroupId, flags FROM instance_spawn_groups"
             }
