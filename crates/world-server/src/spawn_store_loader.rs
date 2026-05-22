@@ -52,6 +52,11 @@
 //!   `m_ActiveEvents` is a `std::set<uint16>` with membership insert/erase helpers.
 //! - `/home/server/woltk-trinity-legacy/src/server/game/Events/GameEventMgr.cpp:1763-1782`
 //!   global `IsHolidayActive` / `IsEventActive` read the active-event set only.
+//! - `/home/server/woltk-trinity-legacy/src/server/game/Events/GameEventMgr.cpp:478-531`
+//!   `game_event_model_equip` load, event-id range check, previous model/equipment defaults,
+//!   and `GetEquipmentInfo(entry, equipId)` validation for positive equipment ids.
+//! - `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:1478-1502,1508-1542`
+//!   `GetEquipmentInfo` lookup by `(CreatureID, ID)` backed by `creature_equip_template`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -105,6 +110,7 @@ pub struct CanonicalSpawnStoreLoadReport {
     pub game_event_prerequisites: GameEventPrerequisiteLoadReportLikeCpp,
     pub game_event_pools: GameEventPoolLoadReportLikeCpp,
     pub game_event_spawn_guids: GameEventSpawnGuidLoadReportLikeCpp,
+    pub game_event_model_equip: GameEventModelEquipLoadReportLikeCpp,
     pub creature_formations: CreatureFormationLoadReportLikeCpp,
 }
 
@@ -189,6 +195,16 @@ pub struct GameEventObjectGuidLoadReportLikeCpp {
 pub struct GameEventSpawnGuidLoadReportLikeCpp {
     pub creature: GameEventObjectGuidLoadReportLikeCpp,
     pub gameobject: GameEventObjectGuidLoadReportLikeCpp,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GameEventModelEquipLoadReportLikeCpp {
+    pub equipment_rows: usize,
+    pub equipment_ids_loaded: usize,
+    pub rows: usize,
+    pub loaded: usize,
+    pub invalid_event_id: usize,
+    pub missing_equipment_template: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -813,6 +829,62 @@ impl GameEventSpawnGuidsLikeCpp {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GameEventModelEquipRecordLikeCpp {
+    pub spawn_id: SpawnId,
+    pub model_id: u32,
+    pub model_id_prev: u32,
+    pub equipment_id: u8,
+    /// C++ member is spelled `equipement_id_prev`; Rust keeps the corrected field name.
+    pub equipment_id_prev: u8,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GameEventModelEquipLikeCpp {
+    records_by_event_id: Vec<Vec<GameEventModelEquipRecordLikeCpp>>,
+}
+
+impl GameEventModelEquipLikeCpp {
+    pub fn from_game_event_max_entry_like_cpp(max_event_entry: Option<u32>) -> Self {
+        Self::from_game_event_sizing_like_cpp(
+            GameEventSizingLikeCpp::from_max_event_entry_like_cpp(max_event_entry),
+        )
+    }
+
+    fn from_game_event_sizing_like_cpp(sizing: GameEventSizingLikeCpp) -> Self {
+        Self {
+            records_by_event_id: vec![Vec::new(); sizing.master_slot_count_like_cpp()],
+        }
+    }
+
+    pub fn records_like_cpp(&self, event_id: u16) -> Option<&[GameEventModelEquipRecordLikeCpp]> {
+        self.records_by_event_id
+            .get(usize::from(event_id))
+            .map(Vec::as_slice)
+    }
+
+    fn push_record_like_cpp(
+        &mut self,
+        event_id: u16,
+        record: GameEventModelEquipRecordLikeCpp,
+    ) -> bool {
+        let Some(records) = self.records_by_event_id.get_mut(usize::from(event_id)) else {
+            return false;
+        };
+        records.push(record);
+        true
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GameEventModelEquipRowLikeCpp {
+    spawn_id: SpawnId,
+    entry: u32,
+    event_id: u16,
+    model_id: u32,
+    equipment_id: u8,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CanonicalSpawnMetadataLikeCpp {
     spawn_store: SpawnStore,
@@ -823,6 +895,7 @@ pub struct CanonicalSpawnMetadataLikeCpp {
     game_event_active_set: GameEventActiveSetLikeCpp,
     game_event_pools: GameEventPoolIdsLikeCpp,
     game_event_spawn_guids: GameEventSpawnGuidsLikeCpp,
+    game_event_model_equip: GameEventModelEquipLikeCpp,
     creature_runtime_rows: BTreeMap<SpawnId, CreatureSpawnRuntimeRowLikeCpp>,
     gameobject_runtime_rows: BTreeMap<SpawnId, GameObjectSpawnRuntimeRowLikeCpp>,
     creature_formations: BTreeMap<SpawnId, CreatureFormationInfoLikeCpp>,
@@ -842,6 +915,7 @@ impl CanonicalSpawnMetadataLikeCpp {
             game_event_active_set: GameEventActiveSetLikeCpp::default(),
             game_event_pools: GameEventPoolIdsLikeCpp::default(),
             game_event_spawn_guids: GameEventSpawnGuidsLikeCpp::default(),
+            game_event_model_equip: GameEventModelEquipLikeCpp::default(),
             creature_runtime_rows: BTreeMap::new(),
             gameobject_runtime_rows: BTreeMap::new(),
             creature_formations: BTreeMap::new(),
@@ -887,6 +961,14 @@ impl CanonicalSpawnMetadataLikeCpp {
         game_event_spawn_guids: GameEventSpawnGuidsLikeCpp,
     ) -> Self {
         self.game_event_spawn_guids = game_event_spawn_guids;
+        self
+    }
+
+    pub fn with_game_event_model_equip_like_cpp(
+        mut self,
+        game_event_model_equip: GameEventModelEquipLikeCpp,
+    ) -> Self {
+        self.game_event_model_equip = game_event_model_equip;
         self
     }
 
@@ -1237,6 +1319,13 @@ impl CanonicalSpawnMetadataLikeCpp {
     pub fn game_event_gameobject_guids_like_cpp(&self, event_id: i16) -> Option<&[SpawnId]> {
         self.game_event_spawn_guids
             .gameobject_guids_like_cpp(event_id)
+    }
+
+    pub fn game_event_model_equip_like_cpp(
+        &self,
+        event_id: u16,
+    ) -> Option<&[GameEventModelEquipRecordLikeCpp]> {
+        self.game_event_model_equip.records_like_cpp(event_id)
     }
 
     pub fn creature_runtime_row_like_cpp(
@@ -1626,6 +1715,11 @@ pub async fn load_canonical_spawn_store_like_cpp(
     // spawn metadata exists. This stores only future caller input; no live grid mutation.
     let game_event_spawn_guids =
         load_game_event_spawn_guids_like_cpp(db, game_event_sizing, &store, &mut report).await?;
+    // C++ `GameEventMgr::LoadFromDB` loads `game_event_model_equip` startup metadata
+    // for later `ChangeEquipOrModel`; this slice stores only validated metadata and
+    // does not mutate live maps, CreatureData/ObjectMgr baselines, display ids or equipment.
+    let game_event_model_equip =
+        load_game_event_model_equip_like_cpp(db, game_event_sizing, &mut report).await?;
 
     let mut templates = spawn_group_templates_for_spawn_store(spawn_group_store);
     let members = load_spawn_group_members_like_cpp(db).await?;
@@ -1639,6 +1733,7 @@ pub async fn load_canonical_spawn_store_like_cpp(
             .with_game_events_like_cpp(game_events)
             .with_game_event_pools_like_cpp(game_event_pools)
             .with_game_event_spawn_guids_like_cpp(game_event_spawn_guids)
+            .with_game_event_model_equip_like_cpp(game_event_model_equip)
             .with_creature_runtime_rows_like_cpp(creature_runtime_rows)
             .with_gameobject_runtime_rows_like_cpp(gameobject_runtime_rows)
             .with_creature_formations_like_cpp(creature_formations),
@@ -2034,6 +2129,101 @@ fn apply_game_event_object_guid_row_like_cpp(
         report.pooled_still_loaded += 1;
     }
     if game_event_spawn_guids.push_guid_like_cpp(object_type, row.event_id, row.guid) {
+        report.loaded += 1;
+    }
+}
+
+async fn load_creature_equip_template_ids_like_cpp(
+    db: &WorldDatabase,
+    report: &mut GameEventModelEquipLoadReportLikeCpp,
+) -> Result<BTreeSet<(u32, u8)>> {
+    let stmt = db.prepare(WorldStatements::SEL_CREATURE_EQUIP_TEMPLATE_IDS);
+    let mut result = db.query(&stmt).await?;
+    let mut equipment_ids = BTreeSet::new();
+    if result.is_empty() {
+        return Ok(equipment_ids);
+    }
+
+    loop {
+        report.equipment_rows += 1;
+        let creature_id: u32 = result.read(0);
+        let equipment_id: u8 = result.read(1);
+        // C++ game_event_model_equip validation calls GetEquipmentInfo only for > 0 ids;
+        // id 0 is not a valid template key for that positive-id validation path.
+        if equipment_id > 0 && equipment_ids.insert((creature_id, equipment_id)) {
+            report.equipment_ids_loaded += 1;
+        }
+        if !result.next_row() {
+            break;
+        }
+    }
+
+    Ok(equipment_ids)
+}
+
+async fn load_game_event_model_equip_like_cpp(
+    db: &WorldDatabase,
+    game_event_sizing: GameEventSizingLikeCpp,
+    report: &mut CanonicalSpawnStoreLoadReport,
+) -> Result<GameEventModelEquipLikeCpp> {
+    let equipment_ids =
+        load_creature_equip_template_ids_like_cpp(db, &mut report.game_event_model_equip).await?;
+    let mut model_equip =
+        GameEventModelEquipLikeCpp::from_game_event_sizing_like_cpp(game_event_sizing);
+
+    let stmt = db.prepare(WorldStatements::SEL_GAME_EVENT_MODEL_EQUIP);
+    let mut result = db.query(&stmt).await?;
+    if result.is_empty() {
+        return Ok(model_equip);
+    }
+
+    loop {
+        apply_game_event_model_equip_row_like_cpp(
+            GameEventModelEquipRowLikeCpp {
+                spawn_id: result.read(0),
+                entry: result.read(1),
+                event_id: result.read(2),
+                model_id: result.read(3),
+                equipment_id: result.read(4),
+            },
+            &equipment_ids,
+            &mut model_equip,
+            &mut report.game_event_model_equip,
+        );
+        if !result.next_row() {
+            break;
+        }
+    }
+
+    Ok(model_equip)
+}
+
+fn apply_game_event_model_equip_row_like_cpp(
+    row: GameEventModelEquipRowLikeCpp,
+    equipment_ids: &BTreeSet<(u32, u8)>,
+    model_equip: &mut GameEventModelEquipLikeCpp,
+    report: &mut GameEventModelEquipLoadReportLikeCpp,
+) {
+    report.rows += 1;
+    if model_equip.records_like_cpp(row.event_id).is_none() {
+        report.invalid_event_id += 1;
+        return;
+    }
+    if row.equipment_id > 0 && !equipment_ids.contains(&(row.entry, row.equipment_id)) {
+        report.missing_equipment_template += 1;
+        return;
+    }
+
+    if model_equip.push_record_like_cpp(
+        row.event_id,
+        GameEventModelEquipRecordLikeCpp {
+            spawn_id: row.spawn_id,
+            model_id: row.model_id,
+            model_id_prev: 0,
+            equipment_id: row.equipment_id,
+            equipment_id_prev: 0,
+        },
+    ) {
         report.loaded += 1;
     }
 }
@@ -4719,6 +4909,158 @@ mod tests {
         assert_eq!(report.rows, 2);
         assert_eq!(report.loaded, 0);
         assert_eq!(report.skipped_out_of_range, 2);
+    }
+
+    #[test]
+    fn game_event_model_equip_accepts_zero_equipment_and_preserves_order_like_cpp() {
+        let mut model_equip =
+            GameEventModelEquipLikeCpp::from_game_event_max_entry_like_cpp(Some(3));
+        let equipment_templates = BTreeSet::new();
+        let mut report = GameEventModelEquipLoadReportLikeCpp::default();
+
+        apply_game_event_model_equip_row_like_cpp(
+            GameEventModelEquipRowLikeCpp {
+                spawn_id: 100,
+                entry: 10,
+                event_id: 1,
+                model_id: 111,
+                equipment_id: 0,
+            },
+            &equipment_templates,
+            &mut model_equip,
+            &mut report,
+        );
+        apply_game_event_model_equip_row_like_cpp(
+            GameEventModelEquipRowLikeCpp {
+                spawn_id: 101,
+                entry: 11,
+                event_id: 1,
+                model_id: 112,
+                equipment_id: 0,
+            },
+            &equipment_templates,
+            &mut model_equip,
+            &mut report,
+        );
+
+        let records = model_equip.records_like_cpp(1).expect("event 1 exists");
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].spawn_id, 100);
+        assert_eq!(records[0].model_id, 111);
+        assert_eq!(records[0].model_id_prev, 0);
+        assert_eq!(records[0].equipment_id, 0);
+        assert_eq!(records[0].equipment_id_prev, 0);
+        assert_eq!(records[1].spawn_id, 101);
+        assert_eq!(report.rows, 2);
+        assert_eq!(report.loaded, 2);
+        assert_eq!(report.missing_equipment_template, 0);
+    }
+
+    #[test]
+    fn game_event_model_equip_skips_out_of_range_event_id_like_cpp() {
+        let mut model_equip =
+            GameEventModelEquipLikeCpp::from_game_event_max_entry_like_cpp(Some(3));
+        let equipment_templates = BTreeSet::new();
+        let mut report = GameEventModelEquipLoadReportLikeCpp::default();
+
+        apply_game_event_model_equip_row_like_cpp(
+            GameEventModelEquipRowLikeCpp {
+                spawn_id: 100,
+                entry: 10,
+                event_id: 4,
+                model_id: 111,
+                equipment_id: 0,
+            },
+            &equipment_templates,
+            &mut model_equip,
+            &mut report,
+        );
+
+        assert_eq!(model_equip.records_like_cpp(4), None);
+        assert_eq!(report.rows, 1);
+        assert_eq!(report.loaded, 0);
+        assert_eq!(report.invalid_event_id, 1);
+    }
+
+    #[test]
+    fn game_event_model_equip_skips_missing_positive_equipment_template_like_cpp() {
+        let mut model_equip =
+            GameEventModelEquipLikeCpp::from_game_event_max_entry_like_cpp(Some(3));
+        let equipment_templates = BTreeSet::from([(10_u32, 2_u8)]);
+        let mut report = GameEventModelEquipLoadReportLikeCpp::default();
+
+        apply_game_event_model_equip_row_like_cpp(
+            GameEventModelEquipRowLikeCpp {
+                spawn_id: 100,
+                entry: 10,
+                event_id: 1,
+                model_id: 111,
+                equipment_id: 1,
+            },
+            &equipment_templates,
+            &mut model_equip,
+            &mut report,
+        );
+
+        assert_eq!(model_equip.records_like_cpp(1), Some([].as_slice()));
+        assert_eq!(report.rows, 1);
+        assert_eq!(report.loaded, 0);
+        assert_eq!(report.missing_equipment_template, 1);
+    }
+
+    #[test]
+    fn game_event_model_equip_accepts_existing_positive_equipment_template_like_cpp() {
+        let mut model_equip =
+            GameEventModelEquipLikeCpp::from_game_event_max_entry_like_cpp(Some(3));
+        let equipment_templates = BTreeSet::from([(10_u32, 1_u8)]);
+        let mut report = GameEventModelEquipLoadReportLikeCpp::default();
+
+        apply_game_event_model_equip_row_like_cpp(
+            GameEventModelEquipRowLikeCpp {
+                spawn_id: 100,
+                entry: 10,
+                event_id: 1,
+                model_id: 111,
+                equipment_id: 1,
+            },
+            &equipment_templates,
+            &mut model_equip,
+            &mut report,
+        );
+
+        let records = model_equip.records_like_cpp(1).expect("event 1 exists");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].spawn_id, 100);
+        assert_eq!(records[0].equipment_id, 1);
+        assert_eq!(records[0].equipment_id_prev, 0);
+        assert_eq!(report.rows, 1);
+        assert_eq!(report.loaded, 1);
+        assert_eq!(report.missing_equipment_template, 0);
+    }
+
+    #[test]
+    fn canonical_metadata_exposes_game_event_model_equip_slices_like_cpp() {
+        let mut model_equip =
+            GameEventModelEquipLikeCpp::from_game_event_max_entry_like_cpp(Some(3));
+        assert!(model_equip.push_record_like_cpp(
+            1,
+            GameEventModelEquipRecordLikeCpp {
+                spawn_id: 100,
+                model_id: 111,
+                model_id_prev: 0,
+                equipment_id: 0,
+                equipment_id_prev: 0,
+            },
+        ));
+        let metadata = CanonicalSpawnMetadataLikeCpp::new(SpawnStore::new(), BTreeMap::new())
+            .with_game_event_model_equip_like_cpp(model_equip);
+
+        let records = metadata
+            .game_event_model_equip_like_cpp(1)
+            .expect("event 1 exists");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].spawn_id, 100);
+        assert_eq!(metadata.game_event_model_equip_like_cpp(4), None);
     }
 
     #[test]

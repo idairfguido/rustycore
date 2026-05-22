@@ -127,6 +127,10 @@ pub enum WorldStatements {
     SEL_GAME_EVENT_CREATURES,
     /// C++ GameEventMgr::LoadFromDB game_event_gameobject metadata query.
     SEL_GAME_EVENT_GAMEOBJECTS,
+    /// C++ ObjectMgr::GetEquipmentInfo existence keys for game_event_model_equip validation.
+    SEL_CREATURE_EQUIP_TEMPLATE_IDS,
+    /// C++ GameEventMgr::LoadFromDB game_event_model_equip metadata query.
+    SEL_GAME_EVENT_MODEL_EQUIP,
     /// Load C++ instance spawn groups.
     SEL_INSTANCE_SPAWN_GROUPS,
     /// Load gameobject template for query response.
@@ -578,6 +582,14 @@ impl StatementDef for WorldStatements {
             Self::SEL_GAME_EVENT_GAMEOBJECTS => {
                 "SELECT guid, eventEntry FROM game_event_gameobject"
             }
+            Self::SEL_CREATURE_EQUIP_TEMPLATE_IDS => {
+                "SELECT CreatureID, ID FROM creature_equip_template"
+            }
+            Self::SEL_GAME_EVENT_MODEL_EQUIP => concat!(
+                "SELECT creature.guid, creature.id, game_event_model_equip.eventEntry, ",
+                "game_event_model_equip.modelid, game_event_model_equip.equipment_id ",
+                "FROM creature JOIN game_event_model_equip ON creature.guid = game_event_model_equip.guid",
+            ),
             Self::SEL_INSTANCE_SPAWN_GROUPS => {
                 "SELECT instanceMapId, bossStateId, bossStates, spawnGroupId, flags FROM instance_spawn_groups"
             }
