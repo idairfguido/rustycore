@@ -2414,6 +2414,13 @@ struct GameEventPoolUnspawnSummaryLikeCpp {
     blocked_pool_plan_errors: Vec<wow_map::PoolMgrPlanErrorLikeCpp>,
 }
 
+#[derive(Debug, Default, Clone, PartialEq)]
+struct GameEventPoolEventUnspawnSummaryLikeCpp {
+    event_id: i16,
+    missing_event_pool_ids: bool,
+    pool_summary: GameEventPoolUnspawnSummaryLikeCpp,
+}
+
 impl GameEventPoolUnspawnSummaryLikeCpp {
     fn accumulate_despawn_summary_like_cpp(
         &mut self,
@@ -2472,6 +2479,31 @@ fn game_event_unspawn_pools_like_cpp(
     summary
 }
 
+fn game_event_unspawn_pools_for_event_like_cpp(
+    manager: &mut wow_map::MapManager,
+    canonical_spawn_metadata: &spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
+    event_id: i16,
+) -> GameEventPoolEventUnspawnSummaryLikeCpp {
+    let Some(event_pool_ids) = canonical_spawn_metadata.game_event_pool_ids_like_cpp(event_id)
+    else {
+        return GameEventPoolEventUnspawnSummaryLikeCpp {
+            event_id,
+            missing_event_pool_ids: true,
+            pool_summary: GameEventPoolUnspawnSummaryLikeCpp::default(),
+        };
+    };
+
+    GameEventPoolEventUnspawnSummaryLikeCpp {
+        event_id,
+        missing_event_pool_ids: false,
+        pool_summary: game_event_unspawn_pools_like_cpp(
+            manager,
+            canonical_spawn_metadata,
+            event_pool_ids,
+        ),
+    }
+}
+
 #[derive(Debug, Default, Clone, PartialEq)]
 struct GameEventPoolSpawnSummaryLikeCpp {
     event_pool_ids_seen: usize,
@@ -2492,6 +2524,13 @@ struct GameEventPoolSpawnSummaryLikeCpp {
     pool_remove_errors: usize,
     pool_unsupported_action_kind: usize,
     blocked_pool_plan_errors: Vec<wow_map::PoolMgrPlanErrorLikeCpp>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq)]
+struct GameEventPoolEventSpawnSummaryLikeCpp {
+    event_id: i16,
+    missing_event_pool_ids: bool,
+    pool_summary: GameEventPoolSpawnSummaryLikeCpp,
 }
 
 impl GameEventPoolSpawnSummaryLikeCpp {
@@ -2586,6 +2625,33 @@ fn game_event_spawn_pools_like_cpp(
     }
 
     summary
+}
+
+fn game_event_spawn_pools_for_event_like_cpp(
+    manager: &mut wow_map::MapManager,
+    canonical_spawn_metadata: &spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
+    loaded_grid_creature_respawn_caches: &LoadedGridCreatureRespawnCachesLikeCpp,
+    event_id: i16,
+) -> GameEventPoolEventSpawnSummaryLikeCpp {
+    let Some(event_pool_ids) = canonical_spawn_metadata.game_event_pool_ids_like_cpp(event_id)
+    else {
+        return GameEventPoolEventSpawnSummaryLikeCpp {
+            event_id,
+            missing_event_pool_ids: true,
+            pool_summary: GameEventPoolSpawnSummaryLikeCpp::default(),
+        };
+    };
+
+    GameEventPoolEventSpawnSummaryLikeCpp {
+        event_id,
+        missing_event_pool_ids: false,
+        pool_summary: game_event_spawn_pools_like_cpp(
+            manager,
+            canonical_spawn_metadata,
+            loaded_grid_creature_respawn_caches,
+            event_pool_ids,
+        ),
+    }
 }
 
 fn apply_canonical_spawn_group_condition_update_loaded_grid_records_like_cpp(
@@ -4249,7 +4315,8 @@ mod tests {
         build_loaded_grid_creature_respawn_record_like_cpp,
         build_loaded_grid_creature_spawn_group_spawn_record_like_cpp,
         build_loaded_grid_gameobject_respawn_record_like_cpp,
-        canonical_map_update_tick_set_inactive_like_cpp, game_event_spawn_pools_like_cpp,
+        canonical_map_update_tick_set_inactive_like_cpp, game_event_spawn_pools_for_event_like_cpp,
+        game_event_spawn_pools_like_cpp, game_event_unspawn_pools_for_event_like_cpp,
         game_event_unspawn_pools_like_cpp, install_canonical_spawn_group_initializer_like_cpp,
         load_world_config_from, loot_drop_rates_like_cpp, mmap_runtime_config_like_cpp,
         persisted_respawn_info_from_row_like_cpp, queue_respawn_db_delete_like_cpp,
@@ -4388,6 +4455,16 @@ mod tests {
             .with_pool_mgr_like_cpp(pool_mgr)
     }
 
+    fn canonical_spawn_metadata_with_store_pool_mgr_and_game_event_pools_like_cpp(
+        spawn_store: SpawnStore,
+        pool_mgr: PoolMgrLikeCpp,
+        game_event_pools: spawn_store_loader::GameEventPoolIdsLikeCpp,
+    ) -> spawn_store_loader::CanonicalSpawnMetadataLikeCpp {
+        spawn_store_loader::CanonicalSpawnMetadataLikeCpp::new(spawn_store, BTreeMap::new())
+            .with_pool_mgr_like_cpp(pool_mgr)
+            .with_game_event_pools_like_cpp(game_event_pools)
+    }
+
     fn pool_mgr_with_creature_pool_like_cpp(
         pool_id: u32,
         map_id: i32,
@@ -4401,6 +4478,206 @@ mod tests {
             .insert_or_replace_group_like_cpp(PoolMemberKindLikeCpp::Creature, pool_id, group)
             .expect("test creature pool group");
         pool_mgr
+    }
+
+    #[test]
+    fn game_event_pool_spawn_uses_canonical_event_pool_ids_like_cpp() {
+        let mut manager = wow_map::MapManager::default();
+        manager.create_world_map(1, 0);
+        manager.create_world_map(2, 0);
+        let event_id = 7;
+        let pool_id = 5321;
+        let spawn_id = 532101;
+        let mut store = SpawnStore::new();
+        store.add_object_spawn(
+            &SpawnData {
+                object_type: SpawnObjectType::Creature,
+                spawn_id,
+                map_id: 1,
+                db_data: true,
+                spawn_group: SpawnGroupTemplateData {
+                    group_id: 5321,
+                    name: "game-event-canonical-spawn".to_string(),
+                    map_id: 1,
+                    flags: SpawnGroupFlags::NONE,
+                },
+                id: 99,
+                spawn_point: SpawnPosition::new(1_000.0, 1_000.0, 0.0, 0.0),
+                phase_use_flags: 0,
+                phase_id: 0,
+                phase_group: 0,
+                terrain_swap_map: 0,
+                pool_id,
+                spawn_time_secs: 0,
+                spawn_difficulties: vec![1],
+                script_id: 0,
+                string_id: String::new(),
+            },
+            |_| false,
+        );
+        let game_event_pools =
+            spawn_store_loader::GameEventPoolIdsLikeCpp::from_game_event_max_entry_like_cpp(Some(
+                10,
+            ))
+            .with_pool_ids_for_event_like_cpp(event_id, [pool_id]);
+        let metadata = canonical_spawn_metadata_with_store_pool_mgr_and_game_event_pools_like_cpp(
+            store,
+            pool_mgr_with_creature_pool_like_cpp(pool_id, 1, spawn_id),
+            game_event_pools,
+        );
+        let caches = empty_loaded_grid_creature_respawn_caches_like_cpp();
+
+        let summary =
+            game_event_spawn_pools_for_event_like_cpp(&mut manager, &metadata, &caches, event_id);
+
+        assert_eq!(summary.event_id, event_id);
+        assert!(!summary.missing_event_pool_ids);
+        assert_eq!(summary.pool_summary.event_pool_ids_seen, 1);
+        assert_eq!(summary.pool_summary.maps_matched, 1);
+        assert!(
+            manager
+                .find_map(1, 0)
+                .expect("test map 1")
+                .map()
+                .pool_data_like_cpp()
+                .is_spawned_creature_like_cpp(spawn_id)
+        );
+        assert!(
+            !manager
+                .find_map(2, 0)
+                .expect("test map 2")
+                .map()
+                .pool_data_like_cpp()
+                .is_spawned_creature_like_cpp(spawn_id)
+        );
+    }
+
+    #[test]
+    fn game_event_pool_unspawn_uses_canonical_event_pool_ids_like_cpp() {
+        let mut manager = wow_map::MapManager::default();
+        manager.create_world_map(1, 0);
+        manager.create_world_map(2, 0);
+        let event_id = 8;
+        let pool_id = 5322;
+        let spawn_id = 532201;
+        let game_event_pools =
+            spawn_store_loader::GameEventPoolIdsLikeCpp::from_game_event_max_entry_like_cpp(Some(
+                10,
+            ))
+            .with_pool_ids_for_event_like_cpp(event_id, [pool_id]);
+        let metadata = canonical_spawn_metadata_with_store_pool_mgr_and_game_event_pools_like_cpp(
+            SpawnStore::new(),
+            pool_mgr_with_creature_pool_like_cpp(pool_id, 1, spawn_id),
+            game_event_pools,
+        );
+        for map_id in [1, 2] {
+            let map = manager
+                .find_map_mut(map_id, 0)
+                .expect("test canonical map")
+                .map_mut();
+            map.add_respawn_info_like_cpp(respawn_info_like_cpp(
+                SpawnObjectType::Creature,
+                spawn_id,
+                532200,
+            ));
+            map.pool_data_mut_like_cpp()
+                .add_spawn_like_cpp(SpawnObjectType::Creature, spawn_id, pool_id)
+                .expect("test spawned creature pool data");
+        }
+
+        let summary =
+            game_event_unspawn_pools_for_event_like_cpp(&mut manager, &metadata, event_id);
+
+        assert_eq!(summary.event_id, event_id);
+        assert!(!summary.missing_event_pool_ids);
+        assert_eq!(summary.pool_summary.event_pool_ids_seen, 1);
+        assert_eq!(summary.pool_summary.maps_matched, 1);
+        assert!(
+            !manager
+                .find_map(1, 0)
+                .expect("test map 1")
+                .map()
+                .pool_data_like_cpp()
+                .is_spawned_creature_like_cpp(spawn_id)
+        );
+        assert!(
+            manager
+                .find_map(2, 0)
+                .expect("test map 2")
+                .map()
+                .pool_data_like_cpp()
+                .is_spawned_creature_like_cpp(spawn_id)
+        );
+    }
+
+    #[test]
+    fn game_event_pool_missing_event_id_is_noop_like_cpp() {
+        let mut manager = wow_map::MapManager::default();
+        manager.create_world_map(1, 0);
+        let pool_id = 5323;
+        let spawn_id = 532301;
+        let metadata = canonical_spawn_metadata_with_store_pool_mgr_and_game_event_pools_like_cpp(
+            SpawnStore::new(),
+            pool_mgr_with_creature_pool_like_cpp(pool_id, 1, spawn_id),
+            spawn_store_loader::GameEventPoolIdsLikeCpp::from_game_event_max_entry_like_cpp(Some(
+                2,
+            )),
+        );
+        manager
+            .find_map_mut(1, 0)
+            .expect("test map")
+            .map_mut()
+            .pool_data_mut_like_cpp()
+            .add_spawn_like_cpp(SpawnObjectType::Creature, spawn_id, pool_id)
+            .expect("test spawned creature pool data");
+        let caches = empty_loaded_grid_creature_respawn_caches_like_cpp();
+
+        let spawn_summary =
+            game_event_spawn_pools_for_event_like_cpp(&mut manager, &metadata, &caches, 99);
+        let unspawn_summary =
+            game_event_unspawn_pools_for_event_like_cpp(&mut manager, &metadata, 99);
+
+        assert!(spawn_summary.missing_event_pool_ids);
+        assert_eq!(spawn_summary.pool_summary.event_pool_ids_seen, 0);
+        assert!(unspawn_summary.missing_event_pool_ids);
+        assert_eq!(unspawn_summary.pool_summary.event_pool_ids_seen, 0);
+        assert!(
+            manager
+                .find_map(1, 0)
+                .expect("test map")
+                .map()
+                .pool_data_like_cpp()
+                .is_spawned_creature_like_cpp(spawn_id)
+        );
+    }
+
+    #[test]
+    fn game_event_pool_empty_event_id_list_is_noop_like_cpp() {
+        let mut manager = wow_map::MapManager::default();
+        manager.create_world_map(1, 0);
+        let event_id = 1;
+        let game_event_pools =
+            spawn_store_loader::GameEventPoolIdsLikeCpp::from_game_event_max_entry_like_cpp(Some(
+                2,
+            ));
+        let metadata = canonical_spawn_metadata_with_store_pool_mgr_and_game_event_pools_like_cpp(
+            SpawnStore::new(),
+            PoolMgrLikeCpp::new(),
+            game_event_pools,
+        );
+        let caches = empty_loaded_grid_creature_respawn_caches_like_cpp();
+
+        let spawn_summary =
+            game_event_spawn_pools_for_event_like_cpp(&mut manager, &metadata, &caches, event_id);
+        let unspawn_summary =
+            game_event_unspawn_pools_for_event_like_cpp(&mut manager, &metadata, event_id);
+
+        assert!(!spawn_summary.missing_event_pool_ids);
+        assert_eq!(spawn_summary.pool_summary.event_pool_ids_seen, 0);
+        assert!(!unspawn_summary.missing_event_pool_ids);
+        assert_eq!(unspawn_summary.pool_summary.event_pool_ids_seen, 0);
+        assert_eq!(spawn_summary.pool_summary.maps_matched, 0);
+        assert_eq!(unspawn_summary.pool_summary.maps_matched, 0);
     }
 
     #[test]

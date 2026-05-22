@@ -163,6 +163,18 @@ impl GameEventPoolIdsLikeCpp {
             .map(Vec::as_slice)
     }
 
+    #[cfg(test)]
+    pub fn with_pool_ids_for_event_like_cpp(
+        mut self,
+        event_id: i16,
+        pool_ids: impl IntoIterator<Item = u32>,
+    ) -> Self {
+        if let Some(index) = self.internal_event_id_like_cpp(event_id) {
+            self.pool_ids_by_internal_event_id[index].extend(pool_ids);
+        }
+        self
+    }
+
     fn push_pool_id_like_cpp(&mut self, event_id: i16, pool_id: u32) -> bool {
         let Some(index) = self.internal_event_id_like_cpp(event_id) else {
             return false;
