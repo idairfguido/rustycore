@@ -78,6 +78,7 @@ use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus, build_dis
 use wow_loot::{LootStoreKind, LootStores};
 use wow_network::session_mgr::{InstanceLink, SessionManager};
 use wow_network::{
+    GameEventQuestCompleteClientOutcomeLikeCpp, GameEventQuestCompleteCommandLikeCpp,
     GroupRegistry, LootDropRatesLikeCpp, PendingInvites, PlayerBroadcastInfo, PlayerRegistry,
     SessionCommand,
 };
@@ -1450,6 +1451,9 @@ pub struct WorldSession {
     // Shared player registry for broadcasting to nearby sessions
     player_registry: Option<Arc<PlayerRegistry>>,
 
+    // Session -> world-server bridge for C++ GameEventMgr::HandleQuestComplete.
+    game_event_quest_complete_tx: Option<flume::Sender<GameEventQuestCompleteCommandLikeCpp>>,
+
     // Shared C++-style ObjectAccessor for canonical in-world/player-owned object lookups.
     object_accessor: Option<SharedObjectAccessor>,
 
@@ -2332,6 +2336,7 @@ impl WorldSession {
             phase_store: None,
             phase_group_store: None,
             player_registry: None,
+            game_event_quest_complete_tx: None,
             object_accessor: None,
             group_registry: None,
             pending_invites: None,
@@ -2545,6 +2550,39 @@ impl WorldSession {
 
     pub fn set_canonical_map_manager(&mut self, mgr: SharedCanonicalMapManager) {
         self.canonical_map_manager = Some(mgr);
+    }
+
+    pub fn set_game_event_quest_complete_sender_like_cpp(
+        &mut self,
+        sender: flume::Sender<GameEventQuestCompleteCommandLikeCpp>,
+    ) {
+        self.game_event_quest_complete_tx = Some(sender);
+    }
+
+    pub async fn notify_game_event_quest_complete_like_cpp(
+        &self,
+        quest_id: u32,
+    ) -> GameEventQuestCompleteClientOutcomeLikeCpp {
+        let Some(sender) = self.game_event_quest_complete_tx.as_ref() else {
+            return GameEventQuestCompleteClientOutcomeLikeCpp::SenderMissing { quest_id };
+        };
+
+        let (response_tx, response_rx) = flume::bounded(1);
+        let command = GameEventQuestCompleteCommandLikeCpp {
+            quest_id,
+            response_tx,
+        };
+        if sender.try_send(command).is_err() {
+            return GameEventQuestCompleteClientOutcomeLikeCpp::SendFailed { quest_id };
+        }
+
+        match tokio::time::timeout(Duration::from_millis(250), response_rx.recv_async()).await {
+            Ok(Ok(response)) => GameEventQuestCompleteClientOutcomeLikeCpp::Ok(response),
+            Ok(Err(_)) => {
+                GameEventQuestCompleteClientOutcomeLikeCpp::ResponseChannelClosed { quest_id }
+            }
+            Err(_) => GameEventQuestCompleteClientOutcomeLikeCpp::ResponseTimeout { quest_id },
+        }
     }
 
     fn canonical_player_entity_snapshot_like_cpp(&self) -> Option<Player> {
@@ -17118,7 +17156,10 @@ mod tests {
         REAGENT_BAG_SLOT_START, SendNewItemInstancePlan, SendNewItemModifier,
     };
     use wow_movement::MoveSplineFlag;
-    use wow_network::{GroupInfo, PlayerBroadcastInfo, ResetSeasonalQuestStatusCommand};
+    use wow_network::{
+        GameEventQuestCompleteClientOutcomeLikeCpp, GameEventQuestCompleteResponseLikeCpp,
+        GroupInfo, PlayerBroadcastInfo, ResetSeasonalQuestStatusCommand,
+    };
     use wow_packet::ServerPacket;
     use wow_packet::packets::loot::{
         CreatureLoot, LOOT_TYPE_CORPSE_LIKE_CPP, LOOT_TYPE_ITEM_LIKE_CPP, LootEntry, LootEntryFlags,
@@ -17169,6 +17210,110 @@ mod tests {
             packets.push(bytes);
         }
         packets
+    }
+
+    #[tokio::test]
+    async fn game_event_quest_complete_notify_reports_missing_sender_like_cpp() {
+        let (session, _, _) = make_session();
+
+        let outcome = session.notify_game_event_quest_complete_like_cpp(42).await;
+
+        assert_eq!(
+            outcome,
+            GameEventQuestCompleteClientOutcomeLikeCpp::SenderMissing { quest_id: 42 }
+        );
+    }
+
+    #[tokio::test]
+    async fn game_event_quest_complete_notify_sends_command_and_receives_response_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let (command_tx, command_rx) = flume::bounded(1);
+        session.set_game_event_quest_complete_sender_like_cpp(command_tx);
+
+        let responder = tokio::spawn(async move {
+            let command = command_rx.recv_async().await.expect("command received");
+            assert_eq!(command.quest_id, 1234);
+            command
+                .response_tx
+                .send_async(GameEventQuestCompleteResponseLikeCpp {
+                    quest_id: 1234,
+                    condition_save_updates_queued: 1,
+                    save_world_event_state_requested: true,
+                    world_event_state_save_requested: 1,
+                    force_game_event_update_requested: true,
+                    force_game_event_update_requests: 1,
+                    ..GameEventQuestCompleteResponseLikeCpp::default()
+                })
+                .await
+                .expect("response sent");
+        });
+
+        let outcome = session
+            .notify_game_event_quest_complete_like_cpp(1234)
+            .await;
+        responder.await.expect("responder task completed");
+
+        match outcome {
+            GameEventQuestCompleteClientOutcomeLikeCpp::Ok(response) => {
+                assert_eq!(response.quest_id, 1234);
+                assert_eq!(response.condition_save_updates_queued, 1);
+                assert!(response.save_world_event_state_requested);
+                assert_eq!(response.world_event_state_save_requested, 1);
+                assert!(response.force_game_event_update_requested);
+            }
+            other => panic!("expected ok response, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn game_event_quest_complete_notify_reports_send_failed_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let (command_tx, command_rx) = flume::bounded(1);
+        drop(command_rx);
+        session.set_game_event_quest_complete_sender_like_cpp(command_tx);
+
+        let outcome = session.notify_game_event_quest_complete_like_cpp(77).await;
+
+        assert_eq!(
+            outcome,
+            GameEventQuestCompleteClientOutcomeLikeCpp::SendFailed { quest_id: 77 }
+        );
+    }
+
+    #[tokio::test]
+    async fn game_event_quest_complete_notify_reports_timeout_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let (command_tx, command_rx) = flume::bounded(1);
+        session.set_game_event_quest_complete_sender_like_cpp(command_tx);
+
+        let outcome = session.notify_game_event_quest_complete_like_cpp(88).await;
+
+        assert_eq!(
+            outcome,
+            GameEventQuestCompleteClientOutcomeLikeCpp::ResponseTimeout { quest_id: 88 }
+        );
+        drop(command_rx);
+    }
+
+    #[tokio::test]
+    async fn game_event_quest_complete_notify_reports_response_channel_closed_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let (command_tx, command_rx) = flume::bounded(1);
+        session.set_game_event_quest_complete_sender_like_cpp(command_tx);
+
+        let closer = tokio::spawn(async move {
+            let command = command_rx.recv_async().await.expect("command received");
+            assert_eq!(command.quest_id, 99);
+            drop(command.response_tx);
+        });
+
+        let outcome = session.notify_game_event_quest_complete_like_cpp(99).await;
+        closer.await.expect("closer task completed");
+
+        assert_eq!(
+            outcome,
+            GameEventQuestCompleteClientOutcomeLikeCpp::ResponseChannelClosed { quest_id: 99 }
+        );
     }
 
     #[test]

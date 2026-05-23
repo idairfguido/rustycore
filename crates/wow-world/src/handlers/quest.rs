@@ -733,6 +733,19 @@ impl WorldSession {
             "Quest rewarded"
         );
 
+        // C++ Player::SendQuestReward calls sGameEventMgr->HandleQuestComplete(questId)
+        // before building/sending the reward packet. This bounded bridge reports
+        // failures explicitly and never blocks the reward flow indefinitely.
+        let game_event_outcome = self
+            .notify_game_event_quest_complete_like_cpp(quest_id)
+            .await;
+        debug!(
+            account = self.account_id,
+            quest_id,
+            outcome = ?game_event_outcome,
+            "Represented C++ GameEventMgr::HandleQuestComplete notification after quest reward"
+        );
+
         // SMSG_QUEST_GIVER_QUEST_COMPLETE — reward popup with XP/gold
         self.send_packet(&QuestGiverQuestComplete {
             quest_id,

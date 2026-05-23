@@ -35,8 +35,9 @@ use wow_loot::{
 use wow_network::session_mgr::SessionManager;
 use wow_network::world_socket::{AccountInfo, AccountLookup};
 use wow_network::{
-    GroupRegistry, LootDropRatesLikeCpp, PendingInvites, PlayerRegistry,
-    ResetSeasonalQuestStatusCommand, SessionCommand, SessionResources,
+    GameEventQuestCompleteCommandLikeCpp, GameEventQuestCompleteResponseLikeCpp, GroupRegistry,
+    LootDropRatesLikeCpp, PendingInvites, PlayerRegistry, ResetSeasonalQuestStatusCommand,
+    SessionCommand, SessionResources,
 };
 use wow_world::{
     MMapRuntimeConfigLikeCpp, MapManager as LegacyMapManager, SharedCanonicalMapManager,
@@ -1666,6 +1667,14 @@ async fn main() -> Result<()> {
         )
     };
 
+    let (game_event_quest_complete_tx, game_event_quest_complete_rx) = flume::bounded(1024);
+    let game_event_quest_complete_handle =
+        tokio::spawn(run_game_event_quest_complete_processor_like_cpp(
+            game_event_quest_complete_rx,
+            Arc::clone(&canonical_spawn_metadata),
+            Arc::clone(&char_db),
+        ));
+
     // Build session resources
     let session_resources = Arc::new(SessionResources {
         char_db: Some(Arc::clone(&char_db)),
@@ -1734,6 +1743,7 @@ async fn main() -> Result<()> {
         quest_v2_store: Some(Arc::clone(&quest_v2_store)),
         player_xp_table: Some(Arc::clone(&player_xp_table)),
         player_registry: Some(Arc::clone(&player_registry)),
+        game_event_quest_complete_tx: Some(game_event_quest_complete_tx),
         group_registry: Some(Arc::clone(&group_registry)),
         pending_invites: Some(Arc::clone(&pending_invites)),
         loot_drop_rates: loot_drop_rates_like_cpp(&world_configs),
@@ -1878,6 +1888,8 @@ async fn main() -> Result<()> {
             }
         }
     }
+
+    game_event_quest_complete_handle.abort();
 
     if let Err(e) = set_realm_offline(&login_db, realm_id).await {
         tracing::error!("Failed to mark realm {realm_id} offline: {e}");
@@ -3555,6 +3567,86 @@ fn current_unix_time_secs_like_cpp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_secs())
+}
+
+fn game_event_quest_complete_response_from_summary_like_cpp(
+    quest_id: u32,
+    summary: &GameEventQuestCompleteDbBridgeSummaryLikeCpp,
+) -> GameEventQuestCompleteResponseLikeCpp {
+    GameEventQuestCompleteResponseLikeCpp {
+        quest_id,
+        condition_save_updates_queued: summary.condition_save_updates_queued,
+        condition_save_updates_executed: summary.condition_save_updates_executed,
+        condition_save_updates_failed: summary.condition_save_updates_failed,
+        condition_save_updates_skipped_non_progress: summary
+            .condition_save_updates_skipped_non_progress,
+        save_world_event_state_requested: summary.save_world_event_state_requested,
+        world_event_state_save_requested: summary.world_event_state_save_requested,
+        world_event_state_saves_queued: summary.world_event_state_summary.saves_queued,
+        world_event_state_saves_executed: summary.world_event_state_summary.saves_executed,
+        world_event_state_saves_failed: summary.world_event_state_summary.saves_failed,
+        world_event_state_saves_skipped_event_id_out_of_range: summary
+            .world_event_state_summary
+            .saves_skipped_event_id_out_of_range,
+        world_event_state_saves_skipped_missing_event: summary
+            .world_event_state_summary
+            .saves_skipped_missing_event,
+        force_game_event_update_requested: summary.force_game_event_update_requested_flag,
+        force_game_event_update_requests: summary.force_game_event_update_requested,
+        processor_failed: false,
+    }
+}
+
+fn game_event_quest_complete_processor_failed_response_like_cpp(
+    quest_id: u32,
+) -> GameEventQuestCompleteResponseLikeCpp {
+    GameEventQuestCompleteResponseLikeCpp {
+        quest_id,
+        processor_failed: true,
+        ..GameEventQuestCompleteResponseLikeCpp::default()
+    }
+}
+
+async fn run_game_event_quest_complete_processor_like_cpp(
+    command_rx: flume::Receiver<GameEventQuestCompleteCommandLikeCpp>,
+    canonical_spawn_metadata: SharedCanonicalSpawnMetadataLikeCpp,
+    character_db: Arc<CharacterDatabase>,
+) {
+    while let Ok(command) = command_rx.recv_async().await {
+        let quest_id = command.quest_id;
+        let maybe_summary = {
+            let Ok(mut metadata) = canonical_spawn_metadata.lock() else {
+                tracing::error!(
+                    quest_id,
+                    "CanonicalSpawnMetadataLikeCpp mutex poisoned during C++ GameEventMgr::HandleQuestComplete bridge"
+                );
+                let _ = command.response_tx.try_send(
+                    game_event_quest_complete_processor_failed_response_like_cpp(quest_id),
+                );
+                continue;
+            };
+            let outcome = metadata.represented_handle_game_event_quest_complete_like_cpp(
+                quest_id,
+                current_unix_time_secs_like_cpp(),
+            );
+            materialize_game_event_quest_complete_db_bridge_like_cpp(&outcome, &metadata)
+        };
+
+        let mut summary = maybe_summary;
+        execute_game_event_quest_complete_condition_save_db_bridge_like_cpp(
+            character_db.as_ref(),
+            &mut summary,
+        )
+        .await;
+        execute_game_event_world_event_state_db_bridge_like_cpp(
+            character_db.as_ref(),
+            &mut summary.world_event_state_summary,
+        )
+        .await;
+
+        let response = game_event_quest_complete_response_from_summary_like_cpp(quest_id, &summary);
+        let _ = command.response_tx.try_send(response);
+    }
 }
 
 fn represented_game_event_world_conditions_met_like_cpp(_event_id: u16) -> bool {
@@ -6171,6 +6263,9 @@ async fn create_session(
     if let Some(ref registry) = resources.player_registry {
         session.set_player_registry(Arc::clone(registry));
     }
+    if let Some(sender) = resources.game_event_quest_complete_tx.as_ref() {
+        session.set_game_event_quest_complete_sender_like_cpp(sender.clone());
+    }
     session.set_loot_drop_rates_like_cpp(resources.loot_drop_rates);
     session.set_enable_ae_loot_like_cpp(resources.enable_ae_loot);
     session.set_mmap_runtime_config_like_cpp(mmap_runtime_config);
@@ -6344,6 +6439,7 @@ mod tests {
         consume_game_event_live_update_side_effects_like_cpp,
         fanout_reset_event_seasonal_quests_to_player_sessions_after_db_delete_like_cpp,
         game_event_change_equip_or_model_like_cpp, game_event_live_update_actions_like_cpp,
+        game_event_quest_complete_response_from_summary_like_cpp,
         game_event_spawn_creatures_and_gameobjects_for_event_like_cpp,
         game_event_spawn_for_event_like_cpp, game_event_spawn_pools_for_event_like_cpp,
         game_event_spawn_pools_like_cpp,
@@ -9398,6 +9494,60 @@ mmap.enablePathFinding = 0
             3,
             1_234,
         );
+    }
+
+    #[test]
+    fn game_event_quest_complete_response_dto_includes_condition_and_world_event_flags_like_cpp() {
+        let metadata = game_event_world_state_metadata_like_cpp(
+            7,
+            &[spawn_store_loader::GameEventDataLikeCpp {
+                event_id: 7,
+                state_raw: 3,
+                next_start: 5_000,
+                ..Default::default()
+            }],
+        );
+        let outcome = game_event_quest_complete_progressed_outcome_like_cpp(true, true);
+
+        let mut summary =
+            materialize_game_event_quest_complete_db_bridge_like_cpp(&outcome, &metadata);
+        summary.condition_save_updates_executed = 1;
+        summary.world_event_state_summary.saves_executed = 1;
+        let response = game_event_quest_complete_response_from_summary_like_cpp(1234, &summary);
+
+        assert_eq!(response.quest_id, 1234);
+        assert_eq!(response.condition_save_updates_queued, 1);
+        assert_eq!(response.condition_save_updates_executed, 1);
+        assert_eq!(response.condition_save_updates_failed, 0);
+        assert_eq!(response.condition_save_updates_skipped_non_progress, 0);
+        assert!(response.save_world_event_state_requested);
+        assert_eq!(response.world_event_state_save_requested, 1);
+        assert_eq!(response.world_event_state_saves_queued, 1);
+        assert_eq!(response.world_event_state_saves_executed, 1);
+        assert_eq!(response.world_event_state_saves_failed, 0);
+        assert!(response.force_game_event_update_requested);
+        assert_eq!(response.force_game_event_update_requests, 1);
+        assert!(!response.processor_failed);
+    }
+
+    #[test]
+    fn game_event_quest_complete_response_dto_reports_non_progress_noop_like_cpp() {
+        let metadata = game_event_world_state_metadata_like_cpp(7, &[]);
+        let outcome =
+            spawn_store_loader::GameEventQuestCompleteOutcomeLikeCpp::MissingQuestMapping {
+                quest_id: 9999,
+            };
+
+        let summary = materialize_game_event_quest_complete_db_bridge_like_cpp(&outcome, &metadata);
+        let response = game_event_quest_complete_response_from_summary_like_cpp(9999, &summary);
+
+        assert_eq!(response.quest_id, 9999);
+        assert_eq!(response.condition_save_updates_queued, 0);
+        assert_eq!(response.condition_save_updates_skipped_non_progress, 1);
+        assert!(!response.save_world_event_state_requested);
+        assert_eq!(response.world_event_state_saves_queued, 0);
+        assert!(!response.force_game_event_update_requested);
+        assert!(!response.processor_failed);
     }
 
     #[test]

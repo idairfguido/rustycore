@@ -30,6 +30,40 @@ pub struct ResetSeasonalQuestStatusCommand {
 }
 
 #[derive(Clone, Debug)]
+pub struct GameEventQuestCompleteCommandLikeCpp {
+    pub quest_id: u32,
+    pub response_tx: flume::Sender<GameEventQuestCompleteResponseLikeCpp>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GameEventQuestCompleteResponseLikeCpp {
+    pub quest_id: u32,
+    pub condition_save_updates_queued: usize,
+    pub condition_save_updates_executed: usize,
+    pub condition_save_updates_failed: usize,
+    pub condition_save_updates_skipped_non_progress: usize,
+    pub save_world_event_state_requested: bool,
+    pub world_event_state_save_requested: usize,
+    pub world_event_state_saves_queued: usize,
+    pub world_event_state_saves_executed: usize,
+    pub world_event_state_saves_failed: usize,
+    pub world_event_state_saves_skipped_event_id_out_of_range: usize,
+    pub world_event_state_saves_skipped_missing_event: usize,
+    pub force_game_event_update_requested: bool,
+    pub force_game_event_update_requests: usize,
+    pub processor_failed: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GameEventQuestCompleteClientOutcomeLikeCpp {
+    Ok(GameEventQuestCompleteResponseLikeCpp),
+    SenderMissing { quest_id: u32 },
+    SendFailed { quest_id: u32 },
+    ResponseTimeout { quest_id: u32 },
+    ResponseChannelClosed { quest_id: u32 },
+}
+
+#[derive(Clone, Debug)]
 pub struct MasterLootGiveCommand {
     pub master_guid: ObjectGuid,
     pub loot_owner: ObjectGuid,

@@ -17,7 +17,7 @@ use wow_packet::ClientPacket;
 use wow_packet::packets::auth::{AuthContinuedSession, ConnectToKey, EnterEncryptedMode};
 
 use crate::group_registry::{GroupRegistry, PendingInvites};
-use crate::player_registry::PlayerRegistry;
+use crate::player_registry::{GameEventQuestCompleteCommandLikeCpp, PlayerRegistry};
 use crate::session_mgr::{InstanceLink, SessionManager};
 use crate::world_socket::{
     AccountInfo, AccountLookup, WorldSocket, WorldSocketError, sign_enable_encryption,
@@ -126,6 +126,8 @@ pub struct SessionResources {
     pub player_xp_table: Option<Arc<Vec<u32>>>,
     /// Shared registry of all active player sessions (for broadcast).
     pub player_registry: Option<Arc<PlayerRegistry>>,
+    /// Session -> world-server bridge for C++ GameEventMgr::HandleQuestComplete.
+    pub game_event_quest_complete_tx: Option<flume::Sender<GameEventQuestCompleteCommandLikeCpp>>,
     /// Shared registry of all active groups.
     pub group_registry: Option<Arc<GroupRegistry>>,
     /// Pending party invites: invited_guid → inviter_guid.
