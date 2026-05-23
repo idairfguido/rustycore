@@ -16,6 +16,10 @@
 - None currently tracked.
 
 ## Closed Tasks
+- [x] **#NEXT.R8.ENTITIES.579** GameObject questgiver consumes QuestStore GameObject starter/ender relations.
+  Status: represented-partial for bounded `WorldSession::use_represented_gameobject_questgiver_like_cpp` session seam only; independent review `APROBADO`; CI `CI_OK`; local commit is this slice closeout at current #579 HEAD. C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:2537-2546`; `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp:13521-13535`; `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp:13947-14004`; `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp:14007-14045`; `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:8505-8567`.
+  Rust targets: `crates/wow-world/src/session.rs`, `crates/wow-world/src/handlers/misc.rs`, docs/inventory/handoff.
+  Boundaries: keeps `SendGossip` evidence for `PrepareGossipMenu(..., true)` and sends `QuestGiverQuestList` only when QuestStore GameObject relations plus player quest state/can_take_quest produce entries. No real PlayerTalkClass/GossipMenu DB/options/SendPreparedGossip, no single-element auto-open, no GameObject-specific accept/reward/query validation, no GameEvent active quest overlay, no conditions/scripts/localization/fanout/manual-test-ready.
 - [x] **#NEXT.R8.ENTITIES.578** QuestStore GameObject queststarter/questender metadata foundation.
   Status: represented-complete for bounded pure `wow-data` metadata foundation only; independent review `APROBADO`; CI `CI_OK`; local commit is this slice closeout at current #578 HEAD; no push/restart/manual-test-ready claim. C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:8505-8539`; `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:8541-8553`; `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:8555-8567`.
   Rust targets: `crates/wow-database/src/statements/world.rs`, `crates/wow-data/src/quest.rs`, docs/inventory/handoff.

@@ -87,6 +87,7 @@ use wow_packet::packets::item::{
     ItemPushResult, ItemPushResultDisplayType, ItemTimeUpdate,
 };
 use wow_packet::packets::misc::{AccountMount, AccountMountUpdate, BuyFailed, SellResponse};
+use wow_packet::packets::quest::{QuestGiverQuestList, QuestListEntry};
 use wow_packet::packets::spell::SpellTargetData;
 use wow_recastdetour::PathQueryFilterContext;
 
@@ -13427,6 +13428,7 @@ impl WorldSession {
         &mut self,
         gameobject_guid: ObjectGuid,
         player_guid: ObjectGuid,
+        gameobject_entry: u32,
         source: wow_entities::QuestgiverUseSource,
     ) -> bool {
         self.represented_gameobject_use_effects
@@ -13436,7 +13438,57 @@ impl WorldSession {
                 gossip_id: source.gossip_id,
             });
 
+        let Some(quest_store) = self.quest_store.as_ref().map(Arc::clone) else {
+            return true;
+        };
+
+        let mut quests = Vec::new();
+
+        // C++ `Player::PrepareQuestMenu` checks GO involved/ender relations before starter
+        // relations. `QuestListEntry` currently has no exact quest-icon field, so this
+        // represented seam preserves the available wire fields and branch/order only.
+        for quest in quest_store.quests_for_gameobject_ender(gameobject_entry) {
+            if self
+                .player_quests
+                .get(&quest.id)
+                .is_some_and(|status| matches!(status.status, 1 | 2))
+            {
+                quests.push(Self::quest_list_entry_from_template_like_cpp(quest));
+            }
+        }
+
+        for quest in quest_store.quests_for_gameobject_starter(gameobject_entry) {
+            if self.can_take_quest(quest) {
+                quests.push(Self::quest_list_entry_from_template_like_cpp(quest));
+            }
+        }
+
+        if !quests.is_empty() {
+            self.send_packet(&QuestGiverQuestList {
+                guid: gameobject_guid,
+                greeting: String::new(),
+                greet_emote_delay: 0,
+                greet_emote_type: 0,
+                quests,
+            });
+        }
+
         true
+    }
+
+    fn quest_list_entry_from_template_like_cpp(
+        quest: &wow_data::quest::QuestTemplate,
+    ) -> QuestListEntry {
+        QuestListEntry {
+            quest_id: quest.id,
+            quest_type: quest.quest_type,
+            quest_level: quest.quest_level,
+            quest_max_scaling_level: quest.quest_max_scaling_level,
+            quest_flags: quest.flags,
+            quest_flags_ex: quest.flags_ex,
+            repeatable: quest.is_repeatable(),
+            title: quest.log_title.clone(),
+        }
     }
 
     pub(crate) fn use_represented_gameobject_spellcaster_like_cpp(
@@ -17238,6 +17290,21 @@ mod tests {
             packets.push(bytes);
         }
         packets
+    }
+
+    fn packet_contains_quest_ids_in_order(bytes: &[u8], quest_ids: &[u32]) -> bool {
+        let mut search_from = 0usize;
+        for quest_id in quest_ids {
+            let needle = quest_id.to_le_bytes();
+            let Some(relative_pos) = bytes[search_from..]
+                .windows(needle.len())
+                .position(|window| window == needle)
+            else {
+                return false;
+            };
+            search_from += relative_pos + needle.len();
+        }
+        true
     }
 
     #[tokio::test]
@@ -35932,7 +35999,7 @@ mod tests {
 
     #[test]
     fn gameobject_use_questgiver_sends_gossip_like_cpp() {
-        let (mut session, _pkt_tx, _send_rx) = make_session();
+        let (mut session, _pkt_tx, send_rx) = make_session();
         let player_guid = ObjectGuid::create_player(1, 99);
         let gameobject_guid =
             ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 19);
@@ -35940,6 +36007,7 @@ mod tests {
         assert!(session.use_represented_gameobject_questgiver_like_cpp(
             gameobject_guid,
             player_guid,
+            777,
             wow_entities::QuestgiverUseSource { gossip_id: 123 },
         ));
         assert_eq!(
@@ -35950,6 +36018,110 @@ mod tests {
                 gossip_id: 123,
             }]
         );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn gameobject_use_questgiver_gameobject_starter_relation_sends_quest_list_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 19);
+        let mut quest = test_quest_template(9_001);
+        quest.log_title = "GO starter".into();
+        let mut quest_store = wow_data::quest::QuestStore::from_quests_like_cpp([quest]);
+        assert!(quest_store.insert_gameobject_starter_relation_like_cpp(777, 9_001));
+        session.quest_store = Some(Arc::new(quest_store));
+
+        assert!(session.use_represented_gameobject_questgiver_like_cpp(
+            gameobject_guid,
+            player_guid,
+            777,
+            wow_entities::QuestgiverUseSource { gossip_id: 123 },
+        ));
+
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::SendGossip {
+                gameobject_guid,
+                player_guid,
+                gossip_id: 123,
+            }]
+        );
+        let bytes = send_rx.try_recv().unwrap();
+        assert_eq!(
+            wow_packet::WorldPacket::from_bytes(&bytes).server_opcode(),
+            Some(ServerOpcodes::QuestGiverQuestListMessage)
+        );
+        assert!(packet_contains_quest_ids_in_order(&bytes, &[9_001]));
+    }
+
+    #[test]
+    fn gameobject_use_questgiver_ender_relation_precedes_starter_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 19);
+        let mut ender = test_quest_template(9_001);
+        ender.log_title = "GO ender".into();
+        let mut starter = test_quest_template(9_002);
+        starter.log_title = "GO starter".into();
+        let mut quest_store = wow_data::quest::QuestStore::from_quests_like_cpp([ender, starter]);
+        assert!(quest_store.insert_gameobject_ender_relation_like_cpp(777, 9_001));
+        assert!(quest_store.insert_gameobject_starter_relation_like_cpp(777, 9_002));
+        session.quest_store = Some(Arc::new(quest_store));
+        session.player_quests.insert(
+            9_001,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id: 9_001,
+                status: 2,
+                explored: false,
+                objective_counts: Vec::new(),
+            },
+        );
+
+        assert!(session.use_represented_gameobject_questgiver_like_cpp(
+            gameobject_guid,
+            player_guid,
+            777,
+            wow_entities::QuestgiverUseSource { gossip_id: 123 },
+        ));
+
+        let bytes = send_rx.try_recv().unwrap();
+        assert_eq!(
+            wow_packet::WorldPacket::from_bytes(&bytes).server_opcode(),
+            Some(ServerOpcodes::QuestGiverQuestListMessage)
+        );
+        assert!(packet_contains_quest_ids_in_order(&bytes, &[9_001, 9_002]));
+    }
+
+    #[test]
+    fn gameobject_use_questgiver_without_gameobject_relations_keeps_only_gossip_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 19);
+        let mut quest_store =
+            wow_data::quest::QuestStore::from_quests_like_cpp([test_quest_template(9_001)]);
+        quest_store.starter_quests.insert(777, vec![9_001]);
+        session.quest_store = Some(Arc::new(quest_store));
+
+        assert!(session.use_represented_gameobject_questgiver_like_cpp(
+            gameobject_guid,
+            player_guid,
+            777,
+            wow_entities::QuestgiverUseSource { gossip_id: 123 },
+        ));
+
+        assert_eq!(
+            session.represented_gameobject_use_effects,
+            vec![RepresentedGameObjectUseEffect::SendGossip {
+                gameobject_guid,
+                player_guid,
+                gossip_id: 123,
+            }]
+        );
+        assert!(send_rx.try_recv().is_err());
     }
 
     #[tokio::test]
