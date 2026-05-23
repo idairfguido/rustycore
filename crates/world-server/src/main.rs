@@ -1569,6 +1569,12 @@ async fn main() -> Result<()> {
                 side_effect_summary.update_event_quests_creature_skipped_active_other_event,
             update_event_quests_gameobject_skipped_active_other_event =
                 side_effect_summary.update_event_quests_gameobject_skipped_active_other_event,
+            update_world_states_actions = side_effect_summary.update_world_states_actions,
+            update_world_states_no_holiday = side_effect_summary.update_world_states_no_holiday,
+            update_world_states_missing_event =
+                side_effect_summary.update_world_states_missing_event,
+            update_world_states_holiday_lookup_unrepresented =
+                side_effect_summary.update_world_states_holiday_lookup_unrepresented,
             update_npc_flags_actions = side_effect_summary.update_npc_flags_actions,
             update_npc_flags_records_seen = side_effect_summary.update_npc_flags_records_seen,
             update_npc_flags_maps_matched = side_effect_summary.update_npc_flags_maps_matched,
@@ -1584,7 +1590,7 @@ async fn main() -> Result<()> {
                 side_effect_summary.update_npc_vendor_missing_event_buckets,
             update_npc_vendor_remove_misses = side_effect_summary.update_npc_vendor_remove_misses,
             update_npc_vendor_no_match = side_effect_summary.update_npc_vendor_no_match,
-            "Represented C++ GameEventMgr::StartSystem: cleared active events, ran first Update with isSystemInit=false, installed WUPDATE_EVENTS delay, and consumed safe represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel, UpdateEventQuests cache, UpdateEventNPCFlags, and UpdateEventNPCVendor cache side effects; full ConditionMgr world-event runtime, quest packets/session gossip refresh, full ObjectMgr quest runtime and unsupported ApplyNewEvent/UnApplyEvent side effects remain pending"
+            "Represented C++ GameEventMgr::StartSystem: cleared active events, ran first Update with isSystemInit=false, installed WUPDATE_EVENTS delay, and consumed safe represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel, UpdateEventQuests cache, UpdateWorldStates evidence, UpdateEventNPCFlags, and UpdateEventNPCVendor cache side effects; full ConditionMgr world-event runtime, quest packets/session gossip refresh, full ObjectMgr quest runtime, real WorldStateMgr/BattlemasterList HolidayWorldState lookup and unsupported ApplyNewEvent/UnApplyEvent side effects remain pending"
         );
         CanonicalGameEventSchedulerLikeCpp::start_system(
             game_event_outcome.next_update_delay_millis,
@@ -3490,6 +3496,7 @@ enum GameEventLiveUpdateActionLikeCpp {
     Unspawn(i16),
     ChangeEquipOrModel { event_id: u16, activate: bool },
     UpdateEventQuests { event_id: u16, activate: bool },
+    UpdateWorldStates { event_id: u16, activate: bool },
     UpdateNpcFlags { event_id: u16 },
     UpdateNpcVendor { event_id: u16, activate: bool },
 }
@@ -3524,6 +3531,10 @@ struct GameEventLiveUpdateSideEffectSummaryLikeCpp {
     update_event_quests_gameobject_missing_event_buckets: usize,
     update_event_quests_creature_skipped_active_other_event: usize,
     update_event_quests_gameobject_skipped_active_other_event: usize,
+    update_world_states_actions: usize,
+    update_world_states_no_holiday: usize,
+    update_world_states_missing_event: usize,
+    update_world_states_holiday_lookup_unrepresented: usize,
     update_npc_flags_actions: usize,
     update_npc_flags_records_seen: usize,
     update_npc_flags_missing_event_buckets: usize,
@@ -3569,6 +3580,10 @@ fn game_event_live_update_actions_like_cpp(
                     event_id: summary.event_id,
                     activate: true,
                 });
+                actions.push(GameEventLiveUpdateActionLikeCpp::UpdateWorldStates {
+                    event_id: summary.event_id,
+                    activate: true,
+                });
                 actions.push(GameEventLiveUpdateActionLikeCpp::UpdateNpcFlags {
                     event_id: summary.event_id,
                 });
@@ -3590,6 +3605,10 @@ fn game_event_live_update_actions_like_cpp(
                     activate: false,
                 });
                 actions.push(GameEventLiveUpdateActionLikeCpp::UpdateEventQuests {
+                    event_id: summary.event_id,
+                    activate: false,
+                });
+                actions.push(GameEventLiveUpdateActionLikeCpp::UpdateWorldStates {
                     event_id: summary.event_id,
                     activate: false,
                 });
@@ -3737,6 +3756,27 @@ fn game_event_update_npc_vendor_like_cpp(
     summary
 }
 
+fn game_event_update_world_states_like_cpp(
+    canonical_spawn_metadata: &spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
+    event_id: u16,
+    activate: bool,
+) -> GameEventLiveUpdateSideEffectSummaryLikeCpp {
+    let mut summary = GameEventLiveUpdateSideEffectSummaryLikeCpp::default();
+    let Some(event) = canonical_spawn_metadata.game_event_like_cpp(event_id) else {
+        summary.update_world_states_missing_event = 1;
+        return summary;
+    };
+
+    if event.holiday_id == 0 {
+        summary.update_world_states_no_holiday = 1;
+        return summary;
+    }
+
+    let _represented_activate_value = usize::from(activate);
+    summary.update_world_states_holiday_lookup_unrepresented = 1;
+    summary
+}
+
 fn game_event_update_quests_like_cpp(
     canonical_spawn_metadata: &mut spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
     event_id: u16,
@@ -3859,6 +3899,20 @@ fn consume_game_event_live_update_side_effects_like_cpp(
                     quest_summary.update_event_quests_creature_skipped_active_other_event;
                 summary.update_event_quests_gameobject_skipped_active_other_event +=
                     quest_summary.update_event_quests_gameobject_skipped_active_other_event;
+            }
+            GameEventLiveUpdateActionLikeCpp::UpdateWorldStates { event_id, activate } => {
+                let world_state_summary = game_event_update_world_states_like_cpp(
+                    canonical_spawn_metadata,
+                    event_id,
+                    activate,
+                );
+                summary.update_world_states_actions += 1;
+                summary.update_world_states_no_holiday +=
+                    world_state_summary.update_world_states_no_holiday;
+                summary.update_world_states_missing_event +=
+                    world_state_summary.update_world_states_missing_event;
+                summary.update_world_states_holiday_lookup_unrepresented +=
+                    world_state_summary.update_world_states_holiday_lookup_unrepresented;
             }
             GameEventLiveUpdateActionLikeCpp::UpdateNpcFlags { event_id } => {
                 let npc_flag_summary = game_event_update_npc_flags_like_cpp(
@@ -4893,6 +4947,13 @@ fn spawn_canonical_map_update_loop(
                         side_effect_summary.update_event_quests_creature_skipped_active_other_event,
                     update_event_quests_gameobject_skipped_active_other_event = side_effect_summary
                         .update_event_quests_gameobject_skipped_active_other_event,
+                    update_world_states_actions = side_effect_summary.update_world_states_actions,
+                    update_world_states_no_holiday =
+                        side_effect_summary.update_world_states_no_holiday,
+                    update_world_states_missing_event =
+                        side_effect_summary.update_world_states_missing_event,
+                    update_world_states_holiday_lookup_unrepresented =
+                        side_effect_summary.update_world_states_holiday_lookup_unrepresented,
                     update_npc_flags_actions = side_effect_summary.update_npc_flags_actions,
                     update_npc_flags_records_seen =
                         side_effect_summary.update_npc_flags_records_seen,
@@ -4914,7 +4975,7 @@ fn spawn_canonical_map_update_loop(
                     update_npc_vendor_remove_misses =
                         side_effect_summary.update_npc_vendor_remove_misses,
                     update_npc_vendor_no_match = side_effect_summary.update_npc_vendor_no_match,
-                    "C++ WUPDATE_EVENTS represented timer fired; updated canonical GameEvent metadata and consumed represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel, UpdateEventQuests cache, UpdateEventNPCFlags, and UpdateEventNPCVendor cache side effects; ConditionMgr world-event rows, DB state writes, announcements, quest packets/session gossip refresh, full ObjectMgr quest runtime, worldstates/SAI/seasonal reset and ForceGameEventUpdate command caller remain pending"
+                    "C++ WUPDATE_EVENTS represented timer fired; updated canonical GameEvent metadata and consumed represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel, UpdateEventQuests cache, UpdateWorldStates evidence, UpdateEventNPCFlags, and UpdateEventNPCVendor cache side effects; ConditionMgr world-event rows, DB state writes, announcements, quest packets/session gossip refresh, full ObjectMgr quest runtime, real WorldStateMgr/BattlemasterList HolidayWorldState lookup, SAI/seasonal reset and ForceGameEventUpdate command caller remain pending"
                 );
             }
 
@@ -5504,8 +5565,9 @@ mod tests {
         build_loaded_grid_creature_respawn_record_like_cpp,
         build_loaded_grid_creature_spawn_group_spawn_record_like_cpp,
         build_loaded_grid_gameobject_respawn_record_like_cpp,
-        canonical_map_update_tick_set_inactive_like_cpp, game_event_change_equip_or_model_like_cpp,
-        game_event_live_update_actions_like_cpp,
+        canonical_map_update_tick_set_inactive_like_cpp,
+        consume_game_event_live_update_side_effects_like_cpp,
+        game_event_change_equip_or_model_like_cpp, game_event_live_update_actions_like_cpp,
         game_event_spawn_creatures_and_gameobjects_for_event_like_cpp,
         game_event_spawn_for_event_like_cpp, game_event_spawn_pools_for_event_like_cpp,
         game_event_spawn_pools_like_cpp,
@@ -8087,8 +8149,139 @@ mmap.enablePathFinding = 0
         );
     }
 
+    fn game_event_world_state_metadata_like_cpp(
+        max_event_entry: u32,
+        events: &[spawn_store_loader::GameEventDataLikeCpp],
+    ) -> spawn_store_loader::CanonicalSpawnMetadataLikeCpp {
+        let store = events.iter().cloned().fold(
+            spawn_store_loader::GameEventDataStoreLikeCpp::from_game_event_max_entry_like_cpp(
+                Some(max_event_entry),
+            ),
+            spawn_store_loader::GameEventDataStoreLikeCpp::with_event_like_cpp,
+        );
+        spawn_store_loader::CanonicalSpawnMetadataLikeCpp::new(SpawnStore::new(), BTreeMap::new())
+            .with_game_events_like_cpp(store)
+    }
+
+    fn game_event_world_state_start_outcome_like_cpp(
+        event_id: u16,
+    ) -> spawn_store_loader::GameEventUpdateOutcomeLikeCpp {
+        spawn_store_loader::GameEventUpdateOutcomeLikeCpp {
+            scanned_event_ids: vec![],
+            check_outcomes: vec![],
+            next_check_outcomes: vec![],
+            queued_activation_event_ids: vec![event_id],
+            queued_deactivation_event_ids: vec![],
+            start_outcomes: vec![spawn_store_loader::GameEventStartOutcomeLikeCpp::Started(
+                spawn_store_loader::GameEventStartSummaryLikeCpp {
+                    event_id,
+                    state_before_raw: 0,
+                    state_after_raw: 0,
+                    active_added: true,
+                    active_was_present: false,
+                    apply_new_event_requested: true,
+                    save_world_event_state_requested: false,
+                    force_game_event_update_requested: false,
+                    completed: false,
+                },
+            )],
+            stop_outcomes: vec![],
+            negative_spawn_event_ids: vec![],
+            world_nextphase_finished: vec![],
+            world_conditions_save_requested: vec![],
+            invalid_check_outcomes: vec![],
+            invalid_next_check_outcomes: vec![],
+            next_event_delay_secs_before_padding: 0,
+            next_update_delay_millis: 1_000,
+        }
+    }
+
     #[test]
-    fn game_event_live_update_actions_preserve_apply_unapply_cpp_order() {
+    fn game_event_world_state_no_holiday_action_is_represented_noop_like_cpp() {
+        let mut metadata = game_event_world_state_metadata_like_cpp(
+            1,
+            &[spawn_store_loader::GameEventDataLikeCpp {
+                event_id: 1,
+                holiday_id: 0,
+                length: 1,
+                ..spawn_store_loader::GameEventDataLikeCpp::default()
+            }],
+        );
+        let mut manager = wow_map::MapManager::default();
+        let outcome = game_event_world_state_start_outcome_like_cpp(1);
+
+        let summary = consume_game_event_live_update_side_effects_like_cpp(
+            &mut manager,
+            &mut metadata,
+            &empty_loaded_grid_creature_respawn_caches_like_cpp(),
+            &[1],
+            &outcome,
+        );
+
+        assert!(
+            summary
+                .actions
+                .contains(&GameEventLiveUpdateActionLikeCpp::UpdateWorldStates {
+                    event_id: 1,
+                    activate: true,
+                })
+        );
+        assert_eq!(summary.update_world_states_actions, 1);
+        assert_eq!(summary.update_world_states_no_holiday, 1);
+        assert_eq!(summary.update_world_states_missing_event, 0);
+        assert_eq!(summary.update_world_states_holiday_lookup_unrepresented, 0);
+    }
+
+    #[test]
+    fn game_event_world_state_holiday_lookup_remains_unrepresented_like_cpp() {
+        let mut metadata = game_event_world_state_metadata_like_cpp(
+            1,
+            &[spawn_store_loader::GameEventDataLikeCpp {
+                event_id: 1,
+                holiday_id: 283,
+                length: 1,
+                ..spawn_store_loader::GameEventDataLikeCpp::default()
+            }],
+        );
+        let mut manager = wow_map::MapManager::default();
+        let outcome = game_event_world_state_start_outcome_like_cpp(1);
+
+        let summary = consume_game_event_live_update_side_effects_like_cpp(
+            &mut manager,
+            &mut metadata,
+            &empty_loaded_grid_creature_respawn_caches_like_cpp(),
+            &[1],
+            &outcome,
+        );
+
+        assert_eq!(summary.update_world_states_actions, 1);
+        assert_eq!(summary.update_world_states_no_holiday, 0);
+        assert_eq!(summary.update_world_states_missing_event, 0);
+        assert_eq!(summary.update_world_states_holiday_lookup_unrepresented, 1);
+    }
+
+    #[test]
+    fn game_event_world_state_missing_event_is_counted_without_panic_like_cpp() {
+        let mut metadata = game_event_world_state_metadata_like_cpp(0, &[]);
+        let mut manager = wow_map::MapManager::default();
+        let outcome = game_event_world_state_start_outcome_like_cpp(1);
+
+        let summary = consume_game_event_live_update_side_effects_like_cpp(
+            &mut manager,
+            &mut metadata,
+            &empty_loaded_grid_creature_respawn_caches_like_cpp(),
+            &[],
+            &outcome,
+        );
+
+        assert_eq!(summary.update_world_states_actions, 1);
+        assert_eq!(summary.update_world_states_missing_event, 1);
+        assert_eq!(summary.update_world_states_no_holiday, 0);
+        assert_eq!(summary.update_world_states_holiday_lookup_unrepresented, 0);
+    }
+
+    #[test]
+    fn game_event_world_state_start_stop_order_is_quests_worldstates_npcflags_vendor_like_cpp() {
         let outcome = spawn_store_loader::GameEventUpdateOutcomeLikeCpp {
             scanned_event_ids: vec![],
             check_outcomes: vec![],
@@ -8145,6 +8338,10 @@ mmap.enablePathFinding = 0
                     event_id: 2,
                     activate: true,
                 },
+                GameEventLiveUpdateActionLikeCpp::UpdateWorldStates {
+                    event_id: 2,
+                    activate: true,
+                },
                 GameEventLiveUpdateActionLikeCpp::UpdateNpcFlags { event_id: 2 },
                 GameEventLiveUpdateActionLikeCpp::UpdateNpcVendor {
                     event_id: 2,
@@ -8157,6 +8354,10 @@ mmap.enablePathFinding = 0
                     activate: false,
                 },
                 GameEventLiveUpdateActionLikeCpp::UpdateEventQuests {
+                    event_id: 3,
+                    activate: false,
+                },
+                GameEventLiveUpdateActionLikeCpp::UpdateWorldStates {
                     event_id: 3,
                     activate: false,
                 },
