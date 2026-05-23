@@ -69,6 +69,10 @@
 //!   represented condition progress and `CheckOneGameEventConditions`.
 //! - `/home/server/woltk-trinity-legacy/src/server/game/Events/GameEventMgr.cpp:1606-1615`
 //!   world-state metadata values for future `SendWorldStateUpdate` fanout.
+//! - `/home/server/woltk-trinity-legacy/src/server/game/World/WorldStates/WorldStateMgr.cpp:39-176`
+//!   `WorldStateMgr::LoadFromDB` templates/defaults plus saved-value overlay.
+//! - `/home/server/woltk-trinity-legacy/src/server/game/World/WorldStates/WorldStateMgr.cpp:183-228`
+//!   `WorldStateMgr::GetValue`/`SetValue` realm-wide vs map-specific branching.
 //! - `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:9737-9777`
 //!   `AddVendorItem`/`RemoveVendorItem(..., persist=false)` mutate only ObjectMgr cache.
 //! - `/home/server/woltk-trinity-legacy/src/server/game/Entities/Creature/Creature.cpp:85-95`
@@ -499,6 +503,138 @@ pub enum GameEventWorldStateUpdateOutcomeLikeCpp {
     MissingEvent {
         event_id: u16,
     },
+}
+
+/// C++-shaped subset of `WorldStateTemplate` for represented realm-wide `SetValue`.
+///
+/// This intentionally does not close `FillInitialWorldStates`, AreaID filtering,
+/// DB validation, script dispatch, map-local `Map::SetWorldStateValue`, or real
+/// session/global fanout. `script_hook_represented` and
+/// `global_message_represented` in outcomes are evidence flags only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorldStateTemplateLikeCpp {
+    pub id: i32,
+    pub default_value: i32,
+    pub map_ids: BTreeSet<i32>,
+}
+
+impl WorldStateTemplateLikeCpp {
+    pub fn realm_wide(id: i32, default_value: i32) -> Self {
+        Self {
+            id,
+            default_value,
+            map_ids: BTreeSet::new(),
+        }
+    }
+
+    pub fn map_specific(
+        id: i32,
+        default_value: i32,
+        map_ids: impl IntoIterator<Item = i32>,
+    ) -> Self {
+        Self {
+            id,
+            default_value,
+            map_ids: map_ids.into_iter().collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorldStateSetValueOutcomeLikeCpp {
+    RealmInsertedOrChanged {
+        world_state_id: i32,
+        old_value: i32,
+        new_value: i32,
+        hidden: bool,
+        script_hook_represented: bool,
+        global_message_represented: bool,
+    },
+    RealmUnchanged {
+        world_state_id: i32,
+        value: i32,
+    },
+    MapSpecificNoMapUnsupported {
+        world_state_id: i32,
+    },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorldStateMgrLikeCpp {
+    world_state_templates: BTreeMap<i32, WorldStateTemplateLikeCpp>,
+    realm_world_state_values: BTreeMap<i32, i32>,
+}
+
+impl WorldStateMgrLikeCpp {
+    /// Builds represented state in the same high-level order as C++ LoadFromDB:
+    /// `world_state` templates/defaults first, then `world_state_value` saved overlay.
+    pub fn from_templates_and_saved_values(
+        templates: impl IntoIterator<Item = WorldStateTemplateLikeCpp>,
+        saved_values: impl IntoIterator<Item = (i32, i32)>,
+    ) -> Self {
+        let mut mgr = Self::default();
+        for template in templates {
+            if template.map_ids.is_empty() {
+                mgr.realm_world_state_values
+                    .insert(template.id, template.default_value);
+            }
+            mgr.world_state_templates.insert(template.id, template);
+        }
+        for (world_state_id, value) in saved_values {
+            if mgr
+                .world_state_templates
+                .get(&world_state_id)
+                .is_some_and(|template| template.map_ids.is_empty())
+            {
+                mgr.realm_world_state_values.insert(world_state_id, value);
+            }
+        }
+        mgr
+    }
+
+    pub fn realm_value_like_cpp(&self, world_state_id: i32) -> i32 {
+        self.realm_world_state_values
+            .get(&world_state_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    pub fn set_value_realm_or_map_null_like_cpp(
+        &mut self,
+        world_state_id: i32,
+        value: i32,
+        hidden: bool,
+    ) -> WorldStateSetValueOutcomeLikeCpp {
+        let template = self.world_state_templates.get(&world_state_id);
+        if template.is_some_and(|template| !template.map_ids.is_empty()) {
+            return WorldStateSetValueOutcomeLikeCpp::MapSpecificNoMapUnsupported {
+                world_state_id,
+            };
+        }
+
+        let inserted = !self.realm_world_state_values.contains_key(&world_state_id);
+        let old_value = self
+            .realm_world_state_values
+            .get(&world_state_id)
+            .copied()
+            .unwrap_or(0);
+        if old_value == value && !inserted {
+            return WorldStateSetValueOutcomeLikeCpp::RealmUnchanged {
+                world_state_id,
+                value,
+            };
+        }
+
+        self.realm_world_state_values.insert(world_state_id, value);
+        WorldStateSetValueOutcomeLikeCpp::RealmInsertedOrChanged {
+            world_state_id,
+            old_value,
+            new_value: value,
+            hidden,
+            script_hook_represented: template.is_some(),
+            global_message_represented: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
