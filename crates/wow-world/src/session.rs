@@ -87,7 +87,10 @@ use wow_packet::packets::item::{
     ItemPushResult, ItemPushResultDisplayType, ItemTimeUpdate,
 };
 use wow_packet::packets::misc::{AccountMount, AccountMountUpdate, BuyFailed, SellResponse};
-use wow_packet::packets::quest::{QuestGiverQuestList, QuestListEntry};
+use wow_packet::packets::quest::{
+    QuestGiverQuestDetails, QuestGiverQuestList, QuestGiverRequestItems, QuestListEntry,
+    QuestObjectiveSimple, QuestRewardsBlock,
+};
 use wow_packet::packets::spell::SpellTargetData;
 use wow_recastdetour::PathQueryFilterContext;
 
@@ -104,6 +107,18 @@ const SUMMON_PROPERTIES_ONLY_VISIBLE_TO_SUMMONER_GROUP_LIKE_CPP: u32 = 0x0001_00
 pub(crate) enum PlayerAttackStartLikeCppResult {
     Rejected,
     Accepted { send_attack_start: bool },
+}
+
+const QUEST_MENU_ICON_TURN_IN_LIKE_CPP: u8 = 0;
+const QUEST_MENU_ICON_AVAILABLE_LIKE_CPP: u8 = 2;
+const QUEST_MENU_ICON_COMPLETE_LIKE_CPP: u8 = 4;
+
+#[derive(Debug, Clone)]
+struct RepresentedPreparedQuestMenuItemLikeCpp {
+    quest: wow_data::quest::QuestTemplate,
+    quest_icon: u8,
+    has_starter_relation: bool,
+    has_involved_relation: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13433,39 +13448,13 @@ impl WorldSession {
             return false;
         };
 
-        let mut quests = Vec::new();
-
-        // C++ `Player::PrepareQuestMenu` checks Creature involved/ender relations before
-        // starter relations. `QuestListEntry` currently has no exact quest-icon field, so
-        // this represented seam preserves the available wire fields and branch/order only.
-        for quest in quest_store.quests_for_ender(creature_entry) {
-            if self
-                .player_quests
-                .get(&quest.id)
-                .is_some_and(|status| matches!(status.status, 1 | 2))
-            {
-                quests.push(Self::quest_list_entry_from_template_like_cpp(quest));
-            }
-        }
-
-        for quest in quest_store.quests_for_starter(creature_entry) {
-            if self.can_take_quest(quest) {
-                quests.push(Self::quest_list_entry_from_template_like_cpp(quest));
-            }
-        }
-
-        if quests.is_empty() {
+        let menu_items =
+            self.represented_creature_quest_menu_items_like_cpp(&quest_store, creature_entry);
+        if menu_items.is_empty() {
             return false;
         }
 
-        self.send_packet(&QuestGiverQuestList {
-            guid: creature_guid,
-            greeting: String::new(),
-            greet_emote_delay: 0,
-            greet_emote_type: 0,
-            quests,
-        });
-
+        self.send_represented_prepared_quest_like_cpp(creature_guid, menu_items);
         true
     }
 
@@ -13487,38 +13476,241 @@ impl WorldSession {
             return true;
         };
 
-        let mut quests = Vec::new();
+        let menu_items =
+            self.represented_gameobject_quest_menu_items_like_cpp(&quest_store, gameobject_entry);
+        if !menu_items.is_empty() {
+            self.send_represented_prepared_quest_like_cpp(gameobject_guid, menu_items);
+        }
 
-        // C++ `Player::PrepareQuestMenu` checks GO involved/ender relations before starter
-        // relations. `QuestListEntry` currently has no exact quest-icon field, so this
-        // represented seam preserves the available wire fields and branch/order only.
+        true
+    }
+
+    fn represented_creature_quest_menu_items_like_cpp(
+        &self,
+        quest_store: &wow_data::quest::QuestStore,
+        creature_entry: u32,
+    ) -> Vec<RepresentedPreparedQuestMenuItemLikeCpp> {
+        let mut menu_items = Vec::new();
+
+        // C++ `Player::PrepareQuestMenu`: involved/ender relations first, icon 4 for
+        // represented COMPLETE/INCOMPLETE local quest status.
+        for quest in quest_store.quests_for_ender(creature_entry) {
+            if self.represented_player_quest_status_is_complete_or_incomplete_like_cpp(quest.id) {
+                menu_items.push(RepresentedPreparedQuestMenuItemLikeCpp {
+                    quest: quest.clone(),
+                    quest_icon: QUEST_MENU_ICON_COMPLETE_LIKE_CPP,
+                    has_starter_relation: false,
+                    has_involved_relation: true,
+                });
+            }
+        }
+
+        // Starter relations second, preserving C++ quest-icon selection for later
+        // `SendPreparedQuest` single-item auto-open.
+        for quest in quest_store.quests_for_starter(creature_entry) {
+            if let Some(menu_item) = self.represented_starter_quest_menu_item_like_cpp(quest) {
+                menu_items.push(menu_item);
+            }
+        }
+
+        menu_items
+    }
+
+    fn represented_gameobject_quest_menu_items_like_cpp(
+        &self,
+        quest_store: &wow_data::quest::QuestStore,
+        gameobject_entry: u32,
+    ) -> Vec<RepresentedPreparedQuestMenuItemLikeCpp> {
+        let mut menu_items = Vec::new();
+
+        // C++ `Player::PrepareQuestMenu`: GO involved/ender relations first, then
+        // starters; do not contaminate GameObject sources with Creature relations.
         for quest in quest_store.quests_for_gameobject_ender(gameobject_entry) {
-            if self
-                .player_quests
-                .get(&quest.id)
-                .is_some_and(|status| matches!(status.status, 1 | 2))
-            {
-                quests.push(Self::quest_list_entry_from_template_like_cpp(quest));
+            if self.represented_player_quest_status_is_complete_or_incomplete_like_cpp(quest.id) {
+                menu_items.push(RepresentedPreparedQuestMenuItemLikeCpp {
+                    quest: quest.clone(),
+                    quest_icon: QUEST_MENU_ICON_COMPLETE_LIKE_CPP,
+                    has_starter_relation: false,
+                    has_involved_relation: true,
+                });
             }
         }
 
         for quest in quest_store.quests_for_gameobject_starter(gameobject_entry) {
-            if self.can_take_quest(quest) {
-                quests.push(Self::quest_list_entry_from_template_like_cpp(quest));
+            if let Some(menu_item) = self.represented_starter_quest_menu_item_like_cpp(quest) {
+                menu_items.push(menu_item);
             }
         }
 
-        if !quests.is_empty() {
-            self.send_packet(&QuestGiverQuestList {
-                guid: gameobject_guid,
-                greeting: String::new(),
-                greet_emote_delay: 0,
-                greet_emote_type: 0,
-                quests,
-            });
+        menu_items
+    }
+
+    fn represented_starter_quest_menu_item_like_cpp(
+        &self,
+        quest: &wow_data::quest::QuestTemplate,
+    ) -> Option<RepresentedPreparedQuestMenuItemLikeCpp> {
+        if !self.can_take_quest(quest) {
+            return None;
         }
 
-        true
+        let quest_icon = if quest.is_turn_in_like_cpp()
+            && (!quest.is_repeatable()
+                || quest.is_daily_like_cpp()
+                || quest.is_weekly_like_cpp()
+                || quest.is_monthly_like_cpp())
+        {
+            QUEST_MENU_ICON_TURN_IN_LIKE_CPP
+        } else if quest.is_turn_in_like_cpp() {
+            QUEST_MENU_ICON_COMPLETE_LIKE_CPP
+        } else if self.represented_player_quest_status_is_none_like_cpp(quest.id) {
+            QUEST_MENU_ICON_AVAILABLE_LIKE_CPP
+        } else {
+            return None;
+        };
+
+        Some(RepresentedPreparedQuestMenuItemLikeCpp {
+            quest: quest.clone(),
+            quest_icon,
+            has_starter_relation: true,
+            has_involved_relation: false,
+        })
+    }
+
+    fn represented_player_quest_status_is_complete_or_incomplete_like_cpp(
+        &self,
+        quest_id: u32,
+    ) -> bool {
+        self.player_quests
+            .get(&quest_id)
+            .is_some_and(|status| matches!(status.status, 1 | 2))
+    }
+
+    fn represented_player_quest_status_is_none_like_cpp(&self, quest_id: u32) -> bool {
+        !self.player_quests.contains_key(&quest_id)
+    }
+
+    fn send_represented_prepared_quest_like_cpp(
+        &mut self,
+        source_guid: ObjectGuid,
+        menu_items: Vec<RepresentedPreparedQuestMenuItemLikeCpp>,
+    ) {
+        if let [menu_item] = menu_items.as_slice() {
+            self.send_represented_prepared_single_quest_like_cpp(source_guid, menu_item);
+            return;
+        }
+
+        self.send_packet(&QuestGiverQuestList {
+            guid: source_guid,
+            greeting: String::new(),
+            greet_emote_delay: 0,
+            greet_emote_type: 0,
+            quests: menu_items
+                .iter()
+                .map(|item| Self::quest_list_entry_from_template_like_cpp(&item.quest))
+                .collect(),
+        });
+    }
+
+    fn send_represented_prepared_single_quest_like_cpp(
+        &mut self,
+        source_guid: ObjectGuid,
+        menu_item: &RepresentedPreparedQuestMenuItemLikeCpp,
+    ) {
+        let quest = &menu_item.quest;
+
+        if menu_item.quest_icon == QUEST_MENU_ICON_COMPLETE_LIKE_CPP {
+            self.send_represented_quest_giver_request_items_like_cpp(source_guid, quest);
+            return;
+        }
+
+        if !menu_item.has_starter_relation && !menu_item.has_involved_relation {
+            // C++ would `SendCloseGossip()`. This represented seam has no close-gossip
+            // packet helper, and relation-derived menu items should not reach this branch.
+            return;
+        }
+
+        // C++ may auto-accept here; this represented-partial seam intentionally performs no
+        // quest log mutation and only chooses the outbound packet.
+        if quest.is_turn_in_like_cpp()
+            && quest.is_repeatable()
+            && !quest.is_daily_or_weekly_like_cpp()
+            && !quest.is_monthly_like_cpp()
+        {
+            self.send_represented_quest_giver_request_items_like_cpp(source_guid, quest);
+        } else if quest.is_turn_in_like_cpp()
+            && !quest.is_daily_or_weekly_like_cpp()
+            && !quest.is_monthly_like_cpp()
+        {
+            self.send_represented_quest_giver_request_items_like_cpp(source_guid, quest);
+        } else {
+            self.send_represented_quest_giver_quest_details_like_cpp(source_guid, quest);
+        }
+    }
+
+    fn send_represented_quest_giver_request_items_like_cpp(
+        &mut self,
+        source_guid: ObjectGuid,
+        quest: &wow_data::quest::QuestTemplate,
+    ) {
+        self.send_packet(&QuestGiverRequestItems {
+            giver_guid: source_guid,
+            quest_id: quest.id,
+            quest_flags: [quest.flags, quest.flags_ex, quest.flags_ex2],
+            suggested_party_members: quest.suggested_group_num,
+            // Exact CanRewardQuest/CanCompleteRepeatableQuest validation is not represented
+            // in this bounded seam; keep conservative status flags rather than overclaiming.
+            status_flags: 0,
+            money_cost: 0,
+            title: quest.log_title.clone(),
+            completion_text: quest.area_description.clone(),
+        });
+    }
+
+    fn send_represented_quest_giver_quest_details_like_cpp(
+        &mut self,
+        source_guid: ObjectGuid,
+        quest: &wow_data::quest::QuestTemplate,
+    ) {
+        let objectives: Vec<QuestObjectiveSimple> = quest
+            .objectives
+            .iter()
+            .map(|obj| QuestObjectiveSimple {
+                id: obj.id,
+                object_id: obj.object_id,
+                amount: obj.amount,
+                obj_type: obj.obj_type,
+            })
+            .collect();
+
+        let mut rewards = QuestRewardsBlock {
+            money: quest.reward_money_difficulty as i32,
+            completion_spell: quest.reward_spell as i32,
+            ..QuestRewardsBlock::default()
+        };
+        for (idx, reward_item) in quest.reward_items.iter().enumerate() {
+            if let Some(reward_slot) = rewards.items.get_mut(idx) {
+                let amount = quest.reward_amounts.get(idx).copied().unwrap_or(0);
+                *reward_slot = (*reward_item, amount);
+            }
+        }
+        for (idx, display_spell) in quest.reward_display_spell.iter().enumerate() {
+            if let Some(slot) = rewards.display_spells.get_mut(idx) {
+                *slot = *display_spell;
+            }
+        }
+
+        self.send_packet(&QuestGiverQuestDetails {
+            giver_guid: source_guid,
+            quest_id: quest.id,
+            quest_flags: [quest.flags, quest.flags_ex, quest.flags_ex2],
+            suggested_party_members: quest.suggested_group_num,
+            objectives,
+            rewards,
+            title: quest.log_title.clone(),
+            description: quest.quest_description.clone(),
+            log_description: quest.log_description.clone(),
+            auto_launched: false,
+        });
     }
 
     fn quest_list_entry_from_template_like_cpp(
@@ -36072,13 +36264,14 @@ mod tests {
     }
 
     #[test]
-    fn gameobject_use_questgiver_gameobject_starter_relation_sends_quest_list_like_cpp() {
+    fn gameobject_use_questgiver_single_gameobject_starter_auto_opens_quest_details_like_cpp() {
         let (mut session, _pkt_tx, send_rx) = make_session();
         session.set_player_level_like_cpp(1);
         let player_guid = ObjectGuid::create_player(1, 99);
         let gameobject_guid =
             ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 19);
         let mut quest = test_quest_template(9_001);
+        quest.quest_type = 2;
         quest.log_title = "GO starter".into();
         let mut quest_store = wow_data::quest::QuestStore::from_quests_like_cpp([quest]);
         assert!(quest_store.insert_gameobject_starter_relation_like_cpp(777, 9_001));
@@ -36102,7 +36295,7 @@ mod tests {
         let bytes = send_rx.try_recv().unwrap();
         assert_eq!(
             wow_packet::WorldPacket::from_bytes(&bytes).server_opcode(),
-            Some(ServerOpcodes::QuestGiverQuestListMessage)
+            Some(ServerOpcodes::QuestGiverQuestDetails)
         );
         assert!(packet_contains_quest_ids_in_order(&bytes, &[9_001]));
     }
@@ -36117,6 +36310,7 @@ mod tests {
         let mut ender = test_quest_template(9_001);
         ender.log_title = "GO ender".into();
         let mut starter = test_quest_template(9_002);
+        starter.quest_type = 2;
         starter.log_title = "GO starter".into();
         let mut quest_store = wow_data::quest::QuestStore::from_quests_like_cpp([ender, starter]);
         assert!(quest_store.insert_gameobject_ender_relation_like_cpp(777, 9_001));
@@ -36145,6 +36339,42 @@ mod tests {
             Some(ServerOpcodes::QuestGiverQuestListMessage)
         );
         assert!(packet_contains_quest_ids_in_order(&bytes, &[9_001, 9_002]));
+    }
+
+    #[test]
+    fn gameobject_use_questgiver_single_incomplete_ender_auto_opens_request_items_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let gameobject_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 19);
+        let mut ender = test_quest_template(9_003);
+        ender.log_title = "GO incomplete ender".into();
+        let mut quest_store = wow_data::quest::QuestStore::from_quests_like_cpp([ender]);
+        assert!(quest_store.insert_gameobject_ender_relation_like_cpp(777, 9_003));
+        session.quest_store = Some(Arc::new(quest_store));
+        session.player_quests.insert(
+            9_003,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id: 9_003,
+                status: 1,
+                explored: false,
+                objective_counts: Vec::new(),
+            },
+        );
+
+        assert!(session.use_represented_gameobject_questgiver_like_cpp(
+            gameobject_guid,
+            player_guid,
+            777,
+            wow_entities::QuestgiverUseSource { gossip_id: 123 },
+        ));
+
+        let bytes = send_rx.try_recv().unwrap();
+        assert_eq!(
+            wow_packet::WorldPacket::from_bytes(&bytes).server_opcode(),
+            Some(ServerOpcodes::QuestGiverRequestItems)
+        );
+        assert!(packet_contains_quest_ids_in_order(&bytes, &[9_003]));
     }
 
     #[test]
@@ -36177,12 +36407,13 @@ mod tests {
     }
 
     #[test]
-    fn creature_questgiver_starter_relation_sends_quest_list_like_cpp() {
+    fn creature_questgiver_single_starter_auto_opens_quest_details_like_cpp() {
         let (mut session, _pkt_tx, send_rx) = make_session();
         session.set_player_level_like_cpp(1);
         let creature_guid =
             ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 571, 0, 777, 21);
         let mut quest = test_quest_template(9_101);
+        quest.quest_type = 2;
         quest.log_title = "Creature starter".into();
         let mut quest_store = wow_data::quest::QuestStore::from_quests_like_cpp([quest]);
         quest_store.starter_quests.insert(777, vec![9_101]);
@@ -36193,7 +36424,7 @@ mod tests {
         let bytes = send_rx.try_recv().unwrap();
         assert_eq!(
             wow_packet::WorldPacket::from_bytes(&bytes).server_opcode(),
-            Some(ServerOpcodes::QuestGiverQuestListMessage)
+            Some(ServerOpcodes::QuestGiverQuestDetails)
         );
         assert!(packet_contains_quest_ids_in_order(&bytes, &[9_101]));
     }
@@ -36207,6 +36438,7 @@ mod tests {
         let mut ender = test_quest_template(9_101);
         ender.log_title = "Creature ender".into();
         let mut starter = test_quest_template(9_102);
+        starter.quest_type = 2;
         starter.log_title = "Creature starter".into();
         let mut quest_store = wow_data::quest::QuestStore::from_quests_like_cpp([ender, starter]);
         quest_store.ender_quests.insert(777, vec![9_101]);

@@ -23,6 +23,7 @@ pub const QUEST_ITEM_DROP_COUNT: usize = 4;
 
 const QUEST_FLAGS_DAILY_LIKE_CPP: u32 = 0x0000_1000;
 const QUEST_FLAGS_WEEKLY_LIKE_CPP: u32 = 0x0000_8000;
+const QUEST_TYPE_TURNIN_LIKE_CPP: u8 = 0;
 const QUEST_SPECIAL_FLAGS_REPEATABLE_LIKE_CPP: u32 = 0x0000_0001;
 const QUEST_SPECIAL_FLAGS_AUTO_PUSH_TO_PARTY_LIKE_CPP: u32 = 0x0000_0002;
 const QUEST_SPECIAL_FLAGS_AUTO_ACCEPT_LIKE_CPP: u32 = 0x0000_0004;
@@ -134,6 +135,31 @@ impl QuestTemplate {
     /// C++ `Quest::IsRepeatable()` exact helper: only `QUEST_SPECIAL_FLAGS_REPEATABLE`.
     pub fn is_repeatable(&self) -> bool {
         self.special_flags & QUEST_SPECIAL_FLAGS_REPEATABLE_LIKE_CPP != 0
+    }
+
+    /// C++ `Quest::IsDaily()`: `QUEST_FLAGS_DAILY`.
+    pub fn is_daily_like_cpp(&self) -> bool {
+        self.flags & QUEST_FLAGS_DAILY_LIKE_CPP != 0
+    }
+
+    /// C++ `Quest::IsWeekly()`: `QUEST_FLAGS_WEEKLY`.
+    pub fn is_weekly_like_cpp(&self) -> bool {
+        self.flags & QUEST_FLAGS_WEEKLY_LIKE_CPP != 0
+    }
+
+    /// C++ `Quest::IsDailyOrWeekly()`.
+    pub fn is_daily_or_weekly_like_cpp(&self) -> bool {
+        self.is_daily_like_cpp() || self.is_weekly_like_cpp()
+    }
+
+    /// C++ `Quest::IsMonthly()`: `QUEST_SPECIAL_FLAGS_MONTHLY`.
+    pub fn is_monthly_like_cpp(&self) -> bool {
+        self.special_flags & QUEST_SPECIAL_FLAGS_MONTHLY_LIKE_CPP != 0
+    }
+
+    /// C++ `Quest::IsTurnIn()` with config gate represented by stored quest type only.
+    pub fn is_turn_in_like_cpp(&self) -> bool {
+        self.quest_type == QUEST_TYPE_TURNIN_LIKE_CPP
     }
 
     /// C++ `Quest::IsSeasonal()` exact quest sort set plus non-repeatable guard.
