@@ -4319,6 +4319,126 @@ struct GameEventWorldEventStateDbBridgeSummaryLikeCpp {
     operations: Vec<GameEventWorldEventStateDbOperationLikeCpp>,
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GameEventQuestCompleteConditionSaveDbStatementKindLikeCpp {
+    DelGameEventConditionSave,
+    InsGameEventConditionSave,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+struct GameEventQuestCompleteConditionSaveDbStatementLikeCpp {
+    kind: GameEventQuestCompleteConditionSaveDbStatementKindLikeCpp,
+    statement: PreparedStatement,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+struct GameEventQuestCompleteConditionSaveDbOperationLikeCpp {
+    event_id: u8,
+    condition_id: u32,
+    statements: Vec<GameEventQuestCompleteConditionSaveDbStatementLikeCpp>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Default, Clone)]
+struct GameEventQuestCompleteDbBridgeSummaryLikeCpp {
+    condition_save_updates_queued: usize,
+    condition_save_updates_executed: usize,
+    condition_save_updates_failed: usize,
+    condition_save_updates_skipped_non_progress: usize,
+    world_event_state_save_requested: usize,
+    force_game_event_update_requested: usize,
+    save_world_event_state_requested: bool,
+    force_game_event_update_requested_flag: bool,
+    operations: Vec<GameEventQuestCompleteConditionSaveDbOperationLikeCpp>,
+}
+
+#[allow(dead_code)]
+fn materialize_game_event_quest_complete_db_bridge_like_cpp(
+    outcome: &spawn_store_loader::GameEventQuestCompleteOutcomeLikeCpp,
+) -> GameEventQuestCompleteDbBridgeSummaryLikeCpp {
+    let mut summary = GameEventQuestCompleteDbBridgeSummaryLikeCpp::default();
+    let spawn_store_loader::GameEventQuestCompleteOutcomeLikeCpp::Progress(
+        spawn_store_loader::GameEventConditionProgressOutcomeLikeCpp::Progressed(progress),
+    ) = outcome
+    else {
+        summary.condition_save_updates_skipped_non_progress += 1;
+        return summary;
+    };
+
+    if progress.save_world_event_state_requested {
+        summary.world_event_state_save_requested += 1;
+        summary.save_world_event_state_requested = true;
+    }
+    if progress.force_game_event_update_requested {
+        summary.force_game_event_update_requested += 1;
+        summary.force_game_event_update_requested_flag = true;
+    }
+
+    let mut delete = PreparedStatement::new(progress.del_statement.statement.sql());
+    delete.set_u8(0, progress.del_statement.event_id);
+    delete.set_u32(1, progress.del_statement.condition_id);
+
+    let mut insert = PreparedStatement::new(progress.ins_statement.statement.sql());
+    insert.set_u8(0, progress.ins_statement.event_id);
+    insert.set_u32(1, progress.ins_statement.condition_id);
+    let done_after = match progress.ins_statement.done {
+        Some(done) => done,
+        None => progress.done_after,
+    };
+    insert.set_f32(2, done_after);
+
+    summary.condition_save_updates_queued += 1;
+    summary
+        .operations
+        .push(GameEventQuestCompleteConditionSaveDbOperationLikeCpp {
+            event_id: progress.del_statement.event_id,
+            condition_id: progress.del_statement.condition_id,
+            statements: vec![
+                GameEventQuestCompleteConditionSaveDbStatementLikeCpp {
+                    kind: GameEventQuestCompleteConditionSaveDbStatementKindLikeCpp::DelGameEventConditionSave,
+                    statement: delete,
+                },
+                GameEventQuestCompleteConditionSaveDbStatementLikeCpp {
+                    kind: GameEventQuestCompleteConditionSaveDbStatementKindLikeCpp::InsGameEventConditionSave,
+                    statement: insert,
+                },
+            ],
+        });
+
+    summary
+}
+
+#[allow(dead_code)]
+async fn execute_game_event_quest_complete_condition_save_db_bridge_like_cpp(
+    character_db: &CharacterDatabase,
+    summary: &mut GameEventQuestCompleteDbBridgeSummaryLikeCpp,
+) {
+    let operation_total = summary.operations.len();
+    for (operation_index, operation) in summary.operations.drain(..).enumerate() {
+        let mut transaction = SqlTransaction::new();
+        for statement in operation.statements.iter().cloned() {
+            transaction.append(statement.statement);
+        }
+        match transaction.commit(character_db.pool()).await {
+            Ok(()) => summary.condition_save_updates_executed += 1,
+            Err(error) => {
+                summary.condition_save_updates_failed += 1;
+                tracing::error!(
+                    error = %error,
+                    operation_index = operation_index + 1,
+                    operation_total,
+                    event_id = operation.event_id,
+                    condition_id = operation.condition_id,
+                    "Failed to execute C++ GameEventMgr quest-complete condition-save DB transaction; continuing live update loop"
+                );
+            }
+        }
+    }
+}
+
 fn game_event_world_event_state_db_save_operation_like_cpp(
     event_id: u16,
     metadata: &spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
@@ -6030,11 +6150,13 @@ fn locale_id_to_name(raw: &str) -> String {
 mod tests {
     use super::{
         CanonicalGameEventSchedulerLikeCpp, CanonicalRespawnConditionSchedulerLikeCpp,
-        GameEventLiveUpdateActionLikeCpp, GameEventWorldEventStateDbOperationKindLikeCpp,
-        GameEventWorldEventStateDbOperationLikeCpp, GameEventWorldEventStateDbStatementKindLikeCpp,
-        LoadedGridCreatureRespawnCachesLikeCpp, PersistedRespawnLoadReportLikeCpp,
-        PersistedRespawnRowLikeCpp, PersistedRespawnTimesLikeCpp,
-        RespawnDbDeleteQueueOutcomeLikeCpp, RespawnDbSaveQueueOutcomeLikeCpp,
+        GameEventLiveUpdateActionLikeCpp,
+        GameEventQuestCompleteConditionSaveDbStatementKindLikeCpp,
+        GameEventWorldEventStateDbOperationKindLikeCpp, GameEventWorldEventStateDbOperationLikeCpp,
+        GameEventWorldEventStateDbStatementKindLikeCpp, LoadedGridCreatureRespawnCachesLikeCpp,
+        PersistedRespawnLoadReportLikeCpp, PersistedRespawnRowLikeCpp,
+        PersistedRespawnTimesLikeCpp, RespawnDbDeleteQueueOutcomeLikeCpp,
+        RespawnDbSaveQueueOutcomeLikeCpp,
         apply_canonical_spawn_group_condition_update_loaded_grid_records_like_cpp,
         build_loaded_grid_creature_respawn_record_like_cpp,
         build_loaded_grid_creature_spawn_group_spawn_record_like_cpp,
@@ -6050,6 +6172,7 @@ mod tests {
         game_event_unspawn_pools_like_cpp, game_event_update_npc_flags_like_cpp,
         game_event_update_npc_vendor_like_cpp, install_canonical_spawn_group_initializer_like_cpp,
         load_world_config_from, loot_drop_rates_like_cpp,
+        materialize_game_event_quest_complete_db_bridge_like_cpp,
         materialize_game_event_world_event_state_db_bridge_like_cpp, mmap_runtime_config_like_cpp,
         persisted_respawn_info_from_row_like_cpp, queue_respawn_db_delete_like_cpp,
         queue_respawn_db_save_like_cpp, spawn_store_loader, world_config_bool, world_config_u8,
@@ -6124,6 +6247,92 @@ mod tests {
         assert_eq!(*actual_respawn_time, respawn_time);
         assert_eq!(*actual_map_id, map_id);
         assert_eq!(*actual_instance_id, instance_id);
+    }
+
+    fn assert_game_event_condition_save_delete_params_like_cpp(
+        statement: &wow_database::PreparedStatement,
+        event_id: u8,
+        condition_id: u32,
+    ) {
+        let [
+            SqlParam::U8(actual_event_id),
+            SqlParam::U32(actual_condition_id),
+        ] = statement.params()
+        else {
+            panic!(
+                "expected DEL_GAME_EVENT_CONDITION_SAVE params [U8, U32], got {:?}",
+                statement.params()
+            );
+        };
+        assert_eq!(*actual_event_id, event_id);
+        assert_eq!(*actual_condition_id, condition_id);
+    }
+
+    fn assert_game_event_condition_save_insert_params_like_cpp(
+        statement: &wow_database::PreparedStatement,
+        event_id: u8,
+        condition_id: u32,
+        done: f32,
+    ) {
+        let [
+            SqlParam::U8(actual_event_id),
+            SqlParam::U32(actual_condition_id),
+            SqlParam::F32(actual_done),
+        ] = statement.params()
+        else {
+            panic!(
+                "expected INS_GAME_EVENT_CONDITION_SAVE params [U8, U32, F32], got {:?}",
+                statement.params()
+            );
+        };
+        assert_eq!(*actual_event_id, event_id);
+        assert_eq!(*actual_condition_id, condition_id);
+        assert_eq!(*actual_done, done);
+    }
+
+    fn game_event_quest_complete_progressed_outcome_like_cpp(
+        save_world_event_state_requested: bool,
+        force_game_event_update_requested: bool,
+    ) -> spawn_store_loader::GameEventQuestCompleteOutcomeLikeCpp {
+        spawn_store_loader::GameEventQuestCompleteOutcomeLikeCpp::Progress(
+            spawn_store_loader::GameEventConditionProgressOutcomeLikeCpp::Progressed(
+                spawn_store_loader::GameEventConditionProgressSummaryLikeCpp {
+                    event_id: 7,
+                    condition_id: 44,
+                    done_before: 2.5,
+                    done_after: 5.25,
+                    req_num: 10.0,
+                    del_statement:
+                        spawn_store_loader::GameEventConditionSaveStatementEvidenceLikeCpp {
+                            statement: CharStatements::DEL_GAME_EVENT_CONDITION_SAVE,
+                            event_id: 7,
+                            condition_id: 44,
+                            done: None,
+                        },
+                    ins_statement:
+                        spawn_store_loader::GameEventConditionSaveStatementEvidenceLikeCpp {
+                            statement: CharStatements::INS_GAME_EVENT_CONDITION_SAVE,
+                            event_id: 7,
+                            condition_id: 44,
+                            done: Some(5.25),
+                        },
+                    completed_event: save_world_event_state_requested,
+                    check_outcome:
+                        spawn_store_loader::GameEventConditionCheckOutcomeLikeCpp::Completed(
+                            spawn_store_loader::GameEventConditionCheckSummaryLikeCpp {
+                                event_id: 7,
+                                condition_count: 1,
+                                state_before_raw: 2,
+                                state_after_raw: 3,
+                                next_start_before: 0,
+                                next_start_after: 1_234,
+                            },
+                        ),
+                    save_world_event_state_requested,
+                    force_game_event_update_requested,
+                },
+            ),
+        )
     }
 
     fn linked_respawn_guid_like_cpp(
@@ -8931,6 +9140,98 @@ mmap.enablePathFinding = 0
         assert_eq!(summary.saves_queued, 0);
         assert_eq!(summary.deletes_queued, 0);
         assert!(summary.operations.is_empty());
+    }
+
+    #[test]
+    fn game_event_quest_complete_db_bridge_materializes_delete_then_insert_condition_save() {
+        let outcome = game_event_quest_complete_progressed_outcome_like_cpp(true, true);
+
+        let summary = materialize_game_event_quest_complete_db_bridge_like_cpp(&outcome);
+
+        assert_eq!(summary.condition_save_updates_queued, 1);
+        assert_eq!(summary.condition_save_updates_skipped_non_progress, 0);
+        assert_eq!(summary.world_event_state_save_requested, 1);
+        assert_eq!(summary.force_game_event_update_requested, 1);
+        assert!(summary.save_world_event_state_requested);
+        assert!(summary.force_game_event_update_requested_flag);
+        assert_eq!(summary.operations.len(), 1);
+
+        let operation = &summary.operations[0];
+        assert_eq!(operation.event_id, 7);
+        assert_eq!(operation.condition_id, 44);
+        assert_eq!(operation.statements.len(), 2);
+        assert_eq!(
+            operation.statements[0].kind,
+            GameEventQuestCompleteConditionSaveDbStatementKindLikeCpp::DelGameEventConditionSave
+        );
+        assert_eq!(
+            operation.statements[0].statement.sql(),
+            "DELETE FROM game_event_condition_save WHERE eventEntry = ? AND condition_id = ?"
+        );
+        assert_game_event_condition_save_delete_params_like_cpp(
+            &operation.statements[0].statement,
+            7,
+            44,
+        );
+        assert_eq!(
+            operation.statements[1].kind,
+            GameEventQuestCompleteConditionSaveDbStatementKindLikeCpp::InsGameEventConditionSave
+        );
+        assert_eq!(
+            operation.statements[1].statement.sql(),
+            "INSERT INTO game_event_condition_save (eventEntry, condition_id, done) VALUES (?, ?, ?)"
+        );
+        assert_game_event_condition_save_insert_params_like_cpp(
+            &operation.statements[1].statement,
+            7,
+            44,
+            5.25,
+        );
+    }
+
+    #[test]
+    fn game_event_quest_complete_db_bridge_skips_missing_or_non_progress() {
+        let missing =
+            spawn_store_loader::GameEventQuestCompleteOutcomeLikeCpp::MissingQuestMapping {
+                quest_id: 12_345,
+            };
+        let missing_summary = materialize_game_event_quest_complete_db_bridge_like_cpp(&missing);
+        assert_eq!(missing_summary.condition_save_updates_queued, 0);
+        assert_eq!(
+            missing_summary.condition_save_updates_skipped_non_progress,
+            1
+        );
+        assert!(missing_summary.operations.is_empty());
+
+        let inactive = spawn_store_loader::GameEventQuestCompleteOutcomeLikeCpp::Progress(
+            spawn_store_loader::GameEventConditionProgressOutcomeLikeCpp::InactiveEvent {
+                event_id: 7,
+            },
+        );
+        let inactive_summary = materialize_game_event_quest_complete_db_bridge_like_cpp(&inactive);
+        assert_eq!(inactive_summary.condition_save_updates_queued, 0);
+        assert_eq!(
+            inactive_summary.condition_save_updates_skipped_non_progress,
+            1
+        );
+        assert!(inactive_summary.operations.is_empty());
+
+        let already_complete = spawn_store_loader::GameEventQuestCompleteOutcomeLikeCpp::Progress(
+            spawn_store_loader::GameEventConditionProgressOutcomeLikeCpp::AlreadyComplete {
+                event_id: 7,
+                condition_id: 44,
+                done: 10.0,
+                req_num: 10.0,
+            },
+        );
+        let complete_summary =
+            materialize_game_event_quest_complete_db_bridge_like_cpp(&already_complete);
+        assert_eq!(complete_summary.condition_save_updates_queued, 0);
+        assert_eq!(
+            complete_summary.condition_save_updates_skipped_non_progress,
+            1
+        );
+        assert!(complete_summary.operations.is_empty());
     }
 
     #[test]
