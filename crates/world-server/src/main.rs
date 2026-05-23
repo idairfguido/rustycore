@@ -22,7 +22,8 @@ use wow_config::{DatabaseInfo, LoadReport, WorldConfigSet};
 use wow_core::{ObjectGuid, ObjectGuidGenerator, guid::HighGuid};
 use wow_database::{
     CharStatements, CharacterDatabase, HotfixDatabase, LoginDatabase, LoginStatements,
-    PreparedStatement, StatementDef, WorldDatabase, WorldStatements, build_connection_string,
+    PreparedStatement, SqlTransaction, StatementDef, WorldDatabase, WorldStatements,
+    build_connection_string,
 };
 use wow_instances::{InstanceLockMgr, MapDb2Entries, MapDifficultyResetInterval};
 use wow_loot::{
@@ -1492,7 +1493,7 @@ async fn main() -> Result<()> {
 
     let game_event_scheduler = {
         let current_time_secs = current_unix_time_secs_like_cpp();
-        let (game_event_outcome, active_event_ids) = {
+        let (game_event_outcome, active_event_ids, mut db_bridge_summary) = {
             let mut canonical_spawn_metadata = canonical_spawn_metadata.lock().map_err(|_| {
                 anyhow::anyhow!(
                     "CanonicalSpawnMetadataLikeCpp mutex poisoned during GameEvent StartSystem"
@@ -1504,12 +1505,21 @@ async fn main() -> Result<()> {
                 false,
                 represented_game_event_world_conditions_met_like_cpp,
             );
+            let db_bridge_summary = materialize_game_event_world_event_state_db_bridge_like_cpp(
+                &outcome,
+                &canonical_spawn_metadata,
+            );
             let active_event_ids = canonical_spawn_metadata
                 .game_event_active_set_like_cpp()
                 .active_event_ids_like_cpp()
                 .collect::<Vec<_>>();
-            (outcome, active_event_ids)
+            (outcome, active_event_ids, db_bridge_summary)
         };
+        execute_game_event_world_event_state_db_bridge_like_cpp(
+            char_db.as_ref(),
+            &mut db_bridge_summary,
+        )
+        .await;
         let side_effect_summary = {
             let mut manager = canonical_map_manager.lock().map_err(|_| {
                 anyhow::anyhow!("Canonical MapManager mutex poisoned during GameEvent StartSystem")
@@ -1536,6 +1546,24 @@ async fn main() -> Result<()> {
             world_nextphase_finished = game_event_outcome.world_nextphase_finished.len(),
             world_conditions_save_requested =
                 game_event_outcome.world_conditions_save_requested.len(),
+            game_event_db_saves_queued = db_bridge_summary.saves_queued,
+            game_event_db_saves_executed = db_bridge_summary.saves_executed,
+            game_event_db_saves_failed = db_bridge_summary.saves_failed,
+            game_event_db_saves_skipped_event_id_out_of_range =
+                db_bridge_summary.saves_skipped_event_id_out_of_range,
+            game_event_db_saves_skipped_missing_event =
+                db_bridge_summary.saves_skipped_missing_event,
+            game_event_db_deletes_queued = db_bridge_summary.deletes_queued,
+            game_event_db_deletes_executed = db_bridge_summary.deletes_executed,
+            game_event_db_deletes_failed = db_bridge_summary.deletes_failed,
+            game_event_db_deletes_skipped_event_id_out_of_range =
+                db_bridge_summary.deletes_skipped_event_id_out_of_range,
+            game_event_db_condition_delete_rows_queued =
+                db_bridge_summary.condition_delete_rows_queued,
+            game_event_db_condition_delete_rows_executed =
+                db_bridge_summary.condition_delete_rows_executed,
+            game_event_db_condition_delete_rows_failed =
+                db_bridge_summary.condition_delete_rows_failed,
             invalid_check_outcomes = game_event_outcome.invalid_check_outcomes.len(),
             invalid_next_check_outcomes = game_event_outcome.invalid_next_check_outcomes.len(),
             next_update_delay_millis = game_event_outcome.next_update_delay_millis,
@@ -4247,6 +4275,245 @@ fn queue_respawn_db_save_like_cpp(
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GameEventWorldEventStateDbStatementKindLikeCpp {
+    DelGameEventSave,
+    InsGameEventSave,
+    DelAllGameEventConditionSave,
+}
+
+#[derive(Debug, Clone)]
+struct GameEventWorldEventStateDbStatementLikeCpp {
+    kind: GameEventWorldEventStateDbStatementKindLikeCpp,
+    statement: PreparedStatement,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GameEventWorldEventStateDbOperationKindLikeCpp {
+    Save,
+    Delete,
+}
+
+#[derive(Debug, Clone)]
+struct GameEventWorldEventStateDbOperationLikeCpp {
+    event_id: u8,
+    kind: GameEventWorldEventStateDbOperationKindLikeCpp,
+    statements: Vec<GameEventWorldEventStateDbStatementLikeCpp>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct GameEventWorldEventStateDbBridgeSummaryLikeCpp {
+    saves_queued: usize,
+    saves_executed: usize,
+    saves_failed: usize,
+    saves_skipped_event_id_out_of_range: usize,
+    saves_skipped_missing_event: usize,
+    deletes_queued: usize,
+    deletes_executed: usize,
+    deletes_failed: usize,
+    deletes_skipped_event_id_out_of_range: usize,
+    condition_delete_rows_queued: usize,
+    condition_delete_rows_executed: usize,
+    condition_delete_rows_failed: usize,
+    operations: Vec<GameEventWorldEventStateDbOperationLikeCpp>,
+}
+
+fn game_event_world_event_state_db_save_operation_like_cpp(
+    event_id: u16,
+    metadata: &spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
+    summary: &mut GameEventWorldEventStateDbBridgeSummaryLikeCpp,
+) {
+    let Ok(event_id_u8) = u8::try_from(event_id) else {
+        summary.saves_skipped_event_id_out_of_range += 1;
+        return;
+    };
+    let Some(event) = metadata.game_event_like_cpp(event_id) else {
+        summary.saves_skipped_missing_event += 1;
+        return;
+    };
+    let Ok(next_start) = i64::try_from(event.next_start) else {
+        summary.saves_skipped_missing_event += 1;
+        return;
+    };
+
+    let mut delete = PreparedStatement::new(CharStatements::DEL_GAME_EVENT_SAVE.sql());
+    delete.set_u8(0, event_id_u8);
+    let mut insert = PreparedStatement::new(CharStatements::INS_GAME_EVENT_SAVE.sql());
+    insert.set_u8(0, event_id_u8);
+    insert.set_u8(1, event.state_raw);
+    insert.set_i64(2, next_start);
+
+    summary.saves_queued += 1;
+    summary
+        .operations
+        .push(GameEventWorldEventStateDbOperationLikeCpp {
+            event_id: event_id_u8,
+            kind: GameEventWorldEventStateDbOperationKindLikeCpp::Save,
+            statements: vec![
+                GameEventWorldEventStateDbStatementLikeCpp {
+                    kind: GameEventWorldEventStateDbStatementKindLikeCpp::DelGameEventSave,
+                    statement: delete,
+                },
+                GameEventWorldEventStateDbStatementLikeCpp {
+                    kind: GameEventWorldEventStateDbStatementKindLikeCpp::InsGameEventSave,
+                    statement: insert,
+                },
+            ],
+        });
+}
+
+fn game_event_world_event_state_db_delete_operation_like_cpp(
+    event_id: u16,
+    delete_condition_saves_requested: bool,
+    delete_world_event_state_requested: bool,
+    summary: &mut GameEventWorldEventStateDbBridgeSummaryLikeCpp,
+) {
+    if !delete_condition_saves_requested && !delete_world_event_state_requested {
+        return;
+    }
+    let Ok(event_id_u8) = u8::try_from(event_id) else {
+        summary.deletes_skipped_event_id_out_of_range += 1;
+        return;
+    };
+
+    let mut statements = Vec::new();
+    if delete_condition_saves_requested {
+        let mut delete_conditions =
+            PreparedStatement::new(CharStatements::DEL_ALL_GAME_EVENT_CONDITION_SAVE.sql());
+        delete_conditions.set_u8(0, event_id_u8);
+        statements.push(GameEventWorldEventStateDbStatementLikeCpp {
+            kind: GameEventWorldEventStateDbStatementKindLikeCpp::DelAllGameEventConditionSave,
+            statement: delete_conditions,
+        });
+        summary.condition_delete_rows_queued += 1;
+    }
+    if delete_world_event_state_requested {
+        let mut delete_save = PreparedStatement::new(CharStatements::DEL_GAME_EVENT_SAVE.sql());
+        delete_save.set_u8(0, event_id_u8);
+        statements.push(GameEventWorldEventStateDbStatementLikeCpp {
+            kind: GameEventWorldEventStateDbStatementKindLikeCpp::DelGameEventSave,
+            statement: delete_save,
+        });
+        summary.deletes_queued += 1;
+    }
+
+    summary
+        .operations
+        .push(GameEventWorldEventStateDbOperationLikeCpp {
+            event_id: event_id_u8,
+            kind: GameEventWorldEventStateDbOperationKindLikeCpp::Delete,
+            statements,
+        });
+}
+
+fn materialize_game_event_world_event_state_db_bridge_like_cpp(
+    outcome: &spawn_store_loader::GameEventUpdateOutcomeLikeCpp,
+    metadata: &spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
+) -> GameEventWorldEventStateDbBridgeSummaryLikeCpp {
+    let mut summary = GameEventWorldEventStateDbBridgeSummaryLikeCpp::default();
+
+    for save in &outcome.world_nextphase_finished {
+        if save.save_state_requested {
+            game_event_world_event_state_db_save_operation_like_cpp(
+                save.event_id,
+                metadata,
+                &mut summary,
+            );
+        }
+    }
+    for save in &outcome.world_conditions_save_requested {
+        game_event_world_event_state_db_save_operation_like_cpp(
+            save.event_id,
+            metadata,
+            &mut summary,
+        );
+    }
+    for start_outcome in &outcome.start_outcomes {
+        if let spawn_store_loader::GameEventStartOutcomeLikeCpp::Started(start) = start_outcome {
+            if start.save_world_event_state_requested {
+                game_event_world_event_state_db_save_operation_like_cpp(
+                    start.event_id,
+                    metadata,
+                    &mut summary,
+                );
+            }
+        }
+    }
+    for stop_outcome in &outcome.stop_outcomes {
+        if let spawn_store_loader::GameEventStopOutcomeLikeCpp::Stopped(stop) = stop_outcome {
+            game_event_world_event_state_db_delete_operation_like_cpp(
+                stop.event_id,
+                stop.delete_condition_saves_requested,
+                stop.delete_world_event_state_requested,
+                &mut summary,
+            );
+        }
+    }
+
+    summary
+}
+
+async fn execute_game_event_world_event_state_db_bridge_like_cpp(
+    character_db: &CharacterDatabase,
+    summary: &mut GameEventWorldEventStateDbBridgeSummaryLikeCpp,
+) {
+    let operation_total = summary.operations.len();
+    for (operation_index, operation) in summary.operations.drain(..).enumerate() {
+        let mut transaction = SqlTransaction::new();
+        for statement in operation.statements.iter().cloned() {
+            transaction.append(statement.statement);
+        }
+        match transaction.commit(character_db.pool()).await {
+            Ok(()) => match operation.kind {
+                GameEventWorldEventStateDbOperationKindLikeCpp::Save => summary.saves_executed += 1,
+                GameEventWorldEventStateDbOperationKindLikeCpp::Delete => {
+                    if operation.statements.iter().any(|statement| {
+                        statement.kind
+                            == GameEventWorldEventStateDbStatementKindLikeCpp::DelGameEventSave
+                    }) {
+                        summary.deletes_executed += 1;
+                    }
+                    if operation.statements.iter().any(|statement| {
+                        statement.kind
+                            == GameEventWorldEventStateDbStatementKindLikeCpp::DelAllGameEventConditionSave
+                    }) {
+                        summary.condition_delete_rows_executed += 1;
+                    }
+                }
+            },
+            Err(error) => {
+                match operation.kind {
+                    GameEventWorldEventStateDbOperationKindLikeCpp::Save => {
+                        summary.saves_failed += 1;
+                    }
+                    GameEventWorldEventStateDbOperationKindLikeCpp::Delete => {
+                        if operation.statements.iter().any(|statement| {
+                            statement.kind
+                                == GameEventWorldEventStateDbStatementKindLikeCpp::DelGameEventSave
+                        }) {
+                            summary.deletes_failed += 1;
+                        }
+                        if operation.statements.iter().any(|statement| {
+                            statement.kind
+                                == GameEventWorldEventStateDbStatementKindLikeCpp::DelAllGameEventConditionSave
+                        }) {
+                            summary.condition_delete_rows_failed += 1;
+                        }
+                    }
+                }
+                tracing::error!(
+                    error = %error,
+                    operation_index = operation_index + 1,
+                    operation_total,
+                    event_id = operation.event_id,
+                    operation_kind = ?operation.kind,
+                    "Failed to execute C++ GameEventMgr world-event state DB transaction; continuing live update loop"
+                );
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 struct LoadedGridCreatureRespawnCachesLikeCpp {
     template_store: Arc<wow_data::CreatureTemplateLifecycleStoreLikeCpp>,
@@ -5012,7 +5279,7 @@ fn spawn_canonical_map_update_loop(
 
             if game_event_scheduler.update(diff_ms) {
                 let current_time_secs = current_unix_time_secs_like_cpp();
-                let (game_event_outcome, active_event_ids) = {
+                let (game_event_outcome, active_event_ids, mut db_bridge_summary) = {
                     let Ok(mut canonical_spawn_metadata) = canonical_spawn_metadata.lock() else {
                         tracing::error!(
                             "CanonicalSpawnMetadataLikeCpp mutex poisoned during GameEvent update; stopping map update loop"
@@ -5025,12 +5292,22 @@ fn spawn_canonical_map_update_loop(
                         represented_game_event_world_conditions_met_like_cpp,
                     );
                     game_event_scheduler.set_interval_and_reset(outcome.next_update_delay_millis);
+                    let db_bridge_summary =
+                        materialize_game_event_world_event_state_db_bridge_like_cpp(
+                            &outcome,
+                            &canonical_spawn_metadata,
+                        );
                     let active_event_ids = canonical_spawn_metadata
                         .game_event_active_set_like_cpp()
                         .active_event_ids_like_cpp()
                         .collect::<Vec<_>>();
-                    (outcome, active_event_ids)
+                    (outcome, active_event_ids, db_bridge_summary)
                 };
+                execute_game_event_world_event_state_db_bridge_like_cpp(
+                    character_db.as_ref(),
+                    &mut db_bridge_summary,
+                )
+                .await;
                 let side_effect_summary = {
                     let Ok(mut manager) = map_manager.lock() else {
                         tracing::error!(
@@ -5065,6 +5342,24 @@ fn spawn_canonical_map_update_loop(
                     world_nextphase_finished = game_event_outcome.world_nextphase_finished.len(),
                     world_conditions_save_requested =
                         game_event_outcome.world_conditions_save_requested.len(),
+                    game_event_db_saves_queued = db_bridge_summary.saves_queued,
+                    game_event_db_saves_executed = db_bridge_summary.saves_executed,
+                    game_event_db_saves_failed = db_bridge_summary.saves_failed,
+                    game_event_db_saves_skipped_event_id_out_of_range =
+                        db_bridge_summary.saves_skipped_event_id_out_of_range,
+                    game_event_db_saves_skipped_missing_event =
+                        db_bridge_summary.saves_skipped_missing_event,
+                    game_event_db_deletes_queued = db_bridge_summary.deletes_queued,
+                    game_event_db_deletes_executed = db_bridge_summary.deletes_executed,
+                    game_event_db_deletes_failed = db_bridge_summary.deletes_failed,
+                    game_event_db_deletes_skipped_event_id_out_of_range =
+                        db_bridge_summary.deletes_skipped_event_id_out_of_range,
+                    game_event_db_condition_delete_rows_queued =
+                        db_bridge_summary.condition_delete_rows_queued,
+                    game_event_db_condition_delete_rows_executed =
+                        db_bridge_summary.condition_delete_rows_executed,
+                    game_event_db_condition_delete_rows_failed =
+                        db_bridge_summary.condition_delete_rows_failed,
                     invalid_check_outcomes = game_event_outcome.invalid_check_outcomes.len(),
                     invalid_next_check_outcomes =
                         game_event_outcome.invalid_next_check_outcomes.len(),
@@ -5152,7 +5447,7 @@ fn spawn_canonical_map_update_loop(
                     reset_event_seasonal_quests_character_db_statement_unimplemented =
                         side_effect_summary
                             .reset_event_seasonal_quests_character_db_statement_unimplemented,
-                    "C++ WUPDATE_EVENTS represented timer fired; updated canonical GameEvent metadata and consumed represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel, UpdateEventQuests cache, UpdateWorldStates evidence, UpdateEventNPCFlags, UpdateEventNPCVendor cache, RunSmartAIScripts evidence, ResetEventSeasonalQuests request evidence, and represented announcement evidence-only side effects; ConditionMgr world-event rows, DB state writes, real SendWorldText/session fanout, quest packets/session gossip refresh, full ObjectMgr quest runtime, real WorldStateMgr/BattlemasterList HolidayWorldState lookup, SmartAI script dispatch, Player/session seasonal quest reset, and character DB seasonal reset statement execution remain pending"
+                    "C++ WUPDATE_EVENTS represented timer fired; updated canonical GameEvent metadata and consumed represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel, UpdateEventQuests cache, UpdateWorldStates evidence, UpdateEventNPCFlags, UpdateEventNPCVendor cache, RunSmartAIScripts evidence, ResetEventSeasonalQuests request evidence, and represented announcement evidence-only side effects; ConditionMgr world-event rows, real SendWorldText/session fanout, quest packets/session gossip refresh, full ObjectMgr quest runtime, real WorldStateMgr/BattlemasterList HolidayWorldState lookup, SmartAI script dispatch, Player/session seasonal quest reset, and character DB seasonal reset statement execution remain pending"
                 );
             }
 
@@ -5734,10 +6029,11 @@ fn locale_id_to_name(raw: &str) -> String {
 mod tests {
     use super::{
         CanonicalGameEventSchedulerLikeCpp, CanonicalRespawnConditionSchedulerLikeCpp,
-        GameEventLiveUpdateActionLikeCpp, LoadedGridCreatureRespawnCachesLikeCpp,
-        PersistedRespawnLoadReportLikeCpp, PersistedRespawnRowLikeCpp,
-        PersistedRespawnTimesLikeCpp, RespawnDbDeleteQueueOutcomeLikeCpp,
-        RespawnDbSaveQueueOutcomeLikeCpp,
+        GameEventLiveUpdateActionLikeCpp, GameEventWorldEventStateDbOperationKindLikeCpp,
+        GameEventWorldEventStateDbOperationLikeCpp, GameEventWorldEventStateDbStatementKindLikeCpp,
+        LoadedGridCreatureRespawnCachesLikeCpp, PersistedRespawnLoadReportLikeCpp,
+        PersistedRespawnRowLikeCpp, PersistedRespawnTimesLikeCpp,
+        RespawnDbDeleteQueueOutcomeLikeCpp, RespawnDbSaveQueueOutcomeLikeCpp,
         apply_canonical_spawn_group_condition_update_loaded_grid_records_like_cpp,
         build_loaded_grid_creature_respawn_record_like_cpp,
         build_loaded_grid_creature_spawn_group_spawn_record_like_cpp,
@@ -5752,7 +6048,8 @@ mod tests {
         game_event_unspawn_for_event_like_cpp, game_event_unspawn_pools_for_event_like_cpp,
         game_event_unspawn_pools_like_cpp, game_event_update_npc_flags_like_cpp,
         game_event_update_npc_vendor_like_cpp, install_canonical_spawn_group_initializer_like_cpp,
-        load_world_config_from, loot_drop_rates_like_cpp, mmap_runtime_config_like_cpp,
+        load_world_config_from, loot_drop_rates_like_cpp,
+        materialize_game_event_world_event_state_db_bridge_like_cpp, mmap_runtime_config_like_cpp,
         persisted_respawn_info_from_row_like_cpp, queue_respawn_db_delete_like_cpp,
         queue_respawn_db_save_like_cpp, spawn_store_loader, world_config_bool, world_config_u8,
         world_config_u16,
@@ -8372,6 +8669,267 @@ mmap.enablePathFinding = 0
             next_event_delay_secs_before_padding: 0,
             next_update_delay_millis: 1_000,
         }
+    }
+
+    fn empty_game_event_update_outcome_for_db_bridge_like_cpp()
+    -> spawn_store_loader::GameEventUpdateOutcomeLikeCpp {
+        spawn_store_loader::GameEventUpdateOutcomeLikeCpp {
+            current_time_secs: 650,
+            scanned_event_ids: vec![],
+            check_outcomes: vec![],
+            next_check_outcomes: vec![],
+            queued_activation_event_ids: vec![],
+            queued_deactivation_event_ids: vec![],
+            start_outcomes: vec![],
+            stop_outcomes: vec![],
+            negative_spawn_event_ids: vec![],
+            world_nextphase_finished: vec![],
+            world_conditions_save_requested: vec![],
+            invalid_check_outcomes: vec![],
+            invalid_next_check_outcomes: vec![],
+            next_event_delay_secs_before_padding: 0,
+            next_update_delay_millis: 1_000,
+        }
+    }
+
+    fn assert_game_event_save_operation_like_cpp(
+        operation: &GameEventWorldEventStateDbOperationLikeCpp,
+        event_id: u8,
+        state: u8,
+        next_start: i64,
+    ) {
+        assert_eq!(operation.event_id, event_id);
+        assert_eq!(
+            operation.kind,
+            GameEventWorldEventStateDbOperationKindLikeCpp::Save
+        );
+        assert_eq!(operation.statements.len(), 2);
+        assert_eq!(
+            operation.statements[0].kind,
+            GameEventWorldEventStateDbStatementKindLikeCpp::DelGameEventSave
+        );
+        assert_eq!(
+            operation.statements[0].statement.sql(),
+            "DELETE FROM game_event_save WHERE eventEntry = ?"
+        );
+        assert!(matches!(
+            operation.statements[0].statement.params(),
+            [wow_database::SqlParam::U8(id)] if id == &event_id
+        ));
+        assert_eq!(
+            operation.statements[1].kind,
+            GameEventWorldEventStateDbStatementKindLikeCpp::InsGameEventSave
+        );
+        assert_eq!(
+            operation.statements[1].statement.sql(),
+            "INSERT INTO game_event_save (eventEntry, state, next_start) VALUES (?, ?, ?)"
+        );
+        assert!(matches!(
+            operation.statements[1].statement.params(),
+            [wow_database::SqlParam::U8(id), wow_database::SqlParam::U8(actual_state), wow_database::SqlParam::I64(actual_next_start)]
+                if id == &event_id
+                    && actual_state == &state
+                    && actual_next_start == &next_start
+        ));
+    }
+
+    #[test]
+    fn game_event_db_bridge_materializes_save_delete_insert_with_cpp_sql_and_zero_next_start() {
+        let metadata = game_event_world_state_metadata_like_cpp(
+            1,
+            &[spawn_store_loader::GameEventDataLikeCpp {
+                event_id: 1,
+                state_raw: 2,
+                next_start: 0,
+                ..spawn_store_loader::GameEventDataLikeCpp::default()
+            }],
+        );
+        let mut outcome = empty_game_event_update_outcome_for_db_bridge_like_cpp();
+        outcome.start_outcomes = vec![spawn_store_loader::GameEventStartOutcomeLikeCpp::Started(
+            spawn_store_loader::GameEventStartSummaryLikeCpp {
+                event_id: 1,
+                state_before_raw: 1,
+                state_after_raw: 2,
+                active_added: true,
+                active_was_present: false,
+                apply_new_event_requested: true,
+                save_world_event_state_requested: true,
+                force_game_event_update_requested: false,
+                completed: false,
+            },
+        )];
+
+        let summary =
+            materialize_game_event_world_event_state_db_bridge_like_cpp(&outcome, &metadata);
+
+        assert_eq!(summary.saves_queued, 1);
+        assert_eq!(summary.operations.len(), 1);
+        assert_game_event_save_operation_like_cpp(&summary.operations[0], 1, 2, 0);
+    }
+
+    #[test]
+    fn game_event_db_bridge_materializes_world_nextphase_and_conditions_in_cpp_order() {
+        let metadata = game_event_world_state_metadata_like_cpp(
+            3,
+            &[
+                spawn_store_loader::GameEventDataLikeCpp {
+                    event_id: 1,
+                    state_raw: 3,
+                    next_start: 10,
+                    ..spawn_store_loader::GameEventDataLikeCpp::default()
+                },
+                spawn_store_loader::GameEventDataLikeCpp {
+                    event_id: 2,
+                    state_raw: 4,
+                    next_start: 20,
+                    ..spawn_store_loader::GameEventDataLikeCpp::default()
+                },
+            ],
+        );
+        let mut outcome = empty_game_event_update_outcome_for_db_bridge_like_cpp();
+        outcome.world_nextphase_finished =
+            vec![spawn_store_loader::GameEventWorldNextPhaseFinishedLikeCpp {
+                event_id: 2,
+                was_active_before_queue: true,
+                state_before_raw: 1,
+                state_after_raw: 4,
+                next_start_before: 0,
+                next_start_after: 20,
+                save_state_requested: true,
+            }];
+        outcome.world_conditions_save_requested =
+            vec![spawn_store_loader::GameEventWorldStateSaveEvidenceLikeCpp {
+                event_id: 1,
+                state_after_raw: 3,
+                next_start_after: 10,
+            }];
+
+        let summary =
+            materialize_game_event_world_event_state_db_bridge_like_cpp(&outcome, &metadata);
+
+        assert_eq!(summary.saves_queued, 2);
+        assert_eq!(summary.operations.len(), 2);
+        assert_game_event_save_operation_like_cpp(&summary.operations[0], 2, 4, 20);
+        assert_game_event_save_operation_like_cpp(&summary.operations[1], 1, 3, 10);
+    }
+
+    #[test]
+    fn game_event_db_bridge_materializes_stop_delete_condition_saves_before_event_save() {
+        let metadata = game_event_world_state_metadata_like_cpp(1, &[]);
+        let mut outcome = empty_game_event_update_outcome_for_db_bridge_like_cpp();
+        outcome.stop_outcomes = vec![spawn_store_loader::GameEventStopOutcomeLikeCpp::Stopped(
+            spawn_store_loader::GameEventStopSummaryLikeCpp {
+                event_id: 1,
+                state_before_raw: 1,
+                state_after_raw: 0,
+                active_removed: true,
+                active_was_present: true,
+                unapply_event_requested: true,
+                serverwide: true,
+                condition_reset_requested: true,
+                delete_world_event_state_requested: true,
+                delete_condition_saves_requested: true,
+            },
+        )];
+
+        let summary =
+            materialize_game_event_world_event_state_db_bridge_like_cpp(&outcome, &metadata);
+
+        assert_eq!(summary.deletes_queued, 1);
+        assert_eq!(summary.condition_delete_rows_queued, 1);
+        assert_eq!(summary.operations.len(), 1);
+        let operation = &summary.operations[0];
+        assert_eq!(
+            operation.kind,
+            GameEventWorldEventStateDbOperationKindLikeCpp::Delete
+        );
+        assert_eq!(operation.statements.len(), 2);
+        assert_eq!(
+            operation.statements[0].kind,
+            GameEventWorldEventStateDbStatementKindLikeCpp::DelAllGameEventConditionSave
+        );
+        assert_eq!(
+            operation.statements[0].statement.sql(),
+            "DELETE FROM game_event_condition_save WHERE eventEntry = ?"
+        );
+        assert_eq!(
+            operation.statements[1].kind,
+            GameEventWorldEventStateDbStatementKindLikeCpp::DelGameEventSave
+        );
+        assert_eq!(
+            operation.statements[1].statement.sql(),
+            "DELETE FROM game_event_save WHERE eventEntry = ?"
+        );
+    }
+
+    #[test]
+    fn game_event_db_bridge_finished_no_overwrite_stop_without_delete_flags_is_noop() {
+        let metadata = game_event_world_state_metadata_like_cpp(1, &[]);
+        let mut outcome = empty_game_event_update_outcome_for_db_bridge_like_cpp();
+        outcome.stop_outcomes = vec![spawn_store_loader::GameEventStopOutcomeLikeCpp::Stopped(
+            spawn_store_loader::GameEventStopSummaryLikeCpp {
+                event_id: 1,
+                state_before_raw: 2,
+                state_after_raw: 2,
+                active_removed: false,
+                active_was_present: true,
+                unapply_event_requested: false,
+                serverwide: true,
+                condition_reset_requested: false,
+                delete_world_event_state_requested: false,
+                delete_condition_saves_requested: false,
+            },
+        )];
+
+        let summary =
+            materialize_game_event_world_event_state_db_bridge_like_cpp(&outcome, &metadata);
+
+        assert_eq!(summary.deletes_queued, 0);
+        assert_eq!(summary.condition_delete_rows_queued, 0);
+        assert!(summary.operations.is_empty());
+    }
+
+    #[test]
+    fn game_event_db_bridge_out_of_range_event_id_skips_without_panic() {
+        let metadata = game_event_world_state_metadata_like_cpp(
+            300,
+            &[spawn_store_loader::GameEventDataLikeCpp {
+                event_id: 300,
+                state_raw: 1,
+                next_start: 0,
+                ..spawn_store_loader::GameEventDataLikeCpp::default()
+            }],
+        );
+        let mut outcome = empty_game_event_update_outcome_for_db_bridge_like_cpp();
+        outcome.world_conditions_save_requested =
+            vec![spawn_store_loader::GameEventWorldStateSaveEvidenceLikeCpp {
+                event_id: 300,
+                state_after_raw: 1,
+                next_start_after: 0,
+            }];
+        outcome.stop_outcomes = vec![spawn_store_loader::GameEventStopOutcomeLikeCpp::Stopped(
+            spawn_store_loader::GameEventStopSummaryLikeCpp {
+                event_id: 300,
+                state_before_raw: 1,
+                state_after_raw: 0,
+                active_removed: true,
+                active_was_present: true,
+                unapply_event_requested: true,
+                serverwide: true,
+                condition_reset_requested: true,
+                delete_world_event_state_requested: true,
+                delete_condition_saves_requested: true,
+            },
+        )];
+
+        let summary =
+            materialize_game_event_world_event_state_db_bridge_like_cpp(&outcome, &metadata);
+
+        assert_eq!(summary.saves_skipped_event_id_out_of_range, 1);
+        assert_eq!(summary.deletes_skipped_event_id_out_of_range, 1);
+        assert_eq!(summary.saves_queued, 0);
+        assert_eq!(summary.deletes_queued, 0);
+        assert!(summary.operations.is_empty());
     }
 
     #[test]

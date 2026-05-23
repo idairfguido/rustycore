@@ -6,6 +6,13 @@
 ## Pending Review Tasks
 
 ## Closed Tasks
+- [x] **#NEXT.R8.ENTITIES.556** GameEvent world-event state DB save/delete bridge.
+  Status: represented-complete for bounded characters DB persistence bridge; dependency `#NEXT.R8.ENTITIES.543`/scheduler outcomes plus later ApplyNewEvent/UnApplyEvent represented side-effect evidence; review `APROBADO`; CI `CI_OK`; local commit is this slice closeout; not manual-test-ready; no push/install/restart. Rust adds exact Character DB prepared statements for `game_event_save` delete/insert and `game_event_condition_save` delete, materializes post-update `SaveWorldEventStateToDB` requests from `WORLD_NEXTPHASE`, `WORLD_CONDITIONS`, and StartEvent outcomes, and materializes StopEvent serverwide delete requests in C++ order. Statements are committed via `SqlTransaction` outside canonical metadata and MapManager locks.
+  C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Events/GameEventMgr.cpp:135-213,994-1061,1590-1604`; `/home/server/woltk-trinity-legacy/src/server/database/Database/Implementation/CharacterDatabase.cpp:340-347`.
+  Rust targets: `crates/wow-database/src/statements/character.rs`, `crates/world-server/src/main.rs`, `docs/migration/current-session-handoff.md`, `docs/migration/inventory/r8-entities-miniphase.md`, `docs/migration/inventory/r8-entities-miniphase.tsv`.
+  Acceptance: focused unit coverage asserts exact SQL, save delete+insert parameters including `next_start=0`, WORLD_NEXTPHASE/WORLD_CONDITIONS scan/outcome order, StopEvent condition-save delete before event-save delete, no-op for finished/no-overwrite stop without delete flags, and out-of-range event ids skip without panic.
+  Boundaries: no real ConditionMgr world-event condition row incremental save/insert, no `CHAR_INS_GAME_EVENT_CONDITION_SAVE`, no DB -> metadata sync, no session/map/object fanout, no scheduler redesign, no GM command flow, no localization, no SmartAI real runtime, no seasonal quest DB reset.
+
 - [x] **#NEXT.R8.ENTITIES.555** GameEvent `ApplyNewEvent` announcement decision represented evidence.
   Status: represented-partial scheduler evidence only; dependency `#NEXT.R8.ENTITIES.554`; review `APROBADO`; CI `CI_OK`; local commit is this slice closeout; not manual-test-ready; no push/install/restart. Rust represents only the C++ announcement decision at the start of `ApplyNewEvent`: if `announce == 1`, or `announce == 2 && CONFIG_EVENT_ANNOUNCE`, it records an `AnnounceEvent` action before `GameEventSpawn(event_id)`. Runtime callers use conservative config default `false`; tests cover explicit config true/false. Stop/`UnApplyEvent` has no announcement action.
   C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Events/GameEventMgr.cpp:215-285,1064-1083,1085-1091`.
