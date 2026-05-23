@@ -13,78 +13,82 @@ use crate::{ClientPacket, ServerPacket};
 
 // ── Chat message types ────────────────────────────────────────────
 
-/// Chat message type (ChatMsg in C#).
+/// Chat message type (`ChatMsg` in TrinityCore WotLK Classic).
+///
+/// C++ anchor:
+/// `/home/server/woltk-trinity-legacy/src/server/game/Miscellaneous/SharedDefines.h:5877-5949`.
+/// `CHAT_MSG_ADDON = -1` is intentionally omitted because this wire enum is
+/// serialized as `uint8` for `SMSG_CHAT` (`ChatPackets.cpp:191`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ChatMsg {
-    Say = 1,
-    Party = 2,
-    Raid = 3,
-    Guild = 4,
-    Officer = 5,
-    Yell = 6,
-    Whisper = 7,
-    WhisperForeign = 8,
-    WhisperInform = 9,
-    Emote = 10,
-    TextEmote = 11,
-    System = 12,
-    Monster = 13, // creature say
-    MonsterParty = 14,
-    MonsterYell = 15,
-    MonsterWhisper = 16,
-    MonsterEmote = 17,
-    Channel = 18,
-    ChannelJoin = 19,
-    ChannelLeave = 20,
-    ChannelList = 21,
-    ChannelNotice = 22,
-    ChannelNoticeUser = 23,
-    Afk = 24,
-    Dnd = 25,
-    Ignored = 26,
-    Skill = 27,
-    Loot = 28,
-    Money = 29,
-    Opening = 30,
-    Tradeskills = 31,
-    PetInfo = 32,
-    CombatMiscInfo = 33,
-    CombatXpGain = 34,
-    CombatHonorGain = 35,
-    CombatFactionChange = 36,
-    BgSystemNeutral = 37,
-    BgSystemAlliance = 38,
-    BgSystemHorde = 39,
-    RaidLeader = 40,
-    RaidWarning = 41,
-    RaidBossEmote = 42,
-    RaidBossWhisper = 43,
-    Filtered = 44,
-    Battleground = 45,
-    BattlegroundLeader = 46,
-    Restricted = 47,
-    BattleNet = 48,
-    Achievement = 49,
-    GuildAchievement = 50,
-    ArenaPoints = 51,
-    PartyLeader = 52,
-    Targeticons = 53,
-    BnWhisper = 54,
-    BnWhisperInform = 55,
-    BnInlineToast = 56,
-    BnInlineToastAlert = 57,
-    BnInlineToastBroadcast = 58,
-    BnInlineToastBroadcastInform = 59,
-    BnInlineToastConversation = 60,
-    BnWhisperPlayerOffline = 61,
-    CombatGuildXpGain = 62,
-    Currency = 63,
-    QuestBossEmote = 64,
-    PetBattleCombatLog = 65,
-    PetBattleInfo = 66,
-    InstanceChat = 67,
-    InstanceChatLeader = 68,
+    System = 0x00,
+    Say = 0x01,
+    Party = 0x02,
+    Raid = 0x03,
+    Guild = 0x04,
+    Officer = 0x05,
+    Yell = 0x06,
+    Whisper = 0x07,
+    WhisperForeign = 0x08,
+    WhisperInform = 0x09,
+    Emote = 0x0A,
+    TextEmote = 0x0B,
+    MonsterSay = 0x0C,
+    MonsterParty = 0x0D,
+    MonsterYell = 0x0E,
+    MonsterWhisper = 0x0F,
+    MonsterEmote = 0x10,
+    Channel = 0x11,
+    ChannelJoin = 0x12,
+    ChannelLeave = 0x13,
+    ChannelList = 0x14,
+    ChannelNotice = 0x15,
+    ChannelNoticeUser = 0x16,
+    Afk = 0x17,
+    Dnd = 0x18,
+    Ignored = 0x19,
+    Skill = 0x1A,
+    Loot = 0x1B,
+    Money = 0x1C,
+    Opening = 0x1D,
+    Tradeskills = 0x1E,
+    PetInfo = 0x1F,
+    CombatMiscInfo = 0x20,
+    CombatXpGain = 0x21,
+    CombatHonorGain = 0x22,
+    CombatFactionChange = 0x23,
+    BgSystemNeutral = 0x24,
+    BgSystemAlliance = 0x25,
+    BgSystemHorde = 0x26,
+    RaidLeader = 0x27,
+    RaidWarning = 0x28,
+    RaidBossEmote = 0x29,
+    RaidBossWhisper = 0x2A,
+    Filtered = 0x2B,
+    Restricted = 0x2C,
+    BattleNet = 0x2D,
+    Achievement = 0x2E,
+    GuildAchievement = 0x2F,
+    ArenaPoints = 0x30,
+    PartyLeader = 0x31,
+    Targeticons = 0x32,
+    BnWhisper = 0x33,
+    BnWhisperInform = 0x34,
+    BnInlineToastAlert = 0x35,
+    BnInlineToastBroadcast = 0x36,
+    BnInlineToastBroadcastInform = 0x37,
+    BnInlineToastConversation = 0x38,
+    BnWhisperPlayerOffline = 0x39,
+    Currency = 0x3A,
+    QuestBossEmote = 0x3B,
+    PetBattleCombatLog = 0x3C,
+    PetBattleInfo = 0x3D,
+    InstanceChat = 0x3E,
+    InstanceChatLeader = 0x3F,
+    GuildItemLooted = 0x40,
+    CommunitiesChannel = 0x41,
+    VoiceText = 0x42,
 }
 
 // ── CMSG_CHAT_MESSAGE_SAY / PARTY / YELL / GUILD / INSTANCE_CHAT ─
@@ -268,7 +272,7 @@ impl ClientPacket for ChatAddonMessage {
 #[derive(Debug, Clone)]
 pub struct ChatPkt {
     pub msg_type: ChatMsg,
-    pub language: i32,
+    pub language: u32,
     pub sender_guid: ObjectGuid,
     pub sender_name: String,
     pub target_guid: ObjectGuid,
@@ -283,7 +287,7 @@ impl ServerPacket for ChatPkt {
 
     fn write(&self, pkt: &mut WorldPacket) {
         pkt.write_uint8(self.msg_type as u8);
-        pkt.write_int32(self.language);
+        pkt.write_uint32(self.language);
         pkt.write_packed_guid(&self.sender_guid);
         pkt.write_packed_guid(&ObjectGuid::EMPTY); // sender_guild_guid
         pkt.write_packed_guid(&ObjectGuid::EMPTY); // sender_account_guid
@@ -466,5 +470,26 @@ mod tests {
 
         assert_eq!(packet.text, "hello");
         assert!(!packet.is_secure);
+    }
+
+    #[test]
+    fn chat_pkt_system_universal_writes_cpp_wire_values() {
+        let packet = ChatPkt {
+            msg_type: ChatMsg::System,
+            language: 0,
+            sender_guid: ObjectGuid::EMPTY,
+            sender_name: String::new(),
+            target_guid: ObjectGuid::EMPTY,
+            target_name: String::new(),
+            channel: String::new(),
+            text: "hello".to_string(),
+            virtual_realm: 0,
+        };
+        let mut writer = WorldPacket::new_empty();
+        packet.write(&mut writer);
+        let payload = writer.data();
+
+        assert_eq!(payload[0], 0x00, "CHAT_MSG_SYSTEM must be 0x00 on wire");
+        assert_eq!(&payload[1..5], &[0x00, 0x00, 0x00, 0x00]);
     }
 }

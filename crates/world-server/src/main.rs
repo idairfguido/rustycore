@@ -39,7 +39,10 @@ use wow_network::{
     LootDropRatesLikeCpp, PendingInvites, PlayerRegistry, ResetSeasonalQuestStatusCommand,
     SessionCommand, SessionResources,
 };
-use wow_packet::ServerPacket;
+use wow_packet::{
+    ServerPacket,
+    packets::chat::{ChatMsg, ChatPkt},
+};
 use wow_world::{
     MMapRuntimeConfigLikeCpp, MapManager as LegacyMapManager, SharedCanonicalMapManager,
     SharedMapManager, WorldMMapPathfinderWorkerLikeCpp, WorldSession,
@@ -1625,6 +1628,17 @@ async fn main() -> Result<()> {
             announce_event_actions = side_effect_summary.announce_event_actions,
             announce_event_description_len_total =
                 side_effect_summary.announce_event_description_len_total,
+            announce_event_world_text_represented =
+                side_effect_summary.announce_event_world_text_represented,
+            announce_event_lines = side_effect_summary.announce_event_lines,
+            announce_event_registry_missing = side_effect_summary.announce_event_registry_missing,
+            announce_event_send_attempted = side_effect_summary.announce_event_send_attempted,
+            announce_event_send_queued = side_effect_summary.announce_event_send_queued,
+            announce_event_send_failed = side_effect_summary.announce_event_send_failed,
+            announce_event_localization_unrepresented =
+                side_effect_summary.announce_event_localization_unrepresented,
+            announce_event_in_world_filter_unrepresented =
+                side_effect_summary.announce_event_in_world_filter_unrepresented,
             announce_event_world_text_unimplemented =
                 side_effect_summary.announce_event_world_text_unimplemented,
             announce_event_session_fanout_unimplemented =
@@ -3704,12 +3718,13 @@ fn represented_game_event_world_conditions_met_like_cpp(_event_id: u16) -> bool 
     false
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum GameEventLiveUpdateActionLikeCpp {
     Spawn(i16),
     Unspawn(i16),
     AnnounceEvent {
         event_id: u16,
+        description: String,
         description_len: usize,
         announce: u8,
         config_event_announce: bool,
@@ -3757,6 +3772,14 @@ struct GameEventLiveUpdateSideEffectSummaryLikeCpp {
     unspawn_actions: usize,
     announce_event_actions: usize,
     announce_event_description_len_total: usize,
+    announce_event_world_text_represented: usize,
+    announce_event_lines: usize,
+    announce_event_registry_missing: usize,
+    announce_event_send_attempted: usize,
+    announce_event_send_queued: usize,
+    announce_event_send_failed: usize,
+    announce_event_localization_unrepresented: usize,
+    announce_event_in_world_filter_unrepresented: usize,
     announce_event_world_text_unimplemented: usize,
     announce_event_session_fanout_unimplemented: usize,
     change_equip_or_model_actions: usize,
@@ -3850,6 +3873,72 @@ fn game_event_signed_id_like_cpp(event_id: u16) -> i16 {
 
 fn should_announce_game_event_like_cpp(announce: u8, config_event_announce: bool) -> bool {
     announce == 1 || (announce == 2 && config_event_announce)
+}
+
+fn game_event_announcement_lines_like_cpp(description: &str) -> Vec<String> {
+    // C++ WorldWorldTextBuilder formats LANG_EVENTMESSAGE first and then
+    // ChatHandler::LineFromMessage tokenizes the resulting buffer with strtok("\n"),
+    // so empty newline runs are skipped. Rust does not have ObjectMgr TrinityString
+    // locale storage yet; represent the known enUS fallback format explicitly.
+    let formatted = format!("|cffff0000[Event Message]: {description}|r");
+    formatted
+        .split('\n')
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn fanout_game_event_announcement_to_player_sessions_like_cpp(
+    player_registry: Option<&PlayerRegistry>,
+    description: &str,
+    summary: &mut GameEventLiveUpdateSideEffectSummaryLikeCpp,
+) {
+    summary.announce_event_world_text_represented += 1;
+    summary.announce_event_localization_unrepresented += 1;
+
+    let lines = game_event_announcement_lines_like_cpp(description);
+    summary.announce_event_lines += lines.len();
+    if lines.is_empty() {
+        return;
+    }
+
+    let Some(player_registry) = player_registry else {
+        summary.announce_event_registry_missing += 1;
+        return;
+    };
+
+    // PlayerBroadcastInfo currently represents active registered sessions but
+    // does not expose C++ Player::IsInWorld(). Keep the fanout bounded to the
+    // registry's active-session scope and count the exact IsInWorld filter gap.
+    summary.announce_event_in_world_filter_unrepresented += 1;
+
+    let packet_bytes: Vec<Vec<u8>> = lines
+        .into_iter()
+        .map(|text| {
+            ChatPkt {
+                msg_type: ChatMsg::System,
+                language: 0,
+                sender_guid: ObjectGuid::EMPTY,
+                sender_name: String::new(),
+                target_guid: ObjectGuid::EMPTY,
+                target_name: String::new(),
+                channel: String::new(),
+                text,
+                virtual_realm: 0,
+            }
+            .to_bytes()
+        })
+        .collect();
+
+    for session in player_registry.iter() {
+        for bytes in &packet_bytes {
+            summary.announce_event_send_attempted += 1;
+            match session.send_tx.try_send(bytes.clone()) {
+                Ok(()) => summary.announce_event_send_queued += 1,
+                Err(_) => summary.announce_event_send_failed += 1,
+            }
+        }
+    }
 }
 
 fn game_event_seasonal_quest_db_delete_like_cpp(
@@ -3975,6 +4064,7 @@ fn game_event_live_update_actions_like_cpp(
                     if should_announce_game_event_like_cpp(event.announce, config_event_announce) {
                         actions.push(GameEventLiveUpdateActionLikeCpp::AnnounceEvent {
                             event_id: summary.event_id,
+                            description: event.description.clone(),
                             description_len: event.description.len(),
                             announce: event.announce,
                             config_event_announce,
@@ -4377,14 +4467,18 @@ fn consume_game_event_live_update_side_effects_like_cpp(
         match action {
             GameEventLiveUpdateActionLikeCpp::AnnounceEvent {
                 event_id: _,
+                description,
                 description_len,
                 announce: _,
                 config_event_announce: _,
             } => {
                 summary.announce_event_actions += 1;
                 summary.announce_event_description_len_total += description_len;
-                summary.announce_event_world_text_unimplemented += 1;
-                summary.announce_event_session_fanout_unimplemented += 1;
+                fanout_game_event_announcement_to_player_sessions_like_cpp(
+                    player_registry,
+                    &description,
+                    &mut summary,
+                );
             }
             GameEventLiveUpdateActionLikeCpp::Spawn(event_id) => {
                 let _ = game_event_spawn_for_event_like_cpp(
@@ -6651,9 +6745,11 @@ mod tests {
         build_loaded_grid_gameobject_respawn_record_like_cpp,
         canonical_map_update_tick_set_inactive_like_cpp,
         consume_game_event_live_update_side_effects_like_cpp,
+        fanout_game_event_announcement_to_player_sessions_like_cpp,
         fanout_realm_update_world_state_to_player_sessions_like_cpp,
         fanout_reset_event_seasonal_quests_to_player_sessions_after_db_delete_like_cpp,
-        game_event_change_equip_or_model_like_cpp, game_event_live_update_actions_like_cpp,
+        game_event_announcement_lines_like_cpp, game_event_change_equip_or_model_like_cpp,
+        game_event_live_update_actions_like_cpp,
         game_event_quest_complete_response_from_summary_like_cpp,
         game_event_spawn_creatures_and_gameobjects_for_event_like_cpp,
         game_event_spawn_for_event_like_cpp, game_event_spawn_pools_for_event_like_cpp,
@@ -6687,7 +6783,10 @@ mod tests {
         spawn::SpawnGroupMemberRow,
     };
     use wow_network::{PlayerBroadcastInfo, PlayerRegistry, SessionCommand};
-    use wow_packet::ServerPacket;
+    use wow_packet::{
+        ServerPacket,
+        packets::chat::{ChatMsg, ChatPkt},
+    };
 
     fn player_broadcast_info_fixture_like_cpp(
         send_tx: flume::Sender<Vec<u8>>,
@@ -10701,6 +10800,7 @@ mmap.enablePathFinding = 0
             actions.first(),
             Some(&GameEventLiveUpdateActionLikeCpp::AnnounceEvent {
                 event_id: 2,
+                description: "Darkmoon Faire".to_string(),
                 description_len: "Darkmoon Faire".len(),
                 announce: 1,
                 config_event_announce: false,
@@ -10779,18 +10879,25 @@ mmap.enablePathFinding = 0
     }
 
     #[test]
-    fn game_event_announce_consumption_records_evidence_only_like_cpp() {
+    fn game_event_announce_consumption_fans_out_system_chat_like_cpp() {
         let mut manager = wow_map::MapManager::default();
         let mut metadata = game_event_world_state_metadata_like_cpp(
             1,
             &[spawn_store_loader::GameEventDataLikeCpp {
                 event_id: 1,
-                description: "Love is in the Air".to_string(),
-                announce: 2,
+                description: "Darkmoon Faire".to_string(),
+                announce: 1,
                 ..spawn_store_loader::GameEventDataLikeCpp::default()
             }],
         );
         let outcome = game_event_world_state_start_outcome_like_cpp(1);
+        let registry = PlayerRegistry::new();
+        let (send_tx_a, send_rx_a) = flume::bounded(2);
+        let (command_tx_a, _command_rx_a) = flume::bounded(1);
+        let (send_tx_b, send_rx_b) = flume::bounded(2);
+        let (command_tx_b, _command_rx_b) = flume::bounded(1);
+        insert_player_broadcast_fixture_like_cpp(&registry, 7101, send_tx_a, command_tx_a);
+        insert_player_broadcast_fixture_like_cpp(&registry, 7102, send_tx_b, command_tx_b);
 
         let summary = consume_game_event_live_update_side_effects_like_cpp(
             &mut manager,
@@ -10798,23 +10905,109 @@ mmap.enablePathFinding = 0
             &empty_loaded_grid_creature_respawn_caches_like_cpp(),
             None,
             None,
-            None,
+            Some(&registry),
             &[1],
             &outcome,
-            true,
+            false,
         );
+
+        let expected_packet = ChatPkt {
+            msg_type: ChatMsg::System,
+            language: 0,
+            sender_guid: ObjectGuid::EMPTY,
+            sender_name: String::new(),
+            target_guid: ObjectGuid::EMPTY,
+            target_name: String::new(),
+            channel: String::new(),
+            text: "|cffff0000[Event Message]: Darkmoon Faire|r".to_string(),
+            virtual_realm: 0,
+        };
+        let mut expected_payload = wow_packet::world_packet::WorldPacket::new_empty();
+        expected_packet.write(&mut expected_payload);
+        assert_eq!(
+            expected_payload.data()[0],
+            0x00,
+            "CHAT_MSG_SYSTEM must be 0x00 on wire"
+        );
+        assert_eq!(&expected_payload.data()[1..5], &[0x00, 0x00, 0x00, 0x00]);
+        let expected = expected_packet.to_bytes();
 
         assert_eq!(summary.announce_event_actions, 1);
         assert_eq!(
             summary.announce_event_description_len_total,
-            "Love is in the Air".len()
+            "Darkmoon Faire".len()
         );
-        assert_eq!(summary.announce_event_world_text_unimplemented, 1);
-        assert_eq!(summary.announce_event_session_fanout_unimplemented, 1);
+        assert_eq!(summary.announce_event_world_text_represented, 1);
+        assert_eq!(summary.announce_event_localization_unrepresented, 1);
+        assert_eq!(summary.announce_event_in_world_filter_unrepresented, 1);
+        assert_eq!(summary.announce_event_lines, 1);
+        assert_eq!(summary.announce_event_send_attempted, 2);
+        assert_eq!(summary.announce_event_send_queued, 2);
+        assert_eq!(summary.announce_event_send_failed, 0);
+        assert_eq!(summary.announce_event_world_text_unimplemented, 0);
+        assert_eq!(summary.announce_event_session_fanout_unimplemented, 0);
+        let received_a = send_rx_a.try_recv().expect("player A packet");
+        let received_b = send_rx_b.try_recv().expect("player B packet");
+        let payload_offset = 2; // ServerPacket::to_bytes prepends the u16 opcode.
+        assert_eq!(
+            received_a[payload_offset], 0x00,
+            "received CHAT_MSG_SYSTEM must be 0x00 on wire"
+        );
+        assert_eq!(
+            &received_a[payload_offset + 1..payload_offset + 5],
+            &[0x00, 0x00, 0x00, 0x00]
+        );
+        assert_eq!(
+            received_b[payload_offset], 0x00,
+            "received CHAT_MSG_SYSTEM must be 0x00 on wire"
+        );
+        assert_eq!(
+            &received_b[payload_offset + 1..payload_offset + 5],
+            &[0x00, 0x00, 0x00, 0x00]
+        );
+        assert_eq!(received_a, expected);
+        assert_eq!(received_b, expected);
+        assert!(send_rx_a.try_recv().is_err());
+        assert!(send_rx_b.try_recv().is_err());
         assert_eq!(summary.spawn_actions, 1);
-        let mut maps_visited = 0usize;
-        manager.do_for_all_maps(|_| maps_visited += 1);
-        assert_eq!(maps_visited, 0);
+    }
+
+    #[test]
+    fn game_event_announce_missing_registry_counts_gap_without_panic_like_cpp() {
+        let mut summary = GameEventLiveUpdateSideEffectSummaryLikeCpp::default();
+
+        fanout_game_event_announcement_to_player_sessions_like_cpp(
+            None,
+            "Love is in the Air",
+            &mut summary,
+        );
+
+        assert_eq!(summary.announce_event_world_text_represented, 1);
+        assert_eq!(summary.announce_event_localization_unrepresented, 1);
+        assert_eq!(summary.announce_event_registry_missing, 1);
+        assert_eq!(summary.announce_event_lines, 1);
+        assert_eq!(summary.announce_event_send_attempted, 0);
+        assert_eq!(summary.announce_event_send_queued, 0);
+        assert_eq!(summary.announce_event_send_failed, 0);
+    }
+
+    #[test]
+    fn game_event_announce_newline_split_after_fallback_format_like_cpp() {
+        assert_eq!(
+            game_event_announcement_lines_like_cpp(""),
+            vec!["|cffff0000[Event Message]: |r".to_string()]
+        );
+        assert_eq!(
+            game_event_announcement_lines_like_cpp("\n\n"),
+            vec!["|cffff0000[Event Message]: ".to_string(), "|r".to_string(),]
+        );
+        assert_eq!(
+            game_event_announcement_lines_like_cpp("A\n\nB"),
+            vec![
+                "|cffff0000[Event Message]: A".to_string(),
+                "B|r".to_string(),
+            ]
+        );
     }
 
     #[test]
