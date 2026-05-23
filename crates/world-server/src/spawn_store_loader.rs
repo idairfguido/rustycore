@@ -505,17 +505,18 @@ pub enum GameEventWorldStateUpdateOutcomeLikeCpp {
     },
 }
 
-/// C++-shaped subset of `WorldStateTemplate` for represented realm-wide `SetValue`.
+/// C++-shaped subset of `WorldStateTemplate` for represented `WorldStateMgr` startup state and realm-wide `SetValue`.
 ///
-/// This intentionally does not close `FillInitialWorldStates`, AreaID filtering,
-/// DB validation, script dispatch, map-local `Map::SetWorldStateValue`, or real
-/// session/global fanout. `script_hook_represented` and
-/// `global_message_represented` in outcomes are evidence flags only.
+/// This intentionally does not close `FillInitialWorldStates`, real player-area login packet filtering,
+/// map-local `Map::SetWorldStateValue`, persistence, or real script dispatch. `script_hook_represented`
+/// and `global_message_represented` in outcomes are evidence flags only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorldStateTemplateLikeCpp {
     pub id: i32,
     pub default_value: i32,
     pub map_ids: BTreeSet<i32>,
+    pub area_ids: BTreeSet<u32>,
+    pub script_name: String,
 }
 
 impl WorldStateTemplateLikeCpp {
@@ -524,6 +525,8 @@ impl WorldStateTemplateLikeCpp {
             id,
             default_value,
             map_ids: BTreeSet::new(),
+            area_ids: BTreeSet::new(),
+            script_name: String::new(),
         }
     }
 
@@ -536,7 +539,19 @@ impl WorldStateTemplateLikeCpp {
             id,
             default_value,
             map_ids: map_ids.into_iter().collect(),
+            area_ids: BTreeSet::new(),
+            script_name: String::new(),
         }
+    }
+
+    pub fn with_area_ids(mut self, area_ids: impl IntoIterator<Item = u32>) -> Self {
+        self.area_ids = area_ids.into_iter().collect();
+        self
+    }
+
+    pub fn with_script_name(mut self, script_name: impl Into<String>) -> Self {
+        self.script_name = script_name.into();
+        self
     }
 }
 
@@ -559,10 +574,32 @@ pub enum WorldStateSetValueOutcomeLikeCpp {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorldStateDbTemplateRowLikeCpp {
+    pub id: i32,
+    pub default_value: i32,
+    pub map_ids_csv: String,
+    pub area_ids_csv: String,
+    pub script_name: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorldStateMgrLoadReportLikeCpp {
+    pub template_rows: u32,
+    pub templates_loaded: u32,
+    pub skipped_invalid_map_list: u32,
+    pub skipped_invalid_area_list: u32,
+    pub realm_area_requirements_ignored: u32,
+    pub saved_rows: u32,
+    pub saved_applied: u32,
+    pub saved_skipped_unknown: u32,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WorldStateMgrLikeCpp {
     world_state_templates: BTreeMap<i32, WorldStateTemplateLikeCpp>,
     realm_world_state_values: BTreeMap<i32, i32>,
+    world_states_by_map: BTreeMap<i32, BTreeMap<i32, i32>>,
 }
 
 impl WorldStateMgrLikeCpp {
@@ -577,19 +614,112 @@ impl WorldStateMgrLikeCpp {
             if template.map_ids.is_empty() {
                 mgr.realm_world_state_values
                     .insert(template.id, template.default_value);
+            } else {
+                for &map_id in &template.map_ids {
+                    mgr.world_states_by_map
+                        .entry(map_id)
+                        .or_default()
+                        .insert(template.id, template.default_value);
+                }
             }
             mgr.world_state_templates.insert(template.id, template);
         }
         for (world_state_id, value) in saved_values {
-            if mgr
-                .world_state_templates
-                .get(&world_state_id)
-                .is_some_and(|template| template.map_ids.is_empty())
-            {
-                mgr.realm_world_state_values.insert(world_state_id, value);
+            if let Some(template) = mgr.world_state_templates.get(&world_state_id) {
+                if template.map_ids.is_empty() {
+                    mgr.realm_world_state_values.insert(world_state_id, value);
+                } else {
+                    for &map_id in &template.map_ids {
+                        mgr.world_states_by_map
+                            .entry(map_id)
+                            .or_default()
+                            .insert(world_state_id, value);
+                    }
+                }
             }
         }
         mgr
+    }
+
+    pub fn from_db_rows_like_cpp(
+        template_rows: impl IntoIterator<Item = WorldStateDbTemplateRowLikeCpp>,
+        saved_values: impl IntoIterator<Item = (i32, i32)>,
+        map_exists: impl Fn(i32) -> bool,
+        area_continent_id: impl Fn(u32) -> Option<u16>,
+    ) -> (Self, WorldStateMgrLoadReportLikeCpp) {
+        let mut mgr = Self::default();
+        let mut report = WorldStateMgrLoadReportLikeCpp::default();
+
+        for row in template_rows {
+            report.template_rows += 1;
+            let map_ids = parse_world_state_map_ids_like_cpp(row.id, &row.map_ids_csv, &map_exists);
+            if !row.map_ids_csv.is_empty() && map_ids.is_empty() {
+                report.skipped_invalid_map_list += 1;
+                continue;
+            }
+
+            let mut area_ids = BTreeSet::new();
+            if !map_ids.is_empty() {
+                area_ids = parse_world_state_area_ids_like_cpp(
+                    row.id,
+                    &row.area_ids_csv,
+                    &map_ids,
+                    &area_continent_id,
+                );
+                if !row.area_ids_csv.is_empty() && area_ids.is_empty() {
+                    report.skipped_invalid_area_list += 1;
+                    continue;
+                }
+            } else if !row.area_ids_csv.is_empty() {
+                report.realm_area_requirements_ignored += 1;
+            }
+
+            let template = WorldStateTemplateLikeCpp {
+                id: row.id,
+                default_value: row.default_value,
+                map_ids,
+                area_ids,
+                script_name: row.script_name,
+            };
+            if template.map_ids.is_empty() {
+                mgr.realm_world_state_values
+                    .insert(template.id, template.default_value);
+            } else {
+                for &map_id in &template.map_ids {
+                    mgr.world_states_by_map
+                        .entry(map_id)
+                        .or_default()
+                        .insert(template.id, template.default_value);
+                }
+            }
+            mgr.world_state_templates.insert(template.id, template);
+            report.templates_loaded += 1;
+        }
+
+        for (world_state_id, value) in saved_values {
+            report.saved_rows += 1;
+            let Some(template) = mgr.world_state_templates.get(&world_state_id) else {
+                report.saved_skipped_unknown += 1;
+                continue;
+            };
+            if template.map_ids.is_empty() {
+                mgr.realm_world_state_values.insert(world_state_id, value);
+            } else {
+                for &map_id in &template.map_ids {
+                    mgr.world_states_by_map
+                        .entry(map_id)
+                        .or_default()
+                        .insert(world_state_id, value);
+                }
+            }
+            report.saved_applied += 1;
+        }
+
+        (mgr, report)
+    }
+
+    pub fn template_like_cpp(&self, world_state_id: i32) -> Option<&WorldStateTemplateLikeCpp> {
+        self.world_state_templates.get(&world_state_id)
     }
 
     pub fn realm_value_like_cpp(&self, world_state_id: i32) -> i32 {
@@ -597,6 +727,25 @@ impl WorldStateMgrLikeCpp {
             .get(&world_state_id)
             .copied()
             .unwrap_or(0)
+    }
+
+    pub fn map_value_like_cpp(&self, map_id: i32, world_state_id: i32) -> i32 {
+        self.world_states_by_map
+            .get(&map_id)
+            .and_then(|values| values.get(&world_state_id))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    pub fn initial_world_states_for_map_like_cpp(&self, map_id: i32) -> BTreeMap<i32, i32> {
+        let mut values = BTreeMap::new();
+        if let Some(any_map_values) = self.world_states_by_map.get(&WORLDSTATE_ANY_MAP_LIKE_CPP) {
+            values.extend(any_map_values.iter().map(|(&id, &value)| (id, value)));
+        }
+        if let Some(map_values) = self.world_states_by_map.get(&map_id) {
+            values.extend(map_values.iter().map(|(&id, &value)| (id, value)));
+        }
+        values
     }
 
     pub fn set_value_realm_or_map_null_like_cpp(
@@ -637,6 +786,95 @@ impl WorldStateMgrLikeCpp {
     }
 }
 
+const WORLDSTATE_ANY_MAP_LIKE_CPP: i32 = -1;
+
+fn parse_world_state_map_ids_like_cpp(
+    _world_state_id: i32,
+    map_ids_csv: &str,
+    map_exists: &impl Fn(i32) -> bool,
+) -> BTreeSet<i32> {
+    let mut map_ids = BTreeSet::new();
+    for token in map_ids_csv.split(',').filter(|token| !token.is_empty()) {
+        let Ok(map_id) = token.trim().parse::<i32>() else {
+            continue;
+        };
+        if map_id != WORLDSTATE_ANY_MAP_LIKE_CPP && !map_exists(map_id) {
+            continue;
+        }
+        map_ids.insert(map_id);
+    }
+    map_ids
+}
+
+fn parse_world_state_area_ids_like_cpp(
+    _world_state_id: i32,
+    area_ids_csv: &str,
+    map_ids: &BTreeSet<i32>,
+    area_continent_id: &impl Fn(u32) -> Option<u16>,
+) -> BTreeSet<u32> {
+    let mut area_ids = BTreeSet::new();
+    for token in area_ids_csv.split(',').filter(|token| !token.is_empty()) {
+        let Ok(area_id) = token.trim().parse::<u32>() else {
+            continue;
+        };
+        let Some(continent_id) = area_continent_id(area_id) else {
+            continue;
+        };
+        if !map_ids.contains(&i32::from(continent_id)) {
+            continue;
+        }
+        area_ids.insert(area_id);
+    }
+    area_ids
+}
+
+pub async fn load_world_state_mgr_like_cpp(
+    world_db: &WorldDatabase,
+    character_db: &CharacterDatabase,
+    map_store: &wow_data::MapStore,
+    area_table_store: &wow_data::AreaTableStore,
+) -> Result<(WorldStateMgrLikeCpp, WorldStateMgrLoadReportLikeCpp)> {
+    let mut template_rows = Vec::new();
+    let stmt = world_db.prepare(WorldStatements::SEL_WORLD_STATES);
+    let mut result = world_db.query(&stmt).await?;
+    if !result.is_empty() {
+        loop {
+            template_rows.push(WorldStateDbTemplateRowLikeCpp {
+                id: result.read(0),
+                default_value: result.read(1),
+                map_ids_csv: result.try_read(2).unwrap_or_default(),
+                area_ids_csv: result.try_read(3).unwrap_or_default(),
+                script_name: result.try_read(4).unwrap_or_default(),
+            });
+            if !result.next_row() {
+                break;
+            }
+        }
+    }
+
+    let mut saved_values = Vec::new();
+    let stmt = character_db.prepare(CharStatements::SEL_WORLD_STATE_VALUES);
+    let mut result = character_db.query(&stmt).await?;
+    if !result.is_empty() {
+        loop {
+            saved_values.push((result.read(0), result.read(1)));
+            if !result.next_row() {
+                break;
+            }
+        }
+    }
+
+    Ok(WorldStateMgrLikeCpp::from_db_rows_like_cpp(
+        template_rows,
+        saved_values,
+        |map_id| {
+            u32::try_from(map_id)
+                .ok()
+                .is_some_and(|map_id| map_store.get(map_id).is_some())
+        },
+        |area_id| area_table_store.get(area_id).map(|area| area.continent_id),
+    ))
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameEventConditionApplyOutcomeLikeCpp {
     Loaded,
@@ -5024,6 +5262,161 @@ mod tests {
             cosmetic_parent_map_id: -1,
             flags1: 0,
         }))
+    }
+
+    fn world_state_row(
+        id: i32,
+        default_value: i32,
+        map_ids_csv: &str,
+        area_ids_csv: &str,
+    ) -> WorldStateDbTemplateRowLikeCpp {
+        WorldStateDbTemplateRowLikeCpp {
+            id,
+            default_value,
+            map_ids_csv: map_ids_csv.to_string(),
+            area_ids_csv: area_ids_csv.to_string(),
+            script_name: String::new(),
+        }
+    }
+
+    fn area_store(entries: &[(u32, u16)]) -> wow_data::AreaTableStore {
+        wow_data::AreaTableStore::from_entries(entries.iter().copied().map(|(id, continent_id)| {
+            wow_data::AreaTableEntry {
+                id,
+                continent_id,
+                parent_area_id: 0,
+                mount_flags: 0,
+                flags: 0,
+            }
+        }))
+    }
+
+    #[test]
+    fn game_event_world_state_load_inserts_realm_default_like_cpp() {
+        let (mgr, report) = WorldStateMgrLikeCpp::from_db_rows_like_cpp(
+            [world_state_row(100, 7, "", "")],
+            [],
+            |_| false,
+            |_| None,
+        );
+
+        assert_eq!(report.template_rows, 1);
+        assert_eq!(report.templates_loaded, 1);
+        assert_eq!(mgr.realm_value_like_cpp(100), 7);
+        assert_eq!(
+            mgr.template_like_cpp(100)
+                .map(|template| template.area_ids.len()),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn game_event_world_state_saved_value_overlays_realm_default_like_cpp() {
+        let (mgr, report) = WorldStateMgrLikeCpp::from_db_rows_like_cpp(
+            [world_state_row(101, 7, "", "")],
+            [(101, 9)],
+            |_| false,
+            |_| None,
+        );
+
+        assert_eq!(report.saved_rows, 1);
+        assert_eq!(report.saved_applied, 1);
+        assert_eq!(mgr.realm_value_like_cpp(101), 9);
+    }
+
+    #[test]
+    fn game_event_world_state_map_defaults_and_saved_overlay_all_maps_like_cpp() {
+        let (mgr, report) = WorldStateMgrLikeCpp::from_db_rows_like_cpp(
+            [world_state_row(102, 3, "1,2", "")],
+            [(102, 11)],
+            |map_id| matches!(map_id, 1 | 2),
+            |_| None,
+        );
+
+        assert_eq!(report.templates_loaded, 1);
+        assert_eq!(report.saved_applied, 1);
+        assert_eq!(mgr.map_value_like_cpp(1, 102), 11);
+        assert_eq!(mgr.map_value_like_cpp(2, 102), 11);
+        assert_eq!(mgr.realm_value_like_cpp(102), 0);
+    }
+
+    #[test]
+    fn game_event_world_state_invalid_map_and_area_lists_skip_rows_like_cpp() {
+        let (mgr, report) = WorldStateMgrLikeCpp::from_db_rows_like_cpp(
+            [
+                world_state_row(103, 1, "bogus,99", ""),
+                world_state_row(104, 2, "1", "bogus,999"),
+                world_state_row(105, 3, "1,not-int", "10,bad"),
+            ],
+            [],
+            |map_id| map_id == 1,
+            |area_id| (area_id == 10).then_some(1),
+        );
+
+        assert_eq!(report.template_rows, 3);
+        assert_eq!(report.skipped_invalid_map_list, 1);
+        assert_eq!(report.skipped_invalid_area_list, 1);
+        assert_eq!(report.templates_loaded, 1);
+        assert!(mgr.template_like_cpp(103).is_none());
+        assert!(mgr.template_like_cpp(104).is_none());
+        assert_eq!(mgr.map_value_like_cpp(1, 105), 3);
+        assert_eq!(
+            mgr.template_like_cpp(105)
+                .map(|template| template.area_ids.contains(&10)),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn game_event_world_state_area_continent_must_match_required_maps_like_cpp() {
+        let areas = area_store(&[(20, 2), (21, 1)]);
+        let (mgr, report) = WorldStateMgrLikeCpp::from_db_rows_like_cpp(
+            [world_state_row(106, 4, "1", "20,21")],
+            [],
+            |map_id| map_id == 1,
+            |area_id| areas.get(area_id).map(|area| area.continent_id),
+        );
+
+        assert_eq!(report.templates_loaded, 1);
+        assert_eq!(
+            mgr.template_like_cpp(106)
+                .map(|template| template.area_ids.contains(&20)),
+            Some(false)
+        );
+        assert_eq!(
+            mgr.template_like_cpp(106)
+                .map(|template| template.area_ids.contains(&21)),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn game_event_world_state_realm_row_with_area_ids_still_loads_like_cpp() {
+        let (mgr, report) = WorldStateMgrLikeCpp::from_db_rows_like_cpp(
+            [world_state_row(107, 5, "", "20")],
+            [],
+            |_| false,
+            |_| Some(1),
+        );
+
+        assert_eq!(report.realm_area_requirements_ignored, 1);
+        assert_eq!(report.templates_loaded, 1);
+        assert_eq!(mgr.realm_value_like_cpp(107), 5);
+    }
+
+    #[test]
+    fn game_event_world_state_unknown_saved_value_is_skipped_like_cpp() {
+        let (mgr, report) = WorldStateMgrLikeCpp::from_db_rows_like_cpp(
+            [world_state_row(108, 5, "", "")],
+            [(999, 12)],
+            |_| false,
+            |_| None,
+        );
+
+        assert_eq!(report.saved_rows, 1);
+        assert_eq!(report.saved_skipped_unknown, 1);
+        assert_eq!(report.saved_applied, 0);
+        assert_eq!(mgr.realm_value_like_cpp(108), 5);
     }
 
     fn map_difficulty_store(entries: &[(u32, Difficulty)]) -> wow_data::MapDifficultyStore {

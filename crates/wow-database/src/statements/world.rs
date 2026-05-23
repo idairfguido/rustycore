@@ -62,6 +62,8 @@ pub enum WorldStatements {
     SEL_VALID_GAME_EVENT_IDS,
     /// Load world-state template IDs for C++ ConditionMgr WorldState validation.
     SEL_WORLD_STATE_IDS,
+    /// Load C++ WorldStateMgr templates/default metadata.
+    SEL_WORLD_STATES,
     /// SELECT Experience FROM player_xp_for_level ORDER BY Level
     SEL_PLAYER_XP_FOR_LEVEL,
     SEL_CREATURE_BY_ID,
@@ -442,6 +444,9 @@ impl StatementDef for WorldStatements {
                 "SELECT eventEntry FROM game_event WHERE eventEntry <> 0 AND (`length` > 0 OR world_event > 0)"
             }
             Self::SEL_WORLD_STATE_IDS => "SELECT ID FROM world_state",
+            Self::SEL_WORLD_STATES => {
+                "SELECT ID, DefaultValue, MapIDs, AreaIDs, ScriptName FROM world_state"
+            }
             Self::SEL_CREATURE_BY_ID => "SELECT guid FROM creature WHERE id = ?",
             Self::SEL_CREATURE_ENTRY_BY_GUID => "SELECT id FROM creature WHERE guid = ?",
             Self::SEL_GAMEOBJECT_NEAREST => {
@@ -894,6 +899,20 @@ impl StatementDef for WorldStatements {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn world_state_load_statement_matches_cpp_sql_exactly() {
+        let sql = WorldStatements::SEL_WORLD_STATES.sql();
+        assert_eq!(
+            sql,
+            "SELECT ID, DefaultValue, MapIDs, AreaIDs, ScriptName FROM world_state"
+        );
+        assert_eq!(sql.matches('?').count(), 0);
+        assert_eq!(
+            WorldStatements::SEL_WORLD_STATE_IDS.sql(),
+            "SELECT ID FROM world_state"
+        );
+    }
 
     #[test]
     fn game_event_condition_statement_matches_cpp_sql_exactly() {

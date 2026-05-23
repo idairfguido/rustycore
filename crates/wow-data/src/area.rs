@@ -17,6 +17,7 @@ use crate::wdc4::Wdc4Reader;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AreaTableEntry {
     pub id: u32,
+    pub continent_id: u16,
     pub parent_area_id: u16,
     pub mount_flags: i32,
     pub flags: u32,
@@ -69,8 +70,9 @@ impl AreaTableStore {
                 AreaTableEntry {
                     id,
                     // WDC4 record ids supply C++ field 0 (`ID`), so
-                    // `ParentAreaID` is DB2Meta field index 3.
-                    parent_area_id: reader.get_field_u16(idx, 3),
+                    // `ContinentID` is DB2Meta field index 3 and `ParentAreaID` is index 4.
+                    continent_id: reader.get_field_u16(idx, 3),
+                    parent_area_id: reader.get_field_u16(idx, 4),
                     // `MountFlags` is C++ field index 17, DB2Meta field index 16.
                     mount_flags: reader.get_field_i32(idx, 16),
                     // `Flags1` is C++ field index 22, DB2Meta field index 21
@@ -111,6 +113,7 @@ impl AreaTableStore {
                 id,
                 AreaTableEntry {
                     id,
+                    continent_id: result.read(3),
                     parent_area_id: result.read(4),
                     mount_flags: result.read(17),
                     flags: result.read(22),
@@ -234,12 +237,14 @@ mod tests {
         let store = AreaTableStore::from_entries([
             AreaTableEntry {
                 id: 100,
+                continent_id: 0,
                 parent_area_id: 0,
                 mount_flags: 0,
                 flags: 0,
             },
             AreaTableEntry {
                 id: 101,
+                continent_id: 0,
                 parent_area_id: 100,
                 mount_flags: 0,
                 flags: AREA_FLAG_IS_SUBZONE_LIKE_CPP,
@@ -262,12 +267,14 @@ mod tests {
         let areas = AreaTableStore::from_entries([
             AreaTableEntry {
                 id: 10,
+                continent_id: 0,
                 parent_area_id: 0,
                 mount_flags: 0,
                 flags: 0,
             },
             AreaTableEntry {
                 id: 11,
+                continent_id: 0,
                 parent_area_id: 10,
                 mount_flags: 0,
                 flags: AREA_FLAG_IS_SUBZONE_LIKE_CPP,

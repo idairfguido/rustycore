@@ -149,6 +149,11 @@ pub enum CharStatements {
     INS_GAME_EVENT_CONDITION_SAVE,
     /// DELETE FROM character_queststatus_seasonal WHERE event = ? AND completedTime < ?
     DEL_RESET_CHARACTER_QUESTSTATUS_SEASONAL_BY_EVENT,
+    /// SELECT Id, Value FROM world_state_value
+    SEL_WORLD_STATE_VALUES,
+    /// REPLACE INTO world_state_value (Id, Value) VALUES (?, ?)
+    /// Future C++ SetValueAndSaveInDb persistence statement; not wired by #NEXT.R8.ENTITIES.575.
+    REP_WORLD_STATE,
 
     // Quest status
     SEL_CHAR_QUEST_STATUS,
@@ -410,6 +415,8 @@ impl StatementDef for CharStatements {
             Self::DEL_RESET_CHARACTER_QUESTSTATUS_SEASONAL_BY_EVENT => {
                 "DELETE FROM character_queststatus_seasonal WHERE event = ? AND completedTime < ?"
             }
+            Self::SEL_WORLD_STATE_VALUES => "SELECT Id, Value FROM world_state_value",
+            Self::REP_WORLD_STATE => "REPLACE INTO world_state_value (Id, Value) VALUES (?, ?)",
             Self::UPD_CHAR_XP => "UPDATE characters SET xp = ? WHERE guid = ?",
             Self::UPD_CHAR_LEVEL => "UPDATE characters SET level = ?, xp = ? WHERE guid = ?",
             Self::UPD_CHAR_MONEY => "UPDATE characters SET money = ? WHERE guid = ?",
@@ -671,6 +678,8 @@ mod tests {
                 .sql()
                 .is_empty()
         );
+        assert!(!CharStatements::SEL_WORLD_STATE_VALUES.sql().is_empty());
+        assert!(!CharStatements::REP_WORLD_STATE.sql().is_empty());
     }
 
     #[test]
@@ -706,6 +715,25 @@ mod tests {
         assert_eq!(
             CharStatements::SEL_CHAR_QUEST_STATUS_SEASONAL.sql(),
             "SELECT quest, event, completedTime FROM character_queststatus_seasonal WHERE guid = ?"
+        );
+    }
+
+    #[test]
+    fn world_state_value_statements_match_cpp_sql_exactly() {
+        assert_eq!(
+            CharStatements::SEL_WORLD_STATE_VALUES.sql(),
+            "SELECT Id, Value FROM world_state_value"
+        );
+        assert_eq!(
+            CharStatements::SEL_WORLD_STATE_VALUES
+                .sql()
+                .matches('?')
+                .count(),
+            0
+        );
+        assert_eq!(
+            CharStatements::REP_WORLD_STATE.sql(),
+            "REPLACE INTO world_state_value (Id, Value) VALUES (?, ?)"
         );
     }
 

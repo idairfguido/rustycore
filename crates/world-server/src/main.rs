@@ -65,6 +65,7 @@ const CREATURE_TYPE_FLAG_BOSS_MOB_LIKE_CPP: u32 = 0x0001_0000;
 
 type SharedCanonicalSpawnMetadataLikeCpp =
     Arc<Mutex<spawn_store_loader::CanonicalSpawnMetadataLikeCpp>>;
+type SharedWorldStateMgrLikeCpp = Arc<Mutex<spawn_store_loader::WorldStateMgrLikeCpp>>;
 
 // ── Account lookup implementation ────────────────────────────────
 
@@ -885,6 +886,27 @@ async fn main() -> Result<()> {
     );
     let canonical_spawn_metadata: SharedCanonicalSpawnMetadataLikeCpp =
         Arc::new(Mutex::new(canonical_spawn_metadata));
+    let (world_state_mgr, world_state_mgr_report) =
+        spawn_store_loader::load_world_state_mgr_like_cpp(
+            world_db.as_ref(),
+            char_db.as_ref(),
+            &map_store,
+            &area_table_store,
+        )
+        .await
+        .context("Failed to load C++ WorldStateMgr startup state")?;
+    info!(
+        "Loaded C++ WorldStateMgr startup state: template rows={} loaded={} skipped-map-list={} skipped-area-list={} realm-area-ignored={} saved rows={} applied={} skipped-unknown={}",
+        world_state_mgr_report.template_rows,
+        world_state_mgr_report.templates_loaded,
+        world_state_mgr_report.skipped_invalid_map_list,
+        world_state_mgr_report.skipped_invalid_area_list,
+        world_state_mgr_report.realm_area_requirements_ignored,
+        world_state_mgr_report.saved_rows,
+        world_state_mgr_report.saved_applied,
+        world_state_mgr_report.saved_skipped_unknown,
+    );
+    let world_state_mgr: SharedWorldStateMgrLikeCpp = Arc::new(Mutex::new(world_state_mgr));
 
     let mount_store = Arc::new(
         wow_data::MountStore::load_with_hotfixes(&data_dir, &locale, &hotfix_db)
@@ -1540,12 +1562,17 @@ async fn main() -> Result<()> {
             let mut canonical_spawn_metadata = canonical_spawn_metadata.lock().map_err(|_| {
                 anyhow::anyhow!("CanonicalSpawnMetadataLikeCpp mutex poisoned during GameEvent StartSystem side effects")
             })?;
+            let mut world_state_mgr = world_state_mgr.lock().map_err(|_| {
+                anyhow::anyhow!(
+                    "WorldStateMgrLikeCpp mutex poisoned during GameEvent StartSystem side effects"
+                )
+            })?;
             consume_game_event_live_update_side_effects_like_cpp(
                 &mut manager,
                 &mut canonical_spawn_metadata,
                 &loaded_grid_creature_respawn_caches,
                 Some(battlemaster_list_typed_store.as_ref()),
-                None,
+                Some(&mut world_state_mgr),
                 Some(player_registry.as_ref()),
                 &active_event_ids,
                 &game_event_outcome,
@@ -1886,6 +1913,7 @@ async fn main() -> Result<()> {
         game_event_scheduler,
         Arc::clone(&player_registry),
         Arc::clone(&battlemaster_list_typed_store),
+        Arc::clone(&world_state_mgr),
     );
 
     set_realm_online(&login_db, realm_id).await?;
@@ -5779,6 +5807,7 @@ fn spawn_canonical_map_update_loop(
     mut game_event_scheduler: CanonicalGameEventSchedulerLikeCpp,
     player_registry: Arc<PlayerRegistry>,
     battlemaster_list_store: Arc<wow_data::BattlemasterListStore>,
+    world_state_mgr: SharedWorldStateMgrLikeCpp,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval =
@@ -5869,12 +5898,18 @@ fn spawn_canonical_map_update_loop(
                         );
                         break;
                     };
+                    let Ok(mut world_state_mgr) = world_state_mgr.lock() else {
+                        tracing::error!(
+                            "WorldStateMgrLikeCpp mutex poisoned during GameEvent side effects; stopping map update loop"
+                        );
+                        break;
+                    };
                     consume_game_event_live_update_side_effects_like_cpp(
                         &mut manager,
                         &mut canonical_spawn_metadata,
                         &loaded_grid_creature_respawn_caches,
                         Some(battlemaster_list_store.as_ref()),
-                        None,
+                        Some(&mut world_state_mgr),
                         Some(player_registry.as_ref()),
                         &active_event_ids,
                         &game_event_outcome,
