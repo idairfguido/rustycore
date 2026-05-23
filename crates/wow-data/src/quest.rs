@@ -10,7 +10,7 @@
 
 use anyhow::Result;
 use std::collections::HashMap;
-use tracing::info;
+use tracing::{info, warn};
 use wow_database::{WorldDatabase, WorldStatements};
 
 // ── Constants (matching C# SharedConst) ──────────────────────────────────────
@@ -20,6 +20,35 @@ pub const QUEST_REWARD_REPUTATIONS_COUNT: usize = 5;
 pub const QUEST_REWARD_CURRENCY_COUNT: usize = 4;
 pub const QUEST_REWARD_DISPLAY_SPELL_COUNT: usize = 3;
 pub const QUEST_ITEM_DROP_COUNT: usize = 4;
+
+const QUEST_FLAGS_DAILY_LIKE_CPP: u32 = 0x0000_1000;
+const QUEST_FLAGS_WEEKLY_LIKE_CPP: u32 = 0x0000_8000;
+const QUEST_SPECIAL_FLAGS_REPEATABLE_LIKE_CPP: u32 = 0x0000_0001;
+const QUEST_SPECIAL_FLAGS_AUTO_PUSH_TO_PARTY_LIKE_CPP: u32 = 0x0000_0002;
+const QUEST_SPECIAL_FLAGS_AUTO_ACCEPT_LIKE_CPP: u32 = 0x0000_0004;
+const QUEST_SPECIAL_FLAGS_DF_QUEST_LIKE_CPP: u32 = 0x0000_0008;
+const QUEST_SPECIAL_FLAGS_MONTHLY_LIKE_CPP: u32 = 0x0000_0010;
+const QUEST_SPECIAL_FLAGS_DB_ALLOWED_LIKE_CPP: u32 = QUEST_SPECIAL_FLAGS_REPEATABLE_LIKE_CPP
+    | QUEST_SPECIAL_FLAGS_AUTO_PUSH_TO_PARTY_LIKE_CPP
+    | QUEST_SPECIAL_FLAGS_AUTO_ACCEPT_LIKE_CPP
+    | QUEST_SPECIAL_FLAGS_DF_QUEST_LIKE_CPP
+    | QUEST_SPECIAL_FLAGS_MONTHLY_LIKE_CPP;
+
+const QUEST_SORT_SEASONAL_LIKE_CPP: i32 = 22;
+const QUEST_SORT_SPECIAL_LIKE_CPP: i32 = 284;
+const QUEST_SORT_LUNAR_FESTIVAL_LIKE_CPP: i32 = 366;
+const QUEST_SORT_MIDSUMMER_LIKE_CPP: i32 = 369;
+const QUEST_SORT_BREWFEST_LIKE_CPP: i32 = 370;
+const QUEST_SORT_NOBLEGARDEN_LIKE_CPP: i32 = 374;
+const QUEST_SORT_LOVE_IS_IN_THE_AIR_LIKE_CPP: i32 = 376;
+const QUEST_SORT_SEASONAL_NEGATIVE_LIKE_CPP: i32 = -QUEST_SORT_SEASONAL_LIKE_CPP;
+const QUEST_SORT_SPECIAL_NEGATIVE_LIKE_CPP: i32 = -QUEST_SORT_SPECIAL_LIKE_CPP;
+const QUEST_SORT_LUNAR_FESTIVAL_NEGATIVE_LIKE_CPP: i32 = -QUEST_SORT_LUNAR_FESTIVAL_LIKE_CPP;
+const QUEST_SORT_MIDSUMMER_NEGATIVE_LIKE_CPP: i32 = -QUEST_SORT_MIDSUMMER_LIKE_CPP;
+const QUEST_SORT_BREWFEST_NEGATIVE_LIKE_CPP: i32 = -QUEST_SORT_BREWFEST_LIKE_CPP;
+const QUEST_SORT_NOBLEGARDEN_NEGATIVE_LIKE_CPP: i32 = -QUEST_SORT_NOBLEGARDEN_LIKE_CPP;
+const QUEST_SORT_LOVE_IS_IN_THE_AIR_NEGATIVE_LIKE_CPP: i32 =
+    -QUEST_SORT_LOVE_IS_IN_THE_AIR_LIKE_CPP;
 
 // ── QuestObjective ────────────────────────────────────────────────────────────
 
@@ -69,6 +98,8 @@ pub struct QuestTemplate {
     pub flags: u32,
     pub flags_ex: u32,
     pub flags_ex2: u32,
+    pub special_flags: u32,
+    pub event_id_for_quest: u16,
     pub reward_items: [u32; QUEST_REWARD_ITEM_COUNT],
     pub reward_amounts: [u32; QUEST_REWARD_ITEM_COUNT],
     pub item_drop: [u32; QUEST_ITEM_DROP_COUNT],
@@ -100,10 +131,28 @@ pub struct QuestTemplate {
 }
 
 impl QuestTemplate {
-    /// Returns true if this is a repeatable (daily/weekly) quest.
+    /// C++ `Quest::IsRepeatable()` exact helper: only `QUEST_SPECIAL_FLAGS_REPEATABLE`.
     pub fn is_repeatable(&self) -> bool {
-        // Flags & QUEST_FLAGS_REPEATABLE (0x1) or daily (0x4000)
-        self.flags & 0x1 != 0 || self.flags & 0x4000 != 0
+        self.special_flags & QUEST_SPECIAL_FLAGS_REPEATABLE_LIKE_CPP != 0
+    }
+
+    /// C++ `Quest::IsSeasonal()` exact quest sort set plus non-repeatable guard.
+    pub fn is_seasonal_like_cpp(&self) -> bool {
+        matches!(
+            self.quest_sort_id,
+            QUEST_SORT_SEASONAL_NEGATIVE_LIKE_CPP
+                | QUEST_SORT_SPECIAL_NEGATIVE_LIKE_CPP
+                | QUEST_SORT_LUNAR_FESTIVAL_NEGATIVE_LIKE_CPP
+                | QUEST_SORT_MIDSUMMER_NEGATIVE_LIKE_CPP
+                | QUEST_SORT_BREWFEST_NEGATIVE_LIKE_CPP
+                | QUEST_SORT_LOVE_IS_IN_THE_AIR_NEGATIVE_LIKE_CPP
+                | QUEST_SORT_NOBLEGARDEN_NEGATIVE_LIKE_CPP
+        ) && !self.is_repeatable()
+    }
+
+    /// C++ `Quest::GetEventIdForQuest()`. Defaults to 0 until seasonal relation load sets it.
+    pub fn event_id_for_quest_like_cpp(&self) -> u16 {
+        self.event_id_for_quest
     }
 
     /// Returns true if the given player (race, class, level) can take this quest.
@@ -137,6 +186,24 @@ impl QuestTemplate {
 
         true
     }
+}
+
+/// C++ `ObjectMgr::LoadQuests` post-load normalization before `Quest` helpers are observable.
+fn normalize_quest_flags_like_cpp(flags: u32, special_flags: u32) -> (u32, u32) {
+    let mut flags = flags;
+    let mut special_flags = special_flags & QUEST_SPECIAL_FLAGS_DB_ALLOWED_LIKE_CPP;
+
+    if flags & QUEST_FLAGS_DAILY_LIKE_CPP != 0 && flags & QUEST_FLAGS_WEEKLY_LIKE_CPP != 0 {
+        flags &= !QUEST_FLAGS_DAILY_LIKE_CPP;
+    }
+
+    if flags & (QUEST_FLAGS_DAILY_LIKE_CPP | QUEST_FLAGS_WEEKLY_LIKE_CPP) != 0
+        || special_flags & QUEST_SPECIAL_FLAGS_MONTHLY_LIKE_CPP != 0
+    {
+        special_flags |= QUEST_SPECIAL_FLAGS_REPEATABLE_LIKE_CPP;
+    }
+
+    (flags, special_flags)
 }
 
 impl QuestObjective {
@@ -246,6 +313,10 @@ pub async fn load_quests(db: &WorldDatabase) -> Result<QuestStore> {
         let mut result = result;
         loop {
             let id: u32 = result.read(0);
+            let (flags, special_flags) = normalize_quest_flags_like_cpp(
+                result.try_read::<u32>(19).unwrap_or(0),
+                result.try_read::<u32>(59).unwrap_or(0),
+            );
             let quest = QuestTemplate {
                 id,
                 quest_type: result.try_read::<u8>(1).unwrap_or(2),
@@ -268,9 +339,11 @@ pub async fn load_quests(db: &WorldDatabase) -> Result<QuestStore> {
                 ],
                 reward_spell: result.try_read::<u32>(17).unwrap_or(0),
                 reward_honor: result.try_read::<u32>(18).unwrap_or(0),
-                flags: result.try_read::<u32>(19).unwrap_or(0),
+                flags,
                 flags_ex: result.try_read::<u32>(20).unwrap_or(0),
                 flags_ex2: result.try_read::<u32>(21).unwrap_or(0),
+                special_flags,
+                event_id_for_quest: 0,
                 reward_items: [
                     result.try_read::<u32>(22).unwrap_or(0),
                     result.try_read::<u32>(26).unwrap_or(0),
@@ -339,6 +412,44 @@ pub async fn load_quests(db: &WorldDatabase) -> Result<QuestStore> {
         }
     }
     info!("Loaded {} quest templates", store.quests.len());
+
+    // ── Load game_event seasonal quest relations ──────────────────────────
+    let stmt = db.prepare(WorldStatements::SEL_GAME_EVENT_SEASONAL_QUEST_RELATIONS);
+    let result = db.query(&stmt).await?;
+    if !result.is_empty() {
+        let mut result = result;
+        let mut count = 0u32;
+        loop {
+            let quest_id: u32 = result.try_read::<u32>(0).unwrap_or(0);
+            let event_entry: u32 = result.try_read::<u32>(1).unwrap_or(u32::MAX);
+
+            if let Some(quest) = store.quests.get_mut(&quest_id) {
+                if let Ok(event_id) = u16::try_from(event_entry) {
+                    quest.event_id_for_quest = event_id;
+                    count += 1;
+                } else {
+                    warn!(
+                        quest_id,
+                        event_entry,
+                        "Skipping seasonal quest relation with event id outside u16 range"
+                    );
+                }
+            } else {
+                warn!(
+                    quest_id,
+                    event_entry, "Skipping seasonal quest relation for missing quest template"
+                );
+            }
+
+            if !result.next_row() {
+                break;
+            }
+        }
+        info!(
+            "Loaded {} seasonal quest event relations (GameEvent max range guard remains with GameEvent metadata owner)",
+            count
+        );
+    }
 
     // ── Load quest objectives ─────────────────────────────────────────────
     let stmt = db.prepare(WorldStatements::SEL_QUEST_OBJECTIVES);
@@ -412,4 +523,154 @@ pub async fn load_quests(db: &WorldDatabase) -> Result<QuestStore> {
     );
 
     Ok(store)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn quest_with_sort_and_flags(
+        quest_sort_id: i32,
+        flags: u32,
+        special_flags: u32,
+    ) -> QuestTemplate {
+        let (flags, special_flags) = normalize_quest_flags_like_cpp(flags, special_flags);
+        QuestTemplate {
+            id: 1,
+            quest_type: 2,
+            quest_level: 1,
+            quest_max_scaling_level: 0,
+            min_level: 1,
+            quest_sort_id,
+            quest_info_id: 0,
+            suggested_group_num: 0,
+            reward_next_quest: 0,
+            reward_xp_difficulty: 0,
+            reward_xp_multiplier: 1.0,
+            reward_money_difficulty: 0,
+            reward_money_multiplier: 1.0,
+            reward_bonus_money: 0,
+            reward_display_spell: [0; QUEST_REWARD_DISPLAY_SPELL_COUNT],
+            reward_spell: 0,
+            reward_honor: 0,
+            flags,
+            flags_ex: 0,
+            flags_ex2: 0,
+            special_flags,
+            event_id_for_quest: 0,
+            reward_items: [0; QUEST_REWARD_ITEM_COUNT],
+            reward_amounts: [0; QUEST_REWARD_ITEM_COUNT],
+            item_drop: [0; QUEST_ITEM_DROP_COUNT],
+            item_drop_quantity: [0; QUEST_ITEM_DROP_COUNT],
+            log_title: String::new(),
+            log_description: String::new(),
+            quest_description: String::new(),
+            area_description: String::new(),
+            quest_completion_log: String::new(),
+            objectives: Vec::new(),
+            allowable_races: 0,
+            allowable_classes: 0,
+            max_level: 0,
+            prev_quest_id: 0,
+            reward_choice_items: [(0, 0); QUEST_REWARD_CHOICES_COUNT],
+        }
+    }
+
+    #[test]
+    fn seasonal_sort_negative_non_repeatable_is_seasonal_like_cpp() {
+        assert!(
+            quest_with_sort_and_flags(-QUEST_SORT_SEASONAL_LIKE_CPP, 0, 0).is_seasonal_like_cpp()
+        );
+    }
+
+    #[test]
+    fn seasonal_sort_repeatable_after_object_mgr_normalization_is_not_seasonal_like_cpp() {
+        assert!(
+            quest_with_sort_and_flags(
+                -QUEST_SORT_SEASONAL_LIKE_CPP,
+                0,
+                QUEST_SPECIAL_FLAGS_REPEATABLE_LIKE_CPP
+            )
+            .is_repeatable()
+        );
+        assert!(
+            !quest_with_sort_and_flags(
+                -QUEST_SORT_SEASONAL_LIKE_CPP,
+                0,
+                QUEST_SPECIAL_FLAGS_REPEATABLE_LIKE_CPP
+            )
+            .is_seasonal_like_cpp()
+        );
+        assert!(
+            !quest_with_sort_and_flags(
+                -QUEST_SORT_SEASONAL_LIKE_CPP,
+                QUEST_FLAGS_DAILY_LIKE_CPP,
+                0
+            )
+            .is_seasonal_like_cpp()
+        );
+        assert!(
+            !quest_with_sort_and_flags(
+                -QUEST_SORT_SEASONAL_LIKE_CPP,
+                QUEST_FLAGS_WEEKLY_LIKE_CPP,
+                0
+            )
+            .is_seasonal_like_cpp()
+        );
+        assert!(
+            !quest_with_sort_and_flags(
+                -QUEST_SORT_SEASONAL_LIKE_CPP,
+                0,
+                QUEST_SPECIAL_FLAGS_MONTHLY_LIKE_CPP
+            )
+            .is_seasonal_like_cpp()
+        );
+    }
+
+    #[test]
+    fn seasonal_object_mgr_normalization_masks_special_flags_and_daily_weekly_prefers_weekly_like_cpp()
+     {
+        let disallowed_special_bit = 0x0000_0020;
+        let quest = quest_with_sort_and_flags(
+            -QUEST_SORT_SEASONAL_LIKE_CPP,
+            QUEST_FLAGS_DAILY_LIKE_CPP | QUEST_FLAGS_WEEKLY_LIKE_CPP,
+            disallowed_special_bit,
+        );
+
+        assert_eq!(quest.flags & QUEST_FLAGS_DAILY_LIKE_CPP, 0);
+        assert_ne!(quest.flags & QUEST_FLAGS_WEEKLY_LIKE_CPP, 0);
+        assert_eq!(quest.special_flags & disallowed_special_bit, 0);
+        assert!(quest.is_repeatable());
+        assert!(!quest.is_seasonal_like_cpp());
+    }
+
+    #[test]
+    fn seasonal_sort_i32_min_is_not_seasonal_and_does_not_panic_like_cpp() {
+        assert!(!quest_with_sort_and_flags(i32::MIN, 0, 0).is_seasonal_like_cpp());
+    }
+
+    #[test]
+    fn non_seasonal_sort_is_not_seasonal_like_cpp() {
+        assert!(!quest_with_sort_and_flags(-101, 0, 0).is_seasonal_like_cpp());
+        assert!(
+            !quest_with_sort_and_flags(QUEST_SORT_SEASONAL_LIKE_CPP, 0, 0).is_seasonal_like_cpp()
+        );
+    }
+
+    #[test]
+    fn love_is_in_the_air_sort_is_seasonal_like_cpp() {
+        assert!(
+            quest_with_sort_and_flags(-QUEST_SORT_LOVE_IS_IN_THE_AIR_LIKE_CPP, 0, 0)
+                .is_seasonal_like_cpp()
+        );
+    }
+
+    #[test]
+    fn event_id_for_quest_defaults_zero_like_cpp() {
+        assert_eq!(
+            quest_with_sort_and_flags(-QUEST_SORT_SEASONAL_LIKE_CPP, 0, 0)
+                .event_id_for_quest_like_cpp(),
+            0
+        );
+    }
 }

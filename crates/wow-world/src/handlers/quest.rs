@@ -826,6 +826,24 @@ impl WorldSession {
             return false;
         }
 
+        // SatisfyQuestSeasonal — C++ Player::SatisfyQuestSeasonal
+        if quest.is_seasonal_like_cpp() && !self.seasonal_quests_like_cpp.is_empty() {
+            if let Some(bucket) = self
+                .seasonal_quests_like_cpp
+                .get(&quest.event_id_for_quest_like_cpp())
+            {
+                if !bucket.is_empty() && bucket.contains_key(&quest.id) {
+                    debug!(
+                        account = self.account_id,
+                        quest_id = quest.id,
+                        event_id = quest.event_id_for_quest_like_cpp(),
+                        "CanTakeQuest: seasonal quest cooldown"
+                    );
+                    return false;
+                }
+            }
+        }
+
         // SatisfyQuestPreviousQuest — C# lines 1415-1440
         // prev_quest_id > 0 → previous quest must have been rewarded
         // prev_quest_id < 0 → previous quest must be currently active (Incomplete)

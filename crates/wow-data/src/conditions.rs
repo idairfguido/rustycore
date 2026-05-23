@@ -2363,6 +2363,8 @@ mod tests {
             flags: 0,
             flags_ex: 0,
             flags_ex2: 0,
+            special_flags: 0,
+            event_id_for_quest: 0,
             reward_items: [0; crate::quest::QUEST_REWARD_ITEM_COUNT],
             reward_amounts: [0; crate::quest::QUEST_REWARD_ITEM_COUNT],
             item_drop: [0; crate::quest::QUEST_ITEM_DROP_COUNT],

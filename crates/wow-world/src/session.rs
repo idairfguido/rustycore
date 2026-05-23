@@ -17141,6 +17141,8 @@ mod tests {
             flags: 0,
             flags_ex: 0,
             flags_ex2: 0,
+            special_flags: 0,
+            event_id_for_quest: 0,
             reward_items: [0; wow_data::quest::QUEST_REWARD_ITEM_COUNT],
             reward_amounts: [0; wow_data::quest::QUEST_REWARD_ITEM_COUNT],
             item_drop: [0; wow_data::quest::QUEST_ITEM_DROP_COUNT],
@@ -17157,6 +17159,56 @@ mod tests {
             prev_quest_id: 0,
             reward_choice_items: [(0, 0); wow_data::quest::QUEST_REWARD_CHOICES_COUNT],
         }
+    }
+
+    fn seasonal_test_quest_template(
+        id: u32,
+        quest_sort_id: i32,
+        event_id_for_quest: u16,
+    ) -> wow_data::quest::QuestTemplate {
+        let mut quest = test_quest_template(id);
+        quest.quest_sort_id = quest_sort_id;
+        quest.min_level = 0;
+        quest.event_id_for_quest = event_id_for_quest;
+        quest
+    }
+
+    #[test]
+    fn can_take_quest_rejects_completed_seasonal_bucket_quest_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let quest = seasonal_test_quest_template(12_345, -376, 9);
+        session.seed_seasonal_quest_status_like_cpp(9, 12_345, 100);
+
+        assert!(!session.can_take_quest(&quest));
+    }
+
+    #[test]
+    fn can_take_quest_allows_seasonal_when_only_other_event_bucket_has_quest_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let quest = seasonal_test_quest_template(12_345, -376, 9);
+        session.seed_seasonal_quest_status_like_cpp(10, 12_345, 100);
+
+        assert!(session.can_take_quest(&quest));
+    }
+
+    #[test]
+    fn can_take_quest_allows_seasonal_when_bucket_missing_or_empty_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let quest = seasonal_test_quest_template(12_345, -376, 9);
+
+        assert!(session.can_take_quest(&quest));
+
+        session.seed_empty_seasonal_event_bucket_like_cpp(9);
+        assert!(session.can_take_quest(&quest));
+    }
+
+    #[test]
+    fn can_take_quest_allows_non_seasonal_even_when_same_bucket_has_quest_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let quest = seasonal_test_quest_template(12_345, -101, 9);
+        session.seed_seasonal_quest_status_like_cpp(9, 12_345, 100);
+
+        assert!(session.can_take_quest(&quest));
     }
 
     #[test]
@@ -24809,6 +24861,8 @@ mod tests {
                 flags: 0,
                 flags_ex: 0,
                 flags_ex2: 0,
+                special_flags: 0,
+                event_id_for_quest: 0,
                 reward_items: [0; wow_data::quest::QUEST_REWARD_ITEM_COUNT],
                 reward_amounts: [0; wow_data::quest::QUEST_REWARD_ITEM_COUNT],
                 item_drop: [0; wow_data::quest::QUEST_ITEM_DROP_COUNT],

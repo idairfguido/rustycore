@@ -1,3 +1,4 @@
+- `#NEXT.R8.ENTITIES.565` — represented-partial: `game_event_seasonal_questrelation` metadata is loaded into `wow-data::QuestTemplate.event_id_for_quest`, bounded ObjectMgr-style normalization makes daily/weekly/monthly `SpecialFlags` repeatable before `Quest::IsSeasonal`, `Quest::IsSeasonal`/event-id helpers are represented, and `WorldSession::can_take_quest` consumes `seasonal_quests_like_cpp` read-only like C++ `SatisfyQuestSeasonal`. Review `APROBADO`; CI `CI_OK`; focused helper/gating/SQL tests, `world-server` check, diff hygiene, and TSV 9-column validation passed. This intentionally does not close other `ObjectMgr::LoadQuests` validations, `_LoadSeasonalQuestStatus`, completed-bit clearing, broader CanTakeQuest gates, scheduler/fanout, persistence, manual-test readiness, or full Player runtime; GameEvent range guard versus `mGameEvent.size()` remains with GameEvent metadata owner.
 # R8 Entities Mini-Phase
 
 > Generated: 2026-05-07

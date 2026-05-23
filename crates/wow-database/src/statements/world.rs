@@ -275,6 +275,8 @@ pub enum WorldStatements {
     // Quest system
     SEL_QUEST_TEMPLATE,
     SEL_QUEST_OBJECTIVES,
+    /// C++ GameEventMgr::LoadFromDB seasonal quest relation query.
+    SEL_GAME_EVENT_SEASONAL_QUEST_RELATIONS,
     SEL_QUEST_STARTERS,
     SEL_QUEST_ENDERS,
     /// Get TrainerId from creature_trainer by creature entry (NPC template ID).
@@ -873,11 +875,15 @@ impl StatementDef for WorldStatements {
                 "qt.RewardChoiceItemID3, qt.RewardChoiceItemQuantity3, ",
                 "qt.RewardChoiceItemID4, qt.RewardChoiceItemQuantity4, ",
                 "qt.RewardChoiceItemID5, qt.RewardChoiceItemQuantity5, ",
-                "qt.RewardChoiceItemID6, qt.RewardChoiceItemQuantity6 ",
+                "qt.RewardChoiceItemID6, qt.RewardChoiceItemQuantity6, ",
+                "COALESCE(qta.SpecialFlags, 0) AS SpecialFlags ",
                 "FROM quest_template qt LEFT JOIN quest_template_addon qta ON qt.ID = qta.ID"
             ),
             Self::SEL_QUEST_OBJECTIVES => {
                 "SELECT ID, QuestID, Type, `Order`, StorageIndex, ObjectID, Amount, Flags, Flags2, ProgressBarWeight, Description FROM quest_objectives ORDER BY QuestID, `Order`"
+            }
+            Self::SEL_GAME_EVENT_SEASONAL_QUEST_RELATIONS => {
+                "SELECT questId, eventEntry FROM game_event_seasonal_questrelation"
             }
             Self::SEL_QUEST_STARTERS => "SELECT id, quest FROM creature_queststarter",
             Self::SEL_QUEST_ENDERS => "SELECT id, quest FROM creature_questender",
@@ -905,6 +911,16 @@ mod tests {
         assert_eq!(
             sql,
             "SELECT quest, eventEntry, condition_id, num FROM game_event_quest_condition"
+        );
+        assert_eq!(sql.matches('?').count(), 0);
+    }
+
+    #[test]
+    fn game_event_seasonal_questrelation_statement_matches_cpp_sql_exactly() {
+        let sql = WorldStatements::SEL_GAME_EVENT_SEASONAL_QUEST_RELATIONS.sql();
+        assert_eq!(
+            sql,
+            "SELECT questId, eventEntry FROM game_event_seasonal_questrelation"
         );
         assert_eq!(sql.matches('?').count(), 0);
     }

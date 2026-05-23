@@ -7629,6 +7629,8 @@ mod tests {
             flags: 0,
             flags_ex: 0,
             flags_ex2: 0,
+            special_flags: 0,
+            event_id_for_quest: 0,
             reward_items: [0; 4],
             reward_amounts: [0; 4],
             item_drop: [0; 4],
