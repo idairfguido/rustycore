@@ -8820,12 +8820,14 @@ mod tests {
         session.set_area_table_store(Arc::new(AreaTableStore::from_entries([
             AreaTableEntry {
                 id: 77,
+                continent_id: 0,
                 parent_area_id: 10,
                 mount_flags: 0,
                 flags: 0,
             },
             AreaTableEntry {
                 id: 10,
+                continent_id: 0,
                 parent_area_id: 0,
                 mount_flags: 0,
                 flags: 0,

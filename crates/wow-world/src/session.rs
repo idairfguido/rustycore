@@ -18680,12 +18680,14 @@ mod tests {
         session.set_area_table_store(Arc::new(wow_data::AreaTableStore::from_entries([
             wow_data::AreaTableEntry {
                 id: 10,
+                continent_id: 0,
                 parent_area_id: 0,
                 mount_flags: i32::from(wow_data::AREA_MOUNT_FLAG_ALLOW_GROUND_MOUNTS),
                 flags: 0,
             },
             wow_data::AreaTableEntry {
                 id: 77,
+                continent_id: 0,
                 parent_area_id: 10,
                 mount_flags: i32::from(wow_data::AREA_MOUNT_FLAG_ALLOW_GROUND_MOUNTS),
                 flags: 0,
@@ -35489,12 +35491,14 @@ mod tests {
         session.set_area_table_store(Arc::new(wow_data::AreaTableStore::from_entries([
             wow_data::AreaTableEntry {
                 id: 900,
+                continent_id: 0,
                 parent_area_id: 0,
                 mount_flags: 0,
                 flags: 0,
             },
             wow_data::AreaTableEntry {
                 id: 901,
+                continent_id: 0,
                 parent_area_id: 900,
                 mount_flags: 0,
                 flags: 0,
@@ -35578,6 +35582,7 @@ mod tests {
         session.set_area_table_store(Arc::new(wow_data::AreaTableStore::from_entries([
             wow_data::AreaTableEntry {
                 id: 900,
+                continent_id: 0,
                 parent_area_id: 0,
                 mount_flags: 0,
                 flags: 0,
@@ -36024,6 +36029,7 @@ mod tests {
     #[test]
     fn gameobject_use_questgiver_gameobject_starter_relation_sends_quest_list_like_cpp() {
         let (mut session, _pkt_tx, send_rx) = make_session();
+        session.set_player_level_like_cpp(1);
         let player_guid = ObjectGuid::create_player(1, 99);
         let gameobject_guid =
             ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 19);
@@ -36059,6 +36065,7 @@ mod tests {
     #[test]
     fn gameobject_use_questgiver_ender_relation_precedes_starter_like_cpp() {
         let (mut session, _pkt_tx, send_rx) = make_session();
+        session.set_player_level_like_cpp(1);
         let player_guid = ObjectGuid::create_player(1, 99);
         let gameobject_guid =
             ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 777, 19);

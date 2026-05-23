@@ -16,6 +16,11 @@
 - None currently tracked.
 
 ## Closed Tasks
+- [x] **#NEXT.R8.ENTITIES.580** Maintenance/test-fixture unblock for #579 GameObject questgiver focused tests.
+  Status: maintenance/test-fixture-unblock only; independent review `APROBADO`; CI `CI_OK`; no product/runtime parity percentage change. C++ refs for the local player-level fixture: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp:13947-14004`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp:14093-14102`, `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp:15039-15056`.
+  Rust targets: `crates/wow-world/src/handlers/loot.rs`, `crates/wow-world/src/phasing.rs`, `crates/wow-world/src/session.rs`, docs/inventory/handoff.
+  Acceptance: independent review `APROBADO`; CI `CI_OK`; `cargo fmt --check`; `cargo test -p wow-world gameobject_use_questgiver` (4 passed); `PROTOC=/home/cdmonio/.local/protoc/bin/protoc cargo check -p world-server`; `git diff --check`; TSV 9-column check.
+  Boundaries: fixtures now include required `AreaTableEntry.continent_id`; two GameObject questgiver tests set represented player level `1` locally to satisfy the C++ `CanTakeQuest` min-level gate. No runtime code change, no changed QuestStore/session ownership, no new parity claim, no push/install/restart/manual-test-ready.
 - [x] **#NEXT.R8.ENTITIES.579** GameObject questgiver consumes QuestStore GameObject starter/ender relations.
   Status: represented-partial for bounded `WorldSession::use_represented_gameobject_questgiver_like_cpp` session seam only; independent review `APROBADO`; CI `CI_OK`; local commit is this slice closeout at current #579 HEAD. C++ refs: `/home/server/woltk-trinity-legacy/src/server/game/Entities/GameObject/GameObject.cpp:2537-2546`; `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp:13521-13535`; `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp:13947-14004`; `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp:14007-14045`; `/home/server/woltk-trinity-legacy/src/server/game/Globals/ObjectMgr.cpp:8505-8567`.
   Rust targets: `crates/wow-world/src/session.rs`, `crates/wow-world/src/handlers/misc.rs`, docs/inventory/handoff.

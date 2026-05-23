@@ -919,18 +919,21 @@ mod tests {
         AreaTableStore::from_entries([
             AreaTableEntry {
                 id: 100,
+                continent_id: 0,
                 parent_area_id: 0,
                 mount_flags: 0,
                 flags: 0,
             },
             AreaTableEntry {
                 id: 101,
+                continent_id: 0,
                 parent_area_id: 100,
                 mount_flags: 0,
                 flags: 0,
             },
             AreaTableEntry {
                 id: 102,
+                continent_id: 0,
                 parent_area_id: 100,
                 mount_flags: 0,
                 flags: 0,
