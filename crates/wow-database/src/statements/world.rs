@@ -123,6 +123,8 @@ pub enum WorldStatements {
     SEL_GAME_EVENT_PREREQUISITES,
     /// C++ GameEventMgr::LoadFromDB game_event_condition metadata query.
     SEL_GAME_EVENT_CONDITIONS,
+    /// C++ GameEventMgr::LoadFromDB game_event_quest_condition metadata query.
+    SEL_GAME_EVENT_QUEST_CONDITIONS,
     /// C++ GameEventMgr::LoadFromDB game_event_pool metadata query.
     SEL_GAME_EVENT_POOLS,
     /// C++ GameEventMgr::LoadFromDB game_event_creature metadata query.
@@ -587,6 +589,9 @@ impl StatementDef for WorldStatements {
             Self::SEL_GAME_EVENT_CONDITIONS => {
                 "SELECT eventEntry, condition_id, req_num, max_world_state_field, done_world_state_field FROM game_event_condition"
             }
+            Self::SEL_GAME_EVENT_QUEST_CONDITIONS => {
+                "SELECT quest, eventEntry, condition_id, num FROM game_event_quest_condition"
+            }
             Self::SEL_GAME_EVENT_POOLS => concat!(
                 "SELECT pool_template.entry, game_event_pool.eventEntry FROM pool_template",
                 " JOIN game_event_pool ON pool_template.entry = game_event_pool.pool_entry",
@@ -890,6 +895,16 @@ mod tests {
         assert_eq!(
             sql,
             "SELECT eventEntry, condition_id, req_num, max_world_state_field, done_world_state_field FROM game_event_condition"
+        );
+        assert_eq!(sql.matches('?').count(), 0);
+    }
+
+    #[test]
+    fn game_event_quest_condition_statement_matches_cpp_sql_exactly() {
+        let sql = WorldStatements::SEL_GAME_EVENT_QUEST_CONDITIONS.sql();
+        assert_eq!(
+            sql,
+            "SELECT quest, eventEntry, condition_id, num FROM game_event_quest_condition"
         );
         assert_eq!(sql.matches('?').count(), 0);
     }

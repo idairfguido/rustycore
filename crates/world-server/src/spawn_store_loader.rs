@@ -126,6 +126,7 @@ pub struct CanonicalSpawnStoreLoadReport {
     pub game_event_prerequisites: GameEventPrerequisiteLoadReportLikeCpp,
     pub game_event_conditions: GameEventConditionLoadReportLikeCpp,
     pub game_event_condition_saves: GameEventConditionSaveLoadReportLikeCpp,
+    pub game_event_quest_conditions: GameEventQuestConditionLoadReportLikeCpp,
     pub game_event_pools: GameEventPoolLoadReportLikeCpp,
     pub game_event_spawn_guids: GameEventSpawnGuidLoadReportLikeCpp,
     pub game_event_model_equip: GameEventModelEquipLoadReportLikeCpp,
@@ -208,6 +209,14 @@ pub struct GameEventConditionSaveLoadReportLikeCpp {
     pub loaded: usize,
     pub skipped_out_of_range_event: usize,
     pub skipped_missing_condition: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GameEventQuestConditionLoadReportLikeCpp {
+    pub rows: usize,
+    pub loaded: usize,
+    pub skipped_out_of_range_event: usize,
+    pub overwrites: usize,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -533,6 +542,20 @@ pub struct GameEventConditionSaveStatementEvidenceLikeCpp {
     pub event_id: u8,
     pub condition_id: u32,
     pub done: Option<f32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GameEventQuestConditionRecordLikeCpp {
+    pub quest_id: u32,
+    pub event_id: u16,
+    pub condition_id: u32,
+    pub num: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GameEventQuestCompleteOutcomeLikeCpp {
+    MissingQuestMapping { quest_id: u32 },
+    Progress(GameEventConditionProgressOutcomeLikeCpp),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1107,6 +1130,14 @@ struct GameEventConditionSaveRowLikeCpp {
     done: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct GameEventQuestConditionRowLikeCpp {
+    quest_id: u32,
+    event_id: u16,
+    condition_id: u32,
+    num: f32,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GameEventPoolIdsLikeCpp {
     game_event_size: i32,
@@ -1600,6 +1631,7 @@ pub struct CanonicalSpawnMetadataLikeCpp {
     game_event_spawn_guids: GameEventSpawnGuidsLikeCpp,
     game_event_model_equip: GameEventModelEquipLikeCpp,
     game_event_quest_relations: GameEventQuestRelationsLikeCpp,
+    game_event_quest_conditions_by_quest: BTreeMap<u32, GameEventQuestConditionRecordLikeCpp>,
     game_event_npc_flags: GameEventNpcFlagsLikeCpp,
     game_event_npc_vendors: GameEventNpcVendorsLikeCpp,
     game_event_active_creature_quest_relations_by_giver:
@@ -1628,6 +1660,7 @@ impl CanonicalSpawnMetadataLikeCpp {
             game_event_spawn_guids: GameEventSpawnGuidsLikeCpp::default(),
             game_event_model_equip: GameEventModelEquipLikeCpp::default(),
             game_event_quest_relations: GameEventQuestRelationsLikeCpp::default(),
+            game_event_quest_conditions_by_quest: BTreeMap::new(),
             game_event_npc_flags: GameEventNpcFlagsLikeCpp::default(),
             game_event_npc_vendors: GameEventNpcVendorsLikeCpp::default(),
             game_event_active_creature_quest_relations_by_giver: BTreeMap::new(),
@@ -1705,6 +1738,21 @@ impl CanonicalSpawnMetadataLikeCpp {
         self
     }
 
+    pub fn with_game_event_quest_conditions_like_cpp(
+        mut self,
+        game_event_quest_conditions_by_quest: BTreeMap<u32, GameEventQuestConditionRecordLikeCpp>,
+    ) -> Self {
+        self.game_event_quest_conditions_by_quest = game_event_quest_conditions_by_quest;
+        self
+    }
+
+    pub fn game_event_quest_condition_like_cpp(
+        &self,
+        quest_id: u32,
+    ) -> Option<&GameEventQuestConditionRecordLikeCpp> {
+        self.game_event_quest_conditions_by_quest.get(&quest_id)
+    }
+
     pub fn with_game_event_npc_vendors_like_cpp(
         mut self,
         game_event_npc_vendors: GameEventNpcVendorsLikeCpp,
@@ -1738,6 +1786,29 @@ impl CanonicalSpawnMetadataLikeCpp {
 
     pub fn clear_active_game_events_like_cpp(&mut self) {
         self.game_event_active_set.clear_active_events_like_cpp();
+    }
+
+    pub fn represented_handle_game_event_quest_complete_like_cpp(
+        &mut self,
+        quest_id: u32,
+        current_time_secs: u64,
+    ) -> GameEventQuestCompleteOutcomeLikeCpp {
+        let Some(record) = self
+            .game_event_quest_conditions_by_quest
+            .get(&quest_id)
+            .copied()
+        else {
+            return GameEventQuestCompleteOutcomeLikeCpp::MissingQuestMapping { quest_id };
+        };
+
+        GameEventQuestCompleteOutcomeLikeCpp::Progress(
+            self.represented_update_game_event_condition_progress_like_cpp(
+                record.event_id,
+                record.condition_id,
+                record.num,
+                current_time_secs,
+            ),
+        )
     }
 
     pub fn represented_update_game_event_condition_progress_like_cpp(
@@ -2909,6 +2980,11 @@ pub async fn load_canonical_spawn_store_like_cpp(
     // `mGameEvent[event].conditions`, then overlays character DB saved `done` values.
     load_game_event_conditions_like_cpp(db, &mut game_events, &mut report).await?;
     load_game_event_condition_saves_like_cpp(character_db, &mut game_events, &mut report).await?;
+    // C++ `GameEventMgr::LoadFromDB` loads `game_event_quest_condition` into
+    // `mQuestToEventConditions` with quest-key last-row-wins semantics for later
+    // `HandleQuestComplete`; this is metadata/evidence only and does not wire quests live.
+    let game_event_quest_conditions =
+        load_game_event_quest_conditions_like_cpp(db, &game_events, &mut report).await?;
     // C++ `GameEventMgr` loads `game_event_pool` after PoolMgr validation so
     // `CheckPool(entry)` can gate each row; this is metadata only.
     let game_event_pools =
@@ -2959,6 +3035,7 @@ pub async fn load_canonical_spawn_store_like_cpp(
             .with_game_event_spawn_guids_like_cpp(game_event_spawn_guids)
             .with_game_event_model_equip_like_cpp(game_event_model_equip)
             .with_game_event_quest_relations_like_cpp(game_event_quest_relations)
+            .with_game_event_quest_conditions_like_cpp(game_event_quest_conditions)
             .with_game_event_npc_flags_like_cpp(game_event_npc_flags)
             .with_game_event_npc_vendors_like_cpp(game_event_npc_vendors)
             .with_creature_runtime_rows_like_cpp(creature_runtime_rows)
@@ -3309,6 +3386,66 @@ fn apply_game_event_condition_save_row_like_cpp(
         GameEventConditionSaveApplyOutcomeLikeCpp::MissingCondition => {
             report.skipped_missing_condition += 1;
         }
+    }
+}
+
+async fn load_game_event_quest_conditions_like_cpp(
+    db: &WorldDatabase,
+    game_events: &GameEventDataStoreLikeCpp,
+    report: &mut CanonicalSpawnStoreLoadReport,
+) -> Result<BTreeMap<u32, GameEventQuestConditionRecordLikeCpp>> {
+    let mut quest_conditions = BTreeMap::new();
+    let stmt = db.prepare(WorldStatements::SEL_GAME_EVENT_QUEST_CONDITIONS);
+    let mut result = db.query(&stmt).await?;
+    if result.is_empty() {
+        return Ok(quest_conditions);
+    }
+
+    loop {
+        let event_id: u8 = result.read(1);
+        apply_game_event_quest_condition_row_like_cpp(
+            GameEventQuestConditionRowLikeCpp {
+                quest_id: result.read(0),
+                event_id: u16::from(event_id),
+                condition_id: result.read(2),
+                num: result.read(3),
+            },
+            game_events,
+            &mut quest_conditions,
+            &mut report.game_event_quest_conditions,
+        );
+        if !result.next_row() {
+            break;
+        }
+    }
+
+    Ok(quest_conditions)
+}
+
+fn apply_game_event_quest_condition_row_like_cpp(
+    row: GameEventQuestConditionRowLikeCpp,
+    game_events: &GameEventDataStoreLikeCpp,
+    quest_conditions: &mut BTreeMap<u32, GameEventQuestConditionRecordLikeCpp>,
+    report: &mut GameEventQuestConditionLoadReportLikeCpp,
+) {
+    report.rows += 1;
+    if game_events.event_like_cpp(row.event_id).is_none() {
+        report.skipped_out_of_range_event += 1;
+        return;
+    }
+
+    let previous = quest_conditions.insert(
+        row.quest_id,
+        GameEventQuestConditionRecordLikeCpp {
+            quest_id: row.quest_id,
+            event_id: row.event_id,
+            condition_id: row.condition_id,
+            num: row.num,
+        },
+    );
+    report.loaded += 1;
+    if previous.is_some() {
+        report.overwrites += 1;
     }
 }
 
@@ -5473,6 +5610,334 @@ mod tests {
                 .done,
             1.0
         );
+    }
+
+    #[test]
+    fn game_event_quest_condition_metadata_load_skips_out_of_range_and_last_row_wins_like_cpp() {
+        let events = GameEventDataStoreLikeCpp::from_game_event_max_entry_like_cpp(Some(2));
+        let mut quest_conditions = BTreeMap::new();
+        let mut report = GameEventQuestConditionLoadReportLikeCpp::default();
+
+        apply_game_event_quest_condition_row_like_cpp(
+            GameEventQuestConditionRowLikeCpp {
+                quest_id: 7000,
+                event_id: 1,
+                condition_id: 10,
+                num: 1.25,
+            },
+            &events,
+            &mut quest_conditions,
+            &mut report,
+        );
+        apply_game_event_quest_condition_row_like_cpp(
+            GameEventQuestConditionRowLikeCpp {
+                quest_id: 7000,
+                event_id: 2,
+                condition_id: 20,
+                num: 2.5,
+            },
+            &events,
+            &mut quest_conditions,
+            &mut report,
+        );
+        apply_game_event_quest_condition_row_like_cpp(
+            GameEventQuestConditionRowLikeCpp {
+                quest_id: 8000,
+                event_id: 3,
+                condition_id: 30,
+                num: 4.0,
+            },
+            &events,
+            &mut quest_conditions,
+            &mut report,
+        );
+
+        assert_eq!(report.rows, 3);
+        assert_eq!(report.loaded, 2);
+        assert_eq!(report.overwrites, 1);
+        assert_eq!(report.skipped_out_of_range_event, 1);
+        assert_eq!(
+            quest_conditions.get(&7000),
+            Some(&GameEventQuestConditionRecordLikeCpp {
+                quest_id: 7000,
+                event_id: 2,
+                condition_id: 20,
+                num: 2.5,
+            })
+        );
+        let metadata = CanonicalSpawnMetadataLikeCpp::new(SpawnStore::default(), BTreeMap::new())
+            .with_game_event_quest_conditions_like_cpp(quest_conditions.clone());
+        assert_eq!(
+            metadata.game_event_quest_condition_like_cpp(7000),
+            quest_conditions.get(&7000)
+        );
+        assert!(!quest_conditions.contains_key(&8000));
+    }
+
+    fn metadata_with_quest_condition_like_cpp(
+        event: GameEventDataLikeCpp,
+        quest_id: u32,
+        event_id: u16,
+        condition_id: u32,
+        num: f32,
+    ) -> CanonicalSpawnMetadataLikeCpp {
+        let mut quest_conditions = BTreeMap::new();
+        quest_conditions.insert(
+            quest_id,
+            GameEventQuestConditionRecordLikeCpp {
+                quest_id,
+                event_id,
+                condition_id,
+                num,
+            },
+        );
+        let max_event_entry = u32::from(event.event_id).max(8);
+        CanonicalSpawnMetadataLikeCpp::new(SpawnStore::default(), BTreeMap::new())
+            .with_game_events_like_cpp(game_event_store_with_max(max_event_entry, [event]))
+            .with_game_event_quest_conditions_like_cpp(quest_conditions)
+    }
+
+    #[test]
+    fn game_event_quest_complete_missing_mapping_does_not_mutate_like_cpp() {
+        let mut metadata =
+            CanonicalSpawnMetadataLikeCpp::new(SpawnStore::default(), BTreeMap::new())
+                .with_game_events_like_cpp(game_event_store([event_with_condition(
+                    event(1, GameEventStateLikeCpp::WorldConditions, 0, 0, 0, 5),
+                    10,
+                    condition(3.0, 1.0),
+                )]));
+        metadata
+            .game_event_active_set_mut_like_cpp()
+            .add_active_event_like_cpp(1);
+
+        assert_eq!(
+            metadata.represented_handle_game_event_quest_complete_like_cpp(7000, 100),
+            GameEventQuestCompleteOutcomeLikeCpp::MissingQuestMapping { quest_id: 7000 }
+        );
+        assert_eq!(
+            metadata
+                .game_event_like_cpp(1)
+                .unwrap()
+                .conditions
+                .get(&10)
+                .unwrap()
+                .done,
+            1.0
+        );
+    }
+
+    #[test]
+    fn game_event_quest_complete_inactive_event_does_not_mutate_like_cpp() {
+        let mut metadata = metadata_with_quest_condition_like_cpp(
+            event_with_condition(
+                event(1, GameEventStateLikeCpp::WorldConditions, 0, 0, 0, 5),
+                10,
+                condition(3.0, 1.0),
+            ),
+            7000,
+            1,
+            10,
+            1.0,
+        );
+
+        assert_eq!(
+            metadata.represented_handle_game_event_quest_complete_like_cpp(7000, 100),
+            GameEventQuestCompleteOutcomeLikeCpp::Progress(
+                GameEventConditionProgressOutcomeLikeCpp::InactiveEvent { event_id: 1 }
+            )
+        );
+        assert_eq!(
+            metadata
+                .game_event_like_cpp(1)
+                .unwrap()
+                .conditions
+                .get(&10)
+                .unwrap()
+                .done,
+            1.0
+        );
+    }
+
+    #[test]
+    fn game_event_quest_complete_non_world_conditions_does_not_mutate_like_cpp() {
+        let mut metadata = metadata_with_quest_condition_like_cpp(
+            event_with_condition(
+                event(1, GameEventStateLikeCpp::Normal, 0, 0, 0, 5),
+                10,
+                condition(3.0, 1.0),
+            ),
+            7000,
+            1,
+            10,
+            1.0,
+        );
+        metadata
+            .game_event_active_set_mut_like_cpp()
+            .add_active_event_like_cpp(1);
+
+        assert_eq!(
+            metadata.represented_handle_game_event_quest_complete_like_cpp(7000, 100),
+            GameEventQuestCompleteOutcomeLikeCpp::Progress(
+                GameEventConditionProgressOutcomeLikeCpp::NotWorldConditions {
+                    event_id: 1,
+                    state_raw: GameEventStateLikeCpp::Normal as u8,
+                }
+            )
+        );
+        assert_eq!(
+            metadata
+                .game_event_like_cpp(1)
+                .unwrap()
+                .conditions
+                .get(&10)
+                .unwrap()
+                .done,
+            1.0
+        );
+    }
+
+    #[test]
+    fn game_event_quest_complete_missing_condition_does_not_mutate_like_cpp() {
+        let mut metadata = metadata_with_quest_condition_like_cpp(
+            event_with_condition(
+                event(1, GameEventStateLikeCpp::WorldConditions, 0, 0, 0, 5),
+                10,
+                condition(3.0, 1.0),
+            ),
+            7000,
+            1,
+            99,
+            1.0,
+        );
+        metadata
+            .game_event_active_set_mut_like_cpp()
+            .add_active_event_like_cpp(1);
+
+        assert_eq!(
+            metadata.represented_handle_game_event_quest_complete_like_cpp(7000, 100),
+            GameEventQuestCompleteOutcomeLikeCpp::Progress(
+                GameEventConditionProgressOutcomeLikeCpp::MissingCondition {
+                    event_id: 1,
+                    condition_id: 99,
+                }
+            )
+        );
+        assert_eq!(
+            metadata
+                .game_event_like_cpp(1)
+                .unwrap()
+                .conditions
+                .get(&10)
+                .unwrap()
+                .done,
+            1.0
+        );
+    }
+
+    #[test]
+    fn game_event_quest_complete_increments_clamps_and_emits_condition_save_evidence_like_cpp() {
+        let mut metadata = metadata_with_quest_condition_like_cpp(
+            event_with_condition(
+                event_with_condition(
+                    event(257, GameEventStateLikeCpp::WorldConditions, 0, 0, 0, 5),
+                    10,
+                    condition(3.0, 1.0),
+                ),
+                20,
+                condition(4.0, 1.0),
+            ),
+            7000,
+            257,
+            10,
+            5.0,
+        );
+        metadata
+            .game_event_active_set_mut_like_cpp()
+            .add_active_event_like_cpp(257);
+
+        let outcome = metadata.represented_handle_game_event_quest_complete_like_cpp(7000, 100);
+
+        assert_eq!(
+            outcome,
+            GameEventQuestCompleteOutcomeLikeCpp::Progress(
+                GameEventConditionProgressOutcomeLikeCpp::Progressed(
+                    GameEventConditionProgressSummaryLikeCpp {
+                        event_id: 257,
+                        condition_id: 10,
+                        done_before: 1.0,
+                        done_after: 3.0,
+                        req_num: 3.0,
+                        del_statement: GameEventConditionSaveStatementEvidenceLikeCpp {
+                            statement: CharStatements::DEL_GAME_EVENT_CONDITION_SAVE,
+                            event_id: 1,
+                            condition_id: 10,
+                            done: None,
+                        },
+                        ins_statement: GameEventConditionSaveStatementEvidenceLikeCpp {
+                            statement: CharStatements::INS_GAME_EVENT_CONDITION_SAVE,
+                            event_id: 1,
+                            condition_id: 10,
+                            done: Some(3.0),
+                        },
+                        completed_event: false,
+                        check_outcome: GameEventConditionCheckOutcomeLikeCpp::NotCompleted {
+                            event_id: 257,
+                            blocking_condition_id: 20,
+                        },
+                        save_world_event_state_requested: false,
+                        force_game_event_update_requested: false,
+                    }
+                )
+            )
+        );
+    }
+
+    #[test]
+    fn game_event_quest_complete_all_conditions_done_requests_save_and_force_like_cpp() {
+        let mut metadata = metadata_with_quest_condition_like_cpp(
+            event_with_condition(
+                event_with_condition(
+                    event(1, GameEventStateLikeCpp::WorldConditions, 0, 0, 0, 5),
+                    10,
+                    condition(3.0, 1.0),
+                ),
+                20,
+                condition(4.0, 4.0),
+            ),
+            7000,
+            1,
+            10,
+            2.0,
+        );
+        metadata
+            .game_event_active_set_mut_like_cpp()
+            .add_active_event_like_cpp(1);
+
+        let outcome = metadata.represented_handle_game_event_quest_complete_like_cpp(7000, 100);
+
+        assert!(matches!(
+            outcome,
+            GameEventQuestCompleteOutcomeLikeCpp::Progress(
+                GameEventConditionProgressOutcomeLikeCpp::Progressed(
+                    GameEventConditionProgressSummaryLikeCpp {
+                        completed_event: true,
+                        save_world_event_state_requested: true,
+                        force_game_event_update_requested: true,
+                        check_outcome: GameEventConditionCheckOutcomeLikeCpp::Completed(
+                            GameEventConditionCheckSummaryLikeCpp {
+                                state_after_raw,
+                                next_start_after: 400,
+                                ..
+                            }
+                        ),
+                        ..
+                    }
+                )
+            ) if state_after_raw == GameEventStateLikeCpp::WorldNextPhase as u8
+        ));
+        let event = metadata.game_event_like_cpp(1).unwrap();
+        assert_eq!(event.state_raw, GameEventStateLikeCpp::WorldNextPhase as u8);
+        assert_eq!(event.next_start, 400);
     }
 
     #[test]
