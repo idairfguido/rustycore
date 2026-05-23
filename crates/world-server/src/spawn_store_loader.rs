@@ -401,6 +401,7 @@ pub struct GameEventWorldNextPhaseFinishedLikeCpp {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GameEventUpdateOutcomeLikeCpp {
+    pub current_time_secs: u64,
     pub scanned_event_ids: Vec<u16>,
     pub check_outcomes: Vec<(u16, GameEventCheckOutcomeLikeCpp)>,
     pub next_check_outcomes: Vec<(u16, GameEventNextCheckOutcomeLikeCpp)>,
@@ -578,6 +579,20 @@ impl GameEventDataStoreLikeCpp {
                 Self::check_periodic_window_like_cpp(event, current_time_secs)
             }
         }
+    }
+
+    pub fn last_start_time_like_cpp(&self, event_id: u16, current_time_secs: u64) -> u64 {
+        let Some(event) = self.event_like_cpp(event_id) else {
+            return 0;
+        };
+        if event.state_like_cpp() != Some(GameEventStateLikeCpp::Normal) {
+            return 0;
+        }
+        let Some(period_secs) = periodic_occurence_secs_like_cpp(event.occurence) else {
+            return 0;
+        };
+        current_time_secs
+            .saturating_sub(current_time_secs.saturating_sub(event.start) % period_secs)
     }
 
     pub fn next_check_like_cpp(
@@ -1671,6 +1686,7 @@ impl CanonicalSpawnMetadataLikeCpp {
         }
 
         GameEventUpdateOutcomeLikeCpp {
+            current_time_secs,
             scanned_event_ids,
             check_outcomes,
             next_check_outcomes,
@@ -1693,6 +1709,15 @@ impl CanonicalSpawnMetadataLikeCpp {
     #[allow(dead_code)]
     pub fn game_event_like_cpp(&self, event_id: u16) -> Option<&GameEventDataLikeCpp> {
         self.game_events.event_like_cpp(event_id)
+    }
+
+    pub fn game_event_last_start_time_like_cpp(
+        &self,
+        event_id: u16,
+        current_time_secs: u64,
+    ) -> u64 {
+        self.game_events
+            .last_start_time_like_cpp(event_id, current_time_secs)
     }
 
     pub fn game_event_pool_ids_like_cpp(&self, event_id: i16) -> Option<&[u32]> {
@@ -4981,6 +5006,28 @@ mod tests {
                 .collect::<Vec<_>>(),
             Vec::<u16>::new()
         );
+    }
+
+    #[test]
+    fn game_event_seasonal_last_start_time_normal_event_like_cpp() {
+        let store = game_event_store([event(1, GameEventStateLikeCpp::Normal, 100, 2_000, 10, 2)]);
+
+        assert_eq!(store.last_start_time_like_cpp(1, 1_350), 1_300);
+    }
+
+    #[test]
+    fn game_event_seasonal_last_start_time_non_normal_out_of_range_and_zero_occurrence_like_cpp() {
+        let store = game_event_store_with_max(
+            2,
+            [
+                event(1, GameEventStateLikeCpp::WorldInactive, 100, 2_000, 10, 2),
+                event(2, GameEventStateLikeCpp::Normal, 100, 2_000, 0, 2),
+            ],
+        );
+
+        assert_eq!(store.last_start_time_like_cpp(1, 1_350), 0);
+        assert_eq!(store.last_start_time_like_cpp(3, 1_350), 0);
+        assert_eq!(store.last_start_time_like_cpp(2, 1_350), 0);
     }
 
     #[test]

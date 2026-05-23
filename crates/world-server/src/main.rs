@@ -1590,7 +1590,17 @@ async fn main() -> Result<()> {
                 side_effect_summary.update_npc_vendor_missing_event_buckets,
             update_npc_vendor_remove_misses = side_effect_summary.update_npc_vendor_remove_misses,
             update_npc_vendor_no_match = side_effect_summary.update_npc_vendor_no_match,
-            "Represented C++ GameEventMgr::StartSystem: cleared active events, ran first Update with isSystemInit=false, installed WUPDATE_EVENTS delay, and consumed safe represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel, UpdateEventQuests cache, UpdateWorldStates evidence, UpdateEventNPCFlags, and UpdateEventNPCVendor cache side effects; full ConditionMgr world-event runtime, quest packets/session gossip refresh, full ObjectMgr quest runtime, real WorldStateMgr/BattlemasterList HolidayWorldState lookup and unsupported ApplyNewEvent/UnApplyEvent side effects remain pending"
+            reset_event_seasonal_quests_actions =
+                side_effect_summary.reset_event_seasonal_quests_actions,
+            reset_event_seasonal_quests_event_start_time_zero =
+                side_effect_summary.reset_event_seasonal_quests_event_start_time_zero,
+            reset_event_seasonal_quests_event_start_time_nonzero =
+                side_effect_summary.reset_event_seasonal_quests_event_start_time_nonzero,
+            reset_event_seasonal_quests_player_session_runtime_unimplemented = side_effect_summary
+                .reset_event_seasonal_quests_player_session_runtime_unimplemented,
+            reset_event_seasonal_quests_character_db_statement_unimplemented = side_effect_summary
+                .reset_event_seasonal_quests_character_db_statement_unimplemented,
+            "Represented C++ GameEventMgr::StartSystem: cleared active events, ran first Update with isSystemInit=false, installed WUPDATE_EVENTS delay, and consumed safe represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel, UpdateEventQuests cache, UpdateWorldStates evidence, UpdateEventNPCFlags, UpdateEventNPCVendor cache, RunSmartAIScripts evidence, and ResetEventSeasonalQuests request evidence side effects; full ConditionMgr world-event runtime, quest packets/session gossip refresh, full ObjectMgr quest runtime, real WorldStateMgr/BattlemasterList HolidayWorldState lookup, SmartAI script dispatch, Player/session seasonal quest reset, and character DB seasonal reset statement execution remain pending"
         );
         CanonicalGameEventSchedulerLikeCpp::start_system(
             game_event_outcome.next_update_delay_millis,
@@ -3494,12 +3504,33 @@ fn represented_game_event_world_conditions_met_like_cpp(_event_id: u16) -> bool 
 enum GameEventLiveUpdateActionLikeCpp {
     Spawn(i16),
     Unspawn(i16),
-    ChangeEquipOrModel { event_id: u16, activate: bool },
-    RunSmartAIScripts { event_id: u16, activate: bool },
-    UpdateEventQuests { event_id: u16, activate: bool },
-    UpdateWorldStates { event_id: u16, activate: bool },
-    UpdateNpcFlags { event_id: u16 },
-    UpdateNpcVendor { event_id: u16, activate: bool },
+    ChangeEquipOrModel {
+        event_id: u16,
+        activate: bool,
+    },
+    RunSmartAIScripts {
+        event_id: u16,
+        activate: bool,
+    },
+    ResetEventSeasonalQuests {
+        event_id: u16,
+        event_start_time: u64,
+    },
+    UpdateEventQuests {
+        event_id: u16,
+        activate: bool,
+    },
+    UpdateWorldStates {
+        event_id: u16,
+        activate: bool,
+    },
+    UpdateNpcFlags {
+        event_id: u16,
+    },
+    UpdateNpcVendor {
+        event_id: u16,
+        activate: bool,
+    },
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -3523,6 +3554,11 @@ struct GameEventLiveUpdateSideEffectSummaryLikeCpp {
     run_smart_ai_gameobject_candidates: usize,
     run_smart_ai_creature_ai_enabled_unrepresented: usize,
     run_smart_ai_script_dispatch_unrepresented: usize,
+    reset_event_seasonal_quests_actions: usize,
+    reset_event_seasonal_quests_event_start_time_zero: usize,
+    reset_event_seasonal_quests_event_start_time_nonzero: usize,
+    reset_event_seasonal_quests_player_session_runtime_unimplemented: usize,
+    reset_event_seasonal_quests_character_db_statement_unimplemented: usize,
     update_event_quests_actions: usize,
     update_event_quests_creature_records_seen: usize,
     update_event_quests_gameobject_records_seen: usize,
@@ -3567,14 +3603,15 @@ fn game_event_signed_id_like_cpp(event_id: u16) -> i16 {
 }
 
 fn game_event_live_update_actions_like_cpp(
+    canonical_spawn_metadata: &spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
     outcome: &spawn_store_loader::GameEventUpdateOutcomeLikeCpp,
 ) -> Vec<GameEventLiveUpdateActionLikeCpp> {
     let mut actions = Vec::new();
     for &event_id in &outcome.negative_spawn_event_ids {
         actions.push(GameEventLiveUpdateActionLikeCpp::Spawn(event_id));
     }
-    for outcome in &outcome.start_outcomes {
-        if let spawn_store_loader::GameEventStartOutcomeLikeCpp::Started(summary) = outcome {
+    for start_outcome in &outcome.start_outcomes {
+        if let spawn_store_loader::GameEventStartOutcomeLikeCpp::Started(summary) = start_outcome {
             if summary.apply_new_event_requested {
                 let event_id = game_event_signed_id_like_cpp(summary.event_id);
                 actions.push(GameEventLiveUpdateActionLikeCpp::Spawn(event_id));
@@ -3602,11 +3639,18 @@ fn game_event_live_update_actions_like_cpp(
                     event_id: summary.event_id,
                     activate: true,
                 });
+                actions.push(GameEventLiveUpdateActionLikeCpp::ResetEventSeasonalQuests {
+                    event_id: summary.event_id,
+                    event_start_time: canonical_spawn_metadata.game_event_last_start_time_like_cpp(
+                        summary.event_id,
+                        outcome.current_time_secs,
+                    ),
+                });
             }
         }
     }
-    for outcome in &outcome.stop_outcomes {
-        if let spawn_store_loader::GameEventStopOutcomeLikeCpp::Stopped(summary) = outcome {
+    for stop_outcome in &outcome.stop_outcomes {
+        if let spawn_store_loader::GameEventStopOutcomeLikeCpp::Stopped(summary) = stop_outcome {
             if summary.unapply_event_requested {
                 let event_id = game_event_signed_id_like_cpp(summary.event_id);
                 actions.push(GameEventLiveUpdateActionLikeCpp::RunSmartAIScripts {
@@ -3851,7 +3895,7 @@ fn consume_game_event_live_update_side_effects_like_cpp(
     active_event_ids: &[u16],
     outcome: &spawn_store_loader::GameEventUpdateOutcomeLikeCpp,
 ) -> GameEventLiveUpdateSideEffectSummaryLikeCpp {
-    let actions = game_event_live_update_actions_like_cpp(outcome);
+    let actions = game_event_live_update_actions_like_cpp(canonical_spawn_metadata, outcome);
     let mut summary = GameEventLiveUpdateSideEffectSummaryLikeCpp {
         actions,
         ..GameEventLiveUpdateSideEffectSummaryLikeCpp::default()
@@ -3916,6 +3960,19 @@ fn consume_game_event_live_update_side_effects_like_cpp(
                     smart_ai_summary.run_smart_ai_creature_ai_enabled_unrepresented;
                 summary.run_smart_ai_script_dispatch_unrepresented +=
                     smart_ai_summary.run_smart_ai_script_dispatch_unrepresented;
+            }
+            GameEventLiveUpdateActionLikeCpp::ResetEventSeasonalQuests {
+                event_id: _,
+                event_start_time,
+            } => {
+                summary.reset_event_seasonal_quests_actions += 1;
+                if event_start_time == 0 {
+                    summary.reset_event_seasonal_quests_event_start_time_zero += 1;
+                } else {
+                    summary.reset_event_seasonal_quests_event_start_time_nonzero += 1;
+                }
+                summary.reset_event_seasonal_quests_player_session_runtime_unimplemented += 1;
+                summary.reset_event_seasonal_quests_character_db_statement_unimplemented += 1;
             }
             GameEventLiveUpdateActionLikeCpp::UpdateEventQuests { event_id, activate } => {
                 let quest_summary =
@@ -5025,7 +5082,19 @@ fn spawn_canonical_map_update_loop(
                     update_npc_vendor_remove_misses =
                         side_effect_summary.update_npc_vendor_remove_misses,
                     update_npc_vendor_no_match = side_effect_summary.update_npc_vendor_no_match,
-                    "C++ WUPDATE_EVENTS represented timer fired; updated canonical GameEvent metadata and consumed represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel, UpdateEventQuests cache, UpdateWorldStates evidence, UpdateEventNPCFlags, and UpdateEventNPCVendor cache side effects; ConditionMgr world-event rows, DB state writes, announcements, quest packets/session gossip refresh, full ObjectMgr quest runtime, real WorldStateMgr/BattlemasterList HolidayWorldState lookup, SAI/seasonal reset and ForceGameEventUpdate command caller remain pending"
+                    reset_event_seasonal_quests_actions =
+                        side_effect_summary.reset_event_seasonal_quests_actions,
+                    reset_event_seasonal_quests_event_start_time_zero =
+                        side_effect_summary.reset_event_seasonal_quests_event_start_time_zero,
+                    reset_event_seasonal_quests_event_start_time_nonzero =
+                        side_effect_summary.reset_event_seasonal_quests_event_start_time_nonzero,
+                    reset_event_seasonal_quests_player_session_runtime_unimplemented =
+                        side_effect_summary
+                            .reset_event_seasonal_quests_player_session_runtime_unimplemented,
+                    reset_event_seasonal_quests_character_db_statement_unimplemented =
+                        side_effect_summary
+                            .reset_event_seasonal_quests_character_db_statement_unimplemented,
+                    "C++ WUPDATE_EVENTS represented timer fired; updated canonical GameEvent metadata and consumed represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel, UpdateEventQuests cache, UpdateWorldStates evidence, UpdateEventNPCFlags, UpdateEventNPCVendor cache, RunSmartAIScripts evidence, and ResetEventSeasonalQuests request evidence side effects; ConditionMgr world-event rows, DB state writes, announcements, quest packets/session gossip refresh, full ObjectMgr quest runtime, real WorldStateMgr/BattlemasterList HolidayWorldState lookup, SmartAI script dispatch, Player/session seasonal quest reset, and character DB seasonal reset statement execution remain pending"
                 );
             }
 
@@ -8217,6 +8286,7 @@ mmap.enablePathFinding = 0
         event_id: u16,
     ) -> spawn_store_loader::GameEventUpdateOutcomeLikeCpp {
         spawn_store_loader::GameEventUpdateOutcomeLikeCpp {
+            current_time_secs: 650,
             scanned_event_ids: vec![],
             check_outcomes: vec![],
             next_check_outcomes: vec![],
@@ -8331,8 +8401,19 @@ mmap.enablePathFinding = 0
     }
 
     #[test]
-    fn game_event_smart_ai_start_stop_order_matches_cpp_live_update_like_cpp() {
+    fn game_event_smart_ai_game_event_seasonal_start_stop_order_matches_cpp_live_update_like_cpp() {
+        let metadata = game_event_world_state_metadata_like_cpp(
+            3,
+            &[spawn_store_loader::GameEventDataLikeCpp {
+                event_id: 2,
+                start: 100,
+                occurence: 10,
+                state_raw: spawn_store_loader::GameEventStateLikeCpp::Normal as u8,
+                ..spawn_store_loader::GameEventDataLikeCpp::default()
+            }],
+        );
         let outcome = spawn_store_loader::GameEventUpdateOutcomeLikeCpp {
+            current_time_secs: 1_350,
             scanned_event_ids: vec![],
             check_outcomes: vec![],
             next_check_outcomes: vec![],
@@ -8375,7 +8456,7 @@ mmap.enablePathFinding = 0
         };
 
         assert_eq!(
-            game_event_live_update_actions_like_cpp(&outcome),
+            game_event_live_update_actions_like_cpp(&metadata, &outcome),
             vec![
                 GameEventLiveUpdateActionLikeCpp::Spawn(-1),
                 GameEventLiveUpdateActionLikeCpp::Spawn(2),
@@ -8400,6 +8481,10 @@ mmap.enablePathFinding = 0
                 GameEventLiveUpdateActionLikeCpp::RunSmartAIScripts {
                     event_id: 2,
                     activate: true,
+                },
+                GameEventLiveUpdateActionLikeCpp::ResetEventSeasonalQuests {
+                    event_id: 2,
+                    event_start_time: 1_300,
                 },
                 GameEventLiveUpdateActionLikeCpp::RunSmartAIScripts {
                     event_id: 3,
@@ -8433,6 +8518,7 @@ mmap.enablePathFinding = 0
         let mut manager = wow_map::MapManager::default();
         let mut metadata = game_event_world_state_metadata_like_cpp(0, &[]);
         let outcome = spawn_store_loader::GameEventUpdateOutcomeLikeCpp {
+            current_time_secs: 650,
             scanned_event_ids: vec![],
             check_outcomes: vec![],
             next_check_outcomes: vec![],
@@ -8474,6 +8560,45 @@ mmap.enablePathFinding = 0
         assert_eq!(summary.run_smart_ai_creature_candidates, 0);
         assert_eq!(summary.run_smart_ai_gameobject_candidates, 0);
         assert_eq!(summary.run_smart_ai_script_dispatch_unrepresented, 0);
+    }
+
+    #[test]
+    fn game_event_seasonal_consume_records_evidence_without_player_or_db_mutation_like_cpp() {
+        let mut manager = wow_map::MapManager::default();
+        let mut metadata = game_event_world_state_metadata_like_cpp(
+            7,
+            &[spawn_store_loader::GameEventDataLikeCpp {
+                event_id: 7,
+                start: 100,
+                occurence: 10,
+                state_raw: spawn_store_loader::GameEventStateLikeCpp::Normal as u8,
+                ..spawn_store_loader::GameEventDataLikeCpp::default()
+            }],
+        );
+        let outcome = game_event_world_state_start_outcome_like_cpp(7);
+
+        let summary = consume_game_event_live_update_side_effects_like_cpp(
+            &mut manager,
+            &mut metadata,
+            &empty_loaded_grid_creature_respawn_caches_like_cpp(),
+            &[7],
+            &outcome,
+        );
+
+        assert_eq!(summary.reset_event_seasonal_quests_actions, 1);
+        assert_eq!(summary.reset_event_seasonal_quests_event_start_time_zero, 0);
+        assert_eq!(
+            summary.reset_event_seasonal_quests_event_start_time_nonzero,
+            1
+        );
+        assert_eq!(
+            summary.reset_event_seasonal_quests_player_session_runtime_unimplemented,
+            1
+        );
+        assert_eq!(
+            summary.reset_event_seasonal_quests_character_db_statement_unimplemented,
+            1
+        );
     }
 
     fn game_event_live_update_npc_vendor_record_like_cpp(
