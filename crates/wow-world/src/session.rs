@@ -13424,6 +13424,51 @@ impl WorldSession {
             .unwrap_or(0)
     }
 
+    pub(crate) fn use_represented_creature_questgiver_like_cpp(
+        &mut self,
+        creature_guid: ObjectGuid,
+        creature_entry: u32,
+    ) -> bool {
+        let Some(quest_store) = self.quest_store.as_ref().map(Arc::clone) else {
+            return false;
+        };
+
+        let mut quests = Vec::new();
+
+        // C++ `Player::PrepareQuestMenu` checks Creature involved/ender relations before
+        // starter relations. `QuestListEntry` currently has no exact quest-icon field, so
+        // this represented seam preserves the available wire fields and branch/order only.
+        for quest in quest_store.quests_for_ender(creature_entry) {
+            if self
+                .player_quests
+                .get(&quest.id)
+                .is_some_and(|status| matches!(status.status, 1 | 2))
+            {
+                quests.push(Self::quest_list_entry_from_template_like_cpp(quest));
+            }
+        }
+
+        for quest in quest_store.quests_for_starter(creature_entry) {
+            if self.can_take_quest(quest) {
+                quests.push(Self::quest_list_entry_from_template_like_cpp(quest));
+            }
+        }
+
+        if quests.is_empty() {
+            return false;
+        }
+
+        self.send_packet(&QuestGiverQuestList {
+            guid: creature_guid,
+            greeting: String::new(),
+            greet_emote_delay: 0,
+            greet_emote_type: 0,
+            quests,
+        });
+
+        true
+    }
+
     pub(crate) fn use_represented_gameobject_questgiver_like_cpp(
         &mut self,
         gameobject_guid: ObjectGuid,
@@ -36128,6 +36173,77 @@ mod tests {
                 gossip_id: 123,
             }]
         );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn creature_questgiver_starter_relation_sends_quest_list_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        session.set_player_level_like_cpp(1);
+        let creature_guid =
+            ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 571, 0, 777, 21);
+        let mut quest = test_quest_template(9_101);
+        quest.log_title = "Creature starter".into();
+        let mut quest_store = wow_data::quest::QuestStore::from_quests_like_cpp([quest]);
+        quest_store.starter_quests.insert(777, vec![9_101]);
+        session.quest_store = Some(Arc::new(quest_store));
+
+        assert!(session.use_represented_creature_questgiver_like_cpp(creature_guid, 777));
+
+        let bytes = send_rx.try_recv().unwrap();
+        assert_eq!(
+            wow_packet::WorldPacket::from_bytes(&bytes).server_opcode(),
+            Some(ServerOpcodes::QuestGiverQuestListMessage)
+        );
+        assert!(packet_contains_quest_ids_in_order(&bytes, &[9_101]));
+    }
+
+    #[test]
+    fn creature_questgiver_ender_relation_precedes_starter_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        session.set_player_level_like_cpp(1);
+        let creature_guid =
+            ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 571, 0, 777, 22);
+        let mut ender = test_quest_template(9_101);
+        ender.log_title = "Creature ender".into();
+        let mut starter = test_quest_template(9_102);
+        starter.log_title = "Creature starter".into();
+        let mut quest_store = wow_data::quest::QuestStore::from_quests_like_cpp([ender, starter]);
+        quest_store.ender_quests.insert(777, vec![9_101]);
+        quest_store.starter_quests.insert(777, vec![9_102]);
+        session.quest_store = Some(Arc::new(quest_store));
+        session.player_quests.insert(
+            9_101,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id: 9_101,
+                status: 2,
+                explored: false,
+                objective_counts: Vec::new(),
+            },
+        );
+
+        assert!(session.use_represented_creature_questgiver_like_cpp(creature_guid, 777));
+
+        let bytes = send_rx.try_recv().unwrap();
+        assert_eq!(
+            wow_packet::WorldPacket::from_bytes(&bytes).server_opcode(),
+            Some(ServerOpcodes::QuestGiverQuestListMessage)
+        );
+        assert!(packet_contains_quest_ids_in_order(&bytes, &[9_101, 9_102]));
+    }
+
+    #[test]
+    fn creature_questgiver_without_creature_relations_sends_nothing_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        session.set_player_level_like_cpp(1);
+        let creature_guid =
+            ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 571, 0, 777, 23);
+        let mut quest_store =
+            wow_data::quest::QuestStore::from_quests_like_cpp([test_quest_template(9_101)]);
+        assert!(quest_store.insert_gameobject_starter_relation_like_cpp(777, 9_101));
+        session.quest_store = Some(Arc::new(quest_store));
+
+        assert!(!session.use_represented_creature_questgiver_like_cpp(creature_guid, 777));
         assert!(send_rx.try_recv().is_err());
     }
 

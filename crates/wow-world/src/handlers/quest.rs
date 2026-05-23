@@ -18,14 +18,13 @@
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 use wow_constants::ClientOpcodes;
+use wow_constants::unit::NPCFlags1;
 use wow_data::DISABLE_TYPE_QUEST;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
-use wow_packet::ServerPacket;
 use wow_packet::packets::quest::{
     QueryQuestInfoResponse, QuestGiverOfferReward, QuestGiverQuestComplete, QuestGiverQuestDetails,
-    QuestGiverQuestList, QuestGiverRequestItems, QuestGiverStatus, QuestListEntry,
-    QuestObjectiveInfo, QuestObjectiveSimple, QuestRewardsBlock, QuestUpdateComplete,
-    quest_giver_status,
+    QuestGiverRequestItems, QuestGiverStatus, QuestObjectiveInfo, QuestObjectiveSimple,
+    QuestRewardsBlock, QuestUpdateComplete, quest_giver_status,
 };
 
 use crate::session::{SeasonalQuestStatusDbRowLikeCpp, WorldSession};
@@ -141,8 +140,12 @@ impl WorldSession {
     }
 
     /// CMSG_QUEST_GIVER_HELLO — player right-clicks a quest NPC.
-    /// Opens the quest list dialog for this NPC.
-    /// C# ref: QuestHandler.HandleQuestGiverHello
+    /// Opens the represented quest list dialog for an interactable questgiver Creature.
+    /// C++ refs:
+    /// - `WorldSession::HandleQuestgiverHelloOpcode`, `QuestHandler.cpp:76-103`.
+    /// - `Player::PrepareQuestMenu`, `Player.cpp:13947-14004`.
+    /// Remaining represented gaps: fake-death aura removal, movement pause/home position,
+    /// `AI()->OnGossipHello`, `PrepareGossipMenu`, `SendPreparedGossip` / auto-open / PlayerTalkClass.
     pub async fn handle_quest_giver_hello(&mut self, mut pkt: wow_packet::WorldPacket) {
         let guid = match pkt.read_packed_guid() {
             Ok(g) => g,
@@ -152,53 +155,24 @@ impl WorldSession {
             }
         };
 
-        let npc_entry = guid.entry();
-        let quest_store = match &self.quest_store {
-            Some(s) => Arc::clone(s),
-            None => {
-                debug!("No quest store");
-                return;
-            }
-        };
-
-        let available = quest_store.quests_for_starter(npc_entry);
-        let quests: Vec<QuestListEntry> = available
-            .iter()
-            .filter(|q| self.can_take_quest(q))
-            .map(|q| QuestListEntry {
-                quest_id: q.id,
-                quest_type: q.quest_type,
-                quest_level: q.quest_level,
-                quest_max_scaling_level: q.quest_max_scaling_level,
-                quest_flags: q.flags,
-                quest_flags_ex: q.flags_ex,
-                repeatable: q.is_repeatable(),
-                title: q.log_title.clone(),
-            })
-            .collect();
-
-        if quests.is_empty() {
+        let Some(access) =
+            self.represented_npc_can_interact_with_like_cpp(guid, NPCFlags1::QUEST_GIVER.bits())
+        else {
             debug!(
                 account = self.account_id,
-                npc_entry, "NPC has no available quests"
+                ?guid,
+                "QuestGiverHello: NPC not found or not interactable as questgiver"
             );
             return;
+        };
+
+        if self.use_represented_creature_questgiver_like_cpp(guid, access.entry) {
+            debug!(
+                account = self.account_id,
+                creature_entry = access.entry,
+                "QuestGiverHello represented Creature questgiver seam consumed"
+            );
         }
-
-        info!(
-            account = self.account_id,
-            npc_entry = npc_entry,
-            count = quests.len(),
-            "Sending quest list"
-        );
-
-        self.send_packet(&QuestGiverQuestList {
-            guid,
-            greeting: String::new(),
-            greet_emote_delay: 0,
-            greet_emote_type: 0,
-            quests,
-        });
     }
 
     /// CMSG_QUEST_GIVER_QUERY_QUEST — player clicks a quest name in the list.
