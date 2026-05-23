@@ -35,7 +35,8 @@ use wow_loot::{
 use wow_network::session_mgr::SessionManager;
 use wow_network::world_socket::{AccountInfo, AccountLookup};
 use wow_network::{
-    GroupRegistry, LootDropRatesLikeCpp, PendingInvites, PlayerRegistry, SessionResources,
+    GroupRegistry, LootDropRatesLikeCpp, PendingInvites, PlayerRegistry,
+    ResetSeasonalQuestStatusCommand, SessionCommand, SessionResources,
 };
 use wow_world::{
     MMapRuntimeConfigLikeCpp, MapManager as LegacyMapManager, SharedCanonicalMapManager,
@@ -1542,6 +1543,10 @@ async fn main() -> Result<()> {
             &mut side_effect_summary,
         )
         .await;
+        fanout_reset_event_seasonal_quests_to_player_sessions_after_db_delete_like_cpp(
+            Some(player_registry.as_ref()),
+            &mut side_effect_summary,
+        );
         debug!(
             scanned_event_ids = game_event_outcome.scanned_event_ids.len(),
             queued_activation_event_ids = game_event_outcome.queued_activation_event_ids.len(),
@@ -1842,6 +1847,7 @@ async fn main() -> Result<()> {
         Arc::clone(&char_db),
         loaded_grid_creature_respawn_caches.clone(),
         game_event_scheduler,
+        Arc::clone(&player_registry),
     );
 
     set_realm_online(&login_db, realm_id).await?;
@@ -3625,6 +3631,10 @@ struct GameEventLiveUpdateSideEffectSummaryLikeCpp {
     reset_event_seasonal_quests_event_start_time_zero: usize,
     reset_event_seasonal_quests_event_start_time_nonzero: usize,
     reset_event_seasonal_quests_player_session_runtime_unimplemented: usize,
+    reset_event_seasonal_quests_player_session_registry_missing: usize,
+    reset_event_seasonal_quests_player_session_send_attempted: usize,
+    reset_event_seasonal_quests_player_session_send_queued: usize,
+    reset_event_seasonal_quests_player_session_send_failed: usize,
     reset_event_seasonal_quests_character_db_statement_unimplemented: usize,
     reset_event_seasonal_quests_character_db_delete_queued: usize,
     reset_event_seasonal_quests_character_db_delete_executed: usize,
@@ -3702,6 +3712,56 @@ fn game_event_seasonal_quest_db_delete_like_cpp(
             event_start_time: event_start_time_i64,
             statement,
         });
+}
+
+fn fanout_reset_event_seasonal_quests_to_player_sessions_like_cpp(
+    player_registry: Option<&PlayerRegistry>,
+    event_id: u16,
+    event_start_time: u64,
+    summary: &mut GameEventLiveUpdateSideEffectSummaryLikeCpp,
+) {
+    let Some(player_registry) = player_registry else {
+        summary.reset_event_seasonal_quests_player_session_registry_missing += 1;
+        return;
+    };
+
+    for session in player_registry.iter() {
+        summary.reset_event_seasonal_quests_player_session_send_attempted += 1;
+        let command = SessionCommand::ResetSeasonalQuestStatus(ResetSeasonalQuestStatusCommand {
+            event_id,
+            event_start_time,
+        });
+        match session.command_tx.try_send(command) {
+            Ok(()) => summary.reset_event_seasonal_quests_player_session_send_queued += 1,
+            Err(_) => summary.reset_event_seasonal_quests_player_session_send_failed += 1,
+        }
+    }
+}
+
+fn fanout_reset_event_seasonal_quests_to_player_sessions_after_db_delete_like_cpp(
+    player_registry: Option<&PlayerRegistry>,
+    summary: &mut GameEventLiveUpdateSideEffectSummaryLikeCpp,
+) {
+    let reset_actions: Vec<(u16, u64)> = summary
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            GameEventLiveUpdateActionLikeCpp::ResetEventSeasonalQuests {
+                event_id,
+                event_start_time,
+            } => Some((*event_id, *event_start_time)),
+            _ => None,
+        })
+        .collect();
+
+    for (event_id, event_start_time) in reset_actions {
+        fanout_reset_event_seasonal_quests_to_player_sessions_like_cpp(
+            player_registry,
+            event_id,
+            event_start_time,
+            summary,
+        );
+    }
 }
 
 async fn execute_game_event_seasonal_quest_db_deletes_like_cpp(
@@ -4130,7 +4190,6 @@ fn consume_game_event_live_update_side_effects_like_cpp(
                 } else {
                     summary.reset_event_seasonal_quests_event_start_time_nonzero += 1;
                 }
-                summary.reset_event_seasonal_quests_player_session_runtime_unimplemented += 1;
                 game_event_seasonal_quest_db_delete_like_cpp(
                     event_id,
                     event_start_time,
@@ -5446,6 +5505,7 @@ fn spawn_canonical_map_update_loop(
     character_db: Arc<CharacterDatabase>,
     loaded_grid_creature_respawn_caches: LoadedGridCreatureRespawnCachesLikeCpp,
     mut game_event_scheduler: CanonicalGameEventSchedulerLikeCpp,
+    player_registry: Arc<PlayerRegistry>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval =
@@ -5550,6 +5610,10 @@ fn spawn_canonical_map_update_loop(
                     &mut side_effect_summary,
                 )
                 .await;
+                fanout_reset_event_seasonal_quests_to_player_sessions_after_db_delete_like_cpp(
+                    Some(player_registry.as_ref()),
+                    &mut side_effect_summary,
+                );
                 debug!(
                     scanned_event_ids = game_event_outcome.scanned_event_ids.len(),
                     queued_activation_event_ids =
@@ -6270,6 +6334,7 @@ mod tests {
         build_loaded_grid_gameobject_respawn_record_like_cpp,
         canonical_map_update_tick_set_inactive_like_cpp,
         consume_game_event_live_update_side_effects_like_cpp,
+        fanout_reset_event_seasonal_quests_to_player_sessions_after_db_delete_like_cpp,
         game_event_change_equip_or_model_like_cpp, game_event_live_update_actions_like_cpp,
         game_event_spawn_creatures_and_gameobjects_for_event_like_cpp,
         game_event_spawn_for_event_like_cpp, game_event_spawn_pools_for_event_like_cpp,
@@ -6302,6 +6367,7 @@ mod tests {
         SpawnGroupTemplateData, SpawnObjectType, SpawnPosition, SpawnStore,
         spawn::SpawnGroupMemberRow,
     };
+    use wow_network::{PlayerBroadcastInfo, PlayerRegistry, SessionCommand};
 
     fn assert_del_respawn_params_like_cpp(
         statement: &wow_database::PreparedStatement,
@@ -9858,7 +9924,7 @@ mmap.enablePathFinding = 0
         );
         let outcome = game_event_world_state_start_outcome_like_cpp(7);
 
-        let summary = consume_game_event_live_update_side_effects_like_cpp(
+        let mut summary = consume_game_event_live_update_side_effects_like_cpp(
             &mut manager,
             &mut metadata,
             &empty_loaded_grid_creature_respawn_caches_like_cpp(),
@@ -9875,7 +9941,11 @@ mmap.enablePathFinding = 0
         );
         assert_eq!(
             summary.reset_event_seasonal_quests_player_session_runtime_unimplemented,
-            1
+            0
+        );
+        assert_eq!(
+            summary.reset_event_seasonal_quests_player_session_registry_missing,
+            0
         );
         assert_eq!(
             summary.reset_event_seasonal_quests_character_db_statement_unimplemented,
@@ -9889,6 +9959,14 @@ mmap.enablePathFinding = 0
             summary
                 .reset_event_seasonal_quests_character_db_delete_skipped_event_start_time_out_of_range,
             0
+        );
+        fanout_reset_event_seasonal_quests_to_player_sessions_after_db_delete_like_cpp(
+            None,
+            &mut summary,
+        );
+        assert_eq!(
+            summary.reset_event_seasonal_quests_player_session_registry_missing,
+            1
         );
         let [db_delete] = summary.reset_event_seasonal_quest_db_deletes.as_slice() else {
             panic!("expected exactly one seasonal quest DB delete")
@@ -9929,7 +10007,7 @@ mmap.enablePathFinding = 0
         );
         let outcome = game_event_world_state_start_outcome_like_cpp(8);
 
-        let summary = consume_game_event_live_update_side_effects_like_cpp(
+        let mut summary = consume_game_event_live_update_side_effects_like_cpp(
             &mut manager,
             &mut metadata,
             &empty_loaded_grid_creature_respawn_caches_like_cpp(),
@@ -9946,7 +10024,11 @@ mmap.enablePathFinding = 0
         );
         assert_eq!(
             summary.reset_event_seasonal_quests_player_session_runtime_unimplemented,
-            1
+            0
+        );
+        assert_eq!(
+            summary.reset_event_seasonal_quests_player_session_registry_missing,
+            0
         );
         assert_eq!(
             summary.reset_event_seasonal_quests_character_db_statement_unimplemented,
@@ -9954,6 +10036,14 @@ mmap.enablePathFinding = 0
         );
         assert_eq!(
             summary.reset_event_seasonal_quests_character_db_delete_queued,
+            1
+        );
+        fanout_reset_event_seasonal_quests_to_player_sessions_after_db_delete_like_cpp(
+            None,
+            &mut summary,
+        );
+        assert_eq!(
+            summary.reset_event_seasonal_quests_player_session_registry_missing,
             1
         );
         let [db_delete] = summary.reset_event_seasonal_quest_db_deletes.as_slice() else {
@@ -9970,6 +10060,92 @@ mmap.enablePathFinding = 0
         };
         assert_eq!(*actual_event_id, 8);
         assert_eq!(*actual_event_start_time, 0);
+    }
+
+    #[test]
+    fn game_event_seasonal_post_db_delete_fanout_queues_session_command_like_cpp() {
+        let mut manager = wow_map::MapManager::default();
+        let mut metadata = game_event_world_state_metadata_like_cpp(
+            9,
+            &[spawn_store_loader::GameEventDataLikeCpp {
+                event_id: 9,
+                start: 345,
+                occurence: 10,
+                state_raw: spawn_store_loader::GameEventStateLikeCpp::Normal as u8,
+                ..spawn_store_loader::GameEventDataLikeCpp::default()
+            }],
+        );
+        let outcome = game_event_world_state_start_outcome_like_cpp(9);
+        let registry = PlayerRegistry::default();
+        let (send_tx, _send_rx) = flume::bounded(1);
+        let (command_tx, command_rx) = flume::bounded(1);
+        let player_guid = ObjectGuid::create_player(1, 9009);
+        registry.insert(
+            player_guid,
+            PlayerBroadcastInfo {
+                map_id: 0,
+                position: wow_core::Position::ZERO,
+                send_tx,
+                command_tx,
+                active_loot_rolls: Vec::new(),
+                pass_on_group_loot: false,
+                enchanting_skill: 0,
+                known_spells: Vec::new(),
+                active_quest_statuses: Default::default(),
+                active_quest_objective_counts: Default::default(),
+                rewarded_quests: Default::default(),
+                inventory_item_counts: Default::default(),
+                party_member_phase_states: Default::default(),
+                player_name: "SeasonalTester".to_string(),
+                account_id: 1,
+                race: 1,
+                class: 1,
+                sex: 0,
+                level: 1,
+                display_id: 49,
+                visible_items: [(0, 0, 0); 19],
+            },
+        );
+
+        let mut summary = consume_game_event_live_update_side_effects_like_cpp(
+            &mut manager,
+            &mut metadata,
+            &empty_loaded_grid_creature_respawn_caches_like_cpp(),
+            &[9],
+            &outcome,
+            false,
+        );
+
+        assert!(command_rx.try_recv().is_err());
+        assert_eq!(
+            summary.reset_event_seasonal_quests_character_db_delete_queued,
+            1
+        );
+        fanout_reset_event_seasonal_quests_to_player_sessions_after_db_delete_like_cpp(
+            Some(&registry),
+            &mut summary,
+        );
+
+        assert_eq!(
+            summary.reset_event_seasonal_quests_player_session_send_attempted,
+            1
+        );
+        assert_eq!(
+            summary.reset_event_seasonal_quests_player_session_send_queued,
+            1
+        );
+        assert_eq!(
+            summary.reset_event_seasonal_quests_player_session_send_failed,
+            0
+        );
+        let command = command_rx
+            .try_recv()
+            .expect("post-delete fanout command queued");
+        let SessionCommand::ResetSeasonalQuestStatus(command) = command else {
+            panic!("expected ResetSeasonalQuestStatus command")
+        };
+        assert_eq!(command.event_id, 9);
+        assert_eq!(command.event_start_time, 345);
     }
 
     fn game_event_live_update_npc_vendor_record_like_cpp(

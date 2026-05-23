@@ -20,6 +20,13 @@ pub enum SessionCommand {
     MasterLootGive(MasterLootGiveCommand),
     LootRollStoreWinner(LootRollStoreWinnerCommand),
     LootRollVote(LootRollVoteCommand),
+    ResetSeasonalQuestStatus(ResetSeasonalQuestStatusCommand),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResetSeasonalQuestStatusCommand {
+    pub event_id: u16,
+    pub event_start_time: u64,
 }
 
 #[derive(Clone, Debug)]

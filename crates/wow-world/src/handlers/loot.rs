@@ -2485,6 +2485,12 @@ impl WorldSession {
                     self.handle_represented_loot_roll_vote_command_like_cpp(command)
                         .await;
                 }
+                SessionCommand::ResetSeasonalQuestStatus(command) => {
+                    let _ = self.reset_seasonal_quest_status_like_cpp(
+                        command.event_id,
+                        command.event_start_time,
+                    );
+                }
             }
         }
     }

@@ -18,7 +18,7 @@ pub use accept::{
 pub use group_registry::{GroupInfo, GroupRegistry, PendingInvites};
 pub use player_registry::{
     LootRollStoreWinnerCommand, LootRollVoteCommand, MasterLootGiveCommand, MasterLootGiveResult,
-    PlayerBroadcastInfo, PlayerRegistry, SessionCommand,
+    PlayerBroadcastInfo, PlayerRegistry, ResetSeasonalQuestStatusCommand, SessionCommand,
 };
 pub use session_mgr::{InstanceLink, SessionManager};
 pub use world_socket::{AccountInfo, SocketReader, SocketWriter, WorldSocket, WorldSocketError};

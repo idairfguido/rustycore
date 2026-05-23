@@ -6,7 +6,7 @@
 //! `WorldSession` — per-player session that receives packets from the
 //! [`WorldSocket`](wow_network::WorldSocket) and dispatches them to handlers.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -101,6 +101,25 @@ const SUMMON_PROPERTIES_ONLY_VISIBLE_TO_SUMMONER_GROUP_LIKE_CPP: u32 = 0x0001_00
 pub(crate) enum PlayerAttackStartLikeCppResult {
     Rejected,
     Accepted { send_attack_start: bool },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ResetSeasonalQuestStatusReasonLikeCpp {
+    MissingEvent,
+    EmptyEvent,
+    RemovedOlderCompletions,
+    NoOlderCompletions,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ResetSeasonalQuestStatusOutcomeLikeCpp {
+    pub event_id: u16,
+    pub event_start_time: u64,
+    pub reason: ResetSeasonalQuestStatusReasonLikeCpp,
+    pub removed_quest_ids: Vec<u32>,
+    pub completed_bit_clear_unrepresented: usize,
+    pub event_bucket_erased: bool,
+    pub seasonal_quest_changed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1759,6 +1778,10 @@ pub struct WorldSession {
     /// Quests the player has already been rewarded for (non-repeatable quests cannot be re-taken).
     /// C# ref: m_RewardedQuests
     pub(crate) rewarded_quests: std::collections::HashSet<u32>,
+    /// C++ `Player::m_seasonalquests`, represented per-session until full Player runtime owns it.
+    pub(crate) seasonal_quests_like_cpp: BTreeMap<u16, BTreeMap<u32, u64>>,
+    /// C++ `Player::m_SeasonalQuestChanged` represented flag.
+    pub(crate) seasonal_quest_changed_like_cpp: bool,
 
     // ── Loot ──────────────────────────────────────────────────────
     /// Active loot windows keyed by creature GUID.
@@ -2433,6 +2456,8 @@ impl WorldSession {
             quest_xp_store: None,
             player_quests: HashMap::new(),
             rewarded_quests: std::collections::HashSet::new(),
+            seasonal_quests_like_cpp: BTreeMap::new(),
+            seasonal_quest_changed_like_cpp: false,
             active_spell_cast: None,
             last_spell_cast_time: None,
             last_spell_cast_time_per_spell: HashMap::new(),
@@ -7254,6 +7279,105 @@ impl WorldSession {
             commands.push(command);
         }
         commands
+    }
+
+    pub(crate) fn reset_seasonal_quest_status_like_cpp(
+        &mut self,
+        event_id: u16,
+        event_start_time: u64,
+    ) -> ResetSeasonalQuestStatusOutcomeLikeCpp {
+        // C++ Player::ResetSeasonalQuestStatus: DB data deleted in caller.
+        self.seasonal_quest_changed_like_cpp = false;
+
+        let Some(bucket) = self.seasonal_quests_like_cpp.get_mut(&event_id) else {
+            return ResetSeasonalQuestStatusOutcomeLikeCpp {
+                event_id,
+                event_start_time,
+                reason: ResetSeasonalQuestStatusReasonLikeCpp::MissingEvent,
+                removed_quest_ids: Vec::new(),
+                completed_bit_clear_unrepresented: 0,
+                event_bucket_erased: false,
+                seasonal_quest_changed: self.seasonal_quest_changed_like_cpp,
+            };
+        };
+
+        if bucket.is_empty() {
+            return ResetSeasonalQuestStatusOutcomeLikeCpp {
+                event_id,
+                event_start_time,
+                reason: ResetSeasonalQuestStatusReasonLikeCpp::EmptyEvent,
+                removed_quest_ids: Vec::new(),
+                completed_bit_clear_unrepresented: 0,
+                event_bucket_erased: false,
+                seasonal_quest_changed: self.seasonal_quest_changed_like_cpp,
+            };
+        }
+
+        let removed_quest_ids: Vec<u32> = bucket
+            .iter()
+            .filter_map(|(quest_id, completed_time)| {
+                (*completed_time < event_start_time).then_some(*quest_id)
+            })
+            .collect();
+
+        for quest_id in &removed_quest_ids {
+            bucket.remove(quest_id);
+        }
+
+        let event_bucket_erased = bucket.is_empty() && !removed_quest_ids.is_empty();
+        if event_bucket_erased {
+            self.seasonal_quests_like_cpp.remove(&event_id);
+        }
+
+        ResetSeasonalQuestStatusOutcomeLikeCpp {
+            event_id,
+            event_start_time,
+            reason: if removed_quest_ids.is_empty() {
+                ResetSeasonalQuestStatusReasonLikeCpp::NoOlderCompletions
+            } else {
+                ResetSeasonalQuestStatusReasonLikeCpp::RemovedOlderCompletions
+            },
+            completed_bit_clear_unrepresented: removed_quest_ids.len(),
+            removed_quest_ids,
+            event_bucket_erased,
+            seasonal_quest_changed: self.seasonal_quest_changed_like_cpp,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn seed_seasonal_quest_status_like_cpp(
+        &mut self,
+        event_id: u16,
+        quest_id: u32,
+        completed_time: u64,
+    ) {
+        self.seasonal_quests_like_cpp
+            .entry(event_id)
+            .or_default()
+            .insert(quest_id, completed_time);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn seed_empty_seasonal_event_bucket_like_cpp(&mut self, event_id: u16) {
+        self.seasonal_quests_like_cpp.entry(event_id).or_default();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn seasonal_quest_bucket_like_cpp(
+        &self,
+        event_id: u16,
+    ) -> Option<&BTreeMap<u32, u64>> {
+        self.seasonal_quests_like_cpp.get(&event_id)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_seasonal_quest_changed_like_cpp_for_test(&mut self, changed: bool) {
+        self.seasonal_quest_changed_like_cpp = changed;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn seasonal_quest_changed_like_cpp(&self) -> bool {
+        self.seasonal_quest_changed_like_cpp
     }
 
     /// Set the list of legitimate characters for this account.
@@ -16803,7 +16927,7 @@ mod tests {
         REAGENT_BAG_SLOT_START, SendNewItemInstancePlan, SendNewItemModifier,
     };
     use wow_movement::MoveSplineFlag;
-    use wow_network::{GroupInfo, PlayerBroadcastInfo};
+    use wow_network::{GroupInfo, PlayerBroadcastInfo, ResetSeasonalQuestStatusCommand};
     use wow_packet::ServerPacket;
     use wow_packet::packets::loot::{
         CreatureLoot, LOOT_TYPE_CORPSE_LIKE_CPP, LOOT_TYPE_ITEM_LIKE_CPP, LootEntry, LootEntryFlags,
@@ -16854,6 +16978,108 @@ mod tests {
             packets.push(bytes);
         }
         packets
+    }
+
+    #[test]
+    fn reset_seasonal_removes_older_than_start_and_erases_emptied_bucket_like_cpp() {
+        let (mut session, _, _) = make_session();
+        session.seed_seasonal_quest_status_like_cpp(7, 1001, 99);
+        session.set_seasonal_quest_changed_like_cpp_for_test(true);
+
+        let outcome = session.reset_seasonal_quest_status_like_cpp(7, 100);
+
+        assert_eq!(
+            outcome.reason,
+            ResetSeasonalQuestStatusReasonLikeCpp::RemovedOlderCompletions
+        );
+        assert_eq!(outcome.removed_quest_ids, vec![1001]);
+        assert_eq!(outcome.completed_bit_clear_unrepresented, 1);
+        assert!(outcome.event_bucket_erased);
+        assert_eq!(session.seasonal_quest_bucket_like_cpp(7), None);
+        assert!(!session.seasonal_quest_changed_like_cpp());
+        assert!(!outcome.seasonal_quest_changed);
+    }
+
+    #[test]
+    fn reset_seasonal_keeps_equal_and_newer_completions_like_cpp() {
+        let (mut session, _, _) = make_session();
+        session.seed_seasonal_quest_status_like_cpp(7, 1001, 100);
+        session.seed_seasonal_quest_status_like_cpp(7, 1002, 101);
+        session.set_seasonal_quest_changed_like_cpp_for_test(true);
+
+        let outcome = session.reset_seasonal_quest_status_like_cpp(7, 100);
+
+        assert_eq!(
+            outcome.reason,
+            ResetSeasonalQuestStatusReasonLikeCpp::NoOlderCompletions
+        );
+        assert!(outcome.removed_quest_ids.is_empty());
+        let bucket = session
+            .seasonal_quest_bucket_like_cpp(7)
+            .expect("bucket kept");
+        assert_eq!(bucket.get(&1001), Some(&100));
+        assert_eq!(bucket.get(&1002), Some(&101));
+        assert!(!session.seasonal_quest_changed_like_cpp());
+    }
+
+    #[test]
+    fn reset_seasonal_missing_event_leaves_changed_false_like_cpp() {
+        let (mut session, _, _) = make_session();
+        session.set_seasonal_quest_changed_like_cpp_for_test(true);
+
+        let outcome = session.reset_seasonal_quest_status_like_cpp(7, 100);
+
+        assert_eq!(
+            outcome.reason,
+            ResetSeasonalQuestStatusReasonLikeCpp::MissingEvent
+        );
+        assert!(outcome.removed_quest_ids.is_empty());
+        assert!(!session.seasonal_quest_changed_like_cpp());
+        assert!(!outcome.seasonal_quest_changed);
+    }
+
+    #[test]
+    fn reset_seasonal_preexisting_empty_bucket_is_preserved_like_cpp() {
+        let (mut session, _, _) = make_session();
+        session.seed_empty_seasonal_event_bucket_like_cpp(7);
+        session.set_seasonal_quest_changed_like_cpp_for_test(true);
+
+        let outcome = session.reset_seasonal_quest_status_like_cpp(7, 100);
+
+        assert_eq!(
+            outcome.reason,
+            ResetSeasonalQuestStatusReasonLikeCpp::EmptyEvent
+        );
+        assert!(outcome.removed_quest_ids.is_empty());
+        assert!(session.seasonal_quest_bucket_like_cpp(7).is_some());
+        assert!(!session.seasonal_quest_changed_like_cpp());
+    }
+
+    #[tokio::test]
+    async fn reset_seasonal_command_processing_drains_session_command_like_cpp() {
+        let (mut session, _, _) = make_session();
+        session.seed_seasonal_quest_status_like_cpp(7, 1001, 99);
+        session.seed_seasonal_quest_status_like_cpp(7, 1002, 100);
+        session
+            .session_command_tx()
+            .try_send(SessionCommand::ResetSeasonalQuestStatus(
+                ResetSeasonalQuestStatusCommand {
+                    event_id: 7,
+                    event_start_time: 100,
+                },
+            ))
+            .expect("command queued");
+
+        session
+            .process_represented_session_commands_like_cpp()
+            .await;
+
+        assert!(session.drain_session_commands().is_empty());
+        let bucket = session
+            .seasonal_quest_bucket_like_cpp(7)
+            .expect("bucket kept");
+        assert_eq!(bucket.get(&1001), None);
+        assert_eq!(bucket.get(&1002), Some(&100));
     }
 
     fn expected_active_player_farsight_object_values_update_like_cpp(
