@@ -4352,12 +4352,14 @@ struct GameEventQuestCompleteDbBridgeSummaryLikeCpp {
     force_game_event_update_requested: usize,
     save_world_event_state_requested: bool,
     force_game_event_update_requested_flag: bool,
+    world_event_state_summary: GameEventWorldEventStateDbBridgeSummaryLikeCpp,
     operations: Vec<GameEventQuestCompleteConditionSaveDbOperationLikeCpp>,
 }
 
 #[allow(dead_code)]
 fn materialize_game_event_quest_complete_db_bridge_like_cpp(
     outcome: &spawn_store_loader::GameEventQuestCompleteOutcomeLikeCpp,
+    metadata: &spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
 ) -> GameEventQuestCompleteDbBridgeSummaryLikeCpp {
     let mut summary = GameEventQuestCompleteDbBridgeSummaryLikeCpp::default();
     let spawn_store_loader::GameEventQuestCompleteOutcomeLikeCpp::Progress(
@@ -4407,6 +4409,14 @@ fn materialize_game_event_quest_complete_db_bridge_like_cpp(
                 },
             ],
         });
+
+    if progress.save_world_event_state_requested {
+        game_event_world_event_state_db_save_operation_like_cpp(
+            progress.event_id,
+            metadata,
+            &mut summary.world_event_state_summary,
+        );
+    }
 
     summary
 }
@@ -9143,10 +9153,19 @@ mmap.enablePathFinding = 0
     }
 
     #[test]
-    fn game_event_quest_complete_db_bridge_materializes_delete_then_insert_condition_save() {
+    fn game_event_quest_complete_db_bridge_materializes_condition_save_then_world_event_save() {
+        let metadata = game_event_world_state_metadata_like_cpp(
+            7,
+            &[spawn_store_loader::GameEventDataLikeCpp {
+                event_id: 7,
+                state_raw: 3,
+                next_start: 1_234,
+                ..spawn_store_loader::GameEventDataLikeCpp::default()
+            }],
+        );
         let outcome = game_event_quest_complete_progressed_outcome_like_cpp(true, true);
 
-        let summary = materialize_game_event_quest_complete_db_bridge_like_cpp(&outcome);
+        let summary = materialize_game_event_quest_complete_db_bridge_like_cpp(&outcome, &metadata);
 
         assert_eq!(summary.condition_save_updates_queued, 1);
         assert_eq!(summary.condition_save_updates_skipped_non_progress, 0);
@@ -9187,34 +9206,124 @@ mmap.enablePathFinding = 0
             44,
             5.25,
         );
+
+        assert_eq!(summary.world_event_state_summary.saves_queued, 1);
+        assert_eq!(
+            summary
+                .world_event_state_summary
+                .saves_skipped_missing_event,
+            0
+        );
+        assert_eq!(
+            summary
+                .world_event_state_summary
+                .saves_skipped_event_id_out_of_range,
+            0
+        );
+        assert_eq!(summary.world_event_state_summary.operations.len(), 1);
+        assert_game_event_save_operation_like_cpp(
+            &summary.world_event_state_summary.operations[0],
+            7,
+            3,
+            1_234,
+        );
+    }
+
+    #[test]
+    fn game_event_quest_complete_db_bridge_preserves_condition_save_without_world_event_save() {
+        let metadata = game_event_world_state_metadata_like_cpp(
+            7,
+            &[spawn_store_loader::GameEventDataLikeCpp {
+                event_id: 7,
+                state_raw: 2,
+                next_start: 0,
+                ..spawn_store_loader::GameEventDataLikeCpp::default()
+            }],
+        );
+        let outcome = game_event_quest_complete_progressed_outcome_like_cpp(false, false);
+
+        let summary = materialize_game_event_quest_complete_db_bridge_like_cpp(&outcome, &metadata);
+
+        assert_eq!(summary.condition_save_updates_queued, 1);
+        assert_eq!(summary.operations.len(), 1);
+        assert_eq!(summary.world_event_state_save_requested, 0);
+        assert!(!summary.save_world_event_state_requested);
+        assert_eq!(summary.world_event_state_summary.saves_queued, 0);
+        assert!(summary.world_event_state_summary.operations.is_empty());
+    }
+
+    #[test]
+    fn game_event_quest_complete_db_bridge_skips_world_event_save_when_metadata_missing() {
+        let metadata = game_event_world_state_metadata_like_cpp(6, &[]);
+        let outcome = game_event_quest_complete_progressed_outcome_like_cpp(true, true);
+
+        let summary = materialize_game_event_quest_complete_db_bridge_like_cpp(&outcome, &metadata);
+
+        assert_eq!(summary.condition_save_updates_queued, 1);
+        assert_eq!(summary.operations.len(), 1);
+        assert_eq!(summary.world_event_state_save_requested, 1);
+        assert!(summary.save_world_event_state_requested);
+        assert_eq!(summary.world_event_state_summary.saves_queued, 0);
+        assert_eq!(
+            summary
+                .world_event_state_summary
+                .saves_skipped_missing_event,
+            1
+        );
+        assert!(summary.world_event_state_summary.operations.is_empty());
     }
 
     #[test]
     fn game_event_quest_complete_db_bridge_skips_missing_or_non_progress() {
+        let metadata = game_event_world_state_metadata_like_cpp(
+            7,
+            &[spawn_store_loader::GameEventDataLikeCpp {
+                event_id: 7,
+                state_raw: 3,
+                next_start: 1_234,
+                ..spawn_store_loader::GameEventDataLikeCpp::default()
+            }],
+        );
         let missing =
             spawn_store_loader::GameEventQuestCompleteOutcomeLikeCpp::MissingQuestMapping {
                 quest_id: 12_345,
             };
-        let missing_summary = materialize_game_event_quest_complete_db_bridge_like_cpp(&missing);
+        let missing_summary =
+            materialize_game_event_quest_complete_db_bridge_like_cpp(&missing, &metadata);
         assert_eq!(missing_summary.condition_save_updates_queued, 0);
         assert_eq!(
             missing_summary.condition_save_updates_skipped_non_progress,
             1
         );
         assert!(missing_summary.operations.is_empty());
+        assert_eq!(missing_summary.world_event_state_summary.saves_queued, 0);
+        assert!(
+            missing_summary
+                .world_event_state_summary
+                .operations
+                .is_empty()
+        );
 
         let inactive = spawn_store_loader::GameEventQuestCompleteOutcomeLikeCpp::Progress(
             spawn_store_loader::GameEventConditionProgressOutcomeLikeCpp::InactiveEvent {
                 event_id: 7,
             },
         );
-        let inactive_summary = materialize_game_event_quest_complete_db_bridge_like_cpp(&inactive);
+        let inactive_summary =
+            materialize_game_event_quest_complete_db_bridge_like_cpp(&inactive, &metadata);
         assert_eq!(inactive_summary.condition_save_updates_queued, 0);
         assert_eq!(
             inactive_summary.condition_save_updates_skipped_non_progress,
             1
         );
         assert!(inactive_summary.operations.is_empty());
+        assert_eq!(inactive_summary.world_event_state_summary.saves_queued, 0);
+        assert!(
+            inactive_summary
+                .world_event_state_summary
+                .operations
+                .is_empty()
+        );
 
         let already_complete = spawn_store_loader::GameEventQuestCompleteOutcomeLikeCpp::Progress(
             spawn_store_loader::GameEventConditionProgressOutcomeLikeCpp::AlreadyComplete {
@@ -9225,13 +9334,20 @@ mmap.enablePathFinding = 0
             },
         );
         let complete_summary =
-            materialize_game_event_quest_complete_db_bridge_like_cpp(&already_complete);
+            materialize_game_event_quest_complete_db_bridge_like_cpp(&already_complete, &metadata);
         assert_eq!(complete_summary.condition_save_updates_queued, 0);
         assert_eq!(
             complete_summary.condition_save_updates_skipped_non_progress,
             1
         );
         assert!(complete_summary.operations.is_empty());
+        assert_eq!(complete_summary.world_event_state_summary.saves_queued, 0);
+        assert!(
+            complete_summary
+                .world_event_state_summary
+                .operations
+                .is_empty()
+        );
     }
 
     #[test]
