@@ -121,6 +121,7 @@ pub struct CanonicalSpawnStoreLoadReport {
     pub game_event_pools: GameEventPoolLoadReportLikeCpp,
     pub game_event_spawn_guids: GameEventSpawnGuidLoadReportLikeCpp,
     pub game_event_model_equip: GameEventModelEquipLoadReportLikeCpp,
+    pub game_event_quest_relations: GameEventQuestRelationsLoadReportLikeCpp,
     pub game_event_npc_flags: GameEventNpcFlagLoadReportLikeCpp,
     pub game_event_npc_vendors: GameEventNpcVendorLoadReportLikeCpp,
     pub creature_formations: CreatureFormationLoadReportLikeCpp,
@@ -217,6 +218,20 @@ pub struct GameEventModelEquipLoadReportLikeCpp {
     pub loaded: usize,
     pub invalid_event_id: usize,
     pub missing_equipment_template: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GameEventQuestRelationFamilyLoadReportLikeCpp {
+    pub rows: usize,
+    pub loaded: usize,
+    pub skipped_out_of_range: usize,
+    pub events_touched: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GameEventQuestRelationsLoadReportLikeCpp {
+    pub creature: GameEventQuestRelationFamilyLoadReportLikeCpp,
+    pub gameobject: GameEventQuestRelationFamilyLoadReportLikeCpp,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -989,6 +1004,90 @@ impl GameEventNpcFlagsLikeCpp {
     }
 }
 
+/// C++ `GameEventMgr.h` `QuestRelation(id, quest)` metadata for GameEvent quest givers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameEventQuestRelationRecordLikeCpp {
+    pub giver_id: u32,
+    pub quest_id: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GameEventQuestRelationsLikeCpp {
+    creature_records_by_event_id: Vec<Vec<GameEventQuestRelationRecordLikeCpp>>,
+    gameobject_records_by_event_id: Vec<Vec<GameEventQuestRelationRecordLikeCpp>>,
+}
+
+#[allow(dead_code)]
+impl GameEventQuestRelationsLikeCpp {
+    pub fn from_game_event_max_entry_like_cpp(max_event_entry: Option<u32>) -> Self {
+        Self::from_game_event_sizing_like_cpp(
+            GameEventSizingLikeCpp::from_max_event_entry_like_cpp(max_event_entry),
+        )
+    }
+
+    fn from_game_event_sizing_like_cpp(sizing: GameEventSizingLikeCpp) -> Self {
+        Self {
+            creature_records_by_event_id: vec![Vec::new(); sizing.master_slot_count_like_cpp()],
+            gameobject_records_by_event_id: vec![Vec::new(); sizing.master_slot_count_like_cpp()],
+        }
+    }
+
+    pub fn creature_records_like_cpp(
+        &self,
+        event_id: u16,
+    ) -> Option<&[GameEventQuestRelationRecordLikeCpp]> {
+        self.creature_records_by_event_id
+            .get(usize::from(event_id))
+            .map(Vec::as_slice)
+    }
+
+    pub fn gameobject_records_like_cpp(
+        &self,
+        event_id: u16,
+    ) -> Option<&[GameEventQuestRelationRecordLikeCpp]> {
+        self.gameobject_records_by_event_id
+            .get(usize::from(event_id))
+            .map(Vec::as_slice)
+    }
+
+    pub(crate) fn push_creature_record_like_cpp(
+        &mut self,
+        event_id: u16,
+        record: GameEventQuestRelationRecordLikeCpp,
+    ) -> bool {
+        let Some(records) = self
+            .creature_records_by_event_id
+            .get_mut(usize::from(event_id))
+        else {
+            return false;
+        };
+        records.push(record);
+        true
+    }
+
+    pub(crate) fn push_gameobject_record_like_cpp(
+        &mut self,
+        event_id: u16,
+        record: GameEventQuestRelationRecordLikeCpp,
+    ) -> bool {
+        let Some(records) = self
+            .gameobject_records_by_event_id
+            .get_mut(usize::from(event_id))
+        else {
+            return false;
+        };
+        records.push(record);
+        true
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GameEventQuestRelationRowLikeCpp {
+    event_id: u8,
+    giver_id: u32,
+    quest_id: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GameEventNpcVendorRecordLikeCpp {
     pub spawn_id: SpawnId,
@@ -1127,6 +1226,7 @@ pub struct CanonicalSpawnMetadataLikeCpp {
     game_event_pools: GameEventPoolIdsLikeCpp,
     game_event_spawn_guids: GameEventSpawnGuidsLikeCpp,
     game_event_model_equip: GameEventModelEquipLikeCpp,
+    game_event_quest_relations: GameEventQuestRelationsLikeCpp,
     game_event_npc_flags: GameEventNpcFlagsLikeCpp,
     game_event_npc_vendors: GameEventNpcVendorsLikeCpp,
     game_event_vendor_cache_by_entry: BTreeMap<u32, Vec<GameEventNpcVendorRecordLikeCpp>>,
@@ -1150,6 +1250,7 @@ impl CanonicalSpawnMetadataLikeCpp {
             game_event_pools: GameEventPoolIdsLikeCpp::default(),
             game_event_spawn_guids: GameEventSpawnGuidsLikeCpp::default(),
             game_event_model_equip: GameEventModelEquipLikeCpp::default(),
+            game_event_quest_relations: GameEventQuestRelationsLikeCpp::default(),
             game_event_npc_flags: GameEventNpcFlagsLikeCpp::default(),
             game_event_npc_vendors: GameEventNpcVendorsLikeCpp::default(),
             game_event_vendor_cache_by_entry: BTreeMap::new(),
@@ -1214,6 +1315,14 @@ impl CanonicalSpawnMetadataLikeCpp {
         game_event_npc_flags: GameEventNpcFlagsLikeCpp,
     ) -> Self {
         self.game_event_npc_flags = game_event_npc_flags;
+        self
+    }
+
+    pub fn with_game_event_quest_relations_like_cpp(
+        mut self,
+        game_event_quest_relations: GameEventQuestRelationsLikeCpp,
+    ) -> Self {
+        self.game_event_quest_relations = game_event_quest_relations;
         self
     }
 
@@ -1587,6 +1696,24 @@ impl CanonicalSpawnMetadataLikeCpp {
         event_id: u16,
     ) -> Option<&[GameEventNpcFlagRecordLikeCpp]> {
         self.game_event_npc_flags.records_like_cpp(event_id)
+    }
+
+    #[allow(dead_code)]
+    pub fn game_event_creature_quests_like_cpp(
+        &self,
+        event_id: u16,
+    ) -> Option<&[GameEventQuestRelationRecordLikeCpp]> {
+        self.game_event_quest_relations
+            .creature_records_like_cpp(event_id)
+    }
+
+    #[allow(dead_code)]
+    pub fn game_event_gameobject_quests_like_cpp(
+        &self,
+        event_id: u16,
+    ) -> Option<&[GameEventQuestRelationRecordLikeCpp]> {
+        self.game_event_quest_relations
+            .gameobject_records_like_cpp(event_id)
     }
 
     #[allow(dead_code)]
@@ -2135,6 +2262,12 @@ pub async fn load_canonical_spawn_store_like_cpp(
     // does not mutate live maps, CreatureData/ObjectMgr baselines, display ids or equipment.
     let game_event_model_equip =
         load_game_event_model_equip_like_cpp(db, game_event_sizing, &mut report).await?;
+    // C++ `GameEventMgr::LoadFromDB` loads quest relation metadata from
+    // `game_event_creature_quest` and `game_event_gameobject_quest` before later
+    // condition/NPC flag/vendor metadata. This is read-only startup metadata for
+    // future `UpdateEventQuests`; no ObjectMgr quest maps or sessions are mutated.
+    let game_event_quest_relations =
+        load_game_event_quest_relations_like_cpp(db, game_event_sizing, &mut report).await?;
     // C++ `GameEventMgr::LoadFromDB` loads `game_event_npcflag` into
     // `mGameEventNPCFlags` for later `UpdateEventNPCFlags`/`GetNPCFlag`.
     // This slice stores only static metadata and pure read-only helpers.
@@ -2165,6 +2298,7 @@ pub async fn load_canonical_spawn_store_like_cpp(
             .with_game_event_pools_like_cpp(game_event_pools)
             .with_game_event_spawn_guids_like_cpp(game_event_spawn_guids)
             .with_game_event_model_equip_like_cpp(game_event_model_equip)
+            .with_game_event_quest_relations_like_cpp(game_event_quest_relations)
             .with_game_event_npc_flags_like_cpp(game_event_npc_flags)
             .with_game_event_npc_vendors_like_cpp(game_event_npc_vendors)
             .with_creature_runtime_rows_like_cpp(creature_runtime_rows)
@@ -2655,6 +2789,143 @@ fn apply_game_event_model_equip_row_like_cpp(
             model_id_prev: 0,
             equipment_id: row.equipment_id,
             equipment_id_prev: 0,
+        },
+    ) {
+        report.loaded += 1;
+    }
+}
+
+async fn load_game_event_quest_relations_like_cpp(
+    db: &WorldDatabase,
+    game_event_sizing: GameEventSizingLikeCpp,
+    report: &mut CanonicalSpawnStoreLoadReport,
+) -> Result<GameEventQuestRelationsLikeCpp> {
+    let mut quest_relations =
+        GameEventQuestRelationsLikeCpp::from_game_event_sizing_like_cpp(game_event_sizing);
+
+    load_game_event_creature_quest_relations_like_cpp(db, &mut quest_relations, report).await?;
+    load_game_event_gameobject_quest_relations_like_cpp(db, &mut quest_relations, report).await?;
+
+    report.game_event_quest_relations.creature.events_touched = quest_relations
+        .creature_records_by_event_id
+        .iter()
+        .filter(|records| !records.is_empty())
+        .count();
+    report.game_event_quest_relations.gameobject.events_touched = quest_relations
+        .gameobject_records_by_event_id
+        .iter()
+        .filter(|records| !records.is_empty())
+        .count();
+
+    Ok(quest_relations)
+}
+
+async fn load_game_event_creature_quest_relations_like_cpp(
+    db: &WorldDatabase,
+    quest_relations: &mut GameEventQuestRelationsLikeCpp,
+    report: &mut CanonicalSpawnStoreLoadReport,
+) -> Result<()> {
+    let stmt = db.prepare(WorldStatements::SEL_GAME_EVENT_CREATURE_QUESTS);
+    let mut result = db.query(&stmt).await?;
+    if result.is_empty() {
+        return Ok(());
+    }
+
+    loop {
+        let event_id: u8 = result.read(2);
+        apply_game_event_creature_quest_relation_row_like_cpp(
+            GameEventQuestRelationRowLikeCpp {
+                giver_id: result.read(0),
+                quest_id: result.read(1),
+                event_id,
+            },
+            quest_relations,
+            &mut report.game_event_quest_relations.creature,
+        );
+        if !result.next_row() {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+async fn load_game_event_gameobject_quest_relations_like_cpp(
+    db: &WorldDatabase,
+    quest_relations: &mut GameEventQuestRelationsLikeCpp,
+    report: &mut CanonicalSpawnStoreLoadReport,
+) -> Result<()> {
+    let stmt = db.prepare(WorldStatements::SEL_GAME_EVENT_GAMEOBJECT_QUESTS);
+    let mut result = db.query(&stmt).await?;
+    if result.is_empty() {
+        return Ok(());
+    }
+
+    loop {
+        let event_id: u8 = result.read(2);
+        apply_game_event_gameobject_quest_relation_row_like_cpp(
+            GameEventQuestRelationRowLikeCpp {
+                giver_id: result.read(0),
+                quest_id: result.read(1),
+                event_id,
+            },
+            quest_relations,
+            &mut report.game_event_quest_relations.gameobject,
+        );
+        if !result.next_row() {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+fn apply_game_event_creature_quest_relation_row_like_cpp(
+    row: GameEventQuestRelationRowLikeCpp,
+    quest_relations: &mut GameEventQuestRelationsLikeCpp,
+    report: &mut GameEventQuestRelationFamilyLoadReportLikeCpp,
+) {
+    report.rows += 1;
+    let event_id = u16::from(row.event_id);
+    if quest_relations
+        .creature_records_like_cpp(event_id)
+        .is_none()
+    {
+        report.skipped_out_of_range += 1;
+        return;
+    }
+
+    if quest_relations.push_creature_record_like_cpp(
+        event_id,
+        GameEventQuestRelationRecordLikeCpp {
+            giver_id: row.giver_id,
+            quest_id: row.quest_id,
+        },
+    ) {
+        report.loaded += 1;
+    }
+}
+
+fn apply_game_event_gameobject_quest_relation_row_like_cpp(
+    row: GameEventQuestRelationRowLikeCpp,
+    quest_relations: &mut GameEventQuestRelationsLikeCpp,
+    report: &mut GameEventQuestRelationFamilyLoadReportLikeCpp,
+) {
+    report.rows += 1;
+    let event_id = u16::from(row.event_id);
+    if quest_relations
+        .gameobject_records_like_cpp(event_id)
+        .is_none()
+    {
+        report.skipped_out_of_range += 1;
+        return;
+    }
+
+    if quest_relations.push_gameobject_record_like_cpp(
+        event_id,
+        GameEventQuestRelationRecordLikeCpp {
+            giver_id: row.giver_id,
+            quest_id: row.quest_id,
         },
     ) {
         report.loaded += 1;
@@ -5757,6 +6028,213 @@ mod tests {
         assert_eq!(metadata.game_event_npc_flag_mask_like_cpp(100, &[3]), 0x4);
         assert_eq!(metadata.game_event_npc_flag_mask_like_cpp(100, &[]), 0);
         assert_eq!(metadata.game_event_npc_flag_mask_like_cpp(999, &[1, 2]), 0);
+    }
+
+    fn game_event_quest_row(
+        event_id: u8,
+        giver_id: u32,
+        quest_id: u32,
+    ) -> GameEventQuestRelationRowLikeCpp {
+        GameEventQuestRelationRowLikeCpp {
+            event_id,
+            giver_id,
+            quest_id,
+        }
+    }
+
+    fn game_event_quest_row_from_raw_event_entry_get_uint8_like_cpp(
+        raw_event_entry: u16,
+        giver_id: u32,
+        quest_id: u32,
+    ) -> GameEventQuestRelationRowLikeCpp {
+        game_event_quest_row(raw_event_entry as u8, giver_id, quest_id)
+    }
+
+    #[test]
+    fn game_event_quest_sizing_accessors_and_out_of_range_like_cpp() {
+        let mut quests =
+            GameEventQuestRelationsLikeCpp::from_game_event_max_entry_like_cpp(Some(2));
+        let mut report = GameEventQuestRelationFamilyLoadReportLikeCpp::default();
+
+        apply_game_event_creature_quest_relation_row_like_cpp(
+            game_event_quest_row(2, 100, 7000),
+            &mut quests,
+            &mut report,
+        );
+        apply_game_event_creature_quest_relation_row_like_cpp(
+            game_event_quest_row(3, 101, 7001),
+            &mut quests,
+            &mut report,
+        );
+
+        assert_eq!(quests.creature_records_like_cpp(0).unwrap(), &[]);
+        assert_eq!(quests.creature_records_like_cpp(1).unwrap(), &[]);
+        assert_eq!(
+            quests.creature_records_like_cpp(2).unwrap()[0].quest_id,
+            7000
+        );
+        assert_eq!(quests.creature_records_like_cpp(3), None);
+        assert_eq!(report.rows, 2);
+        assert_eq!(report.loaded, 1);
+        assert_eq!(report.skipped_out_of_range, 1);
+    }
+
+    #[test]
+    fn game_event_quest_creature_preserves_order_duplicates_and_get_uint8_like_cpp() {
+        let mut quests =
+            GameEventQuestRelationsLikeCpp::from_game_event_max_entry_like_cpp(Some(2));
+        let mut report = GameEventQuestRelationFamilyLoadReportLikeCpp::default();
+
+        for row in [
+            game_event_quest_row(2, 100, 7000),
+            game_event_quest_row(2, 100, 7000),
+            game_event_quest_row(2, 101, 7001),
+            game_event_quest_row_from_raw_event_entry_get_uint8_like_cpp(258, 102, 7002),
+        ] {
+            apply_game_event_creature_quest_relation_row_like_cpp(row, &mut quests, &mut report);
+        }
+
+        let records = quests.creature_records_like_cpp(2).unwrap();
+        assert_eq!(
+            records,
+            &[
+                GameEventQuestRelationRecordLikeCpp {
+                    giver_id: 100,
+                    quest_id: 7000,
+                },
+                GameEventQuestRelationRecordLikeCpp {
+                    giver_id: 100,
+                    quest_id: 7000,
+                },
+                GameEventQuestRelationRecordLikeCpp {
+                    giver_id: 101,
+                    quest_id: 7001,
+                },
+                GameEventQuestRelationRecordLikeCpp {
+                    giver_id: 102,
+                    quest_id: 7002,
+                },
+            ]
+        );
+        assert_eq!(report.loaded, 4);
+        assert_eq!(report.skipped_out_of_range, 0);
+    }
+
+    #[test]
+    fn game_event_quest_gameobject_preserves_order_like_cpp() {
+        let mut quests =
+            GameEventQuestRelationsLikeCpp::from_game_event_max_entry_like_cpp(Some(1));
+        let mut report = GameEventQuestRelationFamilyLoadReportLikeCpp::default();
+
+        apply_game_event_gameobject_quest_relation_row_like_cpp(
+            game_event_quest_row(1, 200, 8000),
+            &mut quests,
+            &mut report,
+        );
+        apply_game_event_gameobject_quest_relation_row_like_cpp(
+            game_event_quest_row(1, 201, 8001),
+            &mut quests,
+            &mut report,
+        );
+
+        let records = quests.gameobject_records_like_cpp(1).unwrap();
+        assert_eq!(records[0].giver_id, 200);
+        assert_eq!(records[0].quest_id, 8000);
+        assert_eq!(records[1].giver_id, 201);
+        assert_eq!(records[1].quest_id, 8001);
+        assert_eq!(report.rows, 2);
+        assert_eq!(report.loaded, 2);
+    }
+
+    #[test]
+    fn game_event_quest_valid_event_accepts_high_quest_id_no_template_validation_like_cpp() {
+        let mut quests =
+            GameEventQuestRelationsLikeCpp::from_game_event_max_entry_like_cpp(Some(1));
+        let mut report = GameEventQuestRelationFamilyLoadReportLikeCpp::default();
+
+        apply_game_event_creature_quest_relation_row_like_cpp(
+            game_event_quest_row(1, 100, u32::MAX),
+            &mut quests,
+            &mut report,
+        );
+
+        let records = quests.creature_records_like_cpp(1).unwrap();
+        assert_eq!(records[0].quest_id, u32::MAX);
+        assert_eq!(report.loaded, 1);
+        assert_eq!(report.skipped_out_of_range, 0);
+    }
+
+    #[test]
+    fn game_event_quest_relation_events_touched_counts_non_empty_buckets_like_cpp() {
+        let mut quests =
+            GameEventQuestRelationsLikeCpp::from_game_event_max_entry_like_cpp(Some(3));
+        let mut report = CanonicalSpawnStoreLoadReport::default();
+
+        apply_game_event_creature_quest_relation_row_like_cpp(
+            game_event_quest_row(1, 100, 7000),
+            &mut quests,
+            &mut report.game_event_quest_relations.creature,
+        );
+        apply_game_event_creature_quest_relation_row_like_cpp(
+            game_event_quest_row(3, 101, 7001),
+            &mut quests,
+            &mut report.game_event_quest_relations.creature,
+        );
+        apply_game_event_gameobject_quest_relation_row_like_cpp(
+            game_event_quest_row(2, 200, 8000),
+            &mut quests,
+            &mut report.game_event_quest_relations.gameobject,
+        );
+
+        report.game_event_quest_relations.creature.events_touched = quests
+            .creature_records_by_event_id
+            .iter()
+            .filter(|records| !records.is_empty())
+            .count();
+        report.game_event_quest_relations.gameobject.events_touched = quests
+            .gameobject_records_by_event_id
+            .iter()
+            .filter(|records| !records.is_empty())
+            .count();
+
+        assert_eq!(report.game_event_quest_relations.creature.events_touched, 2);
+        assert_eq!(
+            report.game_event_quest_relations.gameobject.events_touched,
+            1
+        );
+    }
+
+    #[test]
+    fn game_event_quest_canonical_metadata_accessors_expose_both_families_like_cpp() {
+        let mut quests =
+            GameEventQuestRelationsLikeCpp::from_game_event_max_entry_like_cpp(Some(1));
+        assert!(quests.push_creature_record_like_cpp(
+            1,
+            GameEventQuestRelationRecordLikeCpp {
+                giver_id: 100,
+                quest_id: 7000,
+            },
+        ));
+        assert!(quests.push_gameobject_record_like_cpp(
+            1,
+            GameEventQuestRelationRecordLikeCpp {
+                giver_id: 200,
+                quest_id: 8000,
+            },
+        ));
+        let metadata = CanonicalSpawnMetadataLikeCpp::new(SpawnStore::new(), BTreeMap::new())
+            .with_game_event_quest_relations_like_cpp(quests);
+
+        assert_eq!(
+            metadata.game_event_creature_quests_like_cpp(1).unwrap()[0].giver_id,
+            100
+        );
+        assert_eq!(
+            metadata.game_event_gameobject_quests_like_cpp(1).unwrap()[0].giver_id,
+            200
+        );
+        assert_eq!(metadata.game_event_creature_quests_like_cpp(2), None);
+        assert_eq!(metadata.game_event_gameobject_quests_like_cpp(2), None);
     }
 
     fn game_event_npc_vendor_store(spawns: &[(SpawnId, u32)]) -> SpawnStore {
