@@ -1523,6 +1523,7 @@ async fn main() -> Result<()> {
                 &loaded_grid_creature_respawn_caches,
                 &active_event_ids,
                 &game_event_outcome,
+                false,
             )
         };
         debug!(
@@ -1541,6 +1542,13 @@ async fn main() -> Result<()> {
             side_effect_actions = side_effect_summary.actions.len(),
             spawn_actions = side_effect_summary.spawn_actions,
             unspawn_actions = side_effect_summary.unspawn_actions,
+            announce_event_actions = side_effect_summary.announce_event_actions,
+            announce_event_description_len_total =
+                side_effect_summary.announce_event_description_len_total,
+            announce_event_world_text_unimplemented =
+                side_effect_summary.announce_event_world_text_unimplemented,
+            announce_event_session_fanout_unimplemented =
+                side_effect_summary.announce_event_session_fanout_unimplemented,
             change_equip_or_model_actions = side_effect_summary.change_equip_or_model_actions,
             change_equip_or_model_records_seen =
                 side_effect_summary.change_equip_or_model_records_seen,
@@ -1600,7 +1608,7 @@ async fn main() -> Result<()> {
                 .reset_event_seasonal_quests_player_session_runtime_unimplemented,
             reset_event_seasonal_quests_character_db_statement_unimplemented = side_effect_summary
                 .reset_event_seasonal_quests_character_db_statement_unimplemented,
-            "Represented C++ GameEventMgr::StartSystem: cleared active events, ran first Update with isSystemInit=false, installed WUPDATE_EVENTS delay, and consumed safe represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel, UpdateEventQuests cache, UpdateWorldStates evidence, UpdateEventNPCFlags, UpdateEventNPCVendor cache, RunSmartAIScripts evidence, and ResetEventSeasonalQuests request evidence side effects; full ConditionMgr world-event runtime, quest packets/session gossip refresh, full ObjectMgr quest runtime, real WorldStateMgr/BattlemasterList HolidayWorldState lookup, SmartAI script dispatch, Player/session seasonal quest reset, and character DB seasonal reset statement execution remain pending"
+            "Represented C++ GameEventMgr::StartSystem: cleared active events, ran first Update with isSystemInit=false, installed WUPDATE_EVENTS delay, and consumed safe represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel, UpdateEventQuests cache, UpdateWorldStates evidence, UpdateEventNPCFlags, UpdateEventNPCVendor cache, RunSmartAIScripts evidence, ResetEventSeasonalQuests request evidence, and represented announcement evidence-only side effects; real SendWorldText/session fanout, full ConditionMgr world-event runtime, quest packets/session gossip refresh, full ObjectMgr quest runtime, real WorldStateMgr/BattlemasterList HolidayWorldState lookup, SmartAI script dispatch, Player/session seasonal quest reset, and character DB seasonal reset statement execution remain pending"
         );
         CanonicalGameEventSchedulerLikeCpp::start_system(
             game_event_outcome.next_update_delay_millis,
@@ -3504,6 +3512,12 @@ fn represented_game_event_world_conditions_met_like_cpp(_event_id: u16) -> bool 
 enum GameEventLiveUpdateActionLikeCpp {
     Spawn(i16),
     Unspawn(i16),
+    AnnounceEvent {
+        event_id: u16,
+        description_len: usize,
+        announce: u8,
+        config_event_announce: bool,
+    },
     ChangeEquipOrModel {
         event_id: u16,
         activate: bool,
@@ -3538,6 +3552,10 @@ struct GameEventLiveUpdateSideEffectSummaryLikeCpp {
     actions: Vec<GameEventLiveUpdateActionLikeCpp>,
     spawn_actions: usize,
     unspawn_actions: usize,
+    announce_event_actions: usize,
+    announce_event_description_len_total: usize,
+    announce_event_world_text_unimplemented: usize,
+    announce_event_session_fanout_unimplemented: usize,
     change_equip_or_model_actions: usize,
     change_equip_or_model_records_seen: usize,
     change_equip_or_model_records_applied: usize,
@@ -3602,9 +3620,14 @@ fn game_event_signed_id_like_cpp(event_id: u16) -> i16 {
     i16::try_from(event_id).unwrap_or(i16::MAX)
 }
 
+fn should_announce_game_event_like_cpp(announce: u8, config_event_announce: bool) -> bool {
+    announce == 1 || (announce == 2 && config_event_announce)
+}
+
 fn game_event_live_update_actions_like_cpp(
     canonical_spawn_metadata: &spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
     outcome: &spawn_store_loader::GameEventUpdateOutcomeLikeCpp,
+    config_event_announce: bool,
 ) -> Vec<GameEventLiveUpdateActionLikeCpp> {
     let mut actions = Vec::new();
     for &event_id in &outcome.negative_spawn_event_ids {
@@ -3614,6 +3637,17 @@ fn game_event_live_update_actions_like_cpp(
         if let spawn_store_loader::GameEventStartOutcomeLikeCpp::Started(summary) = start_outcome {
             if summary.apply_new_event_requested {
                 let event_id = game_event_signed_id_like_cpp(summary.event_id);
+                if let Some(event) = canonical_spawn_metadata.game_event_like_cpp(summary.event_id)
+                {
+                    if should_announce_game_event_like_cpp(event.announce, config_event_announce) {
+                        actions.push(GameEventLiveUpdateActionLikeCpp::AnnounceEvent {
+                            event_id: summary.event_id,
+                            description_len: event.description.len(),
+                            announce: event.announce,
+                            config_event_announce,
+                        });
+                    }
+                }
                 actions.push(GameEventLiveUpdateActionLikeCpp::Spawn(event_id));
                 actions.push(GameEventLiveUpdateActionLikeCpp::Unspawn(-event_id));
                 actions.push(GameEventLiveUpdateActionLikeCpp::ChangeEquipOrModel {
@@ -3894,14 +3928,30 @@ fn consume_game_event_live_update_side_effects_like_cpp(
     loaded_grid_creature_respawn_caches: &LoadedGridCreatureRespawnCachesLikeCpp,
     active_event_ids: &[u16],
     outcome: &spawn_store_loader::GameEventUpdateOutcomeLikeCpp,
+    config_event_announce: bool,
 ) -> GameEventLiveUpdateSideEffectSummaryLikeCpp {
-    let actions = game_event_live_update_actions_like_cpp(canonical_spawn_metadata, outcome);
+    let actions = game_event_live_update_actions_like_cpp(
+        canonical_spawn_metadata,
+        outcome,
+        config_event_announce,
+    );
     let mut summary = GameEventLiveUpdateSideEffectSummaryLikeCpp {
         actions,
         ..GameEventLiveUpdateSideEffectSummaryLikeCpp::default()
     };
     for action in summary.actions.iter().copied() {
         match action {
+            GameEventLiveUpdateActionLikeCpp::AnnounceEvent {
+                event_id: _,
+                description_len,
+                announce: _,
+                config_event_announce: _,
+            } => {
+                summary.announce_event_actions += 1;
+                summary.announce_event_description_len_total += description_len;
+                summary.announce_event_world_text_unimplemented += 1;
+                summary.announce_event_session_fanout_unimplemented += 1;
+            }
             GameEventLiveUpdateActionLikeCpp::Spawn(event_id) => {
                 let _ = game_event_spawn_for_event_like_cpp(
                     manager,
@@ -5000,6 +5050,7 @@ fn spawn_canonical_map_update_loop(
                         &loaded_grid_creature_respawn_caches,
                         &active_event_ids,
                         &game_event_outcome,
+                        false,
                     )
                 };
                 debug!(
@@ -5021,6 +5072,13 @@ fn spawn_canonical_map_update_loop(
                     side_effect_actions = side_effect_summary.actions.len(),
                     spawn_actions = side_effect_summary.spawn_actions,
                     unspawn_actions = side_effect_summary.unspawn_actions,
+                    announce_event_actions = side_effect_summary.announce_event_actions,
+                    announce_event_description_len_total =
+                        side_effect_summary.announce_event_description_len_total,
+                    announce_event_world_text_unimplemented =
+                        side_effect_summary.announce_event_world_text_unimplemented,
+                    announce_event_session_fanout_unimplemented =
+                        side_effect_summary.announce_event_session_fanout_unimplemented,
                     change_equip_or_model_actions =
                         side_effect_summary.change_equip_or_model_actions,
                     change_equip_or_model_records_seen =
@@ -5094,7 +5152,7 @@ fn spawn_canonical_map_update_loop(
                     reset_event_seasonal_quests_character_db_statement_unimplemented =
                         side_effect_summary
                             .reset_event_seasonal_quests_character_db_statement_unimplemented,
-                    "C++ WUPDATE_EVENTS represented timer fired; updated canonical GameEvent metadata and consumed represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel, UpdateEventQuests cache, UpdateWorldStates evidence, UpdateEventNPCFlags, UpdateEventNPCVendor cache, RunSmartAIScripts evidence, and ResetEventSeasonalQuests request evidence side effects; ConditionMgr world-event rows, DB state writes, announcements, quest packets/session gossip refresh, full ObjectMgr quest runtime, real WorldStateMgr/BattlemasterList HolidayWorldState lookup, SmartAI script dispatch, Player/session seasonal quest reset, and character DB seasonal reset statement execution remain pending"
+                    "C++ WUPDATE_EVENTS represented timer fired; updated canonical GameEvent metadata and consumed represented GameEventSpawn/GameEventUnspawn plus bounded ChangeEquipOrModel, UpdateEventQuests cache, UpdateWorldStates evidence, UpdateEventNPCFlags, UpdateEventNPCVendor cache, RunSmartAIScripts evidence, ResetEventSeasonalQuests request evidence, and represented announcement evidence-only side effects; ConditionMgr world-event rows, DB state writes, real SendWorldText/session fanout, quest packets/session gossip refresh, full ObjectMgr quest runtime, real WorldStateMgr/BattlemasterList HolidayWorldState lookup, SmartAI script dispatch, Player/session seasonal quest reset, and character DB seasonal reset statement execution remain pending"
                 );
             }
 
@@ -8336,6 +8394,7 @@ mmap.enablePathFinding = 0
             &empty_loaded_grid_creature_respawn_caches_like_cpp(),
             &[1],
             &outcome,
+            false,
         );
 
         assert!(
@@ -8372,6 +8431,7 @@ mmap.enablePathFinding = 0
             &empty_loaded_grid_creature_respawn_caches_like_cpp(),
             &[1],
             &outcome,
+            false,
         );
 
         assert_eq!(summary.update_world_states_actions, 1);
@@ -8392,12 +8452,159 @@ mmap.enablePathFinding = 0
             &empty_loaded_grid_creature_respawn_caches_like_cpp(),
             &[],
             &outcome,
+            false,
         );
 
         assert_eq!(summary.update_world_states_actions, 1);
         assert_eq!(summary.update_world_states_missing_event, 1);
         assert_eq!(summary.update_world_states_no_holiday, 0);
         assert_eq!(summary.update_world_states_holiday_lookup_unrepresented, 0);
+    }
+
+    #[test]
+    fn game_event_announce_start_order_before_spawn_and_stop_has_no_announce_like_cpp() {
+        let metadata = game_event_world_state_metadata_like_cpp(
+            3,
+            &[spawn_store_loader::GameEventDataLikeCpp {
+                event_id: 2,
+                description: "Darkmoon Faire".to_string(),
+                announce: 1,
+                ..spawn_store_loader::GameEventDataLikeCpp::default()
+            }],
+        );
+        let mut outcome = game_event_world_state_start_outcome_like_cpp(2);
+        outcome.stop_outcomes = vec![spawn_store_loader::GameEventStopOutcomeLikeCpp::Stopped(
+            spawn_store_loader::GameEventStopSummaryLikeCpp {
+                event_id: 3,
+                state_before_raw: 0,
+                state_after_raw: 0,
+                active_removed: true,
+                active_was_present: true,
+                unapply_event_requested: true,
+                serverwide: false,
+                condition_reset_requested: false,
+                delete_world_event_state_requested: false,
+                delete_condition_saves_requested: false,
+            },
+        )];
+
+        let actions = game_event_live_update_actions_like_cpp(&metadata, &outcome, false);
+
+        assert_eq!(
+            actions.first(),
+            Some(&GameEventLiveUpdateActionLikeCpp::AnnounceEvent {
+                event_id: 2,
+                description_len: "Darkmoon Faire".len(),
+                announce: 1,
+                config_event_announce: false,
+            })
+        );
+        assert_eq!(
+            actions.get(1),
+            Some(&GameEventLiveUpdateActionLikeCpp::Spawn(2))
+        );
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|action| matches!(
+                    action,
+                    GameEventLiveUpdateActionLikeCpp::AnnounceEvent { .. }
+                ))
+                .count(),
+            1
+        );
+        assert!(matches!(
+            actions.iter().rev().take(8).last(),
+            Some(GameEventLiveUpdateActionLikeCpp::RunSmartAIScripts {
+                event_id: 3,
+                activate: false
+            })
+        ));
+    }
+
+    #[test]
+    fn game_event_announce_gating_matches_cpp_config_like_cpp() {
+        let mut event = spawn_store_loader::GameEventDataLikeCpp {
+            event_id: 1,
+            description: "config gated".to_string(),
+            ..spawn_store_loader::GameEventDataLikeCpp::default()
+        };
+        let outcome = game_event_world_state_start_outcome_like_cpp(1);
+
+        event.announce = 1;
+        let metadata = game_event_world_state_metadata_like_cpp(1, &[event.clone()]);
+        assert!(matches!(
+            game_event_live_update_actions_like_cpp(&metadata, &outcome, false).first(),
+            Some(GameEventLiveUpdateActionLikeCpp::AnnounceEvent { announce: 1, .. })
+        ));
+
+        event.announce = 2;
+        let metadata = game_event_world_state_metadata_like_cpp(1, &[event.clone()]);
+        assert!(
+            !game_event_live_update_actions_like_cpp(&metadata, &outcome, false)
+                .iter()
+                .any(|action| matches!(
+                    action,
+                    GameEventLiveUpdateActionLikeCpp::AnnounceEvent { .. }
+                ))
+        );
+        assert!(matches!(
+            game_event_live_update_actions_like_cpp(&metadata, &outcome, true).first(),
+            Some(GameEventLiveUpdateActionLikeCpp::AnnounceEvent {
+                announce: 2,
+                config_event_announce: true,
+                ..
+            })
+        ));
+
+        for announce in [0_u8, 3_u8] {
+            event.announce = announce;
+            let metadata = game_event_world_state_metadata_like_cpp(1, &[event.clone()]);
+            assert!(
+                !game_event_live_update_actions_like_cpp(&metadata, &outcome, true)
+                    .iter()
+                    .any(|action| matches!(
+                        action,
+                        GameEventLiveUpdateActionLikeCpp::AnnounceEvent { .. }
+                    ))
+            );
+        }
+    }
+
+    #[test]
+    fn game_event_announce_consumption_records_evidence_only_like_cpp() {
+        let mut manager = wow_map::MapManager::default();
+        let mut metadata = game_event_world_state_metadata_like_cpp(
+            1,
+            &[spawn_store_loader::GameEventDataLikeCpp {
+                event_id: 1,
+                description: "Love is in the Air".to_string(),
+                announce: 2,
+                ..spawn_store_loader::GameEventDataLikeCpp::default()
+            }],
+        );
+        let outcome = game_event_world_state_start_outcome_like_cpp(1);
+
+        let summary = consume_game_event_live_update_side_effects_like_cpp(
+            &mut manager,
+            &mut metadata,
+            &empty_loaded_grid_creature_respawn_caches_like_cpp(),
+            &[1],
+            &outcome,
+            true,
+        );
+
+        assert_eq!(summary.announce_event_actions, 1);
+        assert_eq!(
+            summary.announce_event_description_len_total,
+            "Love is in the Air".len()
+        );
+        assert_eq!(summary.announce_event_world_text_unimplemented, 1);
+        assert_eq!(summary.announce_event_session_fanout_unimplemented, 1);
+        assert_eq!(summary.spawn_actions, 1);
+        let mut maps_visited = 0usize;
+        manager.do_for_all_maps(|_| maps_visited += 1);
+        assert_eq!(maps_visited, 0);
     }
 
     #[test]
@@ -8456,7 +8663,7 @@ mmap.enablePathFinding = 0
         };
 
         assert_eq!(
-            game_event_live_update_actions_like_cpp(&metadata, &outcome),
+            game_event_live_update_actions_like_cpp(&metadata, &outcome, false),
             vec![
                 GameEventLiveUpdateActionLikeCpp::Spawn(-1),
                 GameEventLiveUpdateActionLikeCpp::Spawn(2),
@@ -8553,6 +8760,7 @@ mmap.enablePathFinding = 0
             &empty_loaded_grid_creature_respawn_caches_like_cpp(),
             &[7],
             &outcome,
+            false,
         );
 
         assert_eq!(summary.run_smart_ai_actions, 1);
@@ -8583,6 +8791,7 @@ mmap.enablePathFinding = 0
             &empty_loaded_grid_creature_respawn_caches_like_cpp(),
             &[7],
             &outcome,
+            false,
         );
 
         assert_eq!(summary.reset_event_seasonal_quests_actions, 1);
