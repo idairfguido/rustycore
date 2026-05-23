@@ -139,8 +139,14 @@ pub enum CharStatements {
     DEL_GAME_EVENT_SAVE,
     /// INSERT INTO game_event_save (eventEntry, state, next_start) VALUES (?, ?, ?)
     INS_GAME_EVENT_SAVE,
+    /// SELECT eventEntry, condition_id, done FROM game_event_condition_save
+    SEL_GAME_EVENT_CONDITION_SAVES,
     /// DELETE FROM game_event_condition_save WHERE eventEntry = ?
     DEL_ALL_GAME_EVENT_CONDITION_SAVE,
+    /// DELETE FROM game_event_condition_save WHERE eventEntry = ? AND condition_id = ?
+    DEL_GAME_EVENT_CONDITION_SAVE,
+    /// INSERT INTO game_event_condition_save (eventEntry, condition_id, done) VALUES (?, ?, ?)
+    INS_GAME_EVENT_CONDITION_SAVE,
 
     // Quest status
     SEL_CHAR_QUEST_STATUS,
@@ -385,8 +391,17 @@ impl StatementDef for CharStatements {
             Self::INS_GAME_EVENT_SAVE => {
                 "INSERT INTO game_event_save (eventEntry, state, next_start) VALUES (?, ?, ?)"
             }
+            Self::SEL_GAME_EVENT_CONDITION_SAVES => {
+                "SELECT eventEntry, condition_id, done FROM game_event_condition_save"
+            }
             Self::DEL_ALL_GAME_EVENT_CONDITION_SAVE => {
                 "DELETE FROM game_event_condition_save WHERE eventEntry = ?"
+            }
+            Self::DEL_GAME_EVENT_CONDITION_SAVE => {
+                "DELETE FROM game_event_condition_save WHERE eventEntry = ? AND condition_id = ?"
+            }
+            Self::INS_GAME_EVENT_CONDITION_SAVE => {
+                "INSERT INTO game_event_condition_save (eventEntry, condition_id, done) VALUES (?, ?, ?)"
             }
             Self::UPD_CHAR_XP => "UPDATE characters SET xp = ? WHERE guid = ?",
             Self::UPD_CHAR_LEVEL => "UPDATE characters SET level = ?, xp = ? WHERE guid = ?",
@@ -617,7 +632,22 @@ mod tests {
         assert!(!CharStatements::DEL_GAME_EVENT_SAVE.sql().is_empty());
         assert!(!CharStatements::INS_GAME_EVENT_SAVE.sql().is_empty());
         assert!(
+            !CharStatements::SEL_GAME_EVENT_CONDITION_SAVES
+                .sql()
+                .is_empty()
+        );
+        assert!(
             !CharStatements::DEL_ALL_GAME_EVENT_CONDITION_SAVE
+                .sql()
+                .is_empty()
+        );
+        assert!(
+            !CharStatements::DEL_GAME_EVENT_CONDITION_SAVE
+                .sql()
+                .is_empty()
+        );
+        assert!(
+            !CharStatements::INS_GAME_EVENT_CONDITION_SAVE
                 .sql()
                 .is_empty()
         );
@@ -634,8 +664,20 @@ mod tests {
             "INSERT INTO game_event_save (eventEntry, state, next_start) VALUES (?, ?, ?)"
         );
         assert_eq!(
+            CharStatements::SEL_GAME_EVENT_CONDITION_SAVES.sql(),
+            "SELECT eventEntry, condition_id, done FROM game_event_condition_save"
+        );
+        assert_eq!(
             CharStatements::DEL_ALL_GAME_EVENT_CONDITION_SAVE.sql(),
             "DELETE FROM game_event_condition_save WHERE eventEntry = ?"
+        );
+        assert_eq!(
+            CharStatements::DEL_GAME_EVENT_CONDITION_SAVE.sql(),
+            "DELETE FROM game_event_condition_save WHERE eventEntry = ? AND condition_id = ?"
+        );
+        assert_eq!(
+            CharStatements::INS_GAME_EVENT_CONDITION_SAVE.sql(),
+            "INSERT INTO game_event_condition_save (eventEntry, condition_id, done) VALUES (?, ?, ?)"
         );
     }
 
@@ -674,6 +716,21 @@ mod tests {
         );
         assert!(
             CharStatements::DEL_ALL_GAME_EVENT_CONDITION_SAVE
+                .sql()
+                .contains("game_event_condition_save")
+        );
+        assert!(
+            CharStatements::SEL_GAME_EVENT_CONDITION_SAVES
+                .sql()
+                .contains("game_event_condition_save")
+        );
+        assert!(
+            CharStatements::DEL_GAME_EVENT_CONDITION_SAVE
+                .sql()
+                .contains("game_event_condition_save")
+        );
+        assert!(
+            CharStatements::INS_GAME_EVENT_CONDITION_SAVE
                 .sql()
                 .contains("game_event_condition_save")
         );
@@ -923,6 +980,27 @@ mod tests {
         assert_eq!(
             CharStatements::DEL_ALL_RESPAWNS.sql().matches('?').count(),
             2
+        );
+        assert_eq!(
+            CharStatements::SEL_GAME_EVENT_CONDITION_SAVES
+                .sql()
+                .matches('?')
+                .count(),
+            0
+        );
+        assert_eq!(
+            CharStatements::DEL_GAME_EVENT_CONDITION_SAVE
+                .sql()
+                .matches('?')
+                .count(),
+            2
+        );
+        assert_eq!(
+            CharStatements::INS_GAME_EVENT_CONDITION_SAVE
+                .sql()
+                .matches('?')
+                .count(),
+            3
         );
     }
 }

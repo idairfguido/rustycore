@@ -795,6 +795,7 @@ async fn main() -> Result<()> {
     let (canonical_spawn_metadata, canonical_spawn_report) =
         spawn_store_loader::load_canonical_spawn_store_like_cpp(
             world_db.as_ref(),
+            &char_db,
             &map_store,
             &map_difficulty_store,
             &spawn_group_store,
