@@ -1833,6 +1833,8 @@ pub struct WorldSession {
     pub(crate) seasonal_quest_changed_like_cpp: bool,
     /// Bridge for quest completed unique-bit state loaded before the canonical Player snapshot exists.
     pub(crate) represented_quest_completed_bits_like_cpp: BTreeSet<u32>,
+    /// Session-local evidence for represented `ScriptMgr::OnQuestAcknowledgeAutoAccept` calls.
+    pub(crate) represented_auto_accept_acknowledged_quests_like_cpp: Vec<u32>,
 
     // ── Loot ──────────────────────────────────────────────────────
     /// Active loot windows keyed by creature GUID.
@@ -2512,6 +2514,7 @@ impl WorldSession {
             seasonal_quests_like_cpp: BTreeMap::new(),
             seasonal_quest_changed_like_cpp: false,
             represented_quest_completed_bits_like_cpp: BTreeSet::new(),
+            represented_auto_accept_acknowledged_quests_like_cpp: Vec::new(),
             active_spell_cast: None,
             last_spell_cast_time: None,
             last_spell_cast_time_per_spell: HashMap::new(),
@@ -8808,6 +8811,9 @@ impl WorldSession {
             }
             ClientOpcodes::QuestGiverStatusTrackedQuery => {
                 self.handle_quest_giver_status_tracked_query(pkt).await;
+            }
+            ClientOpcodes::QuestGiverCloseQuest => {
+                self.handle_quest_giver_close_quest(pkt).await;
             }
             ClientOpcodes::SwapInvItem => {
                 match wow_packet::packets::item::SwapInvItem::read(&mut pkt) {

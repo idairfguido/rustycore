@@ -114,6 +114,15 @@ inventory::submit! {
     }
 }
 
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::QuestGiverCloseQuest,
+        status: SessionStatus::LoggedIn,
+        processing: PacketProcessing::Inplace,
+        handler_name: "handle_quest_giver_close_quest",
+    }
+}
+
 // ── Handler implementations ──────────────────────────────────────────────────
 
 impl WorldSession {
@@ -295,6 +304,57 @@ impl WorldSession {
             skill_points: 0,
             use_quest_reward_currency: false,
         });
+    }
+
+    /// CMSG_QUEST_GIVER_CLOSE_QUEST — acknowledged client close for auto-accept quest flow.
+    /// C++ ref: `WorldSession::HandleQuestgiverCloseQuest`, `QuestHandler.cpp:591-601`.
+    /// Represented seam only: records local `ScriptMgr::OnQuestAcknowledgeAutoAccept` evidence.
+    pub async fn handle_quest_giver_close_quest(&mut self, mut pkt: wow_packet::WorldPacket) {
+        let quest_id = match pkt.read_uint32() {
+            Ok(quest_id) => quest_id,
+            Err(error) => {
+                warn!(
+                    account = self.account_id,
+                    ?error,
+                    "QuestGiverCloseQuest: failed to read QuestID"
+                );
+                return;
+            }
+        };
+
+        let _ = self.acknowledge_auto_accept_quest_like_cpp(quest_id);
+    }
+
+    pub(crate) fn acknowledge_auto_accept_quest_like_cpp(&mut self, quest_id: u32) -> bool {
+        // C++ order: FindQuestSlot(QuestID), then GetQuestTemplate(QuestID), then
+        // ScriptMgr::OnQuestAcknowledgeAutoAccept(player, quest).
+        if !self.player_quests.contains_key(&quest_id) {
+            debug!(
+                account = self.account_id,
+                quest_id, "QuestGiverCloseQuest: represented active quest log miss"
+            );
+            return false;
+        }
+
+        let Some(quest_store) = &self.quest_store else {
+            debug!(
+                account = self.account_id,
+                quest_id, "QuestGiverCloseQuest: missing represented quest store"
+            );
+            return false;
+        };
+
+        if quest_store.get(quest_id).is_none() {
+            debug!(
+                account = self.account_id,
+                quest_id, "QuestGiverCloseQuest: represented quest template miss"
+            );
+            return false;
+        }
+
+        self.represented_auto_accept_acknowledged_quests_like_cpp
+            .push(quest_id);
+        true
     }
 
     /// CMSG_QUEST_LOG_REMOVE_QUEST — player abandons a quest from the quest log.
@@ -1351,6 +1411,24 @@ mod tests {
         session.handle_quest_giver_status_query(pkt).await;
     }
 
+    fn add_active_quest(session: &mut WorldSession, quest_id: u32) {
+        session.player_quests.insert(
+            quest_id,
+            PlayerQuestStatus {
+                quest_id,
+                status: 1,
+                explored: false,
+                objective_counts: Vec::new(),
+            },
+        );
+    }
+
+    async fn run_close_quest(session: &mut WorldSession, quest_id: u32) {
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_uint32(quest_id);
+        session.handle_quest_giver_close_quest(pkt).await;
+    }
+
     fn recv_status(send_rx: &flume::Receiver<Vec<u8>>) -> (ObjectGuid, u64) {
         let bytes = send_rx.try_recv().expect("quest giver status packet");
         assert_eq!(
@@ -1625,6 +1703,82 @@ mod tests {
             recv_status_multiple(&send_rx),
             vec![(accepted_guid, quest_giver_status::AVAILABLE)]
         );
+    }
+
+    #[tokio::test]
+    async fn quest_giver_close_active_existing_template_records_acknowledge_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        session.set_quest_store(Arc::new(store_with_quests(&[5901])));
+        add_active_quest(&mut session, 5901);
+
+        run_close_quest(&mut session, 5901).await;
+
+        assert_eq!(
+            session.represented_auto_accept_acknowledged_quests_like_cpp,
+            vec![5901]
+        );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_giver_close_missing_active_quest_records_no_acknowledge_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        session.set_quest_store(Arc::new(store_with_quests(&[5902])));
+
+        run_close_quest(&mut session, 5902).await;
+
+        assert!(
+            session
+                .represented_auto_accept_acknowledged_quests_like_cpp
+                .is_empty()
+        );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_giver_close_missing_template_records_no_acknowledge_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        session.set_quest_store(Arc::new(store_with_quests(&[5904])));
+        add_active_quest(&mut session, 5903);
+
+        run_close_quest(&mut session, 5903).await;
+
+        assert!(
+            session
+                .represented_auto_accept_acknowledged_quests_like_cpp
+                .is_empty()
+        );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_giver_close_short_packet_records_no_acknowledge_and_sends_no_packet_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        session.set_quest_store(Arc::new(store_with_quests(&[5905])));
+        add_active_quest(&mut session, 5905);
+
+        session
+            .handle_quest_giver_close_quest(WorldPacket::from_bytes(&[0x05, 0x17]))
+            .await;
+
+        assert!(
+            session
+                .represented_auto_accept_acknowledged_quests_like_cpp
+                .is_empty()
+        );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn quest_giver_close_inventory_registration_matches_dispatch_contract_like_cpp() {
+        let entry = inventory::iter::<PacketHandlerEntry>
+            .into_iter()
+            .find(|entry| entry.opcode == ClientOpcodes::QuestGiverCloseQuest)
+            .expect("QuestGiverCloseQuest handler registration");
+
+        assert_eq!(entry.status, SessionStatus::LoggedIn);
+        assert_eq!(entry.processing, PacketProcessing::Inplace);
+        assert_eq!(entry.handler_name, "handle_quest_giver_close_quest");
     }
 }
 
