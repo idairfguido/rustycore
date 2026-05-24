@@ -126,6 +126,14 @@ pub struct QuestTemplate {
     /// Previous quest that must be completed first. 0 = none.
     /// Positive = must be rewarded. Negative = must be active (Incomplete).
     pub prev_quest_id: i32,
+    /// C++ `Quest::GetRequiredMinRepFaction()` from `quest_template_addon`.
+    pub required_min_rep_faction: u32,
+    /// C++ `Quest::GetRequiredMinRepValue()` from `quest_template_addon`.
+    pub required_min_rep_value: i32,
+    /// C++ `Quest::GetRequiredMaxRepFaction()` from `quest_template_addon`.
+    pub required_max_rep_faction: u32,
+    /// C++ `Quest::GetRequiredMaxRepValue()` from `quest_template_addon`.
+    pub required_max_rep_value: i32,
     /// Optional reward items player can choose (up to 6). (item_id, quantity).
     /// item_id == 0 means that slot is empty.
     pub reward_choice_items: [(u32, u32); QUEST_REWARD_CHOICES_COUNT],
@@ -630,7 +638,7 @@ pub async fn load_quests(db: &WorldDatabase) -> Result<QuestStore> {
             let id: u32 = result.read(0);
             let (flags, special_flags) = normalize_quest_flags_like_cpp(
                 result.try_read::<u32>(19).unwrap_or(0),
-                result.try_read::<u32>(59).unwrap_or(0),
+                result.try_read::<u32>(63).unwrap_or(0),
             );
             let quest = QuestTemplate {
                 id,
@@ -692,15 +700,11 @@ pub async fn load_quests(db: &WorldDatabase) -> Result<QuestStore> {
                 allowable_classes: result.try_read::<u32>(44).unwrap_or(0),
                 max_level: result.try_read::<u8>(45).unwrap_or(0),
                 prev_quest_id: result.try_read::<i32>(46).unwrap_or(0),
+                required_min_rep_faction: result.try_read::<u32>(47).unwrap_or(0),
+                required_min_rep_value: result.try_read::<i32>(48).unwrap_or(0),
+                required_max_rep_faction: result.try_read::<u32>(49).unwrap_or(0),
+                required_max_rep_value: result.try_read::<i32>(50).unwrap_or(0),
                 reward_choice_items: [
-                    (
-                        result.try_read::<u32>(47).unwrap_or(0),
-                        result.try_read::<u32>(48).unwrap_or(0),
-                    ),
-                    (
-                        result.try_read::<u32>(49).unwrap_or(0),
-                        result.try_read::<u32>(50).unwrap_or(0),
-                    ),
                     (
                         result.try_read::<u32>(51).unwrap_or(0),
                         result.try_read::<u32>(52).unwrap_or(0),
@@ -716,6 +720,14 @@ pub async fn load_quests(db: &WorldDatabase) -> Result<QuestStore> {
                     (
                         result.try_read::<u32>(57).unwrap_or(0),
                         result.try_read::<u32>(58).unwrap_or(0),
+                    ),
+                    (
+                        result.try_read::<u32>(59).unwrap_or(0),
+                        result.try_read::<u32>(60).unwrap_or(0),
+                    ),
+                    (
+                        result.try_read::<u32>(61).unwrap_or(0),
+                        result.try_read::<u32>(62).unwrap_or(0),
                     ),
                 ],
                 objectives: Vec::new(), // filled next
@@ -922,6 +934,10 @@ mod tests {
             allowable_classes: 0,
             max_level: 0,
             prev_quest_id: 0,
+            required_min_rep_faction: 0,
+            required_min_rep_value: 0,
+            required_max_rep_faction: 0,
+            required_max_rep_value: 0,
             reward_choice_items: [(0, 0); QUEST_REWARD_CHOICES_COUNT],
         }
     }

@@ -7580,6 +7580,7 @@ mod tests {
             rewarded_quests: Default::default(),
             daily_quests_completed: Default::default(),
             df_quests: Default::default(),
+            reputation_standings: Vec::new(),
             inventory_item_counts: Default::default(),
             party_member_phase_states: Default::default(),
             player_name: format!("Player{}", guid.counter()),
@@ -7650,6 +7651,10 @@ mod tests {
             allowable_classes: 0,
             max_level: 0,
             prev_quest_id: 0,
+            required_min_rep_faction: 0,
+            required_min_rep_value: 0,
+            required_max_rep_faction: 0,
+            required_max_rep_value: 0,
             reward_choice_items: [(0, 0); 6],
         }
     }

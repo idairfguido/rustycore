@@ -186,6 +186,8 @@ pub(crate) enum RepresentedPushQuestToPartyOutcomeReasonLikeCpp {
     ReceiverSatisfyQuestMaxLevelHighLevel,
     ReceiverSatisfyQuestClassWrongClass,
     ReceiverSatisfyQuestRaceWrongRace,
+    ReceiverSatisfyQuestReputationLowFaction,
+    ReceiverSatisfyQuestReputationHighFaction,
     ReceiverEligibilityUnrepresented,
 }
 
@@ -5900,6 +5902,33 @@ impl WorldSession {
             })
     }
 
+    pub(crate) fn canonical_player_reputation_standings_snapshot_like_cpp(
+        &self,
+    ) -> Vec<(u32, i32)> {
+        let Some(guid) = self.player_guid() else {
+            return Vec::new();
+        };
+        let Some(manager) = self.canonical_map_manager.as_ref() else {
+            return Vec::new();
+        };
+        let Ok(manager) = manager.lock() else {
+            return Vec::new();
+        };
+        let Some(map) = manager.find_map(u32::from(self.player_map_id_like_cpp()), 0) else {
+            return Vec::new();
+        };
+        let Some(player) = map.map().get_typed_player(guid) else {
+            return Vec::new();
+        };
+
+        player
+            .gameplay_state()
+            .reputations
+            .iter()
+            .map(|record| (record.faction_id, record.standing))
+            .collect()
+    }
+
     /// Resolve an inventory item by (bag, slot) following C++ Player::GetItemByPos.
     ///
     /// - `bag == INVENTORY_SLOT_BAG_0`       → top-level direct inventory (buyback excluded).
@@ -7305,6 +7334,8 @@ impl WorldSession {
                 rewarded_quests: self.rewarded_quests.clone(),
                 daily_quests_completed: self.daily_quests_completed_like_cpp.clone(),
                 df_quests: self.df_quests_like_cpp.clone(),
+                reputation_standings: self
+                    .canonical_player_reputation_standings_snapshot_like_cpp(),
                 inventory_item_counts: self.represented_inventory_item_counts_like_cpp(),
                 party_member_phase_states: party_member_phase_states_like_cpp(
                     self.represented_player_phase_shift_like_cpp(),
@@ -7360,6 +7391,8 @@ impl WorldSession {
             info.rewarded_quests = self.rewarded_quests.clone();
             info.daily_quests_completed = self.daily_quests_completed_like_cpp.clone();
             info.df_quests = self.df_quests_like_cpp.clone();
+            info.reputation_standings =
+                self.canonical_player_reputation_standings_snapshot_like_cpp();
             info.inventory_item_counts = self.represented_inventory_item_counts_like_cpp();
             info.party_member_phase_states =
                 party_member_phase_states_like_cpp(self.represented_player_phase_shift_like_cpp())
@@ -18410,6 +18443,10 @@ mod tests {
             allowable_classes: 0,
             max_level: 0,
             prev_quest_id: 0,
+            required_min_rep_faction: 0,
+            required_min_rep_value: 0,
+            required_max_rep_faction: 0,
+            required_max_rep_value: 0,
             reward_choice_items: [(0, 0); wow_data::quest::QUEST_REWARD_CHOICES_COUNT],
         }
     }
@@ -25764,6 +25801,7 @@ mod tests {
             rewarded_quests: Default::default(),
             daily_quests_completed: Default::default(),
             df_quests: Default::default(),
+            reputation_standings: Vec::new(),
             inventory_item_counts: Default::default(),
             party_member_phase_states: Default::default(),
             player_name: format!("Player{}", guid.counter()),
@@ -26426,6 +26464,10 @@ mod tests {
                 allowable_classes: 0,
                 max_level: 0,
                 prev_quest_id: 0,
+                required_min_rep_faction: 0,
+                required_min_rep_value: 0,
+                required_max_rep_faction: 0,
+                required_max_rep_value: 0,
                 reward_choice_items: [(0, 0); wow_data::quest::QUEST_REWARD_CHOICES_COUNT],
             },
         );
@@ -32447,6 +32489,42 @@ mod tests {
             assert!(session.inventory_items.is_empty());
             assert!(session.inventory_item_objects.is_empty());
         });
+    }
+
+    #[test]
+    fn player_registry_reputation_snapshot_syncs_from_canonical_player_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_registry = Arc::new(PlayerRegistry::default());
+        let player_guid = ObjectGuid::create_player(1, 604);
+
+        session.set_player_guid(Some(player_guid));
+        session.player_name = Some("RepSnapshot".into());
+        session.player_position = Some(Position::new(10.0, 10.0, 0.0, 0.0));
+        session.current_map_id = 571;
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_player_registry(Arc::clone(&player_registry));
+        insert_session_player_into_canonical_map_like_cpp(&session, &canonical, 571, 0);
+        session.mutate_canonical_player_like_cpp(|player| {
+            player
+                .gameplay_state_mut()
+                .reputations
+                .push(wow_entities::PlayerReputationRecord {
+                    faction_id: 72,
+                    standing: 1234,
+                    flags: 0,
+                });
+        });
+
+        session.register_in_player_registry();
+
+        assert_eq!(
+            player_registry
+                .get(&player_guid)
+                .expect("player snapshot")
+                .reputation_standings,
+            vec![(72, 1234)]
+        );
     }
 
     fn insert_session_player_into_canonical_map_like_cpp(

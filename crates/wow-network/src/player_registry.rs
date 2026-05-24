@@ -135,6 +135,9 @@ pub struct PlayerBroadcastInfo {
     pub daily_quests_completed: HashSet<u32>,
     /// Represented `Player::m_DFQuests` snapshot for remote `SatisfyQuestDay`.
     pub df_quests: HashSet<u32>,
+    /// Represented current reputation standing by faction for remote `SatisfyQuestReputation`.
+    /// Missing factions are interpreted as standing 0 like C++ no-state path.
+    pub reputation_standings: Vec<(u32, i32)>,
     /// Direct inventory item counts, keyed by item entry, used for remote quest-loot gates.
     pub inventory_item_counts: HashMap<u32, u32>,
     /// C++ `PartyMemberPhaseStates` snapshot for SMSG_PARTY_MEMBER_FULL_STATE.

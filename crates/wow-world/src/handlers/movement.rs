@@ -1199,6 +1199,7 @@ mod tests {
             rewarded_quests: Default::default(),
             daily_quests_completed: Default::default(),
             df_quests: Default::default(),
+            reputation_standings: Vec::new(),
             inventory_item_counts: Default::default(),
             party_member_phase_states: Default::default(),
             player_name: format!("Player{}", guid.counter()),
