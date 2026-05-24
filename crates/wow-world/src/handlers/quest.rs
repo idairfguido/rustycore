@@ -55,6 +55,20 @@ pub(crate) const QUEST_PUSH_REASON_LOW_LEVEL_LIKE_CPP: u8 = 22;
 pub(crate) const QUEST_PUSH_REASON_LOW_LEVEL_TO_RECIPIENT_LIKE_CPP: u8 = 23;
 pub(crate) const QUEST_PUSH_REASON_HIGH_LEVEL_LIKE_CPP: u8 = 24;
 pub(crate) const QUEST_PUSH_REASON_HIGH_LEVEL_TO_RECIPIENT_LIKE_CPP: u8 = 25;
+pub(crate) const QUEST_PUSH_REASON_CLASS_LIKE_CPP: u8 = 26;
+pub(crate) const QUEST_PUSH_REASON_CLASS_TO_RECIPIENT_LIKE_CPP: u8 = 27;
+pub(crate) const QUEST_PUSH_REASON_RACE_LIKE_CPP: u8 = 28;
+pub(crate) const QUEST_PUSH_REASON_RACE_TO_RECIPIENT_LIKE_CPP: u8 = 29;
+
+fn player_race_or_class_mask_like_cpp(id: u8) -> u32 {
+    if id == 0 {
+        return 0;
+    }
+
+    1_u32
+        .checked_shl(u32::from(id.saturating_sub(1)))
+        .unwrap_or(0)
+}
 
 fn represented_quest_completion_npc_response_like_cpp(
     quest_store: &wow_data::quest::QuestStore,
@@ -1016,6 +1030,79 @@ impl WorldSession {
                         quest_id: packet.quest_id,
                         target_guid: Some(receiver_guid),
                         reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestMaxLevelHighLevel,
+                        quest_pool_active_check_unrepresented: false,
+                        group_runtime_unrepresented: false,
+                        receiver_fanout_unrepresented: false,
+                    },
+                );
+                continue;
+            }
+
+            // C++ order then evaluates `Player::SatisfyQuestClass(quest, false)`
+            // followed by `SatisfyQuestRace(quest, false)`. Receiver class/race
+            // are read-only `PlayerRegistry` snapshots derived from the receiver
+            // `WorldSession`; never sync registry state back into the session.
+            let receiver_class_mask = player_race_or_class_mask_like_cpp(receiver.class);
+            if quest.allowable_classes != 0 && (quest.allowable_classes & receiver_class_mask) == 0
+            {
+                let Some(sender_guid_for_receiver_packet) = sender_guid else {
+                    blocked_by_unsupported_success_path = true;
+                    continue;
+                };
+
+                self.send_push_quest_result_to_sender_with_title_if_available_like_cpp(
+                    receiver_guid,
+                    QUEST_PUSH_REASON_CLASS_LIKE_CPP,
+                    String::new(),
+                );
+                let _ = receiver.send_tx.send(
+                    QuestPushResultResponse {
+                        sender_guid: sender_guid_for_receiver_packet,
+                        result: QUEST_PUSH_REASON_CLASS_TO_RECIPIENT_LIKE_CPP,
+                        quest_title: quest.log_title.clone(),
+                    }
+                    .to_bytes(),
+                );
+                self.record_represented_push_quest_to_party_outcome_like_cpp(
+                    RepresentedPushQuestToPartyOutcomeLikeCpp {
+                        sender_guid,
+                        quest_id: packet.quest_id,
+                        target_guid: Some(receiver_guid),
+                        reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestClassWrongClass,
+                        quest_pool_active_check_unrepresented: false,
+                        group_runtime_unrepresented: false,
+                        receiver_fanout_unrepresented: false,
+                    },
+                );
+                continue;
+            }
+
+            let receiver_race_mask = u64::from(player_race_or_class_mask_like_cpp(receiver.race));
+            if quest.allowable_races != 0 && (quest.allowable_races & receiver_race_mask) == 0 {
+                let Some(sender_guid_for_receiver_packet) = sender_guid else {
+                    blocked_by_unsupported_success_path = true;
+                    continue;
+                };
+
+                self.send_push_quest_result_to_sender_with_title_if_available_like_cpp(
+                    receiver_guid,
+                    QUEST_PUSH_REASON_RACE_LIKE_CPP,
+                    String::new(),
+                );
+                let _ = receiver.send_tx.send(
+                    QuestPushResultResponse {
+                        sender_guid: sender_guid_for_receiver_packet,
+                        result: QUEST_PUSH_REASON_RACE_TO_RECIPIENT_LIKE_CPP,
+                        quest_title: quest.log_title.clone(),
+                    }
+                    .to_bytes(),
+                );
+                self.record_represented_push_quest_to_party_outcome_like_cpp(
+                    RepresentedPushQuestToPartyOutcomeLikeCpp {
+                        sender_guid,
+                        quest_id: packet.quest_id,
+                        target_guid: Some(receiver_guid),
+                        reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestRaceWrongRace,
                         quest_pool_active_check_unrepresented: false,
                         group_runtime_unrepresented: false,
                         receiver_fanout_unrepresented: false,
@@ -2425,6 +2512,18 @@ mod tests {
         QuestStore::from_quests_like_cpp([quest])
     }
 
+    fn store_with_sharable_quest_class_race(
+        id: u32,
+        allowable_classes: u32,
+        allowable_races: u64,
+    ) -> QuestStore {
+        let mut quest = quest_template(id);
+        quest.flags |= QUEST_FLAGS_SHARABLE_LIKE_CPP;
+        quest.allowable_classes = allowable_classes;
+        quest.allowable_races = allowable_races;
+        QuestStore::from_quests_like_cpp([quest])
+    }
+
     fn store_with_daily_sharable_quests(ids: &[u32]) -> QuestStore {
         let quests = ids.iter().map(|id| {
             let mut quest = quest_template(*id);
@@ -3432,6 +3531,197 @@ mod tests {
                 .any(|outcome| matches!(
                     outcome.reason,
                     RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestMaxLevelHighLevel
+                ))
+        );
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_grouped_receiver_wrong_class_emits_class_pair_like_cpp() {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 251);
+        let shared_quest_id = 7124;
+        let quest_store = store_with_sharable_quest_class_race(shared_quest_id, 1 << (2 - 1), 0);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session.set_loaded_player_identity_like_cpp(571, 1, 1, 80, 0);
+        receiver_session.sync_player_registry_state_like_cpp();
+        assert_eq!(
+            player_registry
+                .get(&receiver_guid)
+                .expect("receiver snapshot")
+                .class,
+            1
+        );
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert_eq!(
+            recv_push_quest_result_response(&sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_CLASS_LIKE_CPP,
+                String::new()
+            )
+        );
+        assert_eq!(
+            recv_push_quest_result_response(&receiver_rx),
+            (
+                sender_guid,
+                QUEST_PUSH_REASON_CLASS_TO_RECIPIENT_LIKE_CPP,
+                "Quest 7124".to_string()
+            )
+        );
+        assert!(
+            session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                    outcome.reason,
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestClassWrongClass
+                ))
+        );
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_grouped_receiver_wrong_race_emits_race_pair_like_cpp() {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 252);
+        let shared_quest_id = 7125;
+        let quest_store = store_with_sharable_quest_class_race(shared_quest_id, 0, 1 << (2 - 1));
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session.set_loaded_player_identity_like_cpp(571, 1, 1, 80, 0);
+        receiver_session.sync_player_registry_state_like_cpp();
+        assert_eq!(
+            player_registry
+                .get(&receiver_guid)
+                .expect("receiver snapshot")
+                .race,
+            1
+        );
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert_eq!(
+            recv_push_quest_result_response(&sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_RACE_LIKE_CPP,
+                String::new()
+            )
+        );
+        assert_eq!(
+            recv_push_quest_result_response(&receiver_rx),
+            (
+                sender_guid,
+                QUEST_PUSH_REASON_RACE_TO_RECIPIENT_LIKE_CPP,
+                "Quest 7125".to_string()
+            )
+        );
+        assert!(
+            session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                    outcome.reason,
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestRaceWrongRace
+                ))
+        );
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_receiver_class_precedes_race_like_cpp() {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 253);
+        let shared_quest_id = 7126;
+        let quest_store =
+            store_with_sharable_quest_class_race(shared_quest_id, 1 << (2 - 1), 1 << (2 - 1));
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (_player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session.set_loaded_player_identity_like_cpp(571, 1, 1, 80, 0);
+        receiver_session.sync_player_registry_state_like_cpp();
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert_eq!(
+            recv_push_quest_result_response(&sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_CLASS_LIKE_CPP,
+                String::new()
+            )
+        );
+        assert_eq!(
+            recv_push_quest_result_response(&receiver_rx),
+            (
+                sender_guid,
+                QUEST_PUSH_REASON_CLASS_TO_RECIPIENT_LIKE_CPP,
+                "Quest 7126".to_string()
+            )
+        );
+        assert!(
+            !session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                    outcome.reason,
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestRaceWrongRace
+                ))
+        );
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_zero_class_and_race_masks_do_not_block_like_cpp() {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 254);
+        let shared_quest_id = 7127;
+        let quest_store = store_with_sharable_quest_class_race(shared_quest_id, 0, 0);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (_player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session.set_loaded_player_identity_like_cpp(571, 1, 1, 80, 0);
+        receiver_session.sync_player_registry_state_like_cpp();
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert!(sender_rx.try_recv().is_err());
+        assert!(receiver_rx.try_recv().is_err());
+        assert!(
+            session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                    outcome.reason,
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented
+                ))
+        );
+        assert!(
+            !session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                    outcome.reason,
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestClassWrongClass
+                        | RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestRaceWrongRace
                 ))
         );
     }

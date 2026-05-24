@@ -184,6 +184,8 @@ pub(crate) enum RepresentedPushQuestToPartyOutcomeReasonLikeCpp {
     ReceiverSatisfyQuestDayAlreadyDone,
     ReceiverSatisfyQuestMinLevelLowLevel,
     ReceiverSatisfyQuestMaxLevelHighLevel,
+    ReceiverSatisfyQuestClassWrongClass,
+    ReceiverSatisfyQuestRaceWrongRace,
     ReceiverEligibilityUnrepresented,
 }
 
@@ -7339,6 +7341,8 @@ impl WorldSession {
             info.enchanting_skill = self.represented_enchanting_skill;
             info.is_alive = self.player_alive_like_cpp;
             info.level = self.player_level_like_cpp();
+            info.race = self.player_race_like_cpp();
+            info.class = self.player_class_like_cpp();
             info.pending_quest_sharing = self
                 .represented_pending_quest_sharing_like_cpp
                 .map(|pending| (pending.sender_guid, pending.quest_id));
