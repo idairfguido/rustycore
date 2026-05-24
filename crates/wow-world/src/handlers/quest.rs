@@ -29,6 +29,8 @@ use wow_packet::packets::quest::{
 
 use crate::session::{SeasonalQuestStatusDbRowLikeCpp, WorldSession};
 
+pub(crate) const QUEST_FLAGS_AUTO_COMPLETE_LIKE_CPP: u32 = 0x0001_0000;
+
 // ── Handler registrations ────────────────────────────────────────────────────
 
 inventory::submit! {
@@ -404,20 +406,18 @@ impl WorldSession {
         };
         let quest_id: u32 = pkt.read_uint32().unwrap_or(0);
 
-        let quest = {
-            let store = match &self.quest_store {
-                Some(s) => Arc::clone(s),
-                None => return,
-            };
-            match store.get(quest_id) {
-                Some(q) => q.clone(),
-                None => {
-                    warn!(
-                        account = self.account_id,
-                        quest_id, "RequestReward: unknown quest"
-                    );
-                    return;
-                }
+        let quest_store = match &self.quest_store {
+            Some(s) => Arc::clone(s),
+            None => return,
+        };
+        let quest = match quest_store.get(quest_id) {
+            Some(q) => q.clone(),
+            None => {
+                warn!(
+                    account = self.account_id,
+                    quest_id, "RequestReward: unknown quest"
+                );
+                return;
             }
         };
 
@@ -429,7 +429,23 @@ impl WorldSession {
             return;
         }
 
-        // C#: if (GetPlayer().CanCompleteQuest(questID)) GetPlayer().CompleteQuest(questID)
+        if quest.flags & QUEST_FLAGS_AUTO_COMPLETE_LIKE_CPP == 0
+            && !self.represented_quest_giver_involved_source_allows_quest_like_cpp(
+                guid,
+                quest_id,
+                &quest_store,
+            )
+        {
+            debug!(
+                account = self.account_id,
+                ?guid,
+                quest_id,
+                "RequestReward: represented involved source rejected"
+            );
+            return;
+        }
+
+        // C++: if (_player->CanCompleteQuest(questID)) _player->CompleteQuest(questID)
         // We check if all objectives are done; if so, upgrade status to Complete (2).
         let is_complete = self
             .player_quests
@@ -489,7 +505,7 @@ impl WorldSession {
             }
         };
         let quest_id: u32 = pkt.read_uint32().unwrap_or(0);
-        let _from_script: bool = pkt.read_bit().unwrap_or(false);
+        let from_script: bool = pkt.read_bit().unwrap_or(false);
 
         let quest_store = match &self.quest_store {
             Some(s) => Arc::clone(s),
@@ -511,6 +527,34 @@ impl WorldSession {
             debug!(
                 account = self.account_id,
                 quest_id, "QuestGiverCompleteQuest: quest disabled"
+            );
+            return;
+        }
+
+        if quest.flags & QUEST_FLAGS_AUTO_COMPLETE_LIKE_CPP == 0 {
+            if from_script
+                || !self.represented_quest_giver_involved_source_allows_quest_like_cpp(
+                    guid,
+                    quest_id,
+                    &quest_store,
+                )
+            {
+                debug!(
+                    account = self.account_id,
+                    ?guid,
+                    quest_id,
+                    from_script,
+                    "QuestGiverCompleteQuest: represented involved source rejected"
+                );
+                return;
+            }
+        } else if !from_script || self.player_guid() != Some(guid) {
+            debug!(
+                account = self.account_id,
+                ?guid,
+                quest_id,
+                from_script,
+                "QuestGiverCompleteQuest: auto-complete source is not script/player"
             );
             return;
         }
