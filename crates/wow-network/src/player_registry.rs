@@ -131,6 +131,10 @@ pub struct PlayerBroadcastInfo {
     pub active_quest_objective_counts: HashMap<u32, Vec<i32>>,
     /// Rewarded quest ids, used for remote `QUEST_STATUS_REWARDED` checks.
     pub rewarded_quests: HashSet<u32>,
+    /// Represented `ActivePlayerData::DailyQuestsCompleted` snapshot for remote `SatisfyQuestDay`.
+    pub daily_quests_completed: HashSet<u32>,
+    /// Represented `Player::m_DFQuests` snapshot for remote `SatisfyQuestDay`.
+    pub df_quests: HashSet<u32>,
     /// Direct inventory item counts, keyed by item entry, used for remote quest-loot gates.
     pub inventory_item_counts: HashMap<u32, u32>,
     /// C++ `PartyMemberPhaseStates` snapshot for SMSG_PARTY_MEMBER_FULL_STATE.

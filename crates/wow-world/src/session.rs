@@ -181,6 +181,7 @@ pub(crate) enum RepresentedPushQuestToPartyOutcomeReasonLikeCpp {
     ReceiverAlreadyDone,
     ReceiverOnQuest,
     ReceiverLogFull,
+    ReceiverSatisfyQuestDayAlreadyDone,
     ReceiverEligibilityUnrepresented,
 }
 
@@ -1883,6 +1884,10 @@ pub struct WorldSession {
     /// Quests the player has already been rewarded for (non-repeatable quests cannot be re-taken).
     /// C# ref: m_RewardedQuests
     pub(crate) rewarded_quests: std::collections::HashSet<u32>,
+    /// C++ `ActivePlayerData::DailyQuestsCompleted`, represented per-session until full Player runtime owns it.
+    pub(crate) daily_quests_completed_like_cpp: HashSet<u32>,
+    /// C++ `Player::m_DFQuests`, represented per-session until full Player runtime owns it.
+    pub(crate) df_quests_like_cpp: HashSet<u32>,
     /// C++ `Player::m_seasonalquests`, represented per-session until full Player runtime owns it.
     pub(crate) seasonal_quests_like_cpp: BTreeMap<u16, BTreeMap<u32, u64>>,
     /// C++ `Player::m_SeasonalQuestChanged` represented flag.
@@ -2582,6 +2587,8 @@ impl WorldSession {
             quest_v2_store: None,
             player_quests: HashMap::new(),
             rewarded_quests: std::collections::HashSet::new(),
+            daily_quests_completed_like_cpp: HashSet::new(),
+            df_quests_like_cpp: HashSet::new(),
             seasonal_quests_like_cpp: BTreeMap::new(),
             seasonal_quest_changed_like_cpp: false,
             represented_quest_completed_bits_like_cpp: BTreeSet::new(),
@@ -7292,6 +7299,8 @@ impl WorldSession {
                     .map(|(quest_id, status)| (*quest_id, status.objective_counts.clone()))
                     .collect(),
                 rewarded_quests: self.rewarded_quests.clone(),
+                daily_quests_completed: self.daily_quests_completed_like_cpp.clone(),
+                df_quests: self.df_quests_like_cpp.clone(),
                 inventory_item_counts: self.represented_inventory_item_counts_like_cpp(),
                 party_member_phase_states: party_member_phase_states_like_cpp(
                     self.represented_player_phase_shift_like_cpp(),
@@ -7342,6 +7351,8 @@ impl WorldSession {
                 .map(|(quest_id, status)| (*quest_id, status.objective_counts.clone()))
                 .collect();
             info.rewarded_quests = self.rewarded_quests.clone();
+            info.daily_quests_completed = self.daily_quests_completed_like_cpp.clone();
+            info.df_quests = self.df_quests_like_cpp.clone();
             info.inventory_item_counts = self.represented_inventory_item_counts_like_cpp();
             info.party_member_phase_states =
                 party_member_phase_states_like_cpp(self.represented_player_phase_shift_like_cpp())
@@ -15557,6 +15568,32 @@ impl WorldSession {
         &self,
     ) -> Option<RepresentedPendingQuestSharingLikeCpp> {
         self.represented_pending_quest_sharing_like_cpp
+    }
+
+    pub(crate) fn set_represented_daily_quest_completed_like_cpp_for_test(
+        &mut self,
+        quest_id: u32,
+        completed: bool,
+    ) {
+        if completed {
+            self.daily_quests_completed_like_cpp.insert(quest_id);
+        } else {
+            self.daily_quests_completed_like_cpp.remove(&quest_id);
+        }
+        self.sync_player_registry_state_like_cpp();
+    }
+
+    pub(crate) fn set_represented_df_quest_like_cpp_for_test(
+        &mut self,
+        quest_id: u32,
+        present: bool,
+    ) {
+        if present {
+            self.df_quests_like_cpp.insert(quest_id);
+        } else {
+            self.df_quests_like_cpp.remove(&quest_id);
+        }
+        self.sync_player_registry_state_like_cpp();
     }
 
     pub(crate) fn represented_quest_push_result_responses_like_cpp(
@@ -25718,6 +25755,8 @@ mod tests {
             active_quest_statuses: Default::default(),
             active_quest_objective_counts: Default::default(),
             rewarded_quests: Default::default(),
+            daily_quests_completed: Default::default(),
+            df_quests: Default::default(),
             inventory_item_counts: Default::default(),
             party_member_phase_states: Default::default(),
             player_name: format!("Player{}", guid.counter()),

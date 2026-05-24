@@ -904,6 +904,52 @@ impl WorldSession {
                 continue;
             }
 
+            // C++ `Player::SatisfyQuestDay(quest, false)` immediately follows
+            // `SatisfyQuestLog(false)` in `WorldSession::HandlePushQuestToParty`.
+            // Non-daily/non-DF quests pass this gate; already-completed daily
+            // quests and represented DF quests send the same AlreadyDone pair
+            // as the earlier rewarded/onquest branch.
+            let already_satisfied_quest_day_like_cpp = if quest.is_df_quest_like_cpp() {
+                receiver.df_quests.contains(&packet.quest_id)
+            } else if quest.is_daily_like_cpp() {
+                receiver.daily_quests_completed.contains(&packet.quest_id)
+            } else {
+                false
+            };
+
+            if already_satisfied_quest_day_like_cpp {
+                let Some(sender_guid_for_receiver_packet) = sender_guid else {
+                    blocked_by_unsupported_success_path = true;
+                    continue;
+                };
+
+                self.send_push_quest_result_to_sender_with_title_if_available_like_cpp(
+                    receiver_guid,
+                    QUEST_PUSH_REASON_ALREADY_DONE_LIKE_CPP,
+                    String::new(),
+                );
+                let _ = receiver.send_tx.send(
+                    QuestPushResultResponse {
+                        sender_guid: sender_guid_for_receiver_packet,
+                        result: QUEST_PUSH_REASON_ALREADY_DONE_TO_RECIPIENT_LIKE_CPP,
+                        quest_title: quest.log_title.clone(),
+                    }
+                    .to_bytes(),
+                );
+                self.record_represented_push_quest_to_party_outcome_like_cpp(
+                    RepresentedPushQuestToPartyOutcomeLikeCpp {
+                        sender_guid,
+                        quest_id: packet.quest_id,
+                        target_guid: Some(receiver_guid),
+                        reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDayAlreadyDone,
+                        quest_pool_active_check_unrepresented: false,
+                        group_runtime_unrepresented: false,
+                        receiver_fanout_unrepresented: false,
+                    },
+                );
+                continue;
+            }
+
             blocked_by_unsupported_success_path = true;
             self.record_represented_push_quest_to_party_outcome_like_cpp(
                 RepresentedPushQuestToPartyOutcomeLikeCpp {
@@ -2056,9 +2102,10 @@ mod tests {
     use wow_core::guid::HighGuid;
     use wow_core::{ObjectGuid, Position};
     use wow_data::quest::{
-        QUEST_ITEM_DROP_COUNT, QUEST_REWARD_CHOICES_COUNT, QUEST_REWARD_DISPLAY_SPELL_COUNT,
-        QUEST_REWARD_ITEM_COUNT, QuestPoolMemberRowLikeCpp, QuestPoolSavedActiveRowLikeCpp,
-        QuestPoolStoreLikeCpp, QuestStore, QuestTemplate,
+        QUEST_FLAGS_DAILY_LIKE_CPP, QUEST_ITEM_DROP_COUNT, QUEST_REWARD_CHOICES_COUNT,
+        QUEST_REWARD_DISPLAY_SPELL_COUNT, QUEST_REWARD_ITEM_COUNT,
+        QUEST_SPECIAL_FLAGS_DF_QUEST_LIKE_CPP, QuestPoolMemberRowLikeCpp,
+        QuestPoolSavedActiveRowLikeCpp, QuestPoolStoreLikeCpp, QuestStore, QuestTemplate,
     };
     use wow_network::{GroupInfo, GroupRegistry, PendingInvites, PlayerRegistry};
     use wow_packet::WorldPacket;
@@ -2299,10 +2346,17 @@ mod tests {
     fn store_with_daily_sharable_quests(ids: &[u32]) -> QuestStore {
         let quests = ids.iter().map(|id| {
             let mut quest = quest_template(*id);
-            quest.flags |= QUEST_FLAGS_SHARABLE_LIKE_CPP | 0x0000_1000;
+            quest.flags |= QUEST_FLAGS_SHARABLE_LIKE_CPP | QUEST_FLAGS_DAILY_LIKE_CPP;
             quest
         });
         QuestStore::from_quests_like_cpp(quests)
+    }
+
+    fn store_with_df_sharable_quest(id: u32) -> QuestStore {
+        let mut quest = quest_template(id);
+        quest.flags |= QUEST_FLAGS_SHARABLE_LIKE_CPP;
+        quest.special_flags |= QUEST_SPECIAL_FLAGS_DF_QUEST_LIKE_CPP;
+        QuestStore::from_quests_like_cpp([quest])
     }
 
     fn quest_pool_store_with_active_saved(
@@ -3017,6 +3071,196 @@ mod tests {
                     outcome.reason,
                     RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverLogFull
                 ))
+        );
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_grouped_receiver_daily_completed_emits_already_done_pair_like_cpp()
+    {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 244);
+        let shared_quest_id = 7117;
+        let quest_store = store_with_daily_sharable_quests(&[shared_quest_id]);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (_player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session
+            .set_represented_daily_quest_completed_like_cpp_for_test(shared_quest_id, true);
+        receiver_session.sync_player_registry_state_like_cpp();
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert_eq!(
+            recv_push_quest_result_response(&sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_ALREADY_DONE_LIKE_CPP,
+                String::new()
+            )
+        );
+        assert_eq!(
+            recv_push_quest_result_response(&receiver_rx),
+            (
+                sender_guid,
+                QUEST_PUSH_REASON_ALREADY_DONE_TO_RECIPIENT_LIKE_CPP,
+                "Quest 7117".to_string()
+            )
+        );
+        assert!(
+            session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                outcome.reason,
+                RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDayAlreadyDone
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_grouped_receiver_df_completed_emits_already_done_pair_like_cpp() {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 245);
+        let shared_quest_id = 7118;
+        let quest_store = store_with_df_sharable_quest(shared_quest_id);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (_player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session.set_represented_df_quest_like_cpp_for_test(shared_quest_id, true);
+        receiver_session.sync_player_registry_state_like_cpp();
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert_eq!(
+            recv_push_quest_result_response(&sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_ALREADY_DONE_LIKE_CPP,
+                String::new()
+            )
+        );
+        assert_eq!(
+            recv_push_quest_result_response(&receiver_rx),
+            (
+                sender_guid,
+                QUEST_PUSH_REASON_ALREADY_DONE_TO_RECIPIENT_LIKE_CPP,
+                "Quest 7118".to_string()
+            )
+        );
+        assert!(
+            session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                outcome.reason,
+                RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDayAlreadyDone
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_non_daily_non_df_ignores_unrelated_daily_snapshot_like_cpp() {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 246);
+        let shared_quest_id = 7119;
+        let quest_store = store_with_sharable_quest(shared_quest_id);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (_player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session.set_represented_daily_quest_completed_like_cpp_for_test(9001, true);
+        receiver_session.sync_player_registry_state_like_cpp();
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert!(sender_rx.try_recv().is_err());
+        assert!(receiver_rx.try_recv().is_err());
+        assert!(
+            session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                outcome.reason,
+                RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented
+            ))
+        );
+        assert!(
+            !session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                outcome.reason,
+                RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDayAlreadyDone
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_log_full_precedes_daily_completed_like_cpp() {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 247);
+        let shared_quest_id = 7120;
+        let quest_store = store_with_daily_sharable_quests(&[shared_quest_id]);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (_player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        for slot in 0..MAX_QUEST_LOG_SIZE_LIKE_CPP {
+            add_active_quest_in_slot(&mut receiver_session, 8100 + u32::from(slot), slot);
+        }
+        receiver_session
+            .set_represented_daily_quest_completed_like_cpp_for_test(shared_quest_id, true);
+        receiver_session.sync_player_registry_state_like_cpp();
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert_eq!(
+            recv_push_quest_result_response(&sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_LOG_FULL_LIKE_CPP,
+                String::new()
+            )
+        );
+        assert_eq!(
+            recv_push_quest_result_response(&receiver_rx),
+            (
+                sender_guid,
+                QUEST_PUSH_REASON_LOG_FULL_TO_RECIPIENT_LIKE_CPP,
+                "Quest 7120".to_string()
+            )
+        );
+        assert!(
+            session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                    outcome.reason,
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverLogFull
+                ))
+        );
+        assert!(
+            !session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                outcome.reason,
+                RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDayAlreadyDone
+            ))
         );
     }
 
