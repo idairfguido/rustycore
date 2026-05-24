@@ -618,25 +618,29 @@ impl WorldSession {
     /// Gives XP, gold, items. Removes quest from active log.
     /// C# ref: QuestHandler.HandleQuestGiverChooseReward
     pub async fn handle_quest_giver_choose_reward(&mut self, mut pkt: wow_packet::WorldPacket) {
-        let _guid = pkt.read_packed_guid();
+        let guid = match pkt.read_packed_guid() {
+            Ok(g) => g,
+            Err(_) => {
+                warn!("ChooseReward: failed to read GUID");
+                return;
+            }
+        };
         let quest_id: u32 = pkt.read_uint32().unwrap_or(0);
         let choice_item_id: u32 = pkt.read_uint32().unwrap_or(0);
         let _loot_item_type: u32 = pkt.read_uint32().unwrap_or(0); // 0=Item, 1=Currency
 
-        let quest = {
-            let store = match &self.quest_store {
-                Some(s) => Arc::clone(s),
-                None => return,
-            };
-            match store.get(quest_id) {
-                Some(q) => q.clone(),
-                None => {
-                    warn!(
-                        account = self.account_id,
-                        quest_id, "ChooseReward: unknown quest"
-                    );
-                    return;
-                }
+        let quest_store = match &self.quest_store {
+            Some(s) => Arc::clone(s),
+            None => return,
+        };
+        let quest = match quest_store.get(quest_id) {
+            Some(q) => q.clone(),
+            None => {
+                warn!(
+                    account = self.account_id,
+                    quest_id, "ChooseReward: unknown quest"
+                );
+                return;
             }
         };
 
@@ -685,6 +689,27 @@ impl WorldSession {
                 );
                 return;
             }
+        }
+
+        // C++ HandleQuestgiverChooseRewardOpcode keeps `object = _player` for auto-complete,
+        // but non-auto-complete quests must resolve the packet source as an involved
+        // Unit/GameObject and pass CanInteractWithQuestGiver before RewardQuest mutates state.
+        // This represented-partial slice intentionally keeps the existing bounded choice-item
+        // validation only; QuestPackageItems and CurrencyTypes DB2 validation remain gaps.
+        if quest.flags & QUEST_FLAGS_AUTO_COMPLETE_LIKE_CPP == 0
+            && !self.represented_quest_giver_involved_source_allows_quest_like_cpp(
+                guid,
+                quest_id,
+                &quest_store,
+            )
+        {
+            debug!(
+                account = self.account_id,
+                ?guid,
+                quest_id,
+                "ChooseReward: represented involved source rejected"
+            );
+            return;
         }
 
         // Give gold reward

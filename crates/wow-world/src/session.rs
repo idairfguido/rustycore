@@ -37106,6 +37106,213 @@ mod tests {
         pkt
     }
 
+    fn quest_giver_choose_reward_packet_like_cpp(
+        source_guid: ObjectGuid,
+        quest_id: u32,
+        choice_item_id: u32,
+        loot_item_type: u32,
+    ) -> WorldPacket {
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_packed_guid(&source_guid);
+        pkt.write_uint32(quest_id);
+        // Keep this bounded test helper aligned with the current represented handler parser;
+        // exact C++ QuestChoiceItem bit/item/quantity wire parity remains outside #586.
+        pkt.write_uint32(choice_item_id);
+        pkt.write_uint32(loot_item_type);
+        pkt
+    }
+
+    #[tokio::test]
+    async fn quest_giver_choose_reward_creature_ender_source_allows_reward_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let source_guid =
+            ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 571, 0, 792, 40);
+        let position = Position::new(1.0, 2.0, 3.0, 0.0);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_map_position_like_cpp(571, position);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        add_canonical_test_player_on_map(&canonical, player_guid, position, 571, 0);
+        add_canonical_test_creature(
+            &canonical,
+            source_guid,
+            792,
+            position,
+            wow_constants::unit::NPCFlags1::QUEST_GIVER.bits(),
+        );
+        let mut quest = test_quest_template(9_223);
+        quest.reward_money_difficulty = 37;
+        let mut quest_store = wow_data::quest::QuestStore::from_quests_like_cpp([quest]);
+        quest_store.ender_quests.insert(792, vec![9_223]);
+        session.quest_store = Some(Arc::new(quest_store));
+        session.set_player_gold_like_cpp(5);
+        session.player_quests.insert(
+            9_223,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id: 9_223,
+                status: 2,
+                explored: false,
+                objective_counts: Vec::new(),
+            },
+        );
+
+        session
+            .handle_quest_giver_choose_reward(quest_giver_choose_reward_packet_like_cpp(
+                source_guid,
+                9_223,
+                0,
+                0,
+            ))
+            .await;
+
+        assert!(!session.player_quests.contains_key(&9_223));
+        assert!(session.rewarded_quests.contains(&9_223));
+        assert_eq!(session.player_gold_like_cpp(), 42);
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![
+                ServerOpcodes::QuestGiverQuestComplete,
+                ServerOpcodes::QuestUpdateComplete,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn quest_giver_choose_reward_missing_source_rejects_before_mutation_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        let missing_guid =
+            ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 571, 0, 793, 41);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_gold_like_cpp(5);
+        let mut quest = test_quest_template(9_224);
+        quest.reward_money_difficulty = 37;
+        session.quest_store = Some(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            9_224,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id: 9_224,
+                status: 2,
+                explored: false,
+                objective_counts: Vec::new(),
+            },
+        );
+
+        session
+            .handle_quest_giver_choose_reward(quest_giver_choose_reward_packet_like_cpp(
+                missing_guid,
+                9_224,
+                0,
+                0,
+            ))
+            .await;
+
+        assert_eq!(
+            session.player_quests.get(&9_224).map(|quest| quest.status),
+            Some(2)
+        );
+        assert!(!session.rewarded_quests.contains(&9_224));
+        assert_eq!(session.player_gold_like_cpp(), 5);
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_giver_choose_reward_gameobject_no_relation_rejects_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let source_guid =
+            ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, 794, 42);
+        let position = Position::new(1.0, 2.0, 3.0, 0.0);
+        session.set_player_map_position_like_cpp(571, position);
+        session.set_player_gold_like_cpp(5);
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        add_canonical_test_gameobject(&canonical, source_guid, 794, position);
+        session.record_represented_gameobject_runtime_state_like_cpp(
+            571,
+            source_guid,
+            794,
+            position,
+            wow_entities::GAMEOBJECT_TYPE_QUESTGIVER as u8,
+        );
+        let mut quest = test_quest_template(9_225);
+        quest.reward_money_difficulty = 37;
+        session.quest_store = Some(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            9_225,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id: 9_225,
+                status: 2,
+                explored: false,
+                objective_counts: Vec::new(),
+            },
+        );
+
+        session
+            .handle_quest_giver_choose_reward(quest_giver_choose_reward_packet_like_cpp(
+                source_guid,
+                9_225,
+                0,
+                0,
+            ))
+            .await;
+
+        assert_eq!(
+            session.player_quests.get(&9_225).map(|quest| quest.status),
+            Some(2)
+        );
+        assert!(!session.rewarded_quests.contains(&9_225));
+        assert_eq!(session.player_gold_like_cpp(), 5);
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_giver_choose_reward_auto_complete_player_source_is_not_blocked_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 99);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_gold_like_cpp(5);
+        let mut quest = test_quest_template(9_226);
+        quest.flags = crate::handlers::quest::QUEST_FLAGS_AUTO_COMPLETE_LIKE_CPP;
+        quest.reward_money_difficulty = 37;
+        session.quest_store = Some(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            9_226,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id: 9_226,
+                status: 2,
+                explored: false,
+                objective_counts: Vec::new(),
+            },
+        );
+
+        session
+            .handle_quest_giver_choose_reward(quest_giver_choose_reward_packet_like_cpp(
+                player_guid,
+                9_226,
+                0,
+                0,
+            ))
+            .await;
+
+        assert!(!session.player_quests.contains_key(&9_226));
+        assert!(session.rewarded_quests.contains(&9_226));
+        assert_eq!(session.player_gold_like_cpp(), 42);
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![
+                ServerOpcodes::QuestGiverQuestComplete,
+                ServerOpcodes::QuestUpdateComplete,
+            ]
+        );
+    }
+
     #[tokio::test]
     async fn quest_giver_reward_daily_flag_is_not_auto_complete_like_cpp() {
         let (mut session, _pkt_tx, send_rx) = make_session();
