@@ -8761,6 +8761,12 @@ impl WorldSession {
                     Err(e) => warn!("Failed to read QueryRealmName: {e}"),
                 }
             }
+            ClientOpcodes::QueryQuestCompletionNpcs => {
+                match wow_packet::packets::query::QueryQuestCompletionNpcs::read(&mut pkt) {
+                    Ok(query) => self.handle_query_quest_completion_npcs(query).await,
+                    Err(e) => warn!("Failed to read QueryQuestCompletionNpcs: {e}"),
+                }
+            }
             ClientOpcodes::Ping => match wow_packet::packets::auth::Ping::read(&mut pkt) {
                 Ok(ping) => self.handle_ping(ping).await,
                 Err(e) => warn!("Failed to read Ping: {e}"),

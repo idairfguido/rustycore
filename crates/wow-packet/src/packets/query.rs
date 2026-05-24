@@ -19,6 +19,9 @@ const MAX_CREATURE_NAMES: usize = 4;
 /// Maximum creature kill credit slots.
 const MAX_CREATURE_KILL_CREDIT: usize = 2;
 
+/// Trinity `Array<int32, 100>` cap for `CMSG_QUERY_QUEST_COMPLETION_NPCS`.
+pub const MAX_QUERY_QUEST_COMPLETION_NPCS: usize = 100;
+
 // ── CMSG_QUERY_CREATURE (0x3270) ─────────────────────────────────────
 
 /// Client request for creature template data.
@@ -727,6 +730,59 @@ impl ServerPacket for QueryPlayerNamesResponse {
     }
 }
 
+// ── CMSG_QUERY_QUEST_COMPLETION_NPCS (0x3177) ───────────────────────
+
+/// Client asks which Creature/GameObject entries can complete the supplied quests.
+pub struct QueryQuestCompletionNpcs {
+    pub quest_ids: Vec<i32>,
+}
+
+impl ClientPacket for QueryQuestCompletionNpcs {
+    const OPCODE: ClientOpcodes = ClientOpcodes::QueryQuestCompletionNpcs;
+
+    fn read(pkt: &mut WorldPacket) -> Result<Self, PacketError> {
+        let count = pkt.read_uint32()? as usize;
+        if count > MAX_QUERY_QUEST_COMPLETION_NPCS {
+            return Err(PacketError::TooLarge { size: count });
+        }
+
+        let mut quest_ids = Vec::with_capacity(count);
+        for _ in 0..count {
+            quest_ids.push(pkt.read_int32()?);
+        }
+
+        Ok(Self { quest_ids })
+    }
+}
+
+// ── SMSG_QUEST_COMPLETION_NPC_RESPONSE (0x2A81) ─────────────────────
+
+/// One quest's completion NPC/GO entry list. GameObjects carry the C++ high-bit mask.
+pub struct QuestCompletionNpc {
+    pub quest_id: i32,
+    pub npcs: Vec<i32>,
+}
+
+/// Server response for `CMSG_QUERY_QUEST_COMPLETION_NPCS`.
+pub struct QuestCompletionNpcResponse {
+    pub quests: Vec<QuestCompletionNpc>,
+}
+
+impl ServerPacket for QuestCompletionNpcResponse {
+    const OPCODE: ServerOpcodes = ServerOpcodes::QuestCompletionNpcResponse;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_uint32(self.quests.len() as u32);
+        for quest in &self.quests {
+            pkt.write_int32(quest.quest_id);
+            pkt.write_uint32(quest.npcs.len() as u32);
+            for &npc in &quest.npcs {
+                pkt.write_int32(npc);
+            }
+        }
+    }
+}
+
 // ── CMSG_QUERY_REALM_NAME (0x368A) ──────────────────────────────────
 
 /// Client asks for the name of a realm given its VirtualRealmAddress.
@@ -774,5 +830,90 @@ impl ServerPacket for RealmQueryResponse {
             pkt.write_string(&self.realm_name_actual);
             pkt.write_string(&self.realm_name_normalized);
         }
+    }
+}
+
+#[cfg(test)]
+mod query_quest_completion_tests {
+    use super::*;
+    use num_traits::ToPrimitive;
+
+    fn client_payload(bytes: &[u8]) -> WorldPacket {
+        let mut data = Vec::from(
+            ClientOpcodes::QueryQuestCompletionNpcs
+                .to_u16()
+                .unwrap()
+                .to_le_bytes(),
+        );
+        data.extend_from_slice(bytes);
+        let mut pkt = WorldPacket::from_bytes(&data);
+        pkt.skip_opcode();
+        pkt
+    }
+
+    #[test]
+    fn query_quest_completion_parse_valid_ids() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&2u32.to_le_bytes());
+        payload.extend_from_slice(&123i32.to_le_bytes());
+        payload.extend_from_slice(&(-45i32).to_le_bytes());
+
+        let mut pkt = client_payload(&payload);
+        let parsed = QueryQuestCompletionNpcs::read(&mut pkt).unwrap();
+
+        assert_eq!(parsed.quest_ids, vec![123, -45]);
+    }
+
+    #[test]
+    fn query_quest_completion_rejects_short_payload() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&1u32.to_le_bytes());
+        payload.extend_from_slice(&[0x34, 0x12]);
+
+        let mut pkt = client_payload(&payload);
+
+        assert!(matches!(
+            QueryQuestCompletionNpcs::read(&mut pkt),
+            Err(PacketError::ReadPastEnd { .. })
+        ));
+    }
+
+    #[test]
+    fn query_quest_completion_rejects_over_cap() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&101u32.to_le_bytes());
+
+        let mut pkt = client_payload(&payload);
+
+        assert!(matches!(
+            QueryQuestCompletionNpcs::read(&mut pkt),
+            Err(PacketError::TooLarge { size: 101 })
+        ));
+    }
+
+    #[test]
+    fn query_quest_completion_response_serializes_creature_and_masked_go() {
+        let response = QuestCompletionNpcResponse {
+            quests: vec![QuestCompletionNpc {
+                quest_id: 77,
+                npcs: vec![1234, 0x8000_5678u32 as i32],
+            }],
+        };
+
+        let bytes = response.to_bytes();
+
+        let mut expected = Vec::from(
+            ServerOpcodes::QuestCompletionNpcResponse
+                .to_u16()
+                .unwrap()
+                .to_le_bytes(),
+        );
+        expected.extend_from_slice(&1u32.to_le_bytes());
+        expected.extend_from_slice(&77i32.to_le_bytes());
+        expected.extend_from_slice(&2u32.to_le_bytes());
+        expected.extend_from_slice(&1234i32.to_le_bytes());
+        expected.extend_from_slice(&0x8000_5678u32.to_le_bytes());
+
+        assert_eq!(bytes, expected);
     }
 }

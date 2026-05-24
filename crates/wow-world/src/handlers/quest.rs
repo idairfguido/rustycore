@@ -22,6 +22,9 @@ use wow_constants::unit::NPCFlags1;
 use wow_data::DISABLE_TYPE_QUEST;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::ClientPacket;
+use wow_packet::packets::query::{
+    QueryQuestCompletionNpcs, QuestCompletionNpc, QuestCompletionNpcResponse,
+};
 use wow_packet::packets::quest::{
     QueryQuestInfoResponse, QuestConfirmAccept, QuestGiverOfferReward, QuestGiverQuestComplete,
     QuestGiverRequestItems, QuestGiverStatus, QuestObjectiveInfo, QuestPushResult,
@@ -34,6 +37,43 @@ use crate::session::{
 };
 
 pub(crate) const QUEST_FLAGS_AUTO_COMPLETE_LIKE_CPP: u32 = 0x0001_0000;
+
+fn represented_quest_completion_npc_response_like_cpp(
+    quest_store: &wow_data::quest::QuestStore,
+    raw_quest_ids: &[i32],
+) -> Vec<QuestCompletionNpc> {
+    raw_quest_ids
+        .iter()
+        .filter_map(|&raw_quest_id| {
+            let quest_id = u32::try_from(raw_quest_id).ok()?;
+            if quest_store.get(quest_id).is_none() {
+                return None;
+            }
+
+            let mut npcs = Vec::new();
+            for creature_entry in quest_store.creature_ender_entries_for_quest_like_cpp(quest_id) {
+                let Ok(entry) = i32::try_from(creature_entry) else {
+                    debug!(
+                        quest_id,
+                        creature_entry,
+                        "QueryQuestCompletionNPCs: creature entry exceeds signed i32 response field"
+                    );
+                    continue;
+                };
+                npcs.push(entry);
+            }
+
+            for go_entry in quest_store.gameobject_ender_entries_for_quest_like_cpp(quest_id) {
+                npcs.push((go_entry | 0x8000_0000) as i32);
+            }
+
+            Some(QuestCompletionNpc {
+                quest_id: raw_quest_id,
+                npcs,
+            })
+        })
+        .collect()
+}
 
 // ── Handler registrations ────────────────────────────────────────────────────
 
@@ -88,6 +128,15 @@ inventory::submit! {
         status: SessionStatus::LoggedIn,
         processing: PacketProcessing::Inplace,
         handler_name: "handle_query_quest_info",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::QueryQuestCompletionNpcs,
+        status: SessionStatus::LoggedIn,
+        processing: PacketProcessing::Inplace,
+        handler_name: "handle_query_quest_completion_npcs",
     }
 }
 
@@ -721,6 +770,21 @@ impl WorldSession {
                 });
             }
         }
+    }
+
+    /// CMSG_QUERY_QUEST_COMPLETION_NPCS — client asks for Creature/GO quest enders.
+    /// C++ refs:
+    /// - `WorldSession::HandleQueryQuestCompletionNPCs`, QueryHandler.cpp:252-278.
+    /// - `QuestCompletionNPCResponse::Write`, QueryPackets.cpp:451-462.
+    pub async fn handle_query_quest_completion_npcs(&mut self, query: QueryQuestCompletionNpcs) {
+        let quests = self
+            .quest_store
+            .as_deref()
+            .map_or_else(Vec::new, |quest_store| {
+                represented_quest_completion_npc_response_like_cpp(quest_store, &query.quest_ids)
+            });
+
+        self.send_packet(&QuestCompletionNpcResponse { quests });
     }
 
     /// CMSG_QUEST_GIVER_REQUEST_REWARD — player talks to NPC to turn in a completed quest.
@@ -1618,6 +1682,45 @@ mod tests {
 
     fn store_with_quests(ids: &[u32]) -> QuestStore {
         QuestStore::from_quests_like_cpp(ids.iter().copied().map(quest_template))
+    }
+
+    #[test]
+    fn query_quest_completion_builds_creature_then_masked_go_entries_like_cpp() {
+        let mut store = store_with_quests(&[77]);
+        store.ender_quests.entry(1234).or_default().push(77);
+        store.ender_quests.entry(12).or_default().push(77);
+        store
+            .gameobject_ender_quests
+            .entry(0x5678)
+            .or_default()
+            .push(77);
+
+        let response = represented_quest_completion_npc_response_like_cpp(&store, &[77]);
+
+        assert_eq!(response.len(), 1);
+        assert_eq!(response[0].quest_id, 77);
+        assert_eq!(response[0].npcs, vec![12, 1234, 0x8000_5678u32 as i32]);
+    }
+
+    #[test]
+    fn query_quest_completion_skips_negative_missing_and_oversized_creature_entries_like_cpp() {
+        let mut store = store_with_quests(&[5]);
+        store
+            .ender_quests
+            .entry(i32::MAX as u32 + 1)
+            .or_default()
+            .push(5);
+        store
+            .gameobject_ender_quests
+            .entry(u32::MAX)
+            .or_default()
+            .push(5);
+
+        let response = represented_quest_completion_npc_response_like_cpp(&store, &[-1, 999, 5]);
+
+        assert_eq!(response.len(), 1);
+        assert_eq!(response[0].quest_id, 5);
+        assert_eq!(response[0].npcs, vec![-1]);
     }
 
     fn creature_guid(entry: u32, counter: i64) -> ObjectGuid {

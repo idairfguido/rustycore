@@ -328,6 +328,34 @@ impl QuestStore {
             .unwrap_or_default()
     }
 
+    /// Creature entries that have `creature_questender`/involved relation for `quest_id`.
+    ///
+    /// C++ uses reverse bounds over ObjectMgr relation multimaps. Rust's current store is
+    /// entry → quest IDs, so this read-only reverse lookup sorts entries for deterministic
+    /// represented output rather than depending on `HashMap` iteration order.
+    pub fn creature_ender_entries_for_quest_like_cpp(&self, quest_id: u32) -> Vec<u32> {
+        let mut entries: Vec<u32> = self
+            .ender_quests
+            .iter()
+            .filter_map(|(&entry, quest_ids)| quest_ids.contains(&quest_id).then_some(entry))
+            .collect();
+        entries.sort_unstable();
+        entries
+    }
+
+    /// GameObject entries that have `gameobject_questender`/involved relation for `quest_id`.
+    ///
+    /// C++ response callers must apply the `0x80000000` GameObject mask themselves.
+    pub fn gameobject_ender_entries_for_quest_like_cpp(&self, quest_id: u32) -> Vec<u32> {
+        let mut entries: Vec<u32> = self
+            .gameobject_ender_quests
+            .iter()
+            .filter_map(|(&entry, quest_ids)| quest_ids.contains(&quest_id).then_some(entry))
+            .collect();
+        entries.sort_unstable();
+        entries
+    }
+
     /// C++ `ObjectMgr::LoadQuestRelationsHelper` insert guard for `gameobject_queststarter`.
     pub fn insert_gameobject_starter_relation_like_cpp(
         &mut self,
