@@ -62,6 +62,8 @@ pub enum WorldStatements {
     SEL_VALID_GAME_EVENT_IDS,
     /// Load world-state template IDs for C++ ConditionMgr WorldState validation.
     SEL_WORLD_STATE_IDS,
+    /// Load C++ WorldStateMgr templates/default metadata.
+    SEL_WORLD_STATES,
     /// SELECT Experience FROM player_xp_for_level ORDER BY Level
     SEL_PLAYER_XP_FOR_LEVEL,
     SEL_CREATURE_BY_ID,
@@ -121,6 +123,10 @@ pub enum WorldStatements {
     SEL_GAME_EVENTS,
     /// C++ GameEventMgr::LoadFromDB game_event_prerequisite metadata query.
     SEL_GAME_EVENT_PREREQUISITES,
+    /// C++ GameEventMgr::LoadFromDB game_event_condition metadata query.
+    SEL_GAME_EVENT_CONDITIONS,
+    /// C++ GameEventMgr::LoadFromDB game_event_quest_condition metadata query.
+    SEL_GAME_EVENT_QUEST_CONDITIONS,
     /// C++ GameEventMgr::LoadFromDB game_event_pool metadata query.
     SEL_GAME_EVENT_POOLS,
     /// C++ GameEventMgr::LoadFromDB game_event_creature metadata query.
@@ -131,8 +137,14 @@ pub enum WorldStatements {
     SEL_CREATURE_EQUIP_TEMPLATE_IDS,
     /// C++ GameEventMgr::LoadFromDB game_event_model_equip metadata query.
     SEL_GAME_EVENT_MODEL_EQUIP,
+    /// C++ GameEventMgr::LoadFromDB game_event_creature_quest metadata query.
+    SEL_GAME_EVENT_CREATURE_QUESTS,
+    /// C++ GameEventMgr::LoadFromDB game_event_gameobject_quest metadata query.
+    SEL_GAME_EVENT_GAMEOBJECT_QUESTS,
     /// C++ GameEventMgr::LoadFromDB game_event_npcflag metadata query.
     SEL_GAME_EVENT_NPC_FLAGS,
+    /// C++ GameEventMgr::LoadFromDB game_event_npc_vendor metadata query.
+    SEL_GAME_EVENT_NPC_VENDOR,
     /// Load C++ instance spawn groups.
     SEL_INSTANCE_SPAWN_GROUPS,
     /// Load gameobject template for query response.
@@ -265,8 +277,12 @@ pub enum WorldStatements {
     // Quest system
     SEL_QUEST_TEMPLATE,
     SEL_QUEST_OBJECTIVES,
+    /// C++ GameEventMgr::LoadFromDB seasonal quest relation query.
+    SEL_GAME_EVENT_SEASONAL_QUEST_RELATIONS,
     SEL_QUEST_STARTERS,
     SEL_QUEST_ENDERS,
+    SEL_GAMEOBJECT_QUEST_STARTERS,
+    SEL_GAMEOBJECT_QUEST_ENDERS,
     /// Get TrainerId from creature_trainer by creature entry (NPC template ID).
     SEL_TRAINER_BY_CREATURE,
     /// Load all spells for a trainer by TrainerId.
@@ -430,6 +446,9 @@ impl StatementDef for WorldStatements {
                 "SELECT eventEntry FROM game_event WHERE eventEntry <> 0 AND (`length` > 0 OR world_event > 0)"
             }
             Self::SEL_WORLD_STATE_IDS => "SELECT ID FROM world_state",
+            Self::SEL_WORLD_STATES => {
+                "SELECT ID, DefaultValue, MapIDs, AreaIDs, ScriptName FROM world_state"
+            }
             Self::SEL_CREATURE_BY_ID => "SELECT guid FROM creature WHERE id = ?",
             Self::SEL_CREATURE_ENTRY_BY_GUID => "SELECT id FROM creature WHERE guid = ?",
             Self::SEL_GAMEOBJECT_NEAREST => {
@@ -576,6 +595,12 @@ impl StatementDef for WorldStatements {
             Self::SEL_GAME_EVENT_PREREQUISITES => {
                 "SELECT eventEntry, prerequisite_event FROM game_event_prerequisite"
             }
+            Self::SEL_GAME_EVENT_CONDITIONS => {
+                "SELECT eventEntry, condition_id, req_num, max_world_state_field, done_world_state_field FROM game_event_condition"
+            }
+            Self::SEL_GAME_EVENT_QUEST_CONDITIONS => {
+                "SELECT quest, eventEntry, condition_id, num FROM game_event_quest_condition"
+            }
             Self::SEL_GAME_EVENT_POOLS => concat!(
                 "SELECT pool_template.entry, game_event_pool.eventEntry FROM pool_template",
                 " JOIN game_event_pool ON pool_template.entry = game_event_pool.pool_entry",
@@ -592,9 +617,20 @@ impl StatementDef for WorldStatements {
                 "game_event_model_equip.modelid, game_event_model_equip.equipment_id ",
                 "FROM creature JOIN game_event_model_equip ON creature.guid = game_event_model_equip.guid",
             ),
+            Self::SEL_GAME_EVENT_CREATURE_QUESTS => {
+                "SELECT id, quest, eventEntry FROM game_event_creature_quest"
+            }
+            Self::SEL_GAME_EVENT_GAMEOBJECT_QUESTS => {
+                "SELECT id, quest, eventEntry FROM game_event_gameobject_quest"
+            }
             Self::SEL_GAME_EVENT_NPC_FLAGS => {
                 "SELECT guid, eventEntry, npcflag FROM game_event_npcflag"
             }
+            Self::SEL_GAME_EVENT_NPC_VENDOR => concat!(
+                "SELECT eventEntry, guid, item, maxcount, incrtime, ExtendedCost, type, ",
+                "BonusListIDs, PlayerConditionId, IgnoreFiltering FROM game_event_npc_vendor ",
+                "ORDER BY guid, slot ASC",
+            ),
             Self::SEL_INSTANCE_SPAWN_GROUPS => {
                 "SELECT instanceMapId, bossStateId, bossStates, spawnGroupId, flags FROM instance_spawn_groups"
             }
@@ -841,19 +877,93 @@ impl StatementDef for WorldStatements {
                 "COALESCE(qta.AllowableClasses, 0) AS AllowableClasses, ",
                 "COALESCE(qta.MaxLevel, 0) AS MaxLevel, ",
                 "COALESCE(qta.PrevQuestID, 0) AS PrevQuestID, ",
+                "COALESCE(qta.RequiredMinRepFaction, 0) AS RequiredMinRepFaction, ",
+                "COALESCE(qta.RequiredMinRepValue, 0) AS RequiredMinRepValue, ",
+                "COALESCE(qta.RequiredMaxRepFaction, 0) AS RequiredMaxRepFaction, ",
+                "COALESCE(qta.RequiredMaxRepValue, 0) AS RequiredMaxRepValue, ",
                 "qt.RewardChoiceItemID1, qt.RewardChoiceItemQuantity1, ",
                 "qt.RewardChoiceItemID2, qt.RewardChoiceItemQuantity2, ",
                 "qt.RewardChoiceItemID3, qt.RewardChoiceItemQuantity3, ",
                 "qt.RewardChoiceItemID4, qt.RewardChoiceItemQuantity4, ",
                 "qt.RewardChoiceItemID5, qt.RewardChoiceItemQuantity5, ",
-                "qt.RewardChoiceItemID6, qt.RewardChoiceItemQuantity6 ",
+                "qt.RewardChoiceItemID6, qt.RewardChoiceItemQuantity6, ",
+                "COALESCE(qta.NextQuestID, 0) AS NextQuestID, ",
+                "COALESCE(qta.ExclusiveGroup, 0) AS ExclusiveGroup, ",
+                "COALESCE(qta.BreadcrumbForQuestId, 0) AS BreadcrumbForQuestId, ",
+                "COALESCE(qta.SpecialFlags, 0) AS SpecialFlags, ",
+                "qt.Expansion ",
                 "FROM quest_template qt LEFT JOIN quest_template_addon qta ON qt.ID = qta.ID"
             ),
             Self::SEL_QUEST_OBJECTIVES => {
                 "SELECT ID, QuestID, Type, `Order`, StorageIndex, ObjectID, Amount, Flags, Flags2, ProgressBarWeight, Description FROM quest_objectives ORDER BY QuestID, `Order`"
             }
+            Self::SEL_GAME_EVENT_SEASONAL_QUEST_RELATIONS => {
+                "SELECT questId, eventEntry FROM game_event_seasonal_questrelation"
+            }
             Self::SEL_QUEST_STARTERS => "SELECT id, quest FROM creature_queststarter",
             Self::SEL_QUEST_ENDERS => "SELECT id, quest FROM creature_questender",
+            Self::SEL_GAMEOBJECT_QUEST_STARTERS => "SELECT id, quest FROM gameobject_queststarter",
+            Self::SEL_GAMEOBJECT_QUEST_ENDERS => "SELECT id, quest FROM gameobject_questender",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn world_state_load_statement_matches_cpp_sql_exactly() {
+        let sql = WorldStatements::SEL_WORLD_STATES.sql();
+        assert_eq!(
+            sql,
+            "SELECT ID, DefaultValue, MapIDs, AreaIDs, ScriptName FROM world_state"
+        );
+        assert_eq!(sql.matches('?').count(), 0);
+        assert_eq!(
+            WorldStatements::SEL_WORLD_STATE_IDS.sql(),
+            "SELECT ID FROM world_state"
+        );
+    }
+
+    #[test]
+    fn game_event_condition_statement_matches_cpp_sql_exactly() {
+        let sql = WorldStatements::SEL_GAME_EVENT_CONDITIONS.sql();
+        assert_eq!(
+            sql,
+            "SELECT eventEntry, condition_id, req_num, max_world_state_field, done_world_state_field FROM game_event_condition"
+        );
+        assert_eq!(sql.matches('?').count(), 0);
+    }
+
+    #[test]
+    fn game_event_quest_condition_statement_matches_cpp_sql_exactly() {
+        let sql = WorldStatements::SEL_GAME_EVENT_QUEST_CONDITIONS.sql();
+        assert_eq!(
+            sql,
+            "SELECT quest, eventEntry, condition_id, num FROM game_event_quest_condition"
+        );
+        assert_eq!(sql.matches('?').count(), 0);
+    }
+
+    #[test]
+    fn game_event_seasonal_questrelation_statement_matches_cpp_sql_exactly() {
+        let sql = WorldStatements::SEL_GAME_EVENT_SEASONAL_QUEST_RELATIONS.sql();
+        assert_eq!(
+            sql,
+            "SELECT questId, eventEntry FROM game_event_seasonal_questrelation"
+        );
+        assert_eq!(sql.matches('?').count(), 0);
+    }
+
+    #[test]
+    fn gameobject_quest_relation_statements_match_cpp_sql_exactly() {
+        let starter_sql = WorldStatements::SEL_GAMEOBJECT_QUEST_STARTERS.sql();
+        let ender_sql = WorldStatements::SEL_GAMEOBJECT_QUEST_ENDERS.sql();
+
+        assert_eq!(starter_sql, "SELECT id, quest FROM gameobject_queststarter");
+        assert_eq!(ender_sql, "SELECT id, quest FROM gameobject_questender");
+        assert_eq!(starter_sql.matches('?').count(), 0);
+        assert_eq!(ender_sql.matches('?').count(), 0);
     }
 }

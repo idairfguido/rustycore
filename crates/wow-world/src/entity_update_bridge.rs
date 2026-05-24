@@ -841,6 +841,7 @@ fn active_player_data_update_to_packet(
         .copy_from_slice(&update.values.inv_slots);
     packet_update.buyback_price = update.values.buyback_price;
     packet_update.buyback_timestamp = update.values.buyback_timestamp;
+    packet_update.quest_completed = update.values.quest_completed;
     packet_update
 }
 
@@ -865,10 +866,12 @@ mod tests {
     use wow_core::ObjectGuid;
     use wow_entities::{
         ACTIVE_PLAYER_DATA_COINAGE_BIT, ACTIVE_PLAYER_DATA_PARENT_BIT,
-        AREA_TRIGGER_DATA_DURATION_BIT, AREA_TRIGGER_DATA_PARENT_BIT, Bag,
-        CONTAINER_DATA_NUM_SLOTS_BIT, CONVERSATION_DATA_LAST_LINE_END_TIME_BIT,
-        CONVERSATION_DATA_PARENT_BIT, CORPSE_DATA_DISPLAY_ID_BIT, CORPSE_DATA_PARENT_BIT, Corpse,
-        CorpseType, DYNAMIC_OBJECT_DATA_PARENT_BIT, DYNAMIC_OBJECT_DATA_RADIUS_BIT, DynamicObject,
+        ACTIVE_PLAYER_DATA_QUEST_COMPLETED_FIRST_BIT,
+        ACTIVE_PLAYER_DATA_QUEST_COMPLETED_PARENT_BIT, AREA_TRIGGER_DATA_DURATION_BIT,
+        AREA_TRIGGER_DATA_PARENT_BIT, Bag, CONTAINER_DATA_NUM_SLOTS_BIT,
+        CONVERSATION_DATA_LAST_LINE_END_TIME_BIT, CONVERSATION_DATA_PARENT_BIT,
+        CORPSE_DATA_DISPLAY_ID_BIT, CORPSE_DATA_PARENT_BIT, Corpse, CorpseType,
+        DYNAMIC_OBJECT_DATA_PARENT_BIT, DYNAMIC_OBJECT_DATA_RADIUS_BIT, DynamicObject,
         GAME_OBJECT_DATA_CREATED_BY_BIT, GAME_OBJECT_DATA_DISPLAY_ID_BIT,
         GAME_OBJECT_DATA_PARENT_BIT, GameObject, ITEM_DATA_STACK_COUNT_BIT, Item,
         PLAYER_DATA_FLAGS_BIT, PLAYER_DATA_PARENT_BIT, Player, SCENE_OBJECT_DATA_PARENT_BIT,
@@ -909,6 +912,36 @@ mod tests {
             ACTIVE_PLAYER_DATA_COINAGE_BIT
         ));
         assert_eq!(active.coinage, 123_456);
+    }
+
+    #[test]
+    fn bridges_quest_completed_bitmap_from_active_player_data_like_cpp() {
+        let mut player = Player::new(Some(7), false);
+        player
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .create(ObjectGuid::create_uniq(0x65));
+        player.clear_data_changes();
+
+        assert!(player.set_quest_completed_bit_like_cpp(65, true));
+        let update = player.values_update(true);
+        let packet_update = player_values_update_to_packet(&update).unwrap();
+        let active = packet_update.active_player_data.as_ref().unwrap();
+
+        assert!(mask_has(
+            &active.active_player_data_mask,
+            ACTIVE_PLAYER_DATA_QUEST_COMPLETED_PARENT_BIT
+        ));
+        assert!(mask_has(
+            &active.active_player_data_mask,
+            ACTIVE_PLAYER_DATA_QUEST_COMPLETED_FIRST_BIT + 1
+        ));
+        assert_eq!(active.quest_completed[1], 1);
+
+        let update_object =
+            player_values_update_to_update_object(player.guid(), 571, &update).unwrap();
+        assert!(!update_object.to_bytes().is_empty());
     }
 
     #[test]

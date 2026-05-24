@@ -47,6 +47,7 @@ use wow_loot::{
     loot_conditions_allow_player_with_references_like_cpp_representable,
     loot_item_ui_type_for_player_like_cpp,
 };
+use wow_network::player_registry::SetQuestSharingInfoAndSendDetailsCommand;
 use wow_network::{
     LootRollStoreWinnerCommand, LootRollVoteCommand, MasterLootGiveCommand, MasterLootGiveResult,
     PlayerRegistry, SessionCommand,
@@ -2485,8 +2486,29 @@ impl WorldSession {
                     self.handle_represented_loot_roll_vote_command_like_cpp(command)
                         .await;
                 }
+                SessionCommand::ResetSeasonalQuestStatus(command) => {
+                    let _ = self.reset_seasonal_quest_status_like_cpp(
+                        command.event_id,
+                        command.event_start_time,
+                    );
+                }
+                SessionCommand::SetQuestSharingInfoAndSendDetails(command) => {
+                    self.handle_set_quest_sharing_info_and_send_details_command_like_cpp(command);
+                }
             }
         }
+    }
+
+    fn handle_set_quest_sharing_info_and_send_details_command_like_cpp(
+        &mut self,
+        command: SetQuestSharingInfoAndSendDetailsCommand,
+    ) {
+        let Some(receiver_guid) = self.player_guid() else {
+            return;
+        };
+
+        self.set_represented_pending_quest_sharing_like_cpp(command.sender_guid, command.quest.id);
+        self.send_represented_quest_giver_quest_details_like_cpp(receiver_guid, &command.quest);
     }
 
     async fn handle_represented_loot_roll_vote_command_like_cpp(
@@ -7560,15 +7582,22 @@ mod tests {
         PlayerBroadcastInfo {
             map_id: 0,
             position: Position::ZERO,
+            is_in_world: true,
             send_tx,
             command_tx,
             active_loot_rolls: Vec::new(),
             pass_on_group_loot: false,
             enchanting_skill: 0,
+            is_alive: true,
+            active_expansion: 2,
+            pending_quest_sharing: None,
             known_spells: Vec::new(),
             active_quest_statuses: Default::default(),
             active_quest_objective_counts: Default::default(),
             rewarded_quests: Default::default(),
+            daily_quests_completed: Default::default(),
+            df_quests: Default::default(),
+            reputation_standings: Vec::new(),
             inventory_item_counts: Default::default(),
             party_member_phase_states: Default::default(),
             player_name: format!("Player{}", guid.counter()),
@@ -7620,9 +7649,12 @@ mod tests {
             reward_display_spell: [0; 3],
             reward_spell: 0,
             reward_honor: 0,
+            expansion: 0,
             flags: 0,
             flags_ex: 0,
             flags_ex2: 0,
+            special_flags: 0,
+            event_id_for_quest: 0,
             reward_items: [0; 4],
             reward_amounts: [0; 4],
             item_drop: [0; 4],
@@ -7637,6 +7669,15 @@ mod tests {
             allowable_classes: 0,
             max_level: 0,
             prev_quest_id: 0,
+            next_quest_id: 0,
+            exclusive_group: 0,
+            breadcrumb_for_quest_id: 0,
+            dependent_previous_quests: Vec::new(),
+            dependent_breadcrumb_quests: Vec::new(),
+            required_min_rep_faction: 0,
+            required_min_rep_value: 0,
+            required_max_rep_faction: 0,
+            required_max_rep_value: 0,
             reward_choice_items: [(0, 0); 6],
         }
     }
@@ -8811,12 +8852,14 @@ mod tests {
         session.set_area_table_store(Arc::new(AreaTableStore::from_entries([
             AreaTableEntry {
                 id: 77,
+                continent_id: 0,
                 parent_area_id: 10,
                 mount_flags: 0,
                 flags: 0,
             },
             AreaTableEntry {
                 id: 10,
+                continent_id: 0,
                 parent_area_id: 0,
                 mount_flags: 0,
                 flags: 0,

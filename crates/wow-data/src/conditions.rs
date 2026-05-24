@@ -2360,9 +2360,12 @@ mod tests {
             reward_display_spell: [0; crate::quest::QUEST_REWARD_DISPLAY_SPELL_COUNT],
             reward_spell: 0,
             reward_honor: 0,
+            expansion: 0,
             flags: 0,
             flags_ex: 0,
             flags_ex2: 0,
+            special_flags: 0,
+            event_id_for_quest: 0,
             reward_items: [0; crate::quest::QUEST_REWARD_ITEM_COUNT],
             reward_amounts: [0; crate::quest::QUEST_REWARD_ITEM_COUNT],
             item_drop: [0; crate::quest::QUEST_ITEM_DROP_COUNT],
@@ -2377,6 +2380,15 @@ mod tests {
             allowable_classes: 0,
             max_level: 0,
             prev_quest_id: 0,
+            next_quest_id: 0,
+            exclusive_group: 0,
+            breadcrumb_for_quest_id: 0,
+            dependent_previous_quests: Vec::new(),
+            dependent_breadcrumb_quests: Vec::new(),
+            required_min_rep_faction: 0,
+            required_min_rep_value: 0,
+            required_max_rep_faction: 0,
+            required_max_rep_value: 0,
             reward_choice_items: [(0, 0); crate::quest::QUEST_REWARD_CHOICES_COUNT],
         }
     }
@@ -2826,12 +2838,14 @@ mod tests {
         let area_store = crate::AreaTableStore::from_entries([
             crate::AreaTableEntry {
                 id: 300,
+                continent_id: 0,
                 parent_area_id: 0,
                 mount_flags: 0,
                 flags: 0,
             },
             crate::AreaTableEntry {
                 id: 301,
+                continent_id: 0,
                 parent_area_id: 300,
                 mount_flags: 0,
                 flags: crate::area::AREA_FLAG_IS_SUBZONE_LIKE_CPP,
@@ -3375,12 +3389,14 @@ mod tests {
         let area_store = crate::AreaTableStore::from_entries([
             crate::AreaTableEntry {
                 id: 7,
+                continent_id: 0,
                 parent_area_id: 0,
                 mount_flags: 0,
                 flags: 0,
             },
             crate::AreaTableEntry {
                 id: 8,
+                continent_id: 0,
                 parent_area_id: 7,
                 mount_flags: 0,
                 flags: crate::area::AREA_FLAG_IS_SUBZONE_LIKE_CPP,

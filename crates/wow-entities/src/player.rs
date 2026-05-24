@@ -683,6 +683,10 @@ pub const ACTIVE_PLAYER_DATA_INV_SLOTS_FIRST_BIT: usize = 125;
 pub const ACTIVE_PLAYER_DATA_BUYBACK_PARENT_BIT: usize = 549;
 pub const ACTIVE_PLAYER_DATA_BUYBACK_PRICE_FIRST_BIT: usize = 550;
 pub const ACTIVE_PLAYER_DATA_BUYBACK_TIMESTAMP_FIRST_BIT: usize = 562;
+pub const ACTIVE_PLAYER_DATA_QUEST_COMPLETED_PARENT_BIT: usize = 636;
+pub const ACTIVE_PLAYER_DATA_QUEST_COMPLETED_FIRST_BIT: usize = 637;
+pub const QUESTS_COMPLETED_BITS_SIZE: usize = 875;
+pub const QUESTS_COMPLETED_BITS_PER_BLOCK: u32 = 64;
 pub const PLAYER_SLOT_END: usize = 141;
 pub const INVENTORY_DEFAULT_SIZE: u8 = 16;
 pub const INVENTORY_SLOT_BAG_START: u8 = 30;
@@ -2727,6 +2731,7 @@ pub struct ActivePlayerDataValues {
     pub inv_slots: [ObjectGuid; PLAYER_SLOT_END],
     pub buyback_price: [u32; BUYBACK_SLOT_COUNT],
     pub buyback_timestamp: [i64; BUYBACK_SLOT_COUNT],
+    pub quest_completed: [u64; QUESTS_COMPLETED_BITS_SIZE],
 }
 
 impl Default for ActivePlayerDataValues {
@@ -2741,6 +2746,7 @@ impl Default for ActivePlayerDataValues {
             inv_slots: [ObjectGuid::EMPTY; PLAYER_SLOT_END],
             buyback_price: [0; BUYBACK_SLOT_COUNT],
             buyback_timestamp: [0; BUYBACK_SLOT_COUNT],
+            quest_completed: [0; QUESTS_COMPLETED_BITS_SIZE],
         }
     }
 }
@@ -3349,6 +3355,42 @@ impl Player {
             i32::from(points),
             |data| &mut data.character_points,
         );
+    }
+
+    pub fn set_quest_completed_bit_like_cpp(&mut self, quest_bit: u32, completed: bool) -> bool {
+        if quest_bit == 0 {
+            return false;
+        }
+
+        let field_offset = (quest_bit - 1) / QUESTS_COMPLETED_BITS_PER_BLOCK;
+        if field_offset as usize >= QUESTS_COMPLETED_BITS_SIZE {
+            return false;
+        }
+
+        let flag = 1u64 << ((quest_bit - 1) % QUESTS_COMPLETED_BITS_PER_BLOCK);
+        let field_offset = field_offset as usize;
+        let target = &mut self.active_data.quest_completed[field_offset];
+        let new_value = if completed {
+            *target | flag
+        } else {
+            *target & !flag
+        };
+
+        if *target == new_value {
+            return false;
+        }
+
+        *target = new_value;
+        self.mark_active_player_data_array(
+            ACTIVE_PLAYER_DATA_QUEST_COMPLETED_PARENT_BIT,
+            ACTIVE_PLAYER_DATA_QUEST_COMPLETED_FIRST_BIT,
+            field_offset,
+        );
+        true
+    }
+
+    pub fn quest_completed_block_like_cpp(&self, index: usize) -> Option<u64> {
+        self.active_data.quest_completed.get(index).copied()
     }
 
     pub fn set_inventory_slot_count(&mut self, count: u8) {
@@ -11905,6 +11947,120 @@ mod tests {
                 .active_player_data_changes_mask()
                 .is_set(ACTIVE_PLAYER_DATA_INV_SLOTS_FIRST_BIT + 3)
         );
+    }
+
+    #[test]
+    fn quest_completed_bit_zero_does_not_mutate_or_mark_mask_like_cpp() {
+        let mut player = Player::new(None, false);
+        player.clear_data_changes();
+
+        assert!(!player.set_quest_completed_bit_like_cpp(0, true));
+        assert_eq!(player.quest_completed_block_like_cpp(0), Some(0));
+        assert!(!player.active_player_data_changes_mask().is_any_set());
+    }
+
+    #[test]
+    fn quest_completed_bit_one_sets_block_zero_and_marks_parent_and_child_like_cpp() {
+        let mut player = Player::new(None, false);
+        player.clear_data_changes();
+
+        assert!(player.set_quest_completed_bit_like_cpp(1, true));
+        assert_eq!(player.quest_completed_block_like_cpp(0), Some(1));
+        assert!(
+            player
+                .active_player_data_changes_mask()
+                .is_set(ACTIVE_PLAYER_DATA_QUEST_COMPLETED_PARENT_BIT)
+        );
+        assert!(
+            player
+                .active_player_data_changes_mask()
+                .is_set(ACTIVE_PLAYER_DATA_QUEST_COMPLETED_FIRST_BIT)
+        );
+    }
+
+    #[test]
+    fn quest_completed_boundary_bits_map_to_cpp_blocks_and_children() {
+        let mut player = Player::new(None, false);
+        player.clear_data_changes();
+
+        assert!(player.set_quest_completed_bit_like_cpp(64, true));
+        assert_eq!(player.quest_completed_block_like_cpp(0), Some(1u64 << 63));
+        assert!(
+            player
+                .active_player_data_changes_mask()
+                .is_set(ACTIVE_PLAYER_DATA_QUEST_COMPLETED_FIRST_BIT)
+        );
+
+        player.clear_data_changes();
+        assert!(player.set_quest_completed_bit_like_cpp(65, true));
+        assert_eq!(player.quest_completed_block_like_cpp(1), Some(1));
+        assert!(
+            player
+                .active_player_data_changes_mask()
+                .is_set(ACTIVE_PLAYER_DATA_QUEST_COMPLETED_PARENT_BIT)
+        );
+        assert!(
+            player
+                .active_player_data_changes_mask()
+                .is_set(ACTIVE_PLAYER_DATA_QUEST_COMPLETED_FIRST_BIT + 1)
+        );
+    }
+
+    #[test]
+    fn quest_completed_clear_removes_only_requested_bit_and_marks_changed_block() {
+        let mut player = Player::new(None, false);
+        assert!(player.set_quest_completed_bit_like_cpp(1, true));
+        assert!(player.set_quest_completed_bit_like_cpp(2, true));
+        player.clear_data_changes();
+
+        assert!(player.set_quest_completed_bit_like_cpp(2, false));
+        assert_eq!(player.quest_completed_block_like_cpp(0), Some(1));
+        assert!(
+            player
+                .active_player_data_changes_mask()
+                .is_set(ACTIVE_PLAYER_DATA_QUEST_COMPLETED_PARENT_BIT)
+        );
+        assert!(
+            player
+                .active_player_data_changes_mask()
+                .is_set(ACTIVE_PLAYER_DATA_QUEST_COMPLETED_FIRST_BIT)
+        );
+    }
+
+    #[test]
+    fn quest_completed_out_of_range_does_not_mutate_or_mark_mask_like_cpp() {
+        let mut player = Player::new(None, false);
+        player.clear_data_changes();
+
+        let out_of_range =
+            (QUESTS_COMPLETED_BITS_SIZE as u32 * QUESTS_COMPLETED_BITS_PER_BLOCK) + 1;
+        assert!(!player.set_quest_completed_bit_like_cpp(out_of_range, true));
+        assert!(
+            player
+                .active_data()
+                .quest_completed
+                .iter()
+                .all(|block| *block == 0)
+        );
+        assert!(!player.active_player_data_changes_mask().is_any_set());
+    }
+
+    #[test]
+    fn quest_completed_repeated_set_and_clear_without_change_do_not_mark_mask_like_cpp() {
+        let mut player = Player::new(None, false);
+        assert!(player.set_quest_completed_bit_like_cpp(65, true));
+        player.clear_data_changes();
+
+        assert!(!player.set_quest_completed_bit_like_cpp(65, true));
+        assert_eq!(player.quest_completed_block_like_cpp(1), Some(1));
+        assert!(!player.active_player_data_changes_mask().is_any_set());
+
+        assert!(player.set_quest_completed_bit_like_cpp(65, false));
+        player.clear_data_changes();
+
+        assert!(!player.set_quest_completed_bit_like_cpp(65, false));
+        assert_eq!(player.quest_completed_block_like_cpp(1), Some(0));
+        assert!(!player.active_player_data_changes_mask().is_any_set());
     }
 
     #[test]

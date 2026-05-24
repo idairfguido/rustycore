@@ -9,6 +9,7 @@ pub mod area;
 pub mod area_trigger;
 pub mod area_trigger_template;
 pub mod artifact_azerite;
+pub mod battlemaster_list;
 pub mod character_progression;
 pub mod chr_specialization;
 pub mod condition_attachments;
@@ -76,6 +77,17 @@ pub use area_trigger::{
     AreaTriggerData, AreaTriggerStore, AreaTriggerTeleport, TriggerShape, load_area_triggers,
 };
 pub use area_trigger_template::AreaTriggerTemplateStore;
+pub use battlemaster_list::{
+    BATTLEGROUND_AB_LIKE_CPP, BATTLEGROUND_AV_LIKE_CPP, BATTLEGROUND_BFG_LIKE_CPP,
+    BATTLEGROUND_EY_LIKE_CPP, BATTLEGROUND_IC_LIKE_CPP, BATTLEGROUND_SA_LIKE_CPP,
+    BATTLEGROUND_TP_LIKE_CPP, BATTLEGROUND_TYPE_NONE_LIKE_CPP, BATTLEGROUND_WS_LIKE_CPP,
+    BattlemasterListEntry, BattlemasterListStore, HOLIDAY_CALL_TO_ARMS_AB_LIKE_CPP,
+    HOLIDAY_CALL_TO_ARMS_AV_LIKE_CPP, HOLIDAY_CALL_TO_ARMS_BG_LIKE_CPP,
+    HOLIDAY_CALL_TO_ARMS_ES_LIKE_CPP, HOLIDAY_CALL_TO_ARMS_IC_LIKE_CPP,
+    HOLIDAY_CALL_TO_ARMS_SA_LIKE_CPP, HOLIDAY_CALL_TO_ARMS_TP_LIKE_CPP,
+    HOLIDAY_CALL_TO_ARMS_WG_LIKE_CPP, HOLIDAY_NONE_LIKE_CPP, HolidayWorldStateLookupLikeCpp,
+    weekend_holiday_id_to_bg_type_like_cpp,
+};
 pub use chr_specialization::{ChrSpecializationEntry, ChrSpecializationStore};
 pub use condition_attachments::{
     ConditionAttachmentReportLikeCpp, attach_loaded_conditions_like_cpp,

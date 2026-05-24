@@ -183,7 +183,7 @@ impl WorldSession {
 
         let chat = ChatPkt {
             msg_type,
-            language: msg.language,
+            language: msg.language as u32,
             sender_guid,
             sender_name,
             target_guid: wow_core::ObjectGuid::EMPTY,
@@ -237,7 +237,7 @@ impl WorldSession {
             // Forward the whisper to the target as a normal Say-whisper.
             let to_target = ChatPkt {
                 msg_type: ChatMsg::Whisper,
-                language: msg.language,
+                language: msg.language as u32,
                 sender_guid,
                 sender_name: sender_name.clone(),
                 target_guid: ObjectGuid::EMPTY,
@@ -251,7 +251,7 @@ impl WorldSession {
             // Inform sender their whisper was delivered.
             let inform = ChatPkt {
                 msg_type: ChatMsg::WhisperInform,
-                language: msg.language,
+                language: msg.language as u32,
                 sender_guid,
                 sender_name: sender_name.clone(),
                 target_guid: ObjectGuid::EMPTY,
@@ -265,7 +265,7 @@ impl WorldSession {
             // Target not found online — echo back as inform (vanilla behavior).
             let chat = ChatPkt {
                 msg_type: ChatMsg::WhisperInform,
-                language: msg.language,
+                language: msg.language as u32,
                 sender_guid,
                 sender_name,
                 target_guid: ObjectGuid::EMPTY,

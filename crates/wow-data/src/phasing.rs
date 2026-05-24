@@ -327,6 +327,7 @@ mod tests {
     fn phase_area_rows_skip_missing_area_or_phase_like_cpp() {
         let area_store = AreaTableStore::from_entries([AreaTableEntry {
             id: 100,
+            continent_id: 0,
             parent_area_id: 0,
             mount_flags: 0,
             flags: 0,
@@ -351,12 +352,14 @@ mod tests {
         let area_store = AreaTableStore::from_entries([
             AreaTableEntry {
                 id: 100,
+                continent_id: 0,
                 parent_area_id: 0,
                 mount_flags: 0,
                 flags: 0,
             },
             AreaTableEntry {
                 id: 101,
+                continent_id: 0,
                 parent_area_id: 100,
                 mount_flags: 0,
                 flags: 0,
@@ -384,12 +387,14 @@ mod tests {
         let area_store = AreaTableStore::from_entries([
             AreaTableEntry {
                 id: 100,
+                continent_id: 0,
                 parent_area_id: 0,
                 mount_flags: 0,
                 flags: 0,
             },
             AreaTableEntry {
                 id: 200,
+                continent_id: 0,
                 parent_area_id: 0,
                 mount_flags: 0,
                 flags: 0,
@@ -430,12 +435,14 @@ mod tests {
         let area_store = AreaTableStore::from_entries([
             AreaTableEntry {
                 id: 100,
+                continent_id: 0,
                 parent_area_id: 0,
                 mount_flags: 0,
                 flags: 0,
             },
             AreaTableEntry {
                 id: 200,
+                continent_id: 0,
                 parent_area_id: 0,
                 mount_flags: 0,
                 flags: 0,
@@ -463,6 +470,7 @@ mod tests {
     fn phase_conditions_report_missing_phase_area_like_cpp() {
         let area_store = AreaTableStore::from_entries([AreaTableEntry {
             id: 100,
+            continent_id: 0,
             parent_area_id: 0,
             mount_flags: 0,
             flags: 0,

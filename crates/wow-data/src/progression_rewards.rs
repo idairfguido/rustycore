@@ -546,6 +546,12 @@ impl QuestV2Store {
             unique_bit_flag: r.get_field_u16(idx, 0),
         })
     }
+
+    /// Mirrors TrinityCore `DB2Manager::GetQuestUniqueBitFlag`.
+    pub fn get_quest_unique_bit_flag_like_cpp(&self, quest_id: u32) -> u32 {
+        self.get(quest_id)
+            .map_or(0, |entry| u32::from(entry.unique_bit_flag))
+    }
 }
 
 impl RewardPackStore {
@@ -733,6 +739,50 @@ mod tests {
         }]);
 
         assert_eq!(store.get(1).unwrap().reward_pack_id, 4);
+    }
+
+    #[test]
+    fn quest_v2_unique_bit_flag_missing_quest_returns_zero_like_cpp() {
+        let store = QuestV2Store::from_entries([]);
+
+        assert_eq!(store.get_quest_unique_bit_flag_like_cpp(12_345), 0);
+    }
+
+    #[test]
+    fn quest_v2_unique_bit_flag_existing_nonzero_returns_exact_flag_like_cpp() {
+        let store = QuestV2Store::from_entries([QuestV2Entry {
+            id: 12_345,
+            unique_bit_flag: 77,
+        }]);
+
+        assert_eq!(store.get_quest_unique_bit_flag_like_cpp(12_345), 77);
+    }
+
+    #[test]
+    fn quest_v2_unique_bit_flag_existing_zero_stays_zero_like_cpp() {
+        let store = QuestV2Store::from_entries([QuestV2Entry {
+            id: 12_345,
+            unique_bit_flag: 0,
+        }]);
+
+        assert_eq!(store.get_quest_unique_bit_flag_like_cpp(12_345), 0);
+    }
+
+    #[test]
+    fn quest_v2_unique_bit_flag_duplicate_ids_preserve_from_entries_last_wins() {
+        let store = QuestV2Store::from_entries([
+            QuestV2Entry {
+                id: 12_345,
+                unique_bit_flag: 11,
+            },
+            QuestV2Entry {
+                id: 12_345,
+                unique_bit_flag: 99,
+            },
+        ]);
+
+        assert_eq!(store.len(), 1);
+        assert_eq!(store.get_quest_unique_bit_flag_like_cpp(12_345), 99);
     }
 
     #[test]

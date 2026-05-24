@@ -135,8 +135,30 @@ pub enum CharStatements {
     /// DELETE FROM respawn WHERE mapId = ? AND instanceId = ?
     DEL_ALL_RESPAWNS,
 
+    /// DELETE FROM game_event_save WHERE eventEntry = ?
+    DEL_GAME_EVENT_SAVE,
+    /// INSERT INTO game_event_save (eventEntry, state, next_start) VALUES (?, ?, ?)
+    INS_GAME_EVENT_SAVE,
+    /// SELECT eventEntry, condition_id, done FROM game_event_condition_save
+    SEL_GAME_EVENT_CONDITION_SAVES,
+    /// DELETE FROM game_event_condition_save WHERE eventEntry = ?
+    DEL_ALL_GAME_EVENT_CONDITION_SAVE,
+    /// DELETE FROM game_event_condition_save WHERE eventEntry = ? AND condition_id = ?
+    DEL_GAME_EVENT_CONDITION_SAVE,
+    /// INSERT INTO game_event_condition_save (eventEntry, condition_id, done) VALUES (?, ?, ?)
+    INS_GAME_EVENT_CONDITION_SAVE,
+    /// DELETE FROM character_queststatus_seasonal WHERE event = ? AND completedTime < ?
+    DEL_RESET_CHARACTER_QUESTSTATUS_SEASONAL_BY_EVENT,
+    /// SELECT Id, Value FROM world_state_value
+    SEL_WORLD_STATE_VALUES,
+    /// REPLACE INTO world_state_value (Id, Value) VALUES (?, ?)
+    /// Future C++ SetValueAndSaveInDb persistence statement; not wired by #NEXT.R8.ENTITIES.575.
+    REP_WORLD_STATE,
+
     // Quest status
     SEL_CHAR_QUEST_STATUS,
+    /// SELECT quest, event, completedTime FROM character_queststatus_seasonal WHERE guid = ?
+    SEL_CHAR_QUEST_STATUS_SEASONAL,
     INS_CHAR_QUEST_STATUS,
     DEL_CHAR_QUEST_STATUS,
 
@@ -374,6 +396,27 @@ impl StatementDef for CharStatements {
                 "DELETE FROM respawn WHERE type = ? AND spawnId = ? AND mapId = ? AND instanceId = ?"
             }
             Self::DEL_ALL_RESPAWNS => "DELETE FROM respawn WHERE mapId = ? AND instanceId = ?",
+            Self::DEL_GAME_EVENT_SAVE => "DELETE FROM game_event_save WHERE eventEntry = ?",
+            Self::INS_GAME_EVENT_SAVE => {
+                "INSERT INTO game_event_save (eventEntry, state, next_start) VALUES (?, ?, ?)"
+            }
+            Self::SEL_GAME_EVENT_CONDITION_SAVES => {
+                "SELECT eventEntry, condition_id, done FROM game_event_condition_save"
+            }
+            Self::DEL_ALL_GAME_EVENT_CONDITION_SAVE => {
+                "DELETE FROM game_event_condition_save WHERE eventEntry = ?"
+            }
+            Self::DEL_GAME_EVENT_CONDITION_SAVE => {
+                "DELETE FROM game_event_condition_save WHERE eventEntry = ? AND condition_id = ?"
+            }
+            Self::INS_GAME_EVENT_CONDITION_SAVE => {
+                "INSERT INTO game_event_condition_save (eventEntry, condition_id, done) VALUES (?, ?, ?)"
+            }
+            Self::DEL_RESET_CHARACTER_QUESTSTATUS_SEASONAL_BY_EVENT => {
+                "DELETE FROM character_queststatus_seasonal WHERE event = ? AND completedTime < ?"
+            }
+            Self::SEL_WORLD_STATE_VALUES => "SELECT Id, Value FROM world_state_value",
+            Self::REP_WORLD_STATE => "REPLACE INTO world_state_value (Id, Value) VALUES (?, ?)",
             Self::UPD_CHAR_XP => "UPDATE characters SET xp = ? WHERE guid = ?",
             Self::UPD_CHAR_LEVEL => "UPDATE characters SET level = ?, xp = ? WHERE guid = ?",
             Self::UPD_CHAR_MONEY => "UPDATE characters SET money = ? WHERE guid = ?",
@@ -463,6 +506,9 @@ impl StatementDef for CharStatements {
             Self::GENERATED_CPP { sql } => sql,
             Self::SEL_CHAR_QUEST_STATUS => {
                 "SELECT quest, status, explored FROM character_queststatus WHERE guid = ?"
+            }
+            Self::SEL_CHAR_QUEST_STATUS_SEASONAL => {
+                "SELECT quest, event, completedTime FROM character_queststatus_seasonal WHERE guid = ?"
             }
             Self::INS_CHAR_QUEST_STATUS => {
                 "INSERT INTO character_queststatus (guid, quest, status, explored, acceptTime, endTime) \
@@ -600,6 +646,103 @@ mod tests {
         assert!(!CharStatements::REP_RESPAWN.sql().is_empty());
         assert!(!CharStatements::DEL_RESPAWN.sql().is_empty());
         assert!(!CharStatements::DEL_ALL_RESPAWNS.sql().is_empty());
+        assert!(!CharStatements::DEL_GAME_EVENT_SAVE.sql().is_empty());
+        assert!(!CharStatements::INS_GAME_EVENT_SAVE.sql().is_empty());
+        assert!(
+            !CharStatements::SEL_GAME_EVENT_CONDITION_SAVES
+                .sql()
+                .is_empty()
+        );
+        assert!(
+            !CharStatements::DEL_ALL_GAME_EVENT_CONDITION_SAVE
+                .sql()
+                .is_empty()
+        );
+        assert!(
+            !CharStatements::DEL_GAME_EVENT_CONDITION_SAVE
+                .sql()
+                .is_empty()
+        );
+        assert!(
+            !CharStatements::INS_GAME_EVENT_CONDITION_SAVE
+                .sql()
+                .is_empty()
+        );
+        assert!(
+            !CharStatements::DEL_RESET_CHARACTER_QUESTSTATUS_SEASONAL_BY_EVENT
+                .sql()
+                .is_empty()
+        );
+        assert!(
+            !CharStatements::SEL_CHAR_QUEST_STATUS_SEASONAL
+                .sql()
+                .is_empty()
+        );
+        assert!(!CharStatements::SEL_WORLD_STATE_VALUES.sql().is_empty());
+        assert!(!CharStatements::REP_WORLD_STATE.sql().is_empty());
+    }
+
+    #[test]
+    fn game_event_save_statements_match_cpp_sql_exactly() {
+        assert_eq!(
+            CharStatements::DEL_GAME_EVENT_SAVE.sql(),
+            "DELETE FROM game_event_save WHERE eventEntry = ?"
+        );
+        assert_eq!(
+            CharStatements::INS_GAME_EVENT_SAVE.sql(),
+            "INSERT INTO game_event_save (eventEntry, state, next_start) VALUES (?, ?, ?)"
+        );
+        assert_eq!(
+            CharStatements::SEL_GAME_EVENT_CONDITION_SAVES.sql(),
+            "SELECT eventEntry, condition_id, done FROM game_event_condition_save"
+        );
+        assert_eq!(
+            CharStatements::DEL_ALL_GAME_EVENT_CONDITION_SAVE.sql(),
+            "DELETE FROM game_event_condition_save WHERE eventEntry = ?"
+        );
+        assert_eq!(
+            CharStatements::DEL_GAME_EVENT_CONDITION_SAVE.sql(),
+            "DELETE FROM game_event_condition_save WHERE eventEntry = ? AND condition_id = ?"
+        );
+        assert_eq!(
+            CharStatements::INS_GAME_EVENT_CONDITION_SAVE.sql(),
+            "INSERT INTO game_event_condition_save (eventEntry, condition_id, done) VALUES (?, ?, ?)"
+        );
+        assert_eq!(
+            CharStatements::DEL_RESET_CHARACTER_QUESTSTATUS_SEASONAL_BY_EVENT.sql(),
+            "DELETE FROM character_queststatus_seasonal WHERE event = ? AND completedTime < ?"
+        );
+        assert_eq!(
+            CharStatements::SEL_CHAR_QUEST_STATUS_SEASONAL.sql(),
+            "SELECT quest, event, completedTime FROM character_queststatus_seasonal WHERE guid = ?"
+        );
+    }
+
+    #[test]
+    fn world_state_value_statements_match_cpp_sql_exactly() {
+        assert_eq!(
+            CharStatements::SEL_WORLD_STATE_VALUES.sql(),
+            "SELECT Id, Value FROM world_state_value"
+        );
+        assert_eq!(
+            CharStatements::SEL_WORLD_STATE_VALUES
+                .sql()
+                .matches('?')
+                .count(),
+            0
+        );
+        assert_eq!(
+            CharStatements::REP_WORLD_STATE.sql(),
+            "REPLACE INTO world_state_value (Id, Value) VALUES (?, ?)"
+        );
+    }
+
+    #[test]
+    fn seasonal_quest_status_load_statement_matches_cpp_sql_exactly() {
+        assert_eq!(
+            CharStatements::SEL_CHAR_QUEST_STATUS_SEASONAL.sql(),
+            "SELECT quest, event, completedTime FROM character_queststatus_seasonal WHERE guid = ?"
+        );
     }
 
     #[test]
@@ -625,6 +768,46 @@ mod tests {
         );
         assert!(CharStatements::SEL_RESPAWNS.sql().contains("respawn"));
         assert!(CharStatements::DEL_ALL_RESPAWNS.sql().contains("respawn"));
+        assert!(
+            CharStatements::DEL_GAME_EVENT_SAVE
+                .sql()
+                .contains("game_event_save")
+        );
+        assert!(
+            CharStatements::INS_GAME_EVENT_SAVE
+                .sql()
+                .contains("game_event_save")
+        );
+        assert!(
+            CharStatements::DEL_ALL_GAME_EVENT_CONDITION_SAVE
+                .sql()
+                .contains("game_event_condition_save")
+        );
+        assert!(
+            CharStatements::SEL_GAME_EVENT_CONDITION_SAVES
+                .sql()
+                .contains("game_event_condition_save")
+        );
+        assert!(
+            CharStatements::DEL_GAME_EVENT_CONDITION_SAVE
+                .sql()
+                .contains("game_event_condition_save")
+        );
+        assert!(
+            CharStatements::INS_GAME_EVENT_CONDITION_SAVE
+                .sql()
+                .contains("game_event_condition_save")
+        );
+        assert!(
+            CharStatements::DEL_RESET_CHARACTER_QUESTSTATUS_SEASONAL_BY_EVENT
+                .sql()
+                .contains("character_queststatus_seasonal")
+        );
+        assert!(
+            CharStatements::SEL_CHAR_QUEST_STATUS_SEASONAL
+                .sql()
+                .contains("character_queststatus_seasonal")
+        );
     }
 
     #[test]
@@ -870,6 +1053,34 @@ mod tests {
         assert_eq!(CharStatements::DEL_RESPAWN.sql().matches('?').count(), 4);
         assert_eq!(
             CharStatements::DEL_ALL_RESPAWNS.sql().matches('?').count(),
+            2
+        );
+        assert_eq!(
+            CharStatements::SEL_GAME_EVENT_CONDITION_SAVES
+                .sql()
+                .matches('?')
+                .count(),
+            0
+        );
+        assert_eq!(
+            CharStatements::DEL_GAME_EVENT_CONDITION_SAVE
+                .sql()
+                .matches('?')
+                .count(),
+            2
+        );
+        assert_eq!(
+            CharStatements::INS_GAME_EVENT_CONDITION_SAVE
+                .sql()
+                .matches('?')
+                .count(),
+            3
+        );
+        assert_eq!(
+            CharStatements::DEL_RESET_CHARACTER_QUESTSTATUS_SEASONAL_BY_EVENT
+                .sql()
+                .matches('?')
+                .count(),
             2
         );
     }

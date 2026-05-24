@@ -102,6 +102,37 @@ impl ServerPacket for TutorialFlags {
     }
 }
 
+// ── UpdateWorldState (SMSG 0x2748) ──────────────────────────────────
+
+/// C++ `WorldPackets::WorldState::UpdateWorldState`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UpdateWorldState {
+    pub variable_id: u32,
+    pub value: i32,
+    pub hidden: bool,
+}
+
+impl UpdateWorldState {
+    pub fn new(variable_id: u32, value: i32) -> Self {
+        Self {
+            variable_id,
+            value,
+            hidden: false,
+        }
+    }
+}
+
+impl ServerPacket for UpdateWorldState {
+    const OPCODE: ServerOpcodes = ServerOpcodes::UpdateWorldState;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_uint32(self.variable_id);
+        pkt.write_int32(self.value);
+        pkt.write_bit(self.hidden);
+        pkt.flush_bits();
+    }
+}
+
 // ── FishNotHooked (SMSG 0x26cf) ─────────────────────────────────────
 
 /// Empty packet sent when a fishing bobber is clicked before a fish is hooked.
@@ -3671,6 +3702,39 @@ mod tests {
         );
         assert_eq!(&bytes[2..18], &guid.to_raw_bytes());
         assert_eq!(bytes.len(), 18);
+    }
+
+    #[test]
+    fn update_world_state_writes_visible_default_false_layout_like_cpp() {
+        let bytes = UpdateWorldState::new(0x1234_5678, 42).to_bytes();
+
+        assert_eq!(
+            bytes[0..2],
+            (ServerOpcodes::UpdateWorldState as u16).to_le_bytes()
+        );
+        assert_eq!(&bytes[2..6], &0x1234_5678_u32.to_le_bytes());
+        assert_eq!(&bytes[6..10], &42_i32.to_le_bytes());
+        assert_eq!(bytes[10], 0x00);
+        assert_eq!(bytes.len(), 11);
+    }
+
+    #[test]
+    fn update_world_state_writes_hidden_true_bit_like_cpp() {
+        let bytes = UpdateWorldState {
+            variable_id: 9001,
+            value: -7,
+            hidden: true,
+        }
+        .to_bytes();
+
+        assert_eq!(
+            bytes[0..2],
+            (ServerOpcodes::UpdateWorldState as u16).to_le_bytes()
+        );
+        assert_eq!(&bytes[2..6], &9001_u32.to_le_bytes());
+        assert_eq!(&bytes[6..10], &(-7_i32).to_le_bytes());
+        assert_eq!(bytes[10], 0x80);
+        assert_eq!(bytes.len(), 11);
     }
 
     #[test]

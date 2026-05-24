@@ -188,6 +188,16 @@ pub struct GameEventChangeEquipOrModelLiveOutcomeLikeCpp {
     pub model_validation_unavailable: usize,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GameEventNpcFlagLiveOutcomeLikeCpp {
+    pub spawn_id: SpawnId,
+    pub indexed_guids: usize,
+    pub live_creatures_mutated: usize,
+    pub stale_index_or_wrong_kind: usize,
+    pub npc_flags_low_applied: usize,
+    pub npc_flags2_unrepresented_nonzero: usize,
+}
+
 /// Represented key for the map-owned C++ `_dynamicTree` model-registration seam.
 ///
 /// C++ `DynamicMapTree` stores `GameObjectModel` object references/pointers. Rust does
@@ -223,6 +233,21 @@ pub struct DynamicMapTreeModelMutationOutcomeLikeCpp {
     pub model_count_after: usize,
     pub unbalanced_before: u32,
     pub unbalanced_after: u32,
+}
+
+/// Represented map-owned evidence for C++ `GameEventMgr::RunSmartAIScripts`.
+///
+/// Anchor: `GameEventMgr.cpp:1618-1655`. The C++ worker visits every map and
+/// dispatches only exact in-world Creature/GameObject AI callbacks. Rust does
+/// not model SmartAI/`ProcessEventsFor` here; this summary only counts exact
+/// typed `Map::map_objects` candidates and marks dispatch as unrepresented.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct GameEventSmartAiScriptCandidateSummaryLikeCpp {
+    pub maps_visited: usize,
+    pub in_world_creature_candidates: usize,
+    pub in_world_gameobject_candidates: usize,
+    pub creature_ai_enabled_unrepresented: usize,
+    pub script_dispatch_unrepresented: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -7832,6 +7857,51 @@ where
         outcome
     }
 
+    /// Bounded map-owned consumer for C++ `GameEventMgr::UpdateEventNPCFlags` live creature loop.
+    ///
+    /// Mirrors `Map::GetCreatureBySpawnIdStore().equal_range(spawnId)` and only applies the
+    /// represented low 32-bit `ReplaceAllNpcFlags` state to canonical `MapObjectRecord::Creature`.
+    /// `NPCFlags2` high bits are evidence-only in this slice; no values/session fanout, gossip reset,
+    /// ObjectAccessor, update packets, or template lookup is performed inside `wow-map`.
+    pub fn update_game_event_npc_flags_by_spawn_id_like_cpp(
+        &mut self,
+        spawn_id: SpawnId,
+        npcflag_mask_with_template: u64,
+    ) -> GameEventNpcFlagLiveOutcomeLikeCpp {
+        let guids = self.creature_spawn_id_store_guids_like_cpp(spawn_id);
+        let mut outcome = GameEventNpcFlagLiveOutcomeLikeCpp {
+            spawn_id,
+            indexed_guids: guids.len(),
+            ..GameEventNpcFlagLiveOutcomeLikeCpp::default()
+        };
+        let npc_flags_low = npcflag_mask_with_template as u32;
+        let npc_flags2_nonzero = (npcflag_mask_with_template >> 32) != 0;
+
+        for guid in guids {
+            let Some(record) = self.map_objects.get_mut(&guid) else {
+                outcome.stale_index_or_wrong_kind += 1;
+                continue;
+            };
+            let Some(creature) = record.creature_mut() else {
+                outcome.stale_index_or_wrong_kind += 1;
+                continue;
+            };
+            if creature.spawn_id() != spawn_id {
+                outcome.stale_index_or_wrong_kind += 1;
+                continue;
+            }
+
+            creature.ai_ownership_mut().npc_flags = npc_flags_low;
+            outcome.live_creatures_mutated += 1;
+            outcome.npc_flags_low_applied += 1;
+            if npc_flags2_nonzero {
+                outcome.npc_flags2_unrepresented_nonzero += 1;
+            }
+        }
+
+        outcome
+    }
+
     pub fn get_gameobject_by_spawn_id_like_cpp(&self, spawn_id: SpawnId) -> Option<&GameObject> {
         let mut fallback_guid = None;
         let mut spawned_guid = None;
@@ -10522,6 +10592,49 @@ where
 
     pub fn map_object_record(&self, guid: ObjectGuid) -> Option<&MapObjectRecord> {
         self.map_objects.get(&guid)
+    }
+
+    /// Count exact typed in-world Creature/GameObject candidates for represented
+    /// C++ `GameEventMgr::RunSmartAIScripts` evidence.
+    ///
+    /// This intentionally reads only canonical `Map::map_objects`. Generic
+    /// fallback records are ignored because C++ uses typed object stores. Transport
+    /// records are also ignored even though they can expose a GameObject view; the
+    /// C++ hook worker's switch has no transport branch in this slice.
+    pub fn game_event_smart_ai_script_candidates_like_cpp(
+        &self,
+    ) -> GameEventSmartAiScriptCandidateSummaryLikeCpp {
+        let mut summary = GameEventSmartAiScriptCandidateSummaryLikeCpp {
+            maps_visited: 1,
+            ..GameEventSmartAiScriptCandidateSummaryLikeCpp::default()
+        };
+
+        for record in self.map_objects.values() {
+            match record.kind() {
+                AccessorObjectKind::Creature => {
+                    if record
+                        .creature()
+                        .is_some_and(|creature| creature.unit().world().object().is_in_world())
+                    {
+                        summary.in_world_creature_candidates += 1;
+                        summary.creature_ai_enabled_unrepresented += 1;
+                        summary.script_dispatch_unrepresented += 1;
+                    }
+                }
+                AccessorObjectKind::GameObject => {
+                    if record
+                        .game_object()
+                        .is_some_and(|game_object| game_object.world().object().is_in_world())
+                    {
+                        summary.in_world_gameobject_candidates += 1;
+                        summary.script_dispatch_unrepresented += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        summary
     }
 
     /// Represented tail metrics from C++ `Map::Update` after
@@ -15255,6 +15368,56 @@ mod tests {
     }
 
     #[test]
+    fn game_event_smart_ai_candidates_count_exact_in_world_creature_gameobject_only_like_cpp() {
+        let mut map = test_map();
+
+        map.insert_map_object_record(
+            MapObjectRecord::new_creature(test_creature_for_spawn(55301, 5530101, true)).unwrap(),
+        )
+        .unwrap();
+
+        let mut not_in_world_creature = test_creature_for_spawn(55302, 5530102, true);
+        not_in_world_creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        map.insert_map_object_record(MapObjectRecord::new_creature(not_in_world_creature).unwrap())
+            .unwrap();
+
+        map.insert_map_object_record(
+            MapObjectRecord::new_game_object(test_gameobject_for_spawn(55303, 5530103)).unwrap(),
+        )
+        .unwrap();
+
+        let mut not_in_world_gameobject = test_gameobject_for_spawn(55304, 5530104);
+        not_in_world_gameobject
+            .world_mut()
+            .object_mut()
+            .remove_from_world();
+        map.insert_map_object_record(
+            MapObjectRecord::new_game_object(not_in_world_gameobject).unwrap(),
+        )
+        .unwrap();
+
+        let generic = world_object_with_counter(HighGuid::GameObject, 5530105, 571, 7, true);
+        map.insert_map_object(AccessorObjectKind::GameObject, generic)
+            .unwrap();
+        map.insert_map_object_record(
+            MapObjectRecord::new_transport(test_transport(553_106, true)).unwrap(),
+        )
+        .unwrap();
+
+        let summary = map.game_event_smart_ai_script_candidates_like_cpp();
+
+        assert_eq!(summary.maps_visited, 1);
+        assert_eq!(summary.in_world_creature_candidates, 1);
+        assert_eq!(summary.in_world_gameobject_candidates, 1);
+        assert_eq!(summary.creature_ai_enabled_unrepresented, 1);
+        assert_eq!(summary.script_dispatch_unrepresented, 2);
+    }
+
+    #[test]
     fn grid_unload_actions_apply_to_map_owned_creature_record() {
         let mut map = test_map();
         let creature_guid = guid(HighGuid::Creature, 3711);
@@ -17322,6 +17485,83 @@ mod tests {
         assert_eq!(outcome.indexed_guids, 1);
         assert_eq!(outcome.live_creatures_mutated, 0);
         assert_eq!(outcome.stale_index_or_wrong_kind, 1);
+    }
+
+    #[test]
+    fn game_event_npc_flag_live_consumer_mutates_exact_spawn_low_bits_like_cpp() {
+        let mut map = test_map();
+        let mut first = test_creature_for_spawn(547, 54701, true);
+        first.ai_ownership_mut().npc_flags = 0x1;
+        let mut second = test_creature_for_spawn(547, 54702, true);
+        second.ai_ownership_mut().npc_flags = 0x2;
+        map.insert_map_object_record(MapObjectRecord::new_creature(first).unwrap())
+            .unwrap();
+        map.insert_map_object_record(MapObjectRecord::new_creature(second).unwrap())
+            .unwrap();
+
+        let outcome = map.update_game_event_npc_flags_by_spawn_id_like_cpp(547, 0x1_0000_00A5);
+
+        assert_eq!(outcome.indexed_guids, 2);
+        assert_eq!(outcome.live_creatures_mutated, 2);
+        assert_eq!(outcome.npc_flags_low_applied, 2);
+        assert_eq!(outcome.npc_flags2_unrepresented_nonzero, 2);
+        for guid in map.creature_spawn_id_store_guids_like_cpp(547) {
+            let creature = map
+                .map_object_record(guid)
+                .and_then(MapObjectRecord::creature)
+                .unwrap();
+            assert_eq!(creature.ai_ownership().npc_flags, 0xA5);
+        }
+    }
+
+    #[test]
+    fn game_event_npc_flag_live_consumer_wrong_kind_or_mismatched_spawn_no_mutation_like_cpp() {
+        let mut map = test_map();
+        let mut creature = test_creature_for_spawn(548, 54801, true);
+        creature.ai_ownership_mut().npc_flags = 0x11;
+        map.insert_map_object_record(MapObjectRecord::new_creature(creature).unwrap())
+            .unwrap();
+        let guid = guid(HighGuid::Creature, 54801);
+        if let Some(creature_index) = map.creatures_by_spawn_id.get_mut(&548) {
+            creature_index.retain(|indexed_guid| *indexed_guid != guid);
+        }
+        map.creatures_by_spawn_id
+            .entry(549)
+            .or_default()
+            .insert(guid);
+
+        let outcome = map.update_game_event_npc_flags_by_spawn_id_like_cpp(549, 0x22);
+
+        assert_eq!(outcome.indexed_guids, 1);
+        assert_eq!(outcome.live_creatures_mutated, 0);
+        assert_eq!(outcome.stale_index_or_wrong_kind, 1);
+        let creature = map
+            .map_object_record(guid)
+            .and_then(MapObjectRecord::creature)
+            .unwrap();
+        assert_eq!(creature.ai_ownership().npc_flags, 0x11);
+    }
+
+    #[test]
+    fn game_event_npc_flag_live_consumer_upper_bits_are_evidence_only_like_cpp() {
+        let mut map = test_map();
+        map.insert_map_object_record(
+            MapObjectRecord::new_creature(test_creature_for_spawn(550, 55001, true)).unwrap(),
+        )
+        .unwrap();
+
+        let outcome =
+            map.update_game_event_npc_flags_by_spawn_id_like_cpp(550, 0xFFFF_FFFF_0000_0040);
+
+        assert_eq!(outcome.live_creatures_mutated, 1);
+        assert_eq!(outcome.npc_flags_low_applied, 1);
+        assert_eq!(outcome.npc_flags2_unrepresented_nonzero, 1);
+        let guid = map.creature_spawn_id_store_guids_like_cpp(550)[0];
+        let creature = map
+            .map_object_record(guid)
+            .and_then(MapObjectRecord::creature)
+            .unwrap();
+        assert_eq!(creature.ai_ownership().npc_flags, 0x40);
     }
 
     #[test]

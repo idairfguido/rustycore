@@ -157,6 +157,7 @@ mod tests {
 
         let area_store = crate::AreaTableStore::from_entries([AreaTableEntry {
             id: 100,
+            continent_id: 0,
             parent_area_id: 0,
             mount_flags: 0,
             flags: 0,
