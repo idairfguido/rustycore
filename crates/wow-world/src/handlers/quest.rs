@@ -22,6 +22,8 @@ use wow_constants::unit::NPCFlags1;
 use wow_core::ObjectGuid;
 use wow_data::DISABLE_TYPE_QUEST;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
+use wow_network::SessionCommand;
+use wow_network::player_registry::SetQuestSharingInfoAndSendDetailsCommand;
 use wow_packet::packets::query::{
     QueryQuestCompletionNpcs, QuestCompletionNpc, QuestCompletionNpcResponse,
 };
@@ -70,6 +72,7 @@ pub(crate) const QUEST_PUSH_REASON_LOW_FACTION_LIKE_CPP: u8 = 30;
 pub(crate) const QUEST_PUSH_REASON_LOW_FACTION_TO_RECIPIENT_LIKE_CPP: u8 = 31;
 pub(crate) const QUEST_PUSH_REASON_EXPANSION_LIKE_CPP: u8 = 32;
 pub(crate) const QUEST_PUSH_REASON_EXPANSION_TO_RECIPIENT_LIKE_CPP: u8 = 33;
+pub(crate) const QUEST_PUSH_REASON_SUCCESS_LIKE_CPP: u8 = 0;
 
 fn player_race_or_class_mask_like_cpp(id: u8) -> u32 {
     if id == 0 {
@@ -1469,16 +1472,78 @@ impl WorldSession {
                 continue;
             }
 
-            blocked_by_unsupported_success_path = true;
+            if quest.is_turn_in_like_cpp()
+                && quest.is_repeatable()
+                && !quest.is_daily_or_weekly_like_cpp()
+            {
+                blocked_by_unsupported_success_path = true;
+                self.record_represented_push_quest_to_party_outcome_like_cpp(
+                    RepresentedPushQuestToPartyOutcomeLikeCpp {
+                        sender_guid,
+                        quest_id: packet.quest_id,
+                        target_guid: Some(receiver_guid),
+                        reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverRepeatableTurnInRequestItemsUnrepresented,
+                        quest_pool_active_check_unrepresented: false,
+                        group_runtime_unrepresented: false,
+                        receiver_fanout_unrepresented: true,
+                    },
+                );
+                continue;
+            }
+
+            let Some(sender_guid_for_receiver_command) = sender_guid else {
+                blocked_by_unsupported_success_path = true;
+                self.record_represented_push_quest_to_party_outcome_like_cpp(
+                    RepresentedPushQuestToPartyOutcomeLikeCpp {
+                        sender_guid,
+                        quest_id: packet.quest_id,
+                        target_guid: Some(receiver_guid),
+                        reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverQuestDetailsPromptCommandFailed,
+                        quest_pool_active_check_unrepresented: false,
+                        group_runtime_unrepresented: false,
+                        receiver_fanout_unrepresented: true,
+                    },
+                );
+                continue;
+            };
+
+            let command = SessionCommand::SetQuestSharingInfoAndSendDetails(
+                SetQuestSharingInfoAndSendDetailsCommand {
+                    sender_guid: sender_guid_for_receiver_command,
+                    quest: quest.clone(),
+                },
+            );
+
+            if receiver.command_tx.try_send(command).is_err() {
+                blocked_by_unsupported_success_path = true;
+                self.record_represented_push_quest_to_party_outcome_like_cpp(
+                    RepresentedPushQuestToPartyOutcomeLikeCpp {
+                        sender_guid,
+                        quest_id: packet.quest_id,
+                        target_guid: Some(receiver_guid),
+                        reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverQuestDetailsPromptCommandFailed,
+                        quest_pool_active_check_unrepresented: false,
+                        group_runtime_unrepresented: false,
+                        receiver_fanout_unrepresented: true,
+                    },
+                );
+                continue;
+            }
+
+            self.send_push_quest_result_to_sender_with_title_if_available_like_cpp(
+                receiver_guid,
+                QUEST_PUSH_REASON_SUCCESS_LIKE_CPP,
+                String::new(),
+            );
             self.record_represented_push_quest_to_party_outcome_like_cpp(
                 RepresentedPushQuestToPartyOutcomeLikeCpp {
                     sender_guid,
                     quest_id: packet.quest_id,
                     target_guid: Some(receiver_guid),
-                    reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented,
+                    reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSuccessQuestDetailsPrompted,
                     quest_pool_active_check_unrepresented: false,
                     group_runtime_unrepresented: false,
-                    receiver_fanout_unrepresented: true,
+                    receiver_fanout_unrepresented: false,
                 },
             );
         }
@@ -3003,6 +3068,53 @@ mod tests {
         (sender_guid, result, quest_title)
     }
 
+    fn recv_quest_giver_quest_details_contains_quest_id(
+        send_rx: &flume::Receiver<Vec<u8>>,
+        quest_id: u32,
+    ) {
+        let bytes = send_rx
+            .try_recv()
+            .expect("quest giver quest details packet");
+        assert_eq!(
+            wow_packet::WorldPacket::from_bytes(&bytes).server_opcode(),
+            Some(wow_constants::ServerOpcodes::QuestGiverQuestDetails)
+        );
+        assert!(
+            bytes
+                .windows(4)
+                .any(|window| window == quest_id.to_le_bytes())
+        );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    fn assert_success_command_queued_like_cpp(
+        sender_rx: &flume::Receiver<Vec<u8>>,
+        receiver_rx: &flume::Receiver<Vec<u8>>,
+        receiver_session: &mut WorldSession,
+        receiver_guid: ObjectGuid,
+        sender_guid: ObjectGuid,
+        quest_id: u32,
+    ) {
+        assert_eq!(
+            recv_push_quest_result_response(sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_SUCCESS_LIKE_CPP,
+                String::new()
+            )
+        );
+        assert!(receiver_rx.try_recv().is_err());
+        let commands = receiver_session.drain_session_commands();
+        assert_eq!(commands.len(), 1);
+        match &commands[0] {
+            SessionCommand::SetQuestSharingInfoAndSendDetails(command) => {
+                assert_eq!(command.sender_guid, sender_guid);
+                assert_eq!(command.quest.id, quest_id);
+            }
+            other => panic!("unexpected session command: {other:?}"),
+        }
+    }
+
     fn recv_status(send_rx: &flume::Receiver<Vec<u8>>) -> (ObjectGuid, u64) {
         let bytes = send_rx.try_recv().expect("quest giver status packet");
         assert_eq!(
@@ -3646,7 +3758,7 @@ mod tests {
                 .iter()
                 .any(|outcome| matches!(
                     outcome.reason,
-                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSuccessQuestDetailsPrompted
                 ))
         );
         assert!(
@@ -3770,15 +3882,21 @@ mod tests {
 
         run_push_quest_to_party(&mut session, shared_quest_id).await;
 
-        assert!(sender_rx.try_recv().is_err());
-        assert!(receiver_rx.try_recv().is_err());
+        assert_success_command_queued_like_cpp(
+            &sender_rx,
+            &receiver_rx,
+            &mut receiver_session,
+            receiver_guid,
+            sender_guid,
+            shared_quest_id,
+        );
         assert!(
             session
                 .represented_push_quest_to_party_outcomes_like_cpp()
                 .iter()
                 .any(|outcome| matches!(
                 outcome.reason,
-                RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented
+                RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSuccessQuestDetailsPrompted
             ))
         );
         assert!(
@@ -3841,7 +3959,7 @@ mod tests {
                 .iter()
                 .any(|outcome| matches!(
                     outcome.reason,
-                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSuccessQuestDetailsPrompted
                 ))
         );
     }
@@ -3895,7 +4013,7 @@ mod tests {
                 .iter()
                 .any(|outcome| matches!(
                     outcome.reason,
-                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSuccessQuestDetailsPrompted
                 ))
         );
     }
@@ -3918,15 +4036,21 @@ mod tests {
 
         run_push_quest_to_party(&mut session, shared_quest_id).await;
 
-        assert!(sender_rx.try_recv().is_err());
-        assert!(receiver_rx.try_recv().is_err());
+        assert_success_command_queued_like_cpp(
+            &sender_rx,
+            &receiver_rx,
+            &mut receiver_session,
+            receiver_guid,
+            sender_guid,
+            shared_quest_id,
+        );
         assert!(
             session
                 .represented_push_quest_to_party_outcomes_like_cpp()
                 .iter()
                 .any(|outcome| matches!(
                     outcome.reason,
-                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSuccessQuestDetailsPrompted
                 ))
         );
         assert!(
@@ -4108,15 +4232,21 @@ mod tests {
 
         run_push_quest_to_party(&mut session, shared_quest_id).await;
 
-        assert!(sender_rx.try_recv().is_err());
-        assert!(receiver_rx.try_recv().is_err());
+        assert_success_command_queued_like_cpp(
+            &sender_rx,
+            &receiver_rx,
+            &mut receiver_session,
+            receiver_guid,
+            sender_guid,
+            shared_quest_id,
+        );
         assert!(
             session
                 .represented_push_quest_to_party_outcomes_like_cpp()
                 .iter()
                 .any(|outcome| matches!(
                     outcome.reason,
-                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSuccessQuestDetailsPrompted
                 ))
         );
         assert!(
@@ -4229,15 +4359,21 @@ mod tests {
         session.set_quest_store(Arc::new(quest_store));
         session.set_quest_pool_store(Arc::new(quest_pool_store));
         add_active_quest(&mut session, shared_quest_id);
-        let (_player_registry, receiver_session, receiver_rx) =
+        let (_player_registry, mut receiver_session, receiver_rx) =
             install_represented_party(&mut session, sender_guid, receiver_guid);
         receiver_session.sync_player_registry_state_like_cpp();
 
         run_push_quest_to_party(&mut session, shared_quest_id).await;
 
-        assert!(sender_rx.try_recv().is_err());
-        assert!(receiver_rx.try_recv().is_err());
-        assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented)));
+        assert_success_command_queued_like_cpp(
+            &sender_rx,
+            &receiver_rx,
+            &mut receiver_session,
+            receiver_guid,
+            sender_guid,
+            shared_quest_id,
+        );
+        assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSuccessQuestDetailsPrompted)));
         assert!(!session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestReputationLowFaction | RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestReputationHighFaction)));
     }
 
@@ -4275,7 +4411,7 @@ mod tests {
             )
         );
         assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestPreviousQuestPrerequisite)));
-        assert!(!session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented)));
+        assert!(!session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSuccessQuestDetailsPrompted)));
     }
 
     #[tokio::test]
@@ -4297,9 +4433,15 @@ mod tests {
 
         run_push_quest_to_party(&mut session, shared_quest_id).await;
 
-        assert!(sender_rx.try_recv().is_err());
-        assert!(receiver_rx.try_recv().is_err());
-        assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented)));
+        assert_success_command_queued_like_cpp(
+            &sender_rx,
+            &receiver_rx,
+            &mut receiver_session,
+            receiver_guid,
+            sender_guid,
+            shared_quest_id,
+        );
+        assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSuccessQuestDetailsPrompted)));
         assert!(!session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestPreviousQuestPrerequisite)));
     }
 
@@ -4359,9 +4501,15 @@ mod tests {
 
         run_push_quest_to_party(&mut session, shared_quest_id).await;
 
-        assert!(sender_rx.try_recv().is_err());
-        assert!(receiver_rx.try_recv().is_err());
-        assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented)));
+        assert_success_command_queued_like_cpp(
+            &sender_rx,
+            &receiver_rx,
+            &mut receiver_session,
+            receiver_guid,
+            sender_guid,
+            shared_quest_id,
+        );
+        assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSuccessQuestDetailsPrompted)));
         assert!(!session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestPreviousQuestPrerequisite)));
     }
 
@@ -4433,9 +4581,15 @@ mod tests {
 
         run_push_quest_to_party(&mut session, shared_quest_id).await;
 
-        assert!(sender_rx.try_recv().is_err());
-        assert!(receiver_rx.try_recv().is_err());
-        assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented)));
+        assert_success_command_queued_like_cpp(
+            &sender_rx,
+            &receiver_rx,
+            &mut receiver_session,
+            receiver_guid,
+            sender_guid,
+            shared_quest_id,
+        );
+        assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSuccessQuestDetailsPrompted)));
         assert!(!session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDependentPreviousQuestsPrerequisite)));
     }
 
@@ -4509,9 +4663,15 @@ mod tests {
 
         run_push_quest_to_party(&mut session, shared_quest_id).await;
 
-        assert!(sender_rx.try_recv().is_err());
-        assert!(receiver_rx.try_recv().is_err());
-        assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented)));
+        assert_success_command_queued_like_cpp(
+            &sender_rx,
+            &receiver_rx,
+            &mut receiver_session,
+            receiver_guid,
+            sender_guid,
+            shared_quest_id,
+        );
+        assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSuccessQuestDetailsPrompted)));
         assert!(!session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDependentPreviousQuestsPrerequisite)));
     }
 
@@ -4573,15 +4733,21 @@ mod tests {
         session.set_quest_store(Arc::new(quest_store));
         session.set_quest_pool_store(Arc::new(quest_pool_store));
         add_active_quest(&mut session, shared_quest_id);
-        let (_player_registry, receiver_session, receiver_rx) =
+        let (_player_registry, mut receiver_session, receiver_rx) =
             install_represented_party(&mut session, sender_guid, receiver_guid);
         receiver_session.sync_player_registry_state_like_cpp();
 
         run_push_quest_to_party(&mut session, shared_quest_id).await;
 
-        assert!(sender_rx.try_recv().is_err());
-        assert!(receiver_rx.try_recv().is_err());
-        assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented)));
+        assert_success_command_queued_like_cpp(
+            &sender_rx,
+            &receiver_rx,
+            &mut receiver_session,
+            receiver_guid,
+            sender_guid,
+            shared_quest_id,
+        );
+        assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSuccessQuestDetailsPrompted)));
         assert!(!session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDependentBreadcrumbQuestsPrerequisite)));
     }
 
@@ -4916,8 +5082,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn push_quest_to_party_equal_receiver_expansion_passes_to_unrepresented_boundary_like_cpp()
-     {
+    async fn push_quest_to_party_success_prompts_receiver_details_and_sets_pending_like_cpp() {
         let (mut session, sender_rx) = make_session();
         let sender_guid = session.player_guid().expect("test sender guid");
         let receiver_guid = ObjectGuid::create_player(1, 249);
@@ -4937,8 +5102,39 @@ mod tests {
 
         run_push_quest_to_party(&mut session, shared_quest_id).await;
 
-        assert!(sender_rx.try_recv().is_err());
+        assert_eq!(
+            recv_push_quest_result_response(&sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_SUCCESS_LIKE_CPP,
+                String::new()
+            )
+        );
         assert!(receiver_rx.try_recv().is_err());
+        let commands = receiver_session.drain_session_commands();
+        assert_eq!(commands.len(), 1);
+        match &commands[0] {
+            SessionCommand::SetQuestSharingInfoAndSendDetails(command) => {
+                assert_eq!(command.sender_guid, sender_guid);
+                assert_eq!(command.quest.id, shared_quest_id);
+            }
+            other => panic!("unexpected session command: {other:?}"),
+        }
+        receiver_session
+            .session_command_tx()
+            .try_send(commands.into_iter().next().expect("command"))
+            .expect("requeue command for processing");
+        receiver_session
+            .process_represented_session_commands_like_cpp()
+            .await;
+        assert_eq!(
+            receiver_session.represented_pending_quest_sharing_like_cpp(),
+            Some(crate::session::RepresentedPendingQuestSharingLikeCpp {
+                sender_guid,
+                quest_id: shared_quest_id,
+            })
+        );
+        recv_quest_giver_quest_details_contains_quest_id(&receiver_rx, shared_quest_id);
         assert!(
             session
                 .represented_push_quest_to_party_outcomes_like_cpp()
@@ -4946,8 +5142,9 @@ mod tests {
                 .any(|outcome| outcome.target_guid == Some(receiver_guid)
                     && matches!(
                         outcome.reason,
-                        RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented
-                    ))
+                        RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSuccessQuestDetailsPrompted
+                    )
+                    && !outcome.receiver_fanout_unrepresented)
         );
         assert!(
             !session
@@ -4956,6 +5153,7 @@ mod tests {
                 .any(|outcome| matches!(
                     outcome.reason,
                     RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestExpansionRequiredExpansion
+                        | RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented
                 ))
         );
     }
@@ -5000,7 +5198,7 @@ mod tests {
             )
         );
         assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| outcome.target_guid == Some(receiver_guid) && matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverCanTakeQuestInvalid)));
-        assert!(!session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| outcome.target_guid == Some(receiver_guid) && matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented)));
+        assert!(!session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| outcome.target_guid == Some(receiver_guid) && matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSuccessQuestDetailsPrompted)));
     }
 
     #[tokio::test]
@@ -5045,7 +5243,7 @@ mod tests {
             )
         );
         assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| outcome.target_guid == Some(receiver_guid) && matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverCanTakeQuestInvalid)));
-        assert!(!session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| outcome.target_guid == Some(receiver_guid) && matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented)));
+        assert!(!session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| outcome.target_guid == Some(receiver_guid) && matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSuccessQuestDetailsPrompted)));
     }
 
     #[tokio::test]

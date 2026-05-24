@@ -193,6 +193,9 @@ pub(crate) enum RepresentedPushQuestToPartyOutcomeReasonLikeCpp {
     ReceiverSatisfyQuestDependentBreadcrumbQuestsPrerequisite,
     ReceiverSatisfyQuestExpansionRequiredExpansion,
     ReceiverCanTakeQuestInvalid,
+    ReceiverRepeatableTurnInRequestItemsUnrepresented,
+    ReceiverSuccessQuestDetailsPrompted,
+    ReceiverQuestDetailsPromptCommandFailed,
     ReceiverEligibilityUnrepresented,
 }
 
@@ -14108,7 +14111,7 @@ impl WorldSession {
         });
     }
 
-    fn send_represented_quest_giver_quest_details_like_cpp(
+    pub(crate) fn send_represented_quest_giver_quest_details_like_cpp(
         &mut self,
         source_guid: ObjectGuid,
         quest: &wow_data::quest::QuestTemplate,

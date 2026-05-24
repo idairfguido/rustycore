@@ -47,6 +47,7 @@ use wow_loot::{
     loot_conditions_allow_player_with_references_like_cpp_representable,
     loot_item_ui_type_for_player_like_cpp,
 };
+use wow_network::player_registry::SetQuestSharingInfoAndSendDetailsCommand;
 use wow_network::{
     LootRollStoreWinnerCommand, LootRollVoteCommand, MasterLootGiveCommand, MasterLootGiveResult,
     PlayerRegistry, SessionCommand,
@@ -2491,8 +2492,23 @@ impl WorldSession {
                         command.event_start_time,
                     );
                 }
+                SessionCommand::SetQuestSharingInfoAndSendDetails(command) => {
+                    self.handle_set_quest_sharing_info_and_send_details_command_like_cpp(command);
+                }
             }
         }
+    }
+
+    fn handle_set_quest_sharing_info_and_send_details_command_like_cpp(
+        &mut self,
+        command: SetQuestSharingInfoAndSendDetailsCommand,
+    ) {
+        let Some(receiver_guid) = self.player_guid() else {
+            return;
+        };
+
+        self.set_represented_pending_quest_sharing_like_cpp(command.sender_guid, command.quest.id);
+        self.send_represented_quest_giver_quest_details_like_cpp(receiver_guid, &command.quest);
     }
 
     async fn handle_represented_loot_roll_vote_command_like_cpp(

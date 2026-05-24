@@ -21,6 +21,13 @@ pub enum SessionCommand {
     LootRollStoreWinner(LootRollStoreWinnerCommand),
     LootRollVote(LootRollVoteCommand),
     ResetSeasonalQuestStatus(ResetSeasonalQuestStatusCommand),
+    SetQuestSharingInfoAndSendDetails(SetQuestSharingInfoAndSendDetailsCommand),
+}
+
+#[derive(Clone, Debug)]
+pub struct SetQuestSharingInfoAndSendDetailsCommand {
+    pub sender_guid: ObjectGuid,
+    pub quest: wow_data::quest::QuestTemplate,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
