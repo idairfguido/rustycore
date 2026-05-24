@@ -188,6 +188,7 @@ pub(crate) enum RepresentedPushQuestToPartyOutcomeReasonLikeCpp {
     ReceiverSatisfyQuestRaceWrongRace,
     ReceiverSatisfyQuestReputationLowFaction,
     ReceiverSatisfyQuestReputationHighFaction,
+    ReceiverSatisfyQuestPreviousQuestPrerequisite,
     ReceiverEligibilityUnrepresented,
 }
 
