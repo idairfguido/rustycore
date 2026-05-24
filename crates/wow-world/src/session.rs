@@ -8806,6 +8806,9 @@ impl WorldSession {
             ClientOpcodes::QuestGiverStatusMultipleQuery => {
                 self.handle_quest_giver_status_multiple_query().await;
             }
+            ClientOpcodes::QuestGiverStatusTrackedQuery => {
+                self.handle_quest_giver_status_tracked_query(pkt).await;
+            }
             ClientOpcodes::SwapInvItem => {
                 match wow_packet::packets::item::SwapInvItem::read(&mut pkt) {
                     Ok(swap) => self.handle_swap_inv_item(swap).await,

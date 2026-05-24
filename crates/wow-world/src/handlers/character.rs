@@ -36,6 +36,7 @@ use wow_entities::{
     REAGENT_BAG_SLOT_END, REAGENT_BAG_SLOT_START, WorldObject, is_equipment_pos, is_inventory_pos,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
+use wow_packet::WorldPacket;
 use wow_packet::packets::auth::{
     ConnectTo, ConnectToAddress, ConnectToFailed, ConnectToKey, ConnectToSerial, ResumeComms,
 };
@@ -59,6 +60,7 @@ const GO_SPAWN_EFFECTIVE_FLAGS_COLUMN: usize = GO_SPAWN_PHASE_USE_FLAGS_COLUMN +
 const GO_SPAWN_EFFECTIVE_FACTION_COLUMN: usize = GO_SPAWN_PHASE_USE_FLAGS_COLUMN + 5;
 const GO_SPAWN_OVERRIDE_SOURCE_KNOWN_COLUMN: usize = GO_SPAWN_PHASE_USE_FLAGS_COLUMN + 6;
 const TACT_KEY_TABLE_HASH_LIKE_CPP: u32 = 0xD3F6_1A9E;
+const QUEST_GIVER_STATUS_TRACKED_QUERY_MAX_GUIDS_LIKE_CPP: u32 = 1000;
 
 inventory::submit! {
     PacketHandlerEntry {
@@ -428,6 +430,15 @@ inventory::submit! {
         status: SessionStatus::LoggedIn,
         processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_quest_giver_status_multiple_query",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::QuestGiverStatusTrackedQuery,
+        status: SessionStatus::LoggedIn,
+        processing: PacketProcessing::Inplace,
+        handler_name: "handle_quest_giver_status_tracked_query",
     }
 }
 
@@ -7652,9 +7663,68 @@ impl WorldSession {
 
         let visible_guids: Vec<ObjectGuid> =
             self.client_visible_guids_like_cpp.iter().copied().collect();
+        let statuses = self.collect_quest_giver_status_multiple_like_cpp(visible_guids);
+        self.send_packet(&QuestGiverStatusMultiple { statuses });
+    }
+
+    /// Handle CMSG_QUEST_GIVER_STATUS_TRACKED_QUERY — client supplies questgiver GUIDs to query.
+    ///
+    /// C++ anchors:
+    /// - `QuestGiverStatusTrackedQuery::Read`, `QuestPackets.cpp:40-54`.
+    /// - `WorldSession::HandleQuestgiverStatusTrackedQueryOpcode`, `QuestHandler.cpp:775-778`.
+    /// - `Player::SendQuestGiverStatusMultiple`, `Player.cpp:16809-16837`.
+    ///
+    /// Ownership/sync: client packet GUID set -> represented canonical Creature/GameObject access +
+    /// read-only `QuestStore` status -> one outbound packet only. This must not read the visible GUID
+    /// cache and must not mutate map, QuestStore, ObjectAccessor/GameEvent, player quest state, or
+    /// represented visibility state.
+    pub async fn handle_quest_giver_status_tracked_query(&mut self, mut pkt: WorldPacket) {
+        trace!(
+            "QuestGiverStatusTrackedQuery from account {}",
+            self.account_id
+        );
+
+        let guid_count = match pkt.read_uint32() {
+            Ok(guid_count) => guid_count,
+            Err(e) => {
+                warn!("Malformed QuestGiverStatusTrackedQuery count: {e}");
+                return;
+            }
+        };
+
+        if guid_count > QUEST_GIVER_STATUS_TRACKED_QUERY_MAX_GUIDS_LIKE_CPP {
+            warn!(
+                guid_count,
+                max = QUEST_GIVER_STATUS_TRACKED_QUERY_MAX_GUIDS_LIKE_CPP,
+                "QuestGiverStatusTrackedQuery exceeds C++ max capacity"
+            );
+            return;
+        }
+
+        let mut quest_giver_guids = HashSet::with_capacity(guid_count as usize);
+        for _ in 0..guid_count {
+            match pkt.read_packed_guid() {
+                Ok(guid) => {
+                    quest_giver_guids.insert(guid);
+                }
+                Err(e) => {
+                    warn!("Malformed QuestGiverStatusTrackedQuery packed GUID: {e}");
+                    return;
+                }
+            }
+        }
+
+        let statuses = self.collect_quest_giver_status_multiple_like_cpp(quest_giver_guids);
+        self.send_packet(&QuestGiverStatusMultiple { statuses });
+    }
+
+    fn collect_quest_giver_status_multiple_like_cpp(
+        &self,
+        guids: impl IntoIterator<Item = ObjectGuid>,
+    ) -> Vec<(ObjectGuid, u64)> {
         let mut statuses = Vec::new();
 
-        for guid in visible_guids {
+        for guid in guids {
             if guid.is_any_type_creature() {
                 let Some(access) = self.canonical_creature_access_like_cpp(guid) else {
                     continue;
@@ -7692,7 +7762,7 @@ impl WorldSession {
             }
         }
 
-        self.send_packet(&QuestGiverStatusMultiple { statuses });
+        statuses
     }
 
     /// Send SMSG_QUEST_GIVER_STATUS for a single NPC.
@@ -8977,10 +9047,15 @@ impl WorldSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wow_data::quest::{
+        QUEST_ITEM_DROP_COUNT, QUEST_REWARD_CHOICES_COUNT, QUEST_REWARD_DISPLAY_SPELL_COUNT,
+        QUEST_REWARD_ITEM_COUNT, QuestStore, QuestTemplate,
+    };
     use wow_packet::WorldPacket;
     use wow_packet::packets::loot::{
         CreatureLoot, LOOT_TYPE_CORPSE_LIKE_CPP, LootEntry, LootEntryFlags,
     };
+    use wow_packet::packets::quest::quest_giver_status;
 
     fn make_session_with_send_capacity(
         capacity: usize,
@@ -9004,6 +9079,149 @@ mod tests {
         )
     }
 
+    fn make_quest_status_session() -> (WorldSession, flume::Receiver<Vec<u8>>) {
+        let (mut session, send_rx) = make_session_with_send_capacity(8);
+        session.set_player_guid(Some(ObjectGuid::create_player(1, 42)));
+        session.set_loaded_player_identity_like_cpp(571, 1, 1, 80, 0);
+        session.set_player_position_like_cpp(Position::new(10.0, 0.0, 0.0, 0.0));
+        (session, send_rx)
+    }
+
+    fn quest_template(id: u32) -> QuestTemplate {
+        QuestTemplate {
+            id,
+            quest_type: 2,
+            quest_level: 1,
+            quest_max_scaling_level: 0,
+            min_level: 1,
+            quest_sort_id: 0,
+            quest_info_id: 0,
+            suggested_group_num: 0,
+            reward_next_quest: 0,
+            reward_xp_difficulty: 0,
+            reward_xp_multiplier: 1.0,
+            reward_money_difficulty: 0,
+            reward_money_multiplier: 1.0,
+            reward_bonus_money: 0,
+            reward_display_spell: [0; QUEST_REWARD_DISPLAY_SPELL_COUNT],
+            reward_spell: 0,
+            reward_honor: 0,
+            flags: 0,
+            flags_ex: 0,
+            flags_ex2: 0,
+            special_flags: 0,
+            event_id_for_quest: 0,
+            reward_items: [0; QUEST_REWARD_ITEM_COUNT],
+            reward_amounts: [0; QUEST_REWARD_ITEM_COUNT],
+            item_drop: [0; QUEST_ITEM_DROP_COUNT],
+            item_drop_quantity: [0; QUEST_ITEM_DROP_COUNT],
+            log_title: format!("Quest {id}"),
+            log_description: String::new(),
+            quest_description: String::new(),
+            area_description: String::new(),
+            quest_completion_log: String::new(),
+            objectives: Vec::new(),
+            allowable_races: 0,
+            allowable_classes: 0,
+            max_level: 0,
+            prev_quest_id: 0,
+            reward_choice_items: [(0, 0); QUEST_REWARD_CHOICES_COUNT],
+        }
+    }
+
+    fn store_with_quests(ids: &[u32]) -> QuestStore {
+        QuestStore::from_quests_like_cpp(ids.iter().copied().map(quest_template))
+    }
+
+    fn creature_guid(entry: u32, counter: i64) -> ObjectGuid {
+        ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 571, 0, entry, counter)
+    }
+
+    fn gameobject_guid(entry: u32, counter: i64) -> ObjectGuid {
+        ObjectGuid::create_world_object(HighGuid::GameObject, 0, 1, 571, 0, entry, counter)
+    }
+
+    fn insert_creature(manager: &mut wow_map::MapManager, guid: ObjectGuid, entry: u32) {
+        let mut creature = wow_entities::Creature::new(false);
+        creature.unit_mut().world_mut().object_mut().create(guid);
+        creature
+            .unit_mut()
+            .world_mut()
+            .object_mut()
+            .set_entry(entry);
+        creature.unit_mut().world_mut().set_map(571, 0).unwrap();
+        creature
+            .unit_mut()
+            .world_mut()
+            .relocate(Position::new(10.0, 0.0, 0.0, 0.0));
+        creature.unit_mut().set_level(80);
+        creature.set_ai_identity_runtime(1, 35, NPCFlags1::QUEST_GIVER.bits(), 0);
+        manager
+            .create_world_map(571, 0)
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_creature(creature).unwrap(),
+            )
+            .unwrap();
+    }
+
+    fn insert_gameobject(manager: &mut wow_map::MapManager, guid: ObjectGuid, entry: u32) {
+        let mut gameobject = wow_entities::GameObject::new();
+        gameobject.world_mut().object_mut().create(guid);
+        gameobject.world_mut().object_mut().set_entry(entry);
+        gameobject.world_mut().set_map(571, 0).unwrap();
+        gameobject
+            .world_mut()
+            .relocate(Position::new(10.0, 0.0, 0.0, 0.0));
+        gameobject.world_mut().object_mut().add_to_world();
+        manager
+            .create_world_map(571, 0)
+            .map_mut()
+            .insert_map_object_record(
+                wow_entities::MapObjectRecord::new_game_object(gameobject).unwrap(),
+            )
+            .unwrap();
+    }
+
+    fn attach_map_manager(session: &mut WorldSession, manager: wow_map::MapManager) {
+        session.set_canonical_map_manager(Arc::new(std::sync::Mutex::new(manager)));
+    }
+
+    fn mark_gameobject_questgiver(session: &mut WorldSession, guid: ObjectGuid) {
+        let mut state = crate::session::RepresentedGameObjectUseState::default();
+        state.go_type = Some(wow_entities::GAMEOBJECT_TYPE_QUESTGIVER as u8);
+        session
+            .represented_gameobject_use_states
+            .insert(guid, state);
+    }
+
+    fn tracked_query_packet(guids: &[ObjectGuid]) -> WorldPacket {
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_uint32(guids.len() as u32);
+        for guid in guids {
+            pkt.write_packed_guid(guid);
+        }
+        pkt
+    }
+
+    fn recv_status_multiple(send_rx: &flume::Receiver<Vec<u8>>) -> Vec<(ObjectGuid, u64)> {
+        let bytes = send_rx
+            .try_recv()
+            .expect("quest giver status multiple packet");
+        assert_eq!(
+            u16::from_le_bytes([bytes[0], bytes[1]]),
+            wow_constants::ServerOpcodes::QuestGiverStatusMultiple as u16
+        );
+        let mut pkt = WorldPacket::from_bytes(&bytes[2..]);
+        let count = pkt.read_int32().unwrap();
+        assert!(count >= 0);
+        let mut statuses = Vec::new();
+        for _ in 0..count {
+            statuses.push((pkt.read_packed_guid().unwrap(), pkt.read_uint64().unwrap()));
+        }
+        statuses
+    }
+
     #[test]
     fn start_positions_are_valid() {
         for race in [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 22] {
@@ -9025,6 +9243,116 @@ mod tests {
                 assert!(id > 0, "Race {race} sex {sex} has zero display ID");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn quest_giver_status_tracked_supplied_creature_not_visible_sends_available_like_cpp() {
+        let (mut session, send_rx) = make_quest_status_session();
+        let mut store = store_with_quests(&[3001]);
+        store.starter_quests.entry(9301).or_default().push(3001);
+        session.set_quest_store(Arc::new(store));
+        let guid = creature_guid(9301, 301);
+        let mut manager = wow_map::MapManager::default();
+        insert_creature(&mut manager, guid, 9301);
+        attach_map_manager(&mut session, manager);
+        assert!(!session.client_visible_guids_like_cpp.contains(&guid));
+
+        session
+            .handle_quest_giver_status_tracked_query(tracked_query_packet(&[guid]))
+            .await;
+
+        assert_eq!(
+            recv_status_multiple(&send_rx),
+            vec![(guid, quest_giver_status::AVAILABLE)]
+        );
+    }
+
+    #[tokio::test]
+    async fn quest_giver_status_tracked_supplied_gameobject_uses_uint64_status_like_cpp() {
+        let (mut session, send_rx) = make_quest_status_session();
+        let mut store = store_with_quests(&[3002]);
+        assert!(store.insert_gameobject_starter_relation_like_cpp(9302, 3002));
+        session.set_quest_store(Arc::new(store));
+        let guid = gameobject_guid(9302, 302);
+        let mut manager = wow_map::MapManager::default();
+        insert_gameobject(&mut manager, guid, 9302);
+        attach_map_manager(&mut session, manager);
+        mark_gameobject_questgiver(&mut session, guid);
+
+        session
+            .handle_quest_giver_status_tracked_query(tracked_query_packet(&[guid]))
+            .await;
+
+        assert_eq!(
+            recv_status_multiple(&send_rx),
+            vec![(guid, quest_giver_status::AVAILABLE)]
+        );
+    }
+
+    #[tokio::test]
+    async fn quest_giver_status_tracked_duplicate_guid_emits_single_status_like_cpp_set() {
+        let (mut session, send_rx) = make_quest_status_session();
+        let mut store = store_with_quests(&[3003]);
+        store.starter_quests.entry(9303).or_default().push(3003);
+        session.set_quest_store(Arc::new(store));
+        let guid = creature_guid(9303, 303);
+        let mut manager = wow_map::MapManager::default();
+        insert_creature(&mut manager, guid, 9303);
+        attach_map_manager(&mut session, manager);
+
+        session
+            .handle_quest_giver_status_tracked_query(tracked_query_packet(&[guid, guid]))
+            .await;
+
+        assert_eq!(recv_status_multiple(&send_rx).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn quest_giver_status_tracked_count_over_cpp_max_sends_no_packet() {
+        let (mut session, send_rx) = make_quest_status_session();
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_uint32(QUEST_GIVER_STATUS_TRACKED_QUERY_MAX_GUIDS_LIKE_CPP + 1);
+
+        session.handle_quest_giver_status_tracked_query(pkt).await;
+
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_giver_status_tracked_short_payload_sends_no_packet() {
+        let (mut session, send_rx) = make_quest_status_session();
+        let guid = creature_guid(9304, 304);
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_uint32(1);
+        pkt.write_packed_guid(&guid);
+        let mut bytes = pkt.into_data();
+        bytes.pop();
+
+        session
+            .handle_quest_giver_status_tracked_query(WorldPacket::from_bytes(&bytes))
+            .await;
+
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_giver_status_tracked_unsupported_missing_guid_sends_empty_multiple_like_cpp() {
+        let (mut session, send_rx) = make_quest_status_session();
+        attach_map_manager(&mut session, wow_map::MapManager::default());
+        session.set_quest_store(Arc::new(store_with_quests(&[3005])));
+        let missing_guid = creature_guid(9305, 305);
+        let player_guid = ObjectGuid::create_player(1, 305);
+        let item_guid = ObjectGuid::create_item(1, 305);
+
+        session
+            .handle_quest_giver_status_tracked_query(tracked_query_packet(&[
+                missing_guid,
+                player_guid,
+                item_guid,
+            ]))
+            .await;
+
+        assert!(recv_status_multiple(&send_rx).is_empty());
     }
 
     #[tokio::test]
