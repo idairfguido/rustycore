@@ -176,6 +176,11 @@ pub(crate) enum RepresentedPushQuestToPartyOutcomeReasonLikeCpp {
     QuestPoolActiveCheckUnrepresented,
     NotInParty,
     GroupRuntimeUnrepresented,
+    ReceiverBusy,
+    ReceiverDead,
+    ReceiverAlreadyDone,
+    ReceiverOnQuest,
+    ReceiverEligibilityUnrepresented,
 }
 
 /// Session-local evidence for the bounded sender-side `HandlePushQuestToParty` preflight.
@@ -7270,6 +7275,10 @@ impl WorldSession {
                     .collect(),
                 pass_on_group_loot: self.pass_on_group_loot,
                 enchanting_skill: self.represented_enchanting_skill,
+                is_alive: self.player_alive_like_cpp,
+                pending_quest_sharing: self
+                    .represented_pending_quest_sharing_like_cpp
+                    .map(|pending| (pending.sender_guid, pending.quest_id)),
                 known_spells: self.known_spells_like_cpp().to_vec(),
                 active_quest_statuses: self
                     .player_quests
@@ -7316,6 +7325,10 @@ impl WorldSession {
                 .collect();
             info.pass_on_group_loot = self.pass_on_group_loot;
             info.enchanting_skill = self.represented_enchanting_skill;
+            info.is_alive = self.player_alive_like_cpp;
+            info.pending_quest_sharing = self
+                .represented_pending_quest_sharing_like_cpp
+                .map(|pending| (pending.sender_guid, pending.quest_id));
             info.known_spells = self.known_spells_like_cpp().to_vec();
             info.active_quest_statuses = self
                 .player_quests
@@ -10745,6 +10758,7 @@ impl WorldSession {
         } else if self.player_health_like_cpp == 0 {
             self.player_health_like_cpp = self.player_max_health_like_cpp.max(1);
         }
+        self.sync_player_registry_state_like_cpp();
     }
 
     pub(crate) fn player_is_alive_like_cpp(&self) -> bool {
@@ -10791,6 +10805,7 @@ impl WorldSession {
         self.player_max_health_like_cpp = max_health.max(1);
         self.player_health_like_cpp = health.min(self.player_max_health_like_cpp);
         self.player_alive_like_cpp = self.player_health_like_cpp > 0;
+        self.sync_player_registry_state_like_cpp();
     }
 
     #[cfg(test)]
@@ -10872,6 +10887,7 @@ impl WorldSession {
         if self.player_health_like_cpp == 0 {
             self.player_alive_like_cpp = false;
         }
+        self.sync_player_registry_state_like_cpp();
 
         let event = MovementFallDamageEvent {
             z_diff,
@@ -10951,6 +10967,8 @@ impl WorldSession {
         // C++ calls KillPlayer if EnvironmentalDamage did not kill due to GM/immunity.
         if self.player_alive_like_cpp {
             self.set_player_alive_like_cpp(false);
+        } else {
+            self.sync_player_registry_state_like_cpp();
         }
 
         let event = MovementUnderMapDamageEvent {
@@ -15526,10 +15544,12 @@ impl WorldSession {
                 sender_guid,
                 quest_id,
             });
+        self.sync_player_registry_state_like_cpp();
     }
 
     pub(crate) fn clear_represented_pending_quest_sharing_like_cpp(&mut self) {
         self.represented_pending_quest_sharing_like_cpp = None;
+        self.sync_player_registry_state_like_cpp();
     }
 
     pub(crate) fn represented_pending_quest_sharing_like_cpp(
@@ -17590,6 +17610,7 @@ impl WorldSession {
                     player.unit_mut().set_max_health(u64::from(max_health));
                     player.unit_mut().set_health(u64::from(healed));
                 });
+                self.sync_player_registry_state_like_cpp();
                 self.send_player_health_values_update_like_cpp(player_guid, u64::from(healed));
             }
             return Ok(());
@@ -25690,6 +25711,8 @@ mod tests {
             active_loot_rolls: Vec::new(),
             pass_on_group_loot: false,
             enchanting_skill: 0,
+            is_alive: true,
+            pending_quest_sharing: None,
             known_spells: Vec::new(),
             active_quest_statuses: Default::default(),
             active_quest_objective_counts: Default::default(),

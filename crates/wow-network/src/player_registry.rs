@@ -119,6 +119,10 @@ pub struct PlayerBroadcastInfo {
     pub pass_on_group_loot: bool,
     /// Represented `Player::GetSkillValue(SKILL_ENCHANTING)` used by group-roll disenchant masks.
     pub enchanting_skill: u16,
+    /// Represented `Player::IsAlive()` snapshot for cross-session receiver gates.
+    pub is_alive: bool,
+    /// Represented non-empty `Player::GetPlayerSharingQuest()` snapshot for party quest sharing.
+    pub pending_quest_sharing: Option<(ObjectGuid, u32)>,
     /// Current known spells, used for remote `ConditionMgr`/loot checks that mirror `Player::HasSpell`.
     pub known_spells: Vec<i32>,
     /// Current quest status map, keyed by quest id, used for remote `Player::GetQuestStatus` checks.

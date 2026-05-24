@@ -6813,6 +6813,8 @@ mod tests {
             active_loot_rolls: Vec::new(),
             pass_on_group_loot: false,
             enchanting_skill: 0,
+            is_alive: true,
+            pending_quest_sharing: None,
             known_spells: Vec::new(),
             active_quest_statuses: Default::default(),
             active_quest_objective_counts: Default::default(),

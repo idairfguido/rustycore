@@ -22,7 +22,6 @@ use wow_constants::unit::NPCFlags1;
 use wow_core::ObjectGuid;
 use wow_data::DISABLE_TYPE_QUEST;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
-use wow_packet::ClientPacket;
 use wow_packet::packets::query::{
     QueryQuestCompletionNpcs, QuestCompletionNpc, QuestCompletionNpcResponse,
 };
@@ -32,7 +31,9 @@ use wow_packet::packets::quest::{
     QuestPushResult, QuestPushResultResponse, QuestRewardsBlock, QuestUpdateComplete,
     WorldQuestUpdateResponse, quest_giver_status, quest_push_reason,
 };
+use wow_packet::{ClientPacket, ServerPacket};
 
+use crate::conditions::{QUEST_STATUS_COMPLETE_LIKE_CPP, QUEST_STATUS_INCOMPLETE_LIKE_CPP};
 use crate::session::{
     RepresentedPushQuestToPartyOutcomeLikeCpp, RepresentedPushQuestToPartyOutcomeReasonLikeCpp,
     RepresentedQuestConfirmAcceptLikeCpp, RepresentedQuestPushResultResponseLikeCpp,
@@ -41,6 +42,13 @@ use crate::session::{
 
 pub(crate) const QUEST_FLAGS_AUTO_COMPLETE_LIKE_CPP: u32 = 0x0001_0000;
 pub(crate) const QUEST_FLAGS_SHARABLE_LIKE_CPP: u32 = 0x0000_0008;
+pub(crate) const QUEST_PUSH_REASON_BUSY_LIKE_CPP: u8 = 5;
+pub(crate) const QUEST_PUSH_REASON_DEAD_LIKE_CPP: u8 = 6;
+pub(crate) const QUEST_PUSH_REASON_DEAD_TO_RECIPIENT_LIKE_CPP: u8 = 7;
+pub(crate) const QUEST_PUSH_REASON_ON_QUEST_LIKE_CPP: u8 = 10;
+pub(crate) const QUEST_PUSH_REASON_ON_QUEST_TO_RECIPIENT_LIKE_CPP: u8 = 11;
+pub(crate) const QUEST_PUSH_REASON_ALREADY_DONE_LIKE_CPP: u8 = 12;
+pub(crate) const QUEST_PUSH_REASON_ALREADY_DONE_TO_RECIPIENT_LIKE_CPP: u8 = 13;
 
 fn represented_quest_completion_npc_response_like_cpp(
     quest_store: &wow_data::quest::QuestStore,
@@ -650,17 +658,240 @@ impl WorldSession {
             return;
         }
 
-        self.record_represented_push_quest_to_party_outcome_like_cpp(
-            RepresentedPushQuestToPartyOutcomeLikeCpp {
-                sender_guid,
-                quest_id: packet.quest_id,
-                target_guid: sender_guid,
-                reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::GroupRuntimeUnrepresented,
-                quest_pool_active_check_unrepresented: false,
-                group_runtime_unrepresented: true,
-                receiver_fanout_unrepresented: true,
-            },
-        );
+        let Some(group_guid) = self.group_guid else {
+            return;
+        };
+
+        let Some(group_registry) = self.group_registry().map(Arc::clone) else {
+            self.record_represented_push_quest_to_party_outcome_like_cpp(
+                RepresentedPushQuestToPartyOutcomeLikeCpp {
+                    sender_guid,
+                    quest_id: packet.quest_id,
+                    target_guid: sender_guid,
+                    reason:
+                        RepresentedPushQuestToPartyOutcomeReasonLikeCpp::GroupRuntimeUnrepresented,
+                    quest_pool_active_check_unrepresented: false,
+                    group_runtime_unrepresented: true,
+                    receiver_fanout_unrepresented: true,
+                },
+            );
+            return;
+        };
+
+        let Some(player_registry) = self.player_registry().map(Arc::clone) else {
+            self.record_represented_push_quest_to_party_outcome_like_cpp(
+                RepresentedPushQuestToPartyOutcomeLikeCpp {
+                    sender_guid,
+                    quest_id: packet.quest_id,
+                    target_guid: sender_guid,
+                    reason:
+                        RepresentedPushQuestToPartyOutcomeReasonLikeCpp::GroupRuntimeUnrepresented,
+                    quest_pool_active_check_unrepresented: false,
+                    group_runtime_unrepresented: true,
+                    receiver_fanout_unrepresented: true,
+                },
+            );
+            return;
+        };
+
+        let Some(group_info) = group_registry.get(&group_guid).map(|entry| entry.clone()) else {
+            self.record_represented_push_quest_to_party_outcome_like_cpp(
+                RepresentedPushQuestToPartyOutcomeLikeCpp {
+                    sender_guid,
+                    quest_id: packet.quest_id,
+                    target_guid: sender_guid,
+                    reason:
+                        RepresentedPushQuestToPartyOutcomeReasonLikeCpp::GroupRuntimeUnrepresented,
+                    quest_pool_active_check_unrepresented: false,
+                    group_runtime_unrepresented: true,
+                    receiver_fanout_unrepresented: true,
+                },
+            );
+            return;
+        };
+
+        let receiver_snapshots = group_info
+            .members
+            .iter()
+            .copied()
+            .filter(|member_guid| Some(*member_guid) != sender_guid)
+            .filter_map(|member_guid| {
+                player_registry
+                    .get(&member_guid)
+                    .map(|receiver| (member_guid, receiver.clone()))
+            })
+            .collect::<Vec<_>>();
+
+        if receiver_snapshots.is_empty() {
+            self.record_represented_push_quest_to_party_outcome_like_cpp(
+                RepresentedPushQuestToPartyOutcomeLikeCpp {
+                    sender_guid,
+                    quest_id: packet.quest_id,
+                    target_guid: sender_guid,
+                    reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented,
+                    quest_pool_active_check_unrepresented: false,
+                    group_runtime_unrepresented: false,
+                    receiver_fanout_unrepresented: true,
+                },
+            );
+            return;
+        }
+
+        let mut blocked_by_unsupported_success_path = false;
+        for (receiver_guid, receiver) in receiver_snapshots {
+            if receiver.pending_quest_sharing.is_some() {
+                self.send_push_quest_result_to_sender_with_title_if_available_like_cpp(
+                    receiver_guid,
+                    QUEST_PUSH_REASON_BUSY_LIKE_CPP,
+                    String::new(),
+                );
+                self.record_represented_push_quest_to_party_outcome_like_cpp(
+                    RepresentedPushQuestToPartyOutcomeLikeCpp {
+                        sender_guid,
+                        quest_id: packet.quest_id,
+                        target_guid: Some(receiver_guid),
+                        reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverBusy,
+                        quest_pool_active_check_unrepresented: false,
+                        group_runtime_unrepresented: false,
+                        receiver_fanout_unrepresented: false,
+                    },
+                );
+                continue;
+            }
+
+            if !receiver.is_alive {
+                self.send_push_quest_result_to_sender_with_title_if_available_like_cpp(
+                    receiver_guid,
+                    QUEST_PUSH_REASON_DEAD_LIKE_CPP,
+                    String::new(),
+                );
+                if let Some(sender_guid) = sender_guid {
+                    let _ = receiver.send_tx.send(
+                        QuestPushResultResponse {
+                            sender_guid,
+                            result: QUEST_PUSH_REASON_DEAD_TO_RECIPIENT_LIKE_CPP,
+                            quest_title: quest.log_title.clone(),
+                        }
+                        .to_bytes(),
+                    );
+                }
+                self.record_represented_push_quest_to_party_outcome_like_cpp(
+                    RepresentedPushQuestToPartyOutcomeLikeCpp {
+                        sender_guid,
+                        quest_id: packet.quest_id,
+                        target_guid: Some(receiver_guid),
+                        reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverDead,
+                        quest_pool_active_check_unrepresented: false,
+                        group_runtime_unrepresented: false,
+                        receiver_fanout_unrepresented: false,
+                    },
+                );
+                continue;
+            }
+
+            if receiver.rewarded_quests.contains(&packet.quest_id) {
+                let Some(sender_guid_for_receiver_packet) = sender_guid else {
+                    blocked_by_unsupported_success_path = true;
+                    continue;
+                };
+
+                self.send_push_quest_result_to_sender_with_title_if_available_like_cpp(
+                    receiver_guid,
+                    QUEST_PUSH_REASON_ALREADY_DONE_LIKE_CPP,
+                    String::new(),
+                );
+                let _ = receiver.send_tx.send(
+                    QuestPushResultResponse {
+                        sender_guid: sender_guid_for_receiver_packet,
+                        result: QUEST_PUSH_REASON_ALREADY_DONE_TO_RECIPIENT_LIKE_CPP,
+                        quest_title: quest.log_title.clone(),
+                    }
+                    .to_bytes(),
+                );
+                self.record_represented_push_quest_to_party_outcome_like_cpp(
+                    RepresentedPushQuestToPartyOutcomeLikeCpp {
+                        sender_guid,
+                        quest_id: packet.quest_id,
+                        target_guid: Some(receiver_guid),
+                        reason:
+                            RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverAlreadyDone,
+                        quest_pool_active_check_unrepresented: false,
+                        group_runtime_unrepresented: false,
+                        receiver_fanout_unrepresented: false,
+                    },
+                );
+                continue;
+            }
+
+            if let Some(status) = receiver
+                .active_quest_statuses
+                .get(&packet.quest_id)
+                .copied()
+            {
+                let Some(sender_guid_for_receiver_packet) = sender_guid else {
+                    blocked_by_unsupported_success_path = true;
+                    continue;
+                };
+
+                if status == QUEST_STATUS_INCOMPLETE_LIKE_CPP
+                    || status == QUEST_STATUS_COMPLETE_LIKE_CPP
+                {
+                    self.send_push_quest_result_to_sender_with_title_if_available_like_cpp(
+                        receiver_guid,
+                        QUEST_PUSH_REASON_ON_QUEST_LIKE_CPP,
+                        String::new(),
+                    );
+                    let _ = receiver.send_tx.send(
+                        QuestPushResultResponse {
+                            sender_guid: sender_guid_for_receiver_packet,
+                            result: QUEST_PUSH_REASON_ON_QUEST_TO_RECIPIENT_LIKE_CPP,
+                            quest_title: quest.log_title.clone(),
+                        }
+                        .to_bytes(),
+                    );
+                    self.record_represented_push_quest_to_party_outcome_like_cpp(
+                        RepresentedPushQuestToPartyOutcomeLikeCpp {
+                            sender_guid,
+                            quest_id: packet.quest_id,
+                            target_guid: Some(receiver_guid),
+                            reason:
+                                RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverOnQuest,
+                            quest_pool_active_check_unrepresented: false,
+                            group_runtime_unrepresented: false,
+                            receiver_fanout_unrepresented: false,
+                        },
+                    );
+                    continue;
+                }
+            }
+
+            blocked_by_unsupported_success_path = true;
+            self.record_represented_push_quest_to_party_outcome_like_cpp(
+                RepresentedPushQuestToPartyOutcomeLikeCpp {
+                    sender_guid,
+                    quest_id: packet.quest_id,
+                    target_guid: Some(receiver_guid),
+                    reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented,
+                    quest_pool_active_check_unrepresented: false,
+                    group_runtime_unrepresented: false,
+                    receiver_fanout_unrepresented: true,
+                },
+            );
+        }
+
+        if blocked_by_unsupported_success_path {
+            self.record_represented_push_quest_to_party_outcome_like_cpp(
+                RepresentedPushQuestToPartyOutcomeLikeCpp {
+                    sender_guid,
+                    quest_id: packet.quest_id,
+                    target_guid: sender_guid,
+                    reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented,
+                    quest_pool_active_check_unrepresented: false,
+                    group_runtime_unrepresented: false,
+                    receiver_fanout_unrepresented: true,
+                },
+            );
+        }
     }
 
     fn represented_can_share_quest_like_cpp(&self, quest: &wow_data::quest::QuestTemplate) -> bool {
@@ -680,6 +911,19 @@ impl WorldSession {
                 quest_title: String::new(),
             });
         }
+    }
+
+    fn send_push_quest_result_to_sender_with_title_if_available_like_cpp(
+        &self,
+        sender_guid: ObjectGuid,
+        result: u8,
+        quest_title: String,
+    ) {
+        self.send_packet(&QuestPushResultResponse {
+            sender_guid,
+            result,
+            quest_title,
+        });
     }
 
     /// CMSG_QUEST_PUSH_RESULT — response to a shared quest prompt.
@@ -1777,6 +2021,7 @@ mod tests {
         QUEST_REWARD_ITEM_COUNT, QuestPoolMemberRowLikeCpp, QuestPoolSavedActiveRowLikeCpp,
         QuestPoolStoreLikeCpp, QuestStore, QuestTemplate,
     };
+    use wow_network::{GroupInfo, GroupRegistry, PendingInvites, PlayerRegistry};
     use wow_packet::WorldPacket;
 
     fn make_session() -> (WorldSession, flume::Receiver<Vec<u8>>) {
@@ -2573,6 +2818,248 @@ mod tests {
             }]
         );
         assert!(send_rx.try_recv().is_err());
+    }
+
+    fn install_represented_party(
+        session: &mut WorldSession,
+        sender_guid: ObjectGuid,
+        receiver_guid: ObjectGuid,
+    ) -> (Arc<PlayerRegistry>, WorldSession, flume::Receiver<Vec<u8>>) {
+        let player_registry = Arc::new(PlayerRegistry::default());
+        let (mut receiver_session, receiver_rx) = make_session();
+        receiver_session.set_player_guid(Some(receiver_guid));
+        receiver_session.set_loaded_player_name_like_cpp("Receiver".to_string());
+        receiver_session.set_loaded_player_identity_like_cpp(571, 1, 1, 80, 0);
+        receiver_session.set_player_position_like_cpp(Position::new(11.0, 0.0, 0.0, 0.0));
+        receiver_session.set_player_registry(Arc::clone(&player_registry));
+        receiver_session.register_in_player_registry();
+
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(sender_guid);
+        group.add_member(receiver_guid);
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+
+        session.group_guid = Some(group_guid);
+        session.set_player_registry(player_registry.clone());
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+        (player_registry, receiver_session, receiver_rx)
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_grouped_receiver_on_quest_emits_on_quest_pair_like_cpp() {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 43);
+        let quest_store = store_with_sharable_quest(7111);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, 7111);
+        let (_player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        add_active_quest(&mut receiver_session, 7111);
+        receiver_session.sync_player_registry_state_like_cpp();
+
+        run_push_quest_to_party(&mut session, 7111).await;
+
+        assert_eq!(
+            recv_push_quest_result_response(&sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_ON_QUEST_LIKE_CPP,
+                String::new()
+            )
+        );
+        assert_eq!(
+            recv_push_quest_result_response(&receiver_rx),
+            (
+                sender_guid,
+                QUEST_PUSH_REASON_ON_QUEST_TO_RECIPIENT_LIKE_CPP,
+                "Quest 7111".to_string()
+            )
+        );
+        assert!(
+            !session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                    outcome.reason,
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::GroupRuntimeUnrepresented
+                ))
+        );
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_grouped_receiver_rewarded_emits_already_done_pair_like_cpp() {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 44);
+        let quest_store = store_with_sharable_quest(7112);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, 7112);
+        let (_player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session.rewarded_quests.insert(7112);
+        receiver_session.sync_player_registry_state_like_cpp();
+
+        run_push_quest_to_party(&mut session, 7112).await;
+
+        assert_eq!(
+            recv_push_quest_result_response(&sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_ALREADY_DONE_LIKE_CPP,
+                String::new()
+            )
+        );
+        assert_eq!(
+            recv_push_quest_result_response(&receiver_rx),
+            (
+                sender_guid,
+                QUEST_PUSH_REASON_ALREADY_DONE_TO_RECIPIENT_LIKE_CPP,
+                "Quest 7112".to_string()
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_grouped_receiver_busy_emits_sender_only_busy_like_cpp() {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 45);
+        let quest_store = store_with_sharable_quest(7113);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, 7113);
+        let (_player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session
+            .set_represented_pending_quest_sharing_like_cpp(ObjectGuid::create_player(1, 77), 9000);
+
+        run_push_quest_to_party(&mut session, 7113).await;
+
+        assert_eq!(
+            recv_push_quest_result_response(&sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_BUSY_LIKE_CPP,
+                String::new()
+            )
+        );
+        assert!(receiver_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_grouped_receiver_dead_emits_dead_pair_like_cpp() {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 46);
+        let quest_store = store_with_sharable_quest(7114);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, 7114);
+        let (_player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session.set_player_alive_like_cpp(false);
+
+        run_push_quest_to_party(&mut session, 7114).await;
+
+        assert_eq!(
+            recv_push_quest_result_response(&sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_DEAD_LIKE_CPP,
+                String::new()
+            )
+        );
+        assert_eq!(
+            recv_push_quest_result_response(&receiver_rx),
+            (
+                sender_guid,
+                QUEST_PUSH_REASON_DEAD_TO_RECIPIENT_LIKE_CPP,
+                "Quest 7114".to_string()
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_grouped_receiver_dead_observes_runtime_under_map_sync_like_cpp() {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 146);
+        let quest_store = store_with_sharable_quest(7114);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, 7114);
+        let (player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session.set_player_health_like_cpp(1_000, 1_000);
+        let mut movement_info = wow_packet::packets::movement::MovementInfo::default();
+        movement_info.position.z = -501.0;
+
+        let event = receiver_session.handle_under_map_like_cpp(&movement_info);
+
+        assert!(event.is_some());
+        assert!(!receiver_session.player_is_alive_like_cpp());
+        assert!(
+            !player_registry
+                .get(&receiver_guid)
+                .expect("receiver registry snapshot")
+                .is_alive
+        );
+
+        run_push_quest_to_party(&mut session, 7114).await;
+
+        assert_eq!(
+            recv_push_quest_result_response(&sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_DEAD_LIKE_CPP,
+                String::new()
+            )
+        );
+        assert_eq!(
+            recv_push_quest_result_response(&receiver_rx),
+            (
+                sender_guid,
+                QUEST_PUSH_REASON_DEAD_TO_RECIPIENT_LIKE_CPP,
+                "Quest 7114".to_string()
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_missing_group_registry_keeps_explicit_blocker_like_cpp() {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid();
+        let quest_store = store_with_sharable_quest(7115);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, 7115);
+        session.group_guid = Some(1234);
+
+        run_push_quest_to_party(&mut session, 7115).await;
+
+        assert_eq!(
+            session.represented_push_quest_to_party_outcomes_like_cpp(),
+            &[RepresentedPushQuestToPartyOutcomeLikeCpp {
+                sender_guid,
+                quest_id: 7115,
+                target_guid: sender_guid,
+                reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::GroupRuntimeUnrepresented,
+                quest_pool_active_check_unrepresented: false,
+                group_runtime_unrepresented: true,
+                receiver_fanout_unrepresented: true,
+            }]
+        );
+        assert!(sender_rx.try_recv().is_err());
     }
 
     #[test]
