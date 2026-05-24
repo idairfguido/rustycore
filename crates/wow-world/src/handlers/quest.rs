@@ -125,6 +125,9 @@ inventory::submit! {
 
 // ── Handler implementations ──────────────────────────────────────────────────
 
+/// TrinityCore `MAX_QUEST_LOG_SIZE`; explicit quest-log slots are 0..24.
+pub(crate) const MAX_QUEST_LOG_SIZE_LIKE_CPP: u8 = 25;
+
 impl WorldSession {
     /// CMSG_QUEST_GIVER_STATUS_QUERY — returns the quest status icon for an NPC.
     /// C# ref: QuestHandler.HandleQuestGiverStatusQuery
@@ -270,11 +273,11 @@ impl WorldSession {
             }
         }
 
-        // Check quest limit (max 25 active quests — C# SharedConst.MaxQuestLogSize)
-        if self.player_quests.len() >= 25 {
+        // C++ Player::AddQuest uses FindQuestSlot(0) over explicit QuestLog slots.
+        let Some(slot) = self.first_free_quest_slot_like_cpp() else {
             warn!(account = self.account_id, "Quest log full");
             return;
-        }
+        };
 
         // Build objective counts (one slot per objective)
         let obj_count = quest_store.get(quest_id).map_or(0, |q| q.objectives.len());
@@ -287,6 +290,7 @@ impl WorldSession {
                 status: 1, // Incomplete
                 explored: false,
                 objective_counts: vec![0; obj_count],
+                slot,
             },
         );
 
@@ -328,7 +332,7 @@ impl WorldSession {
     pub(crate) fn acknowledge_auto_accept_quest_like_cpp(&mut self, quest_id: u32) -> bool {
         // C++ order: FindQuestSlot(QuestID), then GetQuestTemplate(QuestID), then
         // ScriptMgr::OnQuestAcknowledgeAutoAccept(player, quest).
-        if !self.player_quests.contains_key(&quest_id) {
+        if self.find_quest_slot_like_cpp(quest_id).is_none() {
             debug!(
                 account = self.account_id,
                 quest_id, "QuestGiverCloseQuest: represented active quest log miss"
@@ -358,32 +362,116 @@ impl WorldSession {
     }
 
     /// CMSG_QUEST_LOG_REMOVE_QUEST — player abandons a quest from the quest log.
-    /// C# ref: QuestHandler.HandleQuestLogRemoveQuest
+    /// C++ ref: `WorldSession::HandleQuestLogRemoveQuest`, `QuestHandler.cpp:439-497`.
+    /// Represented-partial seam: explicit QuestLog slot lookup + local active quest removal/DB delete.
+    /// Remaining gaps: source-item gates/cleanup, no-abandon-once-begun, timed/PvP state,
+    /// personal summons, quest tracker DB, ScriptMgr callbacks, and criteria update evidence.
     pub async fn handle_quest_log_remove_quest(&mut self, mut pkt: wow_packet::WorldPacket) {
-        let slot: u8 = pkt.read_uint8().unwrap_or(255);
+        let slot = match pkt.read_uint8() {
+            Ok(slot) => slot,
+            Err(error) => {
+                warn!(
+                    account = self.account_id,
+                    ?error,
+                    "QuestLogRemoveQuest: failed to read Entry"
+                );
+                return;
+            }
+        };
 
-        // In a full implementation we'd track quest IDs by slot.
-        // For now, read quest_id from the packet (TrinityCore sends it as well).
-        // The slot-to-quest mapping comes from the quest log order.
-        // We iterate to find the nth quest.
-        let quest_id = self.player_quests.keys().nth(slot as usize).copied();
+        debug!(
+            account = self.account_id,
+            slot, "QuestLogRemoveQuest: represented slot-backed abandon request"
+        );
 
-        if let Some(qid) = quest_id {
-            self.player_quests.remove(&qid);
-            self.delete_quest_from_db(qid).await;
-            self.sync_player_registry_state_like_cpp();
-            info!(
+        if slot >= MAX_QUEST_LOG_SIZE_LIKE_CPP {
+            debug!(
                 account = self.account_id,
-                quest_id = qid,
-                slot,
-                "Quest abandoned"
+                slot, "QuestLogRemoveQuest: slot outside MAX_QUEST_LOG_SIZE"
             );
-        } else {
-            warn!(
-                account = self.account_id,
-                slot, "QuestLogRemoveQuest: slot not found"
-            );
+            return;
         }
+
+        let Some(qid) = self.get_quest_slot_quest_id_like_cpp(slot) else {
+            debug!(
+                account = self.account_id,
+                slot,
+                "QuestLogRemoveQuest: valid slot empty; criteria update remains an explicit gap"
+            );
+            return;
+        };
+
+        self.player_quests.remove(&qid);
+        self.delete_quest_from_db(qid).await;
+        self.sync_player_registry_state_like_cpp();
+        info!(
+            account = self.account_id,
+            quest_id = qid,
+            slot,
+            "Quest abandoned via represented explicit quest-log slot"
+        );
+    }
+
+    pub(crate) fn first_free_quest_slot_like_cpp(&self) -> Option<u8> {
+        (0..MAX_QUEST_LOG_SIZE_LIKE_CPP)
+            .find(|&slot| !self.quest_slot_has_active_entry_like_cpp(slot))
+    }
+
+    fn quest_slot_has_active_entry_like_cpp(&self, slot: u8) -> bool {
+        slot < MAX_QUEST_LOG_SIZE_LIKE_CPP
+            && self
+                .player_quests
+                .values()
+                .any(|status| status.slot == slot && (status.status == 1 || status.status == 2))
+    }
+
+    pub(crate) fn get_quest_slot_quest_id_like_cpp(&self, slot: u8) -> Option<u32> {
+        if slot >= MAX_QUEST_LOG_SIZE_LIKE_CPP {
+            return None;
+        }
+
+        let mut matching_quest_id = None;
+        for status in self
+            .player_quests
+            .values()
+            .filter(|status| status.slot == slot && (status.status == 1 || status.status == 2))
+        {
+            if matching_quest_id.is_some() {
+                return None;
+            }
+
+            matching_quest_id = Some(status.quest_id);
+        }
+
+        matching_quest_id
+    }
+
+    pub(crate) fn find_quest_slot_like_cpp(&self, quest_id: u32) -> Option<u8> {
+        self.player_quests.get(&quest_id).and_then(|status| {
+            (status.slot < MAX_QUEST_LOG_SIZE_LIKE_CPP
+                && (status.status == 1 || status.status == 2))
+                .then_some(status.slot)
+        })
+    }
+
+    pub(crate) fn quest_log_create_entries_like_cpp(&self) -> Vec<(u32, u32, i64, [u16; 24])> {
+        (0..MAX_QUEST_LOG_SIZE_LIKE_CPP)
+            .map(|slot| {
+                let Some(quest_id) = self.get_quest_slot_quest_id_like_cpp(slot) else {
+                    return (0, 0, 0, [0; 24]);
+                };
+                let Some(qs) = self.player_quests.get(&quest_id) else {
+                    return (0, 0, 0, [0; 24]);
+                };
+
+                let state_flags: u32 = if qs.status == 2 { 1 } else { 0 };
+                let mut obj_progress = [0u16; 24];
+                for (i, &count) in qs.objective_counts.iter().enumerate().take(24) {
+                    obj_progress[i] = count.min(u16::MAX as i32) as u16;
+                }
+                (qs.quest_id, state_flags, 0i64, obj_progress)
+            })
+            .collect()
     }
 
     /// CMSG_QUERY_QUEST_INFO — client asks for full quest template data by ID.
@@ -1115,6 +1203,8 @@ impl WorldSession {
         self.player_quests.clear();
         self.rewarded_quests.clear();
 
+        let mut next_active_slot: u8 = 0;
+
         if !result.is_empty() {
             let mut result = result;
             loop {
@@ -1126,8 +1216,12 @@ impl WorldSession {
                     // Rewarded (C# QuestStatus.Rewarded / m_RewardedQuests)
                     // Non-repeatable quests cannot be re-taken once rewarded.
                     self.rewarded_quests.insert(quest_id);
-                } else {
-                    // Active (1=Incomplete) or complete-but-not-turned-in (2=Complete)
+                } else if next_active_slot < MAX_QUEST_LOG_SIZE_LIKE_CPP {
+                    // Active (1=Incomplete) or complete-but-not-turned-in (2=Complete).
+                    // C++ _LoadQuestStatus assigns sequential visible slots in DB row order
+                    // because the character DB status row has no persisted quest-log slot.
+                    let slot = next_active_slot;
+                    next_active_slot = next_active_slot.saturating_add(1);
                     let obj_count = self
                         .quest_store
                         .as_ref()
@@ -1140,6 +1234,7 @@ impl WorldSession {
                             status,
                             explored,
                             objective_counts: vec![0; obj_count],
+                            slot,
                         },
                     );
                 }
@@ -1412,6 +1507,11 @@ mod tests {
     }
 
     fn add_active_quest(session: &mut WorldSession, quest_id: u32) {
+        let slot = session.first_free_quest_slot_like_cpp().unwrap_or(0);
+        add_active_quest_in_slot(session, quest_id, slot);
+    }
+
+    fn add_active_quest_in_slot(session: &mut WorldSession, quest_id: u32, slot: u8) {
         session.player_quests.insert(
             quest_id,
             PlayerQuestStatus {
@@ -1419,6 +1519,7 @@ mod tests {
                 status: 1,
                 explored: false,
                 objective_counts: Vec::new(),
+                slot,
             },
         );
     }
@@ -1427,6 +1528,12 @@ mod tests {
         let mut pkt = WorldPacket::new_empty();
         pkt.write_uint32(quest_id);
         session.handle_quest_giver_close_quest(pkt).await;
+    }
+
+    async fn run_remove_quest_slot(session: &mut WorldSession, slot: u8) {
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_uint8(slot);
+        session.handle_quest_log_remove_quest(pkt).await;
     }
 
     fn recv_status(send_rx: &flume::Receiver<Vec<u8>>) -> (ObjectGuid, u64) {
@@ -1525,6 +1632,7 @@ mod tests {
                 status: 2,
                 explored: false,
                 objective_counts: Vec::new(),
+                slot: 0,
             },
         );
         let guid = creature_guid(9002, 2);
@@ -1570,6 +1678,7 @@ mod tests {
                 status: 2,
                 explored: false,
                 objective_counts: Vec::new(),
+                slot: 0,
             },
         );
         let guid = gameobject_guid(9104, 4);
@@ -1600,6 +1709,7 @@ mod tests {
                 status: 2,
                 explored: false,
                 objective_counts: Vec::new(),
+                slot: 0,
             },
         );
         let guid = gameobject_guid(9105, 5);
@@ -1780,6 +1890,119 @@ mod tests {
         assert_eq!(entry.processing, PacketProcessing::Inplace);
         assert_eq!(entry.handler_name, "handle_quest_giver_close_quest");
     }
+
+    #[tokio::test]
+    async fn quest_log_remove_short_packet_does_not_remove_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        add_active_quest_in_slot(&mut session, 5911, 0);
+
+        session
+            .handle_quest_log_remove_quest(WorldPacket::from_bytes(&[]))
+            .await;
+
+        assert!(session.player_quests.contains_key(&5911));
+        assert_eq!(session.get_quest_slot_quest_id_like_cpp(0), Some(5911));
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_log_remove_slot_outside_max_does_not_remove_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        add_active_quest_in_slot(&mut session, 5912, 0);
+
+        run_remove_quest_slot(&mut session, 25).await;
+
+        assert!(session.player_quests.contains_key(&5912));
+        assert_eq!(session.get_quest_slot_quest_id_like_cpp(0), Some(5912));
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_log_remove_valid_slot_removes_only_that_slot_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        add_active_quest_in_slot(&mut session, 880_001, 7);
+        add_active_quest_in_slot(&mut session, 17, 3);
+
+        run_remove_quest_slot(&mut session, 7).await;
+
+        assert!(!session.player_quests.contains_key(&880_001));
+        assert!(session.player_quests.contains_key(&17));
+        assert_eq!(session.get_quest_slot_quest_id_like_cpp(7), None);
+        assert_eq!(session.get_quest_slot_quest_id_like_cpp(3), Some(17));
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_log_remove_empty_valid_slot_does_not_remove_other_quest_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        add_active_quest_in_slot(&mut session, 5914, 4);
+
+        run_remove_quest_slot(&mut session, 3).await;
+
+        assert!(session.player_quests.contains_key(&5914));
+        assert_eq!(session.get_quest_slot_quest_id_like_cpp(4), Some(5914));
+        assert_eq!(session.get_quest_slot_quest_id_like_cpp(3), None);
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_log_remove_duplicate_slot_fails_closed_and_removes_none_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        add_active_quest_in_slot(&mut session, 5915, 2);
+        add_active_quest_in_slot(&mut session, 5916, 2);
+
+        run_remove_quest_slot(&mut session, 2).await;
+
+        assert!(session.player_quests.contains_key(&5915));
+        assert!(session.player_quests.contains_key(&5916));
+        assert_eq!(session.get_quest_slot_quest_id_like_cpp(2), None);
+        assert_eq!(session.first_free_quest_slot_like_cpp(), Some(0));
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn quest_log_create_entries_preserve_explicit_slot_holes_like_cpp() {
+        let (mut session, _send_rx) = make_session();
+        add_active_quest_in_slot(&mut session, 5916, 9);
+        add_active_quest_in_slot(&mut session, 5915, 2);
+
+        let entries = session.quest_log_create_entries_like_cpp();
+
+        assert_eq!(entries.len(), MAX_QUEST_LOG_SIZE_LIKE_CPP as usize);
+        assert_eq!(entries[0], (0, 0, 0, [0; 24]));
+        assert_eq!(entries[2].0, 5915);
+        assert_eq!(entries[9].0, 5916);
+    }
+
+    #[test]
+    fn quest_log_create_entries_duplicate_slot_is_empty_fail_closed_like_cpp() {
+        let (mut session, _send_rx) = make_session();
+        add_active_quest_in_slot(&mut session, 5915, 2);
+        add_active_quest_in_slot(&mut session, 5916, 2);
+
+        let entries = session.quest_log_create_entries_like_cpp();
+
+        assert_eq!(entries.len(), MAX_QUEST_LOG_SIZE_LIKE_CPP as usize);
+        assert_eq!(entries[2], (0, 0, 0, [0; 24]));
+        assert!(session.player_quests.contains_key(&5915));
+        assert!(session.player_quests.contains_key(&5916));
+    }
+
+    #[test]
+    fn quest_log_remove_inventory_registration_and_dispatcher_contract_like_cpp() {
+        let entry = inventory::iter::<PacketHandlerEntry>
+            .into_iter()
+            .find(|entry| entry.opcode == ClientOpcodes::QuestLogRemoveQuest)
+            .expect("QuestLogRemoveQuest handler registration");
+
+        assert_eq!(entry.status, SessionStatus::LoggedIn);
+        assert_eq!(entry.processing, PacketProcessing::Inplace);
+        assert_eq!(entry.handler_name, "handle_quest_log_remove_quest");
+        assert!(include_str!("../session.rs").contains("ClientOpcodes::QuestLogRemoveQuest =>"));
+        assert!(
+            include_str!("../session.rs").contains("self.handle_quest_log_remove_quest(pkt).await")
+        );
+    }
 }
 
 // ── PlayerQuestStatus ────────────────────────────────────────────────────────
@@ -1794,4 +2017,6 @@ pub struct PlayerQuestStatus {
     /// Progress per objective (indexed by objective.storage_index).
     /// value = current count toward the required amount.
     pub objective_counts: Vec<i32>,
+    /// Represented TrinityCore QuestStatusData::Slot / ActivePlayerData::QuestLog index.
+    pub slot: u8,
 }

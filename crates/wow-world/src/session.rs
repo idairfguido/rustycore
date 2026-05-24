@@ -8815,6 +8815,9 @@ impl WorldSession {
             ClientOpcodes::QuestGiverCloseQuest => {
                 self.handle_quest_giver_close_quest(pkt).await;
             }
+            ClientOpcodes::QuestLogRemoveQuest => {
+                self.handle_quest_log_remove_quest(pkt).await;
+            }
             ClientOpcodes::SwapInvItem => {
                 match wow_packet::packets::item::SwapInvItem::read(&mut pkt) {
                     Ok(swap) => self.handle_swap_inv_item(swap).await,
@@ -18531,6 +18534,7 @@ mod tests {
                 status: 1,
                 explored: false,
                 objective_counts: vec![],
+                slot: 0,
             },
         );
         session.player_quests.insert(
@@ -18540,6 +18544,7 @@ mod tests {
                 status: 2,
                 explored: false,
                 objective_counts: vec![],
+                slot: 0,
             },
         );
         session.rewarded_quests.insert(200);
@@ -25551,6 +25556,7 @@ mod tests {
                 status: 1,
                 explored: false,
                 objective_counts: vec![2, 3],
+                slot: 0,
             },
         );
         session.rewarded_quests.insert(200);
@@ -25620,6 +25626,7 @@ mod tests {
                 status: 2,
                 explored: false,
                 objective_counts: vec![7],
+                slot: 1,
             },
         );
         session.rewarded_quests.insert(400);
@@ -26193,6 +26200,7 @@ mod tests {
                 status: 1,
                 explored: false,
                 objective_counts: vec![0],
+                slot: 0,
             },
         );
         register_test_creature(&mut session, manager.clone(), guid, 3);
@@ -36592,6 +36600,7 @@ mod tests {
                 status: 2,
                 explored: false,
                 objective_counts: Vec::new(),
+                slot: 0,
             },
         );
 
@@ -36628,6 +36637,7 @@ mod tests {
                 status: 1,
                 explored: false,
                 objective_counts: Vec::new(),
+                slot: 0,
             },
         );
 
@@ -36720,6 +36730,7 @@ mod tests {
                 status: 2,
                 explored: false,
                 objective_counts: Vec::new(),
+                slot: 0,
             },
         );
 
@@ -37163,6 +37174,7 @@ mod tests {
                 status: 2,
                 explored: false,
                 objective_counts: Vec::new(),
+                slot: 0,
             },
         );
 
@@ -37207,6 +37219,7 @@ mod tests {
                 status: 2,
                 explored: false,
                 objective_counts: Vec::new(),
+                slot: 0,
             },
         );
 
@@ -37258,6 +37271,7 @@ mod tests {
                 status: 2,
                 explored: false,
                 objective_counts: Vec::new(),
+                slot: 0,
             },
         );
 
@@ -37298,6 +37312,7 @@ mod tests {
                 status: 2,
                 explored: false,
                 objective_counts: Vec::new(),
+                slot: 0,
             },
         );
 
@@ -37339,6 +37354,7 @@ mod tests {
                 status: 2,
                 explored: false,
                 objective_counts: Vec::new(),
+                slot: 0,
             },
         );
 
@@ -37373,6 +37389,7 @@ mod tests {
                 status: 2,
                 explored: false,
                 objective_counts: Vec::new(),
+                slot: 0,
             },
         );
 
@@ -37409,6 +37426,7 @@ mod tests {
                 status: 2,
                 explored: false,
                 objective_counts: Vec::new(),
+                slot: 0,
             },
         );
 
@@ -37512,6 +37530,7 @@ mod tests {
                 status: 2,
                 explored: false,
                 objective_counts: Vec::new(),
+                slot: 0,
             },
         );
 
@@ -37576,6 +37595,7 @@ mod tests {
                 status: 1,
                 explored: false,
                 objective_counts: Vec::new(),
+                slot: 0,
             },
         );
 
@@ -38103,6 +38123,7 @@ mod tests {
                 status: 1,
                 explored: false,
                 objective_counts: vec![],
+                slot: 0,
             },
         );
         assert!(session.use_represented_gameobject_goober_preamble_like_cpp(
