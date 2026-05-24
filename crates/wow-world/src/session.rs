@@ -169,6 +169,26 @@ pub(crate) struct RepresentedQuestPushResultResponseLikeCpp {
     pub result: u8,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepresentedPushQuestToPartyOutcomeReasonLikeCpp {
+    NotAllowed,
+    QuestPoolActiveCheckUnrepresented,
+    NotInParty,
+    GroupRuntimeUnrepresented,
+}
+
+/// Session-local evidence for the bounded sender-side `HandlePushQuestToParty` preflight.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepresentedPushQuestToPartyOutcomeLikeCpp {
+    pub sender_guid: Option<ObjectGuid>,
+    pub quest_id: u32,
+    pub target_guid: Option<ObjectGuid>,
+    pub reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp,
+    pub quest_pool_active_check_unrepresented: bool,
+    pub group_runtime_unrepresented: bool,
+    pub receiver_fanout_unrepresented: bool,
+}
+
 /// Evidence that `HandleQuestConfirmAccept` reached the post-clear/template-present seam.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RepresentedQuestConfirmAcceptLikeCpp {
@@ -1873,6 +1893,9 @@ pub struct WorldSession {
     /// Evidence for represented `HandleQuestConfirmAccept` after clear + template lookup.
     pub(crate) represented_quest_confirm_accepts_like_cpp:
         Vec<RepresentedQuestConfirmAcceptLikeCpp>,
+    /// Session-local evidence for represented sender-side `HandlePushQuestToParty` preflight.
+    pub(crate) represented_push_quest_to_party_outcomes_like_cpp:
+        Vec<RepresentedPushQuestToPartyOutcomeLikeCpp>,
 
     // ── Loot ──────────────────────────────────────────────────────
     /// Active loot windows keyed by creature GUID.
@@ -2557,6 +2580,7 @@ impl WorldSession {
             represented_quest_push_result_responses_like_cpp: Vec::new(),
             represented_quest_push_result_sender_mismatch_count_like_cpp: 0,
             represented_quest_confirm_accepts_like_cpp: Vec::new(),
+            represented_push_quest_to_party_outcomes_like_cpp: Vec::new(),
             active_spell_cast: None,
             last_spell_cast_time: None,
             last_spell_cast_time_per_spell: HashMap::new(),
@@ -8871,6 +8895,9 @@ impl WorldSession {
             }
             ClientOpcodes::QuestPushResult => {
                 self.handle_quest_push_result(pkt).await;
+            }
+            ClientOpcodes::PushQuestToParty => {
+                self.handle_push_quest_to_party(pkt).await;
             }
             ClientOpcodes::QuestLogRemoveQuest => {
                 self.handle_quest_log_remove_quest(pkt).await;
@@ -15538,6 +15565,20 @@ impl WorldSession {
     ) {
         self.represented_quest_confirm_accepts_like_cpp
             .push(evidence);
+    }
+
+    pub(crate) fn represented_push_quest_to_party_outcomes_like_cpp(
+        &self,
+    ) -> &[RepresentedPushQuestToPartyOutcomeLikeCpp] {
+        &self.represented_push_quest_to_party_outcomes_like_cpp
+    }
+
+    pub(crate) fn record_represented_push_quest_to_party_outcome_like_cpp(
+        &mut self,
+        outcome: RepresentedPushQuestToPartyOutcomeLikeCpp,
+    ) {
+        self.represented_push_quest_to_party_outcomes_like_cpp
+            .push(outcome);
     }
 
     /// Get the logged-in player GUID.

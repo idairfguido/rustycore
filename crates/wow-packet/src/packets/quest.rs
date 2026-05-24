@@ -65,6 +65,25 @@ impl ClientPacket for QuestPushResult {
     }
 }
 
+/// Sender request to share one quest with the current party.
+///
+/// C++ anchor: `WorldPackets::Quest::PushQuestToParty::Read`,
+/// `QuestPackets.cpp:658-661`: exactly one `uint32 QuestID`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PushQuestToParty {
+    pub quest_id: u32,
+}
+
+impl ClientPacket for PushQuestToParty {
+    const OPCODE: ClientOpcodes = ClientOpcodes::PushQuestToParty;
+
+    fn read(packet: &mut WorldPacket) -> Result<Self, PacketError> {
+        let quest_id = packet.read_uint32()?;
+
+        Ok(Self { quest_id })
+    }
+}
+
 // ── SMSG_QUEST_GIVER_STATUS (0x...) ──────────────────────────────────────────
 
 /// Quest giver status for a single NPC — controls the ! ? exclamation icons.
@@ -772,6 +791,29 @@ mod quest_confirm_accept_tests {
         let mut pkt = WorldPacket::from_bytes(&[0x59, 0x1B, 0x00]);
 
         assert!(QuestConfirmAccept::read(&mut pkt).is_err());
+    }
+}
+
+#[cfg(test)]
+mod push_quest_to_party_tests {
+    use super::*;
+
+    #[test]
+    fn push_quest_to_party_reads_uint32_quest_id_like_cpp() {
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_uint32(0xA1B2_C3D4);
+
+        let parsed = PushQuestToParty::read(&mut pkt).expect("valid PushQuestToParty packet");
+
+        assert_eq!(parsed.quest_id, 0xA1B2_C3D4);
+        assert_eq!(PushQuestToParty::OPCODE, ClientOpcodes::PushQuestToParty);
+    }
+
+    #[test]
+    fn push_quest_to_party_short_packet_fails_closed() {
+        let mut pkt = WorldPacket::from_bytes(&[0x9F, 0x34, 0x00]);
+
+        assert!(PushQuestToParty::read(&mut pkt).is_err());
     }
 }
 

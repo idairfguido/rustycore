@@ -26,17 +26,20 @@ use wow_packet::packets::query::{
     QueryQuestCompletionNpcs, QuestCompletionNpc, QuestCompletionNpcResponse,
 };
 use wow_packet::packets::quest::{
-    QueryQuestInfoResponse, QuestConfirmAccept, QuestGiverOfferReward, QuestGiverQuestComplete,
-    QuestGiverRequestItems, QuestGiverStatus, QuestObjectiveInfo, QuestPushResult,
-    QuestRewardsBlock, QuestUpdateComplete, WorldQuestUpdateResponse, quest_giver_status,
+    PushQuestToParty, QueryQuestInfoResponse, QuestConfirmAccept, QuestGiverOfferReward,
+    QuestGiverQuestComplete, QuestGiverRequestItems, QuestGiverStatus, QuestObjectiveInfo,
+    QuestPushResult, QuestRewardsBlock, QuestUpdateComplete, WorldQuestUpdateResponse,
+    quest_giver_status,
 };
 
 use crate::session::{
+    RepresentedPushQuestToPartyOutcomeLikeCpp, RepresentedPushQuestToPartyOutcomeReasonLikeCpp,
     RepresentedQuestConfirmAcceptLikeCpp, RepresentedQuestPushResultResponseLikeCpp,
     SeasonalQuestStatusDbRowLikeCpp, WorldSession,
 };
 
 pub(crate) const QUEST_FLAGS_AUTO_COMPLETE_LIKE_CPP: u32 = 0x0001_0000;
+pub(crate) const QUEST_FLAGS_SHARABLE_LIKE_CPP: u32 = 0x0000_0008;
 
 fn represented_quest_completion_npc_response_like_cpp(
     quest_store: &wow_data::quest::QuestStore,
@@ -200,6 +203,15 @@ inventory::submit! {
         status: SessionStatus::LoggedIn,
         processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_quest_push_result",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::PushQuestToParty,
+        status: SessionStatus::LoggedIn,
+        processing: PacketProcessing::ThreadUnsafe,
+        handler_name: "handle_push_quest_to_party",
     }
 }
 
@@ -519,6 +531,81 @@ impl WorldSession {
                 raw_quest_id: packet.quest_id,
             },
         );
+    }
+
+    /// CMSG_PUSH_QUEST_TO_PARTY — sender-side bounded quest share preflight.
+    ///
+    /// C++ anchors:
+    /// - `Opcodes.cpp:746`: `STATUS_LOGGEDIN`, `PROCESS_THREADUNSAFE`, `HandlePushQuestToParty`.
+    /// - `QuestPackets.cpp:658-661`: packet reads one `uint32 QuestID`.
+    /// - `QuestHandler.cpp:603-756`: template lookup, `CanShareQuest`, quest-pool active,
+    ///   group presence, then receiver iteration.
+    ///
+    /// Represented-partial: this records sender-local evidence only. It never mutates DB/maps,
+    /// never sets receiver pending sharing, and never fans out packets to other sessions.
+    pub async fn handle_push_quest_to_party(&mut self, mut pkt: wow_packet::WorldPacket) {
+        let packet = match PushQuestToParty::read(&mut pkt) {
+            Ok(packet) => packet,
+            Err(error) => {
+                warn!(
+                    account = self.account_id,
+                    ?error,
+                    "PushQuestToParty: failed to read QuestID"
+                );
+                return;
+            }
+        };
+
+        let Some(quest_store) = self.quest_store.as_ref().map(Arc::clone) else {
+            debug!(
+                account = self.account_id,
+                quest_id = packet.quest_id,
+                "PushQuestToParty: missing QuestStore, silent return like missing ObjectMgr template path"
+            );
+            return;
+        };
+
+        let Some(quest) = quest_store.get(packet.quest_id) else {
+            debug!(
+                account = self.account_id,
+                quest_id = packet.quest_id,
+                "PushQuestToParty: missing quest template, silent return like C++"
+            );
+            return;
+        };
+
+        let sender_guid = self.player_guid();
+        if !self.represented_can_share_quest_like_cpp(quest) {
+            self.record_represented_push_quest_to_party_outcome_like_cpp(
+                RepresentedPushQuestToPartyOutcomeLikeCpp {
+                    sender_guid,
+                    quest_id: packet.quest_id,
+                    target_guid: sender_guid,
+                    reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::NotAllowed,
+                    quest_pool_active_check_unrepresented: false,
+                    group_runtime_unrepresented: false,
+                    receiver_fanout_unrepresented: false,
+                },
+            );
+            return;
+        }
+
+        self.record_represented_push_quest_to_party_outcome_like_cpp(
+            RepresentedPushQuestToPartyOutcomeLikeCpp {
+                sender_guid,
+                quest_id: packet.quest_id,
+                target_guid: sender_guid,
+                reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::QuestPoolActiveCheckUnrepresented,
+                quest_pool_active_check_unrepresented: true,
+                group_runtime_unrepresented: false,
+                receiver_fanout_unrepresented: false,
+            },
+        );
+    }
+
+    fn represented_can_share_quest_like_cpp(&self, quest: &wow_data::quest::QuestTemplate) -> bool {
+        quest.flags & QUEST_FLAGS_SHARABLE_LIKE_CPP != 0
+            && self.player_quests.contains_key(&quest.id)
     }
 
     /// CMSG_QUEST_PUSH_RESULT — response to a shared quest prompt.
@@ -1838,6 +1925,18 @@ mod tests {
         session.handle_quest_push_result(pkt).await;
     }
 
+    async fn run_push_quest_to_party(session: &mut WorldSession, quest_id: u32) {
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_uint32(quest_id);
+        session.handle_push_quest_to_party(pkt).await;
+    }
+
+    fn store_with_sharable_quest(id: u32) -> QuestStore {
+        let mut quest = quest_template(id);
+        quest.flags |= QUEST_FLAGS_SHARABLE_LIKE_CPP;
+        QuestStore::from_quests_like_cpp([quest])
+    }
+
     fn recv_world_quest_update_count(send_rx: &flume::Receiver<Vec<u8>>) -> u32 {
         let bytes = send_rx
             .try_recv()
@@ -2147,6 +2246,144 @@ mod tests {
         assert_eq!(parsed.sender_guid, sender_guid);
         assert_eq!(parsed.quest_id, 7005);
         assert_eq!(parsed.result, 9);
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_malformed_packet_records_no_evidence_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        session.set_quest_store(Arc::new(store_with_sharable_quest(7101)));
+        add_active_quest(&mut session, 7101);
+
+        session
+            .handle_push_quest_to_party(WorldPacket::from_bytes(&[0x9F, 0x34, 0x00]))
+            .await;
+
+        assert!(
+            session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .is_empty()
+        );
+        assert!(
+            session
+                .represented_pending_quest_sharing_like_cpp()
+                .is_none()
+        );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_missing_quest_template_returns_silently_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        session.set_quest_store(Arc::new(store_with_quests(&[7102])));
+
+        run_push_quest_to_party(&mut session, 7103).await;
+
+        assert!(
+            session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .is_empty()
+        );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_unshareable_or_not_in_log_records_not_allowed_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        let sender_guid = session.player_guid();
+        session.set_quest_store(Arc::new(store_with_sharable_quest(7104)));
+
+        run_push_quest_to_party(&mut session, 7104).await;
+
+        assert_eq!(
+            session.represented_push_quest_to_party_outcomes_like_cpp(),
+            &[RepresentedPushQuestToPartyOutcomeLikeCpp {
+                sender_guid,
+                quest_id: 7104,
+                target_guid: sender_guid,
+                reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::NotAllowed,
+                quest_pool_active_check_unrepresented: false,
+                group_runtime_unrepresented: false,
+                receiver_fanout_unrepresented: false,
+            }]
+        );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_shareable_sender_blocks_at_unrepresented_quest_pool_before_group_like_cpp()
+     {
+        let (mut session, send_rx) = make_session();
+        let sender_guid = session.player_guid();
+        session.set_quest_store(Arc::new(store_with_sharable_quest(7105)));
+        add_active_quest(&mut session, 7105);
+
+        run_push_quest_to_party(&mut session, 7105).await;
+
+        assert_eq!(
+            session.represented_push_quest_to_party_outcomes_like_cpp(),
+            &[RepresentedPushQuestToPartyOutcomeLikeCpp {
+                sender_guid,
+                quest_id: 7105,
+                target_guid: sender_guid,
+                reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::QuestPoolActiveCheckUnrepresented,
+                quest_pool_active_check_unrepresented: true,
+                group_runtime_unrepresented: false,
+                receiver_fanout_unrepresented: false,
+            }]
+        );
+        assert!(
+            session
+                .represented_pending_quest_sharing_like_cpp()
+                .is_none()
+        );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_group_runtime_and_receiver_fanout_stay_unreached_without_pool_check_like_cpp()
+     {
+        let (mut session, send_rx) = make_session();
+        let sender_guid = session.player_guid();
+        session.set_quest_store(Arc::new(store_with_sharable_quest(7106)));
+        add_active_quest(&mut session, 7106);
+        session.group_guid = Some(99);
+
+        run_push_quest_to_party(&mut session, 7106).await;
+
+        assert_eq!(
+            session.represented_push_quest_to_party_outcomes_like_cpp(),
+            &[RepresentedPushQuestToPartyOutcomeLikeCpp {
+                sender_guid,
+                quest_id: 7106,
+                target_guid: sender_guid,
+                reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::QuestPoolActiveCheckUnrepresented,
+                quest_pool_active_check_unrepresented: true,
+                group_runtime_unrepresented: false,
+                receiver_fanout_unrepresented: false,
+            }]
+        );
+        assert!(
+            session
+                .represented_pending_quest_sharing_like_cpp()
+                .is_none()
+        );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn push_quest_to_party_registration_and_dispatch_are_wired_like_cpp() {
+        let entry = inventory::iter::<PacketHandlerEntry>
+            .into_iter()
+            .find(|entry| entry.opcode == ClientOpcodes::PushQuestToParty)
+            .expect("PushQuestToParty handler registration");
+
+        assert_eq!(entry.status, SessionStatus::LoggedIn);
+        assert_eq!(entry.processing, PacketProcessing::ThreadUnsafe);
+        assert_eq!(entry.handler_name, "handle_push_quest_to_party");
+        assert!(include_str!("../session.rs").contains("ClientOpcodes::PushQuestToParty =>"));
+        assert!(
+            include_str!("../session.rs").contains("self.handle_push_quest_to_party(pkt).await")
+        );
     }
 
     #[tokio::test]
