@@ -9,7 +9,7 @@
 //! and GameObject quest relations from the world database at startup.
 
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tracing::{info, warn};
 use wow_database::{WorldDatabase, WorldStatements};
 
@@ -453,6 +453,162 @@ impl Default for QuestStore {
     }
 }
 
+// ── QuestPoolMgr represented metadata seam ───────────────────────────────────
+
+/// Row from C++ `quest_pool_members` joined to `quest_pool_template`.
+///
+/// C++ anchor: `QuestPoolMgr::LoadFromDB`, `QuestPools.cpp:75-125`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuestPoolMemberRowLikeCpp {
+    pub quest_id: u32,
+    pub pool_id: u32,
+    pub pool_index: u32,
+    pub num_active: Option<u32>,
+}
+
+/// Row from C++ `pool_quest_save`.
+///
+/// C++ anchor: `QuestPoolMgr::LoadFromDB`, `QuestPools.cpp:128-160`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuestPoolSavedActiveRowLikeCpp {
+    pub pool_id: u32,
+    pub quest_id: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuestPoolLikeCpp {
+    pub pool_id: u32,
+    pub num_active: u32,
+    pub members: Vec<Vec<u32>>,
+    pub active_quests: HashSet<u32>,
+}
+
+/// Read-only C++-shaped subset of `QuestPoolMgr` sufficient for `IsQuestActive`.
+///
+/// This deliberately does not implement C++ regeneration/RNG or DB persistence from
+/// `QuestPools.cpp:163-250`; when saved rows are absent/incomplete the store remains a
+/// represented snapshot of the metadata and saved active rows supplied by the caller.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct QuestPoolStoreLikeCpp {
+    pools: HashMap<u32, QuestPoolLikeCpp>,
+    pool_lookup: HashMap<u32, u32>,
+}
+
+impl QuestPoolStoreLikeCpp {
+    pub fn from_rows_like_cpp(
+        quest_store: &QuestStore,
+        member_rows: impl IntoIterator<Item = QuestPoolMemberRowLikeCpp>,
+        saved_active_rows: impl IntoIterator<Item = QuestPoolSavedActiveRowLikeCpp>,
+    ) -> Self {
+        let mut pools: HashMap<u32, QuestPoolLikeCpp> = HashMap::new();
+        let mut first_valid_pool_kind: HashMap<u32, QuestPoolKindLikeCpp> = HashMap::new();
+
+        for row in member_rows {
+            let Some(num_active) = row.num_active else {
+                continue;
+            };
+            let Some(quest) = quest_store.get(row.quest_id) else {
+                continue;
+            };
+            let Some(kind) = QuestPoolKindLikeCpp::from_quest_like_cpp(quest) else {
+                continue;
+            };
+
+            first_valid_pool_kind.entry(row.pool_id).or_insert(kind);
+            let pool = pools
+                .entry(row.pool_id)
+                .or_insert_with(|| QuestPoolLikeCpp {
+                    pool_id: row.pool_id,
+                    num_active,
+                    members: Vec::new(),
+                    active_quests: HashSet::new(),
+                });
+
+            let pool_index = row.pool_index as usize;
+            if pool_index >= pool.members.len() {
+                pool.members.resize_with(pool_index + 1, Vec::new);
+            }
+            pool.members[pool_index].push(row.quest_id);
+        }
+
+        let mut saved_active_by_pool: HashMap<u32, HashSet<u32>> = HashMap::new();
+        for row in saved_active_rows {
+            if pools.contains_key(&row.pool_id) {
+                saved_active_by_pool
+                    .entry(row.pool_id)
+                    .or_default()
+                    .insert(row.quest_id);
+            }
+        }
+
+        for pool in pools.values_mut() {
+            let Some(saved_active) = saved_active_by_pool.get(&pool.pool_id) else {
+                continue;
+            };
+
+            for member in &pool.members {
+                let Some(first_quest_id) = member.first() else {
+                    continue;
+                };
+
+                if saved_active.contains(first_quest_id) {
+                    pool.active_quests.extend(member.iter().copied());
+                }
+            }
+        }
+
+        let mut pool_lookup = HashMap::new();
+        for (pool_id, pool) in &pools {
+            if first_valid_pool_kind.contains_key(pool_id) {
+                for quest_id in pool.members.iter().flatten().copied() {
+                    pool_lookup.entry(quest_id).or_insert(*pool_id);
+                }
+            }
+        }
+
+        Self { pools, pool_lookup }
+    }
+
+    /// C++ `QuestPoolMgr::IsQuestActive`: non-pooled quests are active; pooled quests are
+    /// active iff present in their pool's `activeQuests` set.
+    ///
+    /// C++ anchor: `QuestPools.cpp:286-292`.
+    pub fn is_quest_active_like_cpp(&self, quest_id: u32) -> bool {
+        let Some(pool_id) = self.pool_lookup.get(&quest_id) else {
+            return true;
+        };
+
+        self.pools
+            .get(pool_id)
+            .is_none_or(|pool| pool.active_quests.contains(&quest_id))
+    }
+
+    pub fn is_quest_pooled_like_cpp(&self, quest_id: u32) -> bool {
+        self.pool_lookup.contains_key(&quest_id)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QuestPoolKindLikeCpp {
+    Daily,
+    Weekly,
+    Monthly,
+}
+
+impl QuestPoolKindLikeCpp {
+    fn from_quest_like_cpp(quest: &QuestTemplate) -> Option<Self> {
+        if quest.is_daily_like_cpp() {
+            Some(Self::Daily)
+        } else if quest.is_weekly_like_cpp() {
+            Some(Self::Weekly)
+        } else if quest.is_monthly_like_cpp() {
+            Some(Self::Monthly)
+        } else {
+            None
+        }
+    }
+}
+
 // ── DB loading ────────────────────────────────────────────────────────────────
 
 /// Load all quest data from the world database into a QuestStore.
@@ -861,6 +1017,200 @@ mod tests {
                 .event_id_for_quest_like_cpp(),
             0
         );
+    }
+
+    fn daily_quest(id: u32) -> QuestTemplate {
+        let mut quest = quest_with_sort_and_flags(0, QUEST_FLAGS_DAILY_LIKE_CPP, 0);
+        quest.id = id;
+        quest
+    }
+
+    fn weekly_quest(id: u32) -> QuestTemplate {
+        let mut quest = quest_with_sort_and_flags(0, QUEST_FLAGS_WEEKLY_LIKE_CPP, 0);
+        quest.id = id;
+        quest
+    }
+
+    #[test]
+    fn quest_pool_non_pooled_quest_is_active_like_cpp() {
+        let store = QuestStore::from_quests_like_cpp([daily_quest(100)]);
+        let pools = QuestPoolStoreLikeCpp::from_rows_like_cpp(&store, [], []);
+
+        assert!(!pools.is_quest_pooled_like_cpp(100));
+        assert!(pools.is_quest_active_like_cpp(100));
+    }
+
+    #[test]
+    fn quest_pool_pooled_saved_active_quest_is_active_like_cpp() {
+        let store = QuestStore::from_quests_like_cpp([daily_quest(101), daily_quest(102)]);
+        let pools = QuestPoolStoreLikeCpp::from_rows_like_cpp(
+            &store,
+            [
+                QuestPoolMemberRowLikeCpp {
+                    quest_id: 101,
+                    pool_id: 7,
+                    pool_index: 0,
+                    num_active: Some(1),
+                },
+                QuestPoolMemberRowLikeCpp {
+                    quest_id: 102,
+                    pool_id: 7,
+                    pool_index: 1,
+                    num_active: Some(1),
+                },
+            ],
+            [QuestPoolSavedActiveRowLikeCpp {
+                pool_id: 7,
+                quest_id: 101,
+            }],
+        );
+
+        assert!(pools.is_quest_pooled_like_cpp(101));
+        assert!(pools.is_quest_active_like_cpp(101));
+    }
+
+    #[test]
+    fn quest_pool_pooled_not_saved_active_quest_is_inactive_like_cpp() {
+        let store = QuestStore::from_quests_like_cpp([daily_quest(103), daily_quest(104)]);
+        let pools = QuestPoolStoreLikeCpp::from_rows_like_cpp(
+            &store,
+            [
+                QuestPoolMemberRowLikeCpp {
+                    quest_id: 103,
+                    pool_id: 8,
+                    pool_index: 0,
+                    num_active: Some(1),
+                },
+                QuestPoolMemberRowLikeCpp {
+                    quest_id: 104,
+                    pool_id: 8,
+                    pool_index: 1,
+                    num_active: Some(1),
+                },
+            ],
+            [QuestPoolSavedActiveRowLikeCpp {
+                pool_id: 8,
+                quest_id: 103,
+            }],
+        );
+
+        assert!(pools.is_quest_pooled_like_cpp(104));
+        assert!(!pools.is_quest_active_like_cpp(104));
+    }
+
+    #[test]
+    fn quest_pool_saved_first_quest_activates_entire_member_index_like_cpp() {
+        let store = QuestStore::from_quests_like_cpp([daily_quest(201), daily_quest(202)]);
+        let pools = QuestPoolStoreLikeCpp::from_rows_like_cpp(
+            &store,
+            [
+                QuestPoolMemberRowLikeCpp {
+                    quest_id: 201,
+                    pool_id: 12,
+                    pool_index: 0,
+                    num_active: Some(1),
+                },
+                QuestPoolMemberRowLikeCpp {
+                    quest_id: 202,
+                    pool_id: 12,
+                    pool_index: 0,
+                    num_active: Some(1),
+                },
+            ],
+            [QuestPoolSavedActiveRowLikeCpp {
+                pool_id: 12,
+                quest_id: 201,
+            }],
+        );
+
+        assert!(pools.is_quest_pooled_like_cpp(201));
+        assert!(pools.is_quest_pooled_like_cpp(202));
+        assert!(pools.is_quest_active_like_cpp(201));
+        assert!(pools.is_quest_active_like_cpp(202));
+    }
+
+    #[test]
+    fn quest_pool_saved_non_first_quest_does_not_activate_member_index_like_cpp() {
+        let store = QuestStore::from_quests_like_cpp([daily_quest(203), daily_quest(204)]);
+        let pools = QuestPoolStoreLikeCpp::from_rows_like_cpp(
+            &store,
+            [
+                QuestPoolMemberRowLikeCpp {
+                    quest_id: 203,
+                    pool_id: 13,
+                    pool_index: 0,
+                    num_active: Some(1),
+                },
+                QuestPoolMemberRowLikeCpp {
+                    quest_id: 204,
+                    pool_id: 13,
+                    pool_index: 0,
+                    num_active: Some(1),
+                },
+            ],
+            [QuestPoolSavedActiveRowLikeCpp {
+                pool_id: 13,
+                quest_id: 204,
+            }],
+        );
+
+        assert!(pools.is_quest_pooled_like_cpp(203));
+        assert!(pools.is_quest_pooled_like_cpp(204));
+        assert!(!pools.is_quest_active_like_cpp(203));
+        assert!(!pools.is_quest_active_like_cpp(204));
+    }
+
+    #[test]
+    fn quest_pool_missing_quest_and_pool_rows_skip_without_panic_like_cpp() {
+        let store = QuestStore::from_quests_like_cpp([weekly_quest(105)]);
+        let pools = QuestPoolStoreLikeCpp::from_rows_like_cpp(
+            &store,
+            [
+                QuestPoolMemberRowLikeCpp {
+                    quest_id: 999,
+                    pool_id: 9,
+                    pool_index: 0,
+                    num_active: Some(1),
+                },
+                QuestPoolMemberRowLikeCpp {
+                    quest_id: 105,
+                    pool_id: 10,
+                    pool_index: 0,
+                    num_active: None,
+                },
+            ],
+            [QuestPoolSavedActiveRowLikeCpp {
+                pool_id: 404,
+                quest_id: 105,
+            }],
+        );
+
+        assert!(!pools.is_quest_pooled_like_cpp(105));
+        assert!(pools.is_quest_active_like_cpp(105));
+        assert!(pools.is_quest_active_like_cpp(999));
+    }
+
+    #[test]
+    fn quest_pool_non_daily_weekly_monthly_member_is_skipped_and_active_like_cpp() {
+        let mut normal = quest_with_sort_and_flags(0, 0, 0);
+        normal.id = 106;
+        let store = QuestStore::from_quests_like_cpp([normal]);
+        let pools = QuestPoolStoreLikeCpp::from_rows_like_cpp(
+            &store,
+            [QuestPoolMemberRowLikeCpp {
+                quest_id: 106,
+                pool_id: 11,
+                pool_index: 0,
+                num_active: Some(1),
+            }],
+            [QuestPoolSavedActiveRowLikeCpp {
+                pool_id: 11,
+                quest_id: 106,
+            }],
+        );
+
+        assert!(!pools.is_quest_pooled_like_cpp(106));
+        assert!(pools.is_quest_active_like_cpp(106));
     }
 
     #[test]

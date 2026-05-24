@@ -172,6 +172,7 @@ pub(crate) struct RepresentedQuestPushResultResponseLikeCpp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RepresentedPushQuestToPartyOutcomeReasonLikeCpp {
     NotAllowed,
+    NotDaily,
     QuestPoolActiveCheckUnrepresented,
     NotInParty,
     GroupRuntimeUnrepresented,
@@ -1866,6 +1867,8 @@ pub struct WorldSession {
     // ── Quest system ───────────────────────────────────────────────
     /// Quest template store (loaded from world DB at startup).
     pub(crate) quest_store: Option<Arc<wow_data::quest::QuestStore>>,
+    /// Read-only represented QuestPoolMgr active snapshot for C++ `IsQuestActive`.
+    pub(crate) quest_pool_store: Option<Arc<wow_data::quest::QuestPoolStoreLikeCpp>>,
     pub(crate) quest_xp_store: Option<Arc<wow_data::quest_xp::QuestXpStore>>,
     pub(crate) quest_v2_store: Option<Arc<QuestV2Store>>,
     pub(crate) player_xp_table: Option<Arc<Vec<u32>>>,
@@ -2568,6 +2571,7 @@ impl WorldSession {
             spell_radius_store: None,
             spell_range_store: None,
             quest_store: None,
+            quest_pool_store: None,
             quest_xp_store: None,
             quest_v2_store: None,
             player_quests: HashMap::new(),
@@ -6762,6 +6766,11 @@ impl WorldSession {
     /// Set the quest store shared reference.
     pub fn set_quest_store(&mut self, store: Arc<wow_data::quest::QuestStore>) {
         self.quest_store = Some(store);
+    }
+
+    /// Set the represented QuestPoolMgr active snapshot shared reference.
+    pub fn set_quest_pool_store(&mut self, store: Arc<wow_data::quest::QuestPoolStoreLikeCpp>) {
+        self.quest_pool_store = Some(store);
     }
 
     /// Set the QuestV2 store shared reference used for C++ quest unique-bit lookups.
