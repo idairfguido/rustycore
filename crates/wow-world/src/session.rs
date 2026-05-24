@@ -189,6 +189,8 @@ pub(crate) enum RepresentedPushQuestToPartyOutcomeReasonLikeCpp {
     ReceiverSatisfyQuestReputationLowFaction,
     ReceiverSatisfyQuestReputationHighFaction,
     ReceiverSatisfyQuestPreviousQuestPrerequisite,
+    ReceiverSatisfyQuestDependentPreviousQuestsPrerequisite,
+    ReceiverSatisfyQuestDependentBreadcrumbQuestsPrerequisite,
     ReceiverEligibilityUnrepresented,
 }
 
@@ -26470,6 +26472,11 @@ mod tests {
                 allowable_classes: 0,
                 max_level: 0,
                 prev_quest_id: 0,
+                next_quest_id: 0,
+                exclusive_group: 0,
+                breadcrumb_for_quest_id: 0,
+                dependent_previous_quests: Vec::new(),
+                dependent_breadcrumb_quests: Vec::new(),
                 required_min_rep_faction: 0,
                 required_min_rep_value: 0,
                 required_max_rep_faction: 0,

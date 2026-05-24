@@ -33,7 +33,9 @@ use wow_packet::packets::quest::{
 };
 use wow_packet::{ClientPacket, ServerPacket};
 
-use crate::conditions::{QUEST_STATUS_COMPLETE_LIKE_CPP, QUEST_STATUS_INCOMPLETE_LIKE_CPP};
+use crate::conditions::{
+    QUEST_STATUS_COMPLETE_LIKE_CPP, QUEST_STATUS_FAILED_LIKE_CPP, QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+};
 use crate::session::{
     RepresentedPushQuestToPartyOutcomeLikeCpp, RepresentedPushQuestToPartyOutcomeReasonLikeCpp,
     RepresentedQuestConfirmAcceptLikeCpp, RepresentedQuestPushResultResponseLikeCpp,
@@ -72,6 +74,66 @@ fn player_race_or_class_mask_like_cpp(id: u8) -> u32 {
     1_u32
         .checked_shl(u32::from(id.saturating_sub(1)))
         .unwrap_or(0)
+}
+
+fn represented_satisfy_quest_dependent_previous_quests_failed_like_cpp(
+    quest_store: &wow_data::quest::QuestStore,
+    quest: &wow_data::quest::QuestTemplate,
+    receiver_rewarded_quests: &std::collections::HashSet<u32>,
+) -> bool {
+    if quest.dependent_previous_quests.is_empty() {
+        return false;
+    }
+
+    for &prev_id in &quest.dependent_previous_quests {
+        let Some(previous_quest) = quest_store.get(prev_id) else {
+            // C++ ASSERTs because ObjectMgr validates this at startup. Rust fails closed
+            // as the prerequisite branch rather than panicking in the sender loop.
+            return true;
+        };
+
+        if receiver_rewarded_quests.contains(&prev_id) {
+            if previous_quest.exclusive_group >= 0 {
+                return false;
+            }
+
+            for exclusive_quest_id in quest_store
+                .quests
+                .values()
+                .filter(|candidate| candidate.exclusive_group == previous_quest.exclusive_group)
+                .map(|candidate| candidate.id)
+            {
+                if exclusive_quest_id != prev_id
+                    && !receiver_rewarded_quests.contains(&exclusive_quest_id)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    true
+}
+
+fn represented_satisfy_quest_dependent_breadcrumb_quests_failed_like_cpp(
+    quest: &wow_data::quest::QuestTemplate,
+    receiver_active_quest_statuses: &std::collections::HashMap<u32, u8>,
+) -> bool {
+    quest
+        .dependent_breadcrumb_quests
+        .iter()
+        .any(|breadcrumb_quest_id| {
+            matches!(
+                receiver_active_quest_statuses
+                    .get(breadcrumb_quest_id)
+                    .copied(),
+                Some(QUEST_STATUS_INCOMPLETE_LIKE_CPP)
+                    | Some(QUEST_STATUS_COMPLETE_LIKE_CPP)
+                    | Some(QUEST_STATUS_FAILED_LIKE_CPP)
+            )
+        })
 }
 
 fn represented_quest_completion_npc_response_like_cpp(
@@ -1172,11 +1234,11 @@ impl WorldSession {
                 continue;
             }
 
-            // C++ `Player::SatisfyQuestDependentQuests(quest, false)` starts with
-            // `SatisfyQuestPreviousQuest(qInfo, false)`. This slice only represents
-            // that first sub-gate through `QuestTemplate.prev_quest_id`; dependent
-            // previous quests, breadcrumbs, expansion, CanTakeQuest, and success
-            // fanout remain deliberately unsupported below.
+            // C++ `Player::SatisfyQuestDependentQuests(quest, false)` preserves this
+            // sub-gate order: PreviousQuest, DependentPreviousQuests,
+            // BreadcrumbQuest, DependentBreadcrumbQuests. Expansion, CanTakeQuest,
+            // success fanout, SetQuestSharingInfo, details, and auto-accept stay
+            // deliberately unsupported after these represented prerequisites.
             let previous_quest_prerequisite_failed = if quest.prev_quest_id > 0 {
                 !receiver
                     .rewarded_quests
@@ -1191,7 +1253,54 @@ impl WorldSession {
                 false
             };
 
-            if previous_quest_prerequisite_failed {
+            let mut prerequisite_failure_reason =
+                previous_quest_prerequisite_failed.then_some(
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestPreviousQuestPrerequisite,
+                );
+
+            if prerequisite_failure_reason.is_none()
+                && represented_satisfy_quest_dependent_previous_quests_failed_like_cpp(
+                    &quest_store,
+                    quest,
+                    &receiver.rewarded_quests,
+                )
+            {
+                prerequisite_failure_reason = Some(
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDependentPreviousQuestsPrerequisite,
+                );
+            }
+
+            if prerequisite_failure_reason.is_none() && quest.breadcrumb_for_quest_id != 0 {
+                // C++ `SatisfyQuestBreadcrumbQuest` depends on
+                // `CanTakeQuest(target,false)`. Do not fake it here; keep the
+                // success path blocked until real/represented CanTakeQuest is available.
+                blocked_by_unsupported_success_path = true;
+                self.record_represented_push_quest_to_party_outcome_like_cpp(
+                    RepresentedPushQuestToPartyOutcomeLikeCpp {
+                        sender_guid,
+                        quest_id: packet.quest_id,
+                        target_guid: Some(receiver_guid),
+                        reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented,
+                        quest_pool_active_check_unrepresented: false,
+                        group_runtime_unrepresented: false,
+                        receiver_fanout_unrepresented: true,
+                    },
+                );
+                continue;
+            }
+
+            if prerequisite_failure_reason.is_none()
+                && represented_satisfy_quest_dependent_breadcrumb_quests_failed_like_cpp(
+                    quest,
+                    &receiver.active_quest_statuses,
+                )
+            {
+                prerequisite_failure_reason = Some(
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDependentBreadcrumbQuestsPrerequisite,
+                );
+            }
+
+            if let Some(reason) = prerequisite_failure_reason {
                 let Some(sender_guid_for_receiver_packet) = sender_guid else {
                     blocked_by_unsupported_success_path = true;
                     continue;
@@ -1215,7 +1324,7 @@ impl WorldSession {
                         sender_guid,
                         quest_id: packet.quest_id,
                         target_guid: Some(receiver_guid),
-                        reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestPreviousQuestPrerequisite,
+                        reason,
                         quest_pool_active_check_unrepresented: false,
                         group_runtime_unrepresented: false,
                         receiver_fanout_unrepresented: false,
@@ -2565,11 +2674,25 @@ mod tests {
     }
 
     fn add_active_quest_in_slot(session: &mut WorldSession, quest_id: u32, slot: u8) {
+        add_active_quest_in_slot_with_status(
+            session,
+            quest_id,
+            slot,
+            QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+        );
+    }
+
+    fn add_active_quest_in_slot_with_status(
+        session: &mut WorldSession,
+        quest_id: u32,
+        slot: u8,
+        status: u8,
+    ) {
         session.player_quests.insert(
             quest_id,
             PlayerQuestStatus {
                 quest_id,
-                status: QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                status,
                 explored: false,
                 objective_counts: Vec::new(),
                 slot,
@@ -4103,6 +4226,254 @@ mod tests {
         assert!(receiver_rx.try_recv().is_err());
         assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented)));
         assert!(!session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestPreviousQuestPrerequisite)));
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_dependent_previous_missing_rewarded_emits_prerequisite_pair_like_cpp()
+     {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 470);
+        let shared_quest_id = 7607;
+        let prev_id = 9607;
+        let mut shared_quest = quest_template(shared_quest_id);
+        shared_quest.flags |= QUEST_FLAGS_SHARABLE_LIKE_CPP;
+        let mut previous_quest = quest_template(prev_id);
+        previous_quest.next_quest_id = shared_quest_id;
+        previous_quest.exclusive_group = 0;
+        let quest_store = QuestStore::from_quests_like_cpp([shared_quest, previous_quest]);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (_player_registry, receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session.sync_player_registry_state_like_cpp();
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert_eq!(
+            recv_push_quest_result_response(&sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_PREREQUISITE_LIKE_CPP,
+                String::new()
+            )
+        );
+        assert_eq!(
+            recv_push_quest_result_response(&receiver_rx),
+            (
+                sender_guid,
+                QUEST_PUSH_REASON_PREREQUISITE_TO_RECIPIENT_LIKE_CPP,
+                "Quest 7607".to_string()
+            )
+        );
+        assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDependentPreviousQuestsPrerequisite)));
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_dependent_previous_rewarded_nonnegative_group_passes_to_unrepresented_boundary_like_cpp()
+     {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 471);
+        let shared_quest_id = 7608;
+        let prev_id = 9608;
+        let mut shared_quest = quest_template(shared_quest_id);
+        shared_quest.flags |= QUEST_FLAGS_SHARABLE_LIKE_CPP;
+        let mut previous_quest = quest_template(prev_id);
+        previous_quest.next_quest_id = shared_quest_id;
+        previous_quest.exclusive_group = 0;
+        let quest_store = QuestStore::from_quests_like_cpp([shared_quest, previous_quest]);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (_player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session.rewarded_quests.insert(prev_id);
+        receiver_session.sync_player_registry_state_like_cpp();
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert!(sender_rx.try_recv().is_err());
+        assert!(receiver_rx.try_recv().is_err());
+        assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented)));
+        assert!(!session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDependentPreviousQuestsPrerequisite)));
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_dependent_previous_negative_exclusive_group_requires_all_other_members_like_cpp()
+     {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 472);
+        let shared_quest_id = 7609;
+        let prev_id = 9609;
+        let sibling_id = 9610;
+        let mut shared_quest = quest_template(shared_quest_id);
+        shared_quest.flags |= QUEST_FLAGS_SHARABLE_LIKE_CPP;
+        let mut previous_quest = quest_template(prev_id);
+        previous_quest.next_quest_id = shared_quest_id;
+        previous_quest.exclusive_group = -90;
+        let mut sibling_quest = quest_template(sibling_id);
+        sibling_quest.exclusive_group = -90;
+        let quest_store =
+            QuestStore::from_quests_like_cpp([shared_quest, previous_quest, sibling_quest]);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (_player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session.rewarded_quests.insert(prev_id);
+        receiver_session.sync_player_registry_state_like_cpp();
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert_eq!(
+            recv_push_quest_result_response(&sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_PREREQUISITE_LIKE_CPP,
+                String::new()
+            )
+        );
+        assert_eq!(
+            recv_push_quest_result_response(&receiver_rx),
+            (
+                sender_guid,
+                QUEST_PUSH_REASON_PREREQUISITE_TO_RECIPIENT_LIKE_CPP,
+                "Quest 7609".to_string()
+            )
+        );
+        assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDependentPreviousQuestsPrerequisite)));
+
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let mut shared_quest = quest_template(shared_quest_id);
+        shared_quest.flags |= QUEST_FLAGS_SHARABLE_LIKE_CPP;
+        let mut previous_quest = quest_template(prev_id);
+        previous_quest.next_quest_id = shared_quest_id;
+        previous_quest.exclusive_group = -90;
+        let mut sibling_quest = quest_template(sibling_id);
+        sibling_quest.exclusive_group = -90;
+        let quest_store =
+            QuestStore::from_quests_like_cpp([shared_quest, previous_quest, sibling_quest]);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (_player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session.rewarded_quests.insert(prev_id);
+        receiver_session.rewarded_quests.insert(sibling_id);
+        receiver_session.sync_player_registry_state_like_cpp();
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert!(sender_rx.try_recv().is_err());
+        assert!(receiver_rx.try_recv().is_err());
+        assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented)));
+        assert!(!session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDependentPreviousQuestsPrerequisite)));
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_dependent_breadcrumb_active_status_emits_prerequisite_and_absent_passes_like_cpp()
+     {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 473);
+        let shared_quest_id = 7610;
+        let breadcrumb_id = 9611;
+        let mut shared_quest = quest_template(shared_quest_id);
+        shared_quest.flags |= QUEST_FLAGS_SHARABLE_LIKE_CPP;
+        let mut breadcrumb_quest = quest_template(breadcrumb_id);
+        breadcrumb_quest.breadcrumb_for_quest_id = shared_quest_id as i32;
+        let quest_store = QuestStore::from_quests_like_cpp([shared_quest, breadcrumb_quest]);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (_player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        add_active_quest_in_slot_with_status(
+            &mut receiver_session,
+            breadcrumb_id,
+            2,
+            QUEST_STATUS_FAILED_LIKE_CPP,
+        );
+        receiver_session.sync_player_registry_state_like_cpp();
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert_eq!(
+            recv_push_quest_result_response(&sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_PREREQUISITE_LIKE_CPP,
+                String::new()
+            )
+        );
+        assert_eq!(
+            recv_push_quest_result_response(&receiver_rx),
+            (
+                sender_guid,
+                QUEST_PUSH_REASON_PREREQUISITE_TO_RECIPIENT_LIKE_CPP,
+                "Quest 7610".to_string()
+            )
+        );
+        assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDependentBreadcrumbQuestsPrerequisite)));
+
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let mut shared_quest = quest_template(shared_quest_id);
+        shared_quest.flags |= QUEST_FLAGS_SHARABLE_LIKE_CPP;
+        let mut breadcrumb_quest = quest_template(breadcrumb_id);
+        breadcrumb_quest.breadcrumb_for_quest_id = shared_quest_id as i32;
+        let quest_store = QuestStore::from_quests_like_cpp([shared_quest, breadcrumb_quest]);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (_player_registry, receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session.sync_player_registry_state_like_cpp();
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert!(sender_rx.try_recv().is_err());
+        assert!(receiver_rx.try_recv().is_err());
+        assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented)));
+        assert!(!session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDependentBreadcrumbQuestsPrerequisite)));
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_breadcrumb_for_quest_remains_unrepresented_without_prerequisite_pair_like_cpp()
+     {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 474);
+        let shared_quest_id = 7611;
+        let mut shared_quest = quest_template(shared_quest_id);
+        shared_quest.flags |= QUEST_FLAGS_SHARABLE_LIKE_CPP;
+        shared_quest.breadcrumb_for_quest_id = 9991;
+        let target_quest = quest_template(9991);
+        let quest_store = QuestStore::from_quests_like_cpp([shared_quest, target_quest]);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (_player_registry, receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session.sync_player_registry_state_like_cpp();
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert!(sender_rx.try_recv().is_err());
+        assert!(receiver_rx.try_recv().is_err());
+        assert!(session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented)));
+        assert!(!session.represented_push_quest_to_party_outcomes_like_cpp().iter().any(|outcome| matches!(outcome.reason, RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDependentBreadcrumbQuestsPrerequisite | RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDependentPreviousQuestsPrerequisite | RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestPreviousQuestPrerequisite)));
     }
 
     #[tokio::test]
