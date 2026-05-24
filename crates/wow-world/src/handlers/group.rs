@@ -566,6 +566,7 @@ mod tests {
             pass_on_group_loot: false,
             enchanting_skill: 0,
             is_alive: true,
+            active_expansion: 2,
             pending_quest_sharing: None,
             known_spells: Vec::new(),
             active_quest_statuses: Default::default(),

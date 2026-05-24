@@ -191,6 +191,7 @@ pub(crate) enum RepresentedPushQuestToPartyOutcomeReasonLikeCpp {
     ReceiverSatisfyQuestPreviousQuestPrerequisite,
     ReceiverSatisfyQuestDependentPreviousQuestsPrerequisite,
     ReceiverSatisfyQuestDependentBreadcrumbQuestsPrerequisite,
+    ReceiverSatisfyQuestExpansionRequiredExpansion,
     ReceiverEligibilityUnrepresented,
 }
 
@@ -7320,6 +7321,7 @@ impl WorldSession {
                 pass_on_group_loot: self.pass_on_group_loot,
                 enchanting_skill: self.represented_enchanting_skill,
                 is_alive: self.player_alive_like_cpp,
+                active_expansion: self.expansion,
                 pending_quest_sharing: self
                     .represented_pending_quest_sharing_like_cpp
                     .map(|pending| (pending.sender_guid, pending.quest_id)),
@@ -7374,6 +7376,7 @@ impl WorldSession {
             info.pass_on_group_loot = self.pass_on_group_loot;
             info.enchanting_skill = self.represented_enchanting_skill;
             info.is_alive = self.player_alive_like_cpp;
+            info.active_expansion = self.expansion;
             info.level = self.player_level_like_cpp();
             info.race = self.player_race_like_cpp();
             info.class = self.player_class_like_cpp();
@@ -18427,6 +18430,7 @@ mod tests {
             reward_display_spell: [0; wow_data::quest::QUEST_REWARD_DISPLAY_SPELL_COUNT],
             reward_spell: 0,
             reward_honor: 0,
+            expansion: 0,
             flags: 0,
             flags_ex: 0,
             flags_ex2: 0,
@@ -25802,6 +25806,7 @@ mod tests {
             pass_on_group_loot: false,
             enchanting_skill: 0,
             is_alive: true,
+            active_expansion: 2,
             pending_quest_sharing: None,
             known_spells: Vec::new(),
             active_quest_statuses: Default::default(),
@@ -26441,6 +26446,7 @@ mod tests {
                 reward_display_spell: [0; wow_data::quest::QUEST_REWARD_DISPLAY_SPELL_COUNT],
                 reward_spell: 0,
                 reward_honor: 0,
+                expansion: 0,
                 flags: 0,
                 flags_ex: 0,
                 flags_ex2: 0,

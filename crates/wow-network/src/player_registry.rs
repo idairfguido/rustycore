@@ -121,6 +121,8 @@ pub struct PlayerBroadcastInfo {
     pub enchanting_skill: u16,
     /// Represented `Player::IsAlive()` snapshot for cross-session receiver gates.
     pub is_alive: bool,
+    /// Active expansion derived from canonical `WorldSession::expansion` for receiver-only quest gates.
+    pub active_expansion: u8,
     /// Represented non-empty `Player::GetPlayerSharingQuest()` snapshot for party quest sharing.
     pub pending_quest_sharing: Option<(ObjectGuid, u32)>,
     /// Current known spells, used for remote `ConditionMgr`/loot checks that mirror `Player::HasSpell`.

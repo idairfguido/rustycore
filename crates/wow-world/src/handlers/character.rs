@@ -9094,6 +9094,7 @@ mod tests {
             reward_display_spell: [0; QUEST_REWARD_DISPLAY_SPELL_COUNT],
             reward_spell: 0,
             reward_honor: 0,
+            expansion: 0,
             flags: 0,
             flags_ex: 0,
             flags_ex2: 0,
