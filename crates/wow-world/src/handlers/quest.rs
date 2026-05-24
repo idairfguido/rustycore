@@ -51,6 +51,10 @@ pub(crate) const QUEST_PUSH_REASON_ON_QUEST_LIKE_CPP: u8 = 10;
 pub(crate) const QUEST_PUSH_REASON_ON_QUEST_TO_RECIPIENT_LIKE_CPP: u8 = 11;
 pub(crate) const QUEST_PUSH_REASON_ALREADY_DONE_LIKE_CPP: u8 = 12;
 pub(crate) const QUEST_PUSH_REASON_ALREADY_DONE_TO_RECIPIENT_LIKE_CPP: u8 = 13;
+pub(crate) const QUEST_PUSH_REASON_LOW_LEVEL_LIKE_CPP: u8 = 22;
+pub(crate) const QUEST_PUSH_REASON_LOW_LEVEL_TO_RECIPIENT_LIKE_CPP: u8 = 23;
+pub(crate) const QUEST_PUSH_REASON_HIGH_LEVEL_LIKE_CPP: u8 = 24;
+pub(crate) const QUEST_PUSH_REASON_HIGH_LEVEL_TO_RECIPIENT_LIKE_CPP: u8 = 25;
 
 fn represented_quest_completion_npc_response_like_cpp(
     quest_store: &wow_data::quest::QuestStore,
@@ -942,6 +946,76 @@ impl WorldSession {
                         quest_id: packet.quest_id,
                         target_guid: Some(receiver_guid),
                         reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDayAlreadyDone,
+                        quest_pool_active_check_unrepresented: false,
+                        group_runtime_unrepresented: false,
+                        receiver_fanout_unrepresented: false,
+                    },
+                );
+                continue;
+            }
+
+            // C++ then evaluates `Player::SatisfyQuestMinLevel(quest, false)`
+            // followed by `SatisfyQuestMaxLevel(quest, false)`.  Receiver
+            // `level` is a derived cross-session snapshot synchronized from
+            // the receiver `WorldSession`, never source-of-truth in reverse.
+            if quest.min_level > 0 && i32::from(receiver.level) < quest.min_level {
+                let Some(sender_guid_for_receiver_packet) = sender_guid else {
+                    blocked_by_unsupported_success_path = true;
+                    continue;
+                };
+
+                self.send_push_quest_result_to_sender_with_title_if_available_like_cpp(
+                    receiver_guid,
+                    QUEST_PUSH_REASON_LOW_LEVEL_LIKE_CPP,
+                    String::new(),
+                );
+                let _ = receiver.send_tx.send(
+                    QuestPushResultResponse {
+                        sender_guid: sender_guid_for_receiver_packet,
+                        result: QUEST_PUSH_REASON_LOW_LEVEL_TO_RECIPIENT_LIKE_CPP,
+                        quest_title: quest.log_title.clone(),
+                    }
+                    .to_bytes(),
+                );
+                self.record_represented_push_quest_to_party_outcome_like_cpp(
+                    RepresentedPushQuestToPartyOutcomeLikeCpp {
+                        sender_guid,
+                        quest_id: packet.quest_id,
+                        target_guid: Some(receiver_guid),
+                        reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestMinLevelLowLevel,
+                        quest_pool_active_check_unrepresented: false,
+                        group_runtime_unrepresented: false,
+                        receiver_fanout_unrepresented: false,
+                    },
+                );
+                continue;
+            }
+
+            if quest.max_level > 0 && receiver.level > quest.max_level {
+                let Some(sender_guid_for_receiver_packet) = sender_guid else {
+                    blocked_by_unsupported_success_path = true;
+                    continue;
+                };
+
+                self.send_push_quest_result_to_sender_with_title_if_available_like_cpp(
+                    receiver_guid,
+                    QUEST_PUSH_REASON_HIGH_LEVEL_LIKE_CPP,
+                    String::new(),
+                );
+                let _ = receiver.send_tx.send(
+                    QuestPushResultResponse {
+                        sender_guid: sender_guid_for_receiver_packet,
+                        result: QUEST_PUSH_REASON_HIGH_LEVEL_TO_RECIPIENT_LIKE_CPP,
+                        quest_title: quest.log_title.clone(),
+                    }
+                    .to_bytes(),
+                );
+                self.record_represented_push_quest_to_party_outcome_like_cpp(
+                    RepresentedPushQuestToPartyOutcomeLikeCpp {
+                        sender_guid,
+                        quest_id: packet.quest_id,
+                        target_guid: Some(receiver_guid),
+                        reason: RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestMaxLevelHighLevel,
                         quest_pool_active_check_unrepresented: false,
                         group_runtime_unrepresented: false,
                         receiver_fanout_unrepresented: false,
@@ -2343,6 +2417,14 @@ mod tests {
         QuestStore::from_quests_like_cpp([quest])
     }
 
+    fn store_with_sharable_quest_levels(id: u32, min_level: i32, max_level: u8) -> QuestStore {
+        let mut quest = quest_template(id);
+        quest.flags |= QUEST_FLAGS_SHARABLE_LIKE_CPP;
+        quest.min_level = min_level;
+        quest.max_level = max_level;
+        QuestStore::from_quests_like_cpp([quest])
+    }
+
     fn store_with_daily_sharable_quests(ids: &[u32]) -> QuestStore {
         let quests = ids.iter().map(|id| {
             let mut quest = quest_template(*id);
@@ -3203,6 +3285,257 @@ mod tests {
                 outcome.reason,
                 RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDayAlreadyDone
             ))
+        );
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_grouped_receiver_low_level_emits_low_level_pair_like_cpp() {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 248);
+        let shared_quest_id = 7121;
+        let quest_store = store_with_sharable_quest_levels(shared_quest_id, 10, 0);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (_player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session.set_player_level_like_cpp(4);
+        receiver_session.sync_player_registry_state_like_cpp();
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert_eq!(
+            recv_push_quest_result_response(&sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_LOW_LEVEL_LIKE_CPP,
+                String::new()
+            )
+        );
+        assert_eq!(
+            recv_push_quest_result_response(&receiver_rx),
+            (
+                sender_guid,
+                QUEST_PUSH_REASON_LOW_LEVEL_TO_RECIPIENT_LIKE_CPP,
+                "Quest 7121".to_string()
+            )
+        );
+        assert!(
+            session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                    outcome.reason,
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestMinLevelLowLevel
+                ))
+        );
+        assert!(
+            !session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                    outcome.reason,
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented
+                ))
+        );
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_grouped_receiver_high_level_emits_high_level_pair_like_cpp() {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 249);
+        let shared_quest_id = 7122;
+        let quest_store = store_with_sharable_quest_levels(shared_quest_id, 1, 40);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (_player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session.set_player_level_like_cpp(80);
+        receiver_session.sync_player_registry_state_like_cpp();
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert_eq!(
+            recv_push_quest_result_response(&sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_HIGH_LEVEL_LIKE_CPP,
+                String::new()
+            )
+        );
+        assert_eq!(
+            recv_push_quest_result_response(&receiver_rx),
+            (
+                sender_guid,
+                QUEST_PUSH_REASON_HIGH_LEVEL_TO_RECIPIENT_LIKE_CPP,
+                "Quest 7122".to_string()
+            )
+        );
+        assert!(
+            session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                    outcome.reason,
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestMaxLevelHighLevel
+                ))
+        );
+        assert!(
+            !session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                    outcome.reason,
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented
+                ))
+        );
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_receiver_max_level_zero_does_not_block_high_level_like_cpp() {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 250);
+        let shared_quest_id = 7123;
+        let quest_store = store_with_sharable_quest_levels(shared_quest_id, 1, 0);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (_player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session.set_player_level_like_cpp(80);
+        receiver_session.sync_player_registry_state_like_cpp();
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert!(sender_rx.try_recv().is_err());
+        assert!(receiver_rx.try_recv().is_err());
+        assert!(
+            session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                    outcome.reason,
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverEligibilityUnrepresented
+                ))
+        );
+        assert!(
+            !session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                    outcome.reason,
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestMaxLevelHighLevel
+                ))
+        );
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_daily_precedes_low_level_like_cpp() {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 251);
+        let shared_quest_id = 7124;
+        let mut quest = quest_template(shared_quest_id);
+        quest.flags |= QUEST_FLAGS_SHARABLE_LIKE_CPP | QUEST_FLAGS_DAILY_LIKE_CPP;
+        quest.min_level = 80;
+        let quest_store = QuestStore::from_quests_like_cpp([quest]);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (_player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        receiver_session.set_player_level_like_cpp(1);
+        receiver_session
+            .set_represented_daily_quest_completed_like_cpp_for_test(shared_quest_id, true);
+        receiver_session.sync_player_registry_state_like_cpp();
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert_eq!(
+            recv_push_quest_result_response(&sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_ALREADY_DONE_LIKE_CPP,
+                String::new()
+            )
+        );
+        assert_eq!(
+            recv_push_quest_result_response(&receiver_rx),
+            (
+                sender_guid,
+                QUEST_PUSH_REASON_ALREADY_DONE_TO_RECIPIENT_LIKE_CPP,
+                "Quest 7124".to_string()
+            )
+        );
+        assert!(
+            session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                    outcome.reason,
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestDayAlreadyDone
+                ))
+        );
+        assert!(
+            !session
+                .represented_push_quest_to_party_outcomes_like_cpp()
+                .iter()
+                .any(|outcome| matches!(
+                    outcome.reason,
+                    RepresentedPushQuestToPartyOutcomeReasonLikeCpp::ReceiverSatisfyQuestMinLevelLowLevel
+                ))
+        );
+    }
+
+    #[tokio::test]
+    async fn push_quest_to_party_receiver_level_snapshot_syncs_from_world_session_like_cpp() {
+        let (mut session, sender_rx) = make_session();
+        let sender_guid = session.player_guid().expect("test sender guid");
+        let receiver_guid = ObjectGuid::create_player(1, 252);
+        let shared_quest_id = 7125;
+        let quest_store = store_with_sharable_quest_levels(shared_quest_id, 20, 0);
+        let quest_pool_store = QuestPoolStoreLikeCpp::from_rows_like_cpp(&quest_store, [], []);
+        session.set_quest_store(Arc::new(quest_store));
+        session.set_quest_pool_store(Arc::new(quest_pool_store));
+        add_active_quest(&mut session, shared_quest_id);
+        let (player_registry, mut receiver_session, receiver_rx) =
+            install_represented_party(&mut session, sender_guid, receiver_guid);
+        assert_eq!(
+            player_registry.get(&receiver_guid).map(|info| info.level),
+            Some(80)
+        );
+        receiver_session.set_player_level_like_cpp(19);
+        receiver_session.sync_player_registry_state_like_cpp();
+        assert_eq!(
+            player_registry.get(&receiver_guid).map(|info| info.level),
+            Some(19)
+        );
+
+        run_push_quest_to_party(&mut session, shared_quest_id).await;
+
+        assert_eq!(
+            recv_push_quest_result_response(&sender_rx),
+            (
+                receiver_guid,
+                QUEST_PUSH_REASON_LOW_LEVEL_LIKE_CPP,
+                String::new()
+            )
+        );
+        assert_eq!(
+            recv_push_quest_result_response(&receiver_rx),
+            (
+                sender_guid,
+                QUEST_PUSH_REASON_LOW_LEVEL_TO_RECIPIENT_LIKE_CPP,
+                "Quest 7125".to_string()
+            )
         );
     }
 
