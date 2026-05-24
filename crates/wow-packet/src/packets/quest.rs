@@ -62,6 +62,44 @@ impl ServerPacket for QuestGiverStatusMultiple {
     }
 }
 
+/// One entry in `SMSG_WORLD_QUEST_UPDATE_RESPONSE`.
+///
+/// C++ anchor: `WorldPackets::Quest::WorldQuestUpdateInfo`,
+/// `QuestPackets.h:663-673`: `Timestamp<> LastUpdate`, `uint32 QuestID`,
+/// `uint32 Timer`, `int32 VariableID`, `int32 Value`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorldQuestUpdateInfo {
+    pub last_update: i64,
+    pub quest_id: u32,
+    pub timer: u32,
+    pub variable_id: i32,
+    pub value: i32,
+}
+
+/// Empty represented response for `CMSG_REQUEST_WORLD_QUEST_UPDATE`.
+///
+/// C++ anchor: `WorldQuestUpdateResponse::Write`,
+/// `QuestPackets.cpp:677-690`: `uint32` update count followed by each
+/// `WorldQuestUpdateInfo`. The current Trinity handler leaves this vector empty.
+pub struct WorldQuestUpdateResponse {
+    pub updates: Vec<WorldQuestUpdateInfo>,
+}
+
+impl ServerPacket for WorldQuestUpdateResponse {
+    const OPCODE: ServerOpcodes = ServerOpcodes::WorldQuestUpdateResponse;
+
+    fn write(&self, pkt: &mut WorldPacket) {
+        pkt.write_uint32(self.updates.len() as u32);
+        for update in &self.updates {
+            pkt.write_int64(update.last_update);
+            pkt.write_uint32(update.quest_id);
+            pkt.write_uint32(update.timer);
+            pkt.write_int32(update.variable_id);
+            pkt.write_int32(update.value);
+        }
+    }
+}
+
 // ── Quest giver status constants ──────────────────────────────────────────────
 pub mod quest_giver_status {
     pub const NONE: u64 = 0;
@@ -652,5 +690,19 @@ mod tests {
         assert_eq!(pkt.read_int32().unwrap(), 1);
         assert_eq!(pkt.read_packed_guid().unwrap(), guid);
         assert_eq!(pkt.read_uint64().unwrap(), status);
+    }
+
+    #[test]
+    fn world_quest_update_response_empty_writes_zero_count_like_cpp() {
+        let bytes = WorldQuestUpdateResponse {
+            updates: Vec::new(),
+        }
+        .to_bytes();
+
+        assert_eq!(
+            u16::from_le_bytes([bytes[0], bytes[1]]),
+            ServerOpcodes::WorldQuestUpdateResponse as u16
+        );
+        assert_eq!(&bytes[2..], &[0, 0, 0, 0]);
     }
 }

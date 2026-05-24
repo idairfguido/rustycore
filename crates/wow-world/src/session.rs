@@ -8815,6 +8815,9 @@ impl WorldSession {
             ClientOpcodes::QuestGiverCloseQuest => {
                 self.handle_quest_giver_close_quest(pkt).await;
             }
+            ClientOpcodes::RequestWorldQuestUpdate => {
+                self.handle_request_world_quest_update(pkt).await;
+            }
             ClientOpcodes::QuestLogRemoveQuest => {
                 self.handle_quest_log_remove_quest(pkt).await;
             }

@@ -24,7 +24,7 @@ use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
 use wow_packet::packets::quest::{
     QueryQuestInfoResponse, QuestGiverOfferReward, QuestGiverQuestComplete, QuestGiverRequestItems,
     QuestGiverStatus, QuestObjectiveInfo, QuestRewardsBlock, QuestUpdateComplete,
-    quest_giver_status,
+    WorldQuestUpdateResponse, quest_giver_status,
 };
 
 use crate::session::{SeasonalQuestStatusDbRowLikeCpp, WorldSession};
@@ -120,6 +120,15 @@ inventory::submit! {
         status: SessionStatus::LoggedIn,
         processing: PacketProcessing::Inplace,
         handler_name: "handle_quest_giver_close_quest",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::RequestWorldQuestUpdate,
+        status: SessionStatus::LoggedIn,
+        processing: PacketProcessing::ThreadUnsafe,
+        handler_name: "handle_request_world_quest_update",
     }
 }
 
@@ -359,6 +368,15 @@ impl WorldSession {
         self.represented_auto_accept_acknowledged_quests_like_cpp
             .push(quest_id);
         true
+    }
+
+    /// CMSG_REQUEST_WORLD_QUEST_UPDATE — current Trinity 3.4.3 handler sends an empty response.
+    /// C++ refs: `WorldSession::HandleRequestWorldQuestUpdate`, `QuestHandler.cpp:780-788`;
+    /// `RequestWorldQuestUpdate::Read`, `QuestPackets.h:655-661` (`Read() { }`, no payload consumption).
+    pub async fn handle_request_world_quest_update(&mut self, _pkt: wow_packet::WorldPacket) {
+        self.send_packet(&WorldQuestUpdateResponse {
+            updates: Vec::new(),
+        });
     }
 
     /// CMSG_QUEST_LOG_REMOVE_QUEST — player abandons a quest from the quest log.
@@ -1536,6 +1554,24 @@ mod tests {
         session.handle_quest_log_remove_quest(pkt).await;
     }
 
+    async fn run_request_world_quest_update(session: &mut WorldSession) {
+        session
+            .handle_request_world_quest_update(WorldPacket::new_empty())
+            .await;
+    }
+
+    fn recv_world_quest_update_count(send_rx: &flume::Receiver<Vec<u8>>) -> u32 {
+        let bytes = send_rx
+            .try_recv()
+            .expect("world quest update response packet");
+        assert_eq!(
+            u16::from_le_bytes([bytes[0], bytes[1]]),
+            wow_constants::ServerOpcodes::WorldQuestUpdateResponse as u16
+        );
+        let mut pkt = WorldPacket::from_bytes(&bytes[2..]);
+        pkt.read_uint32().unwrap()
+    }
+
     fn recv_status(send_rx: &flume::Receiver<Vec<u8>>) -> (ObjectGuid, u64) {
         let bytes = send_rx.try_recv().expect("quest giver status packet");
         assert_eq!(
@@ -1577,6 +1613,41 @@ mod tests {
             .represented_gameobject_use_states
             .insert(guid, state);
         mark_visible(session, guid);
+    }
+
+    #[tokio::test]
+    async fn request_world_quest_update_empty_payload_sends_empty_response_like_cpp() {
+        let (mut session, send_rx) = make_session();
+
+        run_request_world_quest_update(&mut session).await;
+
+        assert_eq!(recv_world_quest_update_count(&send_rx), 0);
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn request_world_quest_update_with_payload_ignores_bytes_and_sends_empty_response_like_cpp()
+     {
+        let (mut session, send_rx) = make_session();
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_uint8(1);
+
+        session.handle_request_world_quest_update(pkt).await;
+
+        assert_eq!(recv_world_quest_update_count(&send_rx), 0);
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn request_world_quest_update_inventory_entry_matches_cpp_status_and_processing() {
+        let entry = inventory::iter::<PacketHandlerEntry>
+            .into_iter()
+            .find(|entry| entry.opcode == ClientOpcodes::RequestWorldQuestUpdate)
+            .expect("RequestWorldQuestUpdate handler registration");
+
+        assert_eq!(entry.status, SessionStatus::LoggedIn);
+        assert_eq!(entry.processing, PacketProcessing::ThreadUnsafe);
+        assert_eq!(entry.handler_name, "handle_request_world_quest_update");
     }
 
     #[tokio::test]
