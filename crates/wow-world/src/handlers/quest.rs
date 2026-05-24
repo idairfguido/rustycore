@@ -196,7 +196,7 @@ impl WorldSession {
     /// Saves quest to characters DB and confirms to the client.
     /// C# ref: QuestHandler.HandleQuestGiverAcceptQuest
     pub async fn handle_quest_giver_accept_quest(&mut self, mut pkt: wow_packet::WorldPacket) {
-        let _guid = match pkt.read_packed_guid() {
+        let guid = match pkt.read_packed_guid() {
             Ok(g) => g,
             Err(_) => {
                 warn!("QuestGiverAcceptQuest: failed to read GUID");
@@ -206,11 +206,26 @@ impl WorldSession {
         let quest_id: u32 = pkt.read_uint32().unwrap_or(0);
         let _start_cheat: bool = pkt.read_uint8().unwrap_or(0) != 0;
 
-        // Validate quest exists
+        // Validate represented C++ source/relation before any quest-log mutation or DB save.
+        // C++ HandleQuestgiverAcceptQuestOpcode closes gossip and clears sharing info on
+        // failure; this represented slice intentionally models that as no packet/no mutation.
         let quest_store = match &self.quest_store {
             Some(s) => Arc::clone(s),
             None => return,
         };
+        if !self.represented_quest_giver_accept_source_allows_quest_like_cpp(
+            guid,
+            quest_id,
+            &quest_store,
+        ) {
+            debug!(
+                account = self.account_id,
+                ?guid,
+                quest_id,
+                "AcceptQuest: represented source/relation guard rejected quest"
+            );
+            return;
+        }
         if quest_store.get(quest_id).is_none() {
             warn!(
                 account = self.account_id,
