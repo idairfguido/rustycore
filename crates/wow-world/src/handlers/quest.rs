@@ -21,13 +21,16 @@ use wow_constants::ClientOpcodes;
 use wow_constants::unit::NPCFlags1;
 use wow_data::DISABLE_TYPE_QUEST;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
+use wow_packet::ClientPacket;
 use wow_packet::packets::quest::{
     QueryQuestInfoResponse, QuestGiverOfferReward, QuestGiverQuestComplete, QuestGiverRequestItems,
-    QuestGiverStatus, QuestObjectiveInfo, QuestRewardsBlock, QuestUpdateComplete,
+    QuestGiverStatus, QuestObjectiveInfo, QuestPushResult, QuestRewardsBlock, QuestUpdateComplete,
     WorldQuestUpdateResponse, quest_giver_status,
 };
 
-use crate::session::{SeasonalQuestStatusDbRowLikeCpp, WorldSession};
+use crate::session::{
+    RepresentedQuestPushResultResponseLikeCpp, SeasonalQuestStatusDbRowLikeCpp, WorldSession,
+};
 
 pub(crate) const QUEST_FLAGS_AUTO_COMPLETE_LIKE_CPP: u32 = 0x0001_0000;
 
@@ -129,6 +132,15 @@ inventory::submit! {
         status: SessionStatus::LoggedIn,
         processing: PacketProcessing::ThreadUnsafe,
         handler_name: "handle_request_world_quest_update",
+    }
+}
+
+inventory::submit! {
+    PacketHandlerEntry {
+        opcode: ClientOpcodes::QuestPushResult,
+        status: SessionStatus::LoggedIn,
+        processing: PacketProcessing::ThreadUnsafe,
+        handler_name: "handle_quest_push_result",
     }
 }
 
@@ -379,8 +391,71 @@ impl WorldSession {
         });
     }
 
-    /// CMSG_QUEST_LOG_REMOVE_QUEST — player abandons a quest from the quest log.
-    /// C++ ref: `WorldSession::HandleQuestLogRemoveQuest`, `QuestHandler.cpp:439-497`.
+    /// CMSG_QUEST_PUSH_RESULT — response to a shared quest prompt.
+    ///
+    /// C++ anchor: `WorldSession::HandleQuestPushResult`, `QuestHandler.cpp:758-767`.
+    /// Represented-partial: session-local pending sharing state is cleared like C++;
+    /// matching sender responses are recorded as evidence because full `ObjectAccessor::FindPlayer`
+    /// and party sender packet fanout are not represented in this bounded slice.
+    pub async fn handle_quest_push_result(&mut self, mut pkt: wow_packet::WorldPacket) {
+        let packet = match QuestPushResult::read(&mut pkt) {
+            Ok(packet) => packet,
+            Err(error) => {
+                warn!(
+                    account = self.account_id,
+                    ?error,
+                    "QuestPushResult: failed to read SenderGUID/QuestID/Result"
+                );
+                return;
+            }
+        };
+
+        let Some(pending) = self.represented_pending_quest_sharing_like_cpp() else {
+            debug!(
+                account = self.account_id,
+                sender_guid = ?packet.sender_guid,
+                quest_id = packet.quest_id,
+                result = packet.result,
+                "QuestPushResult: no represented pending shared quest"
+            );
+            return;
+        };
+
+        self.clear_represented_pending_quest_sharing_like_cpp();
+
+        if pending.sender_guid != packet.sender_guid {
+            self.record_represented_quest_push_result_sender_mismatch_like_cpp();
+            debug!(
+                account = self.account_id,
+                pending_sender_guid = ?pending.sender_guid,
+                packet_sender_guid = ?packet.sender_guid,
+                "QuestPushResult: represented sender mismatch, pending state cleared"
+            );
+            return;
+        }
+
+        let Some(receiver_guid) = self.player_guid() else {
+            debug!(
+                account = self.account_id,
+                sender_guid = ?packet.sender_guid,
+                "QuestPushResult: represented sender matched but no local receiver guid is available"
+            );
+            return;
+        };
+
+        self.record_represented_quest_push_result_response_like_cpp(
+            RepresentedQuestPushResultResponseLikeCpp {
+                receiver_guid,
+                sender_guid: packet.sender_guid,
+                parsed_quest_id: packet.quest_id,
+                pending_quest_id: pending.quest_id,
+                result: packet.result,
+            },
+        );
+    }
+
+    /// CMSG_QUEST_LOG_REMOVE_QUEST — abandon quest-log slot.
+
     /// Represented-partial seam: explicit QuestLog slot lookup + local active quest removal/DB delete.
     /// Remaining gaps: source-item gates/cleanup, no-abandon-once-begun, timed/PvP state,
     /// personal summons, quest tracker DB, ScriptMgr callbacks, and criteria update evidence.
@@ -1560,6 +1635,19 @@ mod tests {
             .await;
     }
 
+    async fn run_quest_push_result(
+        session: &mut WorldSession,
+        sender_guid: ObjectGuid,
+        quest_id: u32,
+        result: u8,
+    ) {
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_packed_guid(&sender_guid);
+        pkt.write_uint32(quest_id);
+        pkt.write_uint8(result);
+        session.handle_quest_push_result(pkt).await;
+    }
+
     fn recv_world_quest_update_count(send_rx: &flume::Receiver<Vec<u8>>) -> u32 {
         let bytes = send_rx
             .try_recv()
@@ -1613,6 +1701,133 @@ mod tests {
             .represented_gameobject_use_states
             .insert(guid, state);
         mark_visible(session, guid);
+    }
+
+    #[tokio::test]
+    async fn quest_push_short_packet_does_not_clear_pending_state_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        let sender_guid = ObjectGuid::create_player(1, 77);
+        session.set_represented_pending_quest_sharing_like_cpp(sender_guid, 7001);
+
+        session
+            .handle_quest_push_result(WorldPacket::from_bytes(&[0x00]))
+            .await;
+
+        assert_eq!(
+            session.represented_pending_quest_sharing_like_cpp(),
+            Some(crate::session::RepresentedPendingQuestSharingLikeCpp {
+                sender_guid,
+                quest_id: 7001,
+            })
+        );
+        assert!(
+            session
+                .represented_quest_push_result_responses_like_cpp()
+                .is_empty()
+        );
+        assert_eq!(
+            session.represented_quest_push_result_sender_mismatch_count_like_cpp(),
+            0
+        );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_push_no_pending_valid_packet_is_noop_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        let sender_guid = ObjectGuid::create_player(1, 78);
+
+        run_quest_push_result(&mut session, sender_guid, 7002, 3).await;
+
+        assert_eq!(session.represented_pending_quest_sharing_like_cpp(), None);
+        assert!(
+            session
+                .represented_quest_push_result_responses_like_cpp()
+                .is_empty()
+        );
+        assert_eq!(
+            session.represented_quest_push_result_sender_mismatch_count_like_cpp(),
+            0
+        );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_push_pending_sender_match_clears_and_records_response_evidence_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        let sender_guid = ObjectGuid::create_player(1, 79);
+        let receiver_guid = session.player_guid().unwrap();
+        session.set_represented_pending_quest_sharing_like_cpp(sender_guid, 7003);
+
+        run_quest_push_result(&mut session, sender_guid, 8003, 6).await;
+
+        assert_eq!(session.represented_pending_quest_sharing_like_cpp(), None);
+        assert_eq!(
+            session.represented_quest_push_result_responses_like_cpp(),
+            &[RepresentedQuestPushResultResponseLikeCpp {
+                receiver_guid,
+                sender_guid,
+                parsed_quest_id: 8003,
+                pending_quest_id: 7003,
+                result: 6,
+            }]
+        );
+        assert_eq!(
+            session.represented_quest_push_result_sender_mismatch_count_like_cpp(),
+            0
+        );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_push_pending_sender_mismatch_clears_without_response_evidence_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        let pending_sender_guid = ObjectGuid::create_player(1, 80);
+        let packet_sender_guid = ObjectGuid::create_player(1, 81);
+        session.set_represented_pending_quest_sharing_like_cpp(pending_sender_guid, 7004);
+
+        run_quest_push_result(&mut session, packet_sender_guid, 7004, 4).await;
+
+        assert_eq!(session.represented_pending_quest_sharing_like_cpp(), None);
+        assert!(
+            session
+                .represented_quest_push_result_responses_like_cpp()
+                .is_empty()
+        );
+        assert_eq!(
+            session.represented_quest_push_result_sender_mismatch_count_like_cpp(),
+            1
+        );
+        assert!(send_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn quest_push_inventory_registration_and_dispatcher_contract_like_cpp() {
+        let entry = inventory::iter::<PacketHandlerEntry>
+            .into_iter()
+            .find(|entry| entry.opcode == ClientOpcodes::QuestPushResult)
+            .expect("QuestPushResult handler registration");
+
+        assert_eq!(entry.status, SessionStatus::LoggedIn);
+        assert_eq!(entry.processing, PacketProcessing::ThreadUnsafe);
+        assert_eq!(entry.handler_name, "handle_quest_push_result");
+        assert!(include_str!("../session.rs").contains("ClientOpcodes::QuestPushResult =>"));
+        assert!(include_str!("../session.rs").contains("self.handle_quest_push_result(pkt).await"));
+    }
+
+    #[test]
+    fn quest_push_packet_parser_reads_sender_quest_id_result_in_cpp_order() {
+        let sender_guid = ObjectGuid::create_player(1, 82);
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_packed_guid(&sender_guid);
+        pkt.write_uint32(7005);
+        pkt.write_uint8(9);
+
+        let parsed = QuestPushResult::read(&mut pkt).expect("valid QuestPushResult");
+
+        assert_eq!(parsed.sender_guid, sender_guid);
+        assert_eq!(parsed.quest_id, 7005);
+        assert_eq!(parsed.result, 9);
     }
 
     #[tokio::test]

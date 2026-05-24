@@ -151,6 +151,24 @@ pub(crate) struct SeasonalQuestStatusDbRowLikeCpp {
     pub completed_time: i64,
 }
 
+/// Session-local representation of C++ `Player::GetPlayerSharingQuest()` state
+/// until full party/ObjectAccessor quest sharing runtime owns it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepresentedPendingQuestSharingLikeCpp {
+    pub sender_guid: ObjectGuid,
+    pub quest_id: u32,
+}
+
+/// Evidence for the bounded `HandleQuestPushResult` sender-match seam.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepresentedQuestPushResultResponseLikeCpp {
+    pub receiver_guid: ObjectGuid,
+    pub sender_guid: ObjectGuid,
+    pub parsed_quest_id: u32,
+    pub pending_quest_id: u32,
+    pub result: u8,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct LoadSeasonalQuestStatusOutcomeLikeCpp {
     pub rows_seen: usize,
@@ -1835,6 +1853,14 @@ pub struct WorldSession {
     pub(crate) represented_quest_completed_bits_like_cpp: BTreeSet<u32>,
     /// Session-local evidence for represented `ScriptMgr::OnQuestAcknowledgeAutoAccept` calls.
     pub(crate) represented_auto_accept_acknowledged_quests_like_cpp: Vec<u32>,
+    /// Session-local representation of C++ pending shared quest sender + quest id.
+    pub(crate) represented_pending_quest_sharing_like_cpp:
+        Option<RepresentedPendingQuestSharingLikeCpp>,
+    /// Evidence-only replacement for sender `SendPushToPartyResponse` until safe cross-session fanout exists.
+    pub(crate) represented_quest_push_result_responses_like_cpp:
+        Vec<RepresentedQuestPushResultResponseLikeCpp>,
+    /// Explicit mismatch counter: C++ still clears pending sharing when sender GUID differs.
+    pub(crate) represented_quest_push_result_sender_mismatch_count_like_cpp: u32,
 
     // ── Loot ──────────────────────────────────────────────────────
     /// Active loot windows keyed by creature GUID.
@@ -2515,6 +2541,9 @@ impl WorldSession {
             seasonal_quest_changed_like_cpp: false,
             represented_quest_completed_bits_like_cpp: BTreeSet::new(),
             represented_auto_accept_acknowledged_quests_like_cpp: Vec::new(),
+            represented_pending_quest_sharing_like_cpp: None,
+            represented_quest_push_result_responses_like_cpp: Vec::new(),
+            represented_quest_push_result_sender_mismatch_count_like_cpp: 0,
             active_spell_cast: None,
             last_spell_cast_time: None,
             last_spell_cast_time_per_spell: HashMap::new(),
@@ -8817,6 +8846,9 @@ impl WorldSession {
             }
             ClientOpcodes::RequestWorldQuestUpdate => {
                 self.handle_request_world_quest_update(pkt).await;
+            }
+            ClientOpcodes::QuestPushResult => {
+                self.handle_quest_push_result(pkt).await;
             }
             ClientOpcodes::QuestLogRemoveQuest => {
                 self.handle_quest_log_remove_quest(pkt).await;
@@ -15424,6 +15456,52 @@ impl WorldSession {
 
     pub(crate) fn interrupt_non_melee_spell_cast_for_loot_like_cpp(&mut self) -> bool {
         self.active_spell_cast.take().is_some()
+    }
+
+    pub(crate) fn set_represented_pending_quest_sharing_like_cpp(
+        &mut self,
+        sender_guid: ObjectGuid,
+        quest_id: u32,
+    ) {
+        self.represented_pending_quest_sharing_like_cpp =
+            Some(RepresentedPendingQuestSharingLikeCpp {
+                sender_guid,
+                quest_id,
+            });
+    }
+
+    pub(crate) fn clear_represented_pending_quest_sharing_like_cpp(&mut self) {
+        self.represented_pending_quest_sharing_like_cpp = None;
+    }
+
+    pub(crate) fn represented_pending_quest_sharing_like_cpp(
+        &self,
+    ) -> Option<RepresentedPendingQuestSharingLikeCpp> {
+        self.represented_pending_quest_sharing_like_cpp
+    }
+
+    pub(crate) fn represented_quest_push_result_responses_like_cpp(
+        &self,
+    ) -> &[RepresentedQuestPushResultResponseLikeCpp] {
+        &self.represented_quest_push_result_responses_like_cpp
+    }
+
+    pub(crate) fn represented_quest_push_result_sender_mismatch_count_like_cpp(&self) -> u32 {
+        self.represented_quest_push_result_sender_mismatch_count_like_cpp
+    }
+
+    pub(crate) fn record_represented_quest_push_result_response_like_cpp(
+        &mut self,
+        response: RepresentedQuestPushResultResponseLikeCpp,
+    ) {
+        self.represented_quest_push_result_responses_like_cpp
+            .push(response);
+    }
+
+    pub(crate) fn record_represented_quest_push_result_sender_mismatch_like_cpp(&mut self) {
+        self.represented_quest_push_result_sender_mismatch_count_like_cpp = self
+            .represented_quest_push_result_sender_mismatch_count_like_cpp
+            .saturating_add(1);
     }
 
     /// Get the logged-in player GUID.

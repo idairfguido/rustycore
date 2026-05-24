@@ -8,8 +8,8 @@
 //! C# ref: Game/Networking/Packets/QuestPackets.cs
 //! C# ref: Game/Networking/Packets/NPCPackets.cs (ClientGossipText)
 
-use crate::{ServerPacket, WorldPacket};
-use wow_constants::ServerOpcodes;
+use crate::{ClientPacket, PacketError, ServerPacket, WorldPacket};
+use wow_constants::{ClientOpcodes, ServerOpcodes};
 use wow_core::ObjectGuid;
 
 // Constants matching C# SharedConst
@@ -18,6 +18,33 @@ const QUEST_REWARD_CHOICES_COUNT: usize = 6;
 const QUEST_REWARD_REPUTATIONS_COUNT: usize = 5;
 const QUEST_REWARD_CURRENCY_COUNT: usize = 4;
 const QUEST_REWARD_DISPLAY_SPELL_COUNT: usize = 3;
+
+/// Client response to a shared-quest prompt.
+///
+/// C++ anchor: `WorldPackets::Quest::QuestPushResult::Read`,
+/// `QuestPackets.cpp:621-626`: `SenderGUID`, then `uint32 QuestID`, then `uint8 Result`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuestPushResult {
+    pub sender_guid: ObjectGuid,
+    pub quest_id: u32,
+    pub result: u8,
+}
+
+impl ClientPacket for QuestPushResult {
+    const OPCODE: ClientOpcodes = ClientOpcodes::QuestPushResult;
+
+    fn read(packet: &mut WorldPacket) -> Result<Self, PacketError> {
+        let sender_guid = packet.read_packed_guid()?;
+        let quest_id = packet.read_uint32()?;
+        let result = packet.read_uint8()?;
+
+        Ok(Self {
+            sender_guid,
+            quest_id,
+            result,
+        })
+    }
+}
 
 // ── SMSG_QUEST_GIVER_STATUS (0x...) ──────────────────────────────────────────
 
@@ -704,5 +731,36 @@ mod tests {
             ServerOpcodes::WorldQuestUpdateResponse as u16
         );
         assert_eq!(&bytes[2..], &[0, 0, 0, 0]);
+    }
+}
+
+#[cfg(test)]
+mod quest_push_result_tests {
+    use super::*;
+
+    #[test]
+    fn quest_push_result_reads_sender_quest_id_result_in_cpp_order() {
+        let sender_guid = ObjectGuid::create_player(1, 0x1234);
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_packed_guid(&sender_guid);
+        pkt.write_uint32(0xA1B2_C3D4);
+        pkt.write_uint8(0x2A);
+
+        let parsed = QuestPushResult::read(&mut pkt).expect("valid QuestPushResult packet");
+
+        assert_eq!(parsed.sender_guid, sender_guid);
+        assert_eq!(parsed.quest_id, 0xA1B2_C3D4);
+        assert_eq!(parsed.result, 0x2A);
+    }
+
+    #[test]
+    fn quest_push_result_short_packet_fails_closed() {
+        let sender_guid = ObjectGuid::create_player(1, 0x1234);
+        let mut pkt = WorldPacket::new_empty();
+        pkt.write_packed_guid(&sender_guid);
+        pkt.write_uint32(0xA1B2_C3D4);
+        let mut short = WorldPacket::from_bytes(&pkt.into_data());
+
+        assert!(QuestPushResult::read(&mut short).is_err());
     }
 }
