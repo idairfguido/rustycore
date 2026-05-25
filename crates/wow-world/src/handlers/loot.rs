@@ -47,7 +47,9 @@ use wow_loot::{
     loot_conditions_allow_player_with_references_like_cpp_representable,
     loot_item_ui_type_for_player_like_cpp,
 };
-use wow_network::player_registry::SetQuestSharingInfoAndSendDetailsCommand;
+use wow_network::player_registry::{
+    SendRepeatableTurnInRequestItemsLikeCppCommand, SetQuestSharingInfoAndSendDetailsCommand,
+};
 use wow_network::{
     LootRollStoreWinnerCommand, LootRollVoteCommand, MasterLootGiveCommand, MasterLootGiveResult,
     PlayerRegistry, SessionCommand,
@@ -2495,8 +2497,18 @@ impl WorldSession {
                 SessionCommand::SetQuestSharingInfoAndSendDetails(command) => {
                     self.handle_set_quest_sharing_info_and_send_details_command_like_cpp(command);
                 }
+                SessionCommand::SendRepeatableTurnInRequestItemsLikeCpp(command) => {
+                    self.handle_send_repeatable_turn_in_request_items_command_like_cpp(command);
+                }
             }
         }
+    }
+
+    fn handle_send_repeatable_turn_in_request_items_command_like_cpp(
+        &mut self,
+        command: SendRepeatableTurnInRequestItemsLikeCppCommand,
+    ) {
+        self.send_repeatable_turn_in_request_items_like_cpp(command.sender_guid, &command.quest);
     }
 
     fn handle_set_quest_sharing_info_and_send_details_command_like_cpp(
@@ -7649,6 +7661,9 @@ mod tests {
             reward_display_spell: [0; 3],
             reward_spell: 0,
             reward_honor: 0,
+            source_item_id: 0,
+            source_item_count: 0,
+            source_spell_id: 0,
             expansion: 0,
             flags: 0,
             flags_ex: 0,

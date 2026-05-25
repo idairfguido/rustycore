@@ -88,15 +88,47 @@ use wow_packet::packets::item::{
 };
 use wow_packet::packets::misc::{AccountMount, AccountMountUpdate, BuyFailed, SellResponse};
 use wow_packet::packets::quest::{
-    QuestGiverQuestDetails, QuestGiverQuestList, QuestGiverRequestItems, QuestListEntry,
+    QuestGiverOfferReward, QuestGiverQuestDetails, QuestGiverQuestList, QuestGiverRequestItems,
+    QuestGiverRequestItemsCollect, QuestGiverRequestItemsCurrency, QuestListEntry,
     QuestObjectiveSimple, QuestRewardsBlock,
 };
 use wow_packet::packets::spell::SpellTargetData;
 use wow_recastdetour::PathQueryFilterContext;
 
+const QUEST_OBJECTIVE_ITEM_LIKE_CPP: u8 = 1;
+const QUEST_OBJECTIVE_CURRENCY_LIKE_CPP: u8 = 4;
+const QUEST_OBJECTIVE_MONEY_LIKE_CPP: u8 = 8;
+const QUEST_OBJECTIVE_FLAG_2_QUEST_BOUND_ITEM_LIKE_CPP: u32 = 0x1;
 const PLAYER_FLAGS_UBER_LIKE_CPP: u32 = 0x0008_0000;
 const PLAYER_FLAGS_CONTESTED_PVP_LIKE_CPP: u32 = 0x0000_0100;
 const FACTION_TEMPLATE_FLAG_CONTESTED_GUARD_LIKE_CPP: u16 = 0x0000_1000;
+
+fn quest_has_represented_item_objective_like_cpp(quest: &wow_data::quest::QuestTemplate) -> bool {
+    quest
+        .objectives
+        .iter()
+        .any(|objective| objective.obj_type == QUEST_OBJECTIVE_ITEM_LIKE_CPP)
+}
+
+fn quest_rewards_block_like_cpp(quest: &wow_data::quest::QuestTemplate) -> QuestRewardsBlock {
+    let mut rewards = QuestRewardsBlock {
+        money: quest.reward_money_difficulty as i32,
+        completion_spell: quest.reward_spell as i32,
+        ..QuestRewardsBlock::default()
+    };
+    for (idx, reward_item) in quest.reward_items.iter().enumerate() {
+        if let Some(reward_slot) = rewards.items.get_mut(idx) {
+            let amount = quest.reward_amounts.get(idx).copied().unwrap_or(0);
+            *reward_slot = (*reward_item, amount);
+        }
+    }
+    for (idx, display_spell) in quest.reward_display_spell.iter().enumerate() {
+        if let Some(slot) = rewards.display_spells.get_mut(idx) {
+            *slot = *display_spell;
+        }
+    }
+    rewards
+}
 const ATTACK_DISPLAY_DELAY_LIKE_CPP_MS: u32 = 200;
 const MIN_MELEE_REACH_LIKE_CPP: f32 = 2.0;
 const NOMINAL_MELEE_RANGE_LIKE_CPP: f32 = 5.0;
@@ -194,6 +226,8 @@ pub(crate) enum RepresentedPushQuestToPartyOutcomeReasonLikeCpp {
     ReceiverSatisfyQuestExpansionRequiredExpansion,
     ReceiverCanTakeQuestInvalid,
     ReceiverRepeatableTurnInRequestItemsUnrepresented,
+    ReceiverRepeatableTurnInRequestItemsPrompted,
+    ReceiverRepeatableTurnInRequestItemsPromptCommandFailed,
     ReceiverSuccessQuestDetailsPrompted,
     ReceiverQuestDetailsPromptCommandFailed,
     ReceiverEligibilityUnrepresented,
@@ -211,6 +245,23 @@ pub(crate) struct RepresentedPushQuestToPartyOutcomeLikeCpp {
     pub receiver_fanout_unrepresented: bool,
 }
 
+/// Represented outcome for the bounded post-template `HandleQuestConfirmAccept` gates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp {
+    OriginalPlayerMissing,
+    NotInSameRaid,
+    OriginalPlayerNotActiveQuest,
+    ReceiverCanTakeQuestFailed,
+    ReceiverCanAddQuestLogFull,
+    ReceiverCanAddQuestSourceItemFailed,
+    ReceiverCanAddQuestSourceItemLimitCategoryUnrepresented,
+    ReceiverGiveQuestSourceItemStartQuestNoGrant,
+    ReceiverGiveQuestSourceItemMaxCountNoGrant,
+    GiveQuestSourceItemStoreNewItemUnrepresented,
+    ReceiverAddQuestLocalStateRepresented,
+    AddQuestRuntimeUnrepresented,
+}
+
 /// Evidence that `HandleQuestConfirmAccept` reached the post-clear/template-present seam.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RepresentedQuestConfirmAcceptLikeCpp {
@@ -218,6 +269,17 @@ pub(crate) struct RepresentedQuestConfirmAcceptLikeCpp {
     pub sender_guid_before_clear: ObjectGuid,
     pub quest_id: u32,
     pub raw_quest_id: i32,
+    pub reason: RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp,
+    pub object_accessor_unrepresented: bool,
+    pub party_runtime_unrepresented: bool,
+    pub can_add_source_item_unrepresented: bool,
+    pub can_add_source_item_result: Option<InventoryResult>,
+    pub add_quest_runtime_unrepresented: bool,
+    pub source_spell_unrepresented: bool,
+    /// Source spell id whose C++ triggered self-casts are represented as evidence only.
+    pub represented_source_spell_id: Option<u32>,
+    /// Count of represented triggered self-casts C++ would perform in this shared-confirm path.
+    pub represented_source_spell_self_casts: u8,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -14097,17 +14159,141 @@ impl WorldSession {
         source_guid: ObjectGuid,
         quest: &wow_data::quest::QuestTemplate,
     ) {
+        self.send_represented_quest_giver_request_items_with_completion_like_cpp(
+            source_guid,
+            quest,
+            false,
+            false,
+        );
+    }
+
+    pub(crate) fn send_repeatable_turn_in_request_items_like_cpp(
+        &mut self,
+        sender_guid: ObjectGuid,
+        quest: &wow_data::quest::QuestTemplate,
+    ) {
+        let can_complete = self.can_complete_repeatable_quest_represented_bounded_like_cpp(quest);
+        if can_complete && !quest_has_represented_item_objective_like_cpp(quest) {
+            self.send_represented_quest_giver_offer_reward_like_cpp(sender_guid, quest, true);
+            return;
+        }
+
+        self.send_represented_quest_giver_request_items_with_completion_like_cpp(
+            sender_guid,
+            quest,
+            can_complete,
+            true,
+        );
+    }
+
+    pub(crate) fn can_complete_repeatable_quest_represented_bounded_like_cpp(
+        &self,
+        quest: &wow_data::quest::QuestTemplate,
+    ) -> bool {
+        // C++ Player::CanCompleteRepeatableQuest is CanTakeQuest(false) && CanRewardQuest(false).
+        // The full CanRewardQuest blocker set includes disable checks, quest status, day/week/month/
+        // seasonal gates, level/skill/reputation, reward status, item/currency/money checks, etc.
+        // This bounded #611 seam must not overclaim completion while those blockers remain open.
+        if !self.can_take_quest(quest) {
+            return false;
+        }
+
+        let inventory_item_counts = self.represented_inventory_item_counts_like_cpp();
+        let mut saw_non_bound_item_objective = false;
+        for objective in &quest.objectives {
+            if objective.obj_type != QUEST_OBJECTIVE_ITEM_LIKE_CPP {
+                return false;
+            }
+
+            if (objective.flags2 & QUEST_OBJECTIVE_FLAG_2_QUEST_BOUND_ITEM_LIKE_CPP) != 0 {
+                continue;
+            }
+
+            saw_non_bound_item_objective = true;
+            let Ok(item_id) = u32::try_from(objective.object_id) else {
+                return false;
+            };
+            let Ok(required_count) = u32::try_from(objective.amount) else {
+                return false;
+            };
+            if inventory_item_counts.get(&item_id).copied().unwrap_or(0) < required_count {
+                return false;
+            }
+        }
+
+        // Item counts are represented only as partial evidence. Do not return true until the
+        // remaining C++ CanRewardQuest blockers are represented in this runtime path.
+        let _ = saw_non_bound_item_objective;
+        false
+    }
+
+    pub(crate) fn send_represented_quest_giver_request_items_with_completion_like_cpp(
+        &mut self,
+        source_guid: ObjectGuid,
+        quest: &wow_data::quest::QuestTemplate,
+        can_complete: bool,
+        auto_launched: bool,
+    ) {
+        let collect = quest
+            .objectives
+            .iter()
+            .filter(|objective| objective.obj_type == QUEST_OBJECTIVE_ITEM_LIKE_CPP)
+            .map(|objective| QuestGiverRequestItemsCollect {
+                object_id: objective.object_id,
+                amount: objective.amount,
+                flags: objective.flags,
+            })
+            .collect::<Vec<_>>();
+        let currency = quest
+            .objectives
+            .iter()
+            .filter(|objective| objective.obj_type == QUEST_OBJECTIVE_CURRENCY_LIKE_CPP)
+            .map(|objective| QuestGiverRequestItemsCurrency {
+                currency_id: objective.object_id,
+                amount: objective.amount,
+            })
+            .collect::<Vec<_>>();
+        let money_to_get = quest
+            .objectives
+            .iter()
+            .filter(|objective| objective.obj_type == QUEST_OBJECTIVE_MONEY_LIKE_CPP)
+            .map(|objective| objective.amount)
+            .sum::<i32>();
+        let giver_creature_id = i32::try_from(source_guid.entry()).unwrap_or(0);
+
         self.send_packet(&QuestGiverRequestItems {
+            giver_guid: source_guid,
+            giver_creature_id,
+            quest_id: quest.id,
+            comp_emote_delay: 0,
+            comp_emote_type: 0,
+            quest_flags: [quest.flags, quest.flags_ex, quest.flags_ex2],
+            suggested_party_members: quest.suggested_group_num,
+            money_to_get,
+            collect,
+            currency,
+            status_flags: if can_complete { 0xFF } else { 0xFD },
+            title: quest.log_title.clone(),
+            completion_text: quest.area_description.clone(),
+            auto_launched,
+        });
+    }
+
+    pub(crate) fn send_represented_quest_giver_offer_reward_like_cpp(
+        &mut self,
+        source_guid: ObjectGuid,
+        quest: &wow_data::quest::QuestTemplate,
+        auto_launched: bool,
+    ) {
+        self.send_packet(&QuestGiverOfferReward {
             giver_guid: source_guid,
             quest_id: quest.id,
             quest_flags: [quest.flags, quest.flags_ex, quest.flags_ex2],
             suggested_party_members: quest.suggested_group_num,
-            // Exact CanRewardQuest/CanCompleteRepeatableQuest validation is not represented
-            // in this bounded seam; keep conservative status flags rather than overclaiming.
-            status_flags: 0,
-            money_cost: 0,
+            rewards: quest_rewards_block_like_cpp(quest),
             title: quest.log_title.clone(),
-            completion_text: quest.area_description.clone(),
+            reward_text: quest.quest_completion_log.clone(),
+            auto_launched,
         });
     }
 
@@ -14127,30 +14313,13 @@ impl WorldSession {
             })
             .collect();
 
-        let mut rewards = QuestRewardsBlock {
-            money: quest.reward_money_difficulty as i32,
-            completion_spell: quest.reward_spell as i32,
-            ..QuestRewardsBlock::default()
-        };
-        for (idx, reward_item) in quest.reward_items.iter().enumerate() {
-            if let Some(reward_slot) = rewards.items.get_mut(idx) {
-                let amount = quest.reward_amounts.get(idx).copied().unwrap_or(0);
-                *reward_slot = (*reward_item, amount);
-            }
-        }
-        for (idx, display_spell) in quest.reward_display_spell.iter().enumerate() {
-            if let Some(slot) = rewards.display_spells.get_mut(idx) {
-                *slot = *display_spell;
-            }
-        }
-
         self.send_packet(&QuestGiverQuestDetails {
             giver_guid: source_guid,
             quest_id: quest.id,
             quest_flags: [quest.flags, quest.flags_ex, quest.flags_ex2],
             suggested_party_members: quest.suggested_group_num,
             objectives,
-            rewards,
+            rewards: quest_rewards_block_like_cpp(quest),
             title: quest.log_title.clone(),
             description: quest.quest_description.clone(),
             log_description: quest.log_description.clone(),
@@ -18434,6 +18603,9 @@ mod tests {
             reward_display_spell: [0; wow_data::quest::QUEST_REWARD_DISPLAY_SPELL_COUNT],
             reward_spell: 0,
             reward_honor: 0,
+            source_item_id: 0,
+            source_item_count: 0,
+            source_spell_id: 0,
             expansion: 0,
             flags: 0,
             flags_ex: 0,
@@ -26450,6 +26622,9 @@ mod tests {
                 reward_display_spell: [0; wow_data::quest::QUEST_REWARD_DISPLAY_SPELL_COUNT],
                 reward_spell: 0,
                 reward_honor: 0,
+                source_item_id: 0,
+                source_item_count: 0,
+                source_spell_id: 0,
                 expansion: 0,
                 flags: 0,
                 flags_ex: 0,

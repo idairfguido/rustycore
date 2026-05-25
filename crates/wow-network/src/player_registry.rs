@@ -22,10 +22,17 @@ pub enum SessionCommand {
     LootRollVote(LootRollVoteCommand),
     ResetSeasonalQuestStatus(ResetSeasonalQuestStatusCommand),
     SetQuestSharingInfoAndSendDetails(SetQuestSharingInfoAndSendDetailsCommand),
+    SendRepeatableTurnInRequestItemsLikeCpp(SendRepeatableTurnInRequestItemsLikeCppCommand),
 }
 
 #[derive(Clone, Debug)]
 pub struct SetQuestSharingInfoAndSendDetailsCommand {
+    pub sender_guid: ObjectGuid,
+    pub quest: wow_data::quest::QuestTemplate,
+}
+
+#[derive(Clone, Debug)]
+pub struct SendRepeatableTurnInRequestItemsLikeCppCommand {
     pub sender_guid: ObjectGuid,
     pub quest: wow_data::quest::QuestTemplate,
 }

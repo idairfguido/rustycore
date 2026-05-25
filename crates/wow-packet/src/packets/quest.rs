@@ -687,40 +687,84 @@ impl ServerPacket for QuestGiverOfferReward {
 
 // ── SMSG_QUEST_GIVER_REQUEST_ITEMS ───────────────────────────────────────────
 
+/// One item objective row in `SMSG_QUEST_GIVER_REQUEST_ITEMS`.
+///
+/// C++ anchor: `QuestPackets.cpp:509-514` writes `ObjectID`, `Amount`, `Flags`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuestGiverRequestItemsCollect {
+    pub object_id: i32,
+    pub amount: i32,
+    pub flags: u32,
+}
+
+/// One currency objective row in `SMSG_QUEST_GIVER_REQUEST_ITEMS`.
+///
+/// C++ anchor: `QuestPackets.cpp:516-520` writes `CurrencyID`, `Amount`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuestGiverRequestItemsCurrency {
+    pub currency_id: i32,
+    pub amount: i32,
+}
+
 /// Shown when player tries to complete a quest but hasn't finished all objectives.
-/// C# ref: QuestGiverRequestItems
+///
+/// C++ anchors:
+/// - `GossipDef.cpp:605-689` fills title/completion text, collect/currency/money,
+///   status flags and `AutoLaunched`.
+/// - `QuestPackets.cpp:493-538` defines the exact wire layout.
 pub struct QuestGiverRequestItems {
     pub giver_guid: ObjectGuid,
+    pub giver_creature_id: i32,
     pub quest_id: u32,
+    pub comp_emote_delay: i32,
+    pub comp_emote_type: i32,
     pub quest_flags: [u32; 3],
     pub suggested_party_members: u8,
+    pub money_to_get: i32,
+    pub collect: Vec<QuestGiverRequestItemsCollect>,
+    pub currency: Vec<QuestGiverRequestItemsCurrency>,
     pub status_flags: u32,
-    pub money_cost: u32,
     pub title: String,
     pub completion_text: String,
+    pub auto_launched: bool,
 }
 
 impl ServerPacket for QuestGiverRequestItems {
     const OPCODE: ServerOpcodes = ServerOpcodes::QuestGiverRequestItems;
     fn write(&self, pkt: &mut WorldPacket) {
         pkt.write_packed_guid(&self.giver_guid);
-        pkt.write_uint32(self.quest_id);
-        pkt.write_uint32(self.status_flags);
-        pkt.write_uint32(0); // emote delay
-        pkt.write_uint32(0); // emote type
-        pkt.write_uint32(self.money_cost);
-        pkt.write_uint32(0); // collect items count
-        pkt.write_uint32(0); // currency count
+        pkt.write_int32(self.giver_creature_id);
+        pkt.write_int32(self.quest_id as i32);
+        pkt.write_int32(self.comp_emote_delay);
+        pkt.write_int32(self.comp_emote_type);
         pkt.write_uint32(self.quest_flags[0]);
         pkt.write_uint32(self.quest_flags[1]);
         pkt.write_uint32(self.quest_flags[2]);
         pkt.write_int32(self.suggested_party_members as i32);
-        pkt.write_int32(0); // ConditionalCompletionText count
+        pkt.write_int32(self.money_to_get);
+        pkt.write_int32(self.collect.len() as i32);
+        pkt.write_int32(self.currency.len() as i32);
+        pkt.write_int32(self.status_flags as i32);
+
+        for objective in &self.collect {
+            pkt.write_int32(objective.object_id);
+            pkt.write_int32(objective.amount);
+            pkt.write_uint32(objective.flags);
+        }
+
+        for currency in &self.currency {
+            pkt.write_int32(currency.currency_id);
+            pkt.write_int32(currency.amount);
+        }
+
+        pkt.write_bit(self.auto_launched);
+        pkt.flush_bits();
+
+        pkt.write_int32(self.giver_creature_id);
+        pkt.write_uint32(0); // ConditionalCompletionText count (not represented yet)
 
         pkt.write_bits(self.title.len() as u32, 9);
         pkt.write_bits(self.completion_text.len() as u32, 12);
-        pkt.write_bit(false); // AutoLaunched
-        pkt.write_bit(false); // Unused
         pkt.flush_bits();
 
         pkt.write_string(&self.title);

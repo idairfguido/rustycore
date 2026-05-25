@@ -96,6 +96,12 @@ pub struct QuestTemplate {
     pub reward_display_spell: [u32; QUEST_REWARD_DISPLAY_SPELL_COUNT],
     pub reward_spell: u32,
     pub reward_honor: u32,
+    /// C++ `Quest::GetSrcItemId()` / `_sourceItemId` from `quest_template.StartItem`.
+    pub source_item_id: u32,
+    /// C++ `Quest::GetSrcItemCount()` / `_sourceItemIdCount` from `quest_template_addon.ProvidedItemCount`.
+    pub source_item_count: u32,
+    /// C++ `Quest::GetSrcSpell()` / `_sourceSpellID` from `quest_template_addon.SourceSpellID`.
+    pub source_spell_id: u32,
     /// C++ `Quest::GetExpansion()` / `quest_template.Expansion`.
     pub expansion: i32,
     pub flags: u32,
@@ -208,6 +214,31 @@ impl QuestTemplate {
     /// C++ `Quest::GetEventIdForQuest()`. Defaults to 0 until seasonal relation load sets it.
     pub fn event_id_for_quest_like_cpp(&self) -> u16 {
         self.event_id_for_quest
+    }
+
+    /// C++ `ObjectMgr::LoadQuests` source-item/source-spell metadata normalization.
+    ///
+    /// The caller owns item/spell stores and passes real predicates. `load_quests` keeps raw DB
+    /// values until world-server composition can provide those predicates without making
+    /// `wow-data` depend on runtime stores.
+    pub fn normalize_source_item_spell_like_cpp(
+        &mut self,
+        item_exists: impl Fn(u32) -> bool,
+        spell_valid: impl Fn(u32) -> bool,
+    ) {
+        if self.source_item_id != 0 {
+            if !item_exists(self.source_item_id) {
+                self.source_item_id = 0;
+            } else if self.source_item_count == 0 {
+                self.source_item_count = 1;
+            }
+        } else if self.source_item_count > 0 {
+            self.source_item_count = 0;
+        }
+
+        if self.source_spell_id != 0 && !spell_valid(self.source_spell_id) {
+            self.source_spell_id = 0;
+        }
     }
 
     /// Returns true if the given player (race, class, level) can take this quest.
@@ -416,6 +447,20 @@ impl QuestStore {
                     nonzero_abs_i32_to_u32_like_cpp(quest.breadcrumb_for_quest_id)
                 });
             }
+        }
+    }
+
+    /// Applies C++ source-item/source-spell metadata normalization to all loaded quest templates.
+    ///
+    /// Ownership: callers provide item/spell validity predicates from the future composition
+    /// layer. This store owns only static quest metadata and never infers item/spell existence.
+    pub fn normalize_source_item_spell_metadata_like_cpp(
+        &mut self,
+        item_exists: impl Fn(u32) -> bool,
+        spell_valid: impl Fn(u32) -> bool,
+    ) {
+        for quest in self.quests.values_mut() {
+            quest.normalize_source_item_spell_like_cpp(&item_exists, &spell_valid);
         }
     }
 
@@ -783,6 +828,9 @@ pub async fn load_quests(db: &WorldDatabase) -> Result<QuestStore> {
                 ],
                 reward_spell: result.try_read::<u32>(17).unwrap_or(0),
                 reward_honor: result.try_read::<u32>(18).unwrap_or(0),
+                source_item_id: result.try_read::<u32>(68).unwrap_or(0),
+                source_item_count: result.try_read::<u32>(70).unwrap_or(0),
+                source_spell_id: result.try_read::<u32>(69).unwrap_or(0),
                 expansion: result.try_read::<i32>(67).unwrap_or(0),
                 flags,
                 flags_ex: result.try_read::<u32>(20).unwrap_or(0),
@@ -1043,6 +1091,9 @@ mod tests {
             reward_display_spell: [0; QUEST_REWARD_DISPLAY_SPELL_COUNT],
             reward_spell: 0,
             reward_honor: 0,
+            source_item_id: 0,
+            source_item_count: 0,
+            source_spell_id: 0,
             expansion: 0,
             flags,
             flags_ex: 0,
@@ -1282,6 +1333,98 @@ mod tests {
         let mut quest = quest_with_sort_and_flags(0, QUEST_FLAGS_WEEKLY_LIKE_CPP, 0);
         quest.id = id;
         quest
+    }
+
+    #[test]
+    fn quest_source_item_missing_zeroes_item_id_but_keeps_count_like_cpp() {
+        let mut quest = quest_with_id(300);
+        quest.source_item_id = 700;
+        quest.source_item_count = 4;
+
+        quest.normalize_source_item_spell_like_cpp(|_| false, |_| true);
+
+        assert_eq!(quest.source_item_id, 0);
+        // C++ uses an inner if/else-if; after clearing the id, it does not run the outer
+        // `sourceItemId == 0 && count > 0` branch in the same iteration.
+        assert_eq!(quest.source_item_count, 4);
+    }
+
+    #[test]
+    fn quest_source_item_existing_with_zero_count_sets_one_like_cpp() {
+        let mut quest = quest_with_id(301);
+        quest.source_item_id = 701;
+        quest.source_item_count = 0;
+
+        quest.normalize_source_item_spell_like_cpp(|item_id| item_id == 701, |_| true);
+
+        assert_eq!(quest.source_item_id, 701);
+        assert_eq!(quest.source_item_count, 1);
+    }
+
+    #[test]
+    fn quest_source_item_zero_with_positive_count_clears_count_like_cpp() {
+        let mut quest = quest_with_id(302);
+        quest.source_item_id = 0;
+        quest.source_item_count = 3;
+
+        quest.normalize_source_item_spell_like_cpp(|_| true, |_| true);
+
+        assert_eq!(quest.source_item_id, 0);
+        assert_eq!(quest.source_item_count, 0);
+    }
+
+    #[test]
+    fn quest_source_spell_invalid_zeroes_spell_like_cpp() {
+        let mut quest = quest_with_id(303);
+        quest.source_spell_id = 900;
+
+        quest.normalize_source_item_spell_like_cpp(|_| true, |_| false);
+
+        assert_eq!(quest.source_spell_id, 0);
+    }
+
+    #[test]
+    fn quest_source_spell_valid_is_preserved_like_cpp() {
+        let mut quest = quest_with_id(304);
+        quest.source_spell_id = 901;
+
+        quest.normalize_source_item_spell_like_cpp(|_| true, |spell_id| spell_id == 901);
+
+        assert_eq!(quest.source_spell_id, 901);
+    }
+
+    #[test]
+    fn quest_source_fields_can_be_constructed_raw_before_normalization() {
+        let mut quest = quest_with_id(305);
+        quest.source_item_id = 702;
+        quest.source_item_count = 0;
+        quest.source_spell_id = 902;
+
+        assert_eq!(quest.source_item_id, 702);
+        assert_eq!(quest.source_item_count, 0);
+        assert_eq!(quest.source_spell_id, 902);
+    }
+
+    #[test]
+    fn quest_store_source_item_spell_normalization_uses_caller_predicates_like_cpp() {
+        let mut invalid_item = quest_with_id(306);
+        invalid_item.source_item_id = 703;
+        invalid_item.source_item_count = 5;
+        let mut valid_item_zero_count = quest_with_id(307);
+        valid_item_zero_count.source_item_id = 704;
+        valid_item_zero_count.source_item_count = 0;
+        let mut invalid_spell = quest_with_id(308);
+        invalid_spell.source_spell_id = 903;
+
+        let mut store =
+            QuestStore::from_quests_like_cpp([invalid_item, valid_item_zero_count, invalid_spell]);
+        store.normalize_source_item_spell_metadata_like_cpp(|item_id| item_id == 704, |_| false);
+
+        assert_eq!(store.get(306).unwrap().source_item_id, 0);
+        assert_eq!(store.get(306).unwrap().source_item_count, 5);
+        assert_eq!(store.get(307).unwrap().source_item_id, 704);
+        assert_eq!(store.get(307).unwrap().source_item_count, 1);
+        assert_eq!(store.get(308).unwrap().source_spell_id, 0);
     }
 
     #[test]
