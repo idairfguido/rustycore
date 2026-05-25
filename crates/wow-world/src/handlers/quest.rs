@@ -1143,7 +1143,7 @@ impl WorldSession {
         };
 
         let Some(access) =
-            self.represented_npc_can_interact_with_like_cpp(guid, NPCFlags1::QUEST_GIVER.bits())
+            self.represented_npc_can_interact_with_like_cpp(guid, NPCFlags1::QUEST_GIVER.bits(), 0)
         else {
             debug!(
                 account = self.account_id,

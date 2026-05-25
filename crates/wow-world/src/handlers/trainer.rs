@@ -89,6 +89,7 @@ impl WorldSession {
             match self.represented_npc_can_interact_with_like_cpp(
                 trainer_guid,
                 TRAINER_LIST_NPC_FLAGS_LIKE_CPP,
+                0,
             ) {
                 Some(access) => access.entry,
                 None => {
@@ -373,6 +374,7 @@ impl WorldSession {
                 .represented_npc_can_interact_with_like_cpp(
                     trainer_guid,
                     TRAINER_BUY_NPC_FLAGS_LIKE_CPP,
+                    0,
                 )
                 .is_none()
         {

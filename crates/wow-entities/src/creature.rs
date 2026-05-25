@@ -76,6 +76,7 @@ pub struct CreatureAiOwnershipState {
     pub display_id: u32,
     pub faction: u32,
     pub npc_flags: u32,
+    pub npc_flags2: u32,
     pub unit_flags: u32,
     pub min_damage: u32,
     pub max_damage: u32,
@@ -113,6 +114,7 @@ impl Default for CreatureAiOwnershipState {
             display_id: 0,
             faction: 0,
             npc_flags: 0,
+            npc_flags2: 0,
             unit_flags: 0,
             min_damage: BASE_MINDAMAGE as u32,
             max_damage: BASE_MAXDAMAGE as u32,
@@ -1319,6 +1321,10 @@ impl Creature {
         self.ai_ownership.unit_flags = unit_flags;
         self.set_display_id(display_id, true, None);
         self.set_faction(faction);
+    }
+
+    pub fn set_npc_flags2_runtime_like_cpp(&mut self, npc_flags2: u32) {
+        self.ai_ownership.npc_flags2 = npc_flags2;
     }
 
     pub fn configure_ai_runtime(

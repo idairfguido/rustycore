@@ -81,13 +81,14 @@ use wow_entities::{
     INVENTORY_SLOT_BAG_0, INVENTORY_SLOT_BAG_END, INVENTORY_SLOT_BAG_START,
     INVENTORY_SLOT_ITEM_START, ITEM_DATA_BITS, ITEM_DATA_DURABILITY_BIT, Item, ItemCreateInfo,
     ItemDataUpdate, ItemLimitCategoryTemplate, ItemPosCount, ItemSlotRef, ItemStorageRef,
-    ItemStorageTemplate, ItemValuesUpdate, MAX_BAG_SIZE, MAX_ITEM_SPELLS, NULL_BAG, NULL_SLOT,
-    ObjectAccessor, PLAYER_SLOT_END, PhaseShift, Player, PlayerEnchantTimeUpdate,
-    PlayerInventoryStorage, PlayerItemTimeUpdate, QUESTS_COMPLETED_BITS_PER_BLOCK,
-    QUESTS_COMPLETED_BITS_SIZE, REAGENT_BAG_SLOT_END, REAGENT_BAG_SLOT_START, SendNewItemDelivery,
-    SendNewItemDisplayText, SendNewItemPlan, TYPEID_ITEM, UNIT_DATA_HEALTH_BIT, UnitDataUpdate,
-    UnitDataValues, UpdateMask, Vehicle, VehicleAccessory, VisibleItemValues, WorldObject,
-    is_bag_pos, is_equipment_packed_pos, make_item_pos,
+    ItemStorageTemplate, ItemValuesUpdate, MAX_BAG_SIZE, MAX_ITEM_SPELLS, MAX_MONEY_AMOUNT,
+    NULL_BAG, NULL_SLOT, ObjectAccessor, PLAYER_SLOT_END, PhaseShift, Player,
+    PlayerEnchantTimeUpdate, PlayerInventoryStorage, PlayerItemTimeUpdate,
+    QUESTS_COMPLETED_BITS_PER_BLOCK, QUESTS_COMPLETED_BITS_SIZE, REAGENT_BAG_SLOT_END,
+    REAGENT_BAG_SLOT_START, SendNewItemDelivery, SendNewItemDisplayText, SendNewItemPlan,
+    TYPEID_ITEM, UNIT_DATA_HEALTH_BIT, UnitDataUpdate, UnitDataValues, UpdateMask, Vehicle,
+    VehicleAccessory, VisibleItemValues, WorldObject, is_bag_pos, is_equipment_packed_pos,
+    make_item_pos,
 };
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus, build_dispatch_table};
 use wow_loot::{LootStoreKind, LootStores};
@@ -1077,6 +1078,7 @@ pub(crate) struct RepresentedCreatureAccessLikeCpp {
     pub entry: u32,
     pub position: wow_core::Position,
     pub npc_flags: u32,
+    pub npc_flags2: u32,
     pub faction_template_id: u32,
 }
 
@@ -1085,6 +1087,19 @@ pub(crate) struct RepresentedItemModsReapplyEventLikeCpp {
     pub item_guid: ObjectGuid,
     pub slot: u8,
     pub apply: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepresentedGuildRepairBankStateLikeCpp {
+    pub available_repair_money: u64,
+    pub withdraw_repair_money_allowed: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepresentedGuildRepairBankWithdrawLikeCpp {
+    pub amount: u64,
+    pub repair: bool,
+    pub success: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1881,6 +1896,9 @@ pub struct WorldSession {
     buyback_timestamp: [i64; BUYBACK_SLOT_COUNT],
     current_buyback_slot: u8,
     represented_item_mod_reapply_events_like_cpp: Vec<RepresentedItemModsReapplyEventLikeCpp>,
+    represented_guild_repair_bank_state_like_cpp: Option<RepresentedGuildRepairBankStateLikeCpp>,
+    represented_guild_repair_bank_withdraws_like_cpp:
+        Vec<RepresentedGuildRepairBankWithdrawLikeCpp>,
 
     /// C++ `_currencyStorage`, keyed by CurrencyTypes.db2 ID.
     player_currencies: HashMap<u32, PlayerCurrency>,
@@ -2821,6 +2839,8 @@ impl WorldSession {
             buyback_timestamp: [0; BUYBACK_SLOT_COUNT],
             current_buyback_slot: BUYBACK_SLOT_START,
             represented_item_mod_reapply_events_like_cpp: Vec::new(),
+            represented_guild_repair_bank_state_like_cpp: None,
+            represented_guild_repair_bank_withdraws_like_cpp: Vec::new(),
             player_currencies: HashMap::new(),
             represented_quest_objective_progress_events_like_cpp: VecDeque::new(),
             represented_quest_objective_progress_draining_like_cpp: false,
@@ -4803,11 +4823,17 @@ impl WorldSession {
             return None;
         };
         let map = manager.find_map(u32::from(self.player_map_id_like_cpp()), 0)?;
-        let creature = map.map().get_typed_creature(guid)?;
+        let record = map.map().map_object_record(guid)?;
+        let creature = if guid.is_pet() {
+            record.pet()?.creature()
+        } else {
+            record.creature()?
+        };
         Some(RepresentedCreatureAccessLikeCpp {
             entry: creature.entry(),
             position: creature.unit().world().position(),
             npc_flags: creature.ai_ownership().npc_flags,
+            npc_flags2: creature.ai_ownership().npc_flags2,
             faction_template_id: creature.unit().data().faction_template.max(0) as u32,
         })
     }
@@ -4816,6 +4842,7 @@ impl WorldSession {
         &self,
         guid: ObjectGuid,
         npc_flags: u32,
+        npc_flags2: u32,
     ) -> Option<RepresentedCreatureAccessLikeCpp> {
         if guid.is_empty() || !guid.is_any_type_creature() {
             return None;
@@ -4836,7 +4863,19 @@ impl WorldSession {
             return None;
         };
         let map = manager.find_map(u32::from(self.player_map_id_like_cpp()), 0)?;
-        let creature = map.map().get_typed_creature(guid)?;
+        if map
+            .map()
+            .get_typed_player(player_guid)
+            .is_some_and(|player| !player.unit().world().object().is_in_world())
+        {
+            return None;
+        }
+        let record = map.map().map_object_record(guid)?;
+        let creature = if guid.is_pet() {
+            record.pet()?.creature()
+        } else {
+            record.creature()?
+        };
 
         let type_flags =
             CreatureTypeFlags::from_bits_retain(creature.lifecycle_metadata().type_flags);
@@ -4848,7 +4887,10 @@ impl WorldSession {
         if !creature.is_alive() && !type_flags.contains(CreatureTypeFlags::INTERACT_WHILE_DEAD) {
             return None;
         }
-        if npc_flags != 0 && (creature.ai_ownership().npc_flags & npc_flags) == 0 {
+        if (npc_flags != 0 || npc_flags2 != 0)
+            && (creature.ai_ownership().npc_flags & npc_flags) == 0
+            && (creature.ai_ownership().npc_flags2 & npc_flags2) == 0
+        {
             return None;
         }
         if creature.unit().subsystems().control.charmer_guid.is_some() {
@@ -4907,6 +4949,7 @@ impl WorldSession {
             entry: creature.entry(),
             position: creature.unit().world().position(),
             npc_flags: creature.ai_ownership().npc_flags,
+            npc_flags2: creature.ai_ownership().npc_flags2,
             faction_template_id: creature.unit().data().faction_template.max(0) as u32,
         })
     }
@@ -6693,6 +6736,49 @@ impl WorldSession {
                 .repair_inventory_item_durability_like_cpp(item_guid, false, 0.0, repair_cost_rate)
                 .await;
         }
+        repaired_any || total_cost == 0
+    }
+
+    /// C++ `Player::DurabilityRepairAll(takeCost=true, guildBank=true)` for represented items.
+    pub(crate) async fn repair_all_inventory_item_durability_with_guild_bank_like_cpp(
+        &mut self,
+        discount: f32,
+        repair_cost_rate: f32,
+    ) -> bool {
+        let Some(guild_bank_state) = self.represented_guild_repair_bank_state_like_cpp else {
+            return false;
+        };
+        let available_guild_money = guild_bank_state.available_repair_money;
+        if available_guild_money == 0 {
+            return false;
+        }
+
+        let mut repair_items =
+            self.repairable_inventory_item_costs_like_cpp(discount, repair_cost_rate);
+        repair_items.sort_by_key(|(_, cost)| *cost);
+
+        let mut total_cost = 0u64;
+        let mut repaired_any = false;
+        for (item_guid, cost) in repair_items {
+            let new_total_cost = total_cost.saturating_add(cost);
+            if new_total_cost > available_guild_money || new_total_cost > MAX_MONEY_AMOUNT {
+                break;
+            }
+
+            total_cost = new_total_cost;
+            repaired_any |= self
+                .repair_inventory_item_durability_like_cpp(item_guid, false, 0.0, repair_cost_rate)
+                .await;
+        }
+
+        let withdraw_amount = total_cost.min(MAX_MONEY_AMOUNT);
+        self.represented_guild_repair_bank_withdraws_like_cpp.push(
+            RepresentedGuildRepairBankWithdrawLikeCpp {
+                amount: withdraw_amount,
+                repair: true,
+                success: guild_bank_state.withdraw_repair_money_allowed,
+            },
+        );
         repaired_any || total_cost == 0
     }
 
@@ -13824,6 +13910,21 @@ impl WorldSession {
         &self.represented_item_mod_reapply_events_like_cpp
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_represented_guild_repair_bank_state_like_cpp(
+        &mut self,
+        state: Option<RepresentedGuildRepairBankStateLikeCpp>,
+    ) {
+        self.represented_guild_repair_bank_state_like_cpp = state;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn represented_guild_repair_bank_withdraws_like_cpp(
+        &self,
+    ) -> &[RepresentedGuildRepairBankWithdrawLikeCpp] {
+        &self.represented_guild_repair_bank_withdraws_like_cpp
+    }
+
     fn complete_represented_creature_death_state_after_kill_hooks_like_cpp(
         &mut self,
         attacker_guid: ObjectGuid,
@@ -16278,6 +16379,7 @@ impl WorldSession {
             let Some(access) = self.represented_npc_can_interact_with_like_cpp(
                 source_guid,
                 NPCFlags1::QUEST_GIVER.bits(),
+                0,
             ) else {
                 debug!(
                     account = self.account_id,
@@ -16328,6 +16430,7 @@ impl WorldSession {
             let Some(access) = self.represented_npc_can_interact_with_like_cpp(
                 source_guid,
                 NPCFlags1::QUEST_GIVER.bits(),
+                0,
             ) else {
                 debug!(
                     account = self.account_id,
@@ -16394,6 +16497,7 @@ impl WorldSession {
             let Some(access) = self.represented_npc_can_interact_with_like_cpp(
                 source_guid,
                 NPCFlags1::QUEST_GIVER.bits(),
+                0,
             ) else {
                 debug!(
                     account = self.account_id,
@@ -28280,6 +28384,8 @@ mod tests {
         let player_guid = ObjectGuid::create_player(1, 42);
         let trainer_guid = test_creature_guid(10);
         let vendor_guid = test_creature_guid(11);
+        let pet_guid =
+            ObjectGuid::create_world_object(wow_core::guid::HighGuid::Pet, 0, 1, 571, 0, 502, 12);
 
         session.set_canonical_map_manager(Arc::clone(&canonical));
         session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
@@ -28319,6 +28425,64 @@ mod tests {
             Position::new(14.0, 0.0, 0.0, 0.0),
             wow_constants::unit::NPCFlags1::VENDOR.bits(),
         );
+        {
+            let mut canonical = canonical.lock().unwrap();
+            let managed = canonical.find_map_mut(571, 0).unwrap();
+            managed
+                .map_mut()
+                .get_typed_creature_mut(vendor_guid)
+                .unwrap()
+                .set_npc_flags2_runtime_like_cpp(
+                    wow_constants::unit::NPCFlags2::TRADESKILL_NPC.bits(),
+                );
+        }
+        {
+            let mut pet = wow_entities::Pet::new(player_guid, wow_entities::PetType::Summon);
+            pet.creature_mut()
+                .unit_mut()
+                .world_mut()
+                .object_mut()
+                .create(pet_guid);
+            pet.creature_mut()
+                .unit_mut()
+                .world_mut()
+                .object_mut()
+                .set_entry(502);
+            pet.creature_mut()
+                .unit_mut()
+                .world_mut()
+                .set_map(571, 0)
+                .unwrap();
+            pet.creature_mut()
+                .unit_mut()
+                .world_mut()
+                .relocate(Position::new(14.0, 1.0, 0.0, 0.0));
+            pet.creature_mut()
+                .unit_mut()
+                .world_mut()
+                .set_combat_reach(1.0);
+            pet.creature_mut().unit_mut().set_level(80);
+            pet.creature_mut().unit_mut().set_max_health(100);
+            pet.creature_mut().unit_mut().set_health(100);
+            pet.creature_mut().set_ai_identity_runtime(
+                1,
+                35,
+                wow_constants::unit::NPCFlags1::TRAINER.bits(),
+                0,
+            );
+            pet.creature_mut()
+                .unit_mut()
+                .world_mut()
+                .object_mut()
+                .add_to_world();
+            canonical
+                .lock()
+                .unwrap()
+                .create_world_map(571, 0)
+                .map_mut()
+                .insert_map_object_record(wow_entities::MapObjectRecord::new_pet(pet).unwrap())
+                .unwrap();
+        }
 
         assert_eq!(
             session.canonical_creature_access_like_cpp(trainer_guid),
@@ -28326,6 +28490,7 @@ mod tests {
                 entry: 500,
                 position: Position::new(14.0, 0.0, 0.0, 0.0),
                 npc_flags: wow_constants::unit::NPCFlags1::TRAINER.bits(),
+                npc_flags2: 0,
                 faction_template_id: 35,
             })
         );
@@ -28333,20 +28498,73 @@ mod tests {
             session.represented_npc_can_interact_with_like_cpp(
                 trainer_guid,
                 wow_constants::unit::NPCFlags1::TRAINER.bits(),
+                0,
             ),
             Some(RepresentedCreatureAccessLikeCpp {
                 entry: 500,
                 position: Position::new(14.0, 0.0, 0.0, 0.0),
                 npc_flags: wow_constants::unit::NPCFlags1::TRAINER.bits(),
+                npc_flags2: 0,
                 faction_template_id: 35,
             })
         );
         assert_eq!(
             session.represented_npc_can_interact_with_like_cpp(
-                vendor_guid,
+                pet_guid,
                 wow_constants::unit::NPCFlags1::TRAINER.bits(),
+                0,
+            ),
+            Some(RepresentedCreatureAccessLikeCpp {
+                entry: 502,
+                position: Position::new(14.0, 1.0, 0.0, 0.0),
+                npc_flags: wow_constants::unit::NPCFlags1::TRAINER.bits(),
+                npc_flags2: 0,
+                faction_template_id: 35,
+            })
+        );
+        session
+            .mutate_canonical_player_like_cpp(|player| {
+                player
+                    .unit_mut()
+                    .world_mut()
+                    .object_mut()
+                    .remove_from_world();
+            })
+            .unwrap();
+        assert_eq!(
+            session.represented_npc_can_interact_with_like_cpp(
+                trainer_guid,
+                wow_constants::unit::NPCFlags1::TRAINER.bits(),
+                0,
             ),
             None
+        );
+        session
+            .mutate_canonical_player_like_cpp(|player| {
+                player.unit_mut().world_mut().object_mut().add_to_world();
+            })
+            .unwrap();
+        assert_eq!(
+            session.represented_npc_can_interact_with_like_cpp(
+                vendor_guid,
+                wow_constants::unit::NPCFlags1::TRAINER.bits(),
+                0,
+            ),
+            None
+        );
+        assert_eq!(
+            session.represented_npc_can_interact_with_like_cpp(
+                vendor_guid,
+                0,
+                wow_constants::unit::NPCFlags2::TRADESKILL_NPC.bits(),
+            ),
+            Some(RepresentedCreatureAccessLikeCpp {
+                entry: 501,
+                position: Position::new(14.0, 0.0, 0.0, 0.0),
+                npc_flags: wow_constants::unit::NPCFlags1::VENDOR.bits(),
+                npc_flags2: wow_constants::unit::NPCFlags2::TRADESKILL_NPC.bits(),
+                faction_template_id: 35,
+            })
         );
 
         session.set_taxi_flight_state_like_cpp(
@@ -28361,6 +28579,7 @@ mod tests {
             session.represented_npc_can_interact_with_like_cpp(
                 trainer_guid,
                 wow_constants::unit::NPCFlags1::TRAINER.bits(),
+                0,
             ),
             None
         );
@@ -28371,6 +28590,7 @@ mod tests {
             session.represented_npc_can_interact_with_like_cpp(
                 trainer_guid,
                 wow_constants::unit::NPCFlags1::TRAINER.bits(),
+                0,
             ),
             None
         );
@@ -28392,6 +28612,7 @@ mod tests {
             session.represented_npc_can_interact_with_like_cpp(
                 trainer_guid,
                 wow_constants::unit::NPCFlags1::TRAINER.bits(),
+                0,
             ),
             None
         );
@@ -28419,6 +28640,7 @@ mod tests {
             session.represented_npc_can_interact_with_like_cpp(
                 trainer_guid,
                 wow_constants::unit::NPCFlags1::TRAINER.bits(),
+                0,
             ),
             None
         );
@@ -28437,11 +28659,13 @@ mod tests {
             session.represented_npc_can_interact_with_like_cpp(
                 trainer_guid,
                 wow_constants::unit::NPCFlags1::TRAINER.bits(),
+                0,
             ),
             Some(RepresentedCreatureAccessLikeCpp {
                 entry: 500,
                 position: Position::new(14.0, 0.0, 0.0, 0.0),
                 npc_flags: wow_constants::unit::NPCFlags1::TRAINER.bits(),
+                npc_flags2: 0,
                 faction_template_id: 35,
             })
         );
@@ -28459,6 +28683,7 @@ mod tests {
             session.represented_npc_can_interact_with_like_cpp(
                 trainer_guid,
                 wow_constants::unit::NPCFlags1::TRAINER.bits(),
+                0,
             ),
             None
         );
@@ -36310,6 +36535,252 @@ mod tests {
                 .data()
                 .durability,
             10
+        );
+    }
+
+    #[tokio::test]
+    async fn repair_all_inventory_item_durability_uses_guild_bank_limit_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let weapon_guid = ObjectGuid::create_item(1, 900);
+        let bag_guid = ObjectGuid::create_item(1, 901);
+        let armor_guid = ObjectGuid::create_item(1, 902);
+        session.set_player_guid(Some(player_guid));
+        session.set_player_gold_like_cpp(500);
+        session.set_item_store(Arc::new(ItemStore::from_records([
+            ItemRecord {
+                id: 100,
+                class_id: ItemClass::Weapon as u8,
+                subclass_id: 7,
+                material: 0,
+                inventory_type: InventoryType::Weapon as i8,
+                sheathe_type: 0,
+                random_select: 0,
+                random_suffix_group_id: 0,
+            },
+            ItemRecord {
+                id: 101,
+                class_id: ItemClass::Armor as u8,
+                subclass_id: 4,
+                material: 0,
+                inventory_type: InventoryType::Chest as i8,
+                sheathe_type: 0,
+                random_select: 0,
+                random_suffix_group_id: 0,
+            },
+            ItemRecord {
+                id: 200,
+                class_id: ItemClass::Container as u8,
+                subclass_id: 0,
+                material: 0,
+                inventory_type: InventoryType::Bag as i8,
+                sheathe_type: 0,
+                random_select: 0,
+                random_suffix_group_id: 0,
+            },
+        ])));
+        let sparse = |inventory_type: InventoryType, max_durability: u32| ItemSparseTemplateEntry {
+            flags: [0; 4],
+            bag_family: 0,
+            start_quest_id: 0,
+            stackable: 1,
+            max_count: 0,
+            lock_id: 0,
+            required_reputation_rank: 0,
+            sell_price: 0,
+            buy_price: 0,
+            vendor_stack_count: 1,
+            price_variance: 1.0,
+            price_random_value: 0.0,
+            max_durability,
+            limit_category: 0,
+            instance_bound: 0,
+            zone_bound: [0; 2],
+            required_reputation_faction: 0,
+            allowable_class: 0,
+            required_expansion: 0,
+            bonding: ItemBondingType::None as u8,
+            container_slots: if inventory_type == InventoryType::Bag {
+                4
+            } else {
+                0
+            },
+            inventory_type: inventory_type as i8,
+        };
+        session.set_item_stats_store(Arc::new(
+            ItemStatsStore::from_sparse_and_random_property_templates(
+                [
+                    (100, sparse(InventoryType::Weapon, 50)),
+                    (101, sparse(InventoryType::Chest, 13)),
+                    (200, sparse(InventoryType::Bag, 0)),
+                ],
+                [
+                    (
+                        100,
+                        ItemRandomPropertyTemplateEntry {
+                            item_level: 57,
+                            quality: ItemQuality::Rare as i8,
+                            inventory_type: InventoryType::Weapon as i8,
+                        },
+                    ),
+                    (
+                        101,
+                        ItemRandomPropertyTemplateEntry {
+                            item_level: 57,
+                            quality: ItemQuality::Rare as i8,
+                            inventory_type: InventoryType::Chest as i8,
+                        },
+                    ),
+                    (
+                        200,
+                        ItemRandomPropertyTemplateEntry {
+                            item_level: 57,
+                            quality: ItemQuality::Normal as i8,
+                            inventory_type: InventoryType::Bag as i8,
+                        },
+                    ),
+                ],
+            ),
+        ));
+        session.set_durability_costs_store(Arc::new(DurabilityCostsStore::from_entries([
+            DurabilityCostsEntry {
+                id: 57,
+                weapon_sub_class_cost: std::array::from_fn(|i| if i == 7 { 13 } else { 0 }),
+                armor_sub_class_cost: std::array::from_fn(|i| if i == 4 { 5 } else { 0 }),
+            },
+        ])));
+        session.set_durability_quality_store(Arc::new(DurabilityQualityStore::from_entries([
+            DurabilityQualityEntry {
+                id: (ItemQuality::Rare as u32 + 1) * 2,
+                data: 1.25,
+            },
+        ])));
+        session.inventory_items.insert(
+            EQUIPMENT_SLOT_MAINHAND,
+            InventoryItem {
+                guid: weapon_guid,
+                entry_id: 100,
+                db_guid: weapon_guid.counter() as u64,
+                inventory_type: Some(InventoryType::Weapon as u8),
+            },
+        );
+        session.inventory_items.insert(
+            INVENTORY_SLOT_BAG_START,
+            InventoryItem {
+                guid: bag_guid,
+                entry_id: 200,
+                db_guid: bag_guid.counter() as u64,
+                inventory_type: Some(InventoryType::Bag as u8),
+            },
+        );
+        let weapon = session.make_inventory_item_object(
+            weapon_guid,
+            100,
+            player_guid,
+            1,
+            40,
+            ItemContext::None,
+            EQUIPMENT_SLOT_MAINHAND,
+        );
+        let bag = session.make_inventory_item_object(
+            bag_guid,
+            200,
+            player_guid,
+            1,
+            0,
+            ItemContext::None,
+            INVENTORY_SLOT_BAG_START,
+        );
+        let mut armor = session.make_inventory_item_object(
+            armor_guid,
+            101,
+            player_guid,
+            1,
+            10,
+            ItemContext::None,
+            0,
+        );
+        armor.set_container_guid_and_slot(bag_guid, 0);
+        session.insert_inventory_item_object(weapon);
+        session.insert_inventory_item_object(bag);
+        session.insert_inventory_item_object(armor);
+
+        session.set_represented_guild_repair_bank_state_like_cpp(Some(
+            RepresentedGuildRepairBankStateLikeCpp {
+                available_repair_money: 40,
+                withdraw_repair_money_allowed: true,
+            },
+        ));
+        assert!(
+            session
+                .repair_all_inventory_item_durability_with_guild_bank_like_cpp(0.8, 2.0)
+                .await
+        );
+        assert_eq!(session.player_gold_like_cpp(), 500);
+        assert_eq!(
+            session.inventory_item_objects_like_cpp()[&armor_guid]
+                .data()
+                .durability,
+            13
+        );
+        assert_eq!(
+            session.inventory_item_objects_like_cpp()[&weapon_guid]
+                .data()
+                .durability,
+            40
+        );
+        assert_eq!(
+            session.represented_guild_repair_bank_withdraws_like_cpp(),
+            &[RepresentedGuildRepairBankWithdrawLikeCpp {
+                amount: 30,
+                repair: true,
+                success: true,
+            }]
+        );
+
+        session
+            .inventory_item_objects
+            .get_mut(&weapon_guid)
+            .unwrap()
+            .set_durability(40);
+        session
+            .inventory_item_objects
+            .get_mut(&armor_guid)
+            .unwrap()
+            .set_durability(10);
+        session.set_represented_guild_repair_bank_state_like_cpp(Some(
+            RepresentedGuildRepairBankStateLikeCpp {
+                available_repair_money: 500,
+                withdraw_repair_money_allowed: false,
+            },
+        ));
+        assert!(
+            session
+                .repair_all_inventory_item_durability_with_guild_bank_like_cpp(0.8, 2.0)
+                .await
+        );
+        assert_eq!(session.player_gold_like_cpp(), 500);
+        assert_eq!(
+            session.inventory_item_objects_like_cpp()[&armor_guid]
+                .data()
+                .durability,
+            13
+        );
+        assert_eq!(
+            session.inventory_item_objects_like_cpp()[&weapon_guid]
+                .data()
+                .durability,
+            50
+        );
+        assert_eq!(
+            session
+                .represented_guild_repair_bank_withdraws_like_cpp()
+                .last(),
+            Some(&RepresentedGuildRepairBankWithdrawLikeCpp {
+                amount: 290,
+                repair: true,
+                success: false,
+            })
         );
     }
 
