@@ -37,7 +37,8 @@ use wow_network::world_socket::{AccountInfo, AccountLookup};
 use wow_network::{
     GameEventQuestCompleteCommandLikeCpp, GameEventQuestCompleteResponseLikeCpp, GroupRegistry,
     LootDropRatesLikeCpp, PendingInvites, PlayerRegistry, ReputationRatesLikeCpp,
-    ResetSeasonalQuestStatusCommand, SessionCommand, SessionResources,
+    ResetSeasonalQuestStatusCommand, SendVisibleObjectValuesUpdateCommand, SessionCommand,
+    SessionResources,
 };
 use wow_packet::{
     ServerPacket,
@@ -49,6 +50,7 @@ use wow_world::{
     conditions::{
         ConditionMapRef, ConditionMapStateSnapshot, is_spawn_group_meeting_map_conditions_like_cpp,
     },
+    entity_update_bridge::unit_values_update_to_update_object,
 };
 
 mod creature_loaded_grid;
@@ -4012,6 +4014,15 @@ struct GameEventLiveUpdateSideEffectSummaryLikeCpp {
     update_npc_flags_stale_index_or_wrong_kind: usize,
     update_npc_flags_low_applied: usize,
     update_npc_flags2_applied: usize,
+    update_npc_flags_values_updates_built: usize,
+    update_npc_flags_values_update_empty: usize,
+    update_npc_flags_values_update_map_id_out_of_range: usize,
+    update_npc_flags_values_update_registry_missing: usize,
+    update_npc_flags_values_update_not_in_world_skipped: usize,
+    update_npc_flags_values_update_wrong_map_skipped: usize,
+    update_npc_flags_values_update_send_attempted: usize,
+    update_npc_flags_values_update_send_queued: usize,
+    update_npc_flags_values_update_send_failed: usize,
     update_npc_vendor_actions: usize,
     update_npc_vendor_records_seen: usize,
     update_npc_vendor_items_added: usize,
@@ -4356,9 +4367,59 @@ fn game_event_change_equip_or_model_like_cpp(
     summary
 }
 
+fn fanout_game_event_npc_flag_values_update_to_visible_sessions_like_cpp(
+    player_registry: Option<&PlayerRegistry>,
+    values_update: &wow_map::GameEventNpcFlagValuesUpdateLikeCpp,
+    summary: &mut GameEventLiveUpdateSideEffectSummaryLikeCpp,
+) {
+    let Ok(map_id) = u16::try_from(values_update.map_id) else {
+        summary.update_npc_flags_values_update_map_id_out_of_range += 1;
+        return;
+    };
+    let Some(update) = unit_values_update_to_update_object(
+        values_update.guid,
+        map_id,
+        &values_update.values_update,
+    ) else {
+        summary.update_npc_flags_values_update_empty += 1;
+        return;
+    };
+    summary.update_npc_flags_values_updates_built += 1;
+
+    let Some(player_registry) = player_registry else {
+        summary.update_npc_flags_values_update_registry_missing += 1;
+        return;
+    };
+
+    let packet_bytes = update.to_bytes();
+    for session in player_registry.iter() {
+        if !session.is_in_world {
+            summary.update_npc_flags_values_update_not_in_world_skipped += 1;
+            continue;
+        }
+        if session.map_id != map_id {
+            summary.update_npc_flags_values_update_wrong_map_skipped += 1;
+            continue;
+        }
+
+        summary.update_npc_flags_values_update_send_attempted += 1;
+        let command =
+            SessionCommand::SendVisibleObjectValuesUpdate(SendVisibleObjectValuesUpdateCommand {
+                object_guid: values_update.guid,
+                map_id,
+                packet_bytes: packet_bytes.clone(),
+            });
+        match session.command_tx.try_send(command) {
+            Ok(()) => summary.update_npc_flags_values_update_send_queued += 1,
+            Err(_) => summary.update_npc_flags_values_update_send_failed += 1,
+        }
+    }
+}
+
 fn game_event_update_npc_flags_like_cpp(
     manager: &mut wow_map::MapManager,
     canonical_spawn_metadata: &spawn_store_loader::CanonicalSpawnMetadataLikeCpp,
+    player_registry: Option<&PlayerRegistry>,
     event_id: u16,
     active_event_ids: &[u16],
 ) -> GameEventLiveUpdateSideEffectSummaryLikeCpp {
@@ -4398,6 +4459,13 @@ fn game_event_update_npc_flags_like_cpp(
                     outcome.stale_index_or_wrong_kind;
                 summary.update_npc_flags_low_applied += outcome.npc_flags_low_applied;
                 summary.update_npc_flags2_applied += outcome.npc_flags2_applied;
+                for values_update in &outcome.values_updates {
+                    fanout_game_event_npc_flag_values_update_to_visible_sessions_like_cpp(
+                        player_registry,
+                        values_update,
+                        &mut summary,
+                    );
+                }
             }
         });
         summary.update_npc_flags_maps_matched += maps_matched_for_record;
@@ -4801,6 +4869,7 @@ fn consume_game_event_live_update_side_effects_like_cpp(
                 let npc_flag_summary = game_event_update_npc_flags_like_cpp(
                     manager,
                     canonical_spawn_metadata,
+                    player_registry,
                     event_id,
                     active_event_ids,
                 );
@@ -4824,6 +4893,24 @@ fn consume_game_event_live_update_side_effects_like_cpp(
                 summary.update_npc_flags_low_applied +=
                     npc_flag_summary.update_npc_flags_low_applied;
                 summary.update_npc_flags2_applied += npc_flag_summary.update_npc_flags2_applied;
+                summary.update_npc_flags_values_updates_built +=
+                    npc_flag_summary.update_npc_flags_values_updates_built;
+                summary.update_npc_flags_values_update_empty +=
+                    npc_flag_summary.update_npc_flags_values_update_empty;
+                summary.update_npc_flags_values_update_map_id_out_of_range +=
+                    npc_flag_summary.update_npc_flags_values_update_map_id_out_of_range;
+                summary.update_npc_flags_values_update_registry_missing +=
+                    npc_flag_summary.update_npc_flags_values_update_registry_missing;
+                summary.update_npc_flags_values_update_not_in_world_skipped +=
+                    npc_flag_summary.update_npc_flags_values_update_not_in_world_skipped;
+                summary.update_npc_flags_values_update_wrong_map_skipped +=
+                    npc_flag_summary.update_npc_flags_values_update_wrong_map_skipped;
+                summary.update_npc_flags_values_update_send_attempted +=
+                    npc_flag_summary.update_npc_flags_values_update_send_attempted;
+                summary.update_npc_flags_values_update_send_queued +=
+                    npc_flag_summary.update_npc_flags_values_update_send_queued;
+                summary.update_npc_flags_values_update_send_failed +=
+                    npc_flag_summary.update_npc_flags_values_update_send_failed;
             }
             GameEventLiveUpdateActionLikeCpp::UpdateNpcVendor { event_id, activate } => {
                 let npc_vendor_summary = game_event_update_npc_vendor_like_cpp(
@@ -11957,7 +12044,8 @@ mmap.enablePathFinding = 0
             spawn_store_loader::CanonicalSpawnMetadataLikeCpp::new(store, BTreeMap::new())
                 .with_game_event_npc_flags_like_cpp(npc_flags);
 
-        let summary = game_event_update_npc_flags_like_cpp(&mut manager, &metadata, 1, &[1, 2]);
+        let summary =
+            game_event_update_npc_flags_like_cpp(&mut manager, &metadata, None, 1, &[1, 2]);
 
         assert_eq!(summary.update_npc_flags_records_seen, 1);
         assert_eq!(summary.update_npc_flags_template_npcflag_missing, 1);
@@ -11967,6 +12055,58 @@ mmap.enablePathFinding = 0
         assert_eq!(summary.update_npc_flags2_applied, 1);
         assert_eq!(live_npc_flags_like_cpp(&manager, 1, spawn_id), 0x60);
         assert_eq!(live_npc_flags2_like_cpp(&manager, 1, spawn_id), 0x1);
+    }
+
+    #[test]
+    fn game_event_npc_flag_update_queues_visible_session_update_command_like_cpp() {
+        let mut manager = wow_map::MapManager::default();
+        manager.create_world_map(1, 0);
+        let spawn_id = 547102;
+        let creature_guid = test_guid_like_cpp(HighGuid::Creature, 547102, 99);
+        insert_live_creature_for_spawn_like_cpp(&mut manager, 1, spawn_id, 547102);
+        let mut store = SpawnStore::new();
+        add_spawn_data_like_cpp(&mut store, SpawnObjectType::Creature, spawn_id, 1);
+        let mut npc_flags =
+            spawn_store_loader::GameEventNpcFlagsLikeCpp::from_game_event_max_entry_like_cpp(Some(
+                1,
+            ));
+        assert!(npc_flags.push_record_like_cpp(
+            1,
+            spawn_store_loader::GameEventNpcFlagRecordLikeCpp {
+                spawn_id,
+                npcflag: 0x1_0000_0040,
+            },
+        ));
+        let metadata =
+            spawn_store_loader::CanonicalSpawnMetadataLikeCpp::new(store, BTreeMap::new())
+                .with_game_event_npc_flags_like_cpp(npc_flags);
+        let registry = PlayerRegistry::new();
+        let (send_tx, send_rx) = flume::bounded(1);
+        let (command_tx, command_rx) = flume::bounded(1);
+        insert_player_broadcast_fixture_like_cpp(&registry, 7201, send_tx, command_tx);
+        let player_guid = ObjectGuid::create_player(1, 7201);
+        registry
+            .get_mut(&player_guid)
+            .expect("player registry row")
+            .map_id = 1;
+
+        let summary =
+            game_event_update_npc_flags_like_cpp(&mut manager, &metadata, Some(&registry), 1, &[1]);
+
+        assert_eq!(summary.update_npc_flags_live_creatures_mutated, 1);
+        assert_eq!(summary.update_npc_flags_values_updates_built, 1);
+        assert_eq!(summary.update_npc_flags_values_update_send_attempted, 1);
+        assert_eq!(summary.update_npc_flags_values_update_send_queued, 1);
+        assert!(send_rx.try_recv().is_err());
+        let command = command_rx.try_recv().expect("visible update command");
+        match command {
+            SessionCommand::SendVisibleObjectValuesUpdate(command) => {
+                assert_eq!(command.object_guid, creature_guid);
+                assert_eq!(command.map_id, 1);
+                assert!(!command.packet_bytes.is_empty());
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 
     #[test]
@@ -12000,12 +12140,13 @@ mmap.enablePathFinding = 0
                 .with_game_event_npc_flags_like_cpp(npc_flags);
 
         let start_summary =
-            game_event_update_npc_flags_like_cpp(&mut manager, &metadata, 1, &[1, 2]);
+            game_event_update_npc_flags_like_cpp(&mut manager, &metadata, None, 1, &[1, 2]);
         assert_eq!(start_summary.update_npc_flags_live_creatures_mutated, 1);
         assert_eq!(start_summary.update_npc_flags_template_npcflag_missing, 1);
         assert_eq!(live_npc_flags_like_cpp(&manager, 1, spawn_id), 0x60);
 
-        let stop_summary = game_event_update_npc_flags_like_cpp(&mut manager, &metadata, 1, &[2]);
+        let stop_summary =
+            game_event_update_npc_flags_like_cpp(&mut manager, &metadata, None, 1, &[2]);
 
         assert_eq!(stop_summary.update_npc_flags_records_seen, 1);
         assert_eq!(stop_summary.update_npc_flags_template_npcflag_missing, 1);

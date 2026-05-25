@@ -21,8 +21,16 @@ pub enum SessionCommand {
     LootRollStoreWinner(LootRollStoreWinnerCommand),
     LootRollVote(LootRollVoteCommand),
     ResetSeasonalQuestStatus(ResetSeasonalQuestStatusCommand),
+    SendVisibleObjectValuesUpdate(SendVisibleObjectValuesUpdateCommand),
     SetQuestSharingInfoAndSendDetails(SetQuestSharingInfoAndSendDetailsCommand),
     SendRepeatableTurnInRequestItemsLikeCpp(SendRepeatableTurnInRequestItemsLikeCppCommand),
+}
+
+#[derive(Clone, Debug)]
+pub struct SendVisibleObjectValuesUpdateCommand {
+    pub object_guid: ObjectGuid,
+    pub map_id: u16,
+    pub packet_bytes: Vec<u8>,
 }
 
 #[derive(Clone, Debug)]

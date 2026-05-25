@@ -20878,6 +20878,7 @@ mod tests {
     use wow_network::{
         GameEventQuestCompleteClientOutcomeLikeCpp, GameEventQuestCompleteResponseLikeCpp,
         GroupInfo, PendingInvites, PlayerBroadcastInfo, ResetSeasonalQuestStatusCommand,
+        SendVisibleObjectValuesUpdateCommand,
     };
     use wow_packet::ServerPacket;
     use wow_packet::packets::loot::{
@@ -21256,6 +21257,52 @@ mod tests {
             .expect("bucket kept");
         assert_eq!(bucket.get(&1001), None);
         assert_eq!(bucket.get(&1002), Some(&100));
+    }
+
+    #[tokio::test]
+    async fn visible_object_values_update_command_sends_only_when_visible_like_cpp() {
+        let (mut session, _, send_rx) = make_session();
+        let object_guid =
+            ObjectGuid::create_world_object(HighGuid::Creature, 0, 1, 571, 0, 777, 9901);
+        let packet_bytes = vec![0x34, 0x12, 0xAA, 0xBB];
+        session.state = SessionState::LoggedIn;
+        session.set_player_map_position_like_cpp(571, Position::ZERO);
+
+        session
+            .session_command_tx()
+            .try_send(SessionCommand::SendVisibleObjectValuesUpdate(
+                SendVisibleObjectValuesUpdateCommand {
+                    object_guid,
+                    map_id: 571,
+                    packet_bytes: packet_bytes.clone(),
+                },
+            ))
+            .expect("command queued");
+        session
+            .process_represented_session_commands_like_cpp()
+            .await;
+        assert!(send_rx.try_recv().is_err());
+
+        session.client_visible_guids_like_cpp.insert(object_guid);
+        session
+            .session_command_tx()
+            .try_send(SessionCommand::SendVisibleObjectValuesUpdate(
+                SendVisibleObjectValuesUpdateCommand {
+                    object_guid,
+                    map_id: 571,
+                    packet_bytes: packet_bytes.clone(),
+                },
+            ))
+            .expect("command queued");
+        session
+            .process_represented_session_commands_like_cpp()
+            .await;
+
+        assert_eq!(
+            send_rx.try_recv().expect("visible object update"),
+            packet_bytes
+        );
+        assert!(send_rx.try_recv().is_err());
     }
 
     fn expected_active_player_farsight_object_values_update_like_cpp(
