@@ -17,8 +17,8 @@
 
 use std::sync::Arc;
 use tracing::{debug, info, warn};
-use wow_constants::ClientOpcodes;
 use wow_constants::unit::NPCFlags1;
+use wow_constants::{ClientOpcodes, InventoryResult};
 use wow_core::ObjectGuid;
 use wow_data::DISABLE_TYPE_QUEST;
 use wow_handler::{PacketHandlerEntry, PacketProcessing, SessionStatus};
@@ -696,6 +696,7 @@ impl WorldSession {
         let record = |session: &mut WorldSession,
                       reason: RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp,
                       can_add_source_item_unrepresented: bool,
+                      can_add_source_item_result: Option<InventoryResult>,
                       add_quest_runtime_unrepresented: bool,
                       source_spell_unrepresented: bool| {
             session.record_represented_quest_confirm_accept_like_cpp(
@@ -708,6 +709,7 @@ impl WorldSession {
                     object_accessor_unrepresented: true,
                     party_runtime_unrepresented: true,
                     can_add_source_item_unrepresented,
+                    can_add_source_item_result,
                     add_quest_runtime_unrepresented,
                     source_spell_unrepresented,
                 },
@@ -719,6 +721,7 @@ impl WorldSession {
                 self,
                 RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::OriginalPlayerMissing,
                 false,
+                None,
                 false,
                 false,
             );
@@ -733,6 +736,7 @@ impl WorldSession {
                 self,
                 RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::OriginalPlayerMissing,
                 false,
+                None,
                 false,
                 false,
             );
@@ -744,6 +748,7 @@ impl WorldSession {
                 self,
                 RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::NotInSameRaid,
                 false,
+                None,
                 false,
                 false,
             );
@@ -755,6 +760,7 @@ impl WorldSession {
                 self,
                 RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::NotInSameRaid,
                 false,
+                None,
                 false,
                 false,
             );
@@ -770,6 +776,7 @@ impl WorldSession {
                 self,
                 RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::NotInSameRaid,
                 false,
+                None,
                 false,
                 false,
             );
@@ -788,6 +795,7 @@ impl WorldSession {
                 self,
                 RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::OriginalPlayerNotActiveQuest,
                 false,
+                None,
                 false,
                 false,
             );
@@ -799,6 +807,7 @@ impl WorldSession {
                 self,
                 RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::ReceiverCanTakeQuestFailed,
                 false,
+                None,
                 false,
                 false,
             );
@@ -810,18 +819,77 @@ impl WorldSession {
                 self,
                 RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::ReceiverCanAddQuestLogFull,
                 false,
+                None,
                 false,
                 false,
             );
             return;
         }
 
+        if quest.source_item_id > 0 {
+            let Some(source_item_template) = self.item_storage_template(quest.source_item_id)
+            else {
+                let source_item_result = InventoryResult::ItemNotFound;
+                self.send_equip_error(source_item_result, None, None, 0, 0);
+                record(
+                    self,
+                    RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::ReceiverCanAddQuestSourceItemFailed,
+                    false,
+                    Some(source_item_result),
+                    false,
+                    false,
+                );
+                return;
+            };
+
+            if source_item_template.item_limit_category != 0 {
+                record(
+                    self,
+                    RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::ReceiverCanAddQuestSourceItemLimitCategoryUnrepresented,
+                    true,
+                    None,
+                    false,
+                    false,
+                );
+                return;
+            }
+
+            let source_item_count = quest.source_item_count.max(1);
+            let source_item_result = self
+                .plan_store_new_direct_inventory_item(quest.source_item_id, source_item_count)
+                .map(|(result, _dest, _no_space_count)| result)
+                .unwrap_or(InventoryResult::ItemNotFound);
+
+            if !matches!(
+                source_item_result,
+                InventoryResult::Ok | InventoryResult::ItemMaxCount
+            ) {
+                self.send_equip_error(
+                    source_item_result,
+                    None,
+                    None,
+                    0,
+                    u32::from(source_item_template.item_limit_category),
+                );
+                record(
+                    self,
+                    RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::ReceiverCanAddQuestSourceItemFailed,
+                    false,
+                    Some(source_item_result),
+                    false,
+                    false,
+                );
+                return;
+            }
+        }
+
         record(
             self,
             RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::AddQuestRuntimeUnrepresented,
+            false,
+            None,
             true,
-            true,
-            true,
+            quest.source_spell_id > 0,
         );
     }
 
@@ -2862,6 +2930,8 @@ impl RepresentedQuestGiverStatusSourceLikeCpp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::InventoryItem;
+    use wow_constants::{InventoryType, ItemBondingType, ItemClass, ItemContext};
     use wow_core::guid::HighGuid;
     use wow_core::{ObjectGuid, Position};
     use wow_data::quest::{
@@ -2870,8 +2940,10 @@ mod tests {
         QUEST_SPECIAL_FLAGS_DF_QUEST_LIKE_CPP, QuestObjective, QuestPoolMemberRowLikeCpp,
         QuestPoolSavedActiveRowLikeCpp, QuestPoolStoreLikeCpp, QuestStore, QuestTemplate,
     };
+    use wow_data::{ItemRecord, ItemSparseTemplateEntry, ItemStatsStore, ItemStore};
     use wow_network::{GroupInfo, GroupRegistry, PendingInvites, PlayerRegistry};
     use wow_packet::WorldPacket;
+    use wow_packet::packets::item::InventoryChangeFailure;
 
     fn make_session() -> (WorldSession, flume::Receiver<Vec<u8>>) {
         let (_pkt_tx, pkt_rx) = flume::bounded(8);
@@ -2913,6 +2985,9 @@ mod tests {
             reward_display_spell: [0; QUEST_REWARD_DISPLAY_SPELL_COUNT],
             reward_spell: 0,
             reward_honor: 0,
+            source_item_id: 0,
+            source_item_count: 0,
+            source_spell_id: 0,
             expansion: 0,
             flags: 0,
             flags_ex: 0,
@@ -2948,6 +3023,118 @@ mod tests {
 
     fn store_with_quests(ids: &[u32]) -> QuestStore {
         QuestStore::from_quests_like_cpp(ids.iter().copied().map(quest_template))
+    }
+
+    fn quest_template_with_source_item(
+        id: u32,
+        source_item_id: u32,
+        source_item_count: u32,
+        source_spell_id: u32,
+    ) -> QuestTemplate {
+        let mut quest = quest_template(id);
+        quest.source_item_id = source_item_id;
+        quest.source_item_count = source_item_count;
+        quest.source_spell_id = source_spell_id;
+        quest
+    }
+
+    fn store_with_source_item_quest(
+        quest_id: u32,
+        source_item_id: u32,
+        source_item_count: u32,
+        source_spell_id: u32,
+    ) -> QuestStore {
+        QuestStore::from_quests_like_cpp([quest_template_with_source_item(
+            quest_id,
+            source_item_id,
+            source_item_count,
+            source_spell_id,
+        )])
+    }
+
+    fn install_source_item_template(
+        session: &mut WorldSession,
+        entry: u32,
+        stackable: i32,
+        max_count: u32,
+    ) {
+        install_source_item_template_with_limit_category(session, entry, stackable, max_count, 0);
+    }
+
+    fn install_source_item_template_with_limit_category(
+        session: &mut WorldSession,
+        entry: u32,
+        stackable: i32,
+        max_count: u32,
+        limit_category: u16,
+    ) {
+        session.set_item_store(Arc::new(ItemStore::from_records([ItemRecord {
+            id: entry,
+            class_id: ItemClass::Consumable as u8,
+            subclass_id: 0,
+            material: 0,
+            inventory_type: InventoryType::NonEquip as i8,
+            sheathe_type: 0,
+            random_select: 0,
+            random_suffix_group_id: 0,
+        }])));
+        session.set_item_stats_store(Arc::new(ItemStatsStore::from_sparse_templates([(
+            entry,
+            ItemSparseTemplateEntry {
+                flags: [0, 0, 0, 0],
+                bag_family: 0,
+                start_quest_id: 0,
+                stackable,
+                max_count: i32::try_from(max_count).unwrap_or(i32::MAX),
+                lock_id: 0,
+                required_reputation_rank: 0,
+                sell_price: 0,
+                buy_price: 0,
+                vendor_stack_count: 1,
+                price_variance: 1.0,
+                price_random_value: 1.0,
+                max_durability: 0,
+                limit_category,
+                instance_bound: 0,
+                zone_bound: [0, 0],
+                required_reputation_faction: 0,
+                allowable_class: -1,
+                required_expansion: 0,
+                bonding: ItemBondingType::None as u8,
+                container_slots: 0,
+                inventory_type: InventoryType::NonEquip as i8,
+            },
+        )])));
+    }
+
+    fn insert_direct_inventory_item(
+        session: &mut WorldSession,
+        player_guid: ObjectGuid,
+        slot: u8,
+        entry: u32,
+        count: u32,
+        db_guid: u64,
+    ) {
+        let item_guid = ObjectGuid::create_item(1, db_guid as i64);
+        session.insert_inventory_item_like_cpp(
+            slot,
+            InventoryItem {
+                guid: item_guid,
+                entry_id: entry,
+                db_guid,
+                inventory_type: None,
+            },
+        );
+        let item = session.make_inventory_item_object(
+            item_guid,
+            entry,
+            player_guid,
+            count,
+            0,
+            ItemContext::None,
+            slot,
+        );
+        session.insert_inventory_item_object(item);
     }
 
     #[test]
@@ -3428,9 +3615,10 @@ mod tests {
                 reason,
                 object_accessor_unrepresented: true,
                 party_runtime_unrepresented: true,
-                can_add_source_item_unrepresented: success_boundary,
+                can_add_source_item_unrepresented: false,
+                can_add_source_item_result: None,
                 add_quest_runtime_unrepresented: success_boundary,
-                source_spell_unrepresented: success_boundary,
+                source_spell_unrepresented: false,
             }]
         );
     }
@@ -3740,6 +3928,272 @@ mod tests {
 
         assert_eq!(session.represented_pending_quest_sharing_like_cpp(), None);
         assert!(!session.player_quests.contains_key(&quest_id));
+        assert_confirm_accept_outcome(
+            &session,
+            Some(ObjectGuid::create_player(1, 42)),
+            sender_guid,
+            quest_id,
+            quest_id as i32,
+            RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::AddQuestRuntimeUnrepresented,
+        );
+        assert!(send_rx.try_recv().is_err());
+        assert!(sender_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_confirm_accept_source_item_with_space_consumes_can_add_gate_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        let sender_guid = ObjectGuid::create_player(1, 91);
+        let quest_id = 7013;
+        let source_item_id = 9001;
+        session.set_quest_store(Arc::new(store_with_source_item_quest(
+            quest_id,
+            source_item_id,
+            2,
+            0,
+        )));
+        install_source_item_template(&mut session, source_item_id, 20, 0);
+        session.set_represented_pending_quest_sharing_like_cpp(sender_guid, quest_id);
+        let (_sender_session, sender_rx) = install_confirm_accept_sender_snapshot(
+            &mut session,
+            sender_guid,
+            quest_id,
+            true,
+            Some(QUEST_STATUS_INCOMPLETE_LIKE_CPP),
+        );
+
+        run_quest_confirm_accept(&mut session, quest_id as i32).await;
+
+        assert_eq!(session.represented_pending_quest_sharing_like_cpp(), None);
+        assert!(!session.player_quests.contains_key(&quest_id));
+        assert_confirm_accept_outcome(
+            &session,
+            Some(ObjectGuid::create_player(1, 42)),
+            sender_guid,
+            quest_id,
+            quest_id as i32,
+            RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::AddQuestRuntimeUnrepresented,
+        );
+        assert!(send_rx.try_recv().is_err());
+        assert!(sender_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_confirm_accept_source_item_zero_count_normalizes_to_one_and_fails_full_inventory_like_cpp()
+     {
+        let (mut session, send_rx) = make_session();
+        let receiver_guid = session.player_guid().unwrap();
+        let sender_guid = ObjectGuid::create_player(1, 96);
+        let quest_id = 7018;
+        let source_item_id = 9005;
+        let filler_item_id = 9105;
+        session.set_quest_store(Arc::new(store_with_source_item_quest(
+            quest_id,
+            source_item_id,
+            0,
+            0,
+        )));
+        install_source_item_template(&mut session, source_item_id, 1, 0);
+        for slot in 35..59 {
+            insert_direct_inventory_item(
+                &mut session,
+                receiver_guid,
+                slot,
+                filler_item_id,
+                1,
+                91_000 + u64::from(slot),
+            );
+        }
+        session.set_represented_pending_quest_sharing_like_cpp(sender_guid, quest_id);
+        let (_sender_session, sender_rx) = install_confirm_accept_sender_snapshot(
+            &mut session,
+            sender_guid,
+            quest_id,
+            true,
+            Some(QUEST_STATUS_INCOMPLETE_LIKE_CPP),
+        );
+
+        run_quest_confirm_accept(&mut session, quest_id as i32).await;
+
+        assert_eq!(session.represented_pending_quest_sharing_like_cpp(), None);
+        assert!(!session.player_quests.contains_key(&quest_id));
+        let outcomes = session.represented_quest_confirm_accepts_like_cpp();
+        assert_eq!(outcomes.len(), 1);
+        let outcome = &outcomes[0];
+        assert_eq!(outcome.receiver_guid, Some(receiver_guid));
+        assert_eq!(outcome.sender_guid_before_clear, sender_guid);
+        assert_eq!(outcome.quest_id, quest_id);
+        assert_eq!(outcome.raw_quest_id, quest_id as i32);
+        assert_eq!(
+            outcome.reason,
+            RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::ReceiverCanAddQuestSourceItemFailed
+        );
+        assert!(!outcome.add_quest_runtime_unrepresented);
+        let source_item_result = outcome
+            .can_add_source_item_result
+            .expect("zero ProvidedItemCount must normalize to one and reach planner failure");
+        assert_ne!(source_item_result, InventoryResult::Ok);
+        assert_ne!(source_item_result, InventoryResult::ItemMaxCount);
+        assert_eq!(
+            send_rx.try_recv().unwrap(),
+            InventoryChangeFailure::error(source_item_result).to_bytes()
+        );
+        assert!(send_rx.try_recv().is_err());
+        assert!(sender_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_confirm_accept_source_item_at_max_count_allows_can_add_gate_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        let receiver_guid = session.player_guid().unwrap();
+        let sender_guid = ObjectGuid::create_player(1, 92);
+        let quest_id = 7014;
+        let source_item_id = 9002;
+        session.set_quest_store(Arc::new(store_with_source_item_quest(
+            quest_id,
+            source_item_id,
+            1,
+            0,
+        )));
+        install_source_item_template(&mut session, source_item_id, 20, 1);
+        insert_direct_inventory_item(&mut session, receiver_guid, 23, source_item_id, 1, 9002);
+        session.set_represented_pending_quest_sharing_like_cpp(sender_guid, quest_id);
+        let (_sender_session, sender_rx) = install_confirm_accept_sender_snapshot(
+            &mut session,
+            sender_guid,
+            quest_id,
+            true,
+            Some(QUEST_STATUS_INCOMPLETE_LIKE_CPP),
+        );
+
+        run_quest_confirm_accept(&mut session, quest_id as i32).await;
+
+        assert_confirm_accept_outcome(
+            &session,
+            Some(receiver_guid),
+            sender_guid,
+            quest_id,
+            quest_id as i32,
+            RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::AddQuestRuntimeUnrepresented,
+        );
+        assert!(send_rx.try_recv().is_err());
+        assert!(sender_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_confirm_accept_missing_source_item_proto_fails_can_add_gate_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        let receiver_guid = session.player_guid().unwrap();
+        let sender_guid = ObjectGuid::create_player(1, 93);
+        let quest_id = 7015;
+        let source_item_id = 9003;
+        session.set_quest_store(Arc::new(store_with_source_item_quest(
+            quest_id,
+            source_item_id,
+            1,
+            0,
+        )));
+        session.set_represented_pending_quest_sharing_like_cpp(sender_guid, quest_id);
+        let (_sender_session, sender_rx) = install_confirm_accept_sender_snapshot(
+            &mut session,
+            sender_guid,
+            quest_id,
+            true,
+            Some(QUEST_STATUS_INCOMPLETE_LIKE_CPP),
+        );
+
+        run_quest_confirm_accept(&mut session, quest_id as i32).await;
+
+        assert_eq!(
+            session.represented_quest_confirm_accepts_like_cpp(),
+            &[RepresentedQuestConfirmAcceptLikeCpp {
+                receiver_guid: Some(receiver_guid),
+                sender_guid_before_clear: sender_guid,
+                quest_id,
+                raw_quest_id: quest_id as i32,
+                reason:
+                    RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::ReceiverCanAddQuestSourceItemFailed,
+                object_accessor_unrepresented: true,
+                party_runtime_unrepresented: true,
+                can_add_source_item_unrepresented: false,
+                can_add_source_item_result: Some(InventoryResult::ItemNotFound),
+                add_quest_runtime_unrepresented: false,
+                source_spell_unrepresented: false,
+            }]
+        );
+        assert_eq!(
+            send_rx.try_recv().unwrap(),
+            InventoryChangeFailure::error(InventoryResult::ItemNotFound).to_bytes()
+        );
+        assert!(send_rx.try_recv().is_err());
+        assert!(sender_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_confirm_accept_source_item_limit_category_blocks_at_unrepresented_boundary_like_cpp()
+     {
+        let (mut session, send_rx) = make_session();
+        let receiver_guid = session.player_guid().unwrap();
+        let sender_guid = ObjectGuid::create_player(1, 95);
+        let quest_id = 7017;
+        let source_item_id = 9004;
+        session.set_quest_store(Arc::new(store_with_source_item_quest(
+            quest_id,
+            source_item_id,
+            1,
+            0,
+        )));
+        install_source_item_template_with_limit_category(&mut session, source_item_id, 20, 0, 44);
+        session.set_represented_pending_quest_sharing_like_cpp(sender_guid, quest_id);
+        let (_sender_session, sender_rx) = install_confirm_accept_sender_snapshot(
+            &mut session,
+            sender_guid,
+            quest_id,
+            true,
+            Some(QUEST_STATUS_INCOMPLETE_LIKE_CPP),
+        );
+
+        run_quest_confirm_accept(&mut session, quest_id as i32).await;
+
+        assert_eq!(session.represented_pending_quest_sharing_like_cpp(), None);
+        assert!(!session.player_quests.contains_key(&quest_id));
+        assert_eq!(
+            session.represented_quest_confirm_accepts_like_cpp(),
+            &[RepresentedQuestConfirmAcceptLikeCpp {
+                receiver_guid: Some(receiver_guid),
+                sender_guid_before_clear: sender_guid,
+                quest_id,
+                raw_quest_id: quest_id as i32,
+                reason: RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::ReceiverCanAddQuestSourceItemLimitCategoryUnrepresented,
+                object_accessor_unrepresented: true,
+                party_runtime_unrepresented: true,
+                can_add_source_item_unrepresented: true,
+                can_add_source_item_result: None,
+                add_quest_runtime_unrepresented: false,
+                source_spell_unrepresented: false,
+            }]
+        );
+        assert!(send_rx.try_recv().is_err());
+        assert!(sender_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_confirm_accept_without_source_item_does_not_overclaim_source_gate_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        let sender_guid = ObjectGuid::create_player(1, 94);
+        let quest_id = 7016;
+        session.set_quest_store(Arc::new(store_with_source_item_quest(quest_id, 0, 0, 0)));
+        session.set_represented_pending_quest_sharing_like_cpp(sender_guid, quest_id);
+        let (_sender_session, sender_rx) = install_confirm_accept_sender_snapshot(
+            &mut session,
+            sender_guid,
+            quest_id,
+            true,
+            Some(QUEST_STATUS_INCOMPLETE_LIKE_CPP),
+        );
+
+        run_quest_confirm_accept(&mut session, quest_id as i32).await;
+
         assert_confirm_accept_outcome(
             &session,
             Some(ObjectGuid::create_player(1, 42)),

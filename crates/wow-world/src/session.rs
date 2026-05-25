@@ -253,6 +253,8 @@ pub(crate) enum RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp {
     OriginalPlayerNotActiveQuest,
     ReceiverCanTakeQuestFailed,
     ReceiverCanAddQuestLogFull,
+    ReceiverCanAddQuestSourceItemFailed,
+    ReceiverCanAddQuestSourceItemLimitCategoryUnrepresented,
     AddQuestRuntimeUnrepresented,
 }
 
@@ -267,6 +269,7 @@ pub(crate) struct RepresentedQuestConfirmAcceptLikeCpp {
     pub object_accessor_unrepresented: bool,
     pub party_runtime_unrepresented: bool,
     pub can_add_source_item_unrepresented: bool,
+    pub can_add_source_item_result: Option<InventoryResult>,
     pub add_quest_runtime_unrepresented: bool,
     pub source_spell_unrepresented: bool,
 }
@@ -18592,6 +18595,9 @@ mod tests {
             reward_display_spell: [0; wow_data::quest::QUEST_REWARD_DISPLAY_SPELL_COUNT],
             reward_spell: 0,
             reward_honor: 0,
+            source_item_id: 0,
+            source_item_count: 0,
+            source_spell_id: 0,
             expansion: 0,
             flags: 0,
             flags_ex: 0,
@@ -26608,6 +26614,9 @@ mod tests {
                 reward_display_spell: [0; wow_data::quest::QUEST_REWARD_DISPLAY_SPELL_COUNT],
                 reward_spell: 0,
                 reward_honor: 0,
+                source_item_id: 0,
+                source_item_count: 0,
+                source_spell_id: 0,
                 expansion: 0,
                 flags: 0,
                 flags_ex: 0,
