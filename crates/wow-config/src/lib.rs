@@ -858,6 +858,7 @@ fn apply_world_config_validations(values: &mut WorldConfigSet) {
         16_000_000,
     );
     int_above_to(values, "CONFIG_RESPAWN_RESTARTQUIETTIME", 23, 3);
+    float_below_to(values, "RATE_REPAIRCOST", 0.0, 0.0);
     float_below_to(values, "CONFIG_RESPAWN_DYNAMICRATE_CREATURE", 0.0, 10.0);
     float_below_to(values, "CONFIG_RESPAWN_DYNAMICRATE_GAMEOBJECT", 0.0, 10.0);
     int_below_to(values, "CONFIG_PVP_TOKEN_COUNT", 1, 1);

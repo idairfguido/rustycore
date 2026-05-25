@@ -175,6 +175,7 @@ pub struct SessionResources {
     pub pending_invites: Option<Arc<PendingInvites>>,
     pub loot_drop_rates: LootDropRatesLikeCpp,
     pub reputation_rates: ReputationRatesLikeCpp,
+    pub repair_cost_rate: f32,
     pub enable_ae_loot: bool,
     pub realm_id: u16,
     /// External (public) IP from `realmlist.address`.

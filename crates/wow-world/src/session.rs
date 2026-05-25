@@ -2200,6 +2200,8 @@ pub struct WorldSession {
     loot_drop_rates: LootDropRatesLikeCpp,
     /// C++ `sWorld->getRate(...)` subset used by represented reputation gain.
     reputation_rates: ReputationRatesLikeCpp,
+    /// C++ `sWorld->getRate(RATE_REPAIRCOST)` represented value.
+    repair_cost_rate_like_cpp: f32,
     /// C++ `ReputationMgr` per-player state foundation.
     reputation_mgr_like_cpp: ReputationMgrLikeCpp,
     /// C++ `ActivePlayerData::WatchedFactionIndex` represented state.
@@ -2956,6 +2958,7 @@ impl WorldSession {
             represented_gameobject_criteria_events: Vec::new(),
             loot_drop_rates: LootDropRatesLikeCpp::default(),
             reputation_rates: ReputationRatesLikeCpp::default(),
+            repair_cost_rate_like_cpp: 1.0,
             reputation_mgr_like_cpp: ReputationMgrLikeCpp::new_like_cpp(),
             watched_faction_index_like_cpp: -1,
             enable_ae_loot_like_cpp: false,
@@ -6071,6 +6074,14 @@ impl WorldSession {
 
     pub fn set_reputation_rates_like_cpp(&mut self, rates: ReputationRatesLikeCpp) {
         self.reputation_rates = rates;
+    }
+
+    pub fn set_repair_cost_rate_like_cpp(&mut self, rate: f32) {
+        self.repair_cost_rate_like_cpp = rate.max(0.0);
+    }
+
+    pub(crate) fn repair_cost_rate_like_cpp(&self) -> f32 {
+        self.repair_cost_rate_like_cpp
     }
 
     pub(crate) fn reputation_rates_like_cpp(&self) -> ReputationRatesLikeCpp {
@@ -35598,6 +35609,168 @@ mod tests {
                 .data()
                 .durability,
             40
+        );
+    }
+
+    #[tokio::test]
+    async fn repair_item_handler_requires_repair_npc_and_repairs_single_item_like_cpp() {
+        let (mut session, _, _) = make_session();
+        let canonical = shared_canonical_map_manager();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let repair_npc_guid = test_creature_guid(71_701);
+        let vendor_npc_guid = test_creature_guid(71_702);
+        let item_guid = ObjectGuid::create_item(1, 71_703);
+
+        session.set_canonical_map_manager(Arc::clone(&canonical));
+        session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
+            wow_data::MapEntry {
+                id: 571,
+                instance_type: wow_data::map::MAP_COMMON,
+                parent_map_id: -1,
+                cosmetic_parent_map_id: -1,
+                flags1: 0,
+            },
+        ])));
+        session.attach_player_controller_like_cpp(SessionPlayerController::new(
+            player_guid,
+            "RepairTester".to_string(),
+            Position::new(10.0, 0.0, 0.0, 0.0),
+            571,
+            1,
+            1,
+            80,
+            0,
+        ));
+        session.set_player_gold_like_cpp(500);
+        session.set_repair_cost_rate_like_cpp(2.0);
+        session
+            .ensure_canonical_world_map_for_current_player_like_cpp()
+            .expect("canonical map");
+        add_canonical_test_creature(
+            &canonical,
+            repair_npc_guid,
+            500,
+            Position::new(14.0, 0.0, 0.0, 0.0),
+            wow_constants::unit::NPCFlags1::REPAIR.bits(),
+        );
+        add_canonical_test_creature(
+            &canonical,
+            vendor_npc_guid,
+            501,
+            Position::new(14.0, 0.0, 0.0, 0.0),
+            wow_constants::unit::NPCFlags1::VENDOR.bits(),
+        );
+
+        session.set_item_store(Arc::new(ItemStore::from_records([ItemRecord {
+            id: 100,
+            class_id: ItemClass::Weapon as u8,
+            subclass_id: 7,
+            material: 0,
+            inventory_type: InventoryType::Weapon as i8,
+            sheathe_type: 0,
+            random_select: 0,
+            random_suffix_group_id: 0,
+        }])));
+        session.set_item_stats_store(Arc::new(
+            ItemStatsStore::from_sparse_and_random_property_templates(
+                [(
+                    100,
+                    ItemSparseTemplateEntry {
+                        flags: [0; 4],
+                        bag_family: 0,
+                        start_quest_id: 0,
+                        stackable: 1,
+                        max_count: 0,
+                        lock_id: 0,
+                        required_reputation_rank: 0,
+                        sell_price: 0,
+                        buy_price: 0,
+                        vendor_stack_count: 1,
+                        price_variance: 1.0,
+                        price_random_value: 0.0,
+                        max_durability: 50,
+                        limit_category: 0,
+                        instance_bound: 0,
+                        zone_bound: [0; 2],
+                        required_reputation_faction: 0,
+                        allowable_class: 0,
+                        required_expansion: 0,
+                        bonding: ItemBondingType::None as u8,
+                        container_slots: 0,
+                        inventory_type: InventoryType::Weapon as i8,
+                    },
+                )],
+                [(
+                    100,
+                    ItemRandomPropertyTemplateEntry {
+                        item_level: 57,
+                        quality: ItemQuality::Rare as i8,
+                        inventory_type: InventoryType::Weapon as i8,
+                    },
+                )],
+            ),
+        ));
+        session.set_durability_costs_store(Arc::new(DurabilityCostsStore::from_entries([
+            DurabilityCostsEntry {
+                id: 57,
+                weapon_sub_class_cost: std::array::from_fn(|i| if i == 7 { 13 } else { 0 }),
+                armor_sub_class_cost: [0; 8],
+            },
+        ])));
+        session.set_durability_quality_store(Arc::new(DurabilityQualityStore::from_entries([
+            DurabilityQualityEntry {
+                id: (ItemQuality::Rare as u32 + 1) * 2,
+                data: 1.25,
+            },
+        ])));
+        session.inventory_items.insert(
+            23,
+            InventoryItem {
+                guid: item_guid,
+                entry_id: 100,
+                db_guid: item_guid.counter() as u64,
+                inventory_type: Some(InventoryType::Weapon as u8),
+            },
+        );
+        let item = session.make_inventory_item_object(
+            item_guid,
+            100,
+            player_guid,
+            1,
+            40,
+            ItemContext::None,
+            23,
+        );
+        session.insert_inventory_item_object(item);
+
+        session
+            .handle_repair_item(wow_packet::packets::misc::RepairItem {
+                npc_guid: vendor_npc_guid,
+                item_guid,
+                use_guild_bank: false,
+            })
+            .await;
+        assert_eq!(session.player_gold_like_cpp(), 500);
+        assert_eq!(
+            session.inventory_item_objects_like_cpp()[&item_guid]
+                .data()
+                .durability,
+            40
+        );
+
+        session
+            .handle_repair_item(wow_packet::packets::misc::RepairItem {
+                npc_guid: repair_npc_guid,
+                item_guid,
+                use_guild_bank: false,
+            })
+            .await;
+        assert_eq!(session.player_gold_like_cpp(), 174);
+        assert_eq!(
+            session.inventory_item_objects_like_cpp()[&item_guid]
+                .data()
+                .durability,
+            50
         );
     }
 

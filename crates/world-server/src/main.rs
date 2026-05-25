@@ -1939,6 +1939,7 @@ async fn main() -> Result<()> {
         pending_invites: Some(Arc::clone(&pending_invites)),
         loot_drop_rates: loot_drop_rates_like_cpp(&world_configs),
         reputation_rates: reputation_rates_like_cpp(&world_configs),
+        repair_cost_rate: repair_cost_rate_like_cpp(&world_configs),
         enable_ae_loot: world_config_bool(&world_configs, "CONFIG_ENABLE_AE_LOOT", false),
         realm_id,
         realm_external_address,
@@ -2263,6 +2264,10 @@ fn reputation_rates_like_cpp(configs: &WorldConfigSet) -> ReputationRatesLikeCpp
             100.0,
         ),
     }
+}
+
+fn repair_cost_rate_like_cpp(configs: &WorldConfigSet) -> f32 {
+    world_config_f32(configs, "RATE_REPAIRCOST", 1.0).max(0.0)
 }
 
 async fn load_loot_stores_like_cpp(
@@ -6772,6 +6777,7 @@ async fn create_session(
     }
     session.set_loot_drop_rates_like_cpp(resources.loot_drop_rates);
     session.set_reputation_rates_like_cpp(resources.reputation_rates);
+    session.set_repair_cost_rate_like_cpp(resources.repair_cost_rate);
     session.set_enable_ae_loot_like_cpp(resources.enable_ae_loot);
     session.set_mmap_runtime_config_like_cpp(mmap_runtime_config);
     if let Some(pathfinder) = mmap_pathfinder {
@@ -6959,8 +6965,8 @@ mod tests {
         loot_drop_rates_like_cpp, materialize_game_event_quest_complete_db_bridge_like_cpp,
         materialize_game_event_world_event_state_db_bridge_like_cpp, mmap_runtime_config_like_cpp,
         persisted_respawn_info_from_row_like_cpp, queue_respawn_db_delete_like_cpp,
-        queue_respawn_db_save_like_cpp, reputation_rates_like_cpp, spawn_store_loader,
-        world_config_bool, world_config_u8, world_config_u16,
+        queue_respawn_db_save_like_cpp, repair_cost_rate_like_cpp, reputation_rates_like_cpp,
+        spawn_store_loader, world_config_bool, world_config_u8, world_config_u16,
     };
     use std::collections::{BTreeMap, HashSet};
     use std::env;
@@ -9104,6 +9110,19 @@ MaxRecruitAFriendBonusDistance = 45
         assert_eq!(rates.low_level_quest, 0.5);
         assert_eq!(rates.recruit_a_friend_bonus, 0.2);
         assert_eq!(rates.recruit_a_friend_distance, 45.0);
+    }
+
+    #[test]
+    fn repair_cost_rate_uses_cpp_world_config_key_and_clamps_negative_like_cpp() {
+        let _guard = TEST_LOCK.lock().expect("test lock poisoned");
+        wow_config::load_config_from_str("Rate.RepairCost = 2.5\n").expect("config should load");
+
+        let configs = wow_config::load_world_config_values();
+        assert_eq!(repair_cost_rate_like_cpp(&configs), 2.5);
+
+        wow_config::load_config_from_str("Rate.RepairCost = -1\n").expect("config should load");
+        let configs = wow_config::load_world_config_values();
+        assert_eq!(repair_cost_rate_like_cpp(&configs), 0.0);
     }
 
     #[test]

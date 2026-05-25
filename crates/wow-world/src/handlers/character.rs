@@ -5458,15 +5458,63 @@ impl WorldSession {
     }
 
     /// CMSG_REPAIR_ITEM — player repairs item at a repair vendor.
-    /// C# ref: NPCHandler.HandleRepairItem
-    /// TODO: calculate repair cost and apply to character money.
+    /// C++ ref: WorldSession::HandleRepairItemOpcode.
     pub async fn handle_repair_item(&mut self, repair: RepairItem) {
-        info!(
+        let Some(_repair_npc) = self
+            .represented_npc_can_interact_with_like_cpp(repair.npc_guid, NPCFlags1::REPAIR.bits())
+        else {
+            debug!(
+                npc_guid = ?repair.npc_guid,
+                account = self.account_id,
+                "RepairItem rejected: NPC missing, out of range, dead, or lacks REPAIR flag"
+            );
+            return;
+        };
+
+        // C++ uses GetReputationPriceDiscount(unit) and RATE_REPAIRCOST.
+        // The reputation discount source is still an explicit represented-runtime gap.
+        let discount_mod = 1.0;
+        let repair_cost_rate = self.repair_cost_rate_like_cpp();
+
+        if !repair.item_guid.is_empty() {
+            let repaired = self
+                .repair_inventory_item_durability_like_cpp(
+                    repair.item_guid,
+                    true,
+                    discount_mod,
+                    repair_cost_rate,
+                )
+                .await;
+            debug!(
+                npc_guid = ?repair.npc_guid,
+                item_guid = ?repair.item_guid,
+                repaired,
+                account = self.account_id,
+                "RepairItem single-item represented runtime"
+            );
+            return;
+        }
+
+        if repair.use_guild_bank {
+            debug!(
+                npc_guid = ?repair.npc_guid,
+                account = self.account_id,
+                "RepairItem guild-bank repair remains pending"
+            );
+            return;
+        }
+
+        let repaired = self
+            .repair_all_inventory_item_durability_with_player_money_like_cpp(
+                discount_mod,
+                repair_cost_rate,
+            )
+            .await;
+        debug!(
             npc_guid = ?repair.npc_guid,
-            item_guid = ?repair.item_guid,
-            use_guild_bank = repair.use_guild_bank,
+            repaired,
             account = self.account_id,
-            "RepairItem parsed like C++ (durability repair runtime pending)"
+            "RepairItem all-items represented runtime"
         );
     }
 
