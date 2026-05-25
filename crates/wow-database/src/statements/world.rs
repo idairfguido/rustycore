@@ -891,7 +891,10 @@ impl StatementDef for WorldStatements {
                 "COALESCE(qta.ExclusiveGroup, 0) AS ExclusiveGroup, ",
                 "COALESCE(qta.BreadcrumbForQuestId, 0) AS BreadcrumbForQuestId, ",
                 "COALESCE(qta.SpecialFlags, 0) AS SpecialFlags, ",
-                "qt.Expansion ",
+                "qt.Expansion, ",
+                "qt.StartItem, ",
+                "COALESCE(qta.SourceSpellID, 0) AS SourceSpellID, ",
+                "COALESCE(qta.ProvidedItemCount, 0) AS ProvidedItemCount ",
                 "FROM quest_template qt LEFT JOIN quest_template_addon qta ON qt.ID = qta.ID"
             ),
             Self::SEL_QUEST_OBJECTIVES => {
