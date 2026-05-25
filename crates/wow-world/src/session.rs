@@ -245,6 +245,17 @@ pub(crate) struct RepresentedPushQuestToPartyOutcomeLikeCpp {
     pub receiver_fanout_unrepresented: bool,
 }
 
+/// Represented outcome for the bounded post-template `HandleQuestConfirmAccept` gates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp {
+    OriginalPlayerMissing,
+    NotInSameRaid,
+    OriginalPlayerNotActiveQuest,
+    ReceiverCanTakeQuestFailed,
+    ReceiverCanAddQuestLogFull,
+    AddQuestRuntimeUnrepresented,
+}
+
 /// Evidence that `HandleQuestConfirmAccept` reached the post-clear/template-present seam.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RepresentedQuestConfirmAcceptLikeCpp {
@@ -252,6 +263,12 @@ pub(crate) struct RepresentedQuestConfirmAcceptLikeCpp {
     pub sender_guid_before_clear: ObjectGuid,
     pub quest_id: u32,
     pub raw_quest_id: i32,
+    pub reason: RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp,
+    pub object_accessor_unrepresented: bool,
+    pub party_runtime_unrepresented: bool,
+    pub can_add_source_item_unrepresented: bool,
+    pub add_quest_runtime_unrepresented: bool,
+    pub source_spell_unrepresented: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

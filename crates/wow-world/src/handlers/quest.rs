@@ -43,8 +43,8 @@ use crate::conditions::{
 };
 use crate::session::{
     RepresentedPushQuestToPartyOutcomeLikeCpp, RepresentedPushQuestToPartyOutcomeReasonLikeCpp,
-    RepresentedQuestConfirmAcceptLikeCpp, RepresentedQuestPushResultResponseLikeCpp,
-    SeasonalQuestStatusDbRowLikeCpp, WorldSession,
+    RepresentedQuestConfirmAcceptLikeCpp, RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp,
+    RepresentedQuestPushResultResponseLikeCpp, SeasonalQuestStatusDbRowLikeCpp, WorldSession,
 };
 
 pub(crate) const QUEST_FLAGS_AUTO_COMPLETE_LIKE_CPP: u32 = 0x0001_0000;
@@ -634,9 +634,9 @@ impl WorldSession {
     /// CMSG_QUEST_CONFIRM_ACCEPT — confirm accepting a shared quest.
     ///
     /// C++ anchor: `WorldSession::HandleQuestConfirmAccept`, `QuestHandler.cpp:499-531`.
-    /// Represented-partial: validates against session-local pending sharing state and clears
-    /// it before quest-template lookup like C++; full ObjectAccessor/party/AddQuest/source-spell
-    /// branches remain explicit gaps.
+    /// Represented-partial: validates against session-local pending sharing state, clears before
+    /// quest-template lookup like C++, then records only safe represented post-template gates.
+    /// Real `AddQuestAndCheckCompletion`, DB/source-item/source-spell side effects remain gaps.
     pub async fn handle_quest_confirm_accept(&mut self, mut pkt: wow_packet::WorldPacket) {
         let packet = match QuestConfirmAccept::read(&mut pkt) {
             Ok(packet) => packet,
@@ -683,22 +683,145 @@ impl WorldSession {
             return;
         };
 
-        if quest_store.get(parsed_quest_id).is_none() {
+        let Some(quest) = quest_store.get(parsed_quest_id).cloned() else {
             debug!(
                 account = self.account_id,
                 parsed_quest_id,
                 "QuestConfirmAccept: pending cleared before missing quest template like C++ order"
             );
             return;
+        };
+
+        let receiver_guid = self.player_guid();
+        let record = |session: &mut WorldSession,
+                      reason: RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp,
+                      can_add_source_item_unrepresented: bool,
+                      add_quest_runtime_unrepresented: bool,
+                      source_spell_unrepresented: bool| {
+            session.record_represented_quest_confirm_accept_like_cpp(
+                RepresentedQuestConfirmAcceptLikeCpp {
+                    receiver_guid,
+                    sender_guid_before_clear: pending.sender_guid,
+                    quest_id: parsed_quest_id,
+                    raw_quest_id: packet.quest_id,
+                    reason,
+                    object_accessor_unrepresented: true,
+                    party_runtime_unrepresented: true,
+                    can_add_source_item_unrepresented,
+                    add_quest_runtime_unrepresented,
+                    source_spell_unrepresented,
+                },
+            );
+        };
+
+        let Some(player_registry) = self.player_registry().map(Arc::clone) else {
+            record(
+                self,
+                RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::OriginalPlayerMissing,
+                false,
+                false,
+                false,
+            );
+            return;
+        };
+
+        let Some(sender_snapshot) = player_registry
+            .get(&pending.sender_guid)
+            .map(|entry| entry.clone())
+        else {
+            record(
+                self,
+                RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::OriginalPlayerMissing,
+                false,
+                false,
+                false,
+            );
+            return;
+        };
+
+        let Some(receiver_guid) = receiver_guid else {
+            record(
+                self,
+                RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::NotInSameRaid,
+                false,
+                false,
+                false,
+            );
+            return;
+        };
+
+        let Some(group_registry) = self.group_registry().map(Arc::clone) else {
+            record(
+                self,
+                RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::NotInSameRaid,
+                false,
+                false,
+                false,
+            );
+            return;
+        };
+
+        let same_represented_group = group_registry.iter().any(|entry| {
+            let members = &entry.value().members;
+            members.contains(&receiver_guid) && members.contains(&pending.sender_guid)
+        });
+        if !same_represented_group {
+            record(
+                self,
+                RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::NotInSameRaid,
+                false,
+                false,
+                false,
+            );
+            return;
         }
 
-        self.record_represented_quest_confirm_accept_like_cpp(
-            RepresentedQuestConfirmAcceptLikeCpp {
-                receiver_guid: self.player_guid(),
-                sender_guid_before_clear: pending.sender_guid,
-                quest_id: parsed_quest_id,
-                raw_quest_id: packet.quest_id,
-            },
+        let sender_active_status = sender_snapshot
+            .active_quest_statuses
+            .get(&parsed_quest_id)
+            .copied();
+        if !matches!(
+            sender_active_status,
+            Some(QUEST_STATUS_INCOMPLETE_LIKE_CPP | QUEST_STATUS_COMPLETE_LIKE_CPP)
+        ) {
+            record(
+                self,
+                RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::OriginalPlayerNotActiveQuest,
+                false,
+                false,
+                false,
+            );
+            return;
+        }
+
+        if !self.can_take_quest(&quest) {
+            record(
+                self,
+                RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::ReceiverCanTakeQuestFailed,
+                false,
+                false,
+                false,
+            );
+            return;
+        }
+
+        if self.first_free_quest_slot_like_cpp().is_none() {
+            record(
+                self,
+                RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::ReceiverCanAddQuestLogFull,
+                false,
+                false,
+                false,
+            );
+            return;
+        }
+
+        record(
+            self,
+            RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::AddQuestRuntimeUnrepresented,
+            true,
+            true,
+            true,
         );
     }
 
@@ -3283,6 +3406,69 @@ mod tests {
         mark_visible(session, guid);
     }
 
+    fn assert_confirm_accept_outcome(
+        session: &WorldSession,
+        receiver_guid: Option<ObjectGuid>,
+        sender_guid: ObjectGuid,
+        quest_id: u32,
+        raw_quest_id: i32,
+        reason: RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp,
+    ) {
+        let success_boundary = matches!(
+            reason,
+            RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::AddQuestRuntimeUnrepresented
+        );
+        assert_eq!(
+            session.represented_quest_confirm_accepts_like_cpp(),
+            &[RepresentedQuestConfirmAcceptLikeCpp {
+                receiver_guid,
+                sender_guid_before_clear: sender_guid,
+                quest_id,
+                raw_quest_id,
+                reason,
+                object_accessor_unrepresented: true,
+                party_runtime_unrepresented: true,
+                can_add_source_item_unrepresented: success_boundary,
+                add_quest_runtime_unrepresented: success_boundary,
+                source_spell_unrepresented: success_boundary,
+            }]
+        );
+    }
+
+    fn install_confirm_accept_sender_snapshot(
+        session: &mut WorldSession,
+        sender_guid: ObjectGuid,
+        quest_id: u32,
+        same_group: bool,
+        sender_active_status: Option<u8>,
+    ) -> (WorldSession, flume::Receiver<Vec<u8>>) {
+        let player_registry = Arc::new(PlayerRegistry::default());
+        session.set_player_registry(Arc::clone(&player_registry));
+
+        let (mut sender_session, sender_rx) = make_session();
+        sender_session.set_player_guid(Some(sender_guid));
+        sender_session.set_loaded_player_name_like_cpp("Sender".to_string());
+        sender_session.set_player_registry(player_registry);
+        if let Some(status) = sender_active_status {
+            add_active_quest_in_slot_with_status(&mut sender_session, quest_id, 0, status);
+        }
+        sender_session.register_in_player_registry();
+        sender_session.sync_player_registry_state_like_cpp();
+
+        let group_registry = Arc::new(GroupRegistry::default());
+        let mut group = GroupInfo::new(sender_guid);
+        if same_group {
+            if let Some(receiver_guid) = session.player_guid() {
+                group.add_member(receiver_guid);
+            }
+        }
+        let group_guid = group.group_guid;
+        group_registry.insert(group_guid, group);
+        session.set_group_registry(group_registry, Arc::new(PendingInvites::default()));
+
+        (sender_session, sender_rx)
+    }
+
     #[tokio::test]
     async fn quest_confirm_accept_short_packet_does_not_clear_pending_state_like_cpp() {
         let (mut session, send_rx) = make_session();
@@ -3367,7 +3553,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn quest_confirm_accept_match_template_records_post_clear_evidence_like_cpp() {
+    async fn quest_confirm_accept_match_template_records_original_player_missing_like_cpp() {
         let (mut session, send_rx) = make_session();
         let sender_guid = ObjectGuid::create_player(1, 84);
         let receiver_guid = ObjectGuid::create_player(1, 42);
@@ -3377,14 +3563,13 @@ mod tests {
         run_quest_confirm_accept(&mut session, 7007).await;
 
         assert_eq!(session.represented_pending_quest_sharing_like_cpp(), None);
-        assert_eq!(
-            session.represented_quest_confirm_accepts_like_cpp(),
-            &[crate::session::RepresentedQuestConfirmAcceptLikeCpp {
-                receiver_guid: Some(receiver_guid),
-                sender_guid_before_clear: sender_guid,
-                quest_id: 7007,
-                raw_quest_id: 7007,
-            }]
+        assert_confirm_accept_outcome(
+            &session,
+            Some(receiver_guid),
+            sender_guid,
+            7007,
+            7007,
+            RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::OriginalPlayerMissing,
         );
         assert!(send_rx.try_recv().is_err());
     }
@@ -3400,16 +3585,171 @@ mod tests {
         run_quest_confirm_accept(&mut session, -1).await;
 
         assert_eq!(session.represented_pending_quest_sharing_like_cpp(), None);
-        assert_eq!(
-            session.represented_quest_confirm_accepts_like_cpp(),
-            &[crate::session::RepresentedQuestConfirmAcceptLikeCpp {
-                receiver_guid: Some(ObjectGuid::create_player(1, 42)),
-                sender_guid_before_clear: sender_guid,
-                quest_id,
-                raw_quest_id: -1,
-            }]
+        assert_confirm_accept_outcome(
+            &session,
+            Some(ObjectGuid::create_player(1, 42)),
+            sender_guid,
+            quest_id,
+            -1,
+            RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::OriginalPlayerMissing,
         );
         assert!(send_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_confirm_accept_sender_exists_not_same_group_records_not_in_same_raid_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        let sender_guid = ObjectGuid::create_player(1, 86);
+        session.set_quest_store(Arc::new(store_with_quests(&[7008])));
+        session.set_represented_pending_quest_sharing_like_cpp(sender_guid, 7008);
+        let (_sender_session, sender_rx) = install_confirm_accept_sender_snapshot(
+            &mut session,
+            sender_guid,
+            7008,
+            false,
+            Some(QUEST_STATUS_INCOMPLETE_LIKE_CPP),
+        );
+
+        run_quest_confirm_accept(&mut session, 7008).await;
+
+        assert_eq!(session.represented_pending_quest_sharing_like_cpp(), None);
+        assert_confirm_accept_outcome(
+            &session,
+            Some(ObjectGuid::create_player(1, 42)),
+            sender_guid,
+            7008,
+            7008,
+            RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::NotInSameRaid,
+        );
+        assert!(send_rx.try_recv().is_err());
+        assert!(sender_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_confirm_accept_same_group_sender_not_active_records_original_not_active_like_cpp()
+     {
+        let (mut session, send_rx) = make_session();
+        let sender_guid = ObjectGuid::create_player(1, 87);
+        session.set_quest_store(Arc::new(store_with_quests(&[7009])));
+        session.set_represented_pending_quest_sharing_like_cpp(sender_guid, 7009);
+        let (_sender_session, sender_rx) =
+            install_confirm_accept_sender_snapshot(&mut session, sender_guid, 7009, true, None);
+
+        run_quest_confirm_accept(&mut session, 7009).await;
+
+        assert_eq!(session.represented_pending_quest_sharing_like_cpp(), None);
+        assert_confirm_accept_outcome(
+            &session,
+            Some(ObjectGuid::create_player(1, 42)),
+            sender_guid,
+            7009,
+            7009,
+            RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::OriginalPlayerNotActiveQuest,
+        );
+        assert!(send_rx.try_recv().is_err());
+        assert!(sender_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_confirm_accept_same_group_sender_active_can_take_failed_records_receiver_gate_like_cpp()
+     {
+        let (mut session, send_rx) = make_session();
+        let sender_guid = ObjectGuid::create_player(1, 88);
+        let quest_id = 7010;
+        session.set_quest_store(Arc::new(store_with_quests(&[quest_id])));
+        session.rewarded_quests.insert(quest_id);
+        session.set_represented_pending_quest_sharing_like_cpp(sender_guid, quest_id);
+        let (_sender_session, sender_rx) = install_confirm_accept_sender_snapshot(
+            &mut session,
+            sender_guid,
+            quest_id,
+            true,
+            Some(QUEST_STATUS_INCOMPLETE_LIKE_CPP),
+        );
+
+        run_quest_confirm_accept(&mut session, quest_id as i32).await;
+
+        assert_eq!(session.represented_pending_quest_sharing_like_cpp(), None);
+        assert_confirm_accept_outcome(
+            &session,
+            Some(ObjectGuid::create_player(1, 42)),
+            sender_guid,
+            quest_id,
+            quest_id as i32,
+            RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::ReceiverCanTakeQuestFailed,
+        );
+        assert!(send_rx.try_recv().is_err());
+        assert!(sender_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_confirm_accept_can_take_ok_log_full_records_can_add_log_full_like_cpp() {
+        let (mut session, send_rx) = make_session();
+        let sender_guid = ObjectGuid::create_player(1, 89);
+        let quest_id = 7011;
+        session.set_quest_store(Arc::new(store_with_quests(&[quest_id])));
+        for slot in 0..MAX_QUEST_LOG_SIZE_LIKE_CPP {
+            add_active_quest_in_slot_with_status(
+                &mut session,
+                80_000 + u32::from(slot),
+                slot,
+                QUEST_STATUS_COMPLETE_LIKE_CPP,
+            );
+        }
+        session.set_represented_pending_quest_sharing_like_cpp(sender_guid, quest_id);
+        let (_sender_session, sender_rx) = install_confirm_accept_sender_snapshot(
+            &mut session,
+            sender_guid,
+            quest_id,
+            true,
+            Some(QUEST_STATUS_COMPLETE_LIKE_CPP),
+        );
+
+        run_quest_confirm_accept(&mut session, quest_id as i32).await;
+
+        assert_eq!(session.represented_pending_quest_sharing_like_cpp(), None);
+        assert_confirm_accept_outcome(
+            &session,
+            Some(ObjectGuid::create_player(1, 42)),
+            sender_guid,
+            quest_id,
+            quest_id as i32,
+            RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::ReceiverCanAddQuestLogFull,
+        );
+        assert!(send_rx.try_recv().is_err());
+        assert!(sender_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn quest_confirm_accept_all_represented_gates_pass_records_addquest_unrepresented_without_mutation_like_cpp()
+     {
+        let (mut session, send_rx) = make_session();
+        let sender_guid = ObjectGuid::create_player(1, 90);
+        let quest_id = 7012;
+        session.set_quest_store(Arc::new(store_with_quests(&[quest_id])));
+        session.set_represented_pending_quest_sharing_like_cpp(sender_guid, quest_id);
+        let (_sender_session, sender_rx) = install_confirm_accept_sender_snapshot(
+            &mut session,
+            sender_guid,
+            quest_id,
+            true,
+            Some(QUEST_STATUS_INCOMPLETE_LIKE_CPP),
+        );
+
+        run_quest_confirm_accept(&mut session, quest_id as i32).await;
+
+        assert_eq!(session.represented_pending_quest_sharing_like_cpp(), None);
+        assert!(!session.player_quests.contains_key(&quest_id));
+        assert_confirm_accept_outcome(
+            &session,
+            Some(ObjectGuid::create_player(1, 42)),
+            sender_guid,
+            quest_id,
+            quest_id as i32,
+            RepresentedQuestConfirmAcceptOutcomeReasonLikeCpp::AddQuestRuntimeUnrepresented,
+        );
+        assert!(send_rx.try_recv().is_err());
+        assert!(sender_rx.try_recv().is_err());
     }
 
     #[tokio::test]
