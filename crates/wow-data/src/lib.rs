@@ -61,6 +61,7 @@ pub mod skill;
 pub mod skill_talent;
 pub mod spawn_group;
 pub mod spell;
+pub mod spell_click;
 pub mod spell_db2;
 pub mod spell_item_enchantment;
 pub mod terrain_swap;
@@ -280,6 +281,12 @@ pub use spawn_group::{
     SpawnGroupTemplateStore,
 };
 pub use spell::{SpellEffectInfo, SpellInfo, SpellStore};
+pub use spell_click::{
+    NpcSpellClickLoadReportLikeCpp, NpcSpellClickRowLikeCpp, NpcSpellClickStoreLikeCpp,
+    SPELL_CLICK_USER_ANY_LIKE_CPP, SPELL_CLICK_USER_FRIEND_LIKE_CPP, SPELL_CLICK_USER_MAX_LIKE_CPP,
+    SPELL_CLICK_USER_PARTY_LIKE_CPP, SPELL_CLICK_USER_RAID_LIKE_CPP, SpellClickInfoLikeCpp,
+    UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP,
+};
 pub use spell_db2::{
     MAX_SHAPESHIFT_SPELLS, MAX_SPELL_AURA_INTERRUPT_FLAGS, MAX_SPELL_REAGENTS, MAX_SPELL_TOTEMS,
     SpellAuraOptionsEntry, SpellAuraOptionsStore, SpellAuraRestrictionsEntry,

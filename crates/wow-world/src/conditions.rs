@@ -15,8 +15,10 @@ use wow_constants::{
     TypeId, TypeMask, UnitStandStateType,
 };
 use wow_data::{
-    Condition, ConditionEntriesByTypeStore, ConditionId, PlayerConditionContextLikeCpp,
-    PlayerConditionStore, is_player_meeting_condition_like_cpp,
+    Condition, ConditionEntriesByTypeStore, ConditionId, NpcSpellClickStoreLikeCpp,
+    PlayerConditionContextLikeCpp, PlayerConditionStore, SPELL_CLICK_USER_FRIEND_LIKE_CPP,
+    SPELL_CLICK_USER_PARTY_LIKE_CPP, SPELL_CLICK_USER_RAID_LIKE_CPP, SpellClickInfoLikeCpp,
+    UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP, is_player_meeting_condition_like_cpp,
 };
 use wow_entities::WorldObject;
 use wow_loot::{LootStoreItemContext, condition_source_type_for_loot_store_kind_like_cpp};
@@ -26,6 +28,14 @@ pub const QUEST_STATUS_COMPLETE_LIKE_CPP: u8 = 1;
 pub const QUEST_STATUS_INCOMPLETE_LIKE_CPP: u8 = 3;
 pub const QUEST_STATUS_FAILED_LIKE_CPP: u8 = 5;
 pub const QUEST_STATUS_REWARDED_LIKE_CPP: u8 = 6;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpellClickRequirementContextLikeCpp {
+    pub clicker_is_player: bool,
+    pub clicker_is_friendly_to_summoner: bool,
+    pub clicker_is_in_raid_with_summoner: bool,
+    pub clicker_is_in_party_with_summoner: bool,
+}
 
 static CONDITION_MGR_STORE_LIKE_CPP: OnceLock<RwLock<Option<Arc<ConditionEntriesByTypeStore>>>> =
     OnceLock::new();
@@ -1284,6 +1294,63 @@ pub fn has_conditions_for_spell_click_event_like_cpp(
             ConditionId::new(creature_id, spell_id as i32, 0),
         )
         .is_some()
+}
+
+/// C++ `SpellClickInfo::IsFitToRequirements`.
+pub fn spell_click_info_is_fit_to_requirements_like_cpp(
+    info: &SpellClickInfoLikeCpp,
+    context: SpellClickRequirementContextLikeCpp,
+) -> bool {
+    if !context.clicker_is_player {
+        return true;
+    }
+
+    match info.user_type {
+        SPELL_CLICK_USER_FRIEND_LIKE_CPP => context.clicker_is_friendly_to_summoner,
+        SPELL_CLICK_USER_RAID_LIKE_CPP => context.clicker_is_in_raid_with_summoner,
+        SPELL_CLICK_USER_PARTY_LIKE_CPP => context.clicker_is_in_party_with_summoner,
+        _ => true,
+    }
+}
+
+/// C++ `Player::CanSeeSpellClickOn`.
+pub fn can_see_spell_click_on_like_cpp<'a>(
+    spell_click_store: &NpcSpellClickStoreLikeCpp,
+    condition_store: &'a ConditionEntriesByTypeStore,
+    creature_entry: u32,
+    creature_npc_flags: u64,
+    clicker: Option<&'a WorldObject>,
+    target: Option<&'a WorldObject>,
+    requirement_context: SpellClickRequirementContextLikeCpp,
+    mut meets: impl FnMut(&'a Condition, &mut ConditionSourceInfo<'a>) -> bool,
+) -> bool {
+    if (creature_npc_flags & UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP) == 0 {
+        return false;
+    }
+
+    let click_bounds = spell_click_store.spell_click_info_map_bounds_like_cpp(creature_entry);
+    if click_bounds.is_empty() {
+        return false;
+    }
+
+    for click_info in click_bounds {
+        if !spell_click_info_is_fit_to_requirements_like_cpp(click_info, requirement_context) {
+            return false;
+        }
+
+        if is_object_meeting_spell_click_conditions_like_cpp(
+            condition_store,
+            creature_entry,
+            click_info.spell_id,
+            clicker,
+            target,
+            &mut meets,
+        ) {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// C++ `ConditionMgr::IsObjectMeetingVehicleSpellConditions`.
@@ -2878,6 +2945,167 @@ mod tests {
                     && std::ptr::eq(source_info.condition_targets[1].unwrap(), &target)
             },
         ));
+    }
+
+    #[test]
+    fn can_see_spell_click_requires_flag_and_loaded_rows_like_cpp() {
+        let spell_click_store = NpcSpellClickStoreLikeCpp::from_rows_like_cpp(
+            [wow_data::NpcSpellClickRowLikeCpp {
+                npc_entry: 123,
+                spell_id: 456,
+                cast_flags: 0,
+                user_type: wow_data::SPELL_CLICK_USER_ANY_LIKE_CPP,
+            }],
+            |entry| entry == 123,
+            |spell| spell == 456,
+        );
+        let condition_store = ConditionEntriesByTypeStore::default();
+        let context = SpellClickRequirementContextLikeCpp {
+            clicker_is_player: true,
+            clicker_is_friendly_to_summoner: false,
+            clicker_is_in_raid_with_summoner: false,
+            clicker_is_in_party_with_summoner: false,
+        };
+
+        assert!(!can_see_spell_click_on_like_cpp(
+            &spell_click_store,
+            &condition_store,
+            123,
+            0,
+            None,
+            None,
+            context,
+            |_, _| true,
+        ));
+        assert!(!can_see_spell_click_on_like_cpp(
+            &spell_click_store,
+            &condition_store,
+            124,
+            UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP,
+            None,
+            None,
+            context,
+            |_, _| true,
+        ));
+        assert!(can_see_spell_click_on_like_cpp(
+            &spell_click_store,
+            &condition_store,
+            123,
+            UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP,
+            None,
+            None,
+            context,
+            |_, _| false,
+        ));
+    }
+
+    #[test]
+    fn can_see_spell_click_stops_on_first_failed_requirement_like_cpp() {
+        let spell_click_store = NpcSpellClickStoreLikeCpp::from_rows_like_cpp(
+            [
+                wow_data::NpcSpellClickRowLikeCpp {
+                    npc_entry: 123,
+                    spell_id: 456,
+                    cast_flags: 0,
+                    user_type: SPELL_CLICK_USER_PARTY_LIKE_CPP,
+                },
+                wow_data::NpcSpellClickRowLikeCpp {
+                    npc_entry: 123,
+                    spell_id: 457,
+                    cast_flags: 0,
+                    user_type: wow_data::SPELL_CLICK_USER_ANY_LIKE_CPP,
+                },
+            ],
+            |entry| entry == 123,
+            |spell| matches!(spell, 456 | 457),
+        );
+        let condition_store = ConditionEntriesByTypeStore::default();
+        let context = SpellClickRequirementContextLikeCpp {
+            clicker_is_player: true,
+            clicker_is_friendly_to_summoner: true,
+            clicker_is_in_raid_with_summoner: true,
+            clicker_is_in_party_with_summoner: false,
+        };
+        let mut condition_calls = 0;
+
+        assert!(!can_see_spell_click_on_like_cpp(
+            &spell_click_store,
+            &condition_store,
+            123,
+            UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP,
+            None,
+            None,
+            context,
+            |_, _| {
+                condition_calls += 1;
+                true
+            },
+        ));
+        assert_eq!(condition_calls, 0);
+    }
+
+    #[test]
+    fn can_see_spell_click_uses_spell_conditions_until_one_passes_like_cpp() {
+        let spell_click_store = NpcSpellClickStoreLikeCpp::from_rows_like_cpp(
+            [
+                wow_data::NpcSpellClickRowLikeCpp {
+                    npc_entry: 123,
+                    spell_id: 456,
+                    cast_flags: 0,
+                    user_type: SPELL_CLICK_USER_FRIEND_LIKE_CPP,
+                },
+                wow_data::NpcSpellClickRowLikeCpp {
+                    npc_entry: 123,
+                    spell_id: 457,
+                    cast_flags: 0,
+                    user_type: SPELL_CLICK_USER_RAID_LIKE_CPP,
+                },
+            ],
+            |entry| entry == 123,
+            |spell| matches!(spell, 456 | 457),
+        );
+        let condition_store = ConditionEntriesByTypeStore::from_conditions_like_cpp([
+            Condition {
+                source_type: ConditionSourceType::SpellClickEvent,
+                source_group: 123,
+                source_entry: 456,
+                condition_type: ConditionType::Aura,
+                ..Condition::default()
+            },
+            Condition {
+                source_type: ConditionSourceType::SpellClickEvent,
+                source_group: 123,
+                source_entry: 457,
+                condition_type: ConditionType::Aura,
+                ..Condition::default()
+            },
+        ]);
+        let clicker = player_object(571, 1);
+        let target = world_object(571, 1);
+        let context = SpellClickRequirementContextLikeCpp {
+            clicker_is_player: true,
+            clicker_is_friendly_to_summoner: true,
+            clicker_is_in_raid_with_summoner: true,
+            clicker_is_in_party_with_summoner: false,
+        };
+        let mut seen_spells = Vec::new();
+
+        assert!(can_see_spell_click_on_like_cpp(
+            &spell_click_store,
+            &condition_store,
+            123,
+            UNIT_NPC_FLAG_SPELLCLICK_LIKE_CPP,
+            Some(&clicker),
+            Some(&target),
+            context,
+            |condition, source_info| {
+                seen_spells.push(condition.source_entry as u32);
+                std::ptr::eq(source_info.condition_targets[0].unwrap(), &clicker)
+                    && std::ptr::eq(source_info.condition_targets[1].unwrap(), &target)
+                    && condition.source_entry == 457
+            },
+        ));
+        assert_eq!(seen_spells, vec![456, 457]);
     }
 
     #[test]

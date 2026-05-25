@@ -49,14 +49,14 @@ use wow_data::{
     ItemRandomEnchantmentTemplateStore, ItemRandomPropertiesStore, ItemRandomPropertyTemplateEntry,
     ItemRandomSuffixStore, ItemStatsStore, ItemStore, LfgDungeonsStore, LockStore,
     MapDifficultyStore, MapDifficultyXConditionStore, MapStore, MountCapabilityStore, MountStore,
-    MountTypeXCapabilityStore, MountXDisplayStore, PhaseGroupStore, PhaseStore,
-    PlayerConditionAuraLikeCpp, PlayerConditionContextLikeCpp, PlayerConditionCountLikeCpp,
-    PlayerConditionPartyStatusLikeCpp, PlayerConditionQuestKillLikeCpp,
-    PlayerConditionReputationLikeCpp, PlayerConditionSkillLikeCpp, PlayerConditionStore,
-    PlayerStatsStore, RandPropPointsStore, SkillLineStore, SkillStore, SpellDurationStore,
-    SpellItemEnchantmentStore, SpellMiscStore, SpellRadiusStore, SpellRangeStore, SpellStore,
-    SummonPropertiesEntry, VEHICLE_SEAT_FLAG_CAN_ATTACK, VehicleAccessoryStoreLikeCpp,
-    VehicleSeatStore, VehicleStore, VehicleTemplateStoreLikeCpp,
+    MountTypeXCapabilityStore, MountXDisplayStore, NpcSpellClickStoreLikeCpp, PhaseGroupStore,
+    PhaseStore, PlayerConditionAuraLikeCpp, PlayerConditionContextLikeCpp,
+    PlayerConditionCountLikeCpp, PlayerConditionPartyStatusLikeCpp,
+    PlayerConditionQuestKillLikeCpp, PlayerConditionReputationLikeCpp, PlayerConditionSkillLikeCpp,
+    PlayerConditionStore, PlayerStatsStore, RandPropPointsStore, SkillLineStore, SkillStore,
+    SpellDurationStore, SpellItemEnchantmentStore, SpellMiscStore, SpellRadiusStore,
+    SpellRangeStore, SpellStore, SummonPropertiesEntry, VEHICLE_SEAT_FLAG_CAN_ATTACK,
+    VehicleAccessoryStoreLikeCpp, VehicleSeatStore, VehicleStore, VehicleTemplateStoreLikeCpp,
     is_player_meeting_condition_like_cpp,
     progression_rewards::{
         ContentTuningStore, FactionEntry, FactionStore, FactionTemplateStore,
@@ -2131,6 +2131,7 @@ pub struct WorldSession {
     // ── Spell casting ──────────────────────────────────────────────
     /// Spell store (metadata for all known spells: cast time, cooldown, effects, etc.)
     pub spell_store: Option<Arc<SpellStore>>,
+    npc_spell_click_store: Option<Arc<NpcSpellClickStoreLikeCpp>>,
     spell_misc_store: Option<Arc<SpellMiscStore>>,
     spell_duration_store: Option<Arc<SpellDurationStore>>,
     spell_radius_store: Option<Arc<SpellRadiusStore>>,
@@ -2945,6 +2946,7 @@ impl WorldSession {
             movement_speed_ack_events_like_cpp: Vec::new(),
             visible_auras: HashMap::new(),
             spell_store: None,
+            npc_spell_click_store: None,
             spell_misc_store: None,
             spell_duration_store: None,
             spell_radius_store: None,
@@ -8189,6 +8191,14 @@ impl WorldSession {
     /// Get the spell store reference.
     pub fn spell_store(&self) -> Option<&Arc<SpellStore>> {
         self.spell_store.as_ref()
+    }
+
+    pub fn set_npc_spell_click_store(&mut self, store: Arc<NpcSpellClickStoreLikeCpp>) {
+        self.npc_spell_click_store = Some(store);
+    }
+
+    pub(crate) fn npc_spell_click_store(&self) -> Option<&Arc<NpcSpellClickStoreLikeCpp>> {
+        self.npc_spell_click_store.as_ref()
     }
 
     pub fn set_spell_misc_store(&mut self, store: Arc<SpellMiscStore>) {

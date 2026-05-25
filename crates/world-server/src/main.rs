@@ -1583,6 +1583,28 @@ async fn main() -> Result<()> {
             .attached_condition_count
     );
     wow_world::conditions::set_condition_mgr_store_like_cpp(Arc::clone(&condition_store));
+    let npc_spell_click_store = Arc::new(
+        wow_data::NpcSpellClickStoreLikeCpp::load_like_cpp(
+            world_db.as_ref(),
+            creature_template_lifecycle_store.as_ref(),
+            &spell_store,
+        )
+        .await
+        .context("Failed to load C++ npc_spellclick_spells rows")?,
+    );
+    info!(
+        "Loaded {} C++ npc_spellclick_spells rows ({} missing creature templates, {} missing spells, {} invalid user types logged-but-loaded like C++)",
+        npc_spell_click_store.len(),
+        npc_spell_click_store
+            .load_report_like_cpp()
+            .skipped_missing_creature_template,
+        npc_spell_click_store
+            .load_report_like_cpp()
+            .skipped_missing_spell,
+        npc_spell_click_store
+            .load_report_like_cpp()
+            .invalid_user_type_logged_but_loaded_like_cpp
+    );
     let spell_store = Arc::new(spell_store);
 
     // Shared group registry and pending invites
@@ -1895,6 +1917,7 @@ async fn main() -> Result<()> {
         skill_store: Some(Arc::clone(&skill_store)),
         skill_line_store: Some(Arc::clone(&skill_line_store)),
         spell_store: Some(Arc::clone(&spell_store)),
+        npc_spell_click_store: Some(Arc::clone(&npc_spell_click_store)),
         spell_misc_store: Some(Arc::clone(&spell_misc_store)),
         spell_duration_store: Some(Arc::clone(&spell_duration_store)),
         spell_radius_store: Some(Arc::clone(&spell_radius_store)),
@@ -6733,6 +6756,9 @@ async fn create_session(
     }
     if let Some(ref store) = resources.spell_store {
         session.set_spell_store(Arc::clone(store));
+    }
+    if let Some(ref store) = resources.npc_spell_click_store {
+        session.set_npc_spell_click_store(Arc::clone(store));
     }
     if let Some(ref store) = resources.spell_misc_store {
         session.set_spell_misc_store(Arc::clone(store));

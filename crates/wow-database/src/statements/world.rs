@@ -151,6 +151,8 @@ pub enum WorldStatements {
     SEL_GAME_EVENT_NPC_FLAGS,
     /// C++ GameEventMgr::LoadFromDB game_event_npc_vendor metadata query.
     SEL_GAME_EVENT_NPC_VENDOR,
+    /// C++ ObjectMgr::LoadNPCSpellClickSpells startup query.
+    SEL_NPC_SPELLCLICK_SPELLS,
     /// Load C++ instance spawn groups.
     SEL_INSTANCE_SPAWN_GROUPS,
     /// Load gameobject template for query response.
@@ -646,6 +648,9 @@ impl StatementDef for WorldStatements {
                 "BonusListIDs, PlayerConditionId, IgnoreFiltering FROM game_event_npc_vendor ",
                 "ORDER BY guid, slot ASC",
             ),
+            Self::SEL_NPC_SPELLCLICK_SPELLS => {
+                "SELECT npc_entry, spell_id, cast_flags, user_type FROM npc_spellclick_spells"
+            }
             Self::SEL_INSTANCE_SPAWN_GROUPS => {
                 "SELECT instanceMapId, bossStateId, bossStates, spawnGroupId, flags FROM instance_spawn_groups"
             }
@@ -1024,6 +1029,16 @@ mod tests {
         assert_eq!(
             sql,
             "SELECT questId, eventEntry FROM game_event_seasonal_questrelation"
+        );
+        assert_eq!(sql.matches('?').count(), 0);
+    }
+
+    #[test]
+    fn npc_spellclick_spells_statement_matches_cpp_sql_exactly() {
+        let sql = WorldStatements::SEL_NPC_SPELLCLICK_SPELLS.sql();
+        assert_eq!(
+            sql,
+            "SELECT npc_entry, spell_id, cast_flags, user_type FROM npc_spellclick_spells"
         );
         assert_eq!(sql.matches('?').count(), 0);
     }
