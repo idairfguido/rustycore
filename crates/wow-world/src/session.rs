@@ -9158,6 +9158,24 @@ impl WorldSession {
             .await;
     }
 
+    pub(crate) async fn apply_player_money_change_like_cpp(
+        &mut self,
+        old_money: u64,
+        new_money: u64,
+    ) {
+        if old_money != new_money {
+            self.enqueue_represented_quest_objective_progress_like_cpp(
+                RepresentedQuestObjectiveProgressEventLikeCpp::MoneyChanged {
+                    old_money,
+                    new_money,
+                },
+            );
+        }
+        self.set_player_gold_like_cpp(new_money);
+        self.drain_represented_quest_objective_progress_like_cpp()
+            .await;
+    }
+
     pub(crate) async fn currency_changed_like_cpp(&mut self, currency_id: u32, change: i32) {
         self.enqueue_represented_quest_objective_progress_like_cpp(
             RepresentedQuestObjectiveProgressEventLikeCpp::CurrencyChanged {
@@ -10992,7 +11010,10 @@ impl WorldSession {
                 self.handle_spirit_healer_activate(pkt).await;
             }
             ClientOpcodes::RepairItem => {
-                self.handle_repair_item(pkt).await;
+                match wow_packet::packets::misc::RepairItem::read(&mut pkt) {
+                    Ok(repair) => self.handle_repair_item(repair).await,
+                    Err(e) => warn!("Failed to read RepairItem: {e}"),
+                }
             }
             ClientOpcodes::RequestStabledPets => {
                 self.handle_request_stabled_pets(pkt).await;
@@ -21191,6 +21212,58 @@ mod tests {
                 script_status_change_unrepresented: true,
             }]
         );
+        assert_eq!(
+            drain_server_opcodes(&send_rx),
+            vec![
+                ServerOpcodes::QuestGiverQuestComplete,
+                ServerOpcodes::QuestUpdateComplete,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_player_money_change_sets_gold_and_drains_objective_queue_like_cpp() {
+        let (mut session, _pkt_tx, send_rx) = make_session();
+        let player_guid = ObjectGuid::create_player(1, 42);
+        let quest_id = 12_511;
+        let mut quest = test_quest_template(quest_id);
+        quest.flags |= 0x0000_0400; // C++ QUEST_FLAGS_TRACKING_EVENT.
+        quest.objectives.push(wow_data::quest::QuestObjective {
+            id: quest_id * 10,
+            quest_id,
+            obj_type: QUEST_OBJECTIVE_MONEY_LIKE_CPP,
+            order: 0,
+            storage_index: -1,
+            object_id: 0,
+            amount: 100,
+            flags: 0,
+            flags2: 0,
+            progress_bar_weight: 0.0,
+            description: String::new(),
+        });
+        session.set_player_guid(Some(player_guid));
+        session.set_player_gold_like_cpp(90);
+        session.set_quest_store(Arc::new(wow_data::quest::QuestStore::from_quests_like_cpp(
+            [quest],
+        )));
+        session.player_quests.insert(
+            quest_id,
+            crate::handlers::quest::PlayerQuestStatus {
+                quest_id,
+                status: crate::conditions::QUEST_STATUS_INCOMPLETE_LIKE_CPP,
+                explored: false,
+                accept_time_secs: 0,
+                end_time_secs: 0,
+                objective_counts: vec![],
+                slot: 0,
+            },
+        );
+
+        session.apply_player_money_change_like_cpp(90, 100).await;
+
+        assert_eq!(session.player_gold_like_cpp(), 100);
+        assert!(!session.player_quests.contains_key(&quest_id));
+        assert!(session.rewarded_quests.contains(&quest_id));
         assert_eq!(
             drain_server_opcodes(&send_rx),
             vec![

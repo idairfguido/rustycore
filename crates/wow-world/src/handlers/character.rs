@@ -677,6 +677,19 @@ fn vendor_buy_quantity_and_price(buy_price: u64, buy_count: u32, quantity: u32) 
     (quantity, price)
 }
 
+fn player_money_gain_like_cpp(current_money: u64, amount: u64) -> Option<u64> {
+    if amount == 0 {
+        return Some(current_money);
+    }
+
+    let max_gain = MAX_MONEY_AMOUNT.checked_sub(amount)?;
+    if current_money <= max_gain {
+        Some(current_money + amount)
+    } else {
+        None
+    }
+}
+
 fn vendor_buy_packet_quantity_to_cpp_count(quantity: i32) -> u32 {
     u32::from((quantity as u8).max(1))
 }
@@ -5447,10 +5460,13 @@ impl WorldSession {
     /// CMSG_REPAIR_ITEM — player repairs item at a repair vendor.
     /// C# ref: NPCHandler.HandleRepairItem
     /// TODO: calculate repair cost and apply to character money.
-    pub async fn handle_repair_item(&mut self, _pkt: wow_packet::WorldPacket) {
+    pub async fn handle_repair_item(&mut self, repair: RepairItem) {
         info!(
-            "RepairItem account {} (stub — all items already at full durability)",
-            self.account_id
+            npc_guid = ?repair.npc_guid,
+            item_guid = ?repair.item_guid,
+            use_guild_bank = repair.use_guild_bank,
+            account = self.account_id,
+            "RepairItem parsed like C++ (durability repair runtime pending)"
         );
     }
 
@@ -6412,7 +6428,8 @@ impl WorldSession {
         };
 
         let mut tx = SqlTransaction::new();
-        let new_gold = self.player_gold_like_cpp().saturating_sub(buy_price);
+        let old_gold = self.player_gold_like_cpp();
+        let new_gold = old_gold.saturating_sub(buy_price);
         let mut upd_money = char_db.prepare(CharStatements::UPD_CHAR_MONEY);
         upd_money.set_u64(0, new_gold);
         upd_money.set_u64(1, player_guid.counter() as u64);
@@ -6527,7 +6544,8 @@ impl WorldSession {
             return;
         }
 
-        self.set_player_gold_like_cpp(new_gold);
+        self.apply_player_money_change_like_cpp(old_gold, new_gold)
+            .await;
         self.apply_item_turnin_changes(player_guid, map_id, &item_turnin_changes);
         for &(currency_id, amount) in &extended_cost_currency_costs {
             let Some(quantity) = i32::try_from(self.player_currency_quantity(currency_id)).ok()
@@ -6731,7 +6749,8 @@ impl WorldSession {
             None => return,
         };
         let mut tx = SqlTransaction::new();
-        let new_gold = self.player_gold_like_cpp().saturating_sub(price);
+        let old_gold = self.player_gold_like_cpp();
+        let new_gold = old_gold.saturating_sub(price);
         let mut upd_money = char_db.prepare(CharStatements::UPD_CHAR_MONEY);
         upd_money.set_u64(0, new_gold);
         upd_money.set_u64(1, player_guid.counter() as u64);
@@ -6811,7 +6830,8 @@ impl WorldSession {
             return;
         }
 
-        self.set_player_gold_like_cpp(new_gold);
+        self.apply_player_money_change_like_cpp(old_gold, new_gold)
+            .await;
         self.remove_buyback_item_like_cpp(buyback_slot);
         self.clear_buyback_slot_metadata_like_cpp(buyback_slot);
         if self
@@ -6997,7 +7017,15 @@ impl WorldSession {
         }
 
         let money = sell_price.saturating_mul(u64::from(sold_count));
-        let new_gold = self.player_gold_like_cpp().saturating_add(money);
+        let old_gold = self.player_gold_like_cpp();
+        let Some(new_gold) = player_money_gain_like_cpp(old_gold, money) else {
+            self.send_sell_error(
+                SellResult::CantSellItem,
+                Some(sell.vendor_guid),
+                sell.item_guid,
+            );
+            return;
+        };
         let buyback_slot = self.select_buyback_slot_cpp();
         let old_buyback = self.buyback_items_like_cpp().get(&buyback_slot).cloned();
         let buyback_price = sell_price
@@ -7092,7 +7120,8 @@ impl WorldSession {
             return;
         }
 
-        self.set_player_gold_like_cpp(new_gold);
+        self.apply_player_money_change_like_cpp(old_gold, new_gold)
+            .await;
         if let Some(old_buyback) = old_buyback {
             self.remove_buyback_item_like_cpp(buyback_slot);
             self.remove_inventory_item_object(old_buyback.guid);
@@ -7493,9 +7522,10 @@ impl WorldSession {
         del_item.set_u64(0, refund_inv_item.db_guid);
         tx.append(del_item);
 
-        let new_gold = self
-            .player_gold_like_cpp()
-            .saturating_add(refund_item.paid_money());
+        let old_money = self.player_gold_like_cpp();
+        let money_gain = player_money_gain_like_cpp(old_money, refund_item.paid_money());
+        let money_overflow = money_gain.is_none();
+        let new_gold = money_gain.unwrap_or(old_money);
         let mut upd_money = char_db.prepare(CharStatements::UPD_CHAR_MONEY);
         upd_money.set_u64(0, new_gold);
         upd_money.set_u64(1, player_guid.counter() as u64);
@@ -7570,7 +7600,11 @@ impl WorldSession {
             return;
         }
 
-        self.set_player_gold_like_cpp(new_gold);
+        self.apply_player_money_change_like_cpp(old_money, new_gold)
+            .await;
+        if money_overflow {
+            self.send_equip_error(InventoryResult::TooMuchGold, None, None, 0, 0);
+        }
         self.remove_inventory_item_like_cpp(refund_slot);
         self.remove_inventory_item_object(refund.item_guid);
 
@@ -10126,6 +10160,18 @@ mod tests {
             sell_item_amount_action(5, -1),
             SellItemAmountAction::Invalid
         );
+    }
+
+    #[test]
+    fn player_money_gain_like_cpp_enforces_max_money_amount() {
+        assert_eq!(player_money_gain_like_cpp(0, 0), Some(0));
+        assert_eq!(
+            player_money_gain_like_cpp(MAX_MONEY_AMOUNT - 1, 1),
+            Some(MAX_MONEY_AMOUNT)
+        );
+        assert_eq!(player_money_gain_like_cpp(MAX_MONEY_AMOUNT, 1), None);
+        assert_eq!(player_money_gain_like_cpp(MAX_MONEY_AMOUNT - 10, 11), None);
+        assert_eq!(player_money_gain_like_cpp(0, MAX_MONEY_AMOUNT + 1), None);
     }
 
     #[test]

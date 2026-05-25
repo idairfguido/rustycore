@@ -2344,6 +2344,30 @@ impl ClientPacket for SellItem {
     }
 }
 
+/// CMSG_REPAIR_ITEM — client repairs one item or all items at a repair NPC.
+/// C++: WorldPackets::Item::RepairItem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RepairItem {
+    pub npc_guid: ObjectGuid,
+    pub item_guid: ObjectGuid,
+    pub use_guild_bank: bool,
+}
+
+impl ClientPacket for RepairItem {
+    const OPCODE: wow_constants::ClientOpcodes = wow_constants::ClientOpcodes::RepairItem;
+
+    fn read(pkt: &mut crate::WorldPacket) -> Result<Self, PacketError> {
+        let npc_guid = pkt.read_packed_guid()?;
+        let item_guid = pkt.read_packed_guid()?;
+        let use_guild_bank = pkt.read_bit()?;
+        Ok(Self {
+            npc_guid,
+            item_guid,
+            use_guild_bank,
+        })
+    }
+}
+
 /// SMSG_SELL_RESPONSE — result of a sell operation.
 /// C#: SellResponse
 pub struct SellResponse {
@@ -3500,6 +3524,33 @@ mod tests {
 
         assert_eq!(pkt.vendor_guid, vendor_guid);
         assert_eq!(pkt.slot, 94);
+    }
+
+    #[test]
+    fn repair_item_reads_cpp_guids_and_guild_bank_bit() {
+        let npc_guid = ObjectGuid::create_world_object(
+            wow_core::guid::HighGuid::Creature,
+            0,
+            1,
+            0,
+            1,
+            123,
+            456,
+        );
+        let item_guid = ObjectGuid::create_item(1, 777);
+        let mut writer = WorldPacket::new_server(ServerOpcodes::DbReply);
+        writer.write_packed_guid(&npc_guid);
+        writer.write_packed_guid(&item_guid);
+        writer.write_bit(true);
+        writer.flush_bits();
+
+        let mut reader = WorldPacket::from_bytes(writer.data());
+        reader.skip_opcode();
+        let pkt = RepairItem::read(&mut reader).unwrap();
+
+        assert_eq!(pkt.npc_guid, npc_guid);
+        assert_eq!(pkt.item_guid, item_guid);
+        assert!(pkt.use_guild_bank);
     }
 
     #[test]
