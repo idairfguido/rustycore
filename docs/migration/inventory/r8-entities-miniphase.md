@@ -3545,6 +3545,42 @@ Focused tests/checks: `PROTOC=/home/cdmonio/.local/protoc/bin/protoc cargo test 
 
 Remaining gaps: Scenario/LFG/GM `RewardQuest` callers are not ported yet, progress-objective synchronous completion paths still need async reward integration for tracking events, full `RewardQuest` side effects remain represented-partial, no manual-test-ready runtime, install, restart, push, or server launch.
 
+### #NEXT.R8.ENTITIES.721 — Player::DurabilityRepair equipped broken-item mod reapply boundary
+
+Status: represented-partial for the C++ `DurabilityRepair` branch that reapplies item mods after a broken equipped item is repaired.
+
+C++ anchors: `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp:4713-4740` (`DurabilityRepair` captures `isBroken`, restores durability, marks item changed, and calls `_ApplyItemMods(item, pos & 255, true)` for broken equipment) and `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp:7660-7691` (`_ApplyItemMods` skips still-broken items, then applies meta-gem corrections, item bonuses, equip spells, dependent auras, weapon-dependent auras, and enchantments).
+
+Implemented Rust seam: represented repair now captures pre-repair broken state and represented equipment slot. After a successful durability restore, it records `RepresentedItemModsReapplyEventLikeCpp { item_guid, slot, apply: true }` only for items that were equipped and broken before repair. This preserves the exact C++ branch boundary without claiming full item-mod side effects that are not yet canonical.
+
+Focused tests/checks: `cargo fmt`; `cargo test -p wow-world repair_inventory_item_durability_spends_money_and_restores_like_cpp`.
+
+Remaining gaps: full `_ApplyItemMods` item bonuses, equip spells, dependent auras, weapon-dependent aura updates, enchantment effect mutation, exact update-field packet fanout, guild-bank repair, full C++ `GetNPCIfCanInteractWith` branches, install/restart and manual-test-ready runtime remain open.
+
+### #NEXT.R8.ENTITIES.720 — CMSG_REPAIR_ITEM feign-death removal
+
+Status: represented-partial for the C++ repair-handler `UNIT_STATE_DIED -> RemoveAurasByType(SPELL_AURA_FEIGN_DEATH)` branch.
+
+C++ anchors: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/NPCHandler.cpp:558-559` (`HandleRepairItemOpcode` removes fake death), `/home/server/woltk-trinity-legacy/src/server/game/Entities/Unit/Unit.h:249,719,1260` (`UNIT_STATE_DIED`, `HasUnitState`, `RemoveAurasByType`), `/home/server/woltk-trinity-legacy/src/server/game/Spells/Auras/SpellAuraDefines.h:161` (`SPELL_AURA_FEIGN_DEATH = 66`), and `/home/server/woltk-trinity-legacy/src/server/game/Spells/Auras/SpellAuraEffects.cpp:2241-2251` (feign-death aura apply adds `UNIT_STATE_DIED`, remove clears it).
+
+Implemented Rust seam: `RepresentedAuraEffectLikeCpp::FeignDeath` marks represented feign-death auras; `WorldSession::remove_represented_feign_death_if_needed_like_cpp` checks canonical-player `UnitState::DIED`, removes represented feign-death visible auras through the existing aura-removal packet path, and clears canonical `UnitState::DIED` after represented removal. `handle_repair_item` invokes it after the repair NPC interaction gate and before repair cost/mutation.
+
+Focused tests/checks: `cargo fmt --check`; `cargo test -p wow-world repair_item_handler_requires_repair_npc_and_repairs_single_item_like_cpp`.
+
+Remaining gaps: guild-bank repair, full C++ `GetNPCIfCanInteractWith` branches, equipped broken-mod reapply, exact update-field packet fanout, install/restart and manual-test-ready runtime remain open.
+
+### #NEXT.R8.ENTITIES.719 — CMSG_REPAIR_ITEM reputation price discount
+
+Status: represented-partial for C++ `Player::GetReputationPriceDiscount(unit)` inside `WorldSession::HandleRepairItemOpcode`. This closes the represented repair-cost reputation discount source left open by #718.
+
+C++ anchors: `/home/server/woltk-trinity-legacy/src/server/game/Handlers/NPCHandler.cpp:545-575` (`HandleRepairItemOpcode` obtains `discountMod` from the repair NPC) and `/home/server/woltk-trinity-legacy/src/server/game/Entities/Player/Player.cpp:24367-24382` (`GetReputationPriceDiscount` returns `1.0` for missing/zero/neutral-or-worse faction and `1.0 - 0.05f * (rank - REP_NEUTRAL)` above neutral).
+
+Implemented Rust seam: represented canonical creature access now carries the creature `UNIT_FIELD_FACTION_TEMPLATE`; `WorldSession::reputation_price_discount_for_faction_template_like_cpp` resolves `FactionTemplateStore -> FactionStore -> ReputationMgrLikeCpp` and mirrors the C++ discount formula; `handle_repair_item` uses that discount for represented single-item and all-items repair cost calculation.
+
+Focused tests/checks: `cargo fmt`; `cargo fmt --check`; `cargo test -p wow-world repair_item_handler_requires_repair_npc_and_repairs_single_item_like_cpp`.
+
+Remaining gaps: guild-bank repair, fake-death aura removal, full C++ `GetNPCIfCanInteractWith` branches, equipped broken-mod reapply, exact update-field packet fanout, install/restart and manual-test-ready runtime remain open.
+
 ### #NEXT.R8.ENTITIES.699 — tracking-event auto RewardQuest from source-item objective progress
 
 Status: represented-partial for the C++ `Player::CompleteQuest` tracking-event auto-reward branch when quest completion is caused by represented source-item objective progress. This advances `#REP.18` and narrows the non-choose-reward quest reputation gap left by `#NEXT.R8.ENTITIES.698`.

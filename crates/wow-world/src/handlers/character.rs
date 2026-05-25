@@ -5460,7 +5460,7 @@ impl WorldSession {
     /// CMSG_REPAIR_ITEM — player repairs item at a repair vendor.
     /// C++ ref: WorldSession::HandleRepairItemOpcode.
     pub async fn handle_repair_item(&mut self, repair: RepairItem) {
-        let Some(_repair_npc) = self
+        let Some(repair_npc) = self
             .represented_npc_can_interact_with_like_cpp(repair.npc_guid, NPCFlags1::REPAIR.bits())
         else {
             debug!(
@@ -5471,9 +5471,12 @@ impl WorldSession {
             return;
         };
 
+        self.remove_represented_feign_death_if_needed_like_cpp();
+
         // C++ uses GetReputationPriceDiscount(unit) and RATE_REPAIRCOST.
-        // The reputation discount source is still an explicit represented-runtime gap.
-        let discount_mod = 1.0;
+        let discount_mod = self.reputation_price_discount_for_faction_template_like_cpp(
+            repair_npc.faction_template_id,
+        );
         let repair_cost_rate = self.repair_cost_rate_like_cpp();
 
         if !repair.item_guid.is_empty() {

@@ -1074,6 +1074,14 @@ pub(crate) struct RepresentedCreatureAccessLikeCpp {
     pub entry: u32,
     pub position: wow_core::Position,
     pub npc_flags: u32,
+    pub faction_template_id: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RepresentedItemModsReapplyEventLikeCpp {
+    pub item_guid: ObjectGuid,
+    pub slot: u8,
+    pub apply: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1869,6 +1877,7 @@ pub struct WorldSession {
     buyback_price: [u32; BUYBACK_SLOT_COUNT],
     buyback_timestamp: [i64; BUYBACK_SLOT_COUNT],
     current_buyback_slot: u8,
+    represented_item_mod_reapply_events_like_cpp: Vec<RepresentedItemModsReapplyEventLikeCpp>,
 
     /// C++ `_currencyStorage`, keyed by CurrencyTypes.db2 ID.
     player_currencies: HashMap<u32, PlayerCurrency>,
@@ -2510,6 +2519,7 @@ pub(crate) const PLAYER_LOCAL_FLAG_OVERRIDE_TRANSPORT_SERVER_TIME_LIKE_CPP: u32 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RepresentedAuraEffectLikeCpp {
+    FeignDeath,
     FeatherFall,
     Hover,
     SafeFall,
@@ -2807,6 +2817,7 @@ impl WorldSession {
             buyback_price: [0; BUYBACK_SLOT_COUNT],
             buyback_timestamp: [0; BUYBACK_SLOT_COUNT],
             current_buyback_slot: BUYBACK_SLOT_START,
+            represented_item_mod_reapply_events_like_cpp: Vec::new(),
             player_currencies: HashMap::new(),
             represented_quest_objective_progress_events_like_cpp: VecDeque::new(),
             represented_quest_objective_progress_draining_like_cpp: false,
@@ -4794,6 +4805,7 @@ impl WorldSession {
             entry: creature.entry(),
             position: creature.unit().world().position(),
             npc_flags: creature.ai_ownership().npc_flags,
+            faction_template_id: creature.unit().data().faction_template.max(0) as u32,
         })
     }
 
@@ -4844,6 +4856,7 @@ impl WorldSession {
             entry: creature.entry(),
             position: creature.unit().world().position(),
             npc_flags: creature.ai_ownership().npc_flags,
+            faction_template_id: creature.unit().data().faction_template.max(0) as u32,
         })
     }
 
@@ -6084,6 +6097,43 @@ impl WorldSession {
         self.repair_cost_rate_like_cpp
     }
 
+    pub(crate) fn reputation_price_discount_for_faction_template_like_cpp(
+        &self,
+        faction_template_id: u32,
+    ) -> f32 {
+        use wow_data::reputation::ReputationRankLikeCpp;
+
+        let Some(faction_template_store) = self.faction_template_store.as_ref() else {
+            return 1.0;
+        };
+        let Some(faction_template) = faction_template_store.get(faction_template_id) else {
+            return 1.0;
+        };
+        if faction_template.faction == 0 {
+            return 1.0;
+        }
+        let Some(faction_store) = self.faction_store.as_ref() else {
+            return 1.0;
+        };
+        let Some(faction_entry) = faction_store.get(u32::from(faction_template.faction)) else {
+            return 1.0;
+        };
+
+        let rank = self
+            .reputation_mgr_like_cpp
+            .rank_for_faction_entry_like_cpp(
+                faction_entry,
+                self.friendship_rep_reaction_store.as_deref(),
+                self.player_race_like_cpp(),
+                self.player_class_like_cpp(),
+            );
+        if rank <= ReputationRankLikeCpp::Neutral {
+            return 1.0;
+        }
+
+        1.0 - 0.05 * f32::from(rank.as_u8() - ReputationRankLikeCpp::Neutral.as_u8())
+    }
+
     pub(crate) fn reputation_rates_like_cpp(&self) -> ReputationRatesLikeCpp {
         self.reputation_rates
     }
@@ -6470,13 +6520,15 @@ impl WorldSession {
     ) -> bool {
         let top_level_inventory_item = self
             .inventory_items_like_cpp()
-            .values()
-            .find(|item| item.guid == item_guid)
-            .cloned();
+            .iter()
+            .find(|(_, item)| item.guid == item_guid)
+            .map(|(slot, item)| (*slot, item.clone()));
         let Some(item_object) = self.inventory_item_objects_like_cpp().get(&item_guid) else {
             return false;
         };
 
+        let top_level_slot = top_level_inventory_item.as_ref().map(|(slot, _)| *slot);
+        let top_level_inventory_item = top_level_inventory_item.map(|(_, item)| item);
         let item_entry_id = top_level_inventory_item
             .as_ref()
             .map(|item| item.entry_id)
@@ -6487,6 +6539,9 @@ impl WorldSession {
             .unwrap_or_else(|| item_guid.counter() as u64);
         let current_durability = item_object.data().durability;
         let max_durability = item_object.data().max_durability;
+        let was_broken = item_object.is_broken();
+        let equipped_slot = top_level_slot
+            .filter(|slot| is_equipment_packed_pos(make_item_pos(INVENTORY_SLOT_BAG_0, *slot)));
         let cost = self.item_durability_repair_cost_like_cpp(
             item_entry_id,
             current_durability,
@@ -6524,6 +6579,17 @@ impl WorldSession {
             item.set_durability(max_durability);
         });
         if updated {
+            if let Some(slot) = equipped_slot
+                && was_broken
+            {
+                self.represented_item_mod_reapply_events_like_cpp.push(
+                    RepresentedItemModsReapplyEventLikeCpp {
+                        item_guid,
+                        slot,
+                        apply: true,
+                    },
+                );
+            }
             self.sync_object_accessor_player();
         }
         updated
@@ -10736,6 +10802,37 @@ impl WorldSession {
         )
     }
 
+    pub(crate) fn remove_represented_feign_death_if_needed_like_cpp(&mut self) -> bool {
+        let has_died_state = self
+            .mutate_canonical_player_like_cpp(|player| {
+                player.unit().has_unit_state(UnitState::DIED.bits())
+            })
+            .unwrap_or(false);
+        if !has_died_state {
+            return false;
+        }
+
+        let slots: Vec<u8> = self
+            .visible_auras
+            .iter()
+            .filter_map(|(slot, aura)| {
+                (aura.represented_effect == Some(RepresentedAuraEffectLikeCpp::FeignDeath))
+                    .then_some(*slot)
+            })
+            .collect();
+        if slots.is_empty() {
+            return false;
+        }
+
+        for slot in slots {
+            let _ = self.remove_aura(slot);
+        }
+        let _ = self.mutate_canonical_player_like_cpp(|player| {
+            player.unit_mut().clear_unit_state(UnitState::DIED.bits());
+        });
+        true
+    }
+
     pub(crate) fn remove_auras_with_interrupt_flags_like_cpp(
         &mut self,
         flags: u32,
@@ -13648,6 +13745,13 @@ impl WorldSession {
         &self,
     ) -> &[RepresentedCreatureKillEventLikeCpp] {
         &self.represented_creature_kill_events_like_cpp
+    }
+
+    #[cfg(test)]
+    pub(crate) fn represented_item_mod_reapply_events_like_cpp(
+        &self,
+    ) -> &[RepresentedItemModsReapplyEventLikeCpp] {
+        &self.represented_item_mod_reapply_events_like_cpp
     }
 
     fn complete_represented_creature_death_state_after_kill_hooks_like_cpp(
@@ -28152,6 +28256,7 @@ mod tests {
                 entry: 500,
                 position: Position::new(14.0, 0.0, 0.0, 0.0),
                 npc_flags: wow_constants::unit::NPCFlags1::TRAINER.bits(),
+                faction_template_id: 35,
             })
         );
         assert_eq!(
@@ -28163,6 +28268,7 @@ mod tests {
                 entry: 500,
                 position: Position::new(14.0, 0.0, 0.0, 0.0),
                 npc_flags: wow_constants::unit::NPCFlags1::TRAINER.bits(),
+                faction_template_id: 35,
             })
         );
         assert_eq!(
@@ -35499,7 +35605,7 @@ mod tests {
         let player_guid = ObjectGuid::create_player(1, 42);
         let item_guid = ObjectGuid::create_item(1, 900);
         session.set_player_guid(Some(player_guid));
-        session.set_player_gold_like_cpp(300);
+        session.set_player_gold_like_cpp(2_000);
         session.set_item_store(Arc::new(ItemStore::from_records([ItemRecord {
             id: 100,
             class_id: ItemClass::Weapon as u8,
@@ -35563,7 +35669,7 @@ mod tests {
             },
         ])));
         session.inventory_items.insert(
-            23,
+            EQUIPMENT_SLOT_MAINHAND,
             InventoryItem {
                 guid: item_guid,
                 entry_id: 100,
@@ -35576,9 +35682,9 @@ mod tests {
             100,
             player_guid,
             1,
-            40,
+            0,
             ItemContext::None,
-            23,
+            EQUIPMENT_SLOT_MAINHAND,
         );
         session.insert_inventory_item_object(item);
 
@@ -35587,12 +35693,20 @@ mod tests {
                 .repair_inventory_item_durability_like_cpp(item_guid, true, 0.8, 2.0)
                 .await
         );
-        assert_eq!(session.player_gold_like_cpp(), 40);
+        assert_eq!(session.player_gold_like_cpp(), 700);
         assert_eq!(
             session.inventory_item_objects_like_cpp()[&item_guid]
                 .data()
                 .durability,
             50
+        );
+        assert_eq!(
+            session.represented_item_mod_reapply_events_like_cpp(),
+            &[RepresentedItemModsReapplyEventLikeCpp {
+                item_guid,
+                slot: EQUIPMENT_SLOT_MAINHAND,
+                apply: true,
+            }]
         );
 
         session.set_player_gold_like_cpp(10);
@@ -35620,6 +35734,7 @@ mod tests {
         let repair_npc_guid = test_creature_guid(71_701);
         let vendor_npc_guid = test_creature_guid(71_702);
         let item_guid = ObjectGuid::create_item(1, 71_703);
+        let feign_slot = 7;
 
         session.set_canonical_map_manager(Arc::clone(&canonical));
         session.set_map_store(Arc::new(wow_data::MapStore::from_entries([
@@ -35643,6 +35758,19 @@ mod tests {
         ));
         session.set_player_gold_like_cpp(500);
         session.set_repair_cost_rate_like_cpp(2.0);
+        session.set_faction_store(Arc::new(FactionStore::from_entries([
+            FactionEntry::for_test_like_cpp(72, 5),
+        ])));
+        session.set_faction_template_store(Arc::new(FactionTemplateStore::from_entries([
+            faction_template_entry(35, 72, 0, 0, 0),
+        ])));
+        assert!(session.load_character_reputation_rows_like_cpp([
+            crate::reputation::mgr::CharacterReputationRowLikeCpp {
+                faction_id: 72,
+                standing: 9_000,
+                flags: 0,
+            },
+        ]));
         session
             .ensure_canonical_world_map_for_current_player_like_cpp()
             .expect("canonical map");
@@ -35742,6 +35870,19 @@ mod tests {
             23,
         );
         session.insert_inventory_item_object(item);
+        session
+            .mutate_canonical_player_like_cpp(|player| {
+                player.unit_mut().add_unit_state(UnitState::DIED.bits());
+            })
+            .expect("canonical player");
+        let mut feign_death = reputation_aura_for_test(
+            feign_slot,
+            RepresentedAuraEffectLikeCpp::FeignDeath,
+            0,
+            None,
+        );
+        feign_death.spell_id = 5384;
+        session.visible_auras.insert(feign_slot, feign_death);
 
         session
             .handle_repair_item(wow_packet::packets::misc::RepairItem {
@@ -35765,7 +35906,16 @@ mod tests {
                 use_guild_bank: false,
             })
             .await;
-        assert_eq!(session.player_gold_like_cpp(), 174);
+        assert_eq!(session.player_gold_like_cpp(), 207);
+        assert!(!session.visible_auras.contains_key(&feign_slot));
+        assert_eq!(
+            session
+                .mutate_canonical_player_like_cpp(|player| {
+                    player.unit().has_unit_state(UnitState::DIED.bits())
+                })
+                .expect("canonical player"),
+            false
+        );
         assert_eq!(
             session.inventory_item_objects_like_cpp()[&item_guid]
                 .data()
